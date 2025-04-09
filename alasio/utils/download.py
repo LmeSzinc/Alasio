@@ -1,7 +1,7 @@
 import requests
 from requests.adapters import HTTPAdapter
 
-from alasio.utils.atomic import atomic_stream_write, atomic_write
+from alasio.utils.atomic import atomic_write_stream, atomic_write, file_write_stream
 
 
 class Downloader:
@@ -11,8 +11,8 @@ class Downloader:
         session.mount('http://', HTTPAdapter(max_retries=3))
         session.mount('https://', HTTPAdapter(max_retries=3))
 
-        # proxies = {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
-        # session.proxies = proxies
+        proxies = {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
+        session.proxies = proxies
         # session.headers['User-Agent'] = self.user_agent
         return session
 
@@ -26,14 +26,26 @@ class Downloader:
 
         content = resp.content
         atomic_write(file, content)
+        return content
 
-    def atomic_download_stream(self, url: str, file: str, chunk_size=8196):
+    def file_download_stream(self, url: str, file: str, chunk_size=8192):
         """
         Download a file from url then write file in stream.
-        Usually to be used to download a large file
+        Usually to be used to download a large file, so content don't return in memory
         """
         session = self.new_session()
         resp = session.get(url, stream=True)
 
         content = resp.iter_content(chunk_size=chunk_size)
-        atomic_stream_write(file, content)
+        file_write_stream(file, content)
+
+    def atomic_download_stream(self, url: str, file: str, chunk_size=8192):
+        """
+        Download a file from url then write file in stream.
+        Usually to be used to download a large file, so content don't return in memory
+        """
+        session = self.new_session()
+        resp = session.get(url, stream=True)
+
+        content = resp.iter_content(chunk_size=chunk_size)
+        atomic_write_stream(file, content)
