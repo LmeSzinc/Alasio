@@ -1,13 +1,13 @@
 import os
 
-IS_WINDOWS = os.name == 'nt'
+WINDOWS_SEP = os.sep == '\\'
 
 
 def normpath(path: str) -> str:
     """
     Equivalent to os.path.normpath(self)
     """
-    if IS_WINDOWS:
+    if WINDOWS_SEP:
         # In most cases just normpath('xxx.png') check '/' first to be faster
         if '/' in path:
             return path.rstrip('\\/').replace('/', '\\')
@@ -50,7 +50,7 @@ def joinnormpath(root: str, path: str) -> str:
     Returns:
         str:
     """
-    if IS_WINDOWS:
+    if WINDOWS_SEP:
         if '/' in path:
             path = path.rstrip('\\/').replace('/', '\\')
         else:
@@ -78,7 +78,7 @@ def uppath(root: str, up: int = 1) -> str:
     Returns:
         str:
     """
-    if IS_WINDOWS:
+    if WINDOWS_SEP:
         for _ in range(up):
             root, _, _ = root.rpartition(os.sep)
             # Relative path can only up to empty string
@@ -106,7 +106,7 @@ def is_abspath(path: str) -> bool:
     """
     A simplified os.path.isabs()
     """
-    if IS_WINDOWS:
+    if WINDOWS_SEP:
         if len(path) >= 2:
             return path[1] == ':'
         return False
