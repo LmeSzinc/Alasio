@@ -5,7 +5,7 @@ from collections import deque
 from functools import wraps
 from itertools import count
 from threading import Lock, Thread
-from typing import Callable, Dict, Generic, List, NoReturn, Optional, TypeVar, Union
+from typing import Callable, Generic, NoReturn, TypeVar
 
 from alasio.logger import logger
 
@@ -86,10 +86,10 @@ class Error(Outcome[NoReturn]):
 
 
 def capture(
-        sync_fn: Callable[..., ResultT],
+        sync_fn: "Callable[..., ResultT]",
         *args,
         **kwargs,
-) -> Union[Value[ResultT], Error]:
+) -> "Value[ResultT] | Error":
     """Run ``sync_fn(*args, **kwargs)`` and capture the result.
 
     Returns:
@@ -125,7 +125,7 @@ class Job(Generic[ResultT]):
         self.worker = worker
         self.func_args_kwargs = func_args_kwargs
 
-        self.queue: deque[Outcome[ResultT]] = deque()
+        self.queue: "deque[Outcome[ResultT]]" = deque()
         self.put_lock = Lock()
         self.notify_get = Lock()
         self.notify_get.acquire()
@@ -133,7 +133,7 @@ class Job(Generic[ResultT]):
     def __repr__(self):
         return f'Job({self.func_args_kwargs})'
 
-    def _put(self, item: Outcome[ResultT]):
+    def _put(self, item: "Outcome[ResultT]"):
         """
         Put in job result.
         This method should not be called outside, only workers can put results in
@@ -184,8 +184,8 @@ name_counter = count()
 
 
 class WorkerThread:
-    def __init__(self, thread_pool: "WorkerPool") -> None:
-        self.job: Optional[Job] = None
+    def __init__(self, thread_pool: "WorkerPool"):
+        self.job: "Job | None" = None
         self.thread_pool = thread_pool
         # This Lock is used in an unconventional way.
         #
@@ -281,13 +281,13 @@ class WorkerPool:
     # Thread exits after 10s idling.
     IDLE_TIMEOUT = 10
 
-    def __init__(self, pool_size: int = 4) -> None:
+    def __init__(self, pool_size: int = 8):
         # Pool has 4 threads at max.
         # Alasio is for local low-frequency access so default pool size is small
         self.pool_size = pool_size
 
-        self.idle_workers: Dict[WorkerThread, None] = {}
-        self.all_workers: Dict[WorkerThread, None] = {}
+        self.idle_workers: "dict[WorkerThread, None]" = {}
+        self.all_workers: "dict[WorkerThread, None]" = {}
 
         self.notify_worker = Lock()
         self.notify_worker.acquire()
@@ -338,12 +338,7 @@ class WorkerPool:
         self.all_workers[worker] = None
         return worker
 
-    def start_thread_soon(
-            self,
-            func: Callable[..., ResultT],
-            *args,
-            **kwargs,
-    ) -> Job[ResultT]:
+    def start_thread_soon(self, func: "Callable[..., ResultT]", *args, **kwargs) -> "Job[ResultT]":
         worker = self._get_thread_worker()
         job = Job(worker=worker, func_args_kwargs=(func, args, kwargs))
 
@@ -351,15 +346,15 @@ class WorkerPool:
         worker.worker_lock.release()
         return job
 
-    def run_on_thread(self, func: Callable[..., ResultT]) -> Callable[..., Job[ResultT]]:
+    def run_on_thread(self, func: "Callable[..., ResultT]") -> "Callable[..., Job[ResultT]]":
         @wraps(func)
-        def thread_wrapper(*args, **kwargs) -> Job[ResultT]:
+        def thread_wrapper(*args, **kwargs) -> "Job[ResultT]":
             return self.start_thread_soon(func, *args, **kwargs)
 
         return thread_wrapper
 
     @staticmethod
-    def _subprocess_execute(cmd: List[str], timeout=10) -> bytes:
+    def _subprocess_execute(cmd: "list[str]", timeout=10) -> bytes:
         logger.info(f'Execute: {cmd}')
 
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=False)
@@ -372,11 +367,7 @@ class WorkerPool:
             logger.warning(f'TimeoutExpired when calling {cmd}, stdout={stdout}, stderr={stderr}')
         return stdout
 
-    def start_cmd_soon(
-            self,
-            cmd: List[str],
-            timeout=10
-    ) -> Job[bytes]:
+    def start_cmd_soon(self, cmd: "list[str]", timeout=10) -> "Job[bytes]":
         worker = self._get_thread_worker()
         job = Job(worker=worker, func_args_kwargs=(
             self._subprocess_execute, (cmd,), {'timeout': timeout}
@@ -384,6 +375,42 @@ class WorkerPool:
 
         worker.job = job
         worker.worker_lock.release()
+        return job
+
+    def wait_jobs(self) -> "WaitJobsWrapper":
+        """
+        Auto wait all jobs finished
+
+        Examples:
+            with WORKER_POOL.wait_jobs() as pool:
+                pool.start_thread_soon(...)
+        """
+        return WaitJobsWrapper(self)
+
+
+class WaitJobsWrapper:
+    """
+    Wrapper class to wait all jobs
+    """
+
+    def __init__(self, pool: "WorkerPool"):
+        self.pool: "WorkerPool" = pool
+        self.jobs: "deque[Job[ResultT]]" = deque()
+
+    def get(self):
+        for job in self.jobs:
+            job.get()
+        self.jobs.clear()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.get()
+
+    def start_thread_soon(self, func: "Callable[..., ResultT]", *args, **kwargs) -> "Job[ResultT]":
+        job = self.pool.start_thread_soon(func, *args, **kwargs)
+        self.jobs.append(job)
         return job
 
 
