@@ -8,14 +8,16 @@ def normpath(path: str) -> str:
     Equivalent to os.path.normpath(self)
     """
     if IS_WINDOWS:
-        # return path
-        # return path.replace('/', '\\').rstrip('\\')
+        # In most cases just normpath('xxx.png') check '/' first to be faster
         if '/' in path:
             return path.rstrip('\\/').replace('/', '\\')
         else:
             return path.rstrip('\\')
     else:
-        return path.replace('\\', '/').rstrip('/')
+        if '\\' in path:
+            return path.rstrip('\\/').replace('\\', '/')
+        else:
+            return path.rstrip('/')
 
 
 def joinpath(root: str, path: str) -> str:
@@ -30,6 +32,35 @@ def joinpath(root: str, path: str) -> str:
     Returns:
         str:
     """
+    if path:
+        return f'{root}{os.sep}{path}'
+    else:
+        return root
+
+
+def joinnormpath(root: str, path: str) -> str:
+    """
+    Equivalent to joinpath(root, normpath(path))
+    Reduce python function call to be about 0.1us faster
+
+    Args:
+        root: Base path, needs to be normalized first
+        path: Relative path
+
+    Returns:
+        str:
+    """
+    if IS_WINDOWS:
+        if '/' in path:
+            path = path.rstrip('\\/').replace('/', '\\')
+        else:
+            path = path.rstrip('\\')
+    else:
+        if '\\' in path:
+            path = path.rstrip('\\/').replace('\\', '/')
+        else:
+            path = path.rstrip('/')
+
     if path:
         return f'{root}{os.sep}{path}'
     else:
@@ -86,6 +117,7 @@ def is_abspath(path: str) -> bool:
 def abspath(path: str) -> str:
     """
     A simplified os.path.abspath()
+    Note that, to improve performance, this method should be used less
     """
     if is_abspath(path):
         return path

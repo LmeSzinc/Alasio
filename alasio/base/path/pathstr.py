@@ -11,7 +11,7 @@ class PathStr(str):
 
     joinpath:
         function joinpath(root, path)     0.26us
-        PathStr  root.joinpath(path)      0.86us
+        PathStr  root.joinpath(path)      0.71us
         os path  os.path.join(root, path) 2.55us
         pathlib  root.joinpath(path)      2.94us
     """
@@ -66,14 +66,14 @@ class PathStr(str):
         Equivalent to os.path.join(self, path)
         but "./" and "../" is not available, to do "../" use uppath() instead
         """
-        return PathStr(joinpath(self, normpath(path)))
+        return PathStr(joinnormpath(self, path))
 
-    def __div__(self, other: str):
+    def __truediv__(self, other: str) -> "PathStr":
         """
         root = PathStr.new(__file__).uppath(3)
-        path = root / "config/alas.json"
+        path = root / "alas.json"
         """
-        return PathStr(joinpath(self, normpath(other)))
+        return PathStr(joinnormpath(self, other))
 
     def abspath(self) -> "PathStr":
         """
@@ -165,7 +165,7 @@ class PathStr(str):
 
     """
     File read/write
-    
+
     Note that always using atomic method is recommended,
     Call simple read/write on tmp files only.
     """
