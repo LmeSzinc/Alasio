@@ -1,11 +1,21 @@
-from alasio.utils.atomic import *
-from alasio.utils.path import *
+from alasio.base.path.atomic import *
+from alasio.base.path.calc import *
+from alasio.base.path.op import *
 
 
 class PathStr(str):
     """
     A faster alternative of Pathlib
+
+    If you really need high performance path calculations, use path functions instead
+
+    joinpath:
+        function joinpath(root, path)     0.26us
+        PathStr  root.joinpath(path)      0.86us
+        os path  os.path.join(root, path) 2.55us
+        pathlib  root.joinpath(path)      2.94us
     """
+    __slots__ = ()
 
     @classmethod
     def new(cls, path: str) -> "PathStr":

@@ -1,7 +1,7 @@
 import requests
 from requests.adapters import HTTPAdapter
 
-from alasio.utils.atomic import atomic_write_stream, atomic_write, file_write_stream
+from alasio.base.path.atomic import atomic_write_stream, atomic_write, file_write_stream
 
 
 class Downloader:
