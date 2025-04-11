@@ -1,7 +1,7 @@
 import os
 
 
-def iter_files(root: str, suffix: str = ''):
+def iter_files(root: str, ext: str = ''):
     """
     Iter full filepath of files in folder with the good performance
 
@@ -12,17 +12,18 @@ def iter_files(root: str, suffix: str = ''):
 
     Args:
         root:
-        suffix:
+        ext: If ext is given, iter files with extension only
+            If ext is empty, iter all files
 
     Yields:
         str: Full path
     """
-    if suffix:
+    if ext:
         # Iter all files with given extension
         # iter_files(folder, suffix='.json')
         with os.scandir(root) as entries:
             for entry in entries:
-                if entry.name.endswith(suffix) and entry.is_file(follow_symlinks=False):
+                if entry.name.endswith(ext) and entry.is_file(follow_symlinks=False):
                     yield entry.path
     else:
         # Iter all files (directory not included)
@@ -33,24 +34,24 @@ def iter_files(root: str, suffix: str = ''):
                     yield entry.path
 
 
-def iter_filenames(root: str, suffix: str = ''):
+def iter_filenames(root: str, ext: str = ''):
     """
     Iter filename of files in folder with the good performance
 
     Args:
         root:
-        suffix: If suffix is given, iter files with suffix only
-            If suffix is empty, iter all files
+        ext: If ext is given, iter files with extension only
+            If ext is empty, iter all files
 
     Yields:
         str: Filename
     """
-    if suffix:
+    if ext:
         # Iter all files with given extension
         # iter_files(folder, suffix='.json')
         with os.scandir(root) as entries:
             for entry in entries:
-                if entry.name.endswith(suffix) and entry.is_file(follow_symlinks=False):
+                if entry.name.endswith(ext) and entry.is_file(follow_symlinks=False):
                     yield entry.name
     else:
         # Iter all files (directory not included)
@@ -95,3 +96,22 @@ def iter_foldernames(root: str):
         for entry in entries:
             if entry.is_dir(follow_symlinks=False):
                 yield entry.name
+
+
+_NO_CACHE = object()
+
+
+class CachePathExists:
+    def __init__(self):
+        self._file_exist: "dict[str, bool]" = {}
+
+    def path_exists(self, path: str) -> bool:
+        exist = self._file_exist.get(path, _NO_CACHE)
+        if exist == _NO_CACHE:
+            # Yes, there might be a TOCTOU race condition,
+            # but it's just OK to do os.path.exists twice
+            exist = os.path.exists(path)
+            self._file_exist[path] = exist
+            return exist
+        else:
+            return exist

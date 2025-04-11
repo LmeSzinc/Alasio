@@ -322,32 +322,32 @@ class PathStr(str):
     Iter folder
     """
 
-    def iter_files(self: str, suffix: str = ''):
+    def iter_files(self: str, ext: str = ''):
         """
         Iter full filepath of files in folder with the good performance
 
         Args:
-            suffix: If suffix is given, iter files with suffix only
-                If suffix is empty, iter all files
+            ext: If ext is given, iter files with extension only
+                If ext is empty, iter all files
 
         Yields:
             PathStr: Full path
         """
-        for path in iter_files(self, suffix=suffix):
+        for path in iter_files(self, ext=ext):
             yield PathStr(path)
 
-    def iter_filenames(self: str, suffix: str = ''):
+    def iter_filenames(self: str, ext: str = ''):
         """
         Iter filename of files in folder with the good performance
 
         Args:
-            suffix: If suffix is given, iter files with suffix only
-                If suffix is empty, iter all files
+            ext: If ext is given, iter files with extension only
+                If ext is empty, iter all files
 
         Yields:
             str: Filename
         """
-        yield from iter_filenames(self, suffix=suffix)
+        yield from iter_filenames(self, ext=ext)
 
     def iter_folders(self):
         """
