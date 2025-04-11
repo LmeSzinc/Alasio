@@ -32,10 +32,13 @@ def joinpath(root: str, path: str) -> str:
     Returns:
         str:
     """
-    if path:
-        return f'{root}{os.sep}{path}'
+    if root:
+        if path:
+            return f'{root}{os.sep}{path}'
+        else:
+            return root
     else:
-        return root
+        return path
 
 
 def joinnormpath(root: str, path: str) -> str:
@@ -61,10 +64,13 @@ def joinnormpath(root: str, path: str) -> str:
         else:
             path = path.rstrip('/')
 
-    if path:
-        return f'{root}{os.sep}{path}'
+    if root:
+        if path:
+            return f'{root}{os.sep}{path}'
+        else:
+            return root
     else:
-        return root
+        return path
 
 
 def uppath(root: str, up: int = 1) -> str:
@@ -169,8 +175,11 @@ def with_name(path: str, name: str) -> str:
     /abc/def     -> /abc/xxx
     /abc/.git    -> /abc/xxx
     """
-    root, _, _ = path.rpartition(os.sep)
-    return f'{root}{os.sep}{name}'
+    root, sep, _ = path.rpartition(os.sep)
+    if sep:
+        return f'{root}{os.sep}{name}'
+    else:
+        return name
 
 
 def with_stem(path: str, stem: str) -> str:
