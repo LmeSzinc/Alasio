@@ -155,9 +155,15 @@ def file_write(file: str, data: Union[str, bytes]):
         # Create memoryview as Pathlib do
         data = memoryview(data)
     else:
-        mode = 'w'
-        encoding = 'utf-8'
-        newline = ''
+        typename = str(type(data))
+        if typename == "<class 'numpy.ndarray'>":
+            mode = 'wb'
+            encoding = None
+            newline = None
+        else:
+            mode = 'w'
+            encoding = 'utf-8'
+            newline = ''
 
     try:
         # Write temp file
