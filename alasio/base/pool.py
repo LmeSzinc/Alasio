@@ -5,7 +5,7 @@ from collections import deque
 from functools import wraps
 from itertools import count
 from threading import Lock, Thread
-from typing import Callable, Generic, NoReturn, TypeVar
+from typing import Callable, Generic, Iterable, NoReturn, TypeVar
 
 from alasio.logger import logger
 
@@ -387,6 +387,40 @@ class WorkerPool:
         """
         return WaitJobsWrapper(self)
 
+    def gather_jobs(self) -> "GatherJobsWrapper":
+        """
+        Auto wait all jobs finished and gather results
+
+        Examples:
+            pool = WORKER_POOL.gather_jobs()
+            with pool:
+                pool.start_thread_soon(...)
+            # Get results
+            print(pool.results)
+        """
+        return GatherJobsWrapper(self)
+
+    def thread_map(self, func: "Callable[..., ResultT]", iterables) -> "list[ResultT]":
+        """
+        Alternative to ThreadPoolExecutor.map(func, iterables)
+        """
+        jobs = [self.start_thread_soon(func, arg) for arg in iterables]
+        results = [job.get() for job in jobs]
+        return results
+
+    def thread_starmap(self, func: "Callable[..., ResultT]", iterables) -> "list[ResultT]":
+        """
+        Alternative to multiprocessing.pool.Pool().starmap(func, iterables) but in threads
+        """
+        jobs = [self.start_thread_soon(func, *arg) for arg in iterables]
+        results = [job.get() for job in jobs]
+        return results
+
+    def thread_funcmap(self, func_iterables: "Iterable[Callable[..., ResultT]]") -> "list[ResultT]":
+        jobs = [self.start_thread_soon(func) for func in func_iterables]
+        results = [job.get() for job in jobs]
+        return results
+
 
 class WaitJobsWrapper:
     """
@@ -395,7 +429,7 @@ class WaitJobsWrapper:
 
     def __init__(self, pool: "WorkerPool"):
         self.pool: "WorkerPool" = pool
-        self.jobs: "deque[Job[ResultT]]" = deque()
+        self.jobs: "list[Job[ResultT]]" = []
 
     def get(self):
         for job in self.jobs:
@@ -412,6 +446,26 @@ class WaitJobsWrapper:
         job = self.pool.start_thread_soon(func, *args, **kwargs)
         self.jobs.append(job)
         return job
+
+
+class GatherJobsWrapper(WaitJobsWrapper):
+    """
+    Wrapper class to gather all jobs
+    """
+
+    def __init__(self, pool: "WorkerPool"):
+        super().__init__(pool)
+        self.results: "list[ResultT]" = []
+
+    def get(self):
+        for job in self.jobs:
+            result = job.get()
+            self.results.append(result)
+        self.jobs.clear()
+
+    def __enter__(self):
+        self.results.clear()
+        return self
 
 
 WORKER_POOL = WorkerPool()

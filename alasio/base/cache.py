@@ -83,3 +83,40 @@ class cached_property_py312(Generic[T]):
         return val
 
     # __class_getitem__ = classmethod(GenericAlias)
+
+
+def del_cached_property(obj, name):
+    """
+    Delete a cached property safely.
+
+    Args:
+        obj:
+        name (str):
+    """
+    try:
+        del obj.__dict__[name]
+    except KeyError:
+        pass
+
+
+def has_cached_property(obj, name):
+    """
+    Check if a property is cached.
+
+    Args:
+        obj:
+        name (str):
+    """
+    return name in obj.__dict__
+
+
+def set_cached_property(obj, name, value):
+    """
+    Set a cached property.
+
+    Args:
+        obj:
+        name (str):
+        value:
+    """
+    obj.__dict__[name] = value
