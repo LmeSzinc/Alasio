@@ -21,17 +21,23 @@ def iter_files(root: str, ext: str = ''):
     if ext:
         # Iter all files with given extension
         # iter_files(folder, suffix='.json')
-        with os.scandir(root) as entries:
-            for entry in entries:
-                if entry.name.endswith(ext) and entry.is_file(follow_symlinks=False):
-                    yield entry.path
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if entry.name.endswith(ext) and entry.is_file(follow_symlinks=False):
+                        yield entry.path
+        except (FileNotFoundError, NotADirectoryError):
+            return
     else:
         # Iter all files (directory not included)
         # iter_files(folder)
-        with os.scandir(root) as entries:
-            for entry in entries:
-                if entry.is_file(follow_symlinks=False):
-                    yield entry.path
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if entry.is_file(follow_symlinks=False):
+                        yield entry.path
+        except (FileNotFoundError, NotADirectoryError):
+            return
 
 
 def iter_filenames(root: str, ext: str = ''):
@@ -49,17 +55,23 @@ def iter_filenames(root: str, ext: str = ''):
     if ext:
         # Iter all files with given extension
         # iter_files(folder, suffix='.json')
-        with os.scandir(root) as entries:
-            for entry in entries:
-                if entry.name.endswith(ext) and entry.is_file(follow_symlinks=False):
-                    yield entry.name
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if entry.name.endswith(ext) and entry.is_file(follow_symlinks=False):
+                        yield entry.name
+        except (FileNotFoundError, NotADirectoryError):
+            return
     else:
         # Iter all files (directory not included)
         # iter_files(folder)
-        with os.scandir(root) as entries:
-            for entry in entries:
-                if entry.is_file(follow_symlinks=False):
-                    yield entry.name
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if entry.is_file(follow_symlinks=False):
+                        yield entry.name
+        except (FileNotFoundError, NotADirectoryError):
+            return
 
 
 def iter_folders(root: str):
@@ -74,10 +86,13 @@ def iter_folders(root: str):
     """
     # Iter all directories
     # iter_folders(folder)
-    with os.scandir(root) as entries:
-        for entry in entries:
-            if entry.is_dir(follow_symlinks=False):
-                yield entry.path
+    try:
+        with os.scandir(root) as entries:
+            for entry in entries:
+                if entry.is_dir(follow_symlinks=False):
+                    yield entry.path
+    except (FileNotFoundError, NotADirectoryError):
+        return
 
 
 def iter_foldernames(root: str):
@@ -92,10 +107,13 @@ def iter_foldernames(root: str):
     """
     # Iter all directories
     # iter_folders(folder)
-    with os.scandir(root) as entries:
-        for entry in entries:
-            if entry.is_dir(follow_symlinks=False):
-                yield entry.name
+    try:
+        with os.scandir(root) as entries:
+            for entry in entries:
+                if entry.is_dir(follow_symlinks=False):
+                    yield entry.name
+    except (FileNotFoundError, NotADirectoryError):
+        return
 
 
 _NO_CACHE = object()
