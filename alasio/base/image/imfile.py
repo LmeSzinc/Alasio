@@ -242,6 +242,33 @@ def image_channel(image) -> int:
         return shape[2]
 
 
+def image_size(image):
+    """
+    Args:
+        image (np.ndarray):
+
+    Returns:
+        int, int: width, height
+    """
+    shape = image.shape
+    return shape[1], shape[0]
+
+
+def image_paste(image, background, origin):
+    """
+    Paste an image on background.
+    This method does not return a value, but instead updates the array "background".
+
+    Args:
+        image:
+        background:
+        origin: Upper-left corner, (x, y)
+    """
+    x, y = origin
+    w, h = image_size(image)
+    background[y:y + h, x:x + w] = image
+
+
 def show_as_pillow(image):
     """
     Show image in Pillow, for debugging purpose
