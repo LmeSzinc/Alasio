@@ -2,7 +2,6 @@ import os
 import random
 import string
 import time
-from typing import Iterable, Union
 
 IS_WINDOWS = os.name == 'nt'
 # Max attempt if another process is reading/writing, effective only on Windows
@@ -20,9 +19,15 @@ def random_id():
     return ''.join(random.sample(string.ascii_letters + string.digits, 6))
 
 
-def is_tmp_file(file: str) -> bool:
+def is_tmp_file(file):
     """
     Check if a filename is tmp file
+
+    Args:
+        file (str): File name to check
+
+    Returns:
+        bool: True if file is a temporary file
     """
     # Check suffix first to reduce regex calls
     if not file.endswith('.tmp'):
@@ -35,19 +40,31 @@ def is_tmp_file(file: str) -> bool:
     return rid.isalnum()
 
 
-def to_tmp_file(file: str) -> str:
+def to_tmp_file(file):
     """
     Convert a filename or directory name to tmp
     filename -> filename.sTD2kF.tmp
+
+    Args:
+        file (str): Original filename
+
+    Returns:
+        str: Temporary filename
     """
     suffix = random_id()
     return f'{file}.{suffix}.tmp'
 
 
-def to_nontmp_file(file: str) -> str:
+def to_nontmp_file(file):
     """
     Convert a tmp filename or directory name to original file
     filename.sTD2kF.tmp -> filename
+
+    Args:
+        file (str): Temporary filename
+
+    Returns:
+        str: Original filename
     """
     if is_tmp_file(file):
         return file[:-11]
@@ -55,12 +72,12 @@ def to_nontmp_file(file: str) -> str:
         return file
 
 
-def windows_attempt_delay(attempt: int) -> float:
+def windows_attempt_delay(attempt):
     """
     Exponential Backoff if file is in use on Windows
 
     Args:
-        attempt: Current attempt, starting from 0
+        attempt (int): Current attempt, starting from 0
 
     Returns:
         float: Seconds to wait
@@ -68,9 +85,13 @@ def windows_attempt_delay(attempt: int) -> float:
     return 2 ** attempt * WINDOWS_RETRY_DELAY
 
 
-def replace_tmp(tmp: str, file: str):
+def replace_tmp(tmp, file):
     """
     Replace temp file to file
+
+    Args:
+        tmp (str): Temporary file path
+        file (str): Target file path
 
     Raises:
         PermissionError: (Windows only) If another process is still reading the file and all retries failed
@@ -120,13 +141,17 @@ def replace_tmp(tmp: str, file: str):
         raise last_error from None
 
 
-def atomic_replace(replace_from: str, replace_to: str):
+def atomic_replace(replace_from, replace_to):
     """
     Replace file or directory
 
+    Args:
+        replace_from (str): Source file/directory path
+        replace_to (str): Target file/directory path
+
     Raises:
         PermissionError: (Windows only) If another process is still reading the file and all retries failed
-        FileNotFoundError:
+        FileNotFoundError: If source file doesn't exist
     """
     if IS_WINDOWS:
         # PermissionError on Windows if another process is reading
@@ -154,10 +179,14 @@ def atomic_replace(replace_from: str, replace_to: str):
         os.replace(replace_from, replace_to)
 
 
-def file_write(file: str, data: Union[str, bytes]):
+def file_write(file, data):
     """
     Write data into file, auto create directory
     Auto determines write mode based on the type of data.
+
+    Args:
+        file (str): Target file path
+        data (Union[str, bytes]): Data to write
     """
     if isinstance(data, str):
         mode = 'w'
@@ -200,14 +229,14 @@ def file_write(file: str, data: Union[str, bytes]):
             os.fsync(f.fileno())
 
 
-def file_write_stream(file: str, data_generator):
+def file_write_stream(file, data_generator):
     """
     Only creates a file if the generator yields at least one data chunk.
     Auto determines write mode based on the type of first chunk.
 
     Args:
-        file: Target file path
-        data_generator: An iterable that yields data chunks (str or bytes)
+        file (str): Target file path
+        data_generator (Iterable): An iterable that yields data chunks (str or bytes)
     """
     # Convert generator to iterator to ensure we can peek at first chunk
     data_iter = iter(data_generator)
@@ -258,10 +287,7 @@ def file_write_stream(file: str, data_generator):
             os.fsync(f.fileno())
 
 
-def atomic_write(
-        file: str,
-        data: Union[str, bytes],
-):
+def atomic_write(file, data):
     """
     Atomic file write with minimal IO operation
     and handles cases where file might be read by another process.
@@ -270,18 +296,15 @@ def atomic_write(
     we write to temp file then do os.replace()
 
     Args:
-        file:
-        data:
+        file (str): Target file path
+        data (Union[str, bytes]): Data to write
     """
     tmp = to_tmp_file(file)
     file_write(tmp, data)
     replace_tmp(tmp, file)
 
 
-def atomic_write_stream(
-        file: str,
-        data_generator,
-):
+def atomic_write_stream(file, data_generator):
     """
     Atomic file write with streaming data support.
     Handles cases where file might be read by another process.
@@ -290,24 +313,26 @@ def atomic_write_stream(
     we write to temp file then do os.replace()
 
     Args:
-        file: Target file path
-        data_generator: An iterable that yields data chunks (str or bytes)
+        file (str): Target file path
+        data_generator (Iterable): An iterable that yields data chunks (str or bytes)
     """
     tmp = to_tmp_file(file)
     file_write_stream(tmp, data_generator)
     replace_tmp(tmp, file)
 
 
-def file_read_text(
-        file: str,
-        encoding: str = 'utf-8',
-        errors: str = 'strict'
-) -> str:
+def file_read_text(file, encoding='utf-8', errors='strict'):
     """
+    Read text file content
+
     Args:
-        file:
-        encoding:
-        errors: 'strict', 'ignore', 'replace' and any other errors mode in open()
+        file (str): Source file path
+        encoding (str): Text encoding. Defaults to 'utf-8'.
+        errors (str): Error handling strategy. Defaults to 'strict'.
+            'strict', 'ignore', 'replace' and any other errors mode in open()
+
+    Returns:
+        str: File content
     """
     try:
         with open(file, mode='r', encoding=encoding, errors=errors) as f:
@@ -316,18 +341,19 @@ def file_read_text(
         return ''
 
 
-def file_read_text_stream(
-        file: str,
-        encoding: str = 'utf-8',
-        errors: str = 'strict',
-        chunk_size: int = 8192
-) -> Iterable[str]:
+def file_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=8192):
     """
+    Read text file content as stream
+
     Args:
-        file:
-        encoding:
-        errors: 'strict', 'ignore', 'replace' and any other errors mode in open()
-        chunk_size:
+        file (str): Source file path
+        encoding (str): Text encoding. Defaults to 'utf-8'.
+        errors (str): Error handling strategy. Defaults to 'strict'.
+            'strict', 'ignore', 'replace' and any other errors mode in open()
+        chunk_size (int): Size of chunks to read. Defaults to 8192.
+
+    Returns:
+        Iterable[str]: Generator yielding file content chunks
     """
     try:
         with open(file, mode='r', encoding=encoding, errors=errors) as f:
@@ -340,10 +366,15 @@ def file_read_text_stream(
         return
 
 
-def file_read_bytes(file: str) -> bytes:
+def file_read_bytes(file):
     """
+    Read binary file content
+
     Args:
-        file:
+        file (str): Source file path
+
+    Returns:
+        bytes: File content
     """
     try:
         # No python-side buffering when reading the entire file to speedup reading
@@ -354,11 +385,16 @@ def file_read_bytes(file: str) -> bytes:
         return b''
 
 
-def file_read_bytes_stream(file: str, chunk_size: int = 8192) -> Iterable[bytes]:
+def file_read_bytes_stream(file, chunk_size=8192):
     """
+    Read binary file content as stream
+
     Args:
-        file:
-        chunk_size:
+        file (str): Source file path
+        chunk_size (int): Size of chunks to read. Defaults to 8192.
+
+    Returns:
+        Iterable[bytes]: Generator yielding file content chunks
     """
     try:
         with open(file, mode='rb') as f:
@@ -371,18 +407,18 @@ def file_read_bytes_stream(file: str, chunk_size: int = 8192) -> Iterable[bytes]
         return
 
 
-def atomic_read_text(
-        file: str,
-        encoding: str = 'utf-8',
-        errors: str = 'strict'
-) -> str:
+def atomic_read_text(file, encoding='utf-8', errors='strict'):
     """
     Atomic file read with minimal IO operation
 
     Args:
-        file:
-        encoding:
-        errors: 'strict', 'ignore', 'replace' and any other errors mode in open()
+        file (str): Source file path
+        encoding (str): Text encoding. Defaults to 'utf-8'.
+        errors (str): Error handling strategy. Defaults to 'strict'.
+            'strict', 'ignore', 'replace' and any other errors mode in open()
+
+    Returns:
+        str: File content
     """
     if IS_WINDOWS:
         # PermissionError on Windows if another process is replacing
@@ -402,18 +438,19 @@ def atomic_read_text(
         return file_read_text(file, encoding=encoding, errors=errors)
 
 
-def atomic_read_text_stream(
-        file: str,
-        encoding: str = 'utf-8',
-        errors: str = 'strict',
-        chunk_size: int = 8192
-) -> Iterable[str]:
+def atomic_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=8192):
     """
+    Atomic file read with streaming support
+
     Args:
-        file:
-        encoding:
-        errors: 'strict', 'ignore', 'replace' and any other errors mode in open()
-        chunk_size:
+        file (str): Source file path
+        encoding (str): Text encoding. Defaults to 'utf-8'.
+        errors (str): Error handling strategy. Defaults to 'strict'.
+            'strict', 'ignore', 'replace' and any other errors mode in open()
+        chunk_size (int): Size of chunks to read. Defaults to 8192.
+
+    Returns:
+        Iterable[str]: Generator yielding file content chunks
     """
     if IS_WINDOWS:
         # PermissionError on Windows if another process is replacing
@@ -435,9 +472,15 @@ def atomic_read_text_stream(
         return
 
 
-def atomic_read_bytes(file: str) -> bytes:
+def atomic_read_bytes(file):
     """
     Atomic file read with minimal IO operation
+
+    Args:
+        file (str): Source file path
+
+    Returns:
+        bytes: File content
     """
     if IS_WINDOWS:
         # PermissionError on Windows if another process is replacing
@@ -457,11 +500,16 @@ def atomic_read_bytes(file: str) -> bytes:
         return file_read_bytes(file)
 
 
-def atomic_read_bytes_stream(file: str, chunk_size: int = 8192) -> Iterable[bytes]:
+def atomic_read_bytes_stream(file, chunk_size=8192):
     """
+    Atomic file read with streaming support
+
     Args:
-        file:
-        chunk_size:
+        file (str): Source file path
+        chunk_size (int): Size of chunks to read. Defaults to 8192.
+
+    Returns:
+        Iterable[bytes]: Generator yielding file content chunks
     """
     if IS_WINDOWS:
         # PermissionError on Windows if another process is replacing
@@ -483,9 +531,12 @@ def atomic_read_bytes_stream(file: str, chunk_size: int = 8192) -> Iterable[byte
         return
 
 
-def file_remove(file: str):
+def file_remove(file):
     """
     Remove a file non-atomic
+
+    Args:
+        file (str): File path to remove
     """
     try:
         os.unlink(file)
@@ -494,12 +545,12 @@ def file_remove(file: str):
         pass
 
 
-def atomic_remove(file: str):
+def atomic_remove(file):
     """
     Atomic file remove
 
     Args:
-        file:
+        file (str): File path to remove
     """
     if IS_WINDOWS:
         # PermissionError on Windows if another process is replacing
@@ -526,8 +577,8 @@ def folder_rmtree(folder, may_symlinks=True):
     Recursively remove a folder and its content
 
     Args:
-        folder:
-        may_symlinks: Default to True
+        folder (str): Folder path to remove
+        may_symlinks (bool): Whether to handle symlinks. Defaults to True.
             False if you already know it's not a symlink
 
     Returns:
@@ -573,11 +624,14 @@ def folder_rmtree(folder, may_symlinks=True):
         return False
 
 
-def atomic_rmtree(folder: str):
+def atomic_rmtree(folder):
     """
     Atomic folder rmtree
     Rename folder as temp folder and remove it,
     folder can be removed by atomic_failure_cleanup at next startup if remove gets interrupted
+
+    Args:
+        folder (str): Folder path to remove
     """
     tmp = to_tmp_file(folder)
     try:
@@ -588,13 +642,17 @@ def atomic_rmtree(folder: str):
     folder_rmtree(tmp)
 
 
-def atomic_failure_cleanup(folder: str, recursive: bool = False):
+def atomic_failure_cleanup(folder, recursive=False):
     """
     Cleanup remaining temp file under given path.
     In most cases there should be no remaining temp files unless write process get interrupted.
 
     This method should only be called at startup
     to avoid deleting temp files that another process is writing.
+
+    Args:
+        folder (str): Folder path to clean
+        recursive (bool): Whether to clean subdirectories. Defaults to False.
     """
     try:
         with os.scandir(folder) as entries:
