@@ -1,20 +1,20 @@
 import cv2
 import numpy as np
 
-from alasio.base.path.atomic import atomic_write
+from alasio.base.path.atomic import atomic_read_bytes, atomic_write
 
 
 class ImageTruncated(Exception):
     pass
 
 
-def copy_image(src):
+def image_copy(src):
     """
     Equivalent to image.copy() but a little bit faster
 
     Time cost to copy a 1280*720*3 image:
         image.copy()      0.743ms
-        copy_image(image) 0.639ms
+        image_copy(image) 0.639ms
     """
     dst = np.empty_like(src)
     cv2.copyTo(src, None, dst)
@@ -97,32 +97,23 @@ def crop(image, area, copy=True):
             value = tuple(0 for _ in range(image.shape[2]))
         return cv2.copyMakeBorder(image, top, bottom, left, right, borderType=cv2.BORDER_CONSTANT, value=value)
     elif copy:
-        return copy_image(image)
+        return image_copy(image)
     else:
         return image
 
 
-def load_image(file, area=None):
+def image_decode(data, area=None):
     """
-    Load an image like pillow and drop alpha channel.
-
     Args:
-        file (str):
+        data (np.ndarray):
         area (tuple):
 
     Returns:
-        np.ndarray:
+        np.ndarray
 
     Raises:
-        FileNotFoundError:
         ImageTruncated:
     """
-    # cv2.imread can't handle non-ascii filepath and PIL.Image.open is slow
-    # Here we read with numpy first
-    data = np.fromfile(file, dtype=np.uint8)
-    if not data.size:
-        raise ImageTruncated('Empty file')
-
     # Decode image
     image = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
     if image is None:
@@ -164,14 +155,41 @@ def load_image(file, area=None):
             return image
 
 
-def save_image(image, file, encode=None):
+def image_load(file, area=None):
     """
-    Save an image like pillow.
+    Load an image like pillow and drop alpha channel.
+
+    Args:
+        file (str):
+        area (tuple):
+
+    Returns:
+        np.ndarray:
+
+    Raises:
+        FileNotFoundError:
+        ImageTruncated:
+    """
+    # cv2.imread can't handle non-ascii filepath and PIL.Image.open is slow
+    # Here we read with numpy first
+    content = atomic_read_bytes(file)
+    data = np.frombuffer(content, dtype=np.uint8)
+    if not data.size:
+        raise ImageTruncated('Empty file')
+    return image_decode(data, area=area)
+
+
+def image_encode(image, ext='png', encode=None):
+    """
+    Encode image
 
     Args:
         image (np.ndarray):
-        file (str):
-        encode: (list[str]): Encode params
+        ext:
+        encode (list): Extra encode options
+
+    Returns:
+        np.ndarray:
     """
     shape = image.shape
     if len(shape) == 3:
@@ -186,7 +204,6 @@ def save_image(image, file, encode=None):
     # Keep grayscale unchanged
 
     # Prepare encode params
-    _, _, ext = file.rpartition('.')
     ext = ext.lower()
     if encode is None:
         if ext == 'png':
@@ -209,7 +226,77 @@ def save_image(image, file, encode=None):
     if not ret:
         raise ImageTruncated('cv2.imencode failed')
 
-    atomic_write(file, buf)
+    return buf
+
+
+def image_save(image, file, encode=None):
+    """
+    Save an image like pillow.
+
+    Args:
+        image (np.ndarray):
+        file (str):
+        encode: (list[str]): Encode params
+    """
+    _, _, ext = file.rpartition('.')
+    data = image_encode(image, ext=ext, encode=encode)
+    atomic_write(file, data)
+
+
+def image_save2(image, file, encode=None):
+    """
+    Save an image like pillow.
+
+    Args:
+        image (np.ndarray):
+        file (str):
+        encode: (list[str]): Encode params
+    """
+    _, _, ext = file.rpartition('.')
+    data = image_encode(image, ext=ext, encode=encode)
+    data = data.tobytes()
+    atomic_write(file, data)
+
+
+def image_fixup(file: str):
+    """
+    Save image using opencv again, making it smaller and shutting up libpng
+    libpng warning: iCCP: known incorrect sRGB profile
+
+    Args:
+        file (str):
+
+    Returns:
+        bool: If file changed
+    """
+    # image_load
+    content = atomic_read_bytes(file)
+    data = np.frombuffer(content, dtype=np.uint8)
+    if not data.size:
+        return False
+    try:
+        image = image_decode(data)
+    except ImageTruncated:
+        # Ignore error because truncated image don't need fixup
+        return False
+
+    # image_save
+    _, _, ext = file.rpartition('.')
+    try:
+        data = image_encode(image, ext=ext)
+    except ImageTruncated:
+        # Ignore error because truncated image don't need fixup
+        return False
+
+    # Writing numpy array directly is faster
+    # but here we want to compare before and after
+    new_content = data.tobytes()
+    if content == new_content:
+        # Same as before, no need to write
+        return False
+    else:
+        atomic_write(file, data)
+        return True
 
 
 def resize(image, size):
