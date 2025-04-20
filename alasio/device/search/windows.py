@@ -496,3 +496,19 @@ class EmulatorSearchWindows(EmulatorSearchBase, CachePathExists):
 
         output = sorted(set(output), key=lambda x: str(x))
         return output
+
+
+if __name__ == '__main__':
+    import time
+
+    count = 1000000
+    start = time.perf_counter()
+    o = EmulatorSearchWindows().all_adb_binaries
+    print(time.perf_counter() - start)
+
+    start = time.perf_counter()
+    o = EmulatorSearchWindows().all_adb_binaries
+    print(time.perf_counter() - start)
+
+    for b in o:
+        print(b)
