@@ -1,7 +1,7 @@
 import os
 
 
-def iter_files(root: str, ext: str = ''):
+def iter_files(root, ext=''):
     """
     Iter full filepath of files in folder with the good performance
 
@@ -11,8 +11,8 @@ def iter_files(root: str, ext: str = ''):
                 ...
 
     Args:
-        root:
-        ext: If ext is given, iter files with extension only
+        root (str):
+        ext (str): If ext is given, iter files with extension only
             If ext is empty, iter all files
 
     Yields:
@@ -40,13 +40,13 @@ def iter_files(root: str, ext: str = ''):
             return
 
 
-def iter_filenames(root: str, ext: str = ''):
+def iter_filenames(root, ext=''):
     """
     Iter filename of files in folder with the good performance
 
     Args:
-        root:
-        ext: If ext is given, iter files with extension only
+        root (str):
+        ext (str): If ext is given, iter files with extension only
             If ext is empty, iter all files
 
     Yields:
@@ -74,12 +74,12 @@ def iter_filenames(root: str, ext: str = ''):
             return
 
 
-def iter_folders(root: str):
+def iter_folders(root):
     """
     Iter full filepath of directories in folder with the good performance
 
     Args:
-        root:
+        root (str):
 
     Yields:
         str: Full path
@@ -95,12 +95,12 @@ def iter_folders(root: str):
         return
 
 
-def iter_foldernames(root: str):
+def iter_foldernames(root):
     """
     Iter name of directories in folder with the good performance
 
     Args:
-        root:
+        root (str):
 
     Yields:
         str: Folder name
@@ -123,7 +123,14 @@ class CachePathExists:
     def __init__(self):
         self._file_exist: "dict[str, bool]" = {}
 
-    def path_exists(self, path: str) -> bool:
+    def path_exists(self, path: str):
+        """
+        Args:
+            path (str):
+
+        Returns:
+            bool:
+        """
         exist = self._file_exist.get(path, _NO_CACHE)
         if exist == _NO_CACHE:
             # Yes, there might be a TOCTOU race condition,
