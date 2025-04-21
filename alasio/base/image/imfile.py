@@ -269,6 +269,11 @@ def image_fixup(file: str):
     Returns:
         bool: If file changed
     """
+    # fixup png only
+    _, _, ext = file.rpartition('.')
+    if ext != 'png':
+        return False
+
     # image_load
     content = atomic_read_bytes(file)
     data = np.frombuffer(content, dtype=np.uint8)
@@ -281,7 +286,6 @@ def image_fixup(file: str):
         return False
 
     # image_save
-    _, _, ext = file.rpartition('.')
     try:
         data = image_encode(image, ext=ext)
     except ImageTruncated:
