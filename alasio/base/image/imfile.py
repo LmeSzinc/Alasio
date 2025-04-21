@@ -1,3 +1,5 @@
+import os
+
 import cv2
 import numpy as np
 
@@ -301,6 +303,41 @@ def image_fixup(file: str):
     else:
         atomic_write(file, data)
         return True
+
+
+def image_fixup_any(path):
+    """
+    Fixup a file or a directory of files
+    Note that this function should only be used in develop environment.
+
+    Args:
+        path (str): If path is a directory fixup .png files recursively,
+            otherwise fixup this image only.
+
+    Returns:
+        int: Amount of fixed up images
+    """
+    # Fixup image directly
+    if path.endswith('.png'):
+        if image_fixup(path):
+            return 1
+        else:
+            return 0
+    # If path is a directory fixup .png files recursively
+    if os.path.isdir(path):
+        count = 0
+        # Local import
+        from alasio.base.path.iter import iter_files
+        files = iter_files(path, ext='.png', recursive=True)
+        for file in files:
+            if image_fixup(file):
+                count += 1
+        return count
+    # Proceed as image anyway
+    if image_fixup(path):
+        return 1
+    else:
+        return 0
 
 
 def resize(image, size):
