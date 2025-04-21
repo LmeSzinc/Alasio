@@ -1,6 +1,6 @@
 from alasio.base.path.atomic import *
 from alasio.base.path.calc import *
-from alasio.base.path.op import *
+from alasio.base.path.iter import *
 
 
 class PathStr(str):
