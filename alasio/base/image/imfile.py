@@ -238,25 +238,10 @@ def image_save(image, file, encode=None):
     Args:
         image (np.ndarray):
         file (str):
-        encode: (list[str]): Encode params
+        encode: (list): Encode params
     """
     _, _, ext = file.rpartition('.')
     data = image_encode(image, ext=ext, encode=encode)
-    atomic_write(file, data)
-
-
-def image_save2(image, file, encode=None):
-    """
-    Save an image like pillow.
-
-    Args:
-        image (np.ndarray):
-        file (str):
-        encode: (list[str]): Encode params
-    """
-    _, _, ext = file.rpartition('.')
-    data = image_encode(image, ext=ext, encode=encode)
-    data = data.tobytes()
     atomic_write(file, data)
 
 
@@ -294,7 +279,7 @@ def image_fixup(file: str):
         # Ignore error because truncated image don't need fixup
         return False
 
-    # Writing numpy array directly is faster
+    # Convert numpy array to bytes is slower than directly writing into file
     # but here we want to compare before and after
     new_content = data.tobytes()
     if content == new_content:
