@@ -188,10 +188,10 @@ class CodeGen:
             multiline_import:
             empty: Empty lines after import
         """
-        for line in multiline_import.splitlines():
+        for line in multiline_import.strip().splitlines():
             line = line.strip()
-            if line:
-                self.add(line)
+            # Keep empty lines
+            self.add(line)
         self.Empty(empty)
 
     @property
