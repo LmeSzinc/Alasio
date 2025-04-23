@@ -208,3 +208,17 @@ def with_suffix(path: str, suffix: str) -> str:
         return f'{root}{os.sep}{stem}.{suffix}'
     else:
         return f'{root}{os.sep}{name}.{suffix}'
+
+
+def with_multisuffix(path: str, suffix: str) -> str:
+    """
+    /abc/def.part1.png -> /abc/def.xxx.xxx
+    /abc/def     -> /abc/def.xxx
+    /abc/.git    -> /abc/.xxx
+    """
+    root, _, name = path.rpartition(os.sep)
+    stem, dot, _ = name.partition('.')
+    if dot:
+        return f'{root}{os.sep}{stem}.{suffix}'
+    else:
+        return f'{root}{os.sep}{name}.{suffix}'

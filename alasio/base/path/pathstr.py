@@ -208,6 +208,20 @@ class PathStr(str):
         """
         return PathStr(with_suffix(self, name))
 
+    def with_multisuffix(self, name):
+        """
+        /abc/def.part1.png -> /abc/def.xxx.xxx
+        /abc/def     -> /abc/def.xxx
+        /abc/.git    -> /abc/.xxx
+
+        Args:
+            name (str): New extension
+
+        Returns:
+            PathStr: Path with new extension
+        """
+        return PathStr(with_multisuffix(self, name))
+
     @property
     def is_tmp_file(self):
         """
