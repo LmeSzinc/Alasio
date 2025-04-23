@@ -1,3 +1,5 @@
+from typing import Any
+
 from alasio.base.path.atomic import atomic_write
 
 _EMPTY = object()
@@ -90,6 +92,18 @@ class CodeGen:
             line += '\n'
         self.lines.append(line)
         return line
+
+    def predict_length_exceed(self, line, line_ending=True, max_length=120) -> bool:
+        """
+        Predict if one line of python code will exceed max_length after adding indent
+        """
+        if self.indent > 0:
+            line = '    ' * self.indent + line
+        if line_ending:
+            end = self.dict_line_ending.get(self.indent, None)
+            if end:
+                line += end
+        return len(line) > max_length
 
     def tab(self, prefix='', suffix='', line_ending='', tab_type='') -> "TabWrapper":
         """
@@ -213,13 +227,66 @@ class CodeGen:
         else:
             return prefix
 
-    def Var(self, name: str, value, anno: str = ''):
+    def _merge_items(
+            self,
+            items: "list[Any] | tuple[Any] | dict[Any, Any]",
+            max_length=120
+    ) -> "list[str]":
+        # Convert to list[str] of code
+        typ = type(items)
+        if typ is dict:
+            items = [f'{repr(k)}={repr(v)}' for k, v in items.items()]
+        else:
+            items = [repr(v) for v in items]
+        # Merge items into rows
+        max_length = max_length - self.indent * 4
+        output = []
+        row = ''
+        for item in items:
+            # row item,
+            if not row:
+                row = f'{item},'
+                continue
+            if len(row) + len(item) + 2 <= max_length:
+                row = f'{row} {item},'
+            else:
+                output.append(row)
+                row = f'{item},'
+        output.append(row)
+        return output
+
+    def Var(self, name: str, value, anno: str = '', auto_multiline=0):
         """
         Define a variable in line
         {name} = {value}
         {name}: {anno} = {value}
+
+        Args:
+            name:
+            value:
+            anno:
+            auto_multiline: max_length, if length of code > max_length, reformat code to fitin max_length
         """
         line = self._get_prefix(name, repr(value), anno=anno)
+        if auto_multiline and self.predict_length_exceed(line, max_length=auto_multiline):
+            # Try to merge multiline
+            typ = type(value)
+            if typ is list:
+                with self.List(name, anno=anno):
+                    for line in self._merge_items(value, auto_multiline):
+                        self.add(line, line_ending=False)
+                return
+            elif typ is tuple:
+                with self.Tuple(name, anno=anno):
+                    for line in self._merge_items(value, auto_multiline):
+                        self.add(line, line_ending=False)
+                return
+            elif typ is dict:
+                with self.Dict(name, anno=anno):
+                    for line in self._merge_items(value, auto_multiline):
+                        self.add(line, line_ending=False)
+                return
+
         self.add(line)
 
     def Anno(self, name: str, anno: str, value=_EMPTY):
