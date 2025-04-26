@@ -5,7 +5,7 @@ from collections import deque
 from functools import wraps
 from itertools import count
 from threading import Lock, Thread
-from typing import Callable, Generic, Iterable, NoReturn, TypeVar
+from typing import Generic, NoReturn, TypeVar
 
 from alasio.logger import logger
 
@@ -13,7 +13,15 @@ ValueT = TypeVar("ValueT", covariant=True)
 ResultT = TypeVar("ResultT")
 
 
-def remove_tb_frames(exc: BaseException, n: int) -> BaseException:
+def remove_tb_frames(exc, n: int):
+    """
+    Args:
+        exc (BaseException):
+        n:
+
+    Returns:
+        BaseException:
+    """
     tb = exc.__traceback__
     for _ in range(n):
         assert tb is not None
@@ -63,7 +71,7 @@ class Error(Outcome[NoReturn]):
     def __repr__(self) -> str:
         return f'Error({self.error!r})'
 
-    def unwrap(self) -> NoReturn:
+    def unwrap(self):
         # Tracebacks show the 'raise' line below out of context, so let's give
         # this variable a name that makes sense out of context.
         captured_error = self.error
@@ -85,16 +93,15 @@ class Error(Outcome[NoReturn]):
             del captured_error, self
 
 
-def capture(
-        sync_fn: "Callable[..., ResultT]",
-        *args,
-        **kwargs,
-) -> "Value[ResultT] | Error":
-    """Run ``sync_fn(*args, **kwargs)`` and capture the result.
+def capture(sync_fn, *args, **kwargs):
+    """
+    Run ``sync_fn(*args, **kwargs)`` and capture the result.
+
+    Args:
+        sync_fn (Callable[..., ResultT]):
 
     Returns:
-      Either a :class:`Value` or :class:`Error` as appropriate.
-
+        Value[ResultT] | Error:
     """
     try:
         return Value(sync_fn(*args, **kwargs))
@@ -108,6 +115,10 @@ class JobError(Exception):
 
 
 class JobTimeout(Exception):
+    pass
+
+
+class _JobKill(Exception):
     pass
 
 
@@ -132,16 +143,6 @@ class Job(Generic[ResultT]):
 
     def __repr__(self):
         return f'Job({self.func_args_kwargs})'
-
-    def _put(self, item: "Outcome[ResultT]"):
-        """
-        Put in job result.
-        This method should not be called outside, only workers can put results in
-        """
-        with self.put_lock:
-            self.queue.append(item)
-            del self.worker
-            self.notify_get.release()
 
     def get(self) -> ResultT:
         """
@@ -184,7 +185,11 @@ name_counter = count()
 
 
 class WorkerThread:
-    def __init__(self, thread_pool: "WorkerPool"):
+    def __init__(self, thread_pool):
+        """
+        Args:
+            thread_pool (WorkerPool):
+        """
         self.job: "Job | None" = None
         self.thread_pool = thread_pool
         # This Lock is used in an unconventional way.
@@ -200,23 +205,35 @@ class WorkerThread:
         self.thread = Thread(target=self._work, name=self.default_name, daemon=True)
         self.thread.start()
 
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self.default_name})'
+
     def _handle_job(self) -> None:
-        # Handle job in a separate method to ensure user-created
-        # objects are cleaned up in a consistent manner.
-        # assert self.job is not None
+        # Convert to local variable, `self.job` will be another
+        # value if new job is assigned
         job = self.job
+        del self.job
         func, args, kwargs = job.func_args_kwargs
 
         result = capture(func, *args, **kwargs)
 
-        with job.put_lock:
-            job.queue.append(result)
-            del job.worker
-            job.notify_get.release()
+        # Tell the cache that we're available to be assigned a new
+        # job. We do this *before* calling 'deliver', so that if
+        # 'deliver' triggers a new job, it can be assigned to us
+        # instead of spawning a new thread.
+        self.thread_pool.idle_workers[self] = None
+        self.thread_pool.release_full_lock()
 
-            del self.job
-            self.thread_pool.idle_workers[self] = None
-            self.thread_pool.release_full_lock()
+        # Deliver
+        if isinstance(result, Error) and isinstance(result.error, _JobKill):
+            # Job killed
+            pass
+        else:
+            # Job finished, putin result and notify
+            with job.put_lock:
+                job.queue.append(result)
+                del job.worker
+                job.notify_get.release()
 
     def _work(self) -> None:
         while True:
@@ -256,7 +273,7 @@ class WorkerThread:
         # Send SystemExit to thread
         thread_id = ctypes.c_long(self.thread.ident)
         res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
-            thread_id, ctypes.py_object(SystemExit))
+            thread_id, ctypes.py_object(_JobKill))
         if res <= 1:
             del self.thread_pool.all_workers[self]
             self.thread_pool.release_full_lock()
@@ -282,7 +299,7 @@ class WorkerPool:
     IDLE_TIMEOUT = 10
 
     def __init__(self, pool_size: int = 8):
-        # Pool has 4 threads at max.
+        # Pool has 8 threads at max.
         # Alasio is for local low-frequency access so default pool size is small
         self.pool_size = pool_size
 
@@ -335,10 +352,27 @@ class WorkerPool:
 
         # Create new worker
         worker = WorkerThread(self)
+        # logger.info(f'New worker thread: {worker.default_name}')
         self.all_workers[worker] = None
         return worker
 
-    def start_thread_soon(self, func: "Callable[..., ResultT]", *args, **kwargs) -> "Job[ResultT]":
+    def start_thread_soon(self, func, *args, **kwargs):
+        """
+        Run a function on thread,
+        result can be got from `job` object
+
+        Args:
+            func (Callable[..., ResultT]):
+            *args:
+            **kwargs:
+
+        Returns:
+            Job[ResultT]:
+
+        Examples:
+            job = WORKER_POOL.start_thread_soon(func, *args)
+            result = job.get()
+        """
         worker = self._get_thread_worker()
         job = Job(worker=worker, func_args_kwargs=(func, args, kwargs))
 
@@ -346,7 +380,24 @@ class WorkerPool:
         worker.worker_lock.release()
         return job
 
-    def run_on_thread(self, func: "Callable[..., ResultT]") -> "Callable[..., Job[ResultT]]":
+    def run_on_thread(self, func):
+        """
+        Decorate a function to run on thread,
+        result can be got from `job` object
+
+        Args:
+            func (Callable[..., ResultT]):
+
+        Returns:
+            Job[ResultT]:
+
+        Examples:
+            @run_on_thread
+            def function(...):
+                pass
+            job = function(...)
+            result = job.get()
+        """
         @wraps(func)
         def thread_wrapper(*args, **kwargs) -> "Job[ResultT]":
             return self.start_thread_soon(func, *args, **kwargs)
@@ -354,7 +405,17 @@ class WorkerPool:
         return thread_wrapper
 
     @staticmethod
-    def _subprocess_execute(cmd: "list[str]", timeout=10) -> bytes:
+    def _subprocess_execute(cmd, timeout=10):
+        """
+        Helper function to run cmd in subprocess
+
+        Args:
+            cmd (list[str]):
+            timeout:
+
+        Returns:
+            bytes:
+        """
         logger.info(f'Execute: {cmd}')
 
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=False)
@@ -367,7 +428,18 @@ class WorkerPool:
             logger.warning(f'TimeoutExpired when calling {cmd}, stdout={stdout}, stderr={stderr}')
         return stdout
 
-    def start_cmd_soon(self, cmd: "list[str]", timeout=10) -> "Job[bytes]":
+    def start_cmd_soon(self, cmd, timeout=10):
+        """
+        Run cmd on subprocess and communicate it on another thread,
+        result can be got from `job` object
+
+        Args:
+            cmd (list[str]):
+            timeout:
+
+        Returns:
+            Job[bytes]:
+        """
         worker = self._get_thread_worker()
         job = Job(worker=worker, func_args_kwargs=(
             self._subprocess_execute, (cmd,), {'timeout': timeout}
@@ -400,23 +472,46 @@ class WorkerPool:
         """
         return GatherJobsWrapper(self)
 
-    def thread_map(self, func: "Callable[..., ResultT]", iterables) -> "list[ResultT]":
+    def thread_map(self, func, iterables):
         """
         Alternative to ThreadPoolExecutor.map(func, iterables)
+
+        Args:
+            func (Callable[..., ResultT]):
+            iterables:
+
+        Returns:
+            list[ResultT]:
         """
         jobs = [self.start_thread_soon(func, arg) for arg in iterables]
         results = [job.get() for job in jobs]
         return results
 
-    def thread_starmap(self, func: "Callable[..., ResultT]", iterables) -> "list[ResultT]":
+    def thread_starmap(self, func, iterables):
         """
-        Alternative to multiprocessing.pool.Pool().starmap(func, iterables) but in threads
+        Alternative to multiprocessing.pool.Pool().starmap(func, iterables) but on threads
+
+        Args:
+            func (Callable[..., ResultT]):
+            iterables:
+
+        Returns:
+            list[ResultT]:
         """
         jobs = [self.start_thread_soon(func, *arg) for arg in iterables]
         results = [job.get() for job in jobs]
         return results
 
-    def thread_funcmap(self, func_iterables: "Iterable[Callable[..., ResultT]]") -> "list[ResultT]":
+    def thread_funcmap(self, func_iterables):
+        """
+        Run a list of functions on threads
+
+        Args:
+            func_iterables (Iterable[Callable[..., ResultT]]):
+
+        Returns:
+            list[ResultT]:
+        """
         jobs = [self.start_thread_soon(func) for func in func_iterables]
         results = [job.get() for job in jobs]
         return results
@@ -437,12 +532,25 @@ class WaitJobsWrapper:
         self.jobs.clear()
 
     def __enter__(self):
+        self.jobs.clear()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.get()
 
-    def start_thread_soon(self, func: "Callable[..., ResultT]", *args, **kwargs) -> "Job[ResultT]":
+    def start_thread_soon(self, func, *args, **kwargs):
+        """
+        Run a function on thread,
+        result can be got from `job` object
+
+        Args:
+            func (Callable[..., ResultT]):
+            *args:
+            **kwargs:
+
+        Returns:
+            Job[ResultT]:
+        """
         job = self.pool.start_thread_soon(func, *args, **kwargs)
         self.jobs.append(job)
         return job
@@ -464,6 +572,7 @@ class GatherJobsWrapper(WaitJobsWrapper):
         self.jobs.clear()
 
     def __enter__(self):
+        self.jobs.clear()
         self.results.clear()
         return self
 
