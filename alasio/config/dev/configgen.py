@@ -4,11 +4,11 @@ from typing import Any, Dict, List, Union
 import msgspec
 from msgspec import Struct, UNSET, UnsetType, ValidationError
 
-from alasio.base.backport import to_literal
-from alasio.base.cache import cached_property
-from alasio.base.codegen import CodeGen
-from alasio.base.deep import deep_iter_depth1, deep_iter_depth2, deep_set
-from alasio.base.path import PathStr
+from alasio.ext.backport import to_literal
+from alasio.ext.cache import cached_property
+from alasio.ext.codegen import CodeGen
+from alasio.ext.deep import deep_iter_depth1, deep_iter_depth2, deep_set
+from alasio.ext.path import PathStr
 
 # Requires manual maintain
 TYPE_YAML_TO_ARG = {
@@ -330,3 +330,9 @@ class GenMsgspec:
         gen = self.codegen
         file = self.file.with_multisuffix('model.py')
         gen.write(file)
+
+
+if __name__ == '__main__':
+    f = PathStr.new(r'E:\ProgramData\Pycharm\Alasio\alasio\config\alasio\opsi.group.yaml')
+    self = GenMsgspec(f)
+    self.write()

@@ -1,6 +1,6 @@
 from typing import Any
 
-from alasio.base.path.atomic import atomic_write
+from alasio.ext.path.atomic import atomic_write
 
 _EMPTY = object()
 

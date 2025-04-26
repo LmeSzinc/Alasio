@@ -2,10 +2,10 @@ import os
 import re
 from dataclasses import dataclass
 
-from alasio.base.cache import cached_property, del_cached_property
-from alasio.base.path import PathStr
-from alasio.base.path.atomic import atomic_read_text
-from alasio.base.path.calc import joinpath
+from alasio.ext.cache import cached_property, del_cached_property
+from alasio.ext.path import PathStr
+from alasio.ext.path.atomic import atomic_read_text
+from alasio.ext.path.calc import joinpath
 
 
 def vbox_file_to_serial(file: str) -> str:

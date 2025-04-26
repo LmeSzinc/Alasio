@@ -1,9 +1,7 @@
-from typing import Callable, Generic, TypeVar
-
-T = TypeVar("T")
+# T = TypeVar("T")
 
 
-class cached_property(Generic[T]):
+class cached_property:
     """
     cached-property from https://github.com/pydanny/cached-property
     Add typing support, non-thread-safe.
@@ -13,10 +11,12 @@ class cached_property(Generic[T]):
     Source: https://github.com/bottlepy/bottle/commit/fa7733e075da0d790d809aa3d2f53071897e6f76
     """
 
-    def __init__(self, func: Callable[..., T]):
+    def __init__(self, func):
+        # type: (Callable[..., T]) -> None
         self.func = func
 
-    def __get__(self, obj, cls) -> T:
+    def __get__(self, obj, cls):
+        # type: (object, type) -> T
         if obj is None:
             return self
 
@@ -27,12 +27,13 @@ class cached_property(Generic[T]):
 _NOT_FOUND = object()
 
 
-class cached_property_py312(Generic[T]):
+class cached_property_py312():
     """
     Backport functools.cached_property on python >= 3.12
     """
 
-    def __init__(self, func: Callable[..., T]):
+    def __init__(self, func):
+        # type: (Callable[..., T]) -> None
         self.func = func
         self.attrname = None
         self.__doc__ = func.__doc__
@@ -55,7 +56,8 @@ class cached_property_py312(Generic[T]):
     # def __get__(self, instance: Any, owner: Any) -> T:
     #     ...
 
-    def __get__(self, instance, owner=None) -> T:
+    def __get__(self, instance, owner=None):
+        # type: (object, type) -> T
         if instance is None:
             return self
         if self.attrname is None:
