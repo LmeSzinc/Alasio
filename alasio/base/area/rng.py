@@ -14,6 +14,8 @@ def random_normal_distribution_int(a, b, n=3):
     Returns:
         int
     """
+    a = round(a)
+    b = round(b)
     if a < b:
         total = 0
         for _ in range(n):
