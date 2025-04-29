@@ -87,59 +87,58 @@ def populate_yaml(value) -> dict:
     If type is not given, predict type by default value
 
     Enable: true
-    -> Enable: {'type': 'checkbox', 'value': true}
+    -> Enable: {'dt': 'checkbox', 'default': true}
     """
     # Only default value
     vtype = type(value)
-    typ = TYPE_YAML_TO_ARG.get(vtype, None)
-    if typ:
-        return {'type': typ, 'value': value}
+    dt = TYPE_YAML_TO_ARG.get(vtype, None)
+    if dt:
+        return {'dt': dt, 'default': value}
 
     # dict
     if vtype is dict:
         try:
-            v = value['value']
+            default = value['default']
         except KeyError:
-            raise DefinitionError(f'Missing "value" attribute')
-        if 'type' in value:
+            raise DefinitionError(f'Missing "default" attribute')
+        if 'dt' in value:
             # Having pre-defined type, check if valid
-            typ = value['type']
-            if typ not in TYPE_ARG_TO_PYTHON:
-                raise DefinitionError(f'Invalid type {typ}')
+            dt = value['dt']
+            if dt not in TYPE_ARG_TO_PYTHON:
+                raise DefinitionError(f'Invalid datatype {dt}')
             # Check if literal args have option
-            if typ in TYPE_ARG_LITERAL and 'option' not in value:
-                raise DefinitionError(f'type {typ} must have "option"')
+            if dt in TYPE_ARG_LITERAL and 'option' not in value:
+                raise DefinitionError(f'datatype {dt} must have "option" defined')
             return value
         # No pre-defined type, if it has option, predict as dropdown
         if 'option' in value:
             option = value['option']
             if not option:
                 raise DefinitionError('"option" is an empty list')
-            if v not in option:
+            if default not in option:
                 raise DefinitionError('Default value is not in "option"')
-            value['type'] = 'dropdown'
+            value['dt'] = 'dropdown'
             return value
         # No pre-defined type, predict by default value
-        vtype = type(v)
-        typ = TYPE_YAML_TO_ARG.get(vtype, None)
-        if typ:
-            value['type'] = typ
+        vtype = type(default)
+        dt = TYPE_YAML_TO_ARG.get(vtype, None)
+        if dt:
+            value['dt'] = dt
             return value
 
-    raise DefinitionError(f'Cannot predict "type"')
+    raise DefinitionError(f'Cannot predict "dt"')
 
 
 # No need to modify
 MSGSPEC_CONSTRAINT = [
-    'gt', 'ge', 'lt', 'le', 'multiple_of', 'pattern',
-    'min_length', 'max_length', 'tz', 'title', 'description',
-    'examples', 'extra_json_schema', 'extra'
+    'gt', 'ge', 'lt', 'le', 'multiple_of', 'pattern', 'min_length', 'max_length', 'tz',
+    # 'title', 'description', 'examples', 'extra_json_schema', 'extra'
 ]
 
 
 class ArgsData(Struct, omit_defaults=True):
-    type: to_literal(TYPE_ARG_TO_PYTHON.keys())
-    value: Any
+    dt: to_literal(TYPE_ARG_TO_PYTHON.keys())
+    default: Any
     option: Union[list, UnsetType] = UNSET
     advanced: bool = False
 
@@ -175,14 +174,14 @@ class ArgsData(Struct, omit_defaults=True):
     extra: Union[Dict, UnsetType] = UNSET
 
     def __post_init__(self):
-        v = self.value
-        vtype = type(v)
+        default = self.default
+        vtype = type(default)
         # Timezone default to UTC
-        if vtype is datetime and not v.tzinfo:
-            self.value = v.replace(tzinfo=timezone.utc)
+        if vtype is datetime and not default.tzinfo:
+            self.default = default.replace(tzinfo=timezone.utc)
         # Split filters
-        if self.type in TYPE_ARG_LIST and vtype is str:
-            self.value = [s.strip() for s in self.value.split('>')]
+        if self.dt in TYPE_ARG_LIST and vtype is str:
+            self.default = [s.strip() for s in default.split('>')]
         return self
 
     def get_meta(self) -> str:
@@ -220,11 +219,11 @@ class ArgsData(Struct, omit_defaults=True):
             Literal['zh', 'en', 'ja', 'kr']
         """
         # Convert options to literal
-        if self.type in TYPE_ARG_LITERAL:
+        if self.dt in TYPE_ARG_LITERAL:
             option = ', '.join([repr(o) for o in self.option])
             return f't.Literal[{option}]'
         # Find in pre-defined dict
-        return TYPE_ARG_TO_PYTHON.get(self.type, 'Any')
+        return TYPE_ARG_TO_PYTHON.get(self.dt, 'Any')
 
     def get_anno(self) -> str:
         """
@@ -279,8 +278,8 @@ class GenMsgspec:
 
             deep_set(output, keys=[group_name, arg_name], value=arg)
             # print(msgspec.json.encode(arg))
-            # if isinstance(arg.value, datetime):
-            #     print(arg.value.tzinfo)
+            # if isinstance(arg.default, datetime):
+            #     print(arg.default.tzinfo)
 
         return output
 
@@ -301,23 +300,23 @@ class GenMsgspec:
             with gen.Class(group_name, inherit='m.Struct, omit_defaults=True'):
                 for arg_name, arg in deep_iter_depth1(arg_data):
                     # Expand list
-                    if arg.type in TYPE_ARG_LIST:
-                        gen.Var(arg_name, anno=arg.get_anno(), value=arg.value, auto_multiline=120)
+                    if arg.dt in TYPE_ARG_LIST:
+                        gen.Var(arg_name, anno=arg.get_anno(), value=arg.default, auto_multiline=120)
                         continue
                     # Expand literal
-                    if arg.type in TYPE_ARG_LITERAL:
+                    if arg.dt in TYPE_ARG_LITERAL:
                         anno = arg.get_anno()
                         if len(anno) > 60:
                             # {name}: t.Literal[
                             #     ...
                             # } = ...
-                            with gen.tab(prefix=f'{arg_name}: t.Literal[', suffix=f'] = {repr(arg.value)}',
+                            with gen.tab(prefix=f'{arg_name}: t.Literal[', suffix=f'] = {repr(arg.default)}',
                                          line_ending=',', tab_type='list'):
                                 for option in arg.option:
                                     gen.Item(option)
                             continue
                     # inline
-                    gen.Anno(arg_name, anno=arg.get_anno(), value=arg.value)
+                    gen.Anno(arg_name, anno=arg.get_anno(), value=arg.default)
             gen.Empty(2)
 
         # gen.print()
@@ -328,7 +327,9 @@ class GenMsgspec:
         Generate and write msgspec models
         """
         gen = self.codegen
-        file = self.file.with_multisuffix('model.py')
+        # {aside}.group.yaml -> {aside}_model.py
+        aside, _, _ = self.file.name.partition('.')
+        file = self.file.with_name(f'{aside}_model.py')
         gen.write(file)
 
 
