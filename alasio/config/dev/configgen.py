@@ -1,14 +1,16 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import msgspec
 from msgspec import Struct, UNSET, UnsetType, ValidationError
 
+from alasio.config.const import Const
 from alasio.ext.backport import to_literal
-from alasio.ext.cache import cached_property
+from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.codegen import CodeGen
-from alasio.ext.deep import deep_iter_depth1, deep_iter_depth2, deep_set
+from alasio.ext.deep import deep_get, deep_iter_depth1, deep_iter_depth2, deep_set
 from alasio.ext.path import PathStr
+from alasio.ext.path.jsonread import read_msgspec, write_json
 
 # Requires manual maintain
 TYPE_YAML_TO_ARG = {
@@ -162,16 +164,17 @@ class ArgsData(Struct, omit_defaults=True):
     max_length: Union[int, UnsetType] = UNSET
     # Configures the timezone-requirements for annotated datetime/time types.
     tz: Union[bool, UnsetType] = UNSET
+
     # The title to use for the annotated value when generating a json-schema.
-    title: Union[str, UnsetType] = UNSET
+    # title: Union[str, UnsetType] = UNSET
     # The description to use for the annotated value when generating a json-schema.
-    description: Union[str, UnsetType] = UNSET
+    # description: Union[str, UnsetType] = UNSET
     # A list of examples to use for the annotated value when generating a json-schema.
-    examples: Union[List, UnsetType] = UNSET
+    # examples: Union[List, UnsetType] = UNSET
     # A dict of extra fields to set for the annotated value when generating a json-schema.
-    extra_json_schema: Union[Dict, UnsetType] = UNSET
+    # extra_json_schema: Union[Dict, UnsetType] = UNSET
     # Any additional user-defined metadata.
-    extra: Union[Dict, UnsetType] = UNSET
+    # extra: Union[Dict, UnsetType] = UNSET
 
     def __post_init__(self):
         default = self.default
@@ -183,6 +186,13 @@ class ArgsData(Struct, omit_defaults=True):
         if self.dt in TYPE_ARG_LIST and vtype is str:
             self.default = [s.strip() for s in default.split('>')]
         return self
+
+    def to_dict(self) -> dict:
+        """
+        Returns:
+
+        """
+        return msgspec.to_builtins(self)
 
     def get_meta(self) -> str:
         """
@@ -245,7 +255,7 @@ class GenMsgspec:
     def __init__(self, file):
         """
         Args:
-            file (PathStr): Path to *.group.yaml
+            file (PathStr): Path to *.args.yaml
         """
         self.file = file
 
@@ -284,7 +294,13 @@ class GenMsgspec:
         return output
 
     @cached_property
-    def codegen(self) -> CodeGen:
+    def model_file(self):
+        # {aside}.args.yaml -> {aside}_model.py
+        # Use "_" in file name because python can't import filename with "." easily
+        return self.file.with_name(f'{self.file.rootstem}_model.py')
+
+    @cached_property
+    def model(self) -> CodeGen:
         """
         Generate msgspec models
         """
@@ -322,18 +338,78 @@ class GenMsgspec:
         # gen.print()
         return gen
 
+    @cached_property
+    def gui_file(self):
+        # {aside}.args.yaml -> {aside}_gui.json
+        return self.file.with_name(f'{self.file.rootstem}_gui.json')
+
+    @cached_property
+    def gui_old(self):
+        return read_msgspec(self.gui_file)
+
+    def _update_gui_arg(self, group_name, arg_name, arg: ArgsData):
+        old = deep_get(self.gui_old, [group_name, arg_name], default={})
+        new = arg.to_dict()
+        for lang in Const.GUI_LANGUAGE:
+            # name
+            key = ['i18n', lang, 'name']
+            value = deep_get(old, key, default='')
+            if not value:
+                value = f'{group_name}.{arg_name}'
+            deep_set(new, key, value)
+            # help
+            key = ['i18n', lang, 'help']
+            value = deep_get(old, key, default='')
+            deep_set(new, key, value)
+        # option
+        if arg.option:
+            for option in arg.option:
+                for lang in Const.GUI_LANGUAGE:
+                    key = ['i18n_option', lang, option]
+                    value = deep_get(old, key, default=option)
+                    deep_set(new, key, value)
+        return new
+
+    def _update_gui_info(self, group_name, arg_name):
+        old = deep_get(self.gui_old, [group_name, arg_name], default={})
+        new = {}
+        for lang in Const.GUI_LANGUAGE:
+            # name
+            key = ['i18n', lang, 'name']
+            value = deep_get(old, key, default='')
+            if not value:
+                value = f'{group_name}.{arg_name}'
+            deep_set(new, key, value)
+            # help
+            key = ['i18n', lang, 'help']
+            value = deep_get(old, key, default='')
+            deep_set(new, key, value)
+        return new
+
+    @cached_property
+    def gui(self):
+        _ = self.gui_old
+        new = {}
+        for group_name, arg_data in deep_iter_depth1(self.args):
+            # {group}._info
+            row = self._update_gui_info(group_name, '_info')
+            deep_set(new, [group_name, '_info'], row)
+            for arg_name, arg in deep_iter_depth1(arg_data):
+                # {group}.{arg}
+                row = self._update_gui_arg(group_name, arg_name, arg)
+                deep_set(new, [group_name, arg_name], row)
+        del_cached_property(self, 'i18n_old')
+        return new
+
     def write(self):
         """
         Generate and write msgspec models
         """
-        gen = self.codegen
-        # {aside}.group.yaml -> {aside}_model.py
-        aside, _, _ = self.file.name.partition('.')
-        file = self.file.with_name(f'{aside}_model.py')
-        gen.write(file)
+        self.model.write(self.model_file)
+        write_json(self.gui_file, self.gui)
 
 
 if __name__ == '__main__':
-    f = PathStr.new(r'E:\ProgramData\Pycharm\Alasio\alasio\config\alasio\opsi.group.yaml')
+    f = PathStr.new(r'E:\ProgramData\Pycharm\Alasio\alasio\config\alasio\opsi.args.yaml')
     self = GenMsgspec(f)
     self.write()
