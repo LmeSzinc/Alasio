@@ -155,6 +155,21 @@ def get_stem(path: str) -> str:
         return name
 
 
+def get_rootstem(path: str) -> str:
+    """
+    /abc/def.part1.png -> def
+    /abc/def.png -> def
+    /abc/def     -> def
+    /abc/.git    -> ""
+    """
+    _, _, name = path.rpartition(os.sep)
+    stem, dot, _ = name.partition('.')
+    if dot:
+        return stem
+    else:
+        return name
+
+
 def get_suffix(path: str) -> str:
     """
     /abc/def.png -> .png
@@ -163,6 +178,21 @@ def get_suffix(path: str) -> str:
     """
     _, _, name = path.rpartition(os.sep)
     _, dot, suffix = name.rpartition('.')
+    if dot:
+        return suffix
+    else:
+        return ''
+
+
+def get_multisuffix(path: str) -> str:
+    """
+    /abc/def.part1.png -> .part1.png
+    /abc/def.png -> .png
+    /abc/def     -> ""
+    /abc/.git    -> .git
+    """
+    _, _, name = path.rpartition(os.sep)
+    _, dot, suffix = name.partition('.')
     if dot:
         return suffix
     else:
@@ -190,6 +220,21 @@ def with_stem(path: str, stem: str) -> str:
     """
     root, _, name = path.rpartition(os.sep)
     _, dot, suffix = name.rpartition('.')
+    if dot:
+        return f'{root}{os.sep}{stem}.{suffix}'
+    else:
+        return f'{root}{os.sep}{stem}'
+
+
+def with_rootstem(path: str, stem: str) -> str:
+    """
+    /abc/def.part1.png -> /abc/xxx.part1.png
+    /abc/def.png -> /abc/xxx.png
+    /abc/def     -> /abc/xxx
+    /abc/.git    -> /abc/xxx.git
+    """
+    root, _, name = path.rpartition(os.sep)
+    _, dot, suffix = name.partition('.')
     if dot:
         return f'{root}{os.sep}{stem}.{suffix}'
     else:

@@ -138,7 +138,7 @@ class PathStr(str):
         /abc/.git    -> .git
 
         Returns:
-            str: Filename with extension
+            str: Filename
         """
         return get_name(self)
 
@@ -150,9 +150,22 @@ class PathStr(str):
         /abc/.git    -> ""
 
         Returns:
-            str: Filename without extension
+            str: Filename without last extension
         """
         return get_stem(self)
+
+    @property
+    def rootstem(self):
+        """
+        /abc/def.part1.png -> def
+        /abc/def.png -> def
+        /abc/def     -> def
+        /abc/.git    -> ""
+
+        Returns:
+            str: Filename without any extension
+        """
+        return get_rootstem(self)
 
     @property
     def suffix(self):
@@ -162,9 +175,22 @@ class PathStr(str):
         /abc/.git    -> .git
 
         Returns:
-            str: File extension
+            str: Last extension
         """
         return get_suffix(self)
+
+    @property
+    def multisuffix(self):
+        """
+        /abc/def.part1.png -> .part1.png
+        /abc/def.png -> .png
+        /abc/def     -> ""
+        /abc/.git    -> .git
+
+        Returns:
+            str: All extensions
+        """
+        return get_multisuffix(self)
 
     def with_name(self, name):
         """
@@ -193,6 +219,21 @@ class PathStr(str):
             PathStr: Path with new stem
         """
         return PathStr(with_stem(self, name))
+
+    def with_rootstem(self, name):
+        """
+        /abc/def.part1.png -> /abc/xxx.part1.png
+        /abc/def.png -> /abc/xxx.png
+        /abc/def     -> /abc/xxx
+        /abc/.git    -> /abc/xxx.git
+
+        Args:
+            name (str): New stem (filename without extension)
+
+        Returns:
+            PathStr: Path with new stem
+        """
+        return PathStr(with_rootstem(self, name))
 
     def with_suffix(self, name):
         """
