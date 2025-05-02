@@ -4,6 +4,7 @@ from typing import Any, Union
 import msgspec
 from msgspec import Struct, UNSET, UnsetType
 
+from alasio.config.dev.parse_range import parse_range
 from alasio.ext.backport import to_literal
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth2, deep_set
@@ -100,6 +101,14 @@ def populate_yaml(value) -> dict:
             default = value['default']
         except KeyError:
             raise DefinitionError(f'Missing "default" attribute')
+        # Parse range
+        if 'range' in value:
+            range_str = value['range']
+            try:
+                dict_range = parse_range(range_str)
+            except ValueError as e:
+                raise DefinitionError(f'Cannot parse range, {e}')
+            value.update(dict_range)
         if 'dt' in value:
             # Having pre-defined type, check if valid
             dt = value['dt']
