@@ -1,0 +1,105 @@
+import json
+import sys
+
+import msgspec
+from msgspec.json import decode, encode
+
+from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
+
+if sys.version_info >= (3, 9):
+    # Since py3.9, json.loads removed `encoding`
+    def json_loads(data):
+        """
+        Args:
+            data (bytes):
+
+        Returns:
+            Any:
+        """
+        return json.loads(data)
+else:
+    # Under py3.9, set encoding
+    def json_loads(data):
+        """
+        Args:
+            data (bytes):
+
+        Returns:
+            Any:
+        """
+        return json.loads(data, encoding='utf-8')
+
+
+def json_dumps(obj):
+    """
+    Args:
+        obj (Any):
+
+    Returns:
+        bytes:
+    """
+    return json.dumps(obj, indent=2, ensure_ascii=False, sort_keys=False, default=str)
+
+
+def read_json(file, default_factory=dict):
+    """
+    Read json from file
+
+    Args:
+        file (str):
+        default_factory (callable):
+
+    Returns:
+        Any:
+    """
+    data = atomic_read_bytes(file)
+    try:
+        return json_loads(data)
+    except json.JSONDecodeError:
+        return default_factory()
+
+
+def write_json(file, obj):
+    """
+    Encode obj and write into file
+
+    Args:
+        file (str):
+        obj (Any):
+    """
+    data = json_dumps(obj)
+    atomic_write(file, data)
+
+
+def read_msgspec(file, default_factory=dict):
+    """
+    Read json from file using msgspec
+
+    Args:
+        file (str):
+        default_factory (callable):
+
+    Returns:
+        Any:
+    """
+    data = atomic_read_bytes(file)
+    try:
+        return decode(data)
+    except msgspec.DecodeError:
+        # msgspec.DecodeError: Input data was truncated
+        return default_factory()
+
+
+def write_msgspec(file, obj):
+    """
+    Encode obj and write into file using msgspec
+
+    Args:
+        file (str):
+        obj (Any):
+
+    Returns:
+        Any:
+    """
+    data = encode(obj)
+    atomic_write(file, data)
