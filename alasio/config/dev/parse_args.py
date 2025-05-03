@@ -7,7 +7,7 @@ from msgspec import Struct, UNSET, UnsetType
 from alasio.config.dev.parse_range import parse_range
 from alasio.ext.backport import to_literal
 from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_iter_depth2, deep_set
+from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.path import PathStr
 
 # Requires manual maintain
@@ -273,24 +273,27 @@ class ParseArgs:
         output = {}
         content = self.file.atomic_read_bytes()
         data = msgspec.yaml.decode(content)
-        for group_name, arg_name, value in deep_iter_depth2(data):
-            # Create ArgsData object from manual arg definition
-            try:
-                value = populate_yaml(value)
-            except DefinitionError as e:
-                e.file = self.file
-                e.keys = [group_name, arg_name]
-                e.value = value
-                raise
-            try:
-                arg = msgspec.convert(value, ArgData)
-            except msgspec.ValidationError as e:
-                ne = DefinitionError(e, file=self.file, keys=[group_name, arg_name], value=value)
-                raise ne
+        for group_name, group_value in deep_iter_depth1(data):
+            # Keep empty group in args, so they can be empty group to display on GUI
+            output[group_name] = {}
+            for arg_name, value in deep_iter_depth1(group_value):
+                # Create ArgsData object from manual arg definition
+                try:
+                    value = populate_yaml(value)
+                except DefinitionError as e:
+                    e.file = self.file
+                    e.keys = [group_name, arg_name]
+                    e.value = value
+                    raise
+                try:
+                    arg = msgspec.convert(value, ArgData)
+                except msgspec.ValidationError as e:
+                    ne = DefinitionError(e, file=self.file, keys=[group_name, arg_name], value=value)
+                    raise ne
 
-            deep_set(output, keys=[group_name, arg_name], value=arg)
-            # print(msgspec.json.encode(arg))
-            # if isinstance(arg.default, datetime):
-            #     print(arg.default.tzinfo)
+                deep_set(output, keys=[group_name, arg_name], value=arg)
+                # print(msgspec.json.encode(arg))
+                # if isinstance(arg.default, datetime):
+                #     print(arg.default.tzinfo)
 
         return output

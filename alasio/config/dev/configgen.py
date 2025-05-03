@@ -35,6 +35,9 @@ class GenMsgspec(ParseArgs):
         gen.Empty()
         gen.CommentCodeGen('alasio.config.dev.configgen')
         for group_name, arg_data in deep_iter_depth1(self.args):
+            # Skip empty group
+            if not arg_data:
+                continue
             with gen.Class(group_name, inherit='m.Struct, omit_defaults=True'):
                 for arg_name, arg in deep_iter_depth1(arg_data):
                     # Expand list
