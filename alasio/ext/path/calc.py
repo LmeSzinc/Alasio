@@ -179,7 +179,7 @@ def get_suffix(path: str) -> str:
     _, _, name = path.rpartition(os.sep)
     _, dot, suffix = name.rpartition('.')
     if dot:
-        return suffix
+        return dot + suffix
     else:
         return ''
 
@@ -194,7 +194,7 @@ def get_multisuffix(path: str) -> str:
     _, _, name = path.rpartition(os.sep)
     _, dot, suffix = name.partition('.')
     if dot:
-        return suffix
+        return dot + suffix
     else:
         return ''
 
@@ -250,9 +250,9 @@ def with_suffix(path: str, suffix: str) -> str:
     root, _, name = path.rpartition(os.sep)
     stem, dot, _ = name.rpartition('.')
     if dot:
-        return f'{root}{os.sep}{stem}.{suffix}'
+        return f'{root}{os.sep}{stem}{suffix}'
     else:
-        return f'{root}{os.sep}{name}.{suffix}'
+        return f'{root}{os.sep}{name}{suffix}'
 
 
 def with_multisuffix(path: str, suffix: str) -> str:
@@ -264,6 +264,6 @@ def with_multisuffix(path: str, suffix: str) -> str:
     root, _, name = path.rpartition(os.sep)
     stem, dot, _ = name.partition('.')
     if dot:
-        return f'{root}{os.sep}{stem}.{suffix}'
+        return f'{root}{os.sep}{stem}{suffix}'
     else:
-        return f'{root}{os.sep}{name}.{suffix}'
+        return f'{root}{os.sep}{name}{suffix}'
