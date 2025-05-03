@@ -131,6 +131,58 @@ def abspath(path: str) -> str:
     return joinpath(root, path)
 
 
+def to_posix(path):
+    """
+    Convert to posix path
+
+    Args:
+        path (str):
+
+    Returns:
+        str:
+    """
+    return path.replace('\\', '/')
+
+
+def to_python_import(path):
+    """
+    Convert path to python dot-like import
+    path/to/python.py -> path.to.python
+
+    Args:
+        path (str):
+
+    Returns:
+        str:
+    """
+    if path.endswith('.py'):
+        path = path[:-3]
+    path = path.strip('\\/')
+    if '\\' in path:
+        path = path.replace('\\', '.')
+    if '/' in path:
+        path = path.replace('/', '.')
+    return path
+
+
+def subpath_to(path, root):
+    """
+    Calculate sub-path to `root`.
+    If `path` is not sub-path to `root`, return `path`
+
+    Args:
+        path (str): Normalized path
+        root (str): Normalized path
+
+    Returns:
+        str:
+    """
+    if path.startswith(root):
+        return path[len(root):].lstrip('\\/')
+    else:
+        return path
+
+
 def get_name(path: str) -> str:
     """
     /abc/def.png -> def.png

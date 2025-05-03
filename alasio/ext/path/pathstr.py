@@ -263,6 +263,40 @@ class PathStr(str):
         """
         return PathStr(with_multisuffix(self, name))
 
+    def to_posix(self):
+        """
+        Convert to posix path
+        Note that this method returns str instead of PathStr,
+        since path is no longer normalized.
+
+        Returns:
+            str:
+        """
+        return to_posix(self)
+
+    def to_python_import(self):
+        """
+        Convert path to python dot-like import
+        path/to/python.py -> path.to.python
+
+        Returns:
+            str:
+        """
+        return to_python_import(self)
+
+    def subpath_to(self, root):
+        """
+        Calculate sub-path to `root`.
+        If `self` is not sub-path to `root`, return `self`
+
+        Args:
+            root (PathStr):
+
+        Returns:
+            PathStr
+        """
+        return PathStr(subpath_to(self, root))
+
     @property
     def is_tmp_file(self):
         """
