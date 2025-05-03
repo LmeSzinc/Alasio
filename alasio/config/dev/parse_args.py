@@ -81,7 +81,7 @@ class DefinitionError(Exception):
             return f'{self.__class__.__name__},\n    error={self.msg}'
 
 
-def populate_yaml(value) -> dict:
+def populate_arg(value) -> dict:
     """
     Populate shortened struct definition to dict.
     If type is not given, predict type by default value
@@ -262,7 +262,7 @@ class ParseArgs:
     file: PathStr
 
     @cached_property
-    def args(self):
+    def args_data(self):
         """
         Returns:
             dict[str, dict[str, ArgData]]:
@@ -277,9 +277,9 @@ class ParseArgs:
             # Keep empty group in args, so they can be empty group to display on GUI
             output[group_name] = {}
             for arg_name, value in deep_iter_depth1(group_value):
-                # Create ArgsData object from manual arg definition
+                # Create ArgData object from manual arg definition
                 try:
-                    value = populate_yaml(value)
+                    value = populate_arg(value)
                 except DefinitionError as e:
                     e.file = self.file
                     e.keys = [group_name, arg_name]
@@ -290,10 +290,8 @@ class ParseArgs:
                 except msgspec.ValidationError as e:
                     ne = DefinitionError(e, file=self.file, keys=[group_name, arg_name], value=value)
                     raise ne
-
+                # Set
                 deep_set(output, keys=[group_name, arg_name], value=arg)
                 # print(msgspec.json.encode(arg))
-                # if isinstance(arg.default, datetime):
-                #     print(arg.default.tzinfo)
 
         return output

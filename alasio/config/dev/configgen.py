@@ -1,5 +1,6 @@
 from alasio.config.const import Const
 from alasio.config.dev.parse_args import ArgData, ParseArgs, TYPE_ARG_LIST, TYPE_ARG_LITERAL
+from alasio.config.dev.parse_tasks import ParseTasks
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_iter_depth1, deep_set
@@ -7,7 +8,7 @@ from alasio.ext.path import PathStr
 from alasio.ext.path.jsonread import read_msgspec, write_json
 
 
-class GenMsgspec(ParseArgs):
+class GenMsgspec(ParseArgs, ParseTasks):
     def __init__(self, file):
         """
         Args:
@@ -34,7 +35,7 @@ class GenMsgspec(ParseArgs):
         """)
         gen.Empty()
         gen.CommentCodeGen('alasio.config.dev.configgen')
-        for group_name, arg_data in deep_iter_depth1(self.args):
+        for group_name, arg_data in deep_iter_depth1(self.args_data):
             # Skip empty group
             if not arg_data:
                 continue
@@ -69,11 +70,17 @@ class GenMsgspec(ParseArgs):
         return self.file.with_name(f'{self.file.rootstem}_gui.json')
 
     @cached_property
-    def gui_old(self):
+    def _gui_old(self):
+        """
+        Old {aside}_gui.json, with manual written i18n
+        """
         return read_msgspec(self.gui_file)
 
     def _update_gui_arg(self, group_name, arg_name, arg: ArgData):
-        old = deep_get(self.gui_old, [group_name, arg_name], default={})
+        """
+        Update {group_name}.{arg_name} in {aside}_gui.json
+        """
+        old = deep_get(self._gui_old, [group_name, arg_name], default={})
         new = arg.to_dict()
         for lang in Const.GUI_LANGUAGE:
             # name
@@ -96,7 +103,10 @@ class GenMsgspec(ParseArgs):
         return new
 
     def _update_gui_info(self, group_name, arg_name):
-        old = deep_get(self.gui_old, [group_name, arg_name], default={})
+        """
+        Update {group_name}._info in {aside}_gui.json
+        """
+        old = deep_get(self._gui_old, [group_name, arg_name], default={})
         new = {}
         for lang in Const.GUI_LANGUAGE:
             # name
@@ -113,9 +123,18 @@ class GenMsgspec(ParseArgs):
 
     @cached_property
     def gui(self):
-        _ = self.gui_old
+        """
+        data for {aside}_gui.json
+
+        Returns:
+            dict[str, dict[str, Any]]:
+                <group_name>:
+                    <arg_name>:
+                        populated ArgData with i18n and i18n_option
+        """
+        _ = self._gui_old
         new = {}
-        for group_name, arg_data in deep_iter_depth1(self.args):
+        for group_name, arg_data in deep_iter_depth1(self.args_data):
             # {group}._info
             row = self._update_gui_info(group_name, '_info')
             deep_set(new, [group_name, '_info'], row)
@@ -123,7 +142,7 @@ class GenMsgspec(ParseArgs):
                 # {group}.{arg}
                 row = self._update_gui_arg(group_name, arg_name, arg)
                 deep_set(new, [group_name, arg_name], row)
-        del_cached_property(self, 'i18n_old')
+        del_cached_property(self, '_gui_old')
         return new
 
     def write(self):
