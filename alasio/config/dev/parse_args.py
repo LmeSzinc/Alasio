@@ -144,7 +144,7 @@ MSGSPEC_CONSTRAINT = [
 ]
 
 
-class ArgsData(Struct, omit_defaults=True):
+class ArgData(Struct, omit_defaults=True):
     dt: to_literal(TYPE_ARG_TO_PYTHON.keys())
     default: Any
     option: Union[list, UnsetType] = UNSET
@@ -265,7 +265,7 @@ class ParseArgs:
     def args(self):
         """
         Returns:
-            dict[str, dict[str, ArgsData]]:
+            dict[str, dict[str, ArgData]]:
                 <group_name>:
                     <arg_name>:
                         ArgsData
@@ -283,7 +283,7 @@ class ParseArgs:
                 e.value = value
                 raise
             try:
-                arg = msgspec.convert(value, ArgsData)
+                arg = msgspec.convert(value, ArgData)
             except msgspec.ValidationError as e:
                 ne = DefinitionError(e, file=self.file, keys=[group_name, arg_name], value=value)
                 raise ne

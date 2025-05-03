@@ -1,5 +1,5 @@
 from alasio.config.const import Const
-from alasio.config.dev.parse_args import ArgsData, ParseArgs, TYPE_ARG_LIST, TYPE_ARG_LITERAL
+from alasio.config.dev.parse_args import ArgData, ParseArgs, TYPE_ARG_LIST, TYPE_ARG_LITERAL
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_iter_depth1, deep_set
@@ -69,7 +69,7 @@ class GenMsgspec(ParseArgs):
     def gui_old(self):
         return read_msgspec(self.gui_file)
 
-    def _update_gui_arg(self, group_name, arg_name, arg: ArgsData):
+    def _update_gui_arg(self, group_name, arg_name, arg: ArgData):
         old = deep_get(self.gui_old, [group_name, arg_name], default={})
         new = arg.to_dict()
         for lang in Const.GUI_LANGUAGE:
