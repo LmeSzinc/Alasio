@@ -1,6 +1,7 @@
 from alasio.config.const import Const
-from alasio.config.dev.parse_args import ArgData, ParseArgs, TYPE_ARG_LIST, TYPE_ARG_LITERAL
+from alasio.config.dev.parse_args import ArgData, DefinitionError, ParseArgs, TYPE_ARG_LIST, TYPE_ARG_LITERAL
 from alasio.config.dev.parse_tasks import ParseTasks
+from alasio.config.dev.tasks_model import GroupRefModel, TaskRefModel
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_iter_depth1, deep_set
@@ -145,15 +146,48 @@ class GenMsgspec(ParseArgs, ParseTasks):
         del_cached_property(self, '_gui_old')
         return new
 
+    @cached_property
+    def tasks(self) -> TaskRefModel:
+        """
+        Returns:
+            <task_name>:
+                <group_name>:
+                    GroupModelRef
+        """
+        # Calculate module file
+        cwd = PathStr.cwd()
+        file = self.model_file.subpath_to(cwd)
+        if file == self.model_file:
+            raise DefinitionError(
+                f'model_file is not a subpath of cwd, model_file={self.model_file}, cwd={cwd}')
+        file = file.to_python_import()
+        # Generate tasks model ref
+        output = {}
+        for task_name, task in self.tasks_data.items():
+            # Skip tasks with no groups
+            if not task.group:
+                continue
+            # Task name must be unique
+            if task_name in output:
+                raise DefinitionError(f'Duplicate task name: {task_name}', file=self.tasks_file)
+            # Set ref
+            for group_name in task.group:
+                ref = {'file': file, 'cls': group_name}
+                deep_set(output, [task_name, group_name], ref)
+
+        return output
+
     def write(self):
         """
         Generate and write msgspec models
         """
         self.model.write(self.model_file)
         write_json(self.gui_file, self.gui)
+        # write_json(self.file.with_name('taskref.json'), self.tasks)
 
 
 if __name__ == '__main__':
+    PathStr(__file__).uppath(4).chdir_here()
     f = PathStr.new(r'E:\ProgramData\Pycharm\Alasio\alasio\config\alasio\opsi.args.yaml')
     self = GenMsgspec(f)
     self.write()
