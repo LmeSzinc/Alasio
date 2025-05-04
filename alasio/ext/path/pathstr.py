@@ -639,24 +639,3 @@ class PathStr(str):
     """
     Other
     """
-
-    def md5(self):
-        """
-        Calculate MD5 hash of file
-
-        Returns:
-            str: 9c1ff3057fbdd2de7acabfa9515a1641
-                or "" if file not exist
-        """
-        import hashlib
-        md5_hash = hashlib.md5()
-        updated = False
-        for chunk in atomic_read_bytes_stream(self):
-            md5_hash.update(chunk)
-            updated = True
-        # File not exist
-        if not updated:
-            return ''
-
-        d = md5_hash.hexdigest()
-        return d

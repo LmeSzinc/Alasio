@@ -345,7 +345,7 @@ def file_read_text(file, encoding='utf-8', errors='strict'):
         return ''
 
 
-def file_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=8192):
+def file_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=262144):
     """
     Read text file content as stream
 
@@ -354,7 +354,7 @@ def file_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=81
         encoding (str): Text encoding. Defaults to 'utf-8'.
         errors (str): Error handling strategy. Defaults to 'strict'.
             'strict', 'ignore', 'replace' and any other errors mode in open()
-        chunk_size (int): Size of chunks to read. Defaults to 8192.
+        chunk_size (int): Size of chunks to read. Defaults to 256KB.
 
     Returns:
         Iterable[str]: Generator yielding file content chunks
@@ -389,13 +389,13 @@ def file_read_bytes(file):
         return b''
 
 
-def file_read_bytes_stream(file, chunk_size=8192):
+def file_read_bytes_stream(file, chunk_size=262144):
     """
     Read binary file content as stream
 
     Args:
         file (str): Source file path
-        chunk_size (int): Size of chunks to read. Defaults to 8192.
+        chunk_size (int): Size of chunks to read. Defaults to 256KB.
 
     Returns:
         Iterable[bytes]: Generator yielding file content chunks
@@ -442,7 +442,7 @@ def atomic_read_text(file, encoding='utf-8', errors='strict'):
         return file_read_text(file, encoding=encoding, errors=errors)
 
 
-def atomic_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=8192):
+def atomic_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=262144):
     """
     Atomic file read with streaming support
 
@@ -451,7 +451,7 @@ def atomic_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=
         encoding (str): Text encoding. Defaults to 'utf-8'.
         errors (str): Error handling strategy. Defaults to 'strict'.
             'strict', 'ignore', 'replace' and any other errors mode in open()
-        chunk_size (int): Size of chunks to read. Defaults to 8192.
+        chunk_size (int): Size of chunks to read. Defaults to 256KB.
 
     Returns:
         Iterable[str]: Generator yielding file content chunks
@@ -504,13 +504,13 @@ def atomic_read_bytes(file):
         return file_read_bytes(file)
 
 
-def atomic_read_bytes_stream(file, chunk_size=8192):
+def atomic_read_bytes_stream(file, chunk_size=262144):
     """
     Atomic file read with streaming support
 
     Args:
         file (str): Source file path
-        chunk_size (int): Size of chunks to read. Defaults to 8192.
+        chunk_size (int): Size of chunks to read. Defaults to 256KB.
 
     Returns:
         Iterable[bytes]: Generator yielding file content chunks
