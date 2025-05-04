@@ -10,7 +10,7 @@ from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path import PathStr
 
 
-class GenMsgspec(ParseArgs, ParseTasks):
+class ParseConfig(ParseArgs, ParseTasks):
     def __init__(self, file):
         """
         Args:
@@ -205,5 +205,5 @@ class GenMsgspec(ParseArgs, ParseTasks):
 if __name__ == '__main__':
     PathStr(__file__).uppath(4).chdir_here()
     f = PathStr.new(r'E:\ProgramData\Pycharm\Alasio\alasio\config\alasio\opsi.args.yaml')
-    self = GenMsgspec(f)
+    self = ParseConfig(f)
     self.write()
