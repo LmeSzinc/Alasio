@@ -528,51 +528,62 @@ class PathStr(str):
     Iter folder
     """
 
-    def iter_files(self, ext=''):
+    def iter_files(self, ext='', recursive=False, follow_symlinks=False):
         """
         Iter full filepath of files in folder with the good performance
 
         Args:
             ext (str): If ext is given, iter files with extension only.
                 If ext is empty, iter all files. Defaults to ''.
+            recursive (bool): True to recursively traverse subdirectories. Defaults to False.
+            follow_symlinks (bool): True to follow symlinks. Defaults to False.
 
         Yields:
             PathStr: Full path
         """
-        for path in iter_files(self, ext=ext):
+        for path in iter_files(self, ext=ext, recursive=recursive, follow_symlinks=follow_symlinks):
             yield PathStr(path)
 
-    def iter_filenames(self, ext=''):
+    def iter_filenames(self, ext='', follow_symlinks=False):
         """
         Iter filename of files in folder with the good performance
 
         Args:
             ext (str): If ext is given, iter files with extension only.
                 If ext is empty, iter all files. Defaults to ''.
+            follow_symlinks (bool): True to follow symlinks. Defaults to False.
 
         Yields:
             str: Filename
         """
-        yield from iter_filenames(self, ext=ext)
+        yield from iter_filenames(self, ext=ext, follow_symlinks=follow_symlinks)
 
-    def iter_folders(self):
+    def iter_folders(self, recursive=False, follow_symlinks=False):
         """
         Iter full filepath of directories in folder with the good performance
+
+        Args:
+            recursive (bool): True to recursively traverse subdirectories. Defaults to False.
+            follow_symlinks (bool): True to follow symlinks. Defaults to False.
 
         Yields:
             PathStr: Full path
         """
-        for path in iter_folders(self):
+        for path in iter_folders(self, recursive=recursive, follow_symlinks=follow_symlinks):
             yield PathStr(path)
 
-    def iter_foldernames(self):
+    def iter_foldernames(self, recursive=False, follow_symlinks=False):
         """
         Iter name of directories in folder with the good performance
+
+        Args:
+            recursive (bool): True to recursively traverse subdirectories. Defaults to False.
+            follow_symlinks (bool): True to follow symlinks. Defaults to False.
 
         Yields:
             str: Folder name
         """
-        yield from iter_foldernames(self)
+        yield from iter_foldernames(self, recursive=recursive, follow_symlinks=follow_symlinks)
 
     """
     Wrap os module, imitating Pathlib

@@ -187,28 +187,53 @@ def iter_folders(root, recursive=False, follow_symlinks=False):
             return
 
 
-def iter_foldernames(root):
+def iter_foldernames(root, recursive=False, follow_symlinks=False):
     """
     Iter name of directories in folder with the good performance
 
     Args:
         root (str):
+        recursive (bool): True to recursively traverse subdirectories
+        follow_symlinks (bool): True to follow symlinks
 
     Yields:
         str: Folder name
     """
     # Iter all directories
     # iter_folders(folder)
-    try:
-        with os.scandir(root) as entries:
-            for entry in entries:
-                try:
-                    if entry.is_dir(follow_symlinks=False):
-                        yield entry.name
-                except FileNotFoundError:
-                    continue
-    except (FileNotFoundError, NotADirectoryError):
-        return
+    if recursive:
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    # Iter folders
+                    try:
+                        if entry.is_dir(follow_symlinks=follow_symlinks):
+                            yield entry.name
+                            continue
+                    except FileNotFoundError:
+                        continue
+                    # Iter subdirectories
+                    try:
+                        is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
+                    except FileNotFoundError:
+                        continue
+                    if is_dir:
+                        yield from iter_folders(entry.path, recursive, follow_symlinks)
+                        continue
+        except (FileNotFoundError, NotADirectoryError):
+            return
+    else:
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    # Iter folders
+                    try:
+                        if entry.is_dir(follow_symlinks=follow_symlinks):
+                            yield entry.name
+                    except FileNotFoundError:
+                        continue
+        except (FileNotFoundError, NotADirectoryError):
+            return
 
 
 _NO_CACHE = object()
