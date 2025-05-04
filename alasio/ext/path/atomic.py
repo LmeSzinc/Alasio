@@ -492,6 +492,65 @@ def atomic_read_bytes(file):
         return file_read_bytes(file)
 
 
+def file_ensure_exist(file, mode=0o666, default=b''):
+    """
+    Ensure a file exists with minimal I/O operations using os.open.
+    Uses O_EXCL flag to atomically check and create in one operation.
+
+    Args:
+        file (str):
+        mode (int):
+        default (bytes): Default content to write if file doesn't exist
+
+    Returns:
+        bool: True if file just created
+    """
+    try:
+        # Try to create file with O_EXCL flag - will fail if file exists
+        # O_CREAT | O_EXCL | O_WRONLY ensures atomic "create if not exists" operation
+        fd = os.open(file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, mode)
+
+        # If we get here, the file was created successfully
+        if default:
+            os.write(fd, default)
+        os.close(fd)
+        return False
+    except FileExistsError:
+        # File already exists
+        return True
+    except OSError:
+        # Other errors
+        return False
+
+
+def file_touch(file, mode=0o666, exist_ok=True):
+    """
+    Touch a file, copied from pathlib
+    - If file not exist, create file
+    - If file exist, set modify time to now
+
+    Args:
+        mode (int):
+        exist_ok (bool):
+    """
+    if exist_ok:
+        # First try to bump modification time
+        # Implementation note: GNU touch uses the UTIME_NOW option of
+        # the utimensat() / futimens() functions.
+        try:
+            os.utime(file, None)
+        except OSError:
+            # Avoid exception chaining
+            pass
+        else:
+            return
+    flags = os.O_CREAT | os.O_WRONLY
+    if not exist_ok:
+        flags |= os.O_EXCL
+    fd = os.open(file, flags, mode)
+    os.close(fd)
+
+
 def atomic_read_bytes_stream(file, chunk_size=262144):
     """
     Atomic file read with streaming support

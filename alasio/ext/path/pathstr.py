@@ -637,6 +637,32 @@ class PathStr(str):
         """
         return os.stat(self, follow_symlinks=follow_symlinks)
 
+    def ensure_exist(self, mode=0o666, default=b''):
+        """
+        Ensure a file exists with minimal I/O operations using os.open.
+        Uses O_EXCL flag to atomically check and create in one operation.
+
+        Args:
+            mode (int):
+            default (bytes): Default content to write if file doesn't exist
+
+        Returns:
+            bool: True if file just created
+        """
+        file_ensure_exist(self, mode=mode, default=default)
+
+    def touch(self, mode=0o666, exist_ok=True):
+        """
+        Touch a file, copied from pathlib
+        - If file not exist, create file
+        - If file exist, set modify time to now
+
+        Args:
+            mode (int):
+            exist_ok (bool):
+        """
+        file_touch(self, mode=mode, exist_ok=exist_ok)
+
     def makedirs(self, mode=0o777, exist_ok=True):
         """
         Create directories recursively

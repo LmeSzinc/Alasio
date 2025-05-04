@@ -25,9 +25,12 @@ class GenMsgspec(ParseArgs, ParseTasks):
         return self.file.with_name(f'{self.file.rootstem}_model.py')
 
     @cached_property
-    def model(self) -> CodeGen:
+    def model_py(self):
         """
         Generate msgspec models
+
+        Returns:
+            CodeGen | None:
         """
         gen = CodeGen()
         gen.RawImport("""
@@ -37,10 +40,12 @@ class GenMsgspec(ParseArgs, ParseTasks):
         """)
         gen.Empty()
         gen.CommentCodeGen('alasio.config.dev.configgen')
+        has_content = False
         for group_name, arg_data in deep_iter_depth1(self.args_data):
             # Skip empty group
             if not arg_data:
                 continue
+            has_content = True
             with gen.Class(group_name, inherit='m.Struct, omit_defaults=True'):
                 for arg_name, arg in deep_iter_depth1(arg_data):
                     # Expand list
@@ -64,7 +69,10 @@ class GenMsgspec(ParseArgs, ParseTasks):
             gen.Empty(2)
 
         # gen.print()
-        return gen
+        if has_content:
+            return gen
+        else:
+            return None
 
     @cached_property
     def gui_file(self):
@@ -182,8 +190,15 @@ class GenMsgspec(ParseArgs, ParseTasks):
         """
         Generate and write msgspec models
         """
-        self.model.write(self.model_file)
-        write_json(self.gui_file, self.gui)
+        # Auto create {aside}.tasks.yaml
+        if self.file.exists():
+            self.tasks_file.ensure_exist()
+        # {aside}_model.py
+        if self.model_py:
+            self.model_py.write(self.model_file)
+        # {aside}_gui.json
+        if self.gui:
+            write_json(self.gui_file, self.gui)
         # write_json(self.file.with_name('taskref.json'), self.tasks)
 
 

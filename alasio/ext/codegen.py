@@ -56,6 +56,9 @@ class CodeGen:
         self.dict_line_ending: "dict[int, str]" = {}
         self.dict_tab_type: "dict[int, str]" = {}
 
+    def __bool__(self):
+        return True
+
     def gen(self) -> str:
         """
         Get generated code
