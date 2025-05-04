@@ -216,17 +216,19 @@ def file_write(file, data):
             # Ensure data flush to disk
             f.flush()
             os.fsync(f.fileno())
+        return
     except FileNotFoundError:
-        # Create parent directory
-        directory = os.path.dirname(file)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        # Write again
-        with open(file, mode=mode, encoding=encoding, newline=newline) as f:
-            f.write(data)
-            # Ensure data flush to disk
-            f.flush()
-            os.fsync(f.fileno())
+        pass
+    # Create parent directory
+    directory = os.path.dirname(file)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    # Write again
+    with open(file, mode=mode, encoding=encoding, newline=newline) as f:
+        f.write(data)
+        # Ensure data flush to disk
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def file_write_stream(file, data_generator):
@@ -272,19 +274,21 @@ def file_write_stream(file, data_generator):
             # Ensure data flush to disk
             f.flush()
             os.fsync(f.fileno())
+        return
     except FileNotFoundError:
-        # Create parent directory
-        directory = os.path.dirname(file)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        # Write again
-        with open(file, mode=mode, encoding=encoding, newline=newline) as f:
-            f.write(first_chunk)
-            for chunk in data_iter:
-                f.write(chunk)
-            # Ensure data flush to disk
-            f.flush()
-            os.fsync(f.fileno())
+        pass
+    # Create parent directory
+    directory = os.path.dirname(file)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    # Write again
+    with open(file, mode=mode, encoding=encoding, newline=newline) as f:
+        f.write(first_chunk)
+        for chunk in data_iter:
+            f.write(chunk)
+        # Ensure data flush to disk
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def atomic_write(file, data):
