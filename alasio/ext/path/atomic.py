@@ -338,11 +338,8 @@ def file_read_text(file, encoding='utf-8', errors='strict'):
     Returns:
         str: File content
     """
-    try:
-        with open(file, mode='r', encoding=encoding, errors=errors) as f:
-            return f.read()
-    except FileNotFoundError:
-        return ''
+    with open(file, mode='r', encoding=encoding, errors=errors) as f:
+        return f.read()
 
 
 def file_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=262144):
@@ -359,15 +356,12 @@ def file_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=26
     Returns:
         Iterable[str]: Generator yielding file content chunks
     """
-    try:
-        with open(file, mode='r', encoding=encoding, errors=errors) as f:
-            while 1:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    return
-                yield chunk
-    except FileNotFoundError:
-        return
+    with open(file, mode='r', encoding=encoding, errors=errors) as f:
+        while 1:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                return
+            yield chunk
 
 
 def file_read_bytes(file):
@@ -380,13 +374,10 @@ def file_read_bytes(file):
     Returns:
         bytes: File content
     """
-    try:
-        # No python-side buffering when reading the entire file to speedup reading
-        # https://github.com/python/cpython/pull/122111
-        with open(file, mode='rb', buffering=0) as f:
-            return f.read()
-    except FileNotFoundError:
-        return b''
+    # No python-side buffering when reading the entire file to speedup reading
+    # https://github.com/python/cpython/pull/122111
+    with open(file, mode='rb', buffering=0) as f:
+        return f.read()
 
 
 def file_read_bytes_stream(file, chunk_size=262144):
@@ -400,15 +391,12 @@ def file_read_bytes_stream(file, chunk_size=262144):
     Returns:
         Iterable[bytes]: Generator yielding file content chunks
     """
-    try:
-        with open(file, mode='rb') as f:
-            while 1:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    return
-                yield chunk
-    except FileNotFoundError:
-        return
+    with open(file, mode='rb') as f:
+        while 1:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                return
+            yield chunk
 
 
 def atomic_read_text(file, encoding='utf-8', errors='strict'):

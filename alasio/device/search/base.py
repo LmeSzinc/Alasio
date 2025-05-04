@@ -18,10 +18,10 @@ def vbox_file_to_serial(file: str) -> str:
     """
     # <Forwarding name="port2" proto="1" hostip="127.0.0.1" hostport="62026" guestport="5555"/>
     regex = re.compile('<*?hostport="(.*?)".*?guestport="5555"/>', re.M)
-    file = atomic_read_text(file, encoding='utf-8', errors='ignore')
-    if not file:
+    try:
+        file = atomic_read_text(file, errors='ignore')
+    except FileNotFoundError:
         return ''
-
     res = regex.search(file)
     if res:
         return f'127.0.0.1:{res.group(1)}'

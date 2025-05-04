@@ -257,7 +257,10 @@ def iter_instances(emu: EmuStr):
             return
         # Read {UserDefinedDir}/bluestacks.conf
         file = PathStr.new(folder).joinpath('bluestacks.conf')
-        content = file.atomic_read_text()
+        try:
+            content = file.atomic_read_text()
+        except FileNotFoundError:
+            return
         if not content:
             return
         # bst.instance.Nougat64.adb_port="5555"

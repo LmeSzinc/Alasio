@@ -43,7 +43,7 @@ def json_dumps(obj):
 
 def read_json(file, default_factory=dict):
     """
-    Read json from file
+    Read json from file, return default when having error
 
     Args:
         file (str):
@@ -52,7 +52,10 @@ def read_json(file, default_factory=dict):
     Returns:
         Any:
     """
-    data = atomic_read_bytes(file)
+    try:
+        data = atomic_read_bytes(file)
+    except FileNotFoundError:
+        return default_factory()
     try:
         return json_loads(data)
     except json.JSONDecodeError:
@@ -73,7 +76,7 @@ def write_json(file, obj):
 
 def read_msgspec(file, default_factory=dict):
     """
-    Read json from file using msgspec
+    Read json from file using msgspec, return default when having error
 
     Args:
         file (str):
@@ -82,7 +85,10 @@ def read_msgspec(file, default_factory=dict):
     Returns:
         Any:
     """
-    data = atomic_read_bytes(file)
+    try:
+        data = atomic_read_bytes(file)
+    except FileNotFoundError:
+        return default_factory()
     try:
         return decode(data)
     except msgspec.DecodeError:

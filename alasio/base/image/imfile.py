@@ -174,7 +174,10 @@ def image_load(file, area=None):
     """
     # cv2.imread can't handle non-ascii filepath and PIL.Image.open is slow
     # Here we read with numpy first
-    content = atomic_read_bytes(file)
+    try:
+        content = atomic_read_bytes(file)
+    except FileNotFoundError as e:
+        raise ImageTruncated(str(e))
     data = np.frombuffer(content, dtype=np.uint8)
     if not data.size:
         raise ImageTruncated('Empty file')
@@ -262,7 +265,11 @@ def image_fixup(file: str):
         return False
 
     # image_load
-    content = atomic_read_bytes(file)
+    try:
+        content = atomic_read_bytes(file)
+    except FileNotFoundError:
+        # File not exist, no need to fixup
+        return False
     data = np.frombuffer(content, dtype=np.uint8)
     if not data.size:
         return False
