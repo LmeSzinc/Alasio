@@ -8,6 +8,7 @@ from alasio.config.dev.parse_range import parse_range
 from alasio.ext.backport import to_literal
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
+from alasio.ext.file.yamlfile import read_yaml
 from alasio.ext.path import PathStr
 
 # Requires manual maintain
@@ -271,8 +272,7 @@ class ParseArgs:
                         ArgsData
         """
         output = {}
-        content = self.file.atomic_read_bytes()
-        data = msgspec.yaml.decode(content)
+        data = read_yaml(self.file)
         for group_name, group_value in deep_iter_depth1(data):
             # Keep empty group in args, so they can be empty group to display on GUI
             output[group_name] = {}

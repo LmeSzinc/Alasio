@@ -6,6 +6,7 @@ from msgspec import Struct, field
 from alasio.config.dev.parse_args import DefinitionError
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
+from alasio.ext.file.yamlfile import read_yaml
 from alasio.ext.path import PathStr
 
 
@@ -49,8 +50,7 @@ class ParseTasks:
                     TaskData
         """
         output = {}
-        content = self.tasks_file.atomic_read_bytes()
-        data = msgspec.yaml.decode(content)
+        data = read_yaml(self.tasks_file)
         for task_name, value in deep_iter_depth1(data):
             # Create TaskData object from manual arg definition
             try:

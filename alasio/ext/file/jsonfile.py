@@ -61,7 +61,7 @@ def read_json(file, default_factory=dict):
 
 def write_json(file, obj):
     """
-    Encode obj and write into file
+    Encode obj to json and write into file
 
     Args:
         file (str):
