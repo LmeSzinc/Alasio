@@ -62,7 +62,7 @@ def parse_commit_tree(data):
     A light version of parse_commit when you need tree only
 
     Args:
-        data (bytes):
+        data (memoryview):
 
     Returns:
         bytes: sha1 of tree
@@ -75,11 +75,13 @@ def parse_commit_tree(data):
     # tree is in the first row
     # tree fb3a8bdd0ceddd019615af4d57a53f43d8cee2bf
     row, _, _ = data.partition(b'\n')
-    key, _, value = row.partition(b' ')
-    if key == b'tree':
-        return value
-    else:
+    key, _, tree = row.partition(b' ')
+    if key != b'tree':
         raise ObjectBroken(f'Object should startswith "tree" not "{key}"', data)
+    try:
+        return bytes.fromhex(tree.decode())
+    except ValueError:
+        raise ObjectBroken(f'Commit tree is not a sha1: {tree}', data)
 
 
 def parse_commit(data):
@@ -87,7 +89,7 @@ def parse_commit(data):
     Get full info from a git commit object
 
     Args:
-        data (bytes):
+        data (memoryview):
 
     Returns:
         CommitObj:
@@ -102,6 +104,10 @@ def parse_commit(data):
     key, _, tree = row.partition(b' ')
     if key != b'tree':
         raise ObjectBroken(f'Object should startswith "tree" not "{key}"', data)
+    try:
+        tree = bytes.fromhex(tree.decode())
+    except ValueError:
+        raise ObjectBroken(f'Commit tree is not a sha1: {tree}', data)
 
     # parent
     parent = b''
@@ -111,6 +117,10 @@ def parse_commit(data):
         row, _, remain = remain.partition(b'\n')
         key, _, value = row.partition(b' ')
         if key == b'parent':
+            try:
+                value = bytes.fromhex(value.decode())
+            except ValueError:
+                raise ObjectBroken(f'Commit parent is not a sha1: {value}', data)
             if parent:
                 if type(parent) is list:
                     # 3 parents
@@ -182,7 +192,7 @@ def parse_commit(data):
     try:
         message = message.strip().decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode commit message: "{committer_email}"', data)
+        raise ObjectBroken(f'Failed to decode commit message: "{message}"', data)
 
     return CommitObj(
         tree=tree,

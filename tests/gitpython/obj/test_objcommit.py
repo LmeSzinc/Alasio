@@ -51,6 +51,7 @@ obj_chinese = (b'x\x9cu\x90Ao\xd30\x18\x86\xef\xf9\x15\xbeSP\x9c4\x89\x83\x10b\x
                b'\xf5E\x1b6\xda\xcd\xa0d\xfb8\x8d\x0e[\xf3w\xb6\x1b\xf1\xb2(YM\xceF\x19\x04Q)\xe9\xf5\xa1\xd2\xe0{'
                b'G\xf3\x89p\x94\xae\x8e\x07\x01\\M\xa0\xfeY\x80\xf1t\x1ff}\x1e\x1c\xf0r\x955\xa3d\xd6\x11\x8bba\x9b5['
                b'"\x8c\xb7\x06\xbc\xd7\x96\xfe\x00\xe1\xad1\xed')
+obj_chinese = memoryview(obj_chinese)
 # d4bd232a10d1b597debe53d61b5fe7fe1920c54a
 obj_merge = (b'x\x9c}RK\x8f\x9bL\x10\xbc\xf3+F\xca\xd1\xca\x9a\xc7\x18\x98('
              b'\xf9\x14`\xb1\xcd\xb2\x80\xb1\x8dm\xf6b\xc1\xd0\xbc\x0c\x0c\xcb\xc3\x8f\xfd\xf5!\xab\xe4\x16}}\xac\xee'
@@ -73,11 +74,13 @@ obj_merge = (b'x\x9c}RK\x8f\x9bL\x10\xbc\xf3+F\xca\xd1\xca\x9a\xc7\x18\x98('
              b'M\x0f\xfd\xf4\xc6t\x9f\xff\xed\x18\xe7@\x97\x01j\xc7\xaaB\x1d\xbc\x8f\xd0\x0f\xe8\xcb\x82_\xa0'
              b'\xb4c5jLsH\x18\x9f\xcc\xd3\xe2~\x16\xef\xe7\x98\xb1\x0b\xc7-\x8b\xfb7T4S\x88\xaeQu\xee\xa0\x87\x01'
              b'\xa5SD\xb5`\xef\x9dw\xa6\xb65\xd6g\xc7t\x83\xb3\xe1\xb9{\xcb\r\xcc_\xa7\x17\x06\xf1')
+obj_merge = memoryview(obj_merge)
 # ce4887a4f5227a081e7ec7368ea2054428c83574
 obj_initial = (b'x\x9c\x95\x8c;\n\x021\x14\x00\xfb\x9c\xe2\xf5\x82\xe4\xfb6\x01Yl\x05;O\xf0\x92<5\x90\xec\xc2&6\x9e^E'
                b'/`7\x0c\xcc\x8c\x8d\x19Lf\xad\xa3\x94\x9a&tdR\xba\x06d\x95s$\xc7\x18\t9\xc6\xe0M\xb2\x82\x1e\xe3'
                b'\xbenpn|y\x96%\xc1\xa16\xee\x1f\xeaT\xb9\x1fo\x8dJ\xdd\xa7\xb5\xcd\xa0\x9cwV\xa1B\x84\x9d\xf4R\x8a'
                b'\xb7me\x0c\xfe\xa3\x9et\xb0\xbfZ\x9c\x962\nU\xf8n\xc4\x0b)X:V')
+obj_initial = memoryview(obj_initial)
 
 
 class TestParseCommitTree:
@@ -129,7 +132,8 @@ class TestParseCommit:
 
         assert isinstance(commit, CommitObj)
         # Use startswith instead of exact equality to handle system differences
-        assert commit.tree.startswith(b"2b07ca1800c")
+        tree = bytes.fromhex(b"2b07ca1800".decode())
+        assert commit.tree.startswith(tree)
         assert isinstance(commit.parent, bytes)
         assert commit.author_name is not None
         assert commit.author_email is not None
@@ -145,7 +149,8 @@ class TestParseCommit:
 
         assert isinstance(commit, CommitObj)
         # Use startswith instead of exact equality to handle system differences
-        assert commit.tree.startswith(b"542ff99699")
+        tree = bytes.fromhex(b"542ff99699".decode())
+        assert commit.tree.startswith(tree)
         # Merge commit should have multiple parents
         assert isinstance(commit.parent, list)
         assert len(commit.parent) >= 2, "Merge commit should have at least 2 parents"
@@ -163,7 +168,8 @@ class TestParseCommit:
         commit = parse_commit(obj_initial)
 
         assert isinstance(commit, CommitObj)
-        assert commit.tree.startswith(b"3de22b002a")
+        tree = bytes.fromhex(b"3de22b002a".decode())
+        assert commit.tree.startswith(tree)
         # Initial commit might have no parent
         if commit.parent:
             assert isinstance(commit.parent, bytes)
@@ -193,7 +199,7 @@ class TestParseCommit:
 
     def _create_test_data(self, content):
         """Helper to create compressed test data."""
-        return zlib.compress(content)
+        return memoryview(zlib.compress(content))
 
     # These tests might fail in the current implementation
     # but they should pass with a properly fixed function

@@ -53,7 +53,7 @@ def test_different_valid_modes():
     sample_tree = (
             b'100644 regular_file.txt\x00' + b'a' * 20 +  # Regular file
             b'100755 executable.sh\x00' + b'b' * 20 +  # Executable file
-            b'040000 directory\x00' + b'c' * 20 +  # Directory
+            b'40000 directory\x00' + b'c' * 20 +  # Directory
             b'120000 symlink\x00' + b'd' * 20 +  # Symlink
             b'160000 submodule\x00' + b'e' * 20  # Gitlink/submodule
     )
@@ -70,7 +70,7 @@ def test_different_valid_modes():
     assert entries[1].mode == b'100755'
     assert entries[1].name == 'executable.sh'
 
-    assert entries[2].mode == b'040000'
+    assert entries[2].mode == b'40000'
     assert entries[2].name == 'directory'
 
     assert entries[3].mode == b'120000'

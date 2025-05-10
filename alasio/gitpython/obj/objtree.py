@@ -8,7 +8,7 @@ from alasio.gitpython.file.exception import ObjectBroken
 SET_VALID_MODE = {
     b'100644',  # Regular file
     b'100755',  # Executable file
-    b'040000',  # Directory (reference another tree)
+    b'40000',  # Directory (reference another tree)
     b'120000',  # Symlink
     b'160000',  # Gitlink (submodule, reference another commit)
 }
@@ -16,7 +16,7 @@ SET_VALID_MODE = {
 
 class EntryObject(msgspec.Struct):
     mode: bytes
-    sha1: str
+    sha1: bytes
     name: str
 
 
@@ -25,7 +25,7 @@ def parse_tree(data):
     Get a list if entries from a git tree object.
 
     Args:
-        data (bytes):
+        data (memoryview):
 
     Returns:
         list[EntryObject]:

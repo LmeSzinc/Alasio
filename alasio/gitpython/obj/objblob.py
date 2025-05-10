@@ -9,12 +9,13 @@ def parse_blob(data):
     Get file data from a git blob object
 
     Args:
-        data (bytes):
+        data (memoryview):
 
     Returns:
-        bytes:
+        memoryview:
     """
     try:
-        return decompress(data)
+        data = decompress(data)
     except zlib.error as e:
         raise ObjectBroken(str(e), data)
+    return memoryview(data)
