@@ -9,7 +9,7 @@ from alasio.ext.path import PathStr
 from alasio.ext.path.calc import normpath
 from alasio.ext.path.iter import CachePathExists, iter_files
 from alasio.ext.pool import WORKER_POOL
-from alasio.ext.proc import iter_process
+from alasio.ext.proc import process_iter
 from alasio.device.search.base import EmuStr, EmuType, EmulatorInstance, EmulatorSearchBase, flatten_list, \
     remove_duplicated_path, vbox_file_to_serial
 
@@ -438,7 +438,7 @@ class EmulatorSearchWindows(EmulatorSearchBase, CachePathExists):
 
     def search_running_emulator(self) -> "set[PathStr]":
         output = set()
-        for pid, cmdline in iter_process():
+        for pid, cmdline in process_iter():
             file = EmuStr(cmdline[0])
             if file.emutype() and self.path_exists(file):
                 output.add(file)

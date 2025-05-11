@@ -1,7 +1,6 @@
 import sys
 
 import psutil
-from psutil._common import get_procfs_path, open_text
 from psutil import _psplatform as psplatform
 
 
@@ -17,6 +16,7 @@ def pids() -> "list[int]":
 # psutil.Process.cmdline()
 if psutil.LINUX:
     import psutil._psutil_linux as cext
+    from psutil._common import get_procfs_path, open_text
 
 
     def cmdline(pid):
@@ -103,17 +103,17 @@ else:  # pragma: no cover
     raise NotImplementedError('platform %s is not supported' % sys.platform)
 
 
-def iter_process() -> "tuple[int, list[str]]":
+def process_iter():
     """
-    Iter all running processes
+    Iter all running processes, equivalent to `psutil.process_iter()`
 
     FYI, to terminate or kill the process, do:
         psutil.Process(pid).terminate()
         psutil.Process(pid).kill()
 
     Yields:
-        int: pid
-        list[str]: cmdline, and it's guaranteed to have at least one element
+        "tuple[int, list[str]]": (pid, cmdline)
+            cmdline is guaranteed to have at least one element
             Don't forget to normpath if you need to check cmdline
     """
     if psutil.WINDOWS:
@@ -135,6 +135,8 @@ def iter_process() -> "tuple[int, list[str]]":
                 # ProcessLookupError: [Errno 3] assume no such process (originated from psutil_pid_is_running -> 0)
                 # OSError: [WinError 87] 参数错误。: '(originated from ReadProcessMemory)'
                 continue
+            except:
+                continue
 
             # Validate cmdline
             if not cmd:
@@ -152,6 +154,8 @@ def iter_process() -> "tuple[int, list[str]]":
             try:
                 cmd = cmdline(pid)
             except (psutil.AccessDenied, psutil.NoSuchProcess, IndexError, OSError):
+                continue
+            except:
                 continue
 
             # Validate cmdline
