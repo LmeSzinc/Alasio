@@ -9,12 +9,12 @@ from alasio.gitpython.file.exception import ObjectBroken
 
 class CommitObj(msgspec.Struct):
     # sha1 of tree object, tree that records files in this commit
-    tree: bytes
+    tree: str
     # sha1 for parent object
     # 2 parent for merge commit
     # 1 parent for normal commit
     # 0 parent for initial commit
-    parent: Union[List[bytes], bytes, None]
+    parent: Union[List[str], str, None]
 
     author_name: str
     author_email: str
@@ -65,7 +65,7 @@ def parse_commit_tree(data):
         data (memoryview):
 
     Returns:
-        bytes: sha1 of tree
+        str: sha1 of tree
     """
     try:
         data = decompress(data)
@@ -79,7 +79,7 @@ def parse_commit_tree(data):
     if key != b'tree':
         raise ObjectBroken(f'Object should startswith "tree" not "{key}"', data)
     try:
-        return bytes.fromhex(tree.decode())
+        return tree.decode()
     except ValueError:
         raise ObjectBroken(f'Commit tree is not a sha1: {tree}', data)
 
@@ -105,7 +105,7 @@ def parse_commit(data):
     if key != b'tree':
         raise ObjectBroken(f'Object should startswith "tree" not "{key}"', data)
     try:
-        tree = bytes.fromhex(tree.decode())
+        tree = tree.decode()
     except ValueError:
         raise ObjectBroken(f'Commit tree is not a sha1: {tree}', data)
 
@@ -118,7 +118,7 @@ def parse_commit(data):
         key, _, value = row.partition(b' ')
         if key == b'parent':
             try:
-                value = bytes.fromhex(value.decode())
+                value = value.decode()
             except ValueError:
                 raise ObjectBroken(f'Commit parent is not a sha1: {value}', data)
             if parent:

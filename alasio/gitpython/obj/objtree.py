@@ -16,7 +16,7 @@ SET_VALID_MODE = {
 
 class EntryObject(msgspec.Struct):
     mode: bytes
-    sha1: bytes
+    sha1: str
     name: str
 
 
@@ -54,17 +54,17 @@ def parse_tree(data):
         remain = remain[20:]
         if remain:
             # Having remain (which means sha1 length=20)
-            entry = EntryObject(mode=mode, sha1=sha1, name=name)
+            entry = EntryObject(mode=mode, sha1=sha1.hex(), name=name)
             append(entry)
         else:
             # Empty remain, let's check sha1
             if len(sha1) == 20:
                 # End of tree object
-                entry = EntryObject(mode=mode, sha1=sha1, name=name)
+                entry = EntryObject(mode=mode, sha1=sha1.hex(), name=name)
                 append(entry)
                 break
             else:
                 # Empty sha1
-                raise ObjectBroken(f'Invalid entry sha1: "{sha1}"', data)
+                raise ObjectBroken(f'Invalid entry sha1: "{sha1.hex()}"', data)
 
     return list_entry

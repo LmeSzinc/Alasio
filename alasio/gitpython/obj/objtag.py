@@ -9,7 +9,7 @@ from alasio.gitpython.obj.objcommit import tz2delta
 
 class TagObject(msgspec.Struct):
     # the object sha1 that this tag the pointing to
-    object: bytes
+    object: str
     # usually to be "commit"
     type: str
     # tag name, usually to be a version
@@ -32,7 +32,7 @@ def parse_tag_object(data):
         data (memoryview):
 
     Returns:
-        bytes:
+        str:
     """
     try:
         remain = decompress(data)
@@ -45,7 +45,7 @@ def parse_tag_object(data):
     if key != b'object':
         raise ObjectBroken(f'Object should startswith "object" not "{key}"', data)
     try:
-        return bytes.fromhex(obj.decode())
+        return obj.decode()
     except ValueError:
         raise ObjectBroken(f'Tag object of tag is not a sha1: {obj}', data)
 
@@ -71,7 +71,7 @@ def parse_tag(data):
     if key != b'object':
         raise ObjectBroken(f'Object should startswith "object" not "{key}"', data)
     try:
-        obj = bytes.fromhex(obj.decode())
+        obj = obj.decode()
     except ValueError:
         raise ObjectBroken(f'Tag object of tag is not a sha1: {obj}', data)
 
@@ -81,7 +81,7 @@ def parse_tag(data):
     if key != b'type':
         raise ObjectBroken(f'Object should have "type" not "{key}"', data)
     try:
-        typ = typ.decode('utf-8')
+        typ = typ.decode()
     except UnicodeDecodeError:
         raise ObjectBroken(f'Failed to decode tag type: "{typ}"', data)
 
