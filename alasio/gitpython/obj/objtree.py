@@ -1,6 +1,3 @@
-import zlib
-from zlib import decompress
-
 import msgspec
 
 from alasio.gitpython.file.exception import ObjectBroken
@@ -25,15 +22,12 @@ def parse_tree(data):
     Get a list if entries from a git tree object.
 
     Args:
-        data (memoryview):
+        data (bytes):
 
     Returns:
         list[EntryObject]:
     """
-    try:
-        remain = decompress(data)
-    except zlib.error as e:
-        raise ObjectBroken(str(e), data)
+    remain = data
 
     list_entry = []
     append = list_entry.append

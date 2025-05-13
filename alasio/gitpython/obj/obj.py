@@ -1,10 +1,10 @@
+import zlib
 from zlib import decompress
 
 import msgspec
 
 from alasio.ext.cache import cached_property
 from alasio.gitpython.file.exception import ObjectBroken
-from alasio.gitpython.obj.objblob import parse_blob
 from alasio.gitpython.obj.objcommit import parse_commit
 from alasio.gitpython.obj.objdelta import parse_ofs_delta, parse_ref_delta
 from alasio.gitpython.obj.objtag import parse_tag
@@ -44,7 +44,10 @@ class GitObject(msgspec.Struct, dict=True):
         # sorted by object proportion
         # delete self.data to release reference to original file data
         if objtype == 3:
-            result = parse_blob(self.data)
+            try:
+                result = decompress(self.data)
+            except zlib.error as e:
+                raise ObjectBroken(str(e), self.data)
             del self.data
             return result
         if objtype == 6:
@@ -56,15 +59,27 @@ class GitObject(msgspec.Struct, dict=True):
             del self.data
             return result
         if objtype == 2:
-            result = parse_tree(self.data)
+            try:
+                data = decompress(self.data)
+            except zlib.error as e:
+                raise ObjectBroken(str(e), self.data)
+            result = parse_tree(data)
             del self.data
             return result
         if objtype == 1:
-            result = parse_commit(self.data)
+            try:
+                data = decompress(self.data)
+            except zlib.error as e:
+                raise ObjectBroken(str(e), self.data)
+            result = parse_commit(data)
             del self.data
             return result
         if objtype == 4:
-            result = parse_tag(self.data)
+            try:
+                data = decompress(self.data)
+            except zlib.error as e:
+                raise ObjectBroken(str(e), self.data)
+            result = parse_tag(data)
             del self.data
             return result
         if objtype == 5:
@@ -76,6 +91,8 @@ class GitObject(msgspec.Struct, dict=True):
 
 def parse_objdata(data):
     """
+    Parse object data in pack file into GitObject
+
     The pack file format
     https://shafiul.github.io/gitbook/1_the_git_object_model.html
     https://shafiul.github.io/gitbook/7_the_packfile.html
@@ -125,3 +142,89 @@ def parse_objdata(data):
 
     data = data[index:]
     return GitObject(type=objtype, size=size, data=data)
+
+
+DICT_HEADER_TO_OBJTYPE = {
+    b'commit': 1,
+    b'tree': 2,
+    b'blob': 3,
+    b'tag': 4,
+}
+
+
+class GitLooseObject(msgspec.Struct, dict=True):
+    # object type
+    # 1 for commit
+    # 2 for tree
+    # 3 for blob
+    # 4 for tag
+    # 6 for OFS_DELTA
+    # 7 for REF_DELTA
+    type: int
+    # original file size (size before compression)
+    size: int
+    # object data
+    data: bytes
+
+    @cached_property
+    def decoded(self):
+        objtype = self.type
+        # sorted by object proportion
+        # delete self.data to release reference to original file data
+        if objtype == 3:
+            return self.data
+        if objtype == 2:
+            result = parse_tree(self.data)
+            del self.data
+            return result
+        if objtype == 1:
+            result = parse_commit(self.data)
+            del self.data
+            return result
+        if objtype == 4:
+            result = parse_tag(self.data)
+            del self.data
+            return result
+        # loose objects don't have delta
+        if objtype == 6 or objtype == 7:
+            raise ObjectBroken(
+                f'Loose object should not have type {objtype}', self.data)
+        if objtype == 5:
+            raise ObjectBroken(
+                f'Object type {objtype} is a preserved value, it should not be used', self.data)
+        raise ObjectBroken(
+            f'Unknown object type {objtype}', self.data)
+
+
+def parse_loosedata(data):
+    """
+    Parse loose object into GitObject
+
+    Args:
+        data (bytes):
+
+    Returns:
+        GitLooseObject:
+    """
+    try:
+        data = decompress(data)
+    except zlib.error as e:
+        raise ObjectBroken(str(e), data)
+
+    # {objtype} {length}\x00{data}
+    header, _, data = data.partition(b'\x00')
+    header, _, size = header.partition(b' ')
+    # convert data type
+    try:
+        objtype = DICT_HEADER_TO_OBJTYPE[header]
+    except KeyError:
+        raise ObjectBroken(f'Invalid loose header: {header}', data)
+    try:
+        size = int(size, 10)
+    except ValueError:
+        raise ObjectBroken(f'Invalid loose size: {size}', data)
+    # validate size
+    if len(data) != size:
+        raise ObjectBroken(f'Invalid loose size not match, size={size}, len(data)={len(data)}', data)
+
+    return GitLooseObject(type=objtype, size=size, data=data)

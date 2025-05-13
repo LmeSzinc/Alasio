@@ -1,6 +1,3 @@
-import zlib
-from zlib import decompress
-
 import msgspec
 
 from alasio.gitpython.file.exception import ObjectBroken
@@ -29,18 +26,13 @@ def parse_tag_object(data):
     Get the object sha1 that this tag the pointing to
 
     Args:
-        data (memoryview):
+        data (bytes):
 
     Returns:
         str:
     """
-    try:
-        remain = decompress(data)
-    except zlib.error as e:
-        raise ObjectBroken(str(e), data)
-
     # object
-    row, _, remain = remain.partition(b'\n')
+    row, _, remain = data.partition(b'\n')
     key, _, obj = row.partition(b' ')
     if key != b'object':
         raise ObjectBroken(f'Object should startswith "object" not "{key}"', data)
@@ -55,18 +47,13 @@ def parse_tag(data):
     Get full info from a git commit object
 
     Args:
-        data (memoryview):
+        data (bytes):
 
     Returns:
         TagObject:
     """
-    try:
-        remain = decompress(data)
-    except zlib.error as e:
-        raise ObjectBroken(str(e), data)
-
     # object
-    row, _, remain = remain.partition(b'\n')
+    row, _, remain = data.partition(b'\n')
     key, _, obj = row.partition(b' ')
     if key != b'object':
         raise ObjectBroken(f'Object should startswith "object" not "{key}"', data)

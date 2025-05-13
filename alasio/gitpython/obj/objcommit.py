@@ -1,6 +1,4 @@
-import zlib
 from typing import List, Union
-from zlib import decompress
 
 import msgspec
 
@@ -62,16 +60,11 @@ def parse_commit_tree(data):
     A light version of parse_commit when you need tree only
 
     Args:
-        data (memoryview):
+        data (bytes):
 
     Returns:
         str: sha1 of tree
     """
-    try:
-        data = decompress(data)
-    except zlib.error as e:
-        raise ObjectBroken(str(e), data)
-
     # tree is in the first row
     # tree fb3a8bdd0ceddd019615af4d57a53f43d8cee2bf
     row, _, _ = data.partition(b'\n')
@@ -89,16 +82,11 @@ def parse_commit(data):
     Get full info from a git commit object
 
     Args:
-        data (memoryview):
+        data (bytes):
 
     Returns:
         CommitObj:
     """
-    try:
-        data = decompress(data)
-    except zlib.error as e:
-        raise ObjectBroken(str(e), data)
-
     # tree
     row, _, remain = data.partition(b'\n')
     key, _, tree = row.partition(b' ')
