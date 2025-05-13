@@ -83,26 +83,26 @@ def parse_tag(data):
         raise ObjectBroken(f'Failed to decode tag name: "{tag}"', data)
 
     # tagger
-    # same format as committer in commit
+    # same format as tagger in commit
     row, _, remain = remain.partition(b'\n')
-    if not row.startswith(b'tagger'):
-        raise ObjectBroken(f'Tag object should have "tagger" not "{row}"', data)
-    try:
-        key, tagger_name, tagger_email, tagger_time, tz = row.split(b' ')
-    except ValueError:
-        raise ObjectBroken(f'Unexpected element amount in "tagger": {row}', data)
+    key, _, row = row.partition(b' ')
+    if key != b'tagger':
+        raise ObjectBroken(f'Commit object has no "tagger": {row}', data)
+    tagger_name, _, row = row.partition(b' <')
     try:
         tagger_name = tagger_name.decode('utf-8')
     except UnicodeDecodeError:
         raise ObjectBroken(f'Failed to decode tagger name: "{tagger_name}"', data)
+    tagger_email, _, row = row.partition(b'> ')
     try:
-        tagger_email = tagger_email.strip(b'<>').decode('utf-8')
+        tagger_email = tagger_email.decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode tagger name: "{tagger_email}"', data)
+        raise ObjectBroken(f'Failed to decode tagger email: "{tagger_email}"', data)
+    tagger_time, _, tz = row.partition(b' ')
     try:
         tagger_time = int(tagger_time)
     except ValueError:
-        raise ObjectBroken(f'tagger time is not int: "{tagger_time}"', data)
+        raise ObjectBroken(f'Tagger time is not int: "{tagger_time}"', data)
     try:
         tz = tz2delta(tz)
     except ValueError:

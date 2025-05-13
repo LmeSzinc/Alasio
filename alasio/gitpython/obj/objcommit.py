@@ -121,21 +121,21 @@ def parse_commit(data):
             raise ObjectBroken('Commit object has no "author"', data)
 
     # author
-    # we just checked remain is starts with "author"
     # author LmeSzinc <37934724+LmeSzinc@users.noreply.github.com> 1604563164 +0800
     row, _, remain = remain.partition(b'\n')
-    try:
-        key, author_name, author_email, author_time, tz = row.split(b' ')
-    except ValueError:
-        raise ObjectBroken(f'Unexpected element amount in "author": {row}', data)
+    key, _, row = row.partition(b' ')
+    # we just checked remain is starts with "author"
+    author_name, _, row = row.partition(b' <')
     try:
         author_name = author_name.decode('utf-8')
     except UnicodeDecodeError:
         raise ObjectBroken(f'Failed to decode author name: "{author_name}"', data)
+    author_email, _, row = row.partition(b'> ')
     try:
-        author_email = author_email.strip(b'<>').decode('utf-8')
+        author_email = author_email.decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode author name: "{author_email}"', data)
+        raise ObjectBroken(f'Failed to decode author email: "{author_email}"', data)
+    author_time, _, tz = row.partition(b' ')
     try:
         author_time = int(author_time)
     except ValueError:
@@ -150,21 +150,20 @@ def parse_commit(data):
     # keep \n in the remains
     row, sep, remain = remain.partition(b'\n')
     remain = sep + remain
-    if not row.startswith(b'committer'):
-        raise ObjectBroken('Commit object has no "committer"', data)
-    try:
-        key, committer_name, committer_email, committer_time, tz = row.split(b' ')
-    except ValueError:
-        raise ObjectBroken(f'Unexpected element amount in "committer": {row}', data)
-
+    key, _, row = row.partition(b' ')
+    if key != b'committer':
+        raise ObjectBroken(f'Commit object has no "committer": {row}', data)
+    committer_name, _, row = row.partition(b' <')
     try:
         committer_name = committer_name.decode('utf-8')
     except UnicodeDecodeError:
         raise ObjectBroken(f'Failed to decode committer name: "{committer_name}"', data)
+    committer_email, _, row = row.partition(b'> ')
     try:
-        committer_email = committer_email.strip(b'<>').decode('utf-8')
+        committer_email = committer_email.decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode committer name: "{committer_email}"', data)
+        raise ObjectBroken(f'Failed to decode committer email: "{committer_email}"', data)
+    committer_time, _, tz = row.partition(b' ')
     try:
         committer_time = int(committer_time)
     except ValueError:
