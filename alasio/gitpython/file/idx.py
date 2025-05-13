@@ -36,7 +36,7 @@ class IdxFile:
         self.pack_sha1: str = ''
         self.idx_sha1: str = ''
 
-    def clear(self):
+    def clear_idx(self):
         self.dict_offset.clear()
         self.pack_end = 0
         self.mtime = 0.
