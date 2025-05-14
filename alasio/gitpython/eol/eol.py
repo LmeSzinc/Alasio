@@ -1,6 +1,7 @@
 import msgspec
 
 from alasio.ext.path.atomic import atomic_read_text
+from alasio.gitpython.eol.const import *
 
 
 class AttrInfo(msgspec.Struct):
@@ -88,3 +89,59 @@ class GitAttribute:
             dict_eol[info.pattern] = info
 
         self.dict_eol = dict_eol
+
+
+def eol_crlf_remove(path, data):
+    """
+    Args:
+        path (str):
+        data (bytes):
+
+    Returns:
+        bytes:
+    """
+    # suffix
+    _, _, suffix = path.rpartition('.')
+    if suffix in SET_BINARY_SUFFIX:
+        return data
+    if suffix in SET_TEXT_SUFFIX:
+        return data.replace(b'\r\n', b'\n')
+    # name
+    _, _, name = path.rpartition('/')
+    if name in SET_BINARY_NAME:
+        return data
+    if name in SET_TEXT_NAME:
+        return data.replace(b'\r\n', b'\n')
+    # predict if binary
+    if b'\x00' in data:
+        return data
+    else:
+        return data.replace(b'\r\n', b'\n')
+
+
+def eol_crlf_readd(path, data):
+    """
+    Args:
+        path (str):
+        data (bytes):
+
+    Returns:
+        bytes:
+    """
+    # suffix
+    _, _, suffix = path.rpartition('.')
+    if suffix in SET_BINARY_SUFFIX:
+        return data
+    if suffix in SET_TEXT_SUFFIX:
+        return data.replace(b'\n', b'\r\n')
+    # name
+    _, _, name = path.rpartition('/')
+    if name in SET_BINARY_NAME:
+        return data
+    if name in SET_TEXT_NAME:
+        return data.replace(b'\n', b'\r\n')
+    # predict if binary
+    if b'\x00' in data:
+        return data
+    else:
+        return data.replace(b'\n', b'\r\n')
