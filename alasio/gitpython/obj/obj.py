@@ -1,4 +1,5 @@
 import zlib
+from typing import Union
 from zlib import decompress
 
 import msgspec
@@ -9,6 +10,9 @@ from alasio.gitpython.obj.objcommit import parse_commit
 from alasio.gitpython.obj.objdelta import parse_ofs_delta, parse_ref_delta
 from alasio.gitpython.obj.objtag import parse_tag
 from alasio.gitpython.obj.objtree import parse_tree
+
+OBJTYPE_BASIC = {1, 2, 3, 4}
+OBJTYPE_DELTA = {6, 7}
 
 
 class GitObject(msgspec.Struct, dict=True):
@@ -22,8 +26,9 @@ class GitObject(msgspec.Struct, dict=True):
     type: int
     # original file size (size before compression)
     size: int
-    # object data
-    data: memoryview
+    # object data in pack file
+    # if object decoded, `data` will be set to decompressed data
+    data: Union[memoryview, bytes]
 
     def decompress(self):
         """
@@ -45,18 +50,19 @@ class GitObject(msgspec.Struct, dict=True):
         # delete self.data to release reference to original file data
         if objtype == 3:
             try:
-                result = decompress(self.data)
+                data = decompress(self.data)
             except zlib.error as e:
                 raise ObjectBroken(str(e), self.data)
-            del self.data
-            return result
+            self.data = data
+            return data
         if objtype == 6:
             result = parse_ofs_delta(self.data)
-            del self.data
+            # keep data, data will be set in `GitObjectManager.cat()`
+            # self.data = b''
             return result
         if objtype == 7:
             result = parse_ref_delta(self.data)
-            del self.data
+            # self.data = b''
             return result
         if objtype == 2:
             try:
@@ -64,7 +70,7 @@ class GitObject(msgspec.Struct, dict=True):
             except zlib.error as e:
                 raise ObjectBroken(str(e), self.data)
             result = parse_tree(data)
-            del self.data
+            self.data = data
             return result
         if objtype == 1:
             try:
@@ -72,7 +78,7 @@ class GitObject(msgspec.Struct, dict=True):
             except zlib.error as e:
                 raise ObjectBroken(str(e), self.data)
             result = parse_commit(data)
-            del self.data
+            self.data = data
             return result
         if objtype == 4:
             try:
@@ -80,7 +86,7 @@ class GitObject(msgspec.Struct, dict=True):
             except zlib.error as e:
                 raise ObjectBroken(str(e), self.data)
             result = parse_tag(data)
-            del self.data
+            self.data = data
             return result
         if objtype == 5:
             raise ObjectBroken(

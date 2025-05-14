@@ -29,6 +29,7 @@ class IdxFile:
 
         # key: sha1 length=40, value: (offset_start, offset_end)
         self.dict_offset: "dict[str, tuple[int, int]]" = {}
+        self.dict_offset_to_sha1: "dict[int, str]" = {}
         # end of data in pack file, checksum sha1 not included
         self.pack_end: int = 0
         # last modify time of idx file
@@ -38,6 +39,7 @@ class IdxFile:
 
     def clear_idx(self):
         self.dict_offset.clear()
+        self.dict_offset_to_sha1.clear()
         self.pack_end = 0
         self.mtime = 0.
         self.pack_sha1 = ''
@@ -158,6 +160,7 @@ class IdxFile:
 
         # result
         dict_offset = {}
+        dict_offset_to_sha1 = dict(zip(offset_list, sha1_list))
         offset_list = sorted(zip(sha1_list, offset_list), key=lambda x: x[1])
         prev_offset = None
         prev_sha1 = None
@@ -170,6 +173,7 @@ class IdxFile:
 
         # set attribute
         self.dict_offset = dict_offset
+        self.dict_offset_to_sha1 = dict_offset_to_sha1
         self.pack_end = pack_end
         self.mtime = mtime
         self.pack_sha1 = pack_sha1
