@@ -230,7 +230,7 @@ class CodeGen:
         else:
             return prefix
 
-    def _merge_items(
+    def merge_items(
             self,
             items: "list[Any] | tuple[Any] | dict[Any, Any]",
             max_length=120
@@ -276,17 +276,17 @@ class CodeGen:
             typ = type(value)
             if typ is list:
                 with self.List(name, anno=anno):
-                    for line in self._merge_items(value, auto_multiline):
+                    for line in self.merge_items(value, auto_multiline):
                         self.add(line, line_ending=False)
                 return
             elif typ is tuple:
                 with self.Tuple(name, anno=anno):
-                    for line in self._merge_items(value, auto_multiline):
+                    for line in self.merge_items(value, auto_multiline):
                         self.add(line, line_ending=False)
                 return
             elif typ is dict:
                 with self.Dict(name, anno=anno):
-                    for line in self._merge_items(value, auto_multiline):
+                    for line in self.merge_items(value, auto_multiline):
                         self.add(line, line_ending=False)
                 return
 
@@ -349,7 +349,7 @@ class CodeGen:
 
     def Item(self, value):
         """
-        Define an item of list or tuple
+        Define an item of list or tuple or set
         """
         self.add(f'{repr(value)}')
 
@@ -368,6 +368,8 @@ class CodeGen:
         """
         prefix = self._get_prefix(name, '{', anno=anno)
         return self.tab(prefix=prefix, suffix='}', line_ending=',', tab_type='dict')
+
+    Set = Dict
 
     def Object(self, cls: str, name: str = '', anno: str = '') -> "TabWrapper":
         """
