@@ -1,4 +1,3 @@
-import time
 import zlib
 from collections import deque
 from typing import Tuple
@@ -62,8 +61,8 @@ def parse_ofs_delta(data):
             # Look for "offset encoding" here:
             #   https://git-scm.com/docs/pack-format
             # byte & 0x7f + 1
-            byte -= 127
-            offset += byte * 128
+            offset += byte - 127
+            offset *= 128
             index += 1
         else:
             # end reverse_offset, start source_size
