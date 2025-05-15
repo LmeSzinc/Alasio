@@ -9,7 +9,7 @@ DICT_TYPE_TO_HEAD = {
 }
 
 
-def git_hash(data, text=True):
+def git_hash(data):
     """
     Calculate the git sha1 hash for a binary file
 
@@ -19,15 +19,12 @@ def git_hash(data, text=True):
             Use False in binary files
 
     Returns:
-        bytes: sha1
+        str: sha1
     """
-    if text and b'\r\n' in data:
-        data = data.replace(b'\r\n', b'\n')
-
     # {objtype} {length}\x00{data}
     data = b'blob ' + f'{len(data)}'.encode() + b'\0' + data
 
-    return sha1(data).digest()
+    return sha1(data).hexdigest()
 
 
 def obj_hash(objtype, data):

@@ -2,7 +2,6 @@ import os
 from collections import defaultdict, deque
 from os import DirEntry
 
-from alasio.base.timer import timer
 from alasio.ext.cache import set_cached_property
 from alasio.ext.path.calc import joinnormpath
 from alasio.ext.pool import WORKER_POOL
@@ -97,7 +96,6 @@ class GitObjectManager:
                 continue
             yield pack, idx
 
-    @timer
     def _manager_build(self):
         """
         Build object dict from sub managers
@@ -159,7 +157,6 @@ class GitObjectManager:
         self._manager_build()
         self._manager_clear_sub()
 
-    @timer
     def read_lazy(self, skip_size=None):
         """
         Read pack file but skip objects that size > skip_size

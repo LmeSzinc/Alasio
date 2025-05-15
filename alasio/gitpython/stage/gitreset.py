@@ -2,7 +2,11 @@ from collections import deque
 
 import msgspec
 
+from alasio.ext.path.atomic import atomic_read_bytes, file_write
+from alasio.ext.pool import WORKER_POOL
+from alasio.gitpython.eol import eol_crlf_remove
 from alasio.gitpython.file.gitobject import GitObjectManager
+from alasio.gitpython.stage.hashobj import git_hash
 
 
 class FileEntry(msgspec.Struct):
@@ -20,7 +24,7 @@ class GitReset(GitObjectManager):
             sha1: commit sha1, tree sha1, tag sha1
 
         Returns:
-            list[FileEntry]:
+            dict[str, FileEntry]:
         """
         queue = deque([sha1])
 
@@ -74,11 +78,10 @@ class GitReset(GitObjectManager):
                 break
 
         # build filepath
-        output = []
-        append = output.append
-        for sha1, entry in dict_file.items():
+        dict_entry = {}
+        for sha, entry in dict_file.items():
             paths = deque([entry.name])
-            parent_sha1 = sha1
+            parent_sha1 = sha
             while 1:
                 parent_sha1 = dict_parent.get(parent_sha1, None)
                 if parent_sha1:
@@ -88,7 +91,87 @@ class GitReset(GitObjectManager):
                         continue
                 break
             paths = '/'.join(paths)
-            file = FileEntry(sha1=sha1, mode=entry.mode, path=paths)
-            append(file)
+            file = FileEntry(sha1=sha, mode=entry.mode, path=paths)
+            dict_entry[sha] = file
 
-        return output
+        return dict_entry
+
+    @staticmethod
+    def _reset_task_iter(dict_file):
+        """
+        Split dict_file by every 50 files.
+        50 is the magic number, ALAS has average file size 23.6KB and SRC is 22.8KB,
+        so 50 files are about 1MB for each task to read.
+
+        Args:
+            dict_file (dict[str, FileEntry]): files that need validate
+
+        Yields:
+            ict[str, FileEntry]:
+        """
+        count = 0
+        dict_task = {}
+        for sha1, file in dict_file.items():
+            dict_task[sha1] = file
+            count += 1
+            if count >= 50:
+                yield dict_task
+                dict_task = {}
+                count = 1
+
+        yield dict_task
+
+    def _reset_task_validate_files(self, dict_file):
+        """
+        Args:
+            dict_file (dict[str, FileEntry]): files that need validate
+
+        Returns:
+            dict[str, FileEntry]: files that reset
+        """
+        root = self.path
+        # validate files
+        need_reset = {}
+        for sha1, file in dict_file.items():
+            filepath = f'{root}/{file.path}'
+            try:
+                data = atomic_read_bytes(filepath)
+            except FileNotFoundError:
+                # need to write new file
+                need_reset[sha1] = file
+                continue
+            data = eol_crlf_remove(file.path, data)
+            sha1 = git_hash(data)
+            if file.sha1 != sha1:
+                # need to reset file
+                need_reset[sha1] = file
+
+        # write files
+        for sha1, file in need_reset.items():
+            filepath = f'{root}/{file.path}'
+            obj = self.cat(sha1)
+            if obj.type != 3:
+                # This shouldn't happen
+                continue
+            # write, no need to be atomic
+            data = obj.decoded
+            file_write(filepath, data)
+
+        return need_reset
+
+    def reset_validate_files(self, dict_file):
+        """
+        Validate local files by given `dict_file`
+
+        Args:
+            dict_file (dict[str, FileEntry]): files that need validate
+        """
+        tasks = list(self._reset_task_iter(dict_file))
+        if not tasks:
+            return
+        if len(tasks) == 1:
+            self._reset_task_validate_files(tasks[0])
+        else:
+            with WORKER_POOL.wait_jobs() as pool:
+                for task in tasks:
+                    pool.start_thread_soon(self._reset_task_validate_files, task)
