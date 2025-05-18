@@ -10,6 +10,33 @@ class ImageTruncated(Exception):
     pass
 
 
+def image_channel(image) -> int:
+    """
+    Args:
+        image (np.ndarray):
+
+    Returns:
+        int: 0 for grayscale, 3 for RGB, 4 for RGBA
+    """
+    shape = image.shape
+    if len(shape) == 2:
+        return 0
+    else:
+        return shape[2]
+
+
+def image_size(image):
+    """
+    Args:
+        image (np.ndarray):
+
+    Returns:
+        tuple[int, int]: width, height
+    """
+    shape = image.shape
+    return shape[1], shape[0]
+
+
 def image_copy(src):
     """
     Equivalent to image.copy() but a little bit faster
@@ -123,10 +150,7 @@ def image_decode(data, area=None):
     shape = image.shape
     if not shape:
         raise ImageTruncated('Empty image after cv2.imdecode')
-    if len(shape) == 2:
-        channel = 0
-    else:
-        channel = shape[2]
+    channel = image_channel(image)
 
     if area:
         # If image get cropped, return image should be copied to re-order array,
@@ -196,17 +220,17 @@ def image_encode(image, ext='png', encode=None):
     Returns:
         np.ndarray:
     """
-    shape = image.shape
-    if len(shape) == 3:
-        channel = shape[2]
-        if channel == 3:
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        elif channel == 4:
-            image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGRA)
-        else:
-            # proceed as RGB
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    # Keep grayscale unchanged
+    channel = image_channel(image)
+    if channel == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    elif channel == 0:
+        # Keep grayscale unchanged
+        pass
+    elif channel == 4:
+        image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGRA)
+    else:
+        # proceed as RGB
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
     # Prepare encode params
     ext = ext.lower()
@@ -345,33 +369,6 @@ def resize(image, size):
         np.ndarray:
     """
     return cv2.resize(image, size, interpolation=cv2.INTER_NEAREST)
-
-
-def image_channel(image) -> int:
-    """
-    Args:
-        image (np.ndarray):
-
-    Returns:
-        int: 0 for grayscale, 3 for RGB, 4 for RGBA
-    """
-    shape = image.shape
-    if len(shape) == 2:
-        return 0
-    else:
-        return shape[2]
-
-
-def image_size(image):
-    """
-    Args:
-        image (np.ndarray):
-
-    Returns:
-        int, int: width, height
-    """
-    shape = image.shape
-    return shape[1], shape[0]
 
 
 def image_paste(image, background, origin):
