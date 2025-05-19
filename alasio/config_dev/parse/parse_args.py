@@ -265,6 +265,8 @@ class ParseArgs:
     @cached_property
     def args_data(self):
         """
+        Structured data of {aside}.tasks.yaml
+
         Returns:
             dict[str, dict[str, ArgData]]:
                 <group_name>:

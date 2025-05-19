@@ -45,6 +45,8 @@ class ParseTasks:
     @cached_property
     def tasks_data(self):
         """
+        Structured data of {aside}.tasks.yaml
+
         Returns:
             dict[str, TaskData]:
                 <task_name>:

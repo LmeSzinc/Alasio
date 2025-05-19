@@ -1,12 +1,12 @@
 from alasio.config.const import Const
-from alasio.config.dev.tasks_model import TaskRefModel
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_iter_depth1, deep_set
 from alasio.ext.file.jsonfile import write_json
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path import PathStr
-from .parse_args import ArgData, DefinitionError, ParseArgs, TYPE_ARG_LIST, TYPE_ARG_LITERAL
+from alasio.logger import logger
+from .parse_args import ArgData, ParseArgs, TYPE_ARG_LIST, TYPE_ARG_LITERAL
 from .parse_tasks import ParseTasks
 
 
@@ -23,6 +23,20 @@ class ParseConfig(ParseArgs, ParseTasks):
         # {aside}.args.yaml -> {aside}_model.py
         # Use "_" in file name because python can't import filename with "." easily
         return self.file.with_name(f'{self.file.rootstem}_model.py')
+
+    @cached_property
+    def dict_group2class(self):
+        """
+        A dict that convert group name to class name of msgspec model.
+        class name is default to group name but may vary when having override, default, etc
+
+        Returns:
+            dict[str, str]:
+        """
+        data = {}
+        for group_name, _ in deep_iter_depth1(self.args_data):
+            data[group_name] = group_name
+        return data
 
     @cached_property
     def model_py(self):
@@ -46,7 +60,10 @@ class ParseConfig(ParseArgs, ParseTasks):
             if not arg_data:
                 continue
             has_content = True
-            with gen.Class(group_name, inherit='m.Struct, omit_defaults=True'):
+            # args_data and dict_group2class should have the same keys
+            class_name = self.dict_group2class[group_name]
+            # Define model class
+            with gen.Class(class_name, inherit='m.Struct, omit_defaults=True'):
                 for arg_name, arg in deep_iter_depth1(arg_data):
                     # Expand list
                     if arg.dt in TYPE_ARG_LIST:
@@ -155,49 +172,24 @@ class ParseConfig(ParseArgs, ParseTasks):
         del_cached_property(self, '_gui_old')
         return new
 
-    @cached_property
-    def tasks(self) -> TaskRefModel:
-        """
-        tasks data to be merged into global task.index.json
-
-        Returns:
-            <task_name>:
-                <group_name>:
-                    GroupModelRef
-        """
-        # Calculate module file
-        cwd = PathStr.cwd()
-        file = self.model_file.subpath_to(cwd)
-        if file == self.model_file:
-            raise DefinitionError(
-                f'model_file is not a subpath of cwd, model_file={self.model_file}, cwd={cwd}')
-        file = file.to_python_import()
-        # Generate tasks model ref
-        output = {}
-        for task_name, task in self.tasks_data.items():
-            # Skip tasks with no groups
-            if not task.group:
-                continue
-            # Task name must be unique
-            if task_name in output:
-                raise DefinitionError(f'Duplicate task name: {task_name}', file=self.tasks_file)
-            # Set ref
-            for group_name in task.group:
-                ref = {'file': file, 'cls': group_name}
-                deep_set(output, [task_name, group_name], ref)
-
-        return output
-
     def write(self):
         """
-        Generate and write msgspec models
+        Generate configs and write msgspec models
         """
         # Auto create {aside}.tasks.yaml
         if self.file.exists():
-            self.tasks_file.ensure_exist()
+            op = self.tasks_file.ensure_exist()
+            if op:
+                logger.info(f'Write file {self.tasks_file}')
+
         # {aside}_model.py
         if self.model_py:
-            self.model_py.write(self.model_file)
+            op = self.model_py.write(self.model_file, skip_same=True)
+            if op:
+                logger.info(f'Write file {self.model_file}')
+
         # {aside}_gui.json
         if self.gui:
-            write_json(self.gui_file, self.gui)
+            op = write_json(self.gui_file, self.gui, skip_same=True)
+            if op:
+                logger.info(f'Write file {self.gui_file}')
