@@ -95,7 +95,11 @@ class ConfigGen:
             for group_name, class_name in config.dict_group2class.items():
                 # group must be unique
                 if group_name in out:
-                    raise DefinitionError(f'Duplicate group name: {group_name}', file=config.tasks_file)
+                    raise DefinitionError(
+                        f'Duplicate group name: {group_name}',
+                        file=config.tasks_file,
+                        keys=group_name,
+                    )
                 # build model reference
                 ref = {'file': file, 'cls': class_name}
                 out[group_name] = ref
@@ -118,14 +122,21 @@ class ConfigGen:
             for task_name, task_data in config.tasks_data.items():
                 # task name must be unique
                 if task_name in out:
-                    raise DefinitionError(f'Duplicate task name: {task_name}', file=config.tasks_file)
+                    raise DefinitionError(
+                        f'Duplicate task name: {task_name}',
+                        file=config.tasks_file,
+                        keys=task_name,
+                    )
                 for group_name in task_data.group:
                     # group ref
                     try:
                         ref = self.dict_group_ref[group_name]
                     except KeyError:
                         raise DefinitionError(
-                            f'Group ref "{group_name}" of task "{task_name}" does not exist', file=config.tasks_file)
+                            f'Group ref "{group_name}" of task "{task_name}" does not exist',
+                            file=config.tasks_file,
+                            keys=[task_name, 'group']
+                        )
                     deep_set(out, [task_name, group_name], ref)
 
         return out

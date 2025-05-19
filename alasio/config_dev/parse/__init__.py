@@ -1,2 +1,2 @@
 from .parse import ParseConfig
-from .parse_args import DefinitionError
+from .exception import DefinitionError

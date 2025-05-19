@@ -4,12 +4,13 @@ from typing import Any, Union
 import msgspec
 from msgspec import Struct, UNSET, UnsetType
 
-from .parse_range import parse_range
 from alasio.ext.backport import to_literal
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.file.yamlfile import read_yaml
 from alasio.ext.path import PathStr
+from .exception import DefinitionError
+from .parse_range import parse_range
 
 # Requires manual maintain
 TYPE_YAML_TO_ARG = {
@@ -45,41 +46,6 @@ TYPE_ARG_LIST = {
     'multi-dropdown', 'multi-radio',
     'filter', 'filter-order',
 }
-
-_EMPTY = object()
-
-
-class DefinitionError(Exception):
-    def __init__(self, msg, file: str = '', keys: "str | list[str]" = '', value=_EMPTY):
-        self.msg = msg
-        self.file = file
-        self.keys = keys
-        self.value = value
-
-    def __str__(self):
-        parts = [self.__class__.__name__]
-
-        has_location_info = False
-
-        # Add any location information that's available
-        if self.file:
-            parts.append(f'file={self.file}')
-            has_location_info = True
-
-        if self.keys:
-            parts.append(f'keys={self.keys}')
-            has_location_info = True
-
-        if self.value is not _EMPTY:
-            parts.append(f'value={self.value}')
-            has_location_info = True
-
-        # Add a separator only if we have location info
-        if has_location_info:
-            parts.append(f'error={self.msg}')
-            return ',\n    '.join(parts)
-        else:
-            return f'{self.__class__.__name__},\n    error={self.msg}'
 
 
 def populate_arg(value) -> dict:
