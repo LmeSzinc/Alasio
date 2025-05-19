@@ -35,7 +35,9 @@ def json_dumps(obj):
     Returns:
         bytes:
     """
-    return json.dumps(obj, indent=2, ensure_ascii=False, sort_keys=False, default=str)
+    data = json.dumps(obj, indent=2, ensure_ascii=False, sort_keys=False, default=str)
+    data = data.encode('utf-8')
+    return data
 
 
 def read_json(file, default_factory=dict):
@@ -59,13 +61,31 @@ def read_json(file, default_factory=dict):
         return default_factory()
 
 
-def write_json(file, obj):
+def write_json(file, obj, skip_same=False):
     """
     Encode obj to json and write into file
 
     Args:
         file (str):
         obj (Any):
+        skip_same (bool):
+            True to skip writing if existing content is the same as content to write.
+            This would reduce disk write but add disk read
+
+    Returns:
+        bool: if write
     """
     data = json_dumps(obj)
-    atomic_write(file, data)
+    if skip_same:
+        try:
+            old = atomic_read_bytes(file)
+        except FileNotFoundError:
+            old = object()
+        if data == old:
+            return False
+        else:
+            atomic_write(file, data)
+            return True
+    else:
+        atomic_write(file, data)
+        return True

@@ -100,18 +100,34 @@ def poor_yaml_read(file):
     return data
 
 
-def poor_yaml_write(file, data, template_file):
+def poor_yaml_write(file, data, template_file, skip_same=False):
     """
     Args:
         file (str):
         data (dict):
         template_file (str):
+        skip_same (bool):
+            True to skip writing if existing content is the same as content to write.
+            This would reduce disk write but add disk read
+
+    Returns:
+        bool: if write
     """
     text = atomic_read_text(template_file)
+    old = text
 
+    # Change values with re
     regex = re.compile(r'^(.*?):(.*?)$')
     for key, value in data.items():
         value = encode_value(value)
         text = regex.sub(f'{key}: {value}\n', text)
 
-    atomic_write(file, text)
+    if skip_same:
+        if text == old:
+            return False
+        else:
+            atomic_write(file, text)
+            return True
+    else:
+        atomic_write(file, text)
+        return True

@@ -1,6 +1,6 @@
 from typing import Any
 
-from alasio.ext.path.atomic import atomic_write
+from alasio.ext.path.atomic import atomic_read_text, atomic_write
 
 _EMPTY = object()
 
@@ -74,12 +74,34 @@ class CodeGen:
         """
         print(self.gen())
 
-    def write(self, file: str):
+    def write(self, file, skip_same=True):
         """
         Write generated code to file
+
+        Args:
+            file (str):
+            skip_same (bool):
+                True to skip writing if existing content is the same as content to write.
+                This would reduce disk write but add disk read
+
+        Returns:
+            bool: if write
         """
-        content = self.gen()
-        atomic_write(file, content)
+        data = self.gen()
+        if skip_same:
+            try:
+                old = atomic_read_text(file)
+                old = old.replace('\r\n', '\n')
+            except FileNotFoundError:
+                old = object()
+            if data == old:
+                return False
+            else:
+                atomic_write(file, data)
+                return True
+        else:
+            atomic_write(file, data)
+            return True
 
     def add(self, line: str, line_ending=True, newline=True) -> str:
         """

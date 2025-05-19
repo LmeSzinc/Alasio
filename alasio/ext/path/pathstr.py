@@ -649,7 +649,7 @@ class PathStr(str):
         Returns:
             bool: True if file just created
         """
-        file_ensure_exist(self, mode=mode, default=default)
+        return file_ensure_exist(self, mode=mode, default=default)
 
     def touch(self, mode=0o666, exist_ok=True):
         """

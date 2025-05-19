@@ -26,16 +26,31 @@ def read_msgspec(file, default_factory=dict):
         return default_factory()
 
 
-def write_msgspec(file, obj):
+def write_msgspec(file, obj, skip_same=False):
     """
     Encode obj and write into file using msgspec
 
     Args:
         file (str):
         obj (Any):
+        skip_same (bool):
+            True to skip writing if existing content is the same as content to write.
+            This would reduce disk write but add disk read
 
     Returns:
-        Any:
+        bool: if write
     """
     data = encode(obj)
-    atomic_write(file, data)
+    if skip_same:
+        try:
+            old = atomic_read_bytes(file)
+        except FileNotFoundError:
+            old = object()
+        if data == old:
+            return False
+        else:
+            atomic_write(file, data)
+            return True
+    else:
+        atomic_write(file, data)
+        return True

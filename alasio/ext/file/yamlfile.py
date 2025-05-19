@@ -64,13 +64,31 @@ def read_yaml(file, default_factory=dict):
         return default_factory()
 
 
-def write_yaml(file, obj):
+def write_yaml(file, obj, skip_same=False):
     """
     Encode obj to yaml and write into file
 
     Args:
         file (str):
         obj (Any):
+        skip_same (bool):
+            True to skip writing if existing content is the same as content to write.
+            This would reduce disk write but add disk read
+
+    Returns:
+        bool: if write
     """
     data = yaml_dumps(obj)
-    atomic_write(file, data)
+    if skip_same:
+        try:
+            old = atomic_read_bytes(file)
+        except FileNotFoundError:
+            old = object()
+        if data == old:
+            return False
+        else:
+            atomic_write(file, data)
+            return True
+    else:
+        atomic_write(file, data)
+        return True

@@ -514,10 +514,10 @@ def file_ensure_exist(file, mode=0o666, default=b''):
         if default:
             os.write(fd, default)
         os.close(fd)
-        return False
+        return True
     except FileExistsError:
         # File already exists
-        return True
+        return False
     except OSError:
         # Other errors
         return False
