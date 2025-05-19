@@ -3,11 +3,11 @@ from typing import List
 import msgspec
 from msgspec import Struct, field
 
-from alasio.config.dev.parse_args import DefinitionError
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.file.yamlfile import read_yaml
 from alasio.ext.path import PathStr
+from .parse_args import DefinitionError
 
 
 def populate_task(value: dict) -> dict:

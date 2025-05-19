@@ -1,6 +1,4 @@
 from alasio.config.const import Const
-from alasio.config.dev.parse_args import ArgData, DefinitionError, ParseArgs, TYPE_ARG_LIST, TYPE_ARG_LITERAL
-from alasio.config.dev.parse_tasks import ParseTasks
 from alasio.config.dev.tasks_model import TaskRefModel
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.codegen import CodeGen
@@ -8,6 +6,8 @@ from alasio.ext.deep import deep_get, deep_iter_depth1, deep_set
 from alasio.ext.file.jsonfile import write_json
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path import PathStr
+from .parse_args import ArgData, DefinitionError, ParseArgs, TYPE_ARG_LIST, TYPE_ARG_LITERAL
+from .parse_tasks import ParseTasks
 
 
 class ParseConfig(ParseArgs, ParseTasks):
@@ -158,6 +158,8 @@ class ParseConfig(ParseArgs, ParseTasks):
     @cached_property
     def tasks(self) -> TaskRefModel:
         """
+        tasks data to be merged into global task.index.json
+
         Returns:
             <task_name>:
                 <group_name>:
@@ -199,11 +201,3 @@ class ParseConfig(ParseArgs, ParseTasks):
         # {aside}_gui.json
         if self.gui:
             write_json(self.gui_file, self.gui)
-        # write_json(self.file.with_name('taskref.json'), self.tasks)
-
-
-if __name__ == '__main__':
-    PathStr(__file__).uppath(4).chdir_here()
-    f = PathStr.new(r'E:\ProgramData\Pycharm\Alasio\alasio\config\alasio\opsi.args.yaml')
-    self = ParseConfig(f)
-    self.write()

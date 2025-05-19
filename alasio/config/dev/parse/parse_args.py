@@ -4,7 +4,7 @@ from typing import Any, Union
 import msgspec
 from msgspec import Struct, UNSET, UnsetType
 
-from alasio.config.dev.parse_range import parse_range
+from .parse_range import parse_range
 from alasio.ext.backport import to_literal
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
