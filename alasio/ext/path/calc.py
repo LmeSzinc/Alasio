@@ -259,7 +259,7 @@ def with_name(path: str, name: str) -> str:
     """
     root, sep, _ = path.rpartition(os.sep)
     if sep:
-        return f'{root}{os.sep}{name}'
+        return f'{root}{sep}{name}'
     else:
         return name
 
@@ -270,12 +270,18 @@ def with_stem(path: str, stem: str) -> str:
     /abc/def     -> /abc/xxx
     /abc/.git    -> /abc/xxx.git
     """
-    root, _, name = path.rpartition(os.sep)
+    root, sep, name = path.rpartition(os.sep)
     _, dot, suffix = name.rpartition('.')
-    if dot:
-        return f'{root}{os.sep}{stem}.{suffix}'
+    if sep:
+        if dot:
+            return f'{root}{sep}{stem}.{suffix}'
+        else:
+            return f'{root}{sep}{stem}'
     else:
-        return f'{root}{os.sep}{stem}'
+        if dot:
+            return f'{stem}.{suffix}'
+        else:
+            return stem
 
 
 def with_rootstem(path: str, stem: str) -> str:
@@ -285,12 +291,18 @@ def with_rootstem(path: str, stem: str) -> str:
     /abc/def     -> /abc/xxx
     /abc/.git    -> /abc/xxx.git
     """
-    root, _, name = path.rpartition(os.sep)
+    root, sep, name = path.rpartition(os.sep)
     _, dot, suffix = name.partition('.')
-    if dot:
-        return f'{root}{os.sep}{stem}.{suffix}'
+    if sep:
+        if dot:
+            return f'{root}{sep}{stem}.{suffix}'
+        else:
+            return f'{root}{sep}{stem}'
     else:
-        return f'{root}{os.sep}{stem}'
+        if dot:
+            return f'{stem}.{suffix}'
+        else:
+            return stem
 
 
 def with_suffix(path: str, suffix: str) -> str:
@@ -299,12 +311,18 @@ def with_suffix(path: str, suffix: str) -> str:
     /abc/def     -> /abc/def.xxx
     /abc/.git    -> /abc/.xxx
     """
-    root, _, name = path.rpartition(os.sep)
+    root, sep, name = path.rpartition(os.sep)
     stem, dot, _ = name.rpartition('.')
-    if dot:
-        return f'{root}{os.sep}{stem}{suffix}'
+    if sep:
+        if dot:
+            return f'{root}{sep}{stem}{suffix}'
+        else:
+            return f'{root}{sep}{name}{suffix}'
     else:
-        return f'{root}{os.sep}{name}{suffix}'
+        if dot:
+            return f'{stem}{suffix}'
+        else:
+            return suffix
 
 
 def with_multisuffix(path: str, suffix: str) -> str:
@@ -313,9 +331,15 @@ def with_multisuffix(path: str, suffix: str) -> str:
     /abc/def     -> /abc/def.xxx
     /abc/.git    -> /abc/.xxx
     """
-    root, _, name = path.rpartition(os.sep)
+    root, sep, name = path.rpartition(os.sep)
     stem, dot, _ = name.partition('.')
-    if dot:
-        return f'{root}{os.sep}{stem}{suffix}'
+    if sep:
+        if dot:
+            return f'{root}{os.sep}{stem}{suffix}'
+        else:
+            return f'{root}{os.sep}{name}{suffix}'
     else:
-        return f'{root}{os.sep}{name}{suffix}'
+        if dot:
+            return f'{stem}{suffix}'
+        else:
+            return suffix

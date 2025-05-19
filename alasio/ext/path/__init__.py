@@ -1,1 +1,1 @@
-from alasio.ext.path.pathstr import PathStr
+from .pathstr import PathStr
