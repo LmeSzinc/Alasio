@@ -6,7 +6,18 @@ import numpy as np
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 
 
-class ImageTruncated(Exception):
+class ImageBroken(Exception):
+    """
+    Raised if image failed to decode/encode
+    Raised if image is empty
+    """
+    pass
+
+
+class ImageNotSupported(Exception):
+    """
+    Raised if we can't perform image calculation on this image
+    """
     pass
 
 
@@ -146,39 +157,41 @@ def image_decode(data, area=None):
     # Decode image
     image = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
     if image is None:
-        raise ImageTruncated('Empty image after cv2.imdecode')
+        raise ImageBroken('Empty image after cv2.imdecode')
     shape = image.shape
     if not shape:
-        raise ImageTruncated('Empty image after cv2.imdecode')
+        raise ImageBroken('Empty image after cv2.imdecode')
     channel = image_channel(image)
 
     if area:
         # If image get cropped, return image should be copied to re-order array,
         # making later usages faster
         if channel == 3:
+            # RGB
             image = crop(image, area, copy=False)
             return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         elif channel == 0:
+            # grayscale
             return crop(image, area, copy=True)
         elif channel == 4:
+            # RGBA
             image = crop(image, area, copy=False)
             return cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
         else:
-            # proceed as RGB
-            image = crop(image, area, copy=False)
-            return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            raise ImageNotSupported(f'shape={image.shape}')
     else:
         if channel == 3:
+            # RGB
             cv2.cvtColor(image, cv2.COLOR_BGR2RGB, dst=image)
             return image
         elif channel == 0:
+            # grayscale
             return image
         elif channel == 4:
+            # RGBA
             return cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
         else:
-            # proceed as RGB
-            cv2.cvtColor(image, cv2.COLOR_BGR2RGB, dst=image)
-            return image
+            raise ImageNotSupported(f'shape={image.shape}')
 
 
 def image_load(file, area=None):
@@ -201,10 +214,10 @@ def image_load(file, area=None):
     try:
         content = atomic_read_bytes(file)
     except FileNotFoundError as e:
-        raise ImageTruncated(str(e))
+        raise ImageBroken(str(e))
     data = np.frombuffer(content, dtype=np.uint8)
     if not data.size:
-        raise ImageTruncated('Empty file')
+        raise ImageBroken(f'Image with size=0: {file}')
     return image_decode(data, area=area)
 
 
@@ -222,15 +235,16 @@ def image_encode(image, ext='png', encode=None):
     """
     channel = image_channel(image)
     if channel == 3:
+        # RGB
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     elif channel == 0:
-        # Keep grayscale unchanged
+        # grayscale, keep grayscale unchanged
         pass
     elif channel == 4:
+        # RGBA
         image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGRA)
     else:
-        # proceed as RGB
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        raise ImageNotSupported(f'shape={image.shape}')
 
     # Prepare encode params
     ext = ext.lower()
@@ -248,12 +262,12 @@ def image_encode(image, ext='png', encode=None):
             # LZW compression in TIFF
             encode = [cv2.IMWRITE_TIFF_COMPRESSION, 5]
         else:
-            encode = []
+            raise ImageNotSupported(f'Unsupported file extension "{ext}"')
 
     # Encode
     ret, buf = cv2.imencode(f'.{ext}', image, encode)
     if not ret:
-        raise ImageTruncated('cv2.imencode failed')
+        raise ImageBroken('cv2.imencode failed')
 
     return buf
 
@@ -299,14 +313,14 @@ def image_fixup(file: str):
         return False
     try:
         image = image_decode(data)
-    except ImageTruncated:
+    except ImageBroken:
         # Ignore error because truncated image don't need fixup
         return False
 
     # image_save
     try:
         data = image_encode(image, ext=ext)
-    except ImageTruncated:
+    except ImageBroken:
         # Ignore error because truncated image don't need fixup
         return False
 

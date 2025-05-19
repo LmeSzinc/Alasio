@@ -1,6 +1,6 @@
 import cv2
 
-from alasio.base.image.imfile import image_channel, image_size
+from alasio.base.image.imfile import ImageNotSupported, image_channel, image_size
 
 
 def show_as_pillow(image):
@@ -83,7 +83,7 @@ def image_paint_white(image, area):
         # RGBA
         image[y1:y2, x1:x2] = (255, 255, 255, 255)
     else:
-        # what is this?
+        # ImageNotSupported, but we can still paint
         color = tuple([255] * channel)
         image[y1:y2, x1:x2] = color
     return image
@@ -109,7 +109,129 @@ def image_paint_black(image, area):
         # RGBA
         image[y1:y2, x1:x2] = (0, 0, 0, 255)
     else:
-        # what is this?
+        # ImageNotSupported, but we can still paint
         color = tuple([0] * channel)
         image[y1:y2, x1:x2] = color
     return image
+
+
+def get_bbox(image, threshold=0):
+    """
+    Get outbound box of the content in image
+    A opencv implementation of the getbbox() in pillow
+
+    Args:
+        image (np.ndarray):
+        threshold (int):
+            color > threshold will be considered as content
+            color <= threshold will be considered background
+
+    Returns:
+        tuple[int, int, int, int]: area
+
+    Raises:
+        ImageNotSupported: if failed to get bbox
+    """
+    channel = image_channel(image)
+    # convert to grayscale
+    if channel == 3:
+        # RGB
+        mask = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        cv2.threshold(mask, threshold, 255, cv2.THRESH_BINARY, dst=mask)
+    elif channel == 0:
+        # grayscale
+        mask = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
+    elif channel == 4:
+        # RGBA
+        mask = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY)
+        cv2.threshold(mask, threshold, 255, cv2.THRESH_BINARY, dst=mask)
+    else:
+        raise ImageNotSupported(f'shape={image.shape}')
+
+    # find bbox
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    min_y, min_x = mask.shape
+    max_x = 0
+    max_y = 0
+    # all black
+    if not contours:
+        raise ImageNotSupported(f'Cannot get bbox from a pure black image')
+    for contour in contours:
+        # x, y, w, h
+        x1, y1, x2, y2 = cv2.boundingRect(contour)
+        x2 += x1
+        y2 += y1
+        if x1 < min_x:
+            min_x = x1
+        if y1 < min_y:
+            min_y = y1
+        if x2 > max_x:
+            max_x = x2
+        if y2 > max_y:
+            max_y = y2
+    if min_x < max_x and min_y < max_y:
+        return min_x, min_y, max_x, max_y
+    else:
+        # This shouldn't happen
+        raise ImageNotSupported(f'Empty bbox {(min_x, min_y, max_x, max_y)}')
+
+
+def get_bbox_reversed(image, threshold=255):
+    """
+    Get outbound box of the content in image
+    A opencv implementation of the getbbox() in pillow
+
+    Args:
+        image (np.ndarray):
+        threshold (int):
+            color < threshold will be considered as content
+            color >= threshold will be considered background
+
+    Returns:
+        tuple[int, int, int, int]: area
+
+    Raises:
+        ImageNotSupported: if failed to get bbox
+    """
+    channel = image_channel(image)
+    # convert to grayscale
+    if channel == 3:
+        # RGB
+        mask = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        cv2.threshold(mask, 0, threshold, cv2.THRESH_BINARY, dst=mask)
+    elif channel == 0:
+        # grayscale
+        mask = cv2.threshold(image, 0, threshold, cv2.THRESH_BINARY)
+    elif channel == 4:
+        # RGBA
+        mask = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY)
+        cv2.threshold(mask, 0, threshold, cv2.THRESH_BINARY, dst=mask)
+    else:
+        raise ImageNotSupported(f'shape={image.shape}')
+
+    # find bbox
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    min_y, min_x = mask.shape
+    max_x = 0
+    max_y = 0
+    # all black
+    if not contours:
+        raise ImageNotSupported(f'Cannot get bbox from a pure black image')
+    for contour in contours:
+        # x, y, w, h
+        x1, y1, x2, y2 = cv2.boundingRect(contour)
+        x2 += x1
+        y2 += y1
+        if x1 < min_x:
+            min_x = x1
+        if y1 < min_y:
+            min_y = y1
+        if x2 > max_x:
+            max_x = x2
+        if y2 > max_y:
+            max_y = y2
+    if min_x < max_x and min_y < max_y:
+        return min_x, min_y, max_x, max_y
+    else:
+        # This shouldn't happen
+        raise ImageNotSupported(f'Empty bbox {(min_x, min_y, max_x, max_y)}')
