@@ -16,8 +16,7 @@ def show_as_pillow(image):
     elif channel == 4:
         Image.fromarray(image, mode='RGBA').show()
     else:
-        # proceed as RGB
-        Image.fromarray(image, mode='RGB').show()
+        raise ImageNotSupported(f'shape={image.shape}')
 
 
 def resize(image, size):
@@ -140,7 +139,7 @@ def get_bbox(image, threshold=0):
         cv2.threshold(mask, threshold, 255, cv2.THRESH_BINARY, dst=mask)
     elif channel == 0:
         # grayscale
-        mask = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
+        _, mask = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
     elif channel == 4:
         # RGBA
         mask = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY)
@@ -201,7 +200,7 @@ def get_bbox_reversed(image, threshold=255):
         cv2.threshold(mask, 0, threshold, cv2.THRESH_BINARY, dst=mask)
     elif channel == 0:
         # grayscale
-        mask = cv2.threshold(image, 0, threshold, cv2.THRESH_BINARY)
+        _, mask = cv2.threshold(image, 0, threshold, cv2.THRESH_BINARY)
     elif channel == 4:
         # RGBA
         mask = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY)
