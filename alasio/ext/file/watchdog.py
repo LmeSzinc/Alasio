@@ -53,14 +53,14 @@ class Watchdog:
         self._last_snapshot = 0
         self._first_snapshot = True
 
-    def watch(self, include_existing=False, interval=0):
+    def watch(self, include_existing=False, interval=2):
         """
         Args:
             include_existing (bool): True to return all existing files first
             interval: Interval in seconds between two _watch calls
 
         Returns:
-            list[Tuple[str, str, str, float]]:
+            list[tuple[str, str, str, float]]:
                 List of change info (event, path, path_type, mtime)
                 `event` is one of: A for added, M for modified, D for deleted.
                 If path renamed, there will be an "A" first then "D"
@@ -92,7 +92,7 @@ class Watchdog:
         else:
             return result
 
-    def watch_files(self, include_existing=False, interval=0):
+    def watch_files(self, include_existing=False, interval=2):
         """
         Same as watch() but returns file changes only
         """
@@ -108,6 +108,7 @@ class Watchdog:
         for path in self.paths:
             try:
                 info = stat_info(os.stat(path))
+                info_type, info_mtime = info
             except OSError:
                 prev_info = info_dict.pop(path, None)
                 if prev_info is None:
@@ -118,26 +119,30 @@ class Watchdog:
                     yield 'D', path, prev_info[0], prev_info[1]
                     continue
             try:
-                prev_info = info_dict.pop(path)
+                prev_type, prev_mtime = info_dict.pop(path)
             except KeyError:
                 # new path
-                yield 'A', path, info[0], info[1]
+                yield 'A', path, info_type, info_mtime
                 new_dict[path] = info
-                if info[0] == 'D':
+                if info_type == 'D':
                     # new directory
                     need_visit.append(path)
                 continue
             new_dict[path] = info
-            # Always scan directories recursively because directory mtime don't get update when sub files changed
-            if info[0] == 'D':
+            # Always scan directories recursively
+            # because directory mtime don't get update when sub files changed
+            if info_type == 'D':
                 need_visit.append(path)
-            if info == prev_info:
-                # same
-                continue
+            if info_type == prev_type:
+                if info_mtime > prev_mtime:
+                    # modified
+                    yield 'M', path, info_type, info_mtime
+                else:
+                    # same
+                    pass
             else:
-                # path modified
-                yield 'M', path, info[0], info[1]
-                continue
+                # file changed to directory or viceversa
+                yield 'M', path, info_type, info_mtime
 
         while True:
             new_visit = deque()
@@ -158,6 +163,7 @@ class Watchdog:
                     entry_path = entry.path
                     try:
                         entry_info = stat_info(entry.stat(follow_symlinks=True))
+                        info_type, info_mtime = entry_info
                     except OSError:
                         # entry got deleted just now
                         prev_info = info_dict.pop(entry_path, None)
@@ -169,27 +175,30 @@ class Watchdog:
                             yield 'D', entry_path, prev_info[0], prev_info[1]
                             continue
                     try:
-                        prev_info = info_dict.pop(entry_path)
+                        prev_type, prev_mtime = info_dict.pop(entry_path)
                     except KeyError:
                         # new sub path
-                        yield 'A', entry_path, entry_info[0], entry_info[1]
+                        yield 'A', entry_path, info_type, info_mtime
                         new_dict[entry_path] = entry_info
-                        if entry_info[0] == 'D':
+                        if info_type == 'D':
                             # new sub directory
                             new_visit.append(entry_path)
                         continue
                     new_dict[entry_path] = entry_info
-                    # Always scan directories recursively because directory mtime don't get update when sub files
-                    # changed
+                    # Always scan directories recursively
+                    # because directory mtime don't get update when sub files changed
                     if entry_info[0] == 'D':
                         new_visit.append(entry_path)
-                    if entry_info == prev_info:
-                        # same
-                        continue
+                    if info_type == prev_type:
+                        if info_mtime > prev_mtime:
+                            # modified
+                            yield 'M', entry_path, info_type, info_mtime
+                        else:
+                            # same
+                            pass
                     else:
-                        # path modified
-                        yield 'M', entry_path, entry_info[0], entry_info[1]
-                        continue
+                        # file changed to directory or viceversa
+                        yield 'M', entry_path, info_type, info_mtime
             # End
             need_visit = new_visit
             if not need_visit:
@@ -199,3 +208,39 @@ class Watchdog:
             yield 'D', path, info[0], info[1]
         # swap dict
         self.info_dict = new_dict
+
+    def mark_modified(self, path, path_type=None, path_mtime=None):
+        """
+        Mark a path that has been modified by us, not by external changes
+        Useful to reduce duplicate modify event when we modified a file programmatically
+
+        Args:
+            path (str): Absolute filepath
+            path_type (str):
+                F for file, D for directory, S for symlink
+                None to keep current path_type unchanged
+            path_mtime (float):
+                Modify time of path, None for current time
+        """
+        info_dict = self.info_dict
+        try:
+            prev_type, prev_mtime = info_dict[path]
+        except KeyError:
+            # path not recorded
+            try:
+                info = stat_info(os.stat(path))
+            except OSError:
+                # path to mark modified doesn't even exist
+                return
+            # newly created path
+            info_dict[path] = info
+            return
+
+        # having previous record
+        if path_mtime is None:
+            path_mtime = time.time()
+        if path_type is None:
+            info = (prev_type, path_mtime)
+        else:
+            info = (prev_type, prev_mtime)
+        info_dict[path] = info
