@@ -2,6 +2,7 @@ import os
 import stat
 import time
 from collections import deque
+from dataclasses import dataclass
 
 from alasio.ext.path.calc import normpath
 
@@ -36,6 +37,18 @@ def stat_info(st):
     return path_type, st.st_mtime
 
 
+@dataclass
+class PathEvent:
+    # `event` is one of: A for added, M for modified, D for deleted.
+    event: str
+    # path where it changed
+    path: str
+    # `type` is one of: F for file, D for directory, S for symlink
+    type: str
+    # last modify time
+    mtime: float
+
+
 class Watchdog:
     def __init__(self, paths):
         """
@@ -60,19 +73,15 @@ class Watchdog:
             interval: Interval in seconds between two _watch calls
 
         Returns:
-            list[tuple[str, str, str, float]]:
-                List of change info (event, path, path_type, mtime)
-                `event` is one of: A for added, M for modified, D for deleted.
-                If path renamed, there will be an "A" first then "D"
-                `path_type` is one of: F for file, D for directory, S for symlink
+            list[PathEvent]:
 
         Examples:
             self = Watchdog(r'E:\ProgramData\Pycharm\AzurLaneAutoScript')
             while 1:
                 for row in self.watch(interval=2):
                     print(row)
-            # ('M', 'E:\\ProgramData\\Pycharm\\AzurLaneAutoScript\\config', 'D', 1746358905.0225341)
-            # ('M', 'E:\\ProgramData\\Pycharm\\AzurLaneAutoScript\\config\\alas.json', 'F', 1746358905.0210333)
+            # PathEvent('M', 'E:\\ProgramData\\Pycharm\\AzurLaneAutoScript\\config', 'D', 1746358905.0225341)
+            # PathEvent('M', 'E:\\ProgramData\\Pycharm\\AzurLaneAutoScript\\config\\alas.json', 'F', 1746358905.0210333)
         """
         if interval > 0:
             now = time.time()
@@ -95,12 +104,19 @@ class Watchdog:
     def watch_files(self, include_existing=False, interval=2):
         """
         Same as watch() but returns file changes only
+
+        Returns:
+            list[PathEvent]:
         """
-        result = self.watch(include_existing=include_existing, interval=interval)
-        result = [r for r in result if r[2] == 'F']
-        return result
+        events = self.watch(include_existing=include_existing, interval=interval)
+        events = [e for e in events if e.type == 'F']
+        return events
 
     def _watch(self):
+        """
+        Yields:
+            FileEvent:
+        """
         info_dict = self.info_dict
         new_dict = {}
         need_visit = deque()
@@ -116,13 +132,13 @@ class Watchdog:
                     continue
                 else:
                     # path deleted
-                    yield 'D', path, prev_info[0], prev_info[1]
+                    yield PathEvent('D', path, prev_info[0], prev_info[1])
                     continue
             try:
                 prev_type, prev_mtime = info_dict.pop(path)
             except KeyError:
                 # new path
-                yield 'A', path, info_type, info_mtime
+                yield PathEvent('A', path, info_type, info_mtime)
                 new_dict[path] = info
                 if info_type == 'D':
                     # new directory
@@ -136,13 +152,13 @@ class Watchdog:
             if info_type == prev_type:
                 if info_mtime > prev_mtime:
                     # modified
-                    yield 'M', path, info_type, info_mtime
+                    yield PathEvent('M', path, info_type, info_mtime)
                 else:
                     # same
                     pass
             else:
                 # file changed to directory or viceversa
-                yield 'M', path, info_type, info_mtime
+                yield PathEvent('M', path, info_type, info_mtime)
 
         while True:
             new_visit = deque()
@@ -157,7 +173,7 @@ class Watchdog:
                         continue
                     else:
                         # path deleted
-                        yield 'D', path, prev_info[0], prev_info[1]
+                        yield PathEvent('D', path, prev_info[0], prev_info[1])
                         continue
                 for entry in list_entry:
                     entry_path = entry.path
@@ -172,13 +188,13 @@ class Watchdog:
                             continue
                         else:
                             # path deleted
-                            yield 'D', entry_path, prev_info[0], prev_info[1]
+                            yield PathEvent('D', entry_path, prev_info[0], prev_info[1])
                             continue
                     try:
                         prev_type, prev_mtime = info_dict.pop(entry_path)
                     except KeyError:
                         # new sub path
-                        yield 'A', entry_path, info_type, info_mtime
+                        yield PathEvent('A', entry_path, info_type, info_mtime)
                         new_dict[entry_path] = entry_info
                         if info_type == 'D':
                             # new sub directory
@@ -192,20 +208,20 @@ class Watchdog:
                     if info_type == prev_type:
                         if info_mtime > prev_mtime:
                             # modified
-                            yield 'M', entry_path, info_type, info_mtime
+                            yield PathEvent('M', entry_path, info_type, info_mtime)
                         else:
                             # same
                             pass
                     else:
                         # file changed to directory or viceversa
-                        yield 'M', entry_path, info_type, info_mtime
+                        yield PathEvent('M', entry_path, info_type, info_mtime)
             # End
             need_visit = new_visit
             if not need_visit:
                 break
         # path not visited, probably because they are deleted
         for path, info in info_dict.items():
-            yield 'D', path, info[0], info[1]
+            yield PathEvent('D', path, info[0], info[1])
         # swap dict
         self.info_dict = new_dict
 
@@ -215,13 +231,16 @@ class Watchdog:
         Useful to reduce duplicate modify event when we modified a file programmatically
 
         Args:
-            path (str): Absolute filepath
+            path (PathEvent | str): change event or absolute filepath
             path_type (str):
                 F for file, D for directory, S for symlink
                 None to keep current path_type unchanged
             path_mtime (float):
                 Modify time of path, None for current time
         """
+        if type(path) is PathEvent:
+            path = path.path
+
         info_dict = self.info_dict
         try:
             prev_type, prev_mtime = info_dict[path]
