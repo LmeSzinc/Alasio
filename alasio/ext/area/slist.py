@@ -1,22 +1,19 @@
 from collections import defaultdict
-from typing import Generic, TypeVar
+from typing import Generic, Iterator, TypeVar
 
 T = TypeVar('T')
 
 
 class Slist(Generic[T]):
-    def __init__(self, items):
+    def __init__(self, items: "list[T]"):
         """
         A proxy of list of items
         Can act like a simple in-memory database table
-
-        Args:
-            items (list[T]):
         """
-        self.items = items
-        self.index: "dict[tuple, Slist]" = {}
+        self.items: "list[T]" = items
+        self.index: "dict[tuple, Slist[T]]" = {}
 
-    def __iter__(self):
+    def __iter__(self) -> "Iterator[T]":
         return iter(self.items)
 
     def __getitem__(self, item):

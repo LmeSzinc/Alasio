@@ -290,6 +290,8 @@ def image_fixup(file: str):
     """
     Save image using opencv again, making it smaller and shutting up libpng
     libpng warning: iCCP: known incorrect sRGB profile
+    libpng warning: iCCP: cHRM chunk does not match sRGB
+    libpng warning: sBIT: invalid
 
     Args:
         file (str):

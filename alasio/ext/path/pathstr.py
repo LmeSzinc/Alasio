@@ -290,7 +290,7 @@ class PathStr(str):
         If `self` is not sub-path to `root`, return `self`
 
         Args:
-            root (PathStr):
+            root (str):
 
         Returns:
             PathStr

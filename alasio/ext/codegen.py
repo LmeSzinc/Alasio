@@ -347,8 +347,8 @@ class CodeGen:
 
         Examples:
             with gen.List('all_items'):
-                gen.ListItem('item1')
-                gen.ListItem('item2')
+                gen.Item('item1')
+                gen.Item('item2')
         """
         prefix = self._get_prefix(name, '[', anno=anno)
         return self.tab(prefix=prefix, suffix=']', line_ending=',', tab_type='list')
