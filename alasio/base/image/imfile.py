@@ -142,27 +142,18 @@ def crop(image, area, copy=True):
         return image
 
 
-def image_decode(data, area=None):
+def cvt_color_decode(image, area=None):
     """
+    Convert color from opencv to RGB or grayscale
+
     Args:
         data (np.ndarray):
         area (tuple):
 
     Returns:
         np.ndarray
-
-    Raises:
-        ImageTruncated:
     """
-    # Decode image
-    image = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
-    if image is None:
-        raise ImageBroken('Empty image after cv2.imdecode')
-    shape = image.shape
-    if not shape:
-        raise ImageBroken('Empty image after cv2.imdecode')
     channel = image_channel(image)
-
     if area:
         # If image get cropped, return image should be copied to re-order array,
         # making later usages faster
@@ -194,9 +185,101 @@ def image_decode(data, area=None):
             raise ImageNotSupported(f'shape={image.shape}')
 
 
+def image_decode(data, area=None):
+    """
+    Args:
+        data (np.ndarray):
+        area (tuple):
+
+    Returns:
+        np.ndarray
+
+    Raises:
+        ImageBroken:
+    """
+    # Decode image
+    image = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+    if image is None:
+        raise ImageBroken('Empty image after cv2.imdecode')
+    shape = image.shape
+    if not shape:
+        raise ImageBroken('Empty image after cv2.imdecode')
+
+    return cvt_color_decode(image, area=area)
+
+
+def gif_load_fframe(file, area=None):
+    """
+    Load the first frame of a GIF image using pure opencv.
+
+    Args:
+        file (str):
+        area (tuple):
+
+    Returns:
+        np.ndarray: First frame as numpy array in RGB format
+
+    Raises:
+        FileNotFoundError:
+        ImageBroken:
+    """
+    cap = cv2.VideoCapture(file)
+    if not cap.isOpened():
+        raise FileNotFoundError(f'Failed to open GIF file: {file}')
+
+    try:
+        ret, image = cap.read()
+        if not ret:
+            raise ImageBroken(f'Empty image after reading GIF: {file}')
+        # note that VideoCapture always returns BGR/BGRA
+        # if original image is in grayscale, you would get in RGB
+    finally:
+        cap.release()
+
+    return cvt_color_decode(image, area=area)
+
+
+def gif_load(file, area=None):
+    """
+    Load all frames of a GIF image using pure opencv.
+
+    Args:
+        file (str):
+        area (tuple):
+
+    Returns:
+        list[np.ndarray]: List of frames as numpy array in RGB format
+
+    Raises:
+        FileNotFoundError:
+        ImageBroken:
+    """
+    cap = cv2.VideoCapture(file)
+    if not cap.isOpened():
+        raise FileNotFoundError(f'Failed to open GIF file: {file}')
+
+    frames = []
+    try:
+        while 1:
+            ret, image = cap.read()
+            if not ret:
+                break
+            # note that VideoCapture always returns BGR/BGRA
+            # if original image is in grayscale, you would get in RGB
+            image = cvt_color_decode(image, area=area)
+            frames.append(image)
+    finally:
+        cap.release()
+    if not frames:
+        raise ImageBroken(f'Empty image after reading GIF: {file}')
+
+    return frames
+
+
 def image_load(file, area=None):
     """
-    Load an image like pillow and drop alpha channel.
+    Load an image using pure opencv and drop alpha channel.
+    If file is gif, will only read first frame
 
     Args:
         file (str):
@@ -207,8 +290,10 @@ def image_load(file, area=None):
 
     Raises:
         FileNotFoundError:
-        ImageTruncated:
+        ImageBroken:
     """
+    if file.endswith('.gif'):
+        return gif_load_fframe(file, area=area)
     # cv2.imread can't handle non-ascii filepath and PIL.Image.open is slow
     # Here we read with numpy first
     try:
@@ -219,6 +304,30 @@ def image_load(file, area=None):
     if not data.size:
         raise ImageBroken(f'Image with size=0: {file}')
     return image_decode(data, area=area)
+
+
+def cvt_color_encode(image):
+    """
+    Convert color from RGB or grayscale to opencv
+
+    Args:
+        data (np.ndarray):
+
+    Returns:
+        np.ndarray
+    """
+    channel = image_channel(image)
+    if channel == 3:
+        # RGB
+        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    elif channel == 0:
+        # grayscale, keep grayscale unchanged
+        return image
+    elif channel == 4:
+        # RGBA
+        return cv2.cvtColor(image, cv2.COLOR_RGBA2BGRA)
+    else:
+        raise ImageNotSupported(f'shape={image.shape}')
 
 
 def image_encode(image, ext='png', encode=None):
@@ -233,19 +342,6 @@ def image_encode(image, ext='png', encode=None):
     Returns:
         np.ndarray:
     """
-    channel = image_channel(image)
-    if channel == 3:
-        # RGB
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    elif channel == 0:
-        # grayscale, keep grayscale unchanged
-        pass
-    elif channel == 4:
-        # RGBA
-        image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGRA)
-    else:
-        raise ImageNotSupported(f'shape={image.shape}')
-
     # Prepare encode params
     ext = ext.lower()
     if encode is None:
@@ -265,6 +361,7 @@ def image_encode(image, ext='png', encode=None):
             raise ImageNotSupported(f'Unsupported file extension "{ext}"')
 
     # Encode
+    image = cvt_color_encode(image)
     ret, buf = cv2.imencode(f'.{ext}', image, encode)
     if not ret:
         raise ImageBroken('cv2.imencode failed')
@@ -274,7 +371,7 @@ def image_encode(image, ext='png', encode=None):
 
 def image_save(image, file, encode=None):
     """
-    Save an image like pillow.
+    Save an image using pure opencv
 
     Args:
         image (np.ndarray):

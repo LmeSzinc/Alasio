@@ -1,0 +1,83 @@
+import os
+
+import cv2
+import numpy as np
+from PIL import Image
+
+from alasio.base.image.imfile import ImageNotSupported, image_channel
+from alasio.ext.path.atomic import replace_tmp, to_tmp_file
+from alasio.ext.path.calc import get_suffix
+
+
+def image_load_pillow(file, area=None):
+    """
+    Load an image using pillow and drop alpha channel.
+    Note that pillow methods are slower than opencv, you should use image_load() in production
+
+    Args:
+        file (str):
+        area (tuple):
+
+    Returns:
+        np.ndarray:
+
+    Raises:
+        FileNotFoundError:
+        ImageBroken:
+    """
+    # read files first and give bytes to pillow would be a little faster
+    image = Image.open(file)
+    if area is not None:
+        image = image.crop(area)
+
+    image = np.array(image)
+
+    if image_channel == 4:
+        image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+
+    return image
+
+
+def image_save_pillow(image, file):
+    """
+    Save an image using pillow
+    Note that:
+        pillow methods are slower than opencv, you should use image_save() in production.
+        if you write files using pillow, libpng will spam warnings when re-reading it
+
+    Args:
+        image (np.ndarray):
+        file (str):
+    """
+    channel = image_channel(image)
+    if channel == 3:
+        mode = 'RGB'
+    elif channel == 0:
+        mode = 'L'
+    elif channel == 4:
+        mode = 'RGBA'
+    else:
+        raise ImageNotSupported(f'shape={image.shape}')
+
+    # encode
+    im = Image.fromarray(image, mode=mode)
+
+    ext = get_suffix(file).lower().lstrip('.')
+    tmp = to_tmp_file(file)
+
+    try:
+        # Write temp file
+        im.save(tmp, format=ext)
+    except FileNotFoundError:
+        pass
+    else:
+        replace_tmp(tmp, file)
+        return
+
+    # Create parent directory
+    directory = os.path.dirname(file)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    # Write again
+    im.save(tmp, format=ext)
+    replace_tmp(tmp, file)
