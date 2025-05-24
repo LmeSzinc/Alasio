@@ -67,7 +67,7 @@ class AssetImage:
         # must match resolution
         size = image_size(image)
         resolution = Const.ASSETS_RESOLUTION
-        if size != resolution:
+        if not Const.ASSETS_TEMPLATE_PREFIX and size != resolution:
             logger.warning(f'{self.file} has wrong resolution: {size}')
             self.valid = False
             return
@@ -76,6 +76,7 @@ class AssetImage:
         # must be an asset, not a full screenshot
         if bbox[0] == 0 and bbox[1] == 0 and bbox[2] == resolution[0] and bbox[3] == resolution[1]:
             self.valid = False
+            logger.warning(f'{self.file} is not cropped')
             return
 
         mean = get_color(image=image, area=bbox)
@@ -178,6 +179,8 @@ class AssetData:
     def load(self):
         for image in self.images:
             image.load()
+            if not image.valid:
+                continue
             self.load_attr(image)
 
     def populate_search(self):

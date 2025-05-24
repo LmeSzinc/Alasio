@@ -88,11 +88,13 @@ class AssetsExtractor:
                 server = path.joinpath(lang)
                 AssetImage.REPO_ROOT = self.root
                 AssetImage.LANG_ROOT = server
-                for file in iter_files(server, ext='.png', recursive=True):
-                    if self.is_assets_file(file):
-                        file = AssetImage(file)
-                        file.lang = lang
-                        yield file
+                for file in iter_files(server, recursive=True):
+                    # ALAS has png and gif
+                    if file.endswith('.png') or file.endswith('.gif'):
+                        if self.is_assets_file(file):
+                            file = AssetImage(file)
+                            file.lang = lang
+                            yield file
 
         return AssetAll(it)
 
@@ -305,11 +307,11 @@ class AssetsExtractor:
         else:
             return False
 
-    def watch_files(self, interval=2):
+    def watch_files(self, include_existing=False, interval=2):
         """
         Watch files and generate on change
         """
-        events = self.watchdog.watch_files(include_existing=False, interval=interval)
+        events = self.watchdog.watch_files(include_existing=include_existing, interval=interval)
         for event in events:
             logger.info(event)
             if self.image_fixup(event):

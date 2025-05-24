@@ -19,6 +19,9 @@ class Const:
     ASSETS_LANG = dict.fromkeys(['cn', 'en', 'jp', 'tw'])
     # valid resolution of assets
     ASSETS_RESOLUTION = (1280, 720)
+    # Whether to have assets with TEMPLATE_ prefix
+    # resolution check will be skipped on templates
+    ASSETS_TEMPLATE_PREFIX = True
     # default pad to calculate assets.search
     # negative value to search a larger area
     ASSETS_SEARCH_PAD = -20
