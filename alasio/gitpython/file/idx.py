@@ -1,7 +1,6 @@
 import hashlib
 import os
 import struct
-from struct import Struct
 
 from alasio.ext.path.atomic import atomic_read_bytes
 from alasio.ext.path.calc import with_suffix
@@ -80,9 +79,8 @@ class IdxFile:
         size = data[1028:1032]
         if not size:
             raise PackBroken(f'Empty idx size')
-        unpack_uint32 = Struct('>I').unpack
         try:
-            size = unpack_uint32(size)[0]
+            size = struct.unpack('>I', size)[0]
         except struct.error as e:
             raise PackBroken(str(e))
 
@@ -95,7 +93,12 @@ class IdxFile:
         if length % 20:
             raise PackBroken('sha1 table length is not multiple of 20')
         # extract memoryview to release the entire file data
-        sha1_list = [table[i:i + 20].hex() for i in range(0, length, 20)]
+        chunks = length // 20
+        try:
+            sha1_list = struct.unpack('20s' * chunks, table)
+        except struct.error as e:
+            raise PackBroken(str(e))
+        sha1_list = [sha1.hex() for sha1 in sha1_list]
 
         # crc table
         # well, we don't need crc
@@ -110,7 +113,10 @@ class IdxFile:
         length = len(table)
         if length % 4:
             raise PackBroken('Length of offset table is not multiple of 4')
-        offset_list = [unpack_uint32(table[i:i + 4])[0] for i in range(0, length, 4)]
+        try:
+            offset_list = struct.unpack(f'>{length // 4}I', table)
+        except struct.error as e:
+            raise PackBroken(str(e))
 
         # large table offset
         large_size = 0
@@ -129,8 +135,10 @@ class IdxFile:
                 raise PackBroken('Length of large offset table is not multiple of 8')
             if length != expect_length:
                 raise PackBroken('Length of large offset table does not match large size')
-            unpack_uint64 = Struct('>Q').unpack
-            large_list = [unpack_uint64(table[i:i + 8])[0] for i in range(0, length, 8)]
+            try:
+                large_list = struct.unpack(f'>{length // 8}Q', table)
+            except struct.error as e:
+                raise PackBroken(str(e))
             try:
                 offset_list = [large_list[i - 2147483648] if i >= 2147483648 else i for i in offset_list]
             except IndexError:
