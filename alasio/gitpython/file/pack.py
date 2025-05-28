@@ -34,7 +34,28 @@ class PackFile(IdxFile):
     def clear_object(self):
         self.dict_object = {}
         self.dict_object_data = {}
-        self.dict_object_lazy = {}
+        self.dict_object_unread = {}
+
+    def read_full(self):
+        """
+        Read the .idx file and entire .pack file, then parse it.
+        """
+        self.idx_read()
+        self.pack_read_full()
+
+    def read_lazy(self, skip_size=None):
+        """
+        Read pack file but skip objects that size > skip_size
+        if object skipped, object will be set into dict_object_lazy
+        otherwise, object will be set into dict_object
+
+        Args:
+            skip_size (int): Default to 1MB.
+                1MB is balanced value that assume reading from HDD of 100MB/s read and 100 IOPS,
+                so read 1MB less file read means we can have 1 more file seek
+        """
+        self.idx_read()
+        self.pack_read_lazy(skip_size=skip_size)
 
     def pack_read_full(self):
         """
@@ -243,6 +264,7 @@ class PackFile(IdxFile):
 
         Args:
             sha1 (list[str], str): sha1 or a list of sha1
+            skip_size (int):
 
         Returns:
             dict[str, GitObject] | GitObject:

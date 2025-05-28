@@ -143,14 +143,10 @@ class GitObjectManager:
 
         # read loose but get result very later
         loose = WORKER_POOL.start_thread_soon(self.loose.loose_read_lazy)
-        # read idx
+        # read pack and idx
         with WORKER_POOL.wait_jobs() as pool:
             for pack in self.dict_pack.values():
-                pool.start_thread_soon(pack.idx_read)
-        # read pack
-        with WORKER_POOL.wait_jobs() as pool:
-            for pack in self.dict_pack.values():
-                pool.start_thread_soon(pack.pack_read_full)
+                pool.start_thread_soon(pack.read_full)
         # get loose result
         loose.get()
 
@@ -175,14 +171,10 @@ class GitObjectManager:
 
         # read loose but get result very later
         loose = WORKER_POOL.start_thread_soon(self.loose.loose_read_lazy)
-        # read idx
+        # read pack and idx
         with WORKER_POOL.wait_jobs() as pool:
             for pack in self.dict_pack.values():
-                pool.start_thread_soon(pack.idx_read)
-        # read pack
-        with WORKER_POOL.wait_jobs() as pool:
-            for pack in self.dict_pack.values():
-                pool.start_thread_soon(pack.pack_read_lazy, skip_size)
+                pool.start_thread_soon(pack.read_lazy, skip_size)
         # get loose result
         loose.get()
 
