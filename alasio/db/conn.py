@@ -1,0 +1,364 @@
+import os
+import sqlite3
+import time
+from threading import Lock
+
+
+class SqlitePoolCursor(sqlite3.Cursor):
+    def __init__(self, conn):
+        """
+        Args:
+            conn (sqlite3.Connection):
+        """
+        super().__init__(conn)
+        # value will be set in SqlitePool.cursor()
+        self.pool: "ConnectionPool" = None
+
+    def __enter__(self):
+        return self
+
+    def close(self):
+        super().close()
+        conn = self.connection
+        pool = self.pool
+        # Update last_visit again as SQL query may take long
+        pool.last_use[conn] = time.time()
+        # Release lock after all poll stuff
+        pool.idle_workers[conn] = None
+        pool.release_full_lock()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def commit(self):
+        """
+        Now you can commit in cursor object
+        """
+        self.connection.commit()
+
+
+class ConnectionPool:
+    def __init__(self, file, pool_size=4):
+        """
+        Args:
+            file (str): Absolute path to sqlite database
+            pool_size: Max connections
+        """
+        self.file = file
+        self.pool_size = pool_size
+        self.last_use: "dict[sqlite3.Connection, float]" = {}
+
+        # Same as WorkerPool, let's just keep the name 'worker'
+        self.idle_workers: "dict[sqlite3.Connection, None]" = {}
+        self.all_workers: "dict[sqlite3.Connection, None]" = {}
+
+        self.notify_worker = Lock()
+        self.notify_worker.acquire()
+        self.notify_pool = Lock()
+        self.notify_pool.acquire()
+
+        self.create_lock = Lock()
+
+    @classmethod
+    def new_conn(cls, file):
+        """
+        Create a connection directly
+        Auto create folder if folder not exists
+
+        Returns:
+            sqlite3.Connection:
+        """
+        try:
+            conn = sqlite3.connect(file, check_same_thread=False)
+            cls.set_conn_pragma(conn)
+            return conn
+        except sqlite3.OperationalError as e:
+            # sqlite3.OperationalError: unable to open database file
+            if str(e) == 'unable to open database file':
+                pass
+            else:
+                raise
+
+        # Create folder
+        folder = os.path.dirname(file)
+        os.makedirs(folder, exist_ok=True)
+
+        conn = sqlite3.connect(file, check_same_thread=False)
+        cls.set_conn_pragma(conn)
+        return conn
+
+    @classmethod
+    def set_conn_pragma(cls, conn):
+        """
+        Set PRAGMA in sqlite
+
+        Args:
+            conn (sqlite3.Connection):
+        """
+        # Alasio uses the default journal_mode which is DELETE,
+        # so users can have one single config file to be copied around
+        # conn.execute('PRAGMA journal_mode=PERSIST')
+        # No sqlite3.Row to reduce convertion to msgspec.Struct
+        # conn.row_factory = sqlite3.Row
+        pass
+
+    def release_full_lock(self):
+        """
+        Call this method if worker finished any job, or exited, or get killed.
+
+        When pool full,
+        Pool tells all workers: any worker finishes his job notify me.
+        `self.notify_worker.release()`
+        Then the pool blocks himself.
+        `self.notify_pool.acquire()`
+        The fastest worker, and also the only worker, receives the message,
+        `if self.notify_worker.acquire(blocking=False):`
+        Worker tells the pool, new pool slot is ready, you are ready to go.
+        `self.notify_pool.release()`
+        """
+        if self.notify_worker.acquire(blocking=False):
+            try:
+                self.notify_pool.release()
+            except RuntimeError:
+                # Race condition when multiple threads trying to get thread worker
+                # They released `notify_worker` but not yet acquire `notify_pool`
+                pass
+
+    def _get_thread_worker(self):
+        """
+        Returns:
+            sqlite3.Connection:
+        """
+        try:
+            worker, _ = self.idle_workers.popitem()
+            # logger.info(f'reuse worker thread: {worker.default_name}')
+            return worker
+        except KeyError:
+            pass
+
+        # Wait if reached max thread
+        # Check without `create_lock` first, otherwise will be 10x slower
+        # if multiple thread trying to get `create_lock`
+        if len(self.all_workers) >= self.pool_size:
+            # See release_full_lock()
+            try:
+                self.notify_worker.release()
+            except RuntimeError:
+                # Race condition when multiple threads trying to get thread worker
+                # It's ok to treat multiple release as one
+                pass
+            while 1:
+                # If any worker finishes within timeout, we can get it
+                # Race condition when all workers just done `release_full_lock` and no one notifies
+                # To handle that, we acquire with timeout and check if there's idle worker
+                self.notify_pool.acquire(timeout=0.01)
+                # Re-acquire `notify_worker` so other workers can
+                # call `release_full_lock` for next `_get_thread_worker`
+                self.notify_worker.acquire(blocking=False)
+                # A worker just idle
+                try:
+                    worker, _ = self.idle_workers.popitem()
+                    return worker
+                except KeyError:
+                    # Race condition when multiple threads trying to get thread worker,
+                    # they all pass through full lock check and pop the only idle worker.
+                    # Just let the slower ones do full lock check again
+                    pass
+                # A thread just existed, pool no longer full
+                if len(self.all_workers) < self.pool_size:
+                    break
+
+        # Create thread with lock
+        with self.create_lock:
+            # Wait if reached max thread
+            # Check without `create_lock` first, otherwise will be 10x slower
+            # if multiple thread trying to get `create_lock`
+            if len(self.all_workers) >= self.pool_size:
+                # See release_full_lock()
+                try:
+                    self.notify_worker.release()
+                except RuntimeError:
+                    # Race condition when multiple threads trying to get thread worker
+                    # It's ok to treat multiple release as one
+                    pass
+                while 1:
+                    # If any worker finishes within timeout, we can get it
+                    # Race condition when all workers just done `release_full_lock` and no one notifies
+                    # To handle that, we acquire with timeout and check if there's idle worker
+                    self.notify_pool.acquire(timeout=0.01)
+                    # Re-acquire `notify_worker` so other workers can
+                    # call `release_full_lock` for next `_get_thread_worker`
+                    self.notify_worker.acquire(blocking=False)
+                    # A worker just idle
+                    try:
+                        worker, _ = self.idle_workers.popitem()
+                        return worker
+                    except KeyError:
+                        # Race condition when multiple threads trying to get thread worker,
+                        # they all pass through full lock check and pop the only idle worker.
+                        # Just let the slower ones do full lock check again
+                        pass
+                    # A thread just existed, pool no longer full
+                    if len(self.all_workers) < self.pool_size:
+                        break
+            else:
+                # A thread just idle while we were waiting for `create_lock`
+                try:
+                    worker, _ = self.idle_workers.popitem()
+                    # logger.info(f'reuse worker thread: {worker.default_name}')
+                    return worker
+                except KeyError:
+                    pass
+            # Create connection
+            worker = self.new_conn(self.file)
+            self.all_workers[worker] = None
+        # logger.info(f'New worker thread: {worker.default_name}')
+        return worker
+
+    def cursor(self):
+        """
+        Returns:
+            SqlitePoolCursor:
+        """
+        conn = self._get_thread_worker()
+        cursor = conn.cursor(SqlitePoolCursor)
+
+        self.last_use[conn] = time.time()
+        cursor.pool = self
+        return cursor
+
+    def gc(self, idle=60):
+        """
+        Close connections that have not been used for more than 60s
+        This method is not thread-safe so there should only be one thread doing gc
+        """
+        with self.create_lock:
+            now = time.time()
+            # List keys first, so we can delete while iterating
+            list_conn = []
+            for conn in self.idle_workers:
+                try:
+                    last_use = self.last_use[conn]
+                except KeyError:
+                    # no last_ues, probably a newly created connection
+                    continue
+                # record idle connections
+                if now - last_use > idle:
+                    list_conn.append(conn)
+
+        for conn in list_conn:
+            # remove from idle_workers, so other threads cannot take it
+            try:
+                del self.idle_workers[conn]
+            except KeyError:
+                # already taken by other thread
+                continue
+            # check idle time again
+            try:
+                last_use = self.last_use[conn]
+            except KeyError:
+                # no last_use, probably a newly created connection
+                # return conn back
+                self.idle_workers[conn] = None
+                continue
+            if now - last_use <= idle:
+                # no longer idle, probably another thread used and renew it
+                # return conn back
+                self.idle_workers[conn] = None
+                continue
+
+            # now we have unique access to connection
+            try:
+                del self.all_workers[conn]
+            except KeyError:
+                # this shouldn't happen
+                pass
+            self.release_full_lock()
+            # close
+            conn.close()
+
+
+class SqlitePool:
+    def __init__(self, pool_size=4):
+        """
+        Args:
+            pool_size (int): Max connections for each database
+        """
+        self.pool_size = pool_size
+
+        self.all_pool: "dict[str, ConnectionPool]" = {}
+        self.create_lock = Lock()
+
+    def get_pool(self, file):
+        """
+        Args:
+            file (str):
+
+        Returns:
+            ConnectionPool:
+        """
+        try:
+            return self.all_pool[file]
+        except KeyError:
+            pass
+
+        # create
+        with self.create_lock:
+            # another thread may have created pool
+            # while current thread was waiting for lock
+            try:
+                return self.all_pool[file]
+            except KeyError:
+                pass
+
+            # create
+            pool = ConnectionPool(file, self.pool_size)
+            self.all_pool[file] = pool
+            return pool
+
+    def cursor(self, file):
+        """
+        Get a cursor to operate sqlite file, with connection reuse
+        costs 2.7us if connection reused
+        costs 129us if create new connection (110us for direct sqlite3.Connection call)
+
+        Args:
+            file (str): Absolute path to database file
+
+        Returns:
+            SqlitePoolCursor:
+
+        Examples:
+            with SQLITE_POOL.cursor(file) as cursor:
+                cursor.execute(...)
+        """
+        pool = self.get_pool(file)
+        return pool.cursor()
+
+    def gc(self, idle=60):
+        """
+        Close connections that have not been used for more than 60s
+        This method is not thread-safe so there should only be one thread doing gc
+        """
+        with self.create_lock:
+            # List pools first, so we can delete while iterating
+            all_pool = list(self.all_pool.items())
+            if not all_pool:
+                return
+
+            for file, pool in all_pool:
+                pool.gc(idle)
+                if pool.all_workers:
+                    # still using
+                    continue
+                # delete pool entry
+                # it just ok to have race condition when another thread taken the pool we are about to delete
+                # that thread will use its old pool, and new requests will have new pool
+                try:
+                    del self.all_pool[file]
+                except KeyError:
+                    # this shouldn't happen
+                    continue
+
+
+SQLITE_POOL = SqlitePool()
