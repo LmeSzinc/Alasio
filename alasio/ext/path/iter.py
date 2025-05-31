@@ -156,19 +156,13 @@ def iter_folders(root, recursive=False, follow_symlinks=False):
         try:
             with os.scandir(root) as entries:
                 for entry in entries:
-                    # Iter folders
-                    try:
-                        if entry.is_dir(follow_symlinks=follow_symlinks):
-                            yield entry.path
-                            continue
-                    except FileNotFoundError:
-                        continue
                     # Iter subdirectories
                     try:
                         is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
                     except FileNotFoundError:
                         continue
                     if is_dir:
+                        yield entry.path
                         yield from iter_folders(entry.path, recursive, follow_symlinks)
                         continue
         except (FileNotFoundError, NotADirectoryError):
