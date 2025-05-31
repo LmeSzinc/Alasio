@@ -588,12 +588,16 @@ def file_remove(file):
 
     Args:
         file (str): File path to remove
+
+    Returns:
+        bool: If removed
     """
     try:
         os.unlink(file)
+        return True
     except FileNotFoundError:
         # If file not exist, just no need to remove
-        pass
+        return False
 
 
 def atomic_remove(file):
@@ -602,6 +606,9 @@ def atomic_remove(file):
 
     Args:
         file (str): File path to remove
+
+    Returns:
+        bool: If success
     """
     if IS_WINDOWS:
         # PermissionError on Windows if another process is replacing
@@ -633,13 +640,12 @@ def folder_rmtree(folder, may_symlinks=True):
             False if you already know it's not a symlink
 
     Returns:
-        bool: If success
+        bool: If removed
     """
     try:
         # If it's a symlinks, unlink it
         if may_symlinks and os.path.islink(folder):
-            file_remove(folder)
-            return True
+            return file_remove(folder)
         # Iter folder
         with os.scandir(folder) as entries:
             for entry in entries:
@@ -656,10 +662,9 @@ def folder_rmtree(folder, may_symlinks=True):
 
     except FileNotFoundError:
         # directory to clean up does not exist, no need to clean up
-        return True
+        return False
     except NotADirectoryError:
-        file_remove(folder)
-        return True
+        return file_remove(folder)
 
     # Remove empty folder
     # May raise OSError if it's still not empty
@@ -667,10 +672,9 @@ def folder_rmtree(folder, may_symlinks=True):
         os.rmdir(folder)
         return True
     except FileNotFoundError:
-        return True
+        return False
     except NotADirectoryError:
-        file_remove(folder)
-        return True
+        return file_remove(folder)
     except OSError:
         return False
 
@@ -683,14 +687,17 @@ def atomic_rmtree(folder):
 
     Args:
         folder (str): Folder path to remove
+
+    Returns:
+        bool: If success
     """
     tmp = to_tmp_file(folder)
     try:
         atomic_replace(folder, tmp)
     except FileNotFoundError:
         # Folder not exist, no need to rmtree
-        return
-    folder_rmtree(tmp)
+        return False
+    return folder_rmtree(tmp)
 
 
 def atomic_failure_cleanup(folder, recursive=False):
