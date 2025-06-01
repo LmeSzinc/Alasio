@@ -383,7 +383,7 @@ def image_save(image, file, encode=None):
     atomic_write(file, data)
 
 
-def image_fixup(file: str):
+def image_fixup(file, need_crop=False):
     """
     Save image using opencv again, making it smaller and shutting up libpng
     libpng warning: iCCP: known incorrect sRGB profile
@@ -392,6 +392,7 @@ def image_fixup(file: str):
 
     Args:
         file (str):
+        need_crop (bool): True to fixup cropped only and ignore full screenshots
 
     Returns:
         bool: If file changed
@@ -415,6 +416,16 @@ def image_fixup(file: str):
     except ImageBroken:
         # Ignore error because truncated image don't need fixup
         return False
+
+    if need_crop:
+        from alasio.base.image.draw import get_bbox
+        try:
+            bbox = get_bbox(image)
+        except ImageNotSupported:
+            return False
+        w, h = image_size(image)
+        if bbox == (0, 0, w, h):
+            return False
 
     # image_save
     try:

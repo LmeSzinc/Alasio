@@ -301,7 +301,7 @@ class AssetsExtractor:
         if not self.is_assets_file(file):
             return False
         # fixup
-        if image_fixup(file):
+        if image_fixup(file, need_crop=True):
             logger.info(f'Fixup image: {file}')
             return True
         else:
