@@ -253,7 +253,13 @@ class AssetMultilang:
 
     @cached_property
     def has_share(self):
-        return 'share' in self.dict_lang_frame
+        try:
+            if self.dict_lang_frame['share']:
+                return True
+            else:
+                return False
+        except KeyError:
+            return False
 
     def populate_attr_from_first_frame(self):
         """

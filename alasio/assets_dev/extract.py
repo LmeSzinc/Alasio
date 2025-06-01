@@ -117,19 +117,20 @@ class AssetsExtractor:
             gen (CodeGen):
             asset (AssetMultilang):
         """
-        valid_lang = [lang for lang in Const.ASSETS_LANG if lang != 'share']
         with gen.Object(name=asset.asset, cls='ButtonWrapper'):
             gen.Var(name='name', value=asset.asset)
-            # if assets has shared images, language specific images are optional
-            # if assets don't have, all language specific images should present,
-            #   otherwise we leave a None there to notify maintainers
-            if asset.has_share:
-                list_lang = asset.dict_lang_frame
-            else:
-                list_lang = valid_lang
             # iter language
-            for lang in list_lang:
-                dict_frame = asset.dict_lang_frame.get(lang, {})
+            for lang, dict_frame in asset.dict_lang_frame.items():
+                # if assets has shared images, language specific images are optional
+                # if assets don't have, all language specific images should present,
+                #   otherwise we leave a None there to notify maintainers
+                if asset.has_share:
+                    if not dict_frame:
+                        continue
+                else:
+                    if lang == 'share':
+                        continue
+                # gen language assets
                 count = len(dict_frame)
                 if count == 1:
                     # only one frame
