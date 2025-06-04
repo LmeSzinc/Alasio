@@ -28,12 +28,16 @@ class ModEntryBase:
 
         # data of gui.index.json
         # key: {aside}.{display_group}.{display_flatten}
-        #     {display_group} startswith "g_" and {display_flatten} startswith "f_"
-        # value: {'task': task, 'file': gui_file, 'path': path}
+        # value:
+        #     - group_file, for basic group, task_name is display_group
+        #     - {'task': task_name, 'file': group_file}, if display group from another task
         self.gui_index = {}
         # data of tasks.index.json
         # key: {task_name}.{group_name}
-        # value: {'file': file, 'cls': class_name}
+        # value:
+        #     - file, for basic group, class_name is group_name
+        #     - {'file': file, 'cls': class_name}, if group override
+        #     - {'task': task_name}, if reference a group from another task
         self.model_index = {}
         # All {aside}_gui.json
         # key: {filepath}.{group}.{arg}
@@ -83,11 +87,14 @@ class ModEntryBase:
         """
         data = {}
         for ref in deep_values(self.gui_index, depth=3):
-            # reference should have 'file'
-            try:
-                file = ref['file']
-            except KeyError:
-                continue
+            # reference should be the file itself or have 'file'
+            if type(ref) is dict:
+                try:
+                    file = ref['file']
+                except KeyError:
+                    continue
+            else:
+                file = ref
             data[file] = object
         return data
 
@@ -102,11 +109,14 @@ class ModEntryBase:
         """
         data = {}
         for ref in deep_values(self.model_index, depth=2):
-            # reference should have 'file'
-            try:
-                file = ref['file']
-            except KeyError:
-                continue
+            # reference should be the file itself or have 'file'
+            if type(ref) is dict:
+                try:
+                    file = ref['file']
+                except KeyError:
+                    continue
+            else:
+                file = ref
             data[file] = object
         return data
 
@@ -117,8 +127,8 @@ class ModEntryBase:
         """
         if not path:
             return
-        path = self.root.joinpath(path)
-        data = read_msgspec(path)
+        file = self.root.joinpath(path)
+        data = read_msgspec(file)
         self.dict_gui[path] = data
 
     def load_model_py(self, path):
@@ -128,9 +138,9 @@ class ModEntryBase:
         """
         if not path:
             return
-        path = self.root.joinpath(path)
+        file = self.root.joinpath(path)
         try:
-            module = loadpy(path)
+            module = loadpy(file)
         except ImportError as e:
             logger.exception(e)
             return

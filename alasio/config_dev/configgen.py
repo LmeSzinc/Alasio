@@ -1,6 +1,6 @@
 from alasio.config_dev.parse import DefinitionError, ParseConfig
 from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_set
+from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import write_json
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import is_abspath
@@ -123,9 +123,12 @@ class ConfigGen:
         model data in model.index.json
 
         Returns:
-             dict[str, dict[str, dict[str, str]]]:
+             dict[str, dict[str, str | dict[str, str]]]:
                 key: {task_name}.{group_name}
-                value: {'file': file, 'cls': class_name}
+                value:
+                    - file, for basic group, class_name is group_name
+                    - {'file': file, 'cls': class_name}, if group override
+                    - {'task': task_name}, if reference a group from another task
         """
         out = {}
         for file, config in self.dict_config.items():
@@ -137,17 +140,35 @@ class ConfigGen:
                         file=config.tasks_file,
                         keys=task_name,
                     )
-                for group_name in task_data.group:
-                    # group ref
+                for group in task_data.group:
+                    # check if group exists
                     try:
-                        ref = self.dict_group_ref[group_name]
+                        ref = self.dict_group_ref[group.group]
                     except KeyError:
                         raise DefinitionError(
-                            f'Group ref "{group_name}" of task "{task_name}" does not exist',
+                            f'Group ref "{group.group}" of task "{task_name}" does not exist',
                             file=config.tasks_file,
                             keys=[task_name, 'group']
                         )
-                    deep_set(out, [task_name, group_name], ref)
+                    if group.task:
+                        # reference {task_ref}.{group}
+                        ref = {'task': group.task}
+                        deep_set(out, [task_name, group.group], ref)
+                    else:
+                        # reference a group
+                        if ref['cls'] == group.group:
+                            # class name is the same as group name
+                            ref = ref['file']
+                        deep_set(out, [task_name, group.group], ref)
+
+        # check if {task_ref}.{group} reference has corresponding value
+        for _, group, ref in deep_iter_depth2(out):
+            if 'task' in ref:
+                task = ref["task"]
+                if not deep_exist(out, [task, group]):
+                    raise DefinitionError(
+                        f'Cross-task ref has no corresponding value: {task}.{group}',
+                    )
 
         return out
 
@@ -157,7 +178,7 @@ class ConfigGen:
 
     @cached_property
     def gui_file(self):
-        # {index_path}/tasks.index.json
+        # {index_path}/gui.index.json
         return self.index_path.joinpath('gui.index.json')
 
     @cached_property
@@ -196,10 +217,11 @@ class ConfigGen:
         gui data in gui.index.json
 
         Returns:
-            dict[str, dict[str, dict[str, dict[str, str]]]]:
+            dict[str, dict[str, dict[str, str | dict[str, str]]]]:
                 key: {aside}.{display_group}.{display_flatten}
-                    {display_group} startswith "g_" and {display_flatten} startswith "f_"
-                value: {'task': task, 'file': gui_file, 'path': path}
+                value:
+                    - group_file, for basic group, task_name is display_group
+                    - {'task': task_name, 'file': group_file}, if display group from another task
         """
         out = {}
         for file, config in self.dict_config.items():
@@ -213,11 +235,15 @@ class ConfigGen:
             for task_name, task in config.tasks_data.items():
                 for display_group in task.display:
                     for group in display_group:
-                        group_file = self.dict_group2file[group]
-                        data = {'task': task_name, 'group': group, 'file': group_file}
-
+                        group_file = self.dict_group2file[group.group]
+                        if group.task and group.task != task_name:
+                            # display group from another task
+                            data = {'task': task_name, 'file': group_file}
+                        else:
+                            # display group from current task
+                            data = group_file
                         # set
-                        keys = [aside, f'g_{task_name}', f'f_{group}']
+                        keys = [aside, task_name, group.group]
                         deep_set(out, keys=keys, value=data)
 
         return out

@@ -10,6 +10,27 @@ from alasio.ext.path import PathStr
 from .parse_args import DefinitionError
 
 
+class TaskGroup(msgspec.Struct):
+    # A wrapper for group reference "{group}" and "{task_ref}.{group}"
+    task: str
+    group: str
+
+    @classmethod
+    def from_str(cls, task_group: str) -> "TaskGroup":
+        """
+        Convert "{group}" and "{task_ref}.{group}" to TaskGroup object
+        """
+        if '.' in task_group:
+            task, _, group = task_group.rpartition('.')
+            return TaskGroup(task=task, group=group)
+        else:
+            return TaskGroup(task='', group=task_group)
+
+    @classmethod
+    def from_liststr(cls, list_groups: "list[str]") -> "list[TaskGroup]":
+        return [cls.from_str(str(g)) for g in list_groups]
+
+
 def populate_task(value: dict) -> dict:
     """
     Populate shortened task definition
@@ -20,7 +41,14 @@ def populate_task(value: dict) -> dict:
     # group
     group = value.get('group', [])
     if type(group) is list:
-        group = [f'{g}' for g in group]
+        # yaml has dynamic type, we need all in string
+        group = TaskGroup.from_liststr(group)
+        # check if group is unique
+        visited = set()
+        for g in group:
+            if g.group in visited:
+                raise DefinitionError(f'Duplicate group at "{g}"')
+            visited.add(g.group)
     else:
         raise DefinitionError('Not a list')
     value['group'] = group
@@ -35,7 +63,8 @@ def populate_task(value: dict) -> dict:
     elif type(display) is list:
         # populate simple list to nested list
         if display:
-            display = [d if type(d) is list else [str(d)] for d in display]
+            display = [TaskGroup.from_liststr(d) if type(d) is list else TaskGroup.from_liststr([str(d)])
+                       for d in display]
         else:
             # Allow empty display, probably an internal task
             pass
@@ -48,11 +77,11 @@ def populate_task(value: dict) -> dict:
 
 class TaskData(Struct):
     # List of arg groups in this task
-    group: List[str] = field(default_factory=list)
+    group: List[TaskGroup] = field(default_factory=list)
     # Groups to display on GUI
     # Groups in the outer list will be displayed as standalone groups.
     # Groups in the inner list will be flattened into one group.
-    display: List[List[str]] = field(default_factory=list)
+    display: List[List[TaskGroup]] = field(default_factory=list)
 
 
 class ParseTasks:
