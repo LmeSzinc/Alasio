@@ -67,7 +67,7 @@ def loadpy(file):
         else:
             raise
     except Exception as e:
-        raise ImportError(f'Could not load file {file}') from e
+        raise ImportError(f'Could not load file "{file}"') from e
 
     return module
 
