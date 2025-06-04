@@ -113,9 +113,10 @@ def is_abspath(path: str) -> bool:
     A simplified os.path.isabs()
     """
     if WINDOWS_SEP:
-        if len(path) >= 2:
+        try:
             return path[1] == ':'
-        return False
+        except IndexError:
+            return False
     else:
         return path.startswith('/')
 
@@ -189,8 +190,11 @@ def get_name(path: str) -> str:
     /abc/def     -> def
     /abc/.git    -> .git
     """
-    _, _, name = path.rpartition(os.sep)
-    return name
+    if '/' in path:
+        _, _, path = path.rpartition('/')
+    if '\\' in path:
+        _, _, path = path.rpartition('\\')
+    return path
 
 
 def get_stem(path: str) -> str:
@@ -199,12 +203,15 @@ def get_stem(path: str) -> str:
     /abc/def     -> def
     /abc/.git    -> ""
     """
-    _, _, name = path.rpartition(os.sep)
-    stem, dot, _ = name.rpartition('.')
+    if '/' in path:
+        _, _, path = path.rpartition('/')
+    if '\\' in path:
+        _, _, path = path.rpartition('\\')
+    stem, dot, _ = path.rpartition('.')
     if dot:
         return stem
     else:
-        return name
+        return path
 
 
 def get_rootstem(path: str) -> str:
@@ -214,12 +221,15 @@ def get_rootstem(path: str) -> str:
     /abc/def     -> def
     /abc/.git    -> ""
     """
-    _, _, name = path.rpartition(os.sep)
-    stem, dot, _ = name.partition('.')
+    if '/' in path:
+        _, _, path = path.rpartition('/')
+    if '\\' in path:
+        _, _, path = path.rpartition('\\')
+    stem, dot, _ = path.partition('.')
     if dot:
         return stem
     else:
-        return name
+        return path
 
 
 def get_suffix(path: str) -> str:
@@ -228,12 +238,14 @@ def get_suffix(path: str) -> str:
     /abc/def     -> ""
     /abc/.git    -> .git
     """
-    _, _, name = path.rpartition(os.sep)
-    _, dot, suffix = name.rpartition('.')
+    path, dot, suffix = path.rpartition('.')
     if dot:
         return dot + suffix
-    else:
-        return ''
+    if '/' in path:
+        _, _, path = path.rpartition('/')
+    if '\\' in path:
+        _, _, path = path.rpartition('\\')
+    return path
 
 
 def get_multisuffix(path: str) -> str:
@@ -243,8 +255,11 @@ def get_multisuffix(path: str) -> str:
     /abc/def     -> ""
     /abc/.git    -> .git
     """
-    _, _, name = path.rpartition(os.sep)
-    _, dot, suffix = name.partition('.')
+    if '/' in path:
+        _, _, path = path.rpartition('/')
+    if '\\' in path:
+        _, _, path = path.rpartition('\\')
+    _, dot, suffix = path.partition('.')
     if dot:
         return dot + suffix
     else:
