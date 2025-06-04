@@ -154,10 +154,9 @@ class ParseConfig(ParseArgs, ParseTasks):
         data for {aside}_gui.json
 
         Returns:
-            dict[str, dict[str, Any]]:
-                <group_name>:
-                    <arg_name>:
-                        populated ArgData with i18n and i18n_option
+            dict[str, dict[str, ArgData]]:
+                key: {group_name}.{arg_name}
+                value: ArgData, that populated with i18n and i18n_option
         """
         _ = self._gui_old
         new = {}

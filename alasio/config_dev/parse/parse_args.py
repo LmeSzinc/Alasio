@@ -235,9 +235,8 @@ class ParseArgs:
 
         Returns:
             dict[str, dict[str, ArgData]]:
-                <group_name>:
-                    <arg_name>:
-                        ArgsData
+                key: {group_name}.{arg_name}
+                value: ArgsData
         """
         output = {}
         data = read_yaml(self.file)

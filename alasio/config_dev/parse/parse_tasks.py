@@ -16,11 +16,33 @@ def populate_task(value: dict) -> dict:
     """
     if type(value) is not dict:
         raise DefinitionError('Not a dict')
-    # populate simple list to nested list
+
+    # group
+    group = value.get('group', [])
+    if type(group) is list:
+        group = [f'{g}' for g in group]
+    else:
+        raise DefinitionError('Not a list')
+    value['group'] = group
+
+    # display
     display = value.get('display', [])
-    if display:
-        display = [d if type(d) is list else [str(d)] for d in display]
-        value['display'] = display
+    # convert display="flatten" and display="group"
+    if display == 'group':
+        display = [group]
+    elif display == 'flatten':
+        display = [[g] for g in group]
+    elif type(display) is list:
+        # populate simple list to nested list
+        if display:
+            display = [d if type(d) is list else [str(d)] for d in display]
+        else:
+            # Allow empty display, probably an internal task
+            pass
+    else:
+        raise DefinitionError('display should be "flatten" or "group" or a list of groups')
+    value['display'] = display
+
     return value
 
 
@@ -49,8 +71,8 @@ class ParseTasks:
 
         Returns:
             dict[str, TaskData]:
-                <task_name>:
-                    TaskData
+                key: {task_name}
+                value: TaskData
         """
         output = {}
         data = read_yaml(self.tasks_file)

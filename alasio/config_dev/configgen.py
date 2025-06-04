@@ -1,5 +1,4 @@
 from alasio.config_dev.parse import DefinitionError, ParseConfig
-from alasio.config_dev.tasks_model import TaskRefModel
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_set
 from alasio.ext.file.jsonfile import write_json
@@ -64,24 +63,36 @@ class ConfigGen:
         All yaml parser objects
 
         Returns:
-            dict[PathStr, ParseConfig]: key: filepath, value: parser
+            dict[PathStr, ParseConfig]:
+                key: filepath
+                value: parser
         """
         dict_parser = {}
         for path in self.config_path:
             for file in iter_files(path, ext='.args.yaml', recursive=True):
-                parser = ParseConfig(PathStr(file))
+                file = PathStr(file)
+                parser = ParseConfig(file)
                 dict_parser[file] = parser
         return dict_parser
+
+    """
+    {index_path}/tasks.index.json
+    """
+
+    @cached_property
+    def model_index_file(self):
+        # {index_path}/model.index.json
+        return self.index_path.joinpath('model.index.json')
 
     @cached_property
     def dict_group_ref(self):
         """
+        convert group name to where the msgspec model class is defined
+
         Returns:
             dict[str, dict[str, str]]:
-                # where the msgspec model class is defined
-                <group_name>:
-                    # {'file': file, 'cls': class_name}
-                    GroupModelRef
+                key: {group_name}
+                value: {'file': file, 'cls': class_name}
         """
         out = {}
         for file, config in self.dict_config.items():
@@ -107,15 +118,14 @@ class ConfigGen:
         return out
 
     @cached_property
-    def tasks_data(self) -> TaskRefModel:
+    def model_index(self):
         """
-        tasks data to be merged into global task.index.json
+        model data in model.index.json
 
         Returns:
-            TaskRefModel:
-                <task_name>:
-                    <group_name>:
-                        GroupModelRef
+             dict[str, dict[str, dict[str, str]]]:
+                key: {task_name}.{group_name}
+                value: {'file': file, 'cls': class_name}
         """
         out = {}
         for file, config in self.dict_config.items():
@@ -141,10 +151,80 @@ class ConfigGen:
 
         return out
 
+    """
+    {index_path}/gui.index.json
+    """
+
     @cached_property
-    def tasks_file(self):
+    def gui_file(self):
         # {index_path}/tasks.index.json
-        return self.index_path.joinpath('tasks.index.json')
+        return self.index_path.joinpath('gui.index.json')
+
+    @cached_property
+    def dict_group2file(self):
+        """
+        Convert group name to {aside}.gui.json to read
+
+        Returns:
+            dict[str, str]:
+                key: {group_name}
+                value: relative path to {aside}.gui.json
+        """
+        out = {}
+        for file, config in self.dict_config.items():
+            # calculate module file
+            file = config.gui_file.subpath_to(self.root).replace('\\', '/')
+            if file == config.model_file:
+                raise DefinitionError(
+                    f'gui_file is not a subpath of root, model_file={config.gui_file}, root={self.root}')
+            # iter group models
+            for group_name in config.gui.keys():
+                # group must be unique
+                if group_name in out:
+                    raise DefinitionError(
+                        f'Duplicate group name: {group_name}',
+                        file=config.tasks_file,
+                        keys=group_name,
+                    )
+                out[group_name] = file
+
+        return out
+
+    @cached_property
+    def gui_index(self):
+        """
+        gui data in gui.index.json
+
+        Returns:
+            dict[str, dict[str, dict[str, dict[str, str]]]]:
+                key: {aside}.{display_group}.{display_flatten}
+                    {display_group} startswith "g_" and {display_flatten} startswith "f_"
+                value: {'task': task, 'file': gui_file, 'path': path}
+        """
+        out = {}
+        for file, config in self.dict_config.items():
+            # aside
+            aside = file.rootstem
+            if aside in out:
+                raise DefinitionError(
+                    f'Duplicate aside name: {aside}',
+                    file=file,
+                )
+            for task_name, task in config.tasks_data.items():
+                for display_group in task.display:
+                    for group in display_group:
+                        group_file = self.dict_group2file[group]
+                        data = {'task': task_name, 'group': group, 'file': group_file}
+
+                        # set
+                        keys = [aside, f'g_{task_name}', f'f_{group}']
+                        deep_set(out, keys=keys, value=data)
+
+        return out
+
+    """
+    generate
+    """
 
     def generate(self):
         self._path_check()
@@ -154,10 +234,16 @@ class ConfigGen:
             parser.write()
 
         # tasks.index.json
-        if self.tasks_data:
-            op = write_json(self.tasks_file, self.tasks_data, skip_same=True)
+        if self.model_index:
+            op = write_json(self.model_index_file, self.model_index, skip_same=True)
             if op:
-                logger.info(f'Write file {self.tasks_file}')
+                logger.info(f'Write file {self.model_index_file}')
+
+        # gui.index.json
+        if self.model_index:
+            op = write_json(self.gui_file, self.gui_index, skip_same=True)
+            if op:
+                logger.info(f'Write file {self.gui_file}')
 
 
 if __name__ == '__main__':
