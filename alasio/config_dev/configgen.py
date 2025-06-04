@@ -101,7 +101,7 @@ class ConfigGen:
             if file == config.model_file:
                 raise DefinitionError(
                     f'model_file is not a subpath of root, model_file={config.model_file}, root={self.root}')
-            file = file.to_python_import()
+            file = file.to_posix()
             # iter group models
             for group_name, class_name in config.dict_group2class.items():
                 # group must be unique

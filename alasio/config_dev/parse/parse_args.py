@@ -31,13 +31,13 @@ TYPE_ARG_TO_PYTHON = {
     # select
     'dropdown': 'str',
     'radio': 'str',
-    'multi-dropdown': 't.List[str]',
-    'multi-radio': 't.List[str]',
+    'multi-dropdown': 't.Tuple[str]',
+    'multi-radio': 't.Tuple[str]',
     # datatime
     'datetime': 'datetime',
     # filter
-    'filter': 't.List[str]',
-    'filter-order': 't.List[str]',
+    'filter': 't.Tuple[str]',
+    'filter-order': 't.Tuple[str]',
 }
 TYPE_ARG_LITERAL = {
     'dropdown', 'radio', 'multi-dropdown', 'multi-radio',
@@ -157,7 +157,7 @@ class ArgData(Struct, omit_defaults=True):
             self.default = default.replace(tzinfo=timezone.utc)
         # Split filters
         if self.dt in TYPE_ARG_LIST and vtype is str:
-            self.default = [s.strip() for s in default.split('>')]
+            self.default = tuple(s.strip() for s in default.split('>'))
         return self
 
     def to_dict(self) -> dict:
