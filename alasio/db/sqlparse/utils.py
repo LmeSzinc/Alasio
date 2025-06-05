@@ -5,6 +5,7 @@ class State:
     IN_SINGLE_QUOTE_STRING = 4
     IN_DOUBLE_QUOTE_STRING = 5  # MySQL and some other DBs use " for strings too
     IN_BACKTICK_IDENTIFIER = 6  # For MySQL `identifier`
+    IN_BRACKET_IDENTIFIER = 7  # SQL server [Column Name]
 
 
 def first_paren_content(string, balance=0):
@@ -68,6 +69,8 @@ def first_token(string):
                 state = State.IN_DOUBLE_QUOTE_STRING
             elif char == '`':
                 state = State.IN_BACKTICK_IDENTIFIER
+            elif char == '[':
+                state = State.IN_BRACKET_IDENTIFIER
             elif char in ' \t\r\n':
                 # first space
                 end_index = index
@@ -86,6 +89,10 @@ def first_token(string):
         elif state == State.IN_BACKTICK_IDENTIFIER:
             # Backtick ends the identifier state
             if char == '`':
+                state = State.NORMAL
+
+        elif state == State.IN_BRACKET_IDENTIFIER:
+            if char == ']':
                 state = State.NORMAL
 
     # if no space found string[:0] will still return an empty string
