@@ -1,13 +1,6 @@
 from collections import deque
 
-
-class State:
-    NORMAL = 1
-    SINGLE_LINE_COMMENT = 2
-    MULTI_LINE_COMMENT = 3
-    IN_SINGLE_QUOTE_STRING = 4
-    IN_DOUBLE_QUOTE_STRING = 5  # MySQL and some other DBs use " for strings too
-    IN_BACKTICK_IDENTIFIER = 6  # For MySQL `identifier`
+from alasio.db.sqlparse.utils import State
 
 
 def remove_comment(sql):
@@ -86,45 +79,17 @@ def remove_comment(sql):
         elif current_state == State.IN_SINGLE_QUOTE_STRING:
             result.append(char)
             if char == "'":
-                # Handle escaped single quotes like 'O''Reilly'
-                try:
-                    next_char = sql[i + 1]
-                except IndexError:
-                    next_char = ''
-                if next_char == "'":
-                    result.append(next_char)
-                    i += 1  # Consume the escaped quote
-                else:
-                    current_state = State.NORMAL
+                current_state = State.NORMAL
 
         elif current_state == State.IN_DOUBLE_QUOTE_STRING:
             result.append(char)
             if char == '"':
-                # Handle escaped double quotes "ident""ifier" (SQL standard)
-                # or "string\"" (some dialects, less common in SQL for strings)
-                try:
-                    next_char = sql[i + 1]
-                except IndexError:
-                    next_char = ''
-                if next_char == '"':
-                    result.append(next_char)
-                    i += 1
-                else:
-                    current_state = State.NORMAL
+                current_state = State.NORMAL
 
         elif current_state == State.IN_BACKTICK_IDENTIFIER:
             result.append(char)
             if char == '`':
-                # Handle escaped backticks like `ident``ifier`
-                try:
-                    next_char = sql[i + 1]
-                except IndexError:
-                    next_char = ''
-                if next_char == '`':
-                    result.append(next_char)
-                    i += 1  # Consume the escaped backtick
-                else:
-                    current_state = State.NORMAL
+                current_state = State.NORMAL
 
         i += 1
 

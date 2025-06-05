@@ -1,4 +1,4 @@
-from alasio.db.sqlparse.comment import State
+from alasio.db.sqlparse.utils import State, first_paren_content
 
 
 def extract_create_table(sql):
@@ -41,33 +41,11 @@ def extract_create_table(sql):
     index += len(before) + 1
 
     # We've found one opening parenthesis
-    balance = 1
-
-    # 4. Iterate from after the opening parenthesis *in the original 'sql' string*
-    #    to find the matching closing parenthesis. This ensures we respect the
-    #    original casing when we eventually slice the content.
-    #    The balancing logic must operate on the original string to correctly handle
-    #    parentheses within quoted identifiers or string literals if they were to be
-    #    made case-sensitive (though standard SQL quotes are not).
-    #    For simple parenthesis balancing, using the original string is robust.
     sql = sql[index:]
-    end_index = -1
-    for i, char in enumerate(sql):
-        if char == '(':
-            balance += 1
-        elif char == ')':
-            balance -= 1
-            if balance == 0:
-                # Matching closing parenthesis found
-                end_index = i
-                break
-
-    if end_index == -1:
-        # No matching closing parenthesis found for the block
-        return ''
+    sql = first_paren_content(sql, balance=1)
 
     # Return the content, preserving original casing, and stripped of outer whitespace.
-    return sql[:end_index].strip()
+    return sql.strip()
 
 
 def iter_create_table(sql):
