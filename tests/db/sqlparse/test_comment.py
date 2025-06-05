@@ -1,6 +1,6 @@
 import pytest
 
-from alasio.db.sqlparse.sqlparse import remove_comment
+from alasio.db.sqlparse.comment import remove_comment
 
 sql_complex_mysql_input = """
 SELECT
