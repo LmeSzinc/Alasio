@@ -65,6 +65,10 @@ class AlasioTable:
     CREATE_TABLE = ''
     # msgspec model of the table row
     # You need to ensure MODEL matches the schema in CREATE_TABLE
+    # Note that you should define like:
+    #   MODEL = ConfigTable
+    # instead of
+    #   MODEL: ConfigTable
     MODEL: Type[T_model]
 
     def __init__(self, file: str):
@@ -129,11 +133,89 @@ class AlasioTable:
         conditions = ' AND '.join(conditions)
         return conditions
 
-    def select(self, _cursor_=None, **kwargs) -> "list[T_model]":
+    @staticmethod
+    def sql_expr_groupby(fields):
+        """
+        Args:
+            fields (str | list[str] | tuple[str]):
+
+        Returns:
+            str: GROUP BY "field1","field2"
+        """
+        if isinstance(fields, str):
+            sql = f'"{fields}"'
+        else:
+            sql = ','.join([f'"{k}"' for k in fields])
+        return f' GROUP BY {sql}'
+
+    @staticmethod
+    def sql_expr_orderby(fields, asc=True):
+        """
+        Args:
+            fields (str | list[str] | tuple[str]):
+            asc (bool): True for ASC, False for DESC
+
+        Returns:
+            str: ORDER BY "field1","field2"
+                ORDER BY "field1","field2" DESC
+        """
+        if isinstance(fields, str):
+            sql = f'"{fields}"'
+        else:
+            sql = ','.join([f'"{k}"' for k in fields])
+        if asc:
+            return f' ORDER BY {sql}'
+        else:
+            return f' ORDER BY {sql} DESC'
+
+    def sql_select_expr(self, sql='', _groupby_='', _orderby_='', _orderby_desc_='', _limit_=0, _offset_=0):
+        """
+        Args:
+            sql (str): Prev SQL
+            _groupby_ (str | list[str] | tuple[str]):
+            _orderby_ (str | list[str] | tuple[str]):
+            _orderby_desc_ (str | list[str] | tuple[str]):
+            _limit_ (int):
+            _offset_ (int):
+
+        Returns:
+            str: ` GROUP BY "field1","field2" ORDER BY "field1","field2" LIMIT 3 OFFSET 3`
+        """
+        if _groupby_:
+            sql += self.sql_expr_groupby(_groupby_)
+        if _orderby_:
+            sql += self.sql_expr_orderby(_orderby_)
+        elif _orderby_desc_:
+            sql += self.sql_expr_orderby(_orderby_desc_, asc=False)
+        if _limit_ > 0:
+            sql += f' LIMIT {_limit_}'
+        if _offset_ > 0:
+            sql += f' OFFSET {_offset_}'
+        return sql
+
+    def select(
+            self,
+            _cursor_=None,
+            _groupby_='',
+            _orderby_='',
+            _orderby_desc_='',
+            _limit_=0,
+            _offset_=0,
+            **kwargs
+    ) -> "list[T_model]":
         """
         Query table in a pythonic way
         Equivalent to:
             SELECT * FROM {table_name} WHERE key1=value1 AND ...
+
+        Args:
+            _cursor_ (SqlitePoolCursor | None): to reuse cursor
+            _groupby_ (str | list[str] | tuple[str]):
+            _orderby_ (str | list[str] | tuple[str]):
+            _orderby_desc_ (str | list[str] | tuple[str]):
+            _limit_ (int):
+            _offset_ (int):
+            **kwargs: Anything to query
 
         Examples:
             rows = table.select(task='Main')
@@ -141,31 +223,62 @@ class AlasioTable:
         if kwargs:
             conditions = self.sql_select_kwargs_to_condition(kwargs)
             sql = f'SELECT * FROM "{self.TABLE_NAME}" WHERE {conditions}'
+            sql = self.sql_select_expr(
+                sql, _groupby_=_groupby_, _orderby_=_orderby_, _orderby_desc_=_orderby_desc_,
+                _limit_=_limit_, _offset_=_offset_)
             with self.cursor() as c:
                 c.execute(sql, kwargs)
                 result = c.fetchall()
         else:
             sql = f'SELECT * FROM "{self.TABLE_NAME}"'
+            sql = self.sql_select_expr(
+                sql, _groupby_=_groupby_, _orderby_=_orderby_, _orderby_desc_=_orderby_desc_,
+                _limit_=_limit_, _offset_=_offset_)
             with self.cursor() as c:
                 c.execute(sql)
                 result = c.fetchall()
 
         # convert to msgspec model
-        result = [self.MODEL(*row) for row in result]
+        try:
+            model = self.MODEL
+        except AttributeError:
+            raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no MODEL defined')
+        result = [model(*row) for row in result]
         return result
 
-    def select_first(self, _cursor_: "SqlitePoolCursor | None" = None, **kwargs) -> "T_model | None":
+    def select_one(
+            self,
+            _cursor_=None,
+            _groupby_='',
+            _orderby_='',
+            _orderby_desc_='',
+            _offset_=0,
+            **kwargs
+    ) -> "T_model | None":
         """
         Query table in a pythonic way
+        Return one row of data, or None if not found
+
         Equivalent to:
             SELECT * FROM {table_name} WHERE key1=value1 AND ... LIMIT 1
 
+        Args:
+            _cursor_ (SqlitePoolCursor | None): to reuse cursor
+            _groupby_ (str | list[str] | tuple[str]):
+            _orderby_ (str | list[str] | tuple[str]):
+            _orderby_desc_ (str | list[str] | tuple[str]):
+            _offset_ (int):
+            **kwargs: Anything to query
+
         Examples:
-            rows = table.select_first(value=1)
+            row = table.select_first(task='Main')
         """
         if kwargs:
             conditions = self.sql_select_kwargs_to_condition(kwargs)
-            sql = f'SELECT * FROM "{self.TABLE_NAME}" WHERE {conditions} LIMIT 1'
+            sql = f'SELECT * FROM "{self.TABLE_NAME}" WHERE {conditions}'
+            sql = self.sql_select_expr(
+                sql, _groupby_=_groupby_, _orderby_=_orderby_, _orderby_desc_=_orderby_desc_,
+                _limit_=1, _offset_=_offset_)
             if _cursor_ is None:
                 with self.cursor() as c:
                     c.execute(sql, kwargs)
@@ -174,7 +287,10 @@ class AlasioTable:
                 _cursor_.execute(sql, kwargs)
                 result = _cursor_.fetchone()
         else:
-            sql = f'SELECT * FROM "{self.TABLE_NAME}" LIMIT 1'
+            sql = f'SELECT * FROM "{self.TABLE_NAME}"'
+            sql = self.sql_select_expr(
+                sql, _groupby_=_groupby_, _orderby_=_orderby_, _orderby_desc_=_orderby_desc_,
+                _limit_=1, _offset_=_offset_)
             if _cursor_ is None:
                 with self.cursor() as c:
                     c.execute(sql)
@@ -185,7 +301,11 @@ class AlasioTable:
 
         # convert to msgspec model
         if result is not None:
-            result = self.MODEL(*result)
+            try:
+                model = self.MODEL
+            except AttributeError:
+                raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no MODEL defined')
+            result = model(*result)
         return result
 
     @cached_property
@@ -221,10 +341,10 @@ class AlasioTable:
         columns = ",".join([f'"{k}"' for k in columns])
         return columns, placeholders
 
-    def insert(
+    def insert_row(
             self,
             rows: "T_model | list[T_model]",
-            _cursor_: "SqlitePoolCursor | None" = None
+            _cursor_: "SqlitePoolCursor | None" = None,
     ):
         """
         Insert one row of data or a list of data, with auto commit
@@ -256,10 +376,59 @@ class AlasioTable:
             else:
                 _cursor_.execute(sql, rows)
 
-    def update(
+    def update_row(
             self,
             rows: "T_model | list[T_model]",
-            fields: "str | list[str]" = '',
-            _cursor_: "SqlitePoolCursor | None" = None
+            updates: "str | list[str]" = '',
+            _cursor_: "SqlitePoolCursor | None" = None,
     ):
+        """
+        Update rows by PRIMARY_KEY.
+        Rows with PRIMARY_KEY value <= 0 won't be updated.
+
+        Args:
+            rows:
+            updates: fields to update,
+                default to empty string meaning all fields except PRIMARY_KEY will be updated
+            _cursor_:
+        """
+        pass
+
+    def upsert_row(
+            self,
+            rows: "T_model | list[T_model]",
+            updates: "str | list[str]" = '',
+            conflicts: "str | list[str]" = '',
+            _cursor_: "SqlitePoolCursor | None" = None,
+    ):
+        """
+        Upsert rows.
+        Rows with PRIMARY_KEY value <= 0 will be inserted.
+        Rows with PRIMARY_KEY value > 0 will be upserted.
+
+        Args:
+            rows:
+            updates: fields to update,
+                default to empty string meaning all fields except PRIMARY_KEY will be updated
+            conflicts: fields on conflict
+                default to empty string meaning conflicted rows will be ignored
+            _cursor_:
+        """
+        pass
+
+    def delete(self, _cursor_: "SqlitePoolCursor | None" = None, **kwargs):
+        """
+        Delete in a pythonic way
+        """
+        pass
+
+    def delete_row(
+            self,
+            rows: "T_model | list[T_model]",
+            _cursor_: "SqlitePoolCursor | None" = None,
+    ):
+        """
+        Delete rows by PRIMARY_KEY.
+        Rows with PRIMARY_KEY value <= 0 won't be deleted.
+        """
         pass
