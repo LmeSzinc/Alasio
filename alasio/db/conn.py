@@ -12,7 +12,9 @@ class SqlitePoolCursor(sqlite3.Cursor):
         """
         super().__init__(conn)
         # value will be set in SqlitePool.cursor()
-        self.pool: "ConnectionPool" = None
+        self.pool: "ConnectionPool | None" = None
+        self.TABLE_NAME = ''
+        self.CREATE_TABLE = ''
 
     def __enter__(self):
         return self
@@ -21,11 +23,12 @@ class SqlitePoolCursor(sqlite3.Cursor):
         super().close()
         conn = self.connection
         pool = self.pool
-        # Update last_visit again as SQL query may take long
-        pool.last_use[conn] = time.time()
-        # Release lock after all poll stuff
-        pool.idle_workers[conn] = None
-        pool.release_full_lock()
+        if pool is not None:
+            # Update last_visit again as SQL query may take long
+            pool.last_use[conn] = time.time()
+            # Release lock after all poll stuff
+            pool.idle_workers[conn] = None
+            pool.release_full_lock()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
@@ -35,6 +38,44 @@ class SqlitePoolCursor(sqlite3.Cursor):
         Now you can commit in cursor object
         """
         self.connection.commit()
+
+    def execute(self, *args, **kwargs):
+        try:
+            return super().execute(*args, **kwargs)
+        except sqlite3.OperationalError as e:
+            # sqlite3.OperationalError: no such table: .../
+            if 'no such table:' in str(e) and self.CREATE_TABLE:
+                pass
+            else:
+                raise
+
+        # auto create table if `CREATE_TABLE` is set
+        if self.TABLE_NAME:
+            # TABLE_NAME can be dynamic
+            sql = self.CREATE_TABLE.format(TABLE_NAME=self.TABLE_NAME)
+        else:
+            sql = self.CREATE_TABLE
+        super().execute(sql)
+        return super().execute(*args, **kwargs)
+
+    def executemany(self, *args, **kwargs):
+        try:
+            return super().executemany(*args, **kwargs)
+        except sqlite3.OperationalError as e:
+            # sqlite3.OperationalError: no such table: .../
+            if 'no such table:' in str(e) and self.CREATE_TABLE:
+                pass
+            else:
+                raise
+
+        # auto create table if `CREATE_TABLE` is set
+        if self.TABLE_NAME:
+            # TABLE_NAME can be dynamic
+            sql = self.CREATE_TABLE.format(TABLE_NAME=self.TABLE_NAME)
+        else:
+            sql = self.CREATE_TABLE
+        super().execute(sql)
+        return super().executemany(*args, **kwargs)
 
 
 class ConnectionPool:
