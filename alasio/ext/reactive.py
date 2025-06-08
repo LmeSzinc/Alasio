@@ -142,10 +142,10 @@ class reactive:
             observers = list(self.observers)
 
         # Broadcast changes to external function
-        if isinstance(obj, ReactiveBroadcast):
+        if isinstance(obj, ReactiveCallback):
             cache = getattr(obj, self.cache_attr, _NOT_FOUND)
             if cache is not _NOT_FOUND:
-                obj.broadcast(self.name, cache)
+                obj.reactive_callback(self.name, cache)
 
         # Notify observers outside the lock to prevent deadlocks
         for ref, name in observers:
@@ -188,8 +188,8 @@ class reactive_source(reactive):
                 self.broadcast(obj, compute=False)
 
 
-class ReactiveBroadcast:
-    def broadcast(self, name, value):
+class ReactiveCallback:
+    def reactive_callback(self, name, value):
         """
         If any reactive value from this object is changed, this method will be called
         """
@@ -202,7 +202,7 @@ if __name__ == '__main__':
     """
 
 
-    class Counter(ReactiveBroadcast):
+    class Counter(ReactiveCallback):
         @reactive_source
         def value(self):
             return 1
@@ -212,8 +212,8 @@ if __name__ == '__main__':
             # `doubled` will be immediately re-computed once `value` changed
             return self.value * 2
 
-        def broadcast(self, name, value):
-            # `broadcast` will be called once `value` or `doubled` changed
+        def reactive_callback(self, name, value):
+            # `reactive_callback` will be called once `value` or `doubled` changed
             print(f'property "{name}" changed to: {value}')
 
 
@@ -225,4 +225,3 @@ if __name__ == '__main__':
     counter.value = 11
     # property "value" changed to: 11
     # property "doubled" changed to: 22
-    counter.doubled = 2
