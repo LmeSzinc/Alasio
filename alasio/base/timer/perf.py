@@ -119,7 +119,7 @@ class PerformanceTest:
                     # Convert to list for display
                     values = output.tolist() if hasattr(output, 'tolist') else str(output)
                     return f"array{shape}({values})"
-                except:
+                except Exception:
                     return f"array{shape}[{dtype}]"
             else:
                 return f"array{shape}[{dtype}]"

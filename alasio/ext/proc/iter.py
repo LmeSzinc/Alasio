@@ -135,7 +135,7 @@ def process_iter():
                 # ProcessLookupError: [Errno 3] assume no such process (originated from psutil_pid_is_running -> 0)
                 # OSError: [WinError 87] 参数错误。: '(originated from ReadProcessMemory)'
                 continue
-            except:
+            except Exception:
                 continue
 
             # Validate cmdline
@@ -155,7 +155,7 @@ def process_iter():
                 cmd = cmdline(pid)
             except (psutil.AccessDenied, psutil.NoSuchProcess, IndexError, OSError):
                 continue
-            except:
+            except Exception:
                 continue
 
             # Validate cmdline

@@ -135,7 +135,7 @@ def replace_tmp(tmp, file):
     except FileNotFoundError:
         # tmp file already get deleted
         pass
-    except:
+    except Exception:
         pass
     if last_error is not None:
         raise last_error from None
@@ -725,7 +725,7 @@ def atomic_failure_cleanup(folder, recursive=False):
                     except PermissionError:
                         # Another process is reading/writing
                         pass
-                    except:
+                    except Exception:
                         pass
                 else:
                     if recursive:
@@ -733,7 +733,10 @@ def atomic_failure_cleanup(folder, recursive=False):
                             if entry.is_dir(follow_symlinks=False):
                                 # Normal directory
                                 atomic_failure_cleanup(entry.path, recursive=True)
-                        except:
+                        except PermissionError:
+                            # Another process is reading/writing
+                            pass
+                        except Exception:
                             pass
 
     except FileNotFoundError:
@@ -741,6 +744,6 @@ def atomic_failure_cleanup(folder, recursive=False):
         pass
     except NotADirectoryError:
         file_remove(folder)
-    except:
+    except Exception:
         # Ignore all failures, it doesn't matter if tmp files still exist
         pass
