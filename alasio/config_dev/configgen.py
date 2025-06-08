@@ -238,7 +238,7 @@ class ConfigGen:
                         group_file = self.dict_group2file[group.group]
                         if group.task and group.task != task_name:
                             # display group from another task
-                            data = {'task': task_name, 'file': group_file}
+                            data = {'task': group.task, 'file': group_file}
                         else:
                             # display group from current task
                             data = group_file

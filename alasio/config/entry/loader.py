@@ -1,10 +1,31 @@
+from collections import defaultdict
+from typing import Any
+
+import msgspec
+
 import alasio.config.entry.const as const
-from alasio.ext.deep import deep_values
+from alasio.ext.deep import deep_get_with_error, deep_iter_depth1, deep_iter_depth2, deep_set, deep_values
 from alasio.ext.file.loadpy import loadpy
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path import PathStr
 from alasio.ext.pool import WORKER_POOL, WaitJobsWrapper
 from alasio.logger import logger
+
+
+class GuiData(msgspec.Struct):
+    task: str
+    group: str
+    # data is ArgData, but don't import it im production
+    data: Any
+
+
+class ModelData(msgspec.Struct):
+    task: str
+    group: str
+    # model.py file
+    file: str
+    # model class
+    cls: str
 
 
 class ModEntryBase:
@@ -269,3 +290,197 @@ class ModLoader:
             #     print(k, v)
         print('\n'.join(lines))
         return lines
+
+    def get_aside(self, mod_name, aside_name):
+        """
+        Args:
+            mod_name:
+            aside_name:
+
+        Returns:
+            dict[str, dict[str, GuiData]:
+                key: {display_group}.{display_flatten}
+                value: GuiData
+        """
+        try:
+            mod = self.dict_mod[mod_name]
+        except KeyError:
+            raise KeyError(f'No such mod: mod="{mod_name}"') from None
+        try:
+            # key: {task_name}.{group_name}
+            # value:
+            #     - group_file, for basic group, task_name is display_group
+            #     - {'task': task_name, 'file': group_file}, if display group from another task
+            gui_data = mod.gui_index[aside_name]
+        except KeyError:
+            raise KeyError(f'No such aside in gui_index: mod="{mod_name}", aside="{aside_name}"') from None
+
+        # build output
+        out = {}
+        for display_group, display_flatten, display_ref in deep_iter_depth2(gui_data):
+            if type(display_ref) is dict:
+                # display group from another task
+                try:
+                    file = display_ref['file']
+                    task = display_ref['task']
+                except KeyError:
+                    raise KeyError(f'display_ref of gui index has no "file" or "task": mod="{mod_name}", '
+                                   f'key="{aside_name}.{display_group}.{display_flatten}"') from None
+            else:
+                # populate omitted task_name
+                task = display_group
+                file = display_ref
+                # display_ref = {'task': display_group, 'file': display_ref}
+
+            # query full group data
+            group = display_flatten
+            try:
+                group_data = deep_get_with_error(mod.dict_gui, [file, group])
+            except KeyError:
+                raise KeyError(f'No such group "{group}", mod={mod_name}, file={file}') from None
+
+            # set
+            data = GuiData(task=task, group=group, data=group_data)
+            deep_set(out, [display_group, display_flatten], data)
+
+        return out
+
+    def get_task(self, mod_name, task_name):
+        """
+        Args:
+            mod_name:
+            task_name:
+
+        Returns:
+            dict[str, ModelData]:
+                key: {group_name}
+                value: ModelData
+        """
+        try:
+            mod = self.dict_mod[mod_name]
+        except KeyError:
+            raise KeyError(f'No such mod: mod="{mod_name}"') from None
+        try:
+            # key: {group_name}
+            # value:
+            #     - file, for basic group, class_name is group_name
+            #     - {'file': file, 'cls': class_name}, if group override
+            #     - {'task': task_name}, if reference a group from another task
+            task_data = mod.model_index[task_name]
+        except KeyError:
+            raise KeyError(f'No such task in model_index: mod="{mod_name}", task="{task_name}"') from None
+
+        # build output
+        out = {}
+        for group_name, model_ref in deep_iter_depth1(task_data):
+            if type(model_ref) is dict:
+                task = model_ref.get('task', None)
+                if task is None:
+                    # override group class
+                    task = task_name
+                else:
+                    # reference group from another task
+                    try:
+                        model_ref = deep_get_with_error(mod.model_index, [task, group_name])
+                    except KeyError:
+                        raise KeyError(f'task_ref of model index has no corresponding value: mod="{mod_name}", '
+                                       f'key="{task}.{group_name}"') from None
+                if type(model_ref) is dict:
+                    # override group class
+                    try:
+                        file = model_ref['file']
+                        cls = model_ref['cls']
+                    except KeyError:
+                        raise KeyError(f'task_ref of model index has no "file" or "cls": mod="{mod_name}", '
+                                       f'key="{task_name}.{group_name}"') from None
+                else:
+                    file = model_ref
+                    cls = group_name
+            else:
+                task = task_name
+                file = model_ref
+                cls = group_name
+
+            # set
+            data = ModelData(task=task, group=group_name, file=file, cls=cls)
+            out[group_name] = data
+
+        return out
+
+    @staticmethod
+    def get_intask_group(task_data):
+        """
+        Get a set of intask groups from task_data
+
+        Args:
+            task_data (dict):
+                key: {group_name}
+                value:
+                    - file, for basic group, class_name is group_name
+                    - {'file': file, 'cls': class_name}, if group override
+                    - {'task': task_name}, if reference a group from another task
+
+        Returns:
+            set[str]:
+        """
+        out = set()
+        for group_name, group_data in deep_iter_depth1(task_data):
+            if type(group_data) is dict:
+                if 'task' in group_data:
+                    # reference a group from another task
+                    continue
+                else:
+                    out.add(group_name)
+            else:
+                out.add(group_name)
+        return out
+
+    def regroup_task_group(self, mod_name, all_task_groups):
+        """
+        Regroup task groups to simplify database query condition
+        Convert:
+            [Alas.Emulator, OpsiDaily.Scheduler, OpsiDaily.OpsiDaily, OpsiGeneral.OpsiGeneral]
+        to:
+            tasks=[OpsiDaily, OpsiGeneral]
+            task_groups=[Alas.Emulator]
+
+        Args:
+            mod_name:
+            all_task_groups (list[GuiData] | list[ModelData] | iterator[GuiData] | iterator[ModelData]):
+
+        Returns:
+            tuple[list[str], list[tuple[str, str]]]: tasks, task_groups
+        """
+        try:
+            mod = self.dict_mod[mod_name]
+        except KeyError:
+            raise KeyError(f'No such mod: mod="{mod_name}"') from None
+
+        # de-redundancy
+        unique_task_group = defaultdict(set)
+        for tg in all_task_groups:
+            unique_task_group[tg.task].add(tg.group)
+
+        tasks = []
+        task_groups = []
+        for task_name, group_set in unique_task_group.items():
+            try:
+                # key: {group_name}
+                # value:
+                #     - file, for basic group, class_name is group_name
+                #     - {'file': file, 'cls': class_name}, if group override
+                #     - {'task': task_name}, if reference a group from another task
+                task_data = mod.model_index[task_name]
+            except KeyError:
+                raise KeyError(f'No such task in model_index: mod="{mod_name}", task="{task_name}"') from None
+
+            intask_group = self.get_intask_group(task_data)
+            if group_set == intask_group:
+                # given `groups` equals intask groups
+                tasks.append(task_name)
+            else:
+                # visit standalone group
+                for group_name in group_set:
+                    task_groups.append([task_name, group_name])
+
+        return tasks, task_groups
