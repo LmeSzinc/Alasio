@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Set, Tuple, Type, Union, get_args, get_origi
 
 import msgspec
 
+from alasio.db.table import AlasioTable
+
 # In Python 3.10+, the union type operator | can be used.
 # This creates a `types.UnionType` object.
 try:
@@ -147,3 +149,23 @@ def generate_example(model_class: "Type[msgspec.Struct]") -> "msgspec.Struct":
 
     # Start the generation process by calling the main worker function.
     return _generate_model_instance(model_class, memoization_cache)
+
+
+def validate_table(table_cls: Type[AlasioTable]):
+    """
+    Args:
+        table_cls:
+    """
+    # test in memory
+    table = table_cls(':memory:')
+    # test CREATE_TABLE
+    table.create_table()
+    # test MODEL
+    row = generate_example(table.MODEL)
+    # test AUTO_INCREMENT
+    table.insert_row(row)
+    table.select_one()
+    # test PRIMARY_KEY
+    table.delete_row(row)
+    # test TABLE_NAME
+    table.drop_table()

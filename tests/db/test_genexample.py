@@ -5,7 +5,7 @@ import datetime
 import sys
 from typing import Optional, List, Dict, Any
 
-from alasio.db.genexample import generate_example
+from alasio.db.validate import generate_example
 
 
 # --- 1. Define Models for Testing ---
