@@ -25,14 +25,15 @@ def image_load_pillow(file, area=None):
         FileNotFoundError:
         ImageBroken:
     """
-    # read files first and give bytes to pillow would be a little faster
-    image = Image.open(file)
-    if area is not None:
-        image = image.crop(area)
+    # always remember to close Image object
+    with Image.open(file) as f:
+        if area is not None:
+            f = f.crop(area)
 
-    image = np.array(image)
+        image = np.array(f)
 
-    if image_channel == 4:
+    channel = image_channel(image)
+    if channel == 4:
         image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
 
     return image
