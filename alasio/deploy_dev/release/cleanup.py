@@ -13,7 +13,7 @@ def rmtree(path):
         print(f'rmtree {path}')
 
 
-def remove(path):
+def rm(path):
     """
     Remove a file
     """
@@ -43,7 +43,7 @@ def cleanup_python_lib(root: PathStr):
     rmtree(root / 'distutils/test')
     rmtree(root / 'distutils/tests')
     rmtree(root / 'idlelib/idle_test')
-    remove(root / 'idlelib/ChangeLog')
+    rm(root / 'idlelib/ChangeLog')
     rmtree(root / 'lib2to3/tests')
     rmtree(root / 'sqlite3/test')
     rmtree(root / 'tkinter/test')
@@ -66,7 +66,7 @@ def cleanup_python_packages(root: PathStr):
     rmtree(root / 'gevent/tests')
     rmtree(root / 'greenlet/tests')
     rmtree(root / 'h11/tests')
-    remove(root / 'humanfriendly/tests.py')
+    rm(root / 'humanfriendly/tests.py')
     rmtree(root / 'isapi/doc')
     rmtree(root / 'isapi/samples')
     rmtree(root / 'isapi/test')
@@ -84,12 +84,12 @@ def cleanup_python_packages(root: PathStr):
     rmtree(root / 'sniffio/_tests')
     rmtree(root / 'sqlite_bro/tests')
     rmtree(root / 'tornado/test')
-    remove(root / 'ua_parser/user_agent_parser_test.py')
-    remove(root / 'user_agents/tests.py')
+    rm(root / 'ua_parser/user_agent_parser_test.py')
+    rm(root / 'user_agents/tests.py')
     rmtree(root / 'wcwidth/tests')
     rmtree(root / 'winpython/_vendor/qtpy/tests')
     rmtree(root / 'zmq/tests')
-    remove(root / 'zope/event/tests.py')
+    rm(root / 'zope/event/tests.py')
     rmtree(root / 'zope/interface/tests')
     rmtree(root / 'zope/interface/common/tests')
 
@@ -127,7 +127,7 @@ def cleanup_python_packages(root: PathStr):
     # scipy tests in submodules
     for path in root.joinpath('numpy').iter_folders(recursive=False):
         rmtree(path / 'tests')
-    remove(root / 'numpy/_pyinstaller/test_pyinstaller.py')
+    rm(root / 'numpy/_pyinstaller/test_pyinstaller.py')
     for path in root.joinpath('scipy').iter_folders(recursive=True):
         rmtree(path / 'tests')
     for path in root.joinpath('sympy').iter_folders(recursive=True):
@@ -142,10 +142,10 @@ def cleanup_python_packages(root: PathStr):
     rmtree(root / 'imageio/resources')
 
     # mxnet tools
-    remove(root / 'mxnet/tools/bandwidth/.gitignore')
-    remove(root / 'mxnet/tools/bandwidth/test_measure.py')
-    remove(root / 'mxnet/tools/caffe_converter/.gitignore')
-    remove(root / 'mxnet/tools/caffe_converter/test_converter.py')
+    rm(root / 'mxnet/tools/bandwidth/.gitignore')
+    rm(root / 'mxnet/tools/bandwidth/test_measure.py')
+    rm(root / 'mxnet/tools/caffe_converter/.gitignore')
+    rm(root / 'mxnet/tools/caffe_converter/test_converter.py')
 
 
 KEEP_EXT = {'py', 'pyi', 'pyd', 'dll', 'so'}
@@ -161,22 +161,22 @@ def cleanup_license(root: PathStr):
 
         name = name.lower()
         if name.startswith('license') or name.startswith('licence'):
-            remove(file)
+            rm(file)
         if name.startswith('authors'):
-            remove(file)
+            rm(file)
         if name.startswith('copying'):
-            remove(file)
+            rm(file)
         if name.startswith('notice'):
-            remove(file)
+            rm(file)
         if name.startswith('readme'):
-            remove(file)
+            rm(file)
         if name.startswith('description'):
-            remove(file)
+            rm(file)
 
     rmtree(root / 'scipy/linalg/src/id_dist/doc')
-    remove(root / 'scipy/HACKING.rst.txt')
-    remove(root / 'scipy/INSTALL.rst.txt')
-    remove(root / 'scipy/THANKS.txt')
+    rm(root / 'scipy/HACKING.rst.txt')
+    rm(root / 'scipy/INSTALL.rst.txt')
+    rm(root / 'scipy/THANKS.txt')
     rmtree(root / 'scipy/linalg/src/id_dist/doc')
 
 
@@ -206,14 +206,14 @@ def cleanup_electron(root: PathStr):
     """
     Cleanup electron build
     """
-    remove(root / 'LICENSE.electron.txt')
-    remove(root / 'LICENSES.chromium.html')
+    rm(root / 'LICENSE.electron.txt')
+    rm(root / 'LICENSES.chromium.html')
     # keep en-US only
     for file in root.joinpath('locales').iter_files(ext='.pak'):
         if file.endswith('en-US.pak'):
             continue
         else:
-            remove(file)
+            rm(file)
 
 
 def cleanup(root: str):
