@@ -58,32 +58,45 @@ def cleanup_python_packages(root: PathStr):
         root: Path to python/Lib/site-packages
     """
     print(f'Cleanup python/Lib/site-packages: {root}')
+    rm(root / 'anyio/_core/_testing.py')
+    rm(root / 'anyio/abc/_testing.py')
+    rm(root / 'asgiref/testing.py')
     rmtree(root / 'async_generator/_tests')
     rmtree(root / 'colorama/tests')
     rmtree(root / 'commonmark/tests')
+    rm(root / 'click/testing.py')
     rmtree(root / 'Crypto/SelfTest')
     rmtree(root / 'future/tests')
     rmtree(root / 'gevent/tests')
+    rmtree(root / 'gevent/testing')
+    rm(root / 'google/protobuf/internal/testing_refleaks.py')
+    rm(root / 'google/protobuf/internal/_parameterized.py')
     rmtree(root / 'greenlet/tests')
     rmtree(root / 'h11/tests')
     rm(root / 'humanfriendly/tests.py')
+    rm(root / 'humanfriendly/testing.py')
     rmtree(root / 'isapi/doc')
     rmtree(root / 'isapi/samples')
     rmtree(root / 'isapi/test')
     rmtree(root / 'matplotlib/tests')
+    rmtree(root / 'matplotlib/testing')
     rmtree(root / 'mpl_toolkits/tests')
     rmtree(root / 'mpmath/tests')
     rmtree(root / 'numpy/tests')
     rmtree(root / 'numpy/testing/tests')
     rmtree(root / 'psutil/tests')
+    rm(root / 'pygments/lexers/testing.py')
+    rm(root / 'pyparsing/testing.py')
     rmtree(root / 'pyreadline3/test')
     rmtree(root / 'retry/tests')
     rmtree(root / 'shapely/tests')
+    rm(root / 'shapely/testing.py')
     rmtree(root / 'setuptools/tests')
     rmtree(root / 'setuptools/_distutils/tests')
     rmtree(root / 'sniffio/_tests')
     rmtree(root / 'sqlite_bro/tests')
     rmtree(root / 'tornado/test')
+    rm(root / 'tornado/testing.py')
     rm(root / 'ua_parser/user_agent_parser_test.py')
     rm(root / 'user_agents/tests.py')
     rmtree(root / 'wcwidth/tests')
@@ -95,6 +108,7 @@ def cleanup_python_packages(root: PathStr):
 
     # pip/_vender
     rmtree(root / 'pip/_vendor/colorama/tests')
+    rm(root / 'pip/_vendor/pyparsing/testing.py')
 
     # pywin32 tests, demos, docs
     rmtree(root / 'adodbapi/examples')
@@ -127,11 +141,13 @@ def cleanup_python_packages(root: PathStr):
     # scipy tests in submodules
     for path in root.joinpath('numpy').iter_folders(recursive=False):
         rmtree(path / 'tests')
+    rmtree(root / 'numpy/testing')
     rm(root / 'numpy/_pyinstaller/test_pyinstaller.py')
     for path in root.joinpath('scipy').iter_folders(recursive=True):
         rmtree(path / 'tests')
     for path in root.joinpath('sympy').iter_folders(recursive=True):
         rmtree(path / 'tests')
+    rmtree(root / 'sympy/testing')
     rmtree(root / 'sympy/parsing/autolev/test-examples')
 
     # demo images in imageio, so you can access with
@@ -140,12 +156,17 @@ def cleanup_python_packages(root: PathStr):
     # print(im.shape)  # (300, 451, 3)
     # I don't think you need these in production
     rmtree(root / 'imageio/resources')
+    rm(root / 'imageio/testing.py')
 
     # mxnet tools
     rm(root / 'mxnet/tools/bandwidth/.gitignore')
     rm(root / 'mxnet/tools/bandwidth/test_measure.py')
     rm(root / 'mxnet/tools/caffe_converter/.gitignore')
     rm(root / 'mxnet/tools/caffe_converter/test_converter.py')
+
+    # opencv face-detection features
+    # which means you can't use `cv2.CascadeClassifier`, `detectMultiScale()`
+    rmtree(root / 'cv2/data')
 
 
 KEEP_EXT = {'py', 'pyi', 'pyd', 'dll', 'so'}
@@ -183,22 +204,23 @@ def cleanup_license(root: PathStr):
 def find_test_file(root: PathStr):
     for file in root.iter_files(ext='.py', recursive=True):
         path = file.subpath_to(root).replace('\\', '/')
-        # testing folders are for dep users to write tests
-        if 'testing' in path:
-            continue
         content = atomic_read_bytes(file)
         # must startswith \n to ignore `try: import`
         if b'\nimport unittest' in content:
             print(f'import unittest: {path}')
+            print(f"rm(root / '{path}')")
             continue
         if b'\nfrom unittest' in content:
             print(f'from unittest: {path}')
+            print(f"rm(root / '{path}')")
             continue
         if b'\nimport pytest' in content:
             print(f'import pytest: {path}')
+            print(f"rm(root / '{path}')")
             continue
         if b'\nfrom pytest' in content:
             print(f'from pytest: {path}')
+            print(f"rm(root / '{path}')")
             continue
 
 
