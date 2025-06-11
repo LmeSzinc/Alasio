@@ -226,24 +226,32 @@ class AlasioTable:
             sql = self.sql_select_expr(
                 sql, _groupby_=_groupby_, _orderby_=_orderby_, _orderby_desc_=_orderby_desc_,
                 _limit_=_limit_, _offset_=_offset_)
-            with self.cursor() as c:
-                c.execute(sql, kwargs)
-                result = c.fetchall()
+            if _cursor_ is None:
+                with self.cursor() as c:
+                    c.execute(sql, kwargs)
+                    result = c.fetchall()
+            else:
+                _cursor_.execute(sql, kwargs)
+                result = _cursor_.fetchall()
         else:
             sql = f'SELECT * FROM "{self.TABLE_NAME}"'
             sql = self.sql_select_expr(
                 sql, _groupby_=_groupby_, _orderby_=_orderby_, _orderby_desc_=_orderby_desc_,
                 _limit_=_limit_, _offset_=_offset_)
-            with self.cursor() as c:
-                c.execute(sql)
-                result = c.fetchall()
+            if _cursor_ is None:
+                with self.cursor() as c:
+                    c.execute(sql, kwargs)
+                    result = c.fetchall()
+            else:
+                _cursor_.execute(sql, kwargs)
+                result = _cursor_.fetchall()
 
         # convert to msgspec model
         try:
             model = self.MODEL
         except AttributeError:
             raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no MODEL defined')
-        result = [model(*row) for row in result]
+        result = [model(**row) for row in result]
         return result
 
     def select_one(
@@ -305,7 +313,7 @@ class AlasioTable:
                 model = self.MODEL
             except AttributeError:
                 raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no MODEL defined')
-            result = model(*result)
+            result = model(**result)
         return result
 
     @cached_property
@@ -358,9 +366,31 @@ class AlasioTable:
         """
         columns, placeholders = self.sql_insert_columns_placeholders
         sql = f'INSERT INTO {self.TABLE_NAME} ({columns}) VALUES ({placeholders})'
+        self.execute_one_or_many(sql, rows, _cursor_=_cursor_)
 
+    def execute_one_or_many(
+            self,
+            sql: str,
+            rows: "T_model | list[T_model]",
+            _cursor_: "SqlitePoolCursor | None" = None,
+            has_pk=False,
+    ):
+        """
+        Args:
+            sql:
+            rows:
+            _cursor_:
+            has_pk: True to drop rows without PRIMARY_KEY
+        """
         if isinstance(rows, list):
-            rows = [msgspec.structs.asdict(row) for row in rows]
+            if has_pk:
+                # filter rows with PRIMARY_KEY
+                rows = [msgspec.structs.asdict(row) for row in rows if self._row_has_pk(row)]
+            else:
+                rows = [msgspec.structs.asdict(row) for row in rows]
+            if not rows:
+                return
+            # execute
             if _cursor_ is None:
                 with self.cursor() as c:
                     c.executemany(sql, rows)
@@ -368,13 +398,28 @@ class AlasioTable:
             else:
                 _cursor_.executemany(sql, rows)
         else:
+            if has_pk:
+                # filter rows with PRIMARY_KEY
+                if not self._row_has_pk(rows):
+                    return
             rows = msgspec.structs.asdict(rows)
+            # execute
             if _cursor_ is None:
                 with self.cursor() as c:
                     c.execute(sql, rows)
                     c.commit()
             else:
                 _cursor_.execute(sql, rows)
+
+    def _row_has_pk(self, row: T_model) -> bool:
+        """
+        Whether row with PRIMARY_KEY value > 0
+        """
+        try:
+            return getattr(row, self.PRIMARY_KEY) > 0
+        except AttributeError:
+            # Row does not have PRIMARY_KEY
+            return False
 
     def update_row(
             self,
@@ -392,35 +437,116 @@ class AlasioTable:
                 default to empty string meaning all fields except PRIMARY_KEY will be updated
             _cursor_:
         """
-        pass
+        if not self.PRIMARY_KEY:
+            raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no PRIMARY_KEY defined')
+
+        # format updates
+        if not updates:
+            updates = [name for name in self.field_names if name != self.PRIMARY_KEY]
+        elif isinstance(updates, str):
+            updates = [updates]
+        else:
+            updates = [name for name in updates if name != self.PRIMARY_KEY]
+        if not updates:
+            # no update fields?
+            raise AlasioTableError(f'Trying to do update_row() but no update fields, updates={updates}')
+
+        # "task"=:task,"group"=:group,...
+        set_clause = ','.join([f'"{field}"=:{field}' for field in updates])
+        sql = f'UPDATE "{self.TABLE_NAME}" SET {set_clause} WHERE "{self.PRIMARY_KEY}"=:{self.PRIMARY_KEY}'
+
+        self.execute_one_or_many(sql, rows, _cursor_=_cursor_, has_pk=True)
 
     def upsert_row(
             self,
             rows: "T_model | list[T_model]",
-            updates: "str | list[str]" = '',
             conflicts: "str | list[str]" = '',
+            updates: "str | list[str]" = '',
             _cursor_: "SqlitePoolCursor | None" = None,
     ):
         """
         Upsert rows.
-        Rows with PRIMARY_KEY value <= 0 will be inserted.
-        Rows with PRIMARY_KEY value > 0 will be upserted.
 
         Args:
             rows:
+            conflicts: fields on conflict
+                default to empty string meaning conflicts=PRIMARY_KEY
+                If `conflicts` and `updates` have the same field, respect `conflicts` first
             updates: fields to update,
                 default to empty string meaning all fields except PRIMARY_KEY will be updated
-            conflicts: fields on conflict
-                default to empty string meaning conflicted rows will be ignored
+
             _cursor_:
         """
-        pass
+        if not self.PRIMARY_KEY:
+            raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no PRIMARY_KEY defined')
+
+        # format conflicts
+        if not conflicts:
+            conflicts = [self.PRIMARY_KEY]
+        else:
+            if isinstance(conflicts, str):
+                conflicts = [conflicts]
+            else:
+                conflicts = list(conflicts)
+        if not conflicts:
+            # no conflict fields?
+            raise AlasioTableError(f'Trying to do upsert_row() but no conflict fields, '
+                                   f'conflicts={conflicts}, updates={updates}')
+
+        # format updates
+        if not updates:
+            updates = [name for name in self.field_names if name != self.PRIMARY_KEY and not name not in conflicts]
+        elif isinstance(updates, str):
+            if updates in conflicts:
+                # update the conflicted field?
+                raise AlasioTableError(f'Trying to do upsert_row() but updates==conflicts'
+                                       f'conflicts={conflicts}, updates={updates}')
+            updates = [updates]
+        else:
+            updates = [name for name in updates if name != self.PRIMARY_KEY and not name not in conflicts]
+        if not updates:
+            # no update fields?
+            raise AlasioTableError(f'Trying to do upsert_row() but no update fields, '
+                                   f'conflicts={conflicts}, updates={updates}')
+
+        # build sql
+        columns, placeholders = self.sql_insert_columns_placeholders
+        # "task","group",...
+        conflict_clause = ','.join([f'"{field}"' for field in conflicts])
+        # "task"=excluded."task","group"=excluded."group",...
+        update_clause = ','.join([f'"{field}"=excluded."{field}"' for field in updates])
+        sql = f'INSERT INTO "{self.TABLE_NAME}" ({columns}) VALUES ({placeholders})' \
+              f'ON CONFLICT ({conflict_clause}) DO UPDATE SET {update_clause}'
+
+        self.execute_one_or_many(sql, rows, _cursor_=_cursor_)
 
     def delete(self, _cursor_: "SqlitePoolCursor | None" = None, **kwargs):
         """
         Delete in a pythonic way
+        Equivalent to:
+            DELETE FROM {table_name} WHERE key1=value1 AND ...
+
+        Args:
+            _cursor_ (SqlitePoolCursor | None): to reuse cursor
+            **kwargs: Anything to query for deletion
+
+        Examples:
+            table.delete(task='Main')
+            table.delete(task='Main', group='test')
         """
-        pass
+        if not kwargs:
+            # delete without condition?
+            raise AlasioTableError('Delete without conditions is not allowed for safety')
+
+        conditions = self.sql_select_kwargs_to_condition(kwargs)
+        sql = f'DELETE FROM "{self.TABLE_NAME}" WHERE {conditions}'
+
+        if _cursor_ is None:
+            with self.cursor() as c:
+                c.execute(sql, kwargs)
+                c.commit()
+        else:
+            _cursor_.execute(sql, kwargs)
 
     def delete_row(
             self,
@@ -431,4 +557,9 @@ class AlasioTable:
         Delete rows by PRIMARY_KEY.
         Rows with PRIMARY_KEY value <= 0 won't be deleted.
         """
-        pass
+        if not self.PRIMARY_KEY:
+            raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no PRIMARY_KEY defined')
+
+        sql = f'DELETE FROM "{self.TABLE_NAME}" WHERE "{self.PRIMARY_KEY}"=:{self.PRIMARY_KEY}'
+
+        self.execute_one_or_many(sql, rows, _cursor_=_cursor_, has_pk=True)

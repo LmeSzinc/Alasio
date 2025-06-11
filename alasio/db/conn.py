@@ -139,9 +139,9 @@ class ConnectionPool:
         # Alasio uses the default journal_mode which is DELETE,
         # so users can have one single config file to be copied around
         # conn.execute('PRAGMA journal_mode=PERSIST')
-        # No sqlite3.Row to reduce convertion to msgspec.Struct
-        # conn.row_factory = sqlite3.Row
-        pass
+
+        # Set sqlite3.Row to pass kwargs instead of tuple to msgspec.Struct
+        conn.row_factory = sqlite3.Row
 
     def release_full_lock(self):
         """
