@@ -10,6 +10,13 @@ class PerformanceTest:
         self.min_iterations = 15  # Minimum iterations
         self.outputs_consistent = True  # Track output consistency
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.functions:
+            self.run_all_tests()
+
     def register(self, func, *args, **kwargs):
         """
         Register function and parameters
@@ -401,9 +408,6 @@ class PerformanceTest:
 
 # Usage example
 if __name__ == "__main__":
-    # Create test framework
-    bench = PerformanceTest()
-
     # Example functions
     def bubble_sort(arr):
         """Bubble sort algorithm"""
@@ -439,13 +443,11 @@ if __name__ == "__main__":
     large_data = list(range(100, 0, -1))
 
     # Register functions with different parameter types
-    bench.register(bubble_sort, small_data)
-    bench.register(bubble_sort, large_data)
-    bench.register(selection_sort, small_data)
-    bench.register(python_sort, large_data)
-
-    # Run complete test
-    bench.run_all_tests()
+    with PerformanceTest() as pref:
+        pref.register(bubble_sort, small_data)
+        pref.register(bubble_sort, large_data)
+        pref.register(selection_sort, small_data)
+        pref.register(python_sort, large_data)
 
     # Example output with simplified parameter display:
     """
