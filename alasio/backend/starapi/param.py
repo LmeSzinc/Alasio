@@ -1,8 +1,10 @@
 import inspect
+from typing import Any
 from uuid import UUID
 
 import msgspec
 from msgspec.json import decode
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -31,6 +33,25 @@ class ValidationError(Exception):
                 'msg': self.msg
             }
         }
+
+
+class HTTPExceptionJson(HTTPException):
+    def __init__(
+            self,
+            status_code: int,
+            detail: Any = None,
+            headers: "typing.Mapping[str, str] | None" = None,
+    ):
+        """
+        HTTPExceptionJson but accepts any response content
+
+        Args:
+            status_code:
+            detail:
+            headers:
+        """
+        detail = msgspec.json.encode(detail)
+        super().__init__(status_code, detail=detail, headers=headers)
 
 
 class RequestInject:
@@ -292,7 +313,7 @@ class Depends(RequestInject):
         return f'{self.__class__.__name__}({attr})'
 
     async def from_request(self, request: Request):
-        return self.dependency()
+        return await self.dependency(request)
 
 
 class SetCookie(ResponseInject):

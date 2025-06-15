@@ -6,7 +6,8 @@ from starlette import status
 from starlette.exceptions import HTTPException
 from typing_extensions import Annotated
 
-from alasio.backend.starapi.param import Cookie, SetCookie
+from alasio.backend.auth.fail2ban import Fail2Ban
+from alasio.backend.starapi.param import Cookie, Depends, SetCookie
 from alasio.backend.starapi.router import APIRouter
 from alasio.config.table.key import AlasioKeyTable
 from alasio.ext.cache import cached_property
@@ -118,13 +119,16 @@ class LoginRequest(msgspec.Struct):
 async def auth_login(
         request: LoginRequest,
         cookie: SetCookie,
+        fail2ban: Annotated[Fail2Ban, Depends(Fail2Ban('/login'))],
 ):
+    fail2ban.check_ban()
     try:
         new = JWT_MANAGER.validate_pwd(request.pwd)
     except jwt.PyJWTError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, 'Password incorrect') from None
+        raise fail2ban.record_failure()
 
     # success
+    fail2ban.record_success()
     cookie.set_cookie(
         key='alasio_token', value=new, max_age=JWT_MANAGER.expire_hours * 3600,
         httponly=True, samesite="strict", secure=True,
@@ -139,7 +143,11 @@ async def auth_renew(
     try:
         new = JWT_MANAGER.validate_token(token)
     except jwt.PyJWTError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, 'Token invalid or expired') from None
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail='Token invalid or expired',
+            headers={'WWW-Authenticate': 'Bearer'},
+        ) from None
 
     # success
     if new:

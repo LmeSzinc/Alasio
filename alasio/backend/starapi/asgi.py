@@ -8,12 +8,11 @@ import msgspec
 from msgspec.json import decode, encode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 from starlette.websockets import WebSocket
 from typing_extensions import Annotated, get_args, get_origin
 
-from alasio.backend.starapi.param import Body, Cookie, Form, Json, Path, Query, RequestInject, RequestModel, \
+from alasio.backend.starapi.param import Body, Cookie, Depends, Form, Json, Path, Query, RequestInject, RequestModel, \
     ResponseInject, SetCookie, ValidationError
 
 SIG_EMPTY = inspect.Signature.empty
@@ -43,7 +42,7 @@ def isdi(obj):
     return False
 
 
-def iscoroutinefunction_or_partial(obj) -> bool:
+def is_async(obj) -> bool:
     """
     Correctly determines if an object is a coroutine function,
     including those wrapped in functools.partial objects.
@@ -78,12 +77,21 @@ class MsgspecRequest(Request):
 
 
 class RequestASGI:
-    def __init__(self, endpoint, request_di, response_di):
+    def __init__(
+            self,
+            endpoint,
+            request_di,
+            response_di,
+            depends_di,
+            depends_endpoint,
+    ):
         self.endpoint = endpoint
         # Key: arg name
         # Value: DependencyInject object
         self.request_di: "dict[str, RequestInject]" = request_di
         self.response_di: "dict[str, ResponseInject]" = response_di
+        self.depends_di: "dict[str, Depends]" = depends_di
+        self.depends_endpoint: "list[Depends]" = depends_endpoint
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """
@@ -94,6 +102,13 @@ class RequestASGI:
         # prepare request inject
         dict_dep = {}
         try:
+            # run parent dependencies first
+            for dep in self.depends_endpoint:
+                await dep.from_request(request)
+            # then run dependencies of self
+            for name, dep in self.depends_di.items():
+                dict_dep[name] = await dep.from_request(request)
+            # prepare requests and response
             for name, dep in self.request_di.items():
                 dict_dep[name] = await dep.from_request(request)
             for name, dep in self.response_di.items():
@@ -116,12 +131,13 @@ class RequestASGI:
         await response(scope, receive, send)
 
     @classmethod
-    def from_route(cls, route: Route):
+    def from_route(cls, route: "APIRoute"):
         request_di = {}
         response_di = {}
+        depends_di = {}
         path_params = route.param_convertors
 
-        assert iscoroutinefunction_or_partial(route.endpoint), 'Endpoint must be an async function'
+        assert is_async(route.endpoint), 'Endpoint must be an async function'
         sig = inspect.signature(route.endpoint)
         for name, sig_param in sig.parameters.items():
             # name, format, param, default
@@ -216,6 +232,20 @@ class RequestASGI:
             elif is_class and issubclass(param, SetCookie):
                 response_di[name] = param()
                 continue
+            # depends
+            elif isinstance(param, Depends):
+                func = param.dependency
+                if inspect.isclass(func):
+                    assert getattr(func, '__call__', None), 'Depends class must implement __call__()'
+                    assert is_async(func.__call__), 'Depends cls.__call__() must be async'
+                else:
+                    if getattr(func, '__call__', None):
+                        func = func.__call__
+                        assert is_async(func), f'Depends(func) must be async, name={name}, typehint={annotation}'
+                    else:
+                        assert is_async(func), f'Depends(func) must be async, name={name}, typehint={annotation}'
+                depends_di[name] = param
+                continue
             # unknown
             else:
                 raise AssertionError(f'Unknown annotation, name={name}, typehint={annotation}')
@@ -226,4 +256,6 @@ class RequestASGI:
             endpoint=route.endpoint,
             request_di=request_di,
             response_di=response_di,
+            depends_di=depends_di,
+            depends_endpoint=route.dependencies,
         )
