@@ -92,6 +92,9 @@ class AlasioKeyTable(AlasioTable, metaclass=SingletonNamed):
 
         We use MAC address to track if config files are simply copied to another computer.
         Yes, MAC can be easily modified, but we don't need that level of security.
+
+        Returns:
+            bytes:
         """
         key = 'JwtSecret'
         length = 32
