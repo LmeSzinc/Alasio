@@ -7,9 +7,12 @@ def app():
 
 
 if __name__ == '__main__':
-    import uvicorn
+    import trio
+    from hypercorn import Config
+    from hypercorn.trio import serve
 
-    host = '127.0.0.1'
-    port = 8000
+    config = Config()
+    config.bind = '127.0.0.1'
+    config.port = 8000
 
-    uvicorn.run(app, host=host, port=port, factory=True)
+    trio.run(serve, app(), config)
