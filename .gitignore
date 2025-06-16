@@ -1,17 +1,17 @@
 ### Alasio specific gitignore
 # user configs
-config/backup/*
-config/*.ini
-!config/template.ini
-config/*.yaml
-!config/deploy.*.yaml
-config/*.json
-!config/template*.json
-config/*.db
+/config/backup/*
+/config/*.ini
+!/config/template.ini
+/config/*.yaml
+!/config/deploy.*.yaml
+/config/*.json
+!/config/template*.json
+/config/*.db
 # temp files
 /log
-config/reloadflag
-config/reloadalas
+/config/reloadflag
+/config/reloadalas
 *.lock
 *.tmp
 # files in releases
@@ -33,18 +33,18 @@ __pycache__/
 
 # Distribution / packaging
 .Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
+/env/
+/build/
+/develop-eggs/
+/dist/
+/downloads/
+/eggs/
+/.eggs/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -79,17 +79,17 @@ coverage.xml
 local_settings.py
 
 # Flask stuff:
-instance/
+/instance/
 .webassets-cache
 
 # Scrapy stuff:
 .scrapy
 
 # Sphinx documentation
-docs/_build/
+/docs/_build/
 
 # PyBuilder
-target/
+/target/
 
 # IPython Notebook
 .ipynb_checkpoints
@@ -104,8 +104,8 @@ celerybeat-schedule
 .env
 
 # virtualenv
-venv/
-ENV/
+/venv/
+/ENV/
 
 # Spyder project settings
 .spyderproject
@@ -115,12 +115,12 @@ ENV/
 ### VirtualEnv template
 # Virtualenv
 # http://iamzed.com/2009/05/07/a-primer-on-virtualenv/
-[Bb]in
-[Ii]nclude
-[Ll]ib
-[Ll]ib64
-[Ll]ocal
-[Ss]cripts
+/[Bb]in
+/[Ii]nclude
+/[Ll]ib
+/[Ll]ib64
+/[Ll]ocal
+/[Ss]cripts
 pyvenv.cfg
 .venv
 pip-selfcheck.json
