@@ -397,10 +397,7 @@ def image_fixup(file, need_crop=False):
     Returns:
         bool: If file changed
     """
-    # fixup png only
     _, _, ext = file.rpartition('.')
-    if ext != 'png':
-        return False
 
     # image_load
     try:

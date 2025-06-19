@@ -297,8 +297,11 @@ class AssetsExtractor:
         Returns:
             bool: If file changed
         """
-        # must be an asset
         file = event.path
+        # fixup png only
+        if not file.endswith('.png'):
+            return False
+        # must be an asset
         if not self.is_assets_file(file):
             return False
         # fixup

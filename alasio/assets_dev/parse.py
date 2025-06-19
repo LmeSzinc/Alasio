@@ -86,15 +86,6 @@ class AssetImage:
         self.mean = mean
         self.valid = True
 
-    def fixup(self):
-        """
-        Fixup image
-
-        Returns:
-            bool: If file changed
-        """
-        return image_fixup(self.file)
-
 
 @dataclass
 class AssetData:
