@@ -34,6 +34,32 @@ def resize(image, size):
     return cv2.resize(image, size, interpolation=cv2.INTER_NEAREST)
 
 
+def resize_maxpx(image, maxpx):
+    """
+    Resize image to maximum width or height
+
+    Args:
+        image (np.ndarray):
+        maxpx: Maximum width or height
+
+    Returns:
+        np.ndarray:
+    """
+    w, h = image_size(image)
+    if w <= maxpx and h <= maxpx:
+        # no need to resize
+        return image
+
+    if w > h:
+        h = round(maxpx / w * h)
+        w = maxpx
+    else:
+        w = round(maxpx / h * w)
+        h = maxpx
+
+    return cv2.resize(image, (w, h), interpolation=cv2.INTER_NEAREST)
+
+
 def image_paste(image, background, origin):
     """
     Paste an image on background.
