@@ -8,6 +8,7 @@ import msgspec
 from msgspec.json import decode, encode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.routing import compile_path
 from starlette.types import Receive, Scope, Send
 from starlette.websockets import WebSocket
 from typing_extensions import Annotated, get_args, get_origin
@@ -126,19 +127,28 @@ class RequestASGI:
 
         # prepare response inject
         for name, dep in self.response_di.items():
-            dep.from_response(response)
+            await dep.from_response(response)
 
         await response(scope, receive, send)
 
     @classmethod
-    def from_route(cls, route: "APIRoute"):
+    def from_route(cls, path, endpoint, dependencies):
+        """
+        Args:
+            path (str):
+            endpoint (callable):
+            dependencies [list[callable]]:
+
+        Returns:
+            RequestASGI:
+        """
+        _, _, path_params = compile_path(path)
         request_di = {}
         response_di = {}
         depends_di = {}
-        path_params = route.param_convertors
 
-        assert is_async(route.endpoint), 'Endpoint must be an async function'
-        sig = inspect.signature(route.endpoint)
+        assert is_async(endpoint), 'Endpoint must be an async function'
+        sig = inspect.signature(endpoint)
         for name, sig_param in sig.parameters.items():
             # name, format, param, default
             annotation = sig_param.annotation
@@ -212,7 +222,7 @@ class RequestASGI:
                     param.default = default
                 # Path key must pair with path_params
                 if not isinstance(param, (Query, Cookie)):
-                    assert param.key in path_params, f'Path("{param.key}") is not in path_params, path={route.path}'
+                    assert param.key in path_params, f'Path("{param.key}") is not in path_params, path={path}'
                 param.set_formatter(annotation)
             # request model
             elif is_class and issubclass(param, msgspec.Struct):
@@ -253,9 +263,9 @@ class RequestASGI:
             request_di[name] = param
 
         return cls(
-            endpoint=route.endpoint,
+            endpoint=endpoint,
             request_di=request_di,
             response_di=response_di,
             depends_di=depends_di,
-            depends_endpoint=route.dependencies,
+            depends_endpoint=dependencies,
         )

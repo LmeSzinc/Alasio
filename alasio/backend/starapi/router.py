@@ -56,7 +56,7 @@ class APIRouter(routing.Router):
     ):
         self.prefix = prefix.rstrip('/')
         self.tags: "list[str]" = tags or []
-        self.dependencies = list[dependencies] if dependencies is not None else []
+        self.dependencies = list(dependencies) if dependencies is not None else []
         super().__init__()
 
     def route(
@@ -66,19 +66,17 @@ class APIRouter(routing.Router):
     ):
         path = self.prefix + path
 
-        def decorator(func: typing.Callable) -> typing.Callable:
+        def decorator(func: typing.Callable):
+            # convert route to ASGI app
+            asgi = RequestASGI.from_route(path, func, self.dependencies)
             route = APIRoute(
                 path,
-                func,
+                asgi,
                 methods=methods,
                 tags=self.tags,
                 dependencies=self.dependencies,
             )
-            # convert route to ASGI app
-            asgi = RequestASGI.from_route(route)
-            route.app = asgi
             self.routes.append(route)
-            return func
 
         return decorator
 

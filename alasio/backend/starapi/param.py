@@ -330,7 +330,7 @@ class SetCookie(ResponseInject):
         """
         self.call = []
 
-    def from_response(self, response: Response):
+    async def from_response(self, response: Response):
         for call, key, kwargs in self.call:
             if call == 'set_cookie':
                 response.set_cookie(key, **kwargs)
