@@ -71,7 +71,7 @@ class SingletonNamed(type):
 
             # create
             instance = super().__call__(name, *args, **kwargs)
-            cls.__instances[''] = instance
+            cls.__instances[name] = instance
             return instance
 
     def singleton_remove(cls, name):
