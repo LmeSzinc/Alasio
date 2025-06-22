@@ -20,8 +20,8 @@ if __name__ == '__main__':
     from hypercorn.trio import serve
 
     config = Config()
-    config.bind = '127.0.0.1:8000'
-
+    config.bind = '0.0.0.0:8000'
+    # config.bind = ['0.0.0.0:8000', '[::]:8000']
     # To enable assess log
     # config.accesslog = '-'
 
