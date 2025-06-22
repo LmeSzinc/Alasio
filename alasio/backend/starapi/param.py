@@ -51,6 +51,13 @@ class HTTPExceptionJson(HTTPException):
             headers:
         """
         detail = msgspec.json.encode(detail)
+        # Note no.1
+        # It just OK to input bytes to `details`
+        # In starlettle/middleware/exceptions.py http_exception(), HTTPException will turn into PlainTextResponse
+        # and Response.render() returns directly if detail is bytes
+        # Note no.2
+        # `headers` is added in https://github.com/encode/starlette/pull/1435
+        # so Alasio[backend] requires starlette>=0.19.0
         super().__init__(status_code, detail=detail, headers=headers)
 
 
