@@ -21,7 +21,7 @@ class GitReset(GitObjectManager):
         List all files under the tree of given sha1
 
         Args:
-            sha1: commit sha1, tree sha1, tag sha1
+            sha1 (str): commit sha1, or tree sha1, or tag sha1
 
         Returns:
             dict[str, FileEntry]:
@@ -175,3 +175,14 @@ class GitReset(GitObjectManager):
             with WORKER_POOL.wait_jobs() as pool:
                 for task in tasks:
                     pool.start_thread_soon(self._reset_task_validate_files, task)
+
+    def git_reset_hard(self, sha1):
+        """
+        Equivalent to `git reset --hard {sha1}`
+
+        Args:
+            sha1 (str): commit sha1, or tree sha1, or tag sha1
+        """
+        self.read_lazy()
+        dict_file = self.list_files(sha1)
+        self.reset_validate_files(dict_file)
