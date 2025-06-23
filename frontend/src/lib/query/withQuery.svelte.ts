@@ -15,9 +15,10 @@ type FnParams<T> = T extends (...args: infer P) => any ? P : [];
  * [Type-level] Safely gets the response map from a config, providing a default.
  * If TConfig has a responseModel, use it; otherwise, default to `{ 200: unknown }`.
  */
-type GetResponseMap<TConfig extends ApiConfig> = TConfig['responseModel'] extends TResponseMap
-    ? TConfig['responseModel']
-    : { 200: unknown };
+type GetResponseMap<TConfig extends ApiConfig> = 
+    TConfig extends { responseModel: infer R }
+        ? R
+        : { 200: unknown };
 
 /**
  * A branded type to represent a type-level error message.
@@ -134,10 +135,9 @@ class ApiBuilder<TConfig extends ApiConfig> {
      * Can be a single model (maps to status 200) or a map of status codes to models.
      * Usage: .response<Post[]>() or .response<{ 200: Post, 404: Error }>()
      */
-    response<T>(): ApiBuilder<TConfig & { responseModel: T extends TResponseMap ? T : { 200: T } }> {
-        type ResponseMap = T extends TResponseMap ? T : { 200: T };
-        const newConfig = { ...(this.config as any), responseModel: null as unknown as ResponseMap };
-        return new ApiBuilder<TConfig & { responseModel: ResponseMap }>(newConfig);
+    response<T>(): ApiBuilder<TConfig & { responseModel: T }> {
+        const newConfig = { ...(this.config as any), responseModel: null as unknown as T };
+        return new ApiBuilder<TConfig & { responseModel: T }>(newConfig);
     }
 
     /**
@@ -236,7 +236,7 @@ class ApiBuilder<TConfig extends ApiConfig> {
             callerOptions
         );
 
-        return client.request(finalUrl, fetchOptions);
+        return client.request<GetResponseMap<TConfig>>(finalUrl, fetchOptions);
     };
 }
 

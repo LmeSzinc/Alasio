@@ -1,15 +1,16 @@
 import { deepMerge } from './merge';
 
+type PossibleData<TResponseMap> = TResponseMap[keyof TResponseMap];
 /**
  * A smart, type-safe wrapper for the native Fetch Response.
  * It standardizes both successful and failed responses and provides a convenient type guard.
  */
-class SmartResponse<TData> {
+class SmartResponse<TResponseMap> {
 	public readonly success: boolean;
 	public readonly status: number;
-	public readonly data: TData;
+	public readonly data: PossibleData<TResponseMap>;
 
-	constructor(success: boolean, status: number, data: TData) {
+	constructor(success: boolean, status: number, data: PossibleData<TResponseMap>) {
 		this.success = success;
 		this.status = status;
 		this.data = data;
@@ -19,7 +20,7 @@ class SmartResponse<TData> {
 	 * A type guard to safely narrow the response data based on the status code.
 	 * @param status The HTTP status code to check for.
 	 */
-	is<S extends number>(status: S): this is { data: TData extends { [key in S]: infer D } ? D : never; status: S } {
+	is<S extends keyof TResponseMap>(status: S): this is { data: TResponseMap[S]; status: S } {
 		return this.status === status;
 	}
 }
@@ -40,7 +41,8 @@ const GLOBAL_FETCH_OPTIONS: RequestInit = {
 async function http<TData>(url: string, options: RequestInit): Promise<ApiResponse<TData>> {
 	try {
 		const response = await fetch(url, options);
-		const data = response.status === 204 ? null : await response.json();
+        const bodyIsEmpty = response.headers.get('content-length') === '0' || response.status === 204;
+		const data = bodyIsEmpty ? null : await response.json();
 
 		return new SmartResponse<TData>(response.ok, response.status, data);
 
@@ -53,7 +55,7 @@ async function http<TData>(url: string, options: RequestInit): Promise<ApiRespon
 
 		console.error('HTTP Client Error:', e);
 		const errorPayload = { message: 'Network error or invalid JSON response' } as TData;
-		return new SmartResponse<TData>(false, 0, errorPayload); // status 0 for client-side errors
+		return new SmartResponse<TData>(false, 0, errorPayload as PossibleData<TData>); // status 0 for client-side errors
 	}
 }
 
