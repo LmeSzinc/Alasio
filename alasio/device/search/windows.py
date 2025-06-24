@@ -189,6 +189,9 @@ def iter_uninstall_registry():
         'Nemu',
         'Nemu9',
         'MuMuPlayer-12.0'
+        'MuMuPlayer',
+        'MuMuPlayer-12.0',
+        'MuMu Player 12.0',
         'MEmu',
     ]
     for path in known_uninstall_registry_path:

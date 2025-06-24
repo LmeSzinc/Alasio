@@ -151,7 +151,7 @@ class EmuStr(PathStr):
                 return EmuType.MuMuPlayerX
             else:
                 return EmuType.MuMuPlayer
-        if exe == 'mumuplayer.exe':
+        if exe in ['mumuplayer.exe', 'mumunxmain.exe']:
             return EmuType.MuMuPlayer12
         if exe == 'memu.exe':
             return EmuType.MEmuPlayer
@@ -193,7 +193,10 @@ class EmuStr(PathStr):
         folder, _, exe = self.rpartition(os.sep)
         if exe == 'MuMuPlayer.exe':
             return joinpath(folder, 'MuMuManager.exe')
-        elif exe == 'LDPlayer.exe':
+            # MuMuPlayer12 5.0
+        elif 'MuMuPlayer.exe' in exe:
+            return exe.replace('MuMuNxMain.exe', 'MuMuManager.exe')
+        elif 'LDPlayer.exe' in exe:
             return joinpath(folder, 'ldconsole.exe')
         elif exe == 'dnplayer.exe':
             return joinpath(folder, 'ldconsole.exe')
