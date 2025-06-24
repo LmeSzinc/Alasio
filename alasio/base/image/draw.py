@@ -1,6 +1,7 @@
 import cv2
+import numpy as np
 
-from alasio.base.image.imfile import ImageNotSupported, image_channel, image_size
+from alasio.base.image.imfile import ImageNotSupported, image_channel, image_copy, image_size
 
 
 def show_as_pillow(image):
@@ -66,10 +67,13 @@ def image_paste(image, background, origin):
     This method does not return a value, but instead updates the array "background".
 
     Args:
-        image:
+        image (np.ndarray):
         background:
         origin: Upper-left corner, (x, y)
     """
+    if not image.flags.writeable:
+        image = image_copy(image)
+
     x, y = origin
     w, h = image_size(image)
     background[y:y + h, x:x + w] = image
@@ -84,6 +88,9 @@ def image_paint(image, area, color):
         area:
         color: (r, g, b) or value if grayscale
     """
+    if not image.flags.writeable:
+        image = image_copy(image)
+
     x1, y1, x2, y2 = area
     image[y1:y2, x1:x2] = color
 
@@ -96,6 +103,9 @@ def image_paint_white(image, area):
         image (np.ndarray):
         area:
     """
+    if not image.flags.writeable:
+        image = image_copy(image)
+
     channel = image_channel(image)
     x1, y1, x2, y2 = area
     if channel == 3:
@@ -122,6 +132,9 @@ def image_paint_black(image, area):
         image (np.ndarray):
         area:
     """
+    if not image.flags.writeable:
+        image = image_copy(image)
+
     channel = image_channel(image)
     x1, y1, x2, y2 = area
     if channel == 3:
