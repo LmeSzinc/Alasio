@@ -4,7 +4,7 @@ import pytest
 from msgspec import DecodeError, Struct, ValidationError, field
 
 from alasio.ext.msgspec_error.const import ErrorType
-from alasio.ext.msgspec_error.default import load_msgspec_with_default
+from alasio.ext.msgspec_error.default import load_json_with_default
 
 
 # ==============================================================================
@@ -40,7 +40,7 @@ class Team(Struct):
 def test_happy_path():
     """Tests that valid data decodes correctly with no errors."""
     data = b'{"id": 1, "name": "Alice", "profile": {"age": 30, "is_active": true}}'
-    result, errors = load_msgspec_with_default(data, User)
+    result, errors = load_json_with_default(data, User)
 
     assert isinstance(result, User)
     assert result.id == 1
@@ -51,7 +51,7 @@ def test_happy_path():
 def test_single_field_error_with_default():
     """Tests that a single field error is corrected using its default."""
     data = b'{"id": 1, "name": 12345}'
-    result, errors = load_msgspec_with_default(data, User)
+    result, errors = load_json_with_default(data, User)
 
     assert result.name == "default_user"
     assert len(errors) == 1
@@ -63,13 +63,13 @@ def test_unrecoverable_error_no_default():
     """Tests that a required field without a default raises ValidationError."""
     data = b'{"name": "Bob"}'
     with pytest.raises(ValidationError, match="Object missing required field `id`"):
-        load_msgspec_with_default(data, User)
+        load_json_with_default(data, User)
 
 
 def test_list_item_error():
     """Tests that an error inside a list item can be corrected."""
     data = b'{"members": [{"id": 1}, {"id": 2, "name": 123}]}'
-    result, errors = load_msgspec_with_default(data, model=Team)
+    result, errors = load_json_with_default(data, model=Team)
 
     assert len(result.members) == 2
     assert result.members[1].name == "default_user"
@@ -80,7 +80,7 @@ def test_list_item_error():
 def test_set_item_error():
     """Tests that an error inside a set item can be corrected."""
     data = b'{"member_set": [{"id": 1, "name": 123}]}'
-    result, errors = load_msgspec_with_default(data, model=Team)
+    result, errors = load_json_with_default(data, model=Team)
 
     assert len(result.member_set) == 1
     member = result.member_set.pop()
@@ -91,7 +91,7 @@ def test_set_item_error():
 def test_root_validation_error_with_default():
     """Tests replacing the object if the root has a validation error."""
     data = b'["this", "is", "a", "list"]'
-    result, errors = load_msgspec_with_default(data, model=Profile)
+    result, errors = load_json_with_default(data, model=Profile)
 
     assert result == Profile()
     assert len(errors) == 1
@@ -102,13 +102,13 @@ def test_root_validation_error_unrecoverable():
     """Tests a root validation error on a non-default-constructible model."""
     data = b'["not a struct"]'
     with pytest.raises(ValidationError):
-        load_msgspec_with_default(data, model=User)
+        load_json_with_default(data, model=User)
 
 
 def test_decode_error_with_default_fallback():
     """Tests fallback to a default object on DecodeError."""
     data = b'{"key": "incomplete json'
-    result, errors = load_msgspec_with_default(data, Profile)
+    result, errors = load_json_with_default(data, Profile)
 
     assert result == Profile()
     assert len(errors) == 1
@@ -121,13 +121,13 @@ def test_decode_error_unrecoverable():
     """Tests that DecodeError is re-raised for non-default-constructible models."""
     data = b'{"key": "incomplete json'
     with pytest.raises(DecodeError):
-        load_msgspec_with_default(data, User)
+        load_json_with_default(data, User)
 
 
 def test_unicode_decode_error_with_default_fallback():
     """Tests fallback to a default object on UnicodeDecodeError."""
     data = b'{"name": "\xc3"}'  # Invalid start byte for UTF-8
-    result, errors = load_msgspec_with_default(data, Profile)
+    result, errors = load_json_with_default(data, Profile)
 
     assert result == Profile()
     assert len(errors) == 1
@@ -141,5 +141,5 @@ def test_unicode_decode_error_with_default_fallback():
 def test_dict_value_error():
     """Tests an error inside a dict value (skipped due to msgspec limitation)."""
     data = b'{"member_map": {"a": {"id": 1, "name": 123}}}'
-    result, errors = load_msgspec_with_default(data, model=Team)
+    result, errors = load_json_with_default(data, model=Team)
     assert result.member_map["a"].name == "default_user"

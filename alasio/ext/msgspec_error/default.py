@@ -1,13 +1,15 @@
 from msgspec import DecodeError, NODEFAULT, ValidationError, convert
 from msgspec.inspect import DictType, FrozenSetType, ListType, SetType, StructType, TupleType, VarTupleType, type_info
-from msgspec.json import decode
+from msgspec.json import decode as decode_json
+from msgspec.msgpack import decode as decode_msgpack
 
 from alasio.ext.msgspec_error.const import ErrorType
 from alasio.ext.msgspec_error.error import ErrorCtx, MsgspecError, parse_msgspec_error
 
 
-def load_msgspec_with_default(data, model):
-    """Decodes bytes, substituting defaults for fields that fail validation.
+def load_json_with_default(data, model):
+    """
+    Decodes bytes, substituting defaults for fields that fail validation.
 
     This function prioritizes performance for valid data. If a ValidationError
     occurs, it enters an iterative repair loop. If a DecodeError or
@@ -31,12 +33,52 @@ def load_msgspec_with_default(data, model):
             target model cannot be default-constructed.
     """
     try:
-        return decode(data, type=model), []
+        return decode_json(data, type=model), []
     except ValidationError as e:
         # A field is invalid, but the overall structure is valid JSON.
         # Enter the iterative repair process.
         try:
-            raw_obj = decode(data)
+            raw_obj = decode_json(data)
+        except (DecodeError, UnicodeDecodeError):
+            # This can happen if the initial validation found a structural
+            # error that the generic decoder also chokes on. Treat it as
+            # a root-level decode error.
+            return _handle_root_decode_error(model, e)
+        return _repair_and_convert(raw_obj, model, e)
+    except (DecodeError, UnicodeDecodeError) as e:
+        # The data is not valid JSON/MsgPack or has a unicode error.
+        # Attempt to substitute the entire object.
+        return _handle_root_decode_error(model, e)
+
+
+def load_msgpack_with_default(data, model):
+    """
+    Decodes bytes, substituting defaults for fields that fail validation.
+    See load_json_with_default for more info
+
+    Args:
+        data (bytes): The input bytes to decode.
+        model (type): The target type to decode into.
+
+    Returns:
+        tuple[any, list[MsgspecError]]: A tuple containing the validated result
+            and a list of errors that were corrected.
+
+        Raises:
+        msgspec.ValidationError: If a validation error occurs on an item
+            that has no default value.
+        msgspec.DecodeError: If the input data is malformed and the target
+            model cannot be default-constructed.
+        UnicodeDecodeError: If the input data has a unicode error and the
+            target model cannot be default-constructed.
+    """
+    try:
+        return decode_msgpack(data, type=model), []
+    except ValidationError as e:
+        # A field is invalid, but the overall structure is valid JSON.
+        # Enter the iterative repair process.
+        try:
+            raw_obj = decode_msgpack(data)
         except (DecodeError, UnicodeDecodeError):
             # This can happen if the initial validation found a structural
             # error that the generic decoder also chokes on. Treat it as
