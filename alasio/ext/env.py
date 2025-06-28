@@ -19,5 +19,19 @@ AIX = sys.platform.startswith("aix")
 # Global variable
 PROJECT_ROOT = PathStr.new(__file__).uppath(3)
 
+
+def set_project_root(root, up=0):
+    """
+    Args:
+        root (str):
+        up (int):
+    """
+    root = PathStr.new(root)
+    if up:
+        root = root.uppath(up)
+    global PROJECT_ROOT
+    PROJECT_ROOT = root
+
+
 # Environ
 CHINAC_CLOUDPHONE = os.environ.get("cloudphone", "") == "cloudphone"
