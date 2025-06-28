@@ -40,6 +40,55 @@ def iter_class_field(cls):
             yield name, anno, value
 
 
+class LazyCursor:
+    def __init__(self, table):
+        """
+        A cursor wrapper that lazy executes sql.
+        `execute()` and `executemany()` calls will be captured into self.query, then run at `commit()`
+        if self.query is empty, `commit()` will do nothing
+
+        Args:
+            table (AlasioTable):
+        """
+        self.table = table
+        self.query = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return
+
+    def execute(self, sql, param):
+        self.query.append(('execute', sql, param))
+
+    def executemany(self, sql, param):
+        self.query.append(('executemany', sql, param))
+
+    def executscript(self, sql):
+        self.query.append(('executscript', sql, None))
+
+    def fetchone(self):
+        raise RuntimeError('You should not call fetchone() in LazyCursor')
+
+    def fetchall(self):
+        raise RuntimeError('You should not call fetchall() in LazyCursor')
+
+    def commit(self):
+        if not self.query:
+            return
+
+        with self.table.cursor() as cursor:
+            for func, sql, param in self.query:
+                if func == 'execute':
+                    cursor.execute(sql, param)
+                elif func == 'executemany':
+                    cursor.executemany(sql, param)
+                elif func == 'executescript':
+                    cursor.executescript(sql)
+            cursor.commit()
+
+
 class AlasioTable:
     # Tables should override these
     TABLE_NAME = ''
@@ -79,13 +128,19 @@ class AlasioTable:
         """
         self.file = file
 
-    def cursor(self):
+    def cursor(self, lazy=False):
         """
         Create a cursor to operate sqlite
+
+        Args:
+            lazy (bool): True to create a LazyCursor
 
         Returns:
             SqlitePoolCursor:
         """
+        if lazy:
+            return LazyCursor(self)
+
         cursor = SQLITE_POOL.cursor(self.file)
         # copy CREATE_TABLE to cursor, so it can auto create table if table not exists
         cursor.TABLE_NAME = self.TABLE_NAME
@@ -137,7 +192,7 @@ class AlasioTable:
     def sql_expr_groupby(fields):
         """
         Args:
-            fields (str | list[str] | tuple[str]):
+            fields (str | list[str] | tuple[str,...]):
 
         Returns:
             str: GROUP BY "field1","field2"
@@ -152,7 +207,7 @@ class AlasioTable:
     def sql_expr_orderby(fields, asc=True):
         """
         Args:
-            fields (str | list[str] | tuple[str]):
+            fields (str | list[str] | tuple[str,...]):
             asc (bool): True for ASC, False for DESC
 
         Returns:
@@ -172,9 +227,9 @@ class AlasioTable:
         """
         Args:
             sql (str): Prev SQL
-            _groupby_ (str | list[str] | tuple[str]):
-            _orderby_ (str | list[str] | tuple[str]):
-            _orderby_desc_ (str | list[str] | tuple[str]):
+            _groupby_ (str | list[str] | tuple[str,...]):
+            _orderby_ (str | list[str] | tuple[str,...]):
+            _orderby_desc_ (str | list[str] | tuple[str,...]):
             _limit_ (int):
             _offset_ (int):
 
@@ -210,9 +265,9 @@ class AlasioTable:
 
         Args:
             _cursor_ (SqlitePoolCursor | None): to reuse cursor
-            _groupby_ (str | list[str] | tuple[str]):
-            _orderby_ (str | list[str] | tuple[str]):
-            _orderby_desc_ (str | list[str] | tuple[str]):
+            _groupby_ (str | list[str] | tuple[str,...]):
+            _orderby_ (str | list[str] | tuple[str,...]):
+            _orderby_desc_ (str | list[str] | tuple[str,...]):
             _limit_ (int):
             _offset_ (int):
             **kwargs: Anything to query
@@ -272,9 +327,9 @@ class AlasioTable:
 
         Args:
             _cursor_ (SqlitePoolCursor | None): to reuse cursor
-            _groupby_ (str | list[str] | tuple[str]):
-            _orderby_ (str | list[str] | tuple[str]):
-            _orderby_desc_ (str | list[str] | tuple[str]):
+            _groupby_ (str | list[str] | tuple[str,...]):
+            _orderby_ (str | list[str] | tuple[str,...]):
+            _orderby_desc_ (str | list[str] | tuple[str,...]):
             _offset_ (int):
             **kwargs: Anything to query
 
@@ -424,7 +479,7 @@ class AlasioTable:
     def update_row(
             self,
             rows: "T_model | list[T_model]",
-            updates: "str | list[str]" = '',
+            updates: "str | list[str] | tuple[str,...]" = '',
             _cursor_: "SqlitePoolCursor | None" = None,
     ):
         """
@@ -460,8 +515,8 @@ class AlasioTable:
     def upsert_row(
             self,
             rows: "T_model | list[T_model]",
-            conflicts: "str | list[str]" = '',
-            updates: "str | list[str]" = '',
+            conflicts: "str | list[str] | | tuple[str,...]" = '',
+            updates: "str | list[str] | | tuple[str,...]" = '',
             _cursor_: "SqlitePoolCursor | None" = None,
     ):
         """
