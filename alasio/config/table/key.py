@@ -2,10 +2,8 @@ from typing import Type, TypeVar
 
 import msgspec
 
-from alasio.db.table import AlasioTable
-from alasio.ext import env
-from alasio.ext.cache import cached_property
-from alasio.ext.singleton import SingletonNamed
+from alasio.config.table.base import AlasioConfigDB
+from alasio.ext.cache import cached_property, del_cached_property
 from alasio.logger import logger
 
 T_model = TypeVar('T_model', bound=msgspec.Struct)
@@ -16,10 +14,6 @@ class KeyValue(msgspec.Struct):
     value: bytes
     # PRIMARY_KEY, AUTO_INCREMENT
     id: int = 0
-
-
-class AlasioMod(msgspec.Struct):
-    mode_name: str
 
 
 class JwtSecret(msgspec.Struct):
@@ -45,7 +39,7 @@ class JwtSecret(msgspec.Struct):
         return sha1(mac).digest()
 
 
-class AlasioKeyTable(AlasioTable, metaclass=SingletonNamed):
+class AlasioKeyTable(AlasioConfigDB):
     TABLE_NAME = 'alasio'
     PRIMARY_KEY = 'id'
     AUTO_INCREMENT = 'id'
@@ -60,10 +54,6 @@ class AlasioKeyTable(AlasioTable, metaclass=SingletonNamed):
     """
     MODEL = KeyValue
 
-    def __init__(self, config_name):
-        file = env.PROJECT_ROOT / f'config/{config_name}.db'
-        super().__init__(file)
-
     def get(self, key, model_cls: Type[T_model]) -> "T_model | None":
         """
         Get value from key
@@ -77,11 +67,30 @@ class AlasioKeyTable(AlasioTable, metaclass=SingletonNamed):
             value = msgspec.msgpack.decode(value, type=model_cls)
             return value
 
+    def get_value(self, key, default=None) -> "bytes | None":
+        """
+        Get value from key
+        """
+        row = self.select_one(key=key)
+        if row is None:
+            return default
+        else:
+            # found key
+            value = row.value
+            return value
+
     def set(self, key, model: T_model):
         """
         Set key value
         """
         value = msgspec.msgpack.encode(model)
+        row = KeyValue(key=key, value=value)
+        self.upsert_row(row, conflicts='key')
+
+    def set_value(self, key, value: "bytes"):
+        """
+        Set key value
+        """
         row = KeyValue(key=key, value=value)
         self.upsert_row(row, conflicts='key')
 
@@ -128,3 +137,25 @@ class AlasioKeyTable(AlasioTable, metaclass=SingletonNamed):
 
         # keep using current
         return value.secret
+
+    def mod_get(self):
+        """
+        Returns:
+            str: Mod name or "" if unknown
+        """
+        value = self.get_value('Mod', None)
+        if not value:
+            return ''
+        try:
+            return value.decode()
+        except UnicodeDecodeError:
+            return ''
+
+    def mod_set(self, value):
+        """
+        Args:
+            value (str):
+        """
+        value = value.encode()
+        self.set_value('Mod', value)
+        del_cached_property(self, 'mod')
