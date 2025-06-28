@@ -89,12 +89,10 @@ class AssetsExtractor:
                 AssetImage.REPO_ROOT = self.root
                 AssetImage.LANG_ROOT = server
                 for file in iter_files(server, recursive=True):
-                    # ALAS has png and gif
-                    if file.endswith('.png') or file.endswith('.gif'):
-                        if self.is_assets_file(file):
-                            file = AssetImage(file)
-                            file.lang = lang
-                            yield file
+                    if self.is_assets_file(file):
+                        file = AssetImage(file)
+                        file.lang = lang
+                        yield file
 
         return AssetAll(it)
 
