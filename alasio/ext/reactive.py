@@ -127,25 +127,36 @@ class reactive:
         with self.lock:
             self.observers = {(r, n) for r, n in self.observers if r != ref}
 
-    def broadcast(self, obj, compute=True):
+    def broadcast(self, obj, old=_NOT_FOUND, new=_NOT_FOUND):
         """
         Broadcast changes to all observers
 
         Args:
-            obj:
-            compute: True to re-compute cache
+            obj: ReactiveCallback instance, or any instance
+            old: Old value of the reactive data
+                If `old` is _NOT_FOUND, get `old` from `self.cache_attr`
+            new: New value of the reactive data
+                If `new` is _NOT_FOUND, compute reactive agin
         """
         # Get observers copy under lock, then notify outside lock
         with self.lock:
-            if compute:
-                self.compute(obj)
+            if old is _NOT_FOUND:
+                old = getattr(obj, self.cache_attr, _NOT_FOUND)
+            if new is _NOT_FOUND:
+                new = self.compute(obj)
             observers = list(self.observers)
+
+        # Check if value changed
+        if new is _NOT_FOUND:
+            # this shouldn't happen
+            return
+        if old == new:
+            # value unchanged
+            return
 
         # Broadcast changes to external function
         if isinstance(obj, ReactiveCallback):
-            cache = getattr(obj, self.cache_attr, _NOT_FOUND)
-            if cache is not _NOT_FOUND:
-                obj.reactive_callback(self.name, cache)
+            obj.reactive_callback(self.name, old, new)
 
         # Notify observers outside the lock to prevent deadlocks
         for ref, name in observers:
@@ -166,30 +177,35 @@ class reactive_source(reactive):
     def compute(self, obj):
         """
         Compute value and set it to cache, assumes lock is held
+        reactive_source should not observe anything, so here just register observer, no new context
         """
+        parent = ReactiveContext.get_current_observer()
+
+        # call
         value = self.func(obj)
         setattr(obj, self.cache_attr, value)
-        # reactive_source should not observe anything
+
+        # register observer
+        if parent is not None and parent != (obj, self.name):
+            parent_obj, parent_name = parent
+            self._observer_add_unsafe(parent_obj, parent_name)
+
         return value
 
     def __set__(self, obj, value: T):
         with self.lock:
-            cache = getattr(obj, self.cache_attr, _NOT_FOUND)
-            if cache is _NOT_FOUND:
-                # new value
-                setattr(obj, self.cache_attr, value)
-                self.broadcast(obj, compute=False)
-            elif cache == value:
+            old = getattr(obj, self.cache_attr, _NOT_FOUND)
+            if old == value:
                 # value unchanged
                 pass
             else:
                 # value changed
                 setattr(obj, self.cache_attr, value)
-                self.broadcast(obj, compute=False)
+                self.broadcast(obj, old=old, new=value)
 
 
 class ReactiveCallback:
-    def reactive_callback(self, name, value):
+    def reactive_callback(self, name, old, new):
         """
         If any reactive value from this object is changed, this method will be called
         """
@@ -212,9 +228,9 @@ if __name__ == '__main__':
             # `doubled` will be immediately re-computed once `value` changed
             return self.value * 2
 
-        def reactive_callback(self, name, value):
+        def reactive_callback(self, name, old, new):
             # `reactive_callback` will be called once `value` or `doubled` changed
-            print(f'property "{name}" changed to: {value}')
+            print(f'property "{name}" changed: {old} -> {new}')
 
 
     counter = Counter()
@@ -223,5 +239,5 @@ if __name__ == '__main__':
     print(counter.doubled)
     # 2
     counter.value = 11
-    # property "value" changed to: 11
-    # property "doubled" changed to: 22
+    # property "value" changed: 1 -> 11
+    # property "doubled" changed: 2 -> 22
