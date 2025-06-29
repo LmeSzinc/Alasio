@@ -172,7 +172,7 @@ class reactive:
                         continue
                     broadcast(observer_obj)
 
-    def touch(self, obj):
+    def mutate(self, obj, new=_NOT_FOUND):
         """
         Manually triggers a broadcast for this reactive property on a specific instance.
         Current value will be broadcast to all observers as `new`,
@@ -180,20 +180,25 @@ class reactive:
 
         Args:
             obj: The instance on which to trigger the broadcast.
+            new: New value of the reactive data
+                If `new` is _NOT_FOUND, reuse current data
 
         Usage:
-            <ClassName>.<property_name>.touch(<instance_of_class>)
+            <ClassName>.<property_name>.mutate(<instance_of_class>)
 
         Examples:
             processor = DeepDataProcessor()
             # this won't trigger any broadcast because it's an in-place mutation
             processor.raw_data['user']['profile']['name'] = 'Bob'
             # this would broadcast changes to all observers
-            DeepDataProcessor.raw_data.touch(processor)
+            DeepDataProcessor.raw_data.mutate(processor)
         """
         # Get observers copy under lock, then notify outside lock
         with self.lock:
-            new = getattr(obj, self.cache_attr, _NOT_FOUND)
+            if new is _NOT_FOUND:
+                new = getattr(obj, self.cache_attr, _NOT_FOUND)
+            else:
+                setattr(obj, self.cache_attr, new)
             observers = list(self.observers)
 
         # Check if value changed

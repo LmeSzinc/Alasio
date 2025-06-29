@@ -202,7 +202,7 @@ def test_deep_dictionary_dependency(processor):
     # Relevant change
     new_data_relevant = processor.raw_data.copy()
     new_data_relevant['user']['profile']['name'] = 'Bob'
-    DeepDataProcessor.raw_data.touch(processor)
+    DeepDataProcessor.raw_data.mutate(processor)
     assert processor.username == 'Bob'
     assert processor.greeting_message == 'Welcome, Bob!'
     assert processor.greeting_compute_mock.call_count == 2
