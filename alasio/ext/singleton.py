@@ -12,27 +12,27 @@ class Singleton(type):
     Subclasses will have their own unique singleton instance.
     This implementation is thread-safe.
     """
-    __instances = {}
-    __lock = threading.Lock()
+    def __init__(cls, name, bases, dct):
+        super().__init__(name, bases, dct)
+        cls.__instances = None
+        cls.__lock = threading.Lock()
 
     def __call__(cls: Type[T], *args, **kwargs) -> T:
         # return cached instance directly
-        try:
-            return cls.__instances['']
-        except KeyError:
-            pass
+        instance = cls.__instances
+        if instance is not None:
+            return instance
 
         # create new instance
         with cls.__lock:
             # another thread may have created while we are waiting
-            try:
-                return cls.__instances['']
-            except KeyError:
-                pass
+            instance = cls.__instances
+            if instance is not None:
+                return instance
 
             # create
             instance = super().__call__(*args, **kwargs)
-            cls.__instances[''] = instance
+            cls.__instances = instance
             return instance
 
     def singleton_clear_all(cls):
@@ -40,7 +40,7 @@ class Singleton(type):
         Remove all instances
         """
         with cls.__lock:
-            cls.__instances.clear()
+            cls.__instances = None
 
 
 class SingletonNamed(type):
@@ -51,8 +51,10 @@ class SingletonNamed(type):
     Each class will have its own separate cache of named instances.
     This implementation is thread-safe.
     """
-    __instances = {}
-    __lock = threading.Lock()
+    def __init__(cls, name, bases, dct):
+        super().__init__(name, bases, dct)
+        cls.__instances = {}
+        cls.__lock = threading.Lock()
 
     def __call__(cls: Type[T], name, *args, **kwargs) -> T:
         # return cached instance directly
