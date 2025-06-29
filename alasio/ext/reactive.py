@@ -13,20 +13,20 @@ class ReactiveContext:
     _local = threading.local()
 
     @classmethod
-    def get_current_observer(cls):
+    def get_observer(cls):
         """
         Returns:
             tuple[Any, str] | None: (weak_ref_to_object, property_name)
         """
-        return getattr(cls._local, 'current_observer', None)
+        return getattr(cls._local, 'observer', None)
 
     @classmethod
-    def set_current_observer(cls, observer):
+    def set_observer(cls, observer):
         """
         Args:
             observer (tuple[Any, str] | None): (weak_ref_to_object, property_name)
         """
-        cls._local.current_observer = observer
+        cls._local.observer = observer
 
 
 class reactive:
@@ -48,7 +48,7 @@ class reactive:
         cache = getattr(obj, self.cache_attr, _NOT_FOUND)
         if cache is not _NOT_FOUND:
             # register observer
-            parent = ReactiveContext.get_current_observer()
+            parent = ReactiveContext.get_observer()
             if parent is not None and parent != (obj, self.name):
                 parent_obj, parent_name = parent
                 self._observer_add(parent_obj, parent_name)
@@ -59,7 +59,7 @@ class reactive:
             cache = getattr(obj, self.cache_attr, _NOT_FOUND)
             if cache is not _NOT_FOUND:
                 # register observer
-                parent = ReactiveContext.get_current_observer()
+                parent = ReactiveContext.get_observer()
                 if parent is not None and parent != (obj, self.name):
                     parent_obj, parent_name = parent
                     self._observer_add(parent_obj, parent_name)
@@ -75,10 +75,10 @@ class reactive:
         """
         Compute value and set it to cache, assumes lock is held
         """
-        parent = ReactiveContext.get_current_observer()
+        parent = ReactiveContext.get_observer()
         # enter new context, so dependencies can know who's observing
         current = (obj, self.name)
-        ReactiveContext.set_current_observer(current)
+        ReactiveContext.set_observer(current)
         try:
             # call
             value = self.func(obj)
@@ -93,7 +93,7 @@ class reactive:
 
         finally:
             # rollback context
-            ReactiveContext.set_current_observer(parent)
+            ReactiveContext.set_observer(parent)
 
     def _observer_add(self, obj, name):
         """
@@ -172,6 +172,53 @@ class reactive:
                         continue
                     broadcast(observer_obj)
 
+    def touch(self, obj):
+        """
+        Manually triggers a broadcast for this reactive property on a specific instance.
+        Current value will be broadcast to all observers as `new`,
+        `old` would be _NOT_FOUND because value is already changed by in-place mutation.
+
+        Args:
+            obj: The instance on which to trigger the broadcast.
+
+        Usage:
+            <ClassName>.<property_name>.touch(<instance_of_class>)
+
+        Examples:
+            processor = DeepDataProcessor()
+            # this won't trigger any broadcast because it's an in-place mutation
+            processor.raw_data['user']['profile']['name'] = 'Bob'
+            # this would broadcast changes to all observers
+            DeepDataProcessor.raw_data.touch(processor)
+        """
+        # Get observers copy under lock, then notify outside lock
+        with self.lock:
+            new = getattr(obj, self.cache_attr, _NOT_FOUND)
+            observers = list(self.observers)
+
+        # Check if value changed
+        if new is _NOT_FOUND:
+            # this shouldn't happen
+            return
+
+        # Broadcast changes to external function
+        if isinstance(obj, ReactiveCallback):
+            obj.reactive_callback(self.name, _NOT_FOUND, new)
+
+        # Notify observers outside the lock to prevent deadlocks
+        for ref, name in observers:
+            observer_obj = ref()
+            if observer_obj is not None:
+                observer_cls = observer_obj.__class__
+                observer_reactive = getattr(observer_cls, name, _NOT_FOUND)
+                if observer_reactive is not _NOT_FOUND:
+                    try:
+                        broadcast = observer_reactive.broadcast
+                    except AttributeError:
+                        # this shouldn't happen
+                        continue
+                    broadcast(observer_obj)
+
 
 class reactive_source(reactive):
     def compute(self, obj):
@@ -179,7 +226,7 @@ class reactive_source(reactive):
         Compute value and set it to cache, assumes lock is held
         reactive_source should not observe anything, so here just register observer, no new context
         """
-        parent = ReactiveContext.get_current_observer()
+        parent = ReactiveContext.get_observer()
 
         # call
         value = self.func(obj)
@@ -208,6 +255,7 @@ class ReactiveCallback:
     def reactive_callback(self, name, old, new):
         """
         If any reactive value from this object is changed, this method will be called
+        Note that `old` might be _NOT_FOUND
         """
         pass
 
