@@ -33,8 +33,37 @@ def random_rectangle_point(area, n=3):
         n (int): The amount of numbers in simulation. Default to 3.
 
     Returns:
-        tuple(int): (x, y)
+        tuple[int, int]: (x, y)
     """
     x = random_normal_distribution_int(area[0], area[2], n=n)
     y = random_normal_distribution_int(area[1], area[3], n=n)
     return x, y
+
+
+def random_id(length=8):
+    """
+    Generate a base62 random id
+
+    Args:
+        length:
+
+    Returns:
+        str:
+    """
+    char = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    return ''.join(random.choices(char, k=length))
+
+
+def random_friendly_id(length=10):
+    """
+    Generate a random ID that is human friendly and OCR friendly
+    Output won't contain 0/o/O, 1/i/I/l, 5/S/s, 2/Z/z, 0/D, 8/B, u/U, v/V, w/W, x/X
+
+    Args:
+        length:
+
+    Returns:
+        str:
+    """
+    char = 'abcdefghjkmnpqrtyACEFGHJKLMNPQRTY34679'
+    return ''.join(random.choices(char, k=length))
