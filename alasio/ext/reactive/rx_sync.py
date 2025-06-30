@@ -1,6 +1,6 @@
 import threading
 import weakref
-from typing import Callable, TypeVar
+from typing import Callable, Generic, TypeVar
 
 T = TypeVar('T')
 _NOT_FOUND = object()
@@ -29,14 +29,14 @@ class ReactiveContext:
         cls._local.observer = observer
 
 
-class reactive:
+class reactive(Generic[T]):
     def __init__(self, func: Callable[..., T]):
         self.func = func
         self.name = func.__name__
         self.cache_attr = f'_reactive_cache_{self.name}'
 
-        # Track observers: Set of (weak_ref_to_object, property_name)
-        self.observers: "set[tuple[weakref.ref, str]]" = set()
+        # Track observers: {weak_ref_to_object, set(property_name)}
+        self.observers: "weakref.WeakKeyDictionary[object, set[str]]" = weakref.WeakKeyDictionary()
         # Lock computation and observer changes
         self.lock = threading.RLock()
 
@@ -62,7 +62,7 @@ class reactive:
                 parent = ReactiveContext.get_observer()
                 if parent is not None and parent != (obj, self.name):
                     parent_obj, parent_name = parent
-                    self._observer_add(parent_obj, parent_name)
+                    self._observer_add_unsafe(parent_obj, parent_name)
                 return cache
             # compute the value
             return self.compute(obj)
@@ -114,18 +114,13 @@ class reactive:
             obj (Any):
             name: property_name
         """
-        ref = weakref.ref(obj, self._observer_remove)
-        self.observers.add((ref, name))
+        if obj in self.observers:
+            observer_names = self.observers[obj]
+        else:
+            observer_names = set()
+            self.observers[obj] = observer_names
 
-    def _observer_remove(self, ref):
-        """
-        Clean up dead observer references
-
-        Args:
-            ref (weakref.ref):
-        """
-        with self.lock:
-            self.observers = {(r, n) for r, n in self.observers if r != ref}
+        observer_names.add(name)
 
     def broadcast(self, obj, old=_NOT_FOUND, new=_NOT_FOUND):
         """
@@ -144,7 +139,7 @@ class reactive:
                 old = getattr(obj, self.cache_attr, _NOT_FOUND)
             if new is _NOT_FOUND:
                 new = self.compute(obj)
-            observers = list(self.observers)
+            observer_items = list(self.observers.items())
 
         # Check if value changed
         if new is _NOT_FOUND:
@@ -159,10 +154,9 @@ class reactive:
             obj.reactive_callback(self.name, old, new)
 
         # Notify observers outside the lock to prevent deadlocks
-        for ref, name in observers:
-            observer_obj = ref()
-            if observer_obj is not None:
-                observer_cls = observer_obj.__class__
+        for observer_obj, names in observer_items:
+            observer_cls = observer_obj.__class__
+            for name in names:
                 observer_reactive = getattr(observer_cls, name, _NOT_FOUND)
                 if observer_reactive is not _NOT_FOUND:
                     try:
@@ -199,7 +193,7 @@ class reactive:
                 new = getattr(obj, self.cache_attr, _NOT_FOUND)
             else:
                 setattr(obj, self.cache_attr, new)
-            observers = list(self.observers)
+            observer_items = list(self.observers.items())
 
         # Check if value changed
         if new is _NOT_FOUND:
@@ -211,10 +205,9 @@ class reactive:
             obj.reactive_callback(self.name, _NOT_FOUND, new)
 
         # Notify observers outside the lock to prevent deadlocks
-        for ref, name in observers:
-            observer_obj = ref()
-            if observer_obj is not None:
-                observer_cls = observer_obj.__class__
+        for observer_obj, names in observer_items:
+            observer_cls = observer_obj.__class__
+            for name in names:
                 observer_reactive = getattr(observer_cls, name, _NOT_FOUND)
                 if observer_reactive is not _NOT_FOUND:
                     try:
