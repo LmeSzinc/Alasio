@@ -9,7 +9,7 @@ from alasio.ext.area.rng import random_id
 from alasio.ext.reactive.topic_ws import RequestEvent, ResponseEvent
 from alasio.logger import logger
 
-TRIO_CHANNEL_ERRORS = (trio.BrokenResourceError, trio.BusyResourceError, trio.ClosedResourceError)
+TRIO_CHANNEL_ERRORS = (trio.BrokenResourceError, trio.BusyResourceError, trio.ClosedResourceError, trio.EndOfChannel)
 WEBSOCKET_ERRORS = (WebSocketDisconnect, RuntimeError)
 DECODE_ERRORS = (ValidationError, DecodeError, UnicodeDecodeError)
 ENCODE_ERRORS = (EncodeError, UnicodeEncodeError)
@@ -18,6 +18,18 @@ RESPONSE_EVENT_ENCODER = msgspec.json.Encoder()
 
 
 class WebsocketServer:
+    @classmethod
+    async def endpoint(cls, ws: WebSocket):
+        """
+        Websocket endpoint
+        """
+        server = WebsocketServer(ws)
+
+        await server.serve()
+
+        # cleanup
+        pass
+
     # If no activity for X seconds,
     # we will send a "ping" to client
     PING_INTERVAL = 30
@@ -82,9 +94,9 @@ class WebsocketServer:
             except WEBSOCKET_ERRORS:
                 pass
 
-    async def send(self, data):
+    async def send(self, data: ResponseEvent):
         """
-        Send anything to send buffer
+        Send an event to send buffer
         """
         try:
             await self.send_buffer.send(data)
@@ -92,15 +104,30 @@ class WebsocketServer:
             # buffer closed
             pass
 
-    async def _ws_receive(self, ws: WebSocket) -> bytes:
+    async def send_error(self, data: "ResponseEvent | Exception | str | bytes"):
+        """
+        Send data as error
+        """
+        # convert errors
+        if isinstance(data, Exception):
+            data = f'{data.__class__.__name__}: {data}'
+        # convert to event
+        if not isinstance(data, ResponseEvent):
+            data = ResponseEvent(t='error', o='full', k=[], v=data)
+
+        await self.send(data)
+
+    async def _ws_receive(self, ws: WebSocket):
         """
         Similar to WebSocket.receive_bytes but accept both text and bytes and return bytes
+
+        Returns:
+            bytes | str:
 
         Raises:
             WebSocketDisconnect:
             RuntimeError:
             ValidationError:
-            UnicodeEncodeError
         """
         if ws.application_state != WebSocketState.CONNECTED:
             raise RuntimeError('WebSocket is not connected. Need to call "accept" first.')
@@ -111,17 +138,21 @@ class WebsocketServer:
         self.last_active = trio.current_time()
 
         try:
-            return message['bytes']
+            data = message['bytes']
+            if data is not None:
+                return data
         except KeyError:
             pass
         try:
-            text = message['text']
+            data = message['text']
+            if data is not None:
+                return data
         except KeyError:
             # This shouldn't happen
-            # We re-raise as ValidationError to ignore this message
-            raise ValidationError('Websocket event does not contain bytes nor text') from None
-        # may raise UnicodeEncodeError
-        return text.encode('utf-8')
+            pass
+
+        # We re-raise as ValidationError to ignore this message
+        raise ValidationError('Websocket event does not contain bytes nor text') from None
 
     async def task_recv(self, send_buffer: "trio.MemorySendChannel[RequestEvent]"):
         """
@@ -134,20 +165,22 @@ class WebsocketServer:
                 # websocket disconnected
                 # we capture and exit silently, so trio will wait other task to finish current job
                 break
-            except DECODE_ERRORS:
+            except DECODE_ERRORS as e:
                 # invalid message, we ignore this and hope the next message is good
+                await self.send_error(e)
                 continue
 
             # heartbeat message
-            if message == b'pong':
+            if message == b'pong' or message == 'pong':
                 self.pong_received.set()
                 continue
 
             # normal message
             try:
                 data = REQUEST_EVENT_DECODER.decode(message)
-            except ValidationError:
+            except DECODE_ERRORS as e:
                 # parse error is acceptable, just drop to message
+                await self.send_error(e)
                 continue
             except Exception as e:
                 logger.error(f'Failed to decode message {message}')
@@ -198,7 +231,7 @@ class WebsocketServer:
         while True:
             # receive from buffer
             try:
-                data = send_buffer.receive()
+                data = await send_buffer.receive()
             except TRIO_CHANNEL_ERRORS:
                 # websocket closed -> recv_buffer closed -> send_buffer closed
                 break
@@ -272,15 +305,3 @@ class WebsocketServer:
 
         # confirm websocket is closed
         await self.close()
-
-
-async def endpoint(ws: WebSocket):
-    """
-    Websocket endpoint
-    """
-    server = WebsocketServer(ws)
-
-    await server.serve()
-
-    # cleanup
-    pass

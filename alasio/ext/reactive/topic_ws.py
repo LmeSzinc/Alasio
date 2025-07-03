@@ -1,4 +1,4 @@
-from typing import Any, List, Literal, Union
+from typing import Any, List, Literal, Tuple, Union
 
 import msgspec
 
@@ -6,12 +6,18 @@ from alasio.ext.deep import deep_iter_patch
 from alasio.ext.reactive.rx_trio import AsyncReactiveCallback, async_reactive
 from alasio.ext.singleton import SingletonNamed
 
+NO_VALUE = object()
+
 
 class RequestEvent(msgspec.Struct):
     # topic
     t: str
     # operation
-    o: Literal['sub', 'unsub']
+    o: Literal['sub', 'unsub', 'add', 'set', 'del']
+    # keys
+    k: Tuple[Union[str, int]] = ()
+    # value
+    v: Any = NO_VALUE
 
 
 class ResponseEvent(msgspec.Struct):
