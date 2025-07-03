@@ -1,4 +1,4 @@
-from typing import Any, List, Literal, Tuple, Union
+from typing import Any, List, Literal, TYPE_CHECKING, Tuple, Union
 
 import msgspec
 
@@ -15,8 +15,10 @@ class RequestEvent(msgspec.Struct):
     # operation
     o: Literal['sub', 'unsub', 'add', 'set', 'del']
     # keys
+    # if operation is "sub" or "unsub", keys should be empty
     k: Tuple[Union[str, int]] = ()
     # value
+    # if operation is "sub" or "unsub" or "del", value should be empty
     v: Any = NO_VALUE
 
 
@@ -28,12 +30,20 @@ class ResponseEvent(msgspec.Struct):
     # keys
     k: List[Union[str, int]]
     # value
+    # if operation is "del", value will be None
     v: Any
+
+
+if TYPE_CHECKING:
+    # For IDE typehint, avoid recursive import
+    from alasio.backend.ws.ws import WebsocketServer
 
 
 class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
     # subclasses should override `topic` and topic name should be unique
-    # If name is empty, class name will be used
+    # If topic name is empty, class name will be used
+    # The following names are preserved:
+    # - "error", the builtin topic to give response to invalid input
     topic = ''
 
     def __init__(self, conn_id, server):
