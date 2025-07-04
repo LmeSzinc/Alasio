@@ -5,7 +5,7 @@ import trio
 from msgspec import DecodeError, EncodeError, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from alasio.backend.ws.topic import RequestEvent, ResponseEvent
+from alasio.backend.ws.event import RequestEvent, ResponseEvent
 from alasio.ext.area.rng import random_id
 from alasio.logger import logger
 
@@ -113,7 +113,7 @@ class WebsocketServer:
             data = f'{data.__class__.__name__}: {data}'
         # convert to event
         if not isinstance(data, ResponseEvent):
-            data = ResponseEvent(t='error', o='full', k=[], v=data)
+            data = ResponseEvent(t='error', o='full', v=data)
 
         await self.send(data)
 

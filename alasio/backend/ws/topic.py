@@ -1,38 +1,9 @@
-from typing import Any, List, Literal, TYPE_CHECKING, Tuple, Union
+from typing import TYPE_CHECKING
 
-import msgspec
-
+from alasio.backend.ws.event import ResponseEvent
 from alasio.ext.deep import deep_iter_patch
 from alasio.ext.reactive.rx_trio import AsyncReactiveCallback, async_reactive
 from alasio.ext.singleton import SingletonNamed
-
-NO_VALUE = object()
-
-
-class RequestEvent(msgspec.Struct):
-    # topic
-    t: str
-    # operation
-    o: Literal['sub', 'unsub', 'add', 'set', 'del']
-    # keys
-    # if operation is "sub" or "unsub", keys should be empty
-    k: Tuple[Union[str, int]] = ()
-    # value
-    # if operation is "sub" or "unsub" or "del", value should be empty
-    v: Any = NO_VALUE
-
-
-class ResponseEvent(msgspec.Struct):
-    # topic
-    t: str
-    # operation
-    o: Literal['full', 'add', 'set', 'del']
-    # keys
-    k: List[Union[str, int]]
-    # value
-    # if operation is "del", value will be None
-    v: Any
-
 
 if TYPE_CHECKING:
     # For IDE typehint, avoid recursive import
@@ -115,7 +86,7 @@ class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
         data = await self.getdata()
 
         # prepare event
-        event = ResponseEvent(t=self.topic, o='full', k=[], v=data)
+        event = ResponseEvent(t=self.topic, o='full')
 
         # send event
         await self.server.send(event)
