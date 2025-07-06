@@ -1,7 +1,7 @@
 import msgspec
 
-from alasio.gitpython.file.exception import ObjectBroken
-from alasio.gitpython.obj.objcommit import tz2delta
+from alasio.ext.gitpython.file.exception import ObjectBroken
+from alasio.ext.gitpython.obj.objcommit import tz2delta
 
 
 class TagObject(msgspec.Struct):

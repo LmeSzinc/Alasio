@@ -24,6 +24,7 @@ class WebsocketServer:
         Websocket endpoint
         """
         server = WebsocketServer(ws)
+        print(server)
 
         await server.serve()
 

@@ -5,14 +5,14 @@ from os import DirEntry
 from alasio.ext.cache import set_cached_property
 from alasio.ext.path.calc import joinnormpath
 from alasio.ext.pool import WORKER_POOL
-from alasio.gitpython.file.exception import PackBroken
-from alasio.gitpython.file.loose import LoosePath
-from alasio.gitpython.file.pack import PackFile
-from alasio.gitpython.obj.obj import GitLooseObject, GitObject, OBJTYPE_BASIC, OBJTYPE_DELTA, parse_objdata
-from alasio.gitpython.obj.objcommit import parse_commit
-from alasio.gitpython.obj.objdelta import apply_delta
-from alasio.gitpython.obj.objtag import parse_tag
-from alasio.gitpython.obj.objtree import parse_tree
+from alasio.ext.gitpython.file.exception import PackBroken
+from alasio.ext.gitpython.file.loose import LoosePath
+from alasio.ext.gitpython.file.pack import PackFile
+from alasio.ext.gitpython.obj.obj import GitLooseObject, GitObject, OBJTYPE_BASIC, OBJTYPE_DELTA, parse_objdata
+from alasio.ext.gitpython.obj.objcommit import parse_commit
+from alasio.ext.gitpython.obj.objdelta import apply_delta
+from alasio.ext.gitpython.obj.objtag import parse_tag
+from alasio.ext.gitpython.obj.objtree import parse_tree
 
 
 class GitObjectManager:
@@ -325,3 +325,15 @@ class GitObjectManager:
 
         # result_obj is the last object of queue and obj.decoded should have be set
         return result_obj
+
+if __name__ == '__main__':
+    # self = GitObjectManager(r'E:\ProgramData\Pycharm\AzurLaneAutoScript')
+    self = GitObjectManager(r'D:\AlasRelease\AzurLaneAutoScript')
+    self.read_full()
+    # self.read_lazy()
+    # for k, v in self.dict_object_unread.items():
+    #     print(k, v)
+    r = self.cat('0d0e4a9ae0a8acfa0117e1ff99435f3960c87ae2')
+    # r = self.cat('032b77768b275533da25d10ed87a7d3fbb9f7975')
+    # for entry in r.decoded:
+    #     print(entry)

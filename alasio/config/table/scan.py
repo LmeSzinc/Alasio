@@ -2,7 +2,6 @@ from collections import deque
 
 import msgspec
 
-from alasio.base.timer import timer
 from alasio.config.table.base import AlasioConfigDB, AlasioGuiDB
 from alasio.config.table.key import AlasioKeyTable
 from alasio.ext import env
@@ -77,7 +76,6 @@ class ScanTable(AlasioGuiDB):
     """
     MODEL = ConfigInfo
 
-    @timer
     def scan(self):
         """
         Scan local files and maintain consistency with gui.db

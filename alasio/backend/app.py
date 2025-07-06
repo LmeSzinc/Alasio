@@ -28,6 +28,6 @@ if __name__ == '__main__':
     config.bind = '0.0.0.0:8000'
     # config.bind = ['0.0.0.0:8000', '[::]:8000']
     # To enable assess log
-    # config.accesslog = '-'
+    config.accesslog = '-'
 
     trio.run(serve, create_app(), config)

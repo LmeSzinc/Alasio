@@ -53,3 +53,10 @@ class AssetsExtractorSRC(AssetsExtractor):
                 path = removeprefix(path, lang)
                 break
         return path
+
+
+if __name__ == '__main__':
+    self = AssetsExtractorSRC(r'E:/ProgramData/pycharm/StarRailCopilot')
+    # self.generate()
+    while 1:
+        self.watch_files()

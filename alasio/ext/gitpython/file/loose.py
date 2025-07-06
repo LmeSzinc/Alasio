@@ -1,8 +1,8 @@
 import os
 
 from alasio.ext.path.atomic import atomic_read_bytes
-from alasio.gitpython.file.exception import ObjectBroken, PackBroken
-from alasio.gitpython.obj.obj import GitLooseObject, parse_loosedata
+from alasio.ext.gitpython.file.exception import ObjectBroken, PackBroken
+from alasio.ext.gitpython.obj.obj import GitLooseObject, parse_loosedata
 
 
 class LoosePath:

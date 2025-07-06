@@ -4,7 +4,7 @@ import struct
 
 from alasio.ext.path.atomic import atomic_read_bytes
 from alasio.ext.path.calc import with_suffix
-from alasio.gitpython.file.exception import PackBroken
+from alasio.ext.gitpython.file.exception import PackBroken
 
 
 class IdxFile:

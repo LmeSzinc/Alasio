@@ -2,8 +2,8 @@ import zlib
 
 import pytest
 
-from alasio.gitpython.file.exception import ObjectBroken
-from alasio.gitpython.obj.objtree import parse_tree
+from alasio.ext.gitpython.file.exception import ObjectBroken
+from alasio.ext.gitpython.obj.objtree import parse_tree
 
 obj_tree = (b'100644 assets.py\x00~\xa5A\x10\xe3_\xe9\x85\xba\xf0\xc2\x80\x9c*Ve\xbe\r\xba\x02'
             b'100644 camera.py\x00sY:\xb9\'\xcdD/\x9f\xc8s\x88K\xbe\x15\xb7\xec\x84\xc9\x1f'

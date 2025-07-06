@@ -2,7 +2,7 @@ from typing import List, Union
 
 import msgspec
 
-from alasio.gitpython.file.exception import ObjectBroken
+from alasio.ext.gitpython.file.exception import ObjectBroken
 
 
 class CommitObj(msgspec.Struct):

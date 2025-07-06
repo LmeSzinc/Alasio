@@ -5,11 +5,11 @@ from zlib import decompress
 import msgspec
 
 from alasio.ext.cache import cached_property
-from alasio.gitpython.file.exception import ObjectBroken
-from alasio.gitpython.obj.objcommit import parse_commit
-from alasio.gitpython.obj.objdelta import parse_ofs_delta, parse_ref_delta
-from alasio.gitpython.obj.objtag import parse_tag
-from alasio.gitpython.obj.objtree import parse_tree
+from alasio.ext.gitpython.file.exception import ObjectBroken
+from alasio.ext.gitpython.obj.objcommit import parse_commit
+from alasio.ext.gitpython.obj.objdelta import parse_ofs_delta, parse_ref_delta
+from alasio.ext.gitpython.obj.objtag import parse_tag
+from alasio.ext.gitpython.obj.objtree import parse_tree
 
 OBJTYPE_BASIC = {1, 2, 3, 4}
 OBJTYPE_DELTA = {6, 7}

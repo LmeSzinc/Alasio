@@ -1,9 +1,7 @@
-import os.path
-
 from alasio.ext.codegen import CodeGen
 from alasio.ext.path import PathStr
 from alasio.ext.path.iter import iter_files
-from alasio.gitpython.eol.eol import AttrInfo, GitAttribute
+from alasio.ext.gitpython.eol.eol import AttrInfo, GitAttribute
 
 
 class EolConstGen:

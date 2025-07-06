@@ -484,3 +484,16 @@ class ModLoader:
                     task_groups.append([task_name, group_name])
 
         return tasks, task_groups
+
+
+if __name__ == '__main__':
+    self = ModLoader(PathStr.new(r'E:\ProgramData\Pycharm\Alasio'))
+    self.rebuild()
+    for t, g, v in deep_iter_depth2(self.get_aside('alasio', 'opsi')):
+        print(t, g, v)
+    # for g, v in deep_iter_depth1(self.get_task('alasio', 'OpsiDaily')):
+    #     print(g, v)
+    all_task_groups = self.get_task('alasio', 'OpsiDaily')
+    tasks, task_groups = self.regroup_task_group('alasio', all_task_groups.values())
+    print(tasks)
+    print(task_groups)

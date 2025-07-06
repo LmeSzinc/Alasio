@@ -4,9 +4,9 @@ import msgspec
 
 from alasio.ext.path.atomic import atomic_read_bytes, file_write
 from alasio.ext.pool import WORKER_POOL
-from alasio.gitpython.eol import eol_crlf_remove
-from alasio.gitpython.file.gitobject import GitObjectManager
-from alasio.gitpython.stage.hashobj import git_hash
+from alasio.ext.gitpython.eol import eol_crlf_remove
+from alasio.ext.gitpython.file.gitobject import GitObjectManager
+from alasio.ext.gitpython.stage.hashobj import git_hash
 
 
 class FileEntry(msgspec.Struct):

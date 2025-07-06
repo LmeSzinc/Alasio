@@ -5,7 +5,7 @@ from zlib import decompress
 
 import msgspec
 
-from alasio.gitpython.file.exception import ObjectBroken
+from alasio.ext.gitpython.file.exception import ObjectBroken
 
 
 class OfsDeltaObj(msgspec.Struct):

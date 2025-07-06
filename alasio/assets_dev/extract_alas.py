@@ -123,3 +123,9 @@ class AssetsExtractorALAS(AssetsExtractor):
                 if file.endswith('assets.py'):
                     logger.info(f'Remove file: {file}')
                     atomic_remove(file)
+
+
+if __name__ == '__main__':
+    self = AssetsExtractorALAS(r'E:/ProgramData/pycharm/AzurLaneAutoScript')
+    while 1:
+        self.watch_files()

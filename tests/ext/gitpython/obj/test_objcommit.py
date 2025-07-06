@@ -1,8 +1,8 @@
 import pytest
 import zlib
 
-from alasio.gitpython.file.exception import ObjectBroken
-from alasio.gitpython.obj.objcommit import CommitObj, parse_commit, parse_commit_tree, tz2delta
+from alasio.ext.gitpython.file.exception import ObjectBroken
+from alasio.ext.gitpython.obj.objcommit import CommitObj, parse_commit, parse_commit_tree, tz2delta
 
 
 class TestTz2delta:

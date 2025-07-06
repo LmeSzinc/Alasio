@@ -1,6 +1,6 @@
 import msgspec
 
-from alasio.gitpython.file.exception import ObjectBroken
+from alasio.ext.gitpython.file.exception import ObjectBroken
 
 SET_VALID_MODE = {
     b'100644',  # Regular file

@@ -1,7 +1,7 @@
 import msgspec
 
 from alasio.ext.path.atomic import atomic_read_text
-from alasio.gitpython.eol.const import *
+from alasio.ext.gitpython.eol.const import *
 
 
 class AttrInfo(msgspec.Struct):
