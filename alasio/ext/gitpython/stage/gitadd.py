@@ -21,9 +21,23 @@ class GitAdd(GitIndex):
         self.entry_modified = False
         super().__init__(file)
 
+    def _stage_restore(self, path):
+        """
+        Remove file from staging area, Equivalent to `git restore --stage <file>`
+        This is an internal method that only add one file
+
+        Args:
+            path (str): Relative path, must use "/" as sep, must not startswith "/"
+                example: "assets/cn/xxx.png"
+        """
+        entry = self.dict_entry.pop((path, 0), None)
+        if entry is not None:
+            logger.info(f'stage_restore, entry={entry}')
+            self.entry_modified = True
+
     def _stage_add(self, path):
         """
-        Add file/path to staging area, Equivalent to `git add <file>`
+        Add file to staging area, Equivalent to `git add <file>`
         This is an internal method that only add one file
 
         Args:
@@ -40,7 +54,8 @@ class GitAdd(GitIndex):
         try:
             st = os.stat(abspath)
         except FileNotFoundError:
-            # file not exist, no need to add
+            # remove from index
+            self._stage_restore(path)
             return False
 
         mode = st.st_mode
@@ -73,6 +88,7 @@ class GitAdd(GitIndex):
             sha1 = git_file_hash(abspath)
         except FileNotFoundError:
             # race condition that file not exist anymore
+            self._stage_restore(path)
             return False
         sha1 = bytes.fromhex(sha1)
 
@@ -90,20 +106,17 @@ class GitAdd(GitIndex):
 
     def stage_add(self, file):
         """
-        Add file/path to staging area, Equivalent to:
-        - git add <file>
-        - git add <file1> <file2>
-        - git add <path>
-        - git add .
+        Add file to staging area.
+        If file exist, equivalent to `git add <file>`
+        If not, equivalent to `git restore --stage <file>`
 
         Args:
-            file (str, list[str], tuple[str]): filepath or a list of filepath,
-                Filepath can be a file, or a path, or just "." to add all.
+            file (str): filepath or a list of filepath,
                 If filepath is an absolute path, it should be a sub path of repo root,
                 otherwise stage_add will do nothing
 
         Returns:
-            int: number of files added
+            bool: If added
         """
         path = subpath_to(file, self.path)
         if path == file:
@@ -118,7 +131,7 @@ class GitAdd(GitIndex):
             # abspath and sub path to repo root
             pass
 
-        self._stage_add(path)
+        return self._stage_add(path)
 
     def __enter__(self):
         self.index_read()

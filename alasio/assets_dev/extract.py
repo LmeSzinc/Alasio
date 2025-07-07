@@ -323,7 +323,7 @@ class AssetsExtractor:
         with GitAdd(self.root) as gitadd:
             for event in events:
                 logger.info(event)
-                if event.event == 'A' and self.is_assets_file(event.path):
+                if self.is_assets_file(event.path):
                     gitadd.stage_add(event.path)
                 if self.image_fixup(event):
                     self.watchdog.mark_modified(event)
