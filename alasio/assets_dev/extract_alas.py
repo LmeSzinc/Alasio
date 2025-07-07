@@ -3,10 +3,7 @@ from alasio.assets_dev.parse import AssetModule, AssetMultilang
 from alasio.config.const import Const
 from alasio.ext.codegen import CodeGen
 from alasio.ext.path import PathStr
-from alasio.ext.path.atomic import atomic_remove
 from alasio.ext.path.calc import get_name, uppath
-from alasio.ext.path.iter import iter_files
-from alasio.logger import logger
 
 
 class AssetsExtractorALAS(AssetsExtractor):
@@ -79,16 +76,16 @@ class AssetsExtractorALAS(AssetsExtractor):
         for asset in module:
             self.gen_asset(gen, asset)
 
-    def gen_output(self, module):
+    def get_output_file(self, module_path):
         """
         Args:
-            module (AssetModule):
+            module_path (str): example: "combat", "combat/support"
 
         Returns:
             PathStr: output file of module
         """
         # module/combat/assets.py
-        module, _, _ = module.module.partition('/')
+        module, _, _ = module_path.partition('/')
         file = self.root.joinpath(f'{Const.ASSETS_MODULE}/{module}/assets.py')
         return file
 
@@ -98,31 +95,19 @@ class AssetsExtractorALAS(AssetsExtractor):
         return path
 
     @staticmethod
-    def remove_old_files(files):
+    def is_keep_file(file):
         """
-        remove old files from the output folder,
-        leaving auto-generated files and __init__.py only
-
         Args:
-            files (set[PathStr]): all output files
+            file: Absolute filepath
+
+        Returns:
+            bool: True to keep this file in output directory
+                False to remove it
         """
-        # get all output folders
-        folders = set()
-        for file in files:
-            folder = file.uppath()
-            folders.add(folder)
-        # iter existing files
-        for folder in folders:
-            for file in iter_files(folder, ext='.py', recursive=False):
-                if file in files:
-                    continue
-                if file.endswith('__init__.py'):
-                    continue
-                # remove file
-                # only remove assets.py in alas
-                if file.endswith('assets.py'):
-                    logger.info(f'Remove file: {file}')
-                    atomic_remove(file)
+        # **DIFFERENCE** only remove assets.py in alas
+        if file.endswith('assets.py'):
+            return False
+        return True
 
 
 if __name__ == '__main__':

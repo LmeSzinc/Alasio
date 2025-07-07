@@ -99,12 +99,12 @@ class CodeGen:
                 return False
             else:
                 atomic_write(file, data)
-                if gitadd is not None:
+                if gitadd:
                     gitadd.stage_add(file)
                 return True
         else:
             atomic_write(file, data)
-            if gitadd is not None:
+            if gitadd:
                 gitadd.stage_add(file)
             return True
 

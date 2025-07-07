@@ -172,44 +172,33 @@ class AssetsExtractor:
         for asset in module:
             self.gen_asset(gen, asset)
 
-    def gen_output(self, module):
+    def get_output_file(self, module_path):
         """
         Args:
-            module (AssetModule):
+            module_path (str): example: "combat", "combat/support"
 
         Returns:
             PathStr: output file of module
         """
         # tasks/combat/assets/assets_support.py
-        file = f'assets_{module.module.replace("/", "_")}.py'
-        module, _, _ = module.module.partition('/')
+        file = f'assets_{module_path.replace("/", "_")}.py'
+        module, _, _ = module_path.partition('/')
         file = self.root.joinpath(f'{Const.ASSETS_MODULE}/{module}/assets/{file}')
         return file
 
     @staticmethod
-    def remove_old_files(files):
+    def is_keep_file(file):
         """
-        remove old files from the output folder,
-        leaving auto-generated files and __init__.py only
-
         Args:
-            files (set[PathStr]): all output files
+            file: Absolute filepath
+
+        Returns:
+            bool: True to keep this file in output directory
+                False to remove it
         """
-        # get all output folders
-        folders = set()
-        for file in files:
-            folder = file.uppath()
-            folders.add(folder)
-        # iter existing files
-        for folder in folders:
-            for file in iter_files(folder, ext='.py', recursive=False):
-                if file in files:
-                    continue
-                if file.endswith('__init__.py'):
-                    continue
-                # remove file
-                logger.info(f'Remove file: {file}')
-                atomic_remove(file)
+        if file.endswith('__init__.py'):
+            return True
+        return False
 
     def generate(self, modules=None, gitadd=None):
         """
@@ -223,7 +212,7 @@ class AssetsExtractor:
             logger.info('Assets generate')
         else:
             if isinstance(modules, str):
-                modules = {modules,}
+                modules = {modules, }
             if not isinstance(modules, set):
                 modules = set(modules)
             logger.info(f'Assets generate, modules={modules}')
@@ -236,12 +225,17 @@ class AssetsExtractor:
         # populate
         self.populate()
 
+        # all output folders
+        folders = set()
+        # all output files
+        keep = set()
+
         # iter modules
-        files = set()
         for module in self.assets:
             # record output
-            file = self.gen_output(module)
-            files.add(file)
+            file = self.get_output_file(module.module)
+            keep.add(file)
+            folders.add(file.uppath())
 
             if modules is not None:
                 if module.module not in modules:
@@ -253,8 +247,28 @@ class AssetsExtractor:
             write = gen.write(file, gitadd=gitadd, skip_same=True)
             if write:
                 logger.info(f'Write file {file}')
+        # iter input modules, to record empty asset folders
+        for module in modules:
+            file = self.get_output_file(module)
+            if file not in keep:
+                folders.add(file.uppath())
 
-        self.remove_old_files(files)
+        # remove old files in output directory
+        for folder in folders:
+            for file in folder.iter_files(ext='.py', recursive=False):
+                if file in keep:
+                    continue
+                if self.is_keep_file(file):
+                    continue
+                # remove file
+                logger.info(f'Remove file: {file}')
+                atomic_remove(file)
+                if gitadd:
+                    gitadd.stage_add(file)
+            # remove empty folder
+            if folder.is_empty_folder(ignore_pycache=True):
+                logger.info(f'Remove empty folder: {folder}')
+                folder._folder_rmtree()
 
         # cleanup
         del_cached_property(self, 'assets')
