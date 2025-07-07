@@ -1,4 +1,4 @@
-from alasio.ext.path.calc import get_stem
+from .calc import get_stem
 
 
 def validate_filename(filename):

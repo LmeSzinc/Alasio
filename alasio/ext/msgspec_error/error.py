@@ -3,8 +3,8 @@ from typing import Tuple, Union
 
 from msgspec import NODEFAULT, Struct
 
-from alasio.ext.msgspec_error.const import ErrorType
-from alasio.ext.msgspec_error.path import KEY_at, KEY_got, get_error_path
+from .const import ErrorType
+from .path import KEY_at, KEY_got, get_error_path
 
 
 class ErrorCtx(Struct, omit_defaults=True):

@@ -3,8 +3,8 @@ from msgspec.inspect import DictType, FrozenSetType, ListType, SetType, StructTy
 from msgspec.json import decode as decode_json
 from msgspec.msgpack import decode as decode_msgpack
 
-from alasio.ext.msgspec_error.const import ErrorType
-from alasio.ext.msgspec_error.error import ErrorCtx, MsgspecError, parse_msgspec_error
+from .const import ErrorType
+from .error import ErrorCtx, MsgspecError, parse_msgspec_error
 
 
 def load_json_with_default(data, model):

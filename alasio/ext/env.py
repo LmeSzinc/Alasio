@@ -1,7 +1,7 @@
 import os
 import sys
 
-from alasio.ext.path import PathStr
+from .path import PathStr
 
 # Operating System
 POSIX = os.name == "posix"
