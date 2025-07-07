@@ -166,14 +166,16 @@ class GitConfig:
         else:
             self.set('http', 'sslVerify', False)
 
-    def autocrlf(self, auto_crlf=True):
+    def init_client(self):
         """
-        Set core.autocrlf
+        Init git config as client deploy
         """
-        if auto_crlf:
-            self.set('core', 'autocrlf', True)
-        else:
-            self.pop('core', 'autocrlf')
+        # always auto crlf
+        self.set('core', 'autocrlf', True)
+        # max compression
+        self.set('core', 'compression', 9)
+        # git index version 4 for smaller index file
+        self.set('index', 'version', 4)
 
     def pop_github_action_config(self):
         """
