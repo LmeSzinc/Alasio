@@ -334,7 +334,7 @@ class PathStr(str):
     Call simple read/write on tmp files only.
     """
 
-    def _file_write(self, data):
+    def file_write(self, data):
         """
         Write data into file, auto create directory
         Auto determines write mode based on the type of data.
@@ -348,7 +348,7 @@ class PathStr(str):
         file_write(self, data)
         return self
 
-    def _file_write_stream(self, data_generator):
+    def file_write_stream(self, data_generator):
         """
         Only creates a file if the generator yields at least one data chunk.
         Auto determines write mode based on the type of first chunk.
@@ -446,7 +446,7 @@ class PathStr(str):
         """
         return atomic_read_bytes_stream(self, chunk_size=chunk_size)
 
-    def _file_remove(self):
+    def file_remove(self):
         """
         Remove a file non-atomic
 
@@ -464,7 +464,7 @@ class PathStr(str):
         """
         return atomic_remove(self)
 
-    def _folder_rmtree(self, may_symlinks=True):
+    def folder_rmtree(self, may_symlinks=True):
         """
         Recursively remove a folder and its content
 

@@ -268,7 +268,7 @@ class AssetsExtractor:
             # remove empty folder
             if folder.is_empty_folder(ignore_pycache=True):
                 logger.info(f'Remove empty folder: {folder}')
-                folder._folder_rmtree()
+                folder.folder_rmtree()
 
         # cleanup
         del_cached_property(self, 'assets')
