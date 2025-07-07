@@ -2,11 +2,10 @@ from collections import deque
 
 import msgspec
 
-from alasio.ext.path.atomic import atomic_read_bytes, file_write
-from alasio.ext.pool import WORKER_POOL
-from alasio.ext.gitpython.eol import eol_crlf_remove
 from alasio.ext.gitpython.file.gitobject import GitObjectManager
-from alasio.ext.gitpython.stage.hashobj import git_hash
+from alasio.ext.gitpython.stage.hashobj import git_file_hash
+from alasio.ext.path.atomic import file_write
+from alasio.ext.pool import WORKER_POOL
 
 
 class FileEntry(msgspec.Struct):
@@ -135,13 +134,11 @@ class GitReset(GitObjectManager):
         for sha1, file in dict_file.items():
             filepath = f'{root}/{file.path}'
             try:
-                data = atomic_read_bytes(filepath)
+                sha1 = git_file_hash(filepath)
             except FileNotFoundError:
                 # need to write new file
                 need_reset[sha1] = file
                 continue
-            data = eol_crlf_remove(file.path, data)
-            sha1 = git_hash(data)
             if file.sha1 != sha1:
                 # need to reset file
                 need_reset[sha1] = file
