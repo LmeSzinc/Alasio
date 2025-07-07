@@ -6,7 +6,7 @@ from starlette import status
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 
-from alasio.backend.starapi.param import HTTPExceptionJson
+from alasio.ext.starapi.param import HTTPExceptionJson
 from alasio.ext.singleton import SingletonNamed
 
 

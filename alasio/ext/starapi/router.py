@@ -4,7 +4,7 @@ from typing import Callable
 from starlette import routing
 from starlette.applications import Starlette
 
-from alasio.backend.starapi.asgi import RequestASGI
+from .asgi import RequestASGI
 
 
 class APIRoute(routing.Route):

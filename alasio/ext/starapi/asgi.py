@@ -13,8 +13,8 @@ from starlette.types import Receive, Scope, Send
 from starlette.websockets import WebSocket
 from typing_extensions import Annotated, get_args, get_origin
 
-from alasio.backend.starapi.param import Body, Cookie, Depends, Form, Json, Path, Query, RequestInject, RequestModel, \
-    ResponseInject, SetCookie, ValidationError
+from .param import (Body, Cookie, Depends, Form, Json, Path, Query, RequestInject, RequestModel, ResponseInject,
+                    SetCookie, ValidationError)
 
 SIG_EMPTY = inspect.Signature.empty
 

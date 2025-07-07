@@ -1,5 +1,5 @@
 def create_app():
-    from alasio.backend.starapi.router import StarAPI
+    from alasio.ext.starapi.router import StarAPI
 
     app = StarAPI()
 
