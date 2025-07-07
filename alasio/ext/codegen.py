@@ -74,12 +74,13 @@ class CodeGen:
         """
         print(self.gen())
 
-    def write(self, file, skip_same=True):
+    def write(self, file, gitadd=None, skip_same=True):
         """
         Write generated code to file
 
         Args:
             file (str):
+            gitadd (GitAdd): Input a GitAdd object to track the generated files
             skip_same (bool):
                 True to skip writing if existing content is the same as content to write.
                 This would reduce disk write but add disk read
@@ -98,9 +99,13 @@ class CodeGen:
                 return False
             else:
                 atomic_write(file, data)
+                if gitadd is not None:
+                    gitadd.stage_add(file)
                 return True
         else:
             atomic_write(file, data)
+            if gitadd is not None:
+                gitadd.stage_add(file)
             return True
 
     def add(self, line: str, line_ending=True, newline=True) -> str:

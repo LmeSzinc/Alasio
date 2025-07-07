@@ -6,6 +6,7 @@ from alasio.config.const import Const
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.file.watchdog import PathEvent, Watchdog
+from alasio.ext.gitpython.stage.gitadd import GitAdd
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_remove
 from alasio.ext.path.calc import get_rootstem, get_suffix, subpath_to, uppath
@@ -210,12 +211,13 @@ class AssetsExtractor:
                 logger.info(f'Remove file: {file}')
                 atomic_remove(file)
 
-    def generate(self, modules=None):
+    def generate(self, modules=None, gitadd=None):
         """
         Generate all assets
 
         Args:
             modules (list[str] | set[str] | str): To generate given modules only
+            gitadd (GitAdd): Input a GitAdd object to track the generated files
         """
         if modules is None:
             logger.info('Assets generate')
@@ -248,7 +250,7 @@ class AssetsExtractor:
             gen = CodeGen()
             self.gen_module(gen, module)
             # write
-            write = gen.write(file, skip_same=True)
+            write = gen.write(file, gitadd=gitadd, skip_same=True)
             if write:
                 logger.info(f'Write file {file}')
 
@@ -264,10 +266,11 @@ class AssetsExtractor:
         path = path.replace('\\', '/')
         return path
 
-    def generate_on_change(self, events):
+    def generate_on_change(self, events, gitadd=None):
         """
         Args:
             events (list[PathEvent]):
+            gitadd (GitAdd): Input a GitAdd object to track the generated files
         """
         self.patch_const()
 
@@ -285,7 +288,7 @@ class AssetsExtractor:
         if not modules:
             return
 
-        self.generate(modules)
+        self.generate(modules, gitadd=gitadd)
 
     def image_fixup(self, event):
         """
@@ -314,8 +317,14 @@ class AssetsExtractor:
         Watch files and generate on change
         """
         events = self.watchdog.watch_files(include_existing=include_existing, interval=interval)
-        for event in events:
-            logger.info(event)
-            if self.image_fixup(event):
-                self.watchdog.mark_modified(event)
-        self.generate_on_change(events)
+        if not events:
+            return
+
+        with GitAdd(self.root) as gitadd:
+            for event in events:
+                logger.info(event)
+                if event.event == 'A' and self.is_assets_file(event.path):
+                    gitadd.stage_add(event.path)
+                if self.image_fixup(event):
+                    self.watchdog.mark_modified(event)
+            self.generate_on_change(events, gitadd=gitadd)

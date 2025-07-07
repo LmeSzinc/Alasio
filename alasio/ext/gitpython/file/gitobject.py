@@ -325,15 +325,3 @@ class GitObjectManager:
 
         # result_obj is the last object of queue and obj.decoded should have be set
         return result_obj
-
-if __name__ == '__main__':
-    # self = GitObjectManager(r'E:\ProgramData\Pycharm\AzurLaneAutoScript')
-    self = GitObjectManager(r'D:\AlasRelease\AzurLaneAutoScript')
-    self.read_full()
-    # self.read_lazy()
-    # for k, v in self.dict_object_unread.items():
-    #     print(k, v)
-    r = self.cat('0d0e4a9ae0a8acfa0117e1ff99435f3960c87ae2')
-    # r = self.cat('032b77768b275533da25d10ed87a7d3fbb9f7975')
-    # for entry in r.decoded:
-    #     print(entry)

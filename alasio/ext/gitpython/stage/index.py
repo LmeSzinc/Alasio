@@ -244,13 +244,13 @@ class GitIndex:
 
             path = data[path_start:path_end].tobytes()
             try:
-                path = path.decode('utf-8')
+                path_str = path.decode('utf-8')
             except UnicodeDecodeError as e:
                 raise GitIndexBroken(f'Filepath invalid on entry {i}, path={path}, {e}')
 
             # Build info
-            dict_entry[path] = GitIndexEntry(
-                *fixed_part[:11], path,
+            dict_entry[(path_str, stage)] = GitIndexEntry(
+                *fixed_part[:11], path_str,
                 assume_valid=assume_valid, stage=stage, skip_worktree=skip_worktree, intent_to_add=intent_to_add)
 
             # calculate next cursor
@@ -344,7 +344,7 @@ class GitIndex:
                 raise GitIndexBroken(f'Filepath invalid on entry {i}, path={path}, {e}')
 
             # Build info
-            dict_entry[path] = GitIndexEntry(
+            dict_entry[(path_str, stage)] = GitIndexEntry(
                 *fixed_part[:11], path_str,
                 assume_valid=assume_valid, stage=stage, skip_worktree=skip_worktree, intent_to_add=intent_to_add)
 

@@ -41,7 +41,7 @@ def stat_info(st):
 class PathEvent:
     # `event` is one of: A for added, M for modified, D for deleted.
     event: str
-    # path where it changed
+    # Absolute path of the changed file
     path: str
     # `type` is one of: F for file, D for directory, S for symlink
     type: str
