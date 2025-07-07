@@ -451,20 +451,18 @@ class PathStr(str):
         Remove a file non-atomic
 
         Returns:
-            PathStr: Self
+            bool: True if success
         """
-        file_remove(self)
-        return self
+        return file_remove(self)
 
     def atomic_remove(self):
         """
         Atomic file remove
 
         Returns:
-            PathStr: Self
+            bool: True if success
         """
-        atomic_remove(self)
-        return self
+        return atomic_remove(self)
 
     def _folder_rmtree(self, may_symlinks=True):
         """
@@ -486,10 +484,39 @@ class PathStr(str):
         folder can be removed by atomic_failure_cleanup at next startup if remove gets interrupted
 
         Returns:
-            PathStr: Self
+            bool: True if success
         """
-        atomic_rmtree(self)
-        return self
+        return atomic_rmtree(self)
+
+    def is_empty_folder(self, ignore_pycache=False):
+        """
+        Args:
+            ignore_pycache (bool): True to treat as empty folder if there's only one __pycache__
+        Returns:
+            bool: True if `root` is an empty folder
+                False if `root` not exist, or is file, or having any error
+        """
+        return is_empty_folder(self, ignore_pycache=ignore_pycache)
+
+    def folder_rmtree_empty(self):
+        """
+        Remove an empty folder.
+        If folder is not empty, do nothing
+
+        Returns:
+            bool: True if success
+        """
+        return folder_rmtree_empty(self)
+
+    def atomic_rmtree_empty(self):
+        """
+        Atomic remove an empty folder.
+        If folder is not empty, do nothing.
+
+        Returns:
+            bool: If success
+        """
+        return atomic_rmtree_empty(self)
 
     def atomic_replace(self, replace_to):
         """

@@ -700,6 +700,75 @@ def atomic_rmtree(folder):
     return folder_rmtree(tmp)
 
 
+def is_empty_folder(folder, ignore_pycache=False):
+    """
+    Args:
+        folder (str):
+        ignore_pycache (bool): True to treat as empty folder if there's only one __pycache__
+
+    Returns:
+        bool: True if `root` is an empty folder
+            False if `root` not exist, or is file, or having any error
+    """
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if ignore_pycache:
+                    if entry.name == '__pycache__':
+                        continue
+                    else:
+                        # having any non-pycache
+                        return False
+                else:
+                    # having any entry
+                    return False
+        return True
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+
+
+def folder_rmtree_empty(folder):
+    """
+    Remove an empty folder.
+    If folder is not empty, do nothing
+
+    Args:
+        folder (str): Folder path to remove
+
+    Returns:
+        bool: True if success
+    """
+    try:
+        os.rmdir(folder)
+        return True
+    except FileNotFoundError:
+        return False
+    except NotADirectoryError:
+        return False
+    except OSError:
+        return False
+
+
+def atomic_rmtree_empty(folder):
+    """
+    Atomic remove an empty folder.
+    If folder is not empty, do nothing.
+
+    Args:
+        folder (str): Folder path to remove
+
+    Returns:
+        bool: If success
+    """
+    tmp = to_tmp_file(folder)
+    try:
+        atomic_replace(folder, tmp)
+    except FileNotFoundError:
+        # Folder not exist, no need to rmtree
+        return False
+    return folder_rmtree_empty(tmp)
+
+
 def atomic_failure_cleanup(folder, recursive=False):
     """
     Cleanup remaining temp file under given path.
