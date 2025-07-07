@@ -1,9 +1,9 @@
 from typing import Any, Literal, Tuple, Union
 
-import msgspec
+from msgspec import Struct
 
 
-class RequestEvent(msgspec.Struct, omit_defaults=True):
+class RequestEvent(Struct, omit_defaults=True):
     # topic.
     t: str
     # operation.
@@ -20,7 +20,7 @@ class RequestEvent(msgspec.Struct, omit_defaults=True):
     v: Any = None
 
 
-class ResponseEvent(msgspec.Struct, omit_defaults=True):
+class ResponseEvent(Struct, omit_defaults=True):
     # topic.
     t: str
     # operation.

@@ -5,9 +5,9 @@ import trio
 from msgspec import DecodeError, EncodeError, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from alasio.backend.ws.event import RequestEvent, ResponseEvent
-from alasio.ext.area.rng import random_id
 from alasio.logger import logger
+from .event import RequestEvent, ResponseEvent
+from ..area.rng import random_id
 
 TRIO_CHANNEL_ERRORS = (trio.BrokenResourceError, trio.BusyResourceError, trio.ClosedResourceError, trio.EndOfChannel)
 WEBSOCKET_ERRORS = (WebSocketDisconnect, RuntimeError)

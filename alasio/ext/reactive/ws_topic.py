@@ -1,13 +1,13 @@
 from typing import TYPE_CHECKING
 
-from alasio.backend.ws.event import ResponseEvent
-from alasio.ext.deep import deep_iter_patch
-from alasio.ext.reactive.rx_trio import AsyncReactiveCallback, async_reactive
-from alasio.ext.singleton import SingletonNamed
+from .event import ResponseEvent
+from .rx_trio import AsyncReactiveCallback, async_reactive
+from ..deep import deep_iter_patch
+from ..singleton import SingletonNamed
 
 if TYPE_CHECKING:
     # For IDE typehint, avoid recursive import
-    from alasio.backend.ws.ws import WebsocketServer
+    from .ws_server import WebsocketServer
 
 
 class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
@@ -86,7 +86,7 @@ class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
         data = await self.getdata()
 
         # prepare event
-        event = ResponseEvent(t=self.topic, o='full')
+        event = ResponseEvent(t=self.topic, o='full', v=data)
 
         # send event
         await self.server.send(event)
