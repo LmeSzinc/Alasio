@@ -158,7 +158,7 @@
           <!-- Operation Toggle Group -->
           <div class="grid gap-2">
             <Label>Operation</Label>
-            <ToggleGroup.Root type="single" bind:value={operation} class="flex flex-wrap items-center gap-1">
+            <ToggleGroup.Root type="single" bind:value={operation} variant="outline">
               {#each ["sub", "unsub", "add", "set", "del"] as op}
                 <ToggleGroup.Item value={op} class="font-mono" aria-label={`Select operation ${op}`}>
                   {op}

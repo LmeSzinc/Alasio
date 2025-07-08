@@ -16,6 +16,7 @@
   const ctx = getToggleGroupCtx();
 </script>
 
+<!-- MODIFIED: removed fiex thingy, to let each item has dynamic width according to its content -->
 <ToggleGroupPrimitive.Item
   bind:ref
   data-slot="toggle-group-item"
@@ -26,7 +27,7 @@
       variant: ctx.variant || variant,
       size: ctx.size || size,
     }),
-    "min-w-0 flex-1 shrink-0 rounded-none shadow-none first:rounded-l-md last:rounded-r-md focus:z-10 focus-visible:z-10 data-[variant=outline]:border-l-0 data-[variant=outline]:first:border-l",
+    "min-w-0 rounded-none shadow-none first:rounded-l-md last:rounded-r-md focus:z-10 focus-visible:z-10 data-[variant=outline]:border-l-0 data-[variant=outline]:first:border-l",
     className,
   )}
   {value}

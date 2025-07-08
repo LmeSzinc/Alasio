@@ -19,6 +19,8 @@
 	}: Props = $props();
 </script>
 
+<!-- MODIFIED: removed h-9 and enlarge padding y.
+	When using both height and font-size underscore will be capped -->
 {#if type === "file"}
 	<input
 		bind:this={ref}
