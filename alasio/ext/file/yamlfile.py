@@ -1,6 +1,6 @@
 import yaml
 
-from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
+from ..path.atomic import atomic_read_bytes, atomic_write
 
 
 # https://stackoverflow.com/questions/8640959/how-can-i-control-what-scalar-form-pyyaml-uses-for-my-data/15423007

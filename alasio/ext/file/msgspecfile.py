@@ -1,7 +1,7 @@
 import msgspec
 from msgspec.json import decode, encode
 
-from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
+from ..path.atomic import atomic_read_bytes, atomic_write
 
 
 def read_msgspec(file, default_factory=dict):

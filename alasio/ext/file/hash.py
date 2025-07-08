@@ -1,7 +1,7 @@
 import hashlib
 import time
 
-from alasio.ext.path.atomic import IS_WINDOWS, WINDOWS_MAX_ATTEMPT, windows_attempt_delay
+from ..path.atomic import IS_WINDOWS, WINDOWS_MAX_ATTEMPT, windows_attempt_delay
 
 
 def _get_md5(file, chunk_size=262144):

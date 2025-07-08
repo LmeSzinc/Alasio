@@ -3,7 +3,7 @@ import threading
 from collections import defaultdict
 from typing import Any
 
-from alasio.ext.path.calc import get_stem
+from ..path.calc import get_stem
 
 
 def loadpy(file):

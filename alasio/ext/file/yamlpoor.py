@@ -1,6 +1,6 @@
 import re
 
-from alasio.ext.path.atomic import atomic_read_text, atomic_write
+from ..path.atomic import atomic_read_text, atomic_write
 
 
 def may_int(string):

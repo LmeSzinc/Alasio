@@ -1,7 +1,7 @@
 import json
 import sys
 
-from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
+from ..path.atomic import atomic_read_bytes, atomic_write
 
 if sys.version_info >= (3, 9):
     # Since py3.9, json.loads removed `encoding`

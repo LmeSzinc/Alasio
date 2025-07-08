@@ -4,7 +4,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 
-from alasio.ext.path.calc import normpath
+from ..path.calc import normpath
 
 
 def stat_info(st):
