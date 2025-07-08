@@ -93,10 +93,10 @@
 
     switch (operation) {
       case "sub":
-        websocketClient.sub(topic);
+        websocketClient.sub(topic, true);
         return;
       case "unsub":
-        websocketClient.unsub(topic);
+        websocketClient.unsub(topic, true);
         return;
     }
 
@@ -215,7 +215,7 @@
             <Card.Root class="flex max-h-[32rem] w-full flex-col">
               <Card.Header class="flex flex-row items-center justify-between">
                 <Card.Title>{topicName}</Card.Title>
-                {#if activeSubs[topicName]}
+                {#if topicsData[topicName]}
                   <Badge variant="outline">Subscribed</Badge>
                 {/if}
               </Card.Header>

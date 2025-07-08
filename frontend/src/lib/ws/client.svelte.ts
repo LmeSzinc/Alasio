@@ -261,7 +261,7 @@ class WebsocketManager {
   /**
    * Subscribes to a topic and returns a client object for interaction.
    */
-  sub(topic: string) {
+  sub(topic: string, forceSend: boolean = false) {
     const currentCount = this.subscriptions[topic] || 0;
     // CRITICAL: Update the subscription count *before* initiating connection logic.
     // This prevents a race condition where `onopen` could fire before the count is updated.
@@ -273,7 +273,8 @@ class WebsocketManager {
     // If this is the first subscription for this topic AND the connection is already open,
     // we must send the 'sub' message immediately. If the connection is not open,
     // the `onopen` handler is responsible for sending the initial subscription message.
-    if (currentCount === 0 && !this.#options.defaultSubscriptions.includes(topic)) {
+    // For testing purposes, `forceSend` allows bypassing this check.
+    if (forceSend || (currentCount === 0 && !this.#options.defaultSubscriptions.includes(topic))) {
       if (this.#ws?.readyState === WebSocket.OPEN) {
         this.#send({ t: topic });
       }
@@ -298,15 +299,27 @@ class WebsocketManager {
    * Unsubscribes to a topic.
    * Call this in a component's `onDestroy` to clean up the subscription.
    */
-  unsub (topic: string) {
+  unsub (topic: string, forceSend: boolean = false) {
     if (this.#options.defaultSubscriptions.includes(topic)) return;
-    const count = this.subscriptions[topic] || 0;
-    if (count > 1) {
-      this.subscriptions[topic] = count - 1;
-    } else {
+
+    const currentCount = this.subscriptions[topic] || 0;
+
+    // Decrement the subscription count if it's greater than 0
+    if (currentCount > 0) {
+      this.subscriptions[topic] = currentCount - 1;
+    }
+
+    // Determine if we should send the 'unsub' message to the backend
+    // Send if forceSend is true, OR if this is the last component unsubscribing (count becomes 0)
+    const shouldSendUnsubMessage = forceSend || (currentCount === 1 && !forceSend);
+
+    if (shouldSendUnsubMessage) {
       this.#send({ t: topic, o: "unsub" });
+    }
+
+    // If the subscription count is now 0, clean up the topic data
+    if (this.subscriptions[topic] <= 0) {
       delete this.subscriptions[topic];
-      // Immediately delete data to prevent staleness.
       delete this.topics[topic];
     }
   }
