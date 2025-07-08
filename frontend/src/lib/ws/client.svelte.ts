@@ -262,13 +262,22 @@ class WebsocketManager {
    * Subscribes to a topic and returns a client object for interaction.
    */
   sub(topic: string) {
-    this.connect();
     const currentCount = this.subscriptions[topic] || 0;
-    if (currentCount === 0 && !this.#options.defaultSubscriptions.includes(topic)) {
-      // Per spec, 'sub' is the default and can be omitted, but we send it for clarity.
-      this.#send({ t: topic });
-    }
+    // CRITICAL: Update the subscription count *before* initiating connection logic.
+    // This prevents a race condition where `onopen` could fire before the count is updated.
     this.subscriptions[topic] = currentCount + 1;
+
+    // Ensure a connection is active or being established.
+    this.connect();
+
+    // If this is the first subscription for this topic AND the connection is already open,
+    // we must send the 'sub' message immediately. If the connection is not open,
+    // the `onopen` handler is responsible for sending the initial subscription message.
+    if (currentCount === 0 && !this.#options.defaultSubscriptions.includes(topic)) {
+      if (this.#ws?.readyState === WebSocket.OPEN) {
+        this.#send({ t: topic });
+      }
+    }
     const instance = this;
 
     return {
