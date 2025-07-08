@@ -310,7 +310,7 @@ class WebsocketManager {
       delete this.topics[topic];
     }
   }
-  unsubAll () {
+  unsubAll = () => {
     for (const topic in this.subscriptions) {
       this.unsub(topic)
     }

@@ -12,7 +12,7 @@
   import { Badge } from "$lib/components/ui/badge";
 
   // --- Form State (using Svelte 5 runes) ---
-  let topic = $state("system_info");
+  let topic = $state("ConfigScan");
   let operation: "sub" | "unsub" | "add" | "set" | "del" = $state("sub");
   let keys = $state([""]);
   let value = $state('{"new_key": "new_value"}');
@@ -49,14 +49,14 @@
       return;
     }
 
-		switch (operation) {
-			case 'sub':
-				websocketClient.sub(topic);
-				return;
-			case 'unsub':
-				websocketClient.unsub(topic);
-				return;
-		}
+    switch (operation) {
+      case "sub":
+        websocketClient.sub(topic);
+        return;
+      case "unsub":
+        websocketClient.unsub(topic);
+        return;
+    }
 
     const finalKeys = keys
       .filter((k) => k.trim() !== "")
@@ -111,7 +111,7 @@
       <!-- Topic Input -->
       <div class="grid gap-2">
         <Label for="topic">Topic</Label>
-        <Input id="topic" bind:value={topic} placeholder="e.g., system_info or logs" />
+        <Input id="topic" bind:value={topic} placeholder="e.g., ConfigScan or logs" />
       </div>
 
       <!-- Operation Toggle Group -->
