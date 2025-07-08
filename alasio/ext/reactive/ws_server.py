@@ -1,4 +1,5 @@
 import time
+from typing import Type
 
 import msgspec
 import trio
@@ -6,7 +7,8 @@ from msgspec import DecodeError, EncodeError, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from alasio.logger import logger
-from .event import RequestEvent, ResponseEvent
+from .event import AccessDenied, RequestEvent, ResponseEvent
+from .ws_topic import BaseTopic
 from ..area.rng import random_id
 
 TRIO_CHANNEL_ERRORS = (trio.BrokenResourceError, trio.BusyResourceError, trio.ClosedResourceError, trio.EndOfChannel)
@@ -17,19 +19,18 @@ REQUEST_EVENT_DECODER = msgspec.json.Decoder(RequestEvent)
 RESPONSE_EVENT_ENCODER = msgspec.json.Encoder()
 
 
-class WebsocketServer:
+class WebsocketTopicServer:
     @classmethod
     async def endpoint(cls, ws: WebSocket):
         """
         Websocket endpoint
         """
-        server = WebsocketServer(ws)
-        print(server)
+        server = cls(ws)
 
-        await server.serve()
-
-        # cleanup
-        pass
+        try:
+            await server.serve()
+        finally:
+            await server.cleanup()
 
     # If no activity for X seconds,
     # we will send a "ping" to client
@@ -37,6 +38,9 @@ class WebsocketServer:
     # When client received a "ping", client should respond with a "pong" within X seconds,
     # otherwise we will close the connection
     PONG_TIMEOUT = 15
+    # all topic classes, subclasses should override this
+    # key: topic name, value: topic class
+    ALL_TOPIC_CLASS: "dict[str, Type[BaseTopic]]" = {}
 
     def __init__(self, ws: WebSocket):
         self.ws = ws
@@ -48,9 +52,22 @@ class WebsocketServer:
         self.pong_received = trio.Event()
         # buffer the message to be sent
         self.send_buffer: "trio.MemorySendChannel[ResponseEvent]" = None
+        # All subscribed topics
+        # key: topic name, value: topic object Topic(self.id)
+        self.subscribed: "dict[str, BaseTopic]" = {}
 
     def __str__(self):
-        return f'Websocket({self.id})'
+        return f'WebsocketServer({self.id})'
+
+    async def cleanup(self):
+        """
+        Cleanup all subscribed topics
+        """
+        # cache current subscribed and clear, to make cleanup atomic
+        topics = list(self.subscribed.values())
+        self.subscribed = {}
+        for topic in topics:
+            await topic.op_unsub()
 
     async def serve(self):
         """
@@ -205,7 +222,7 @@ class WebsocketServer:
         """
         while True:
             try:
-                data = await recv_buffer.receive()
+                event = await recv_buffer.receive()
             except TRIO_CHANNEL_ERRORS:
                 # websocket closed -> recv_buffer closed
                 break
@@ -213,9 +230,13 @@ class WebsocketServer:
             # do jobs,
             # jobs will send data to send_buffer
             try:
-                print(data)
+                await self.handle_job(event)
+            except AccessDenied as e:
+                await self.send_error(e)
+                continue
             except Exception as e:
                 logger.exception(e)
+                await self.send_error('Internal Error')
                 continue
 
         # close from upstream to downstream, so downstream can still finish curren job
@@ -306,3 +327,48 @@ class WebsocketServer:
 
         # confirm websocket is closed
         await self.close()
+
+    async def handle_job(self, event: RequestEvent):
+        """
+        Dispatch request event to topic objects
+        """
+        # check if topic valid
+        try:
+            topic_class = self.ALL_TOPIC_CLASS[event.t]
+        except KeyError:
+            raise AccessDenied(f'No such topic: {event.t}')
+
+        op = event.o
+        if op == 'sub':
+            # if topic is already subscribed, ignore this event
+            if event.t in self.subscribed:
+                return
+            # create new topic
+            topic = topic_class(self.id, self)
+            self.subscribed[topic.name] = topic
+            await topic.op_sub()
+            return
+        if op == 'unsub':
+            try:
+                topic = self.subscribed.pop(event.t)
+            except KeyError:
+                # if topic is never subscribed, ignore this event
+                return
+            # remove topic
+            await topic.op_unsub()
+            return
+
+        # going to do add/set/del, check if topic subscribed
+        try:
+            topic = self.subscribed[event.t]
+        except KeyError:
+            raise AccessDenied(f'Cannot do operation on topic before subscribing, topic={event.t}')
+        if op == 'set':
+            await topic.op_set(event.k, event.v)
+            return
+        if op == 'add':
+            await topic.op_add(event.k, event.v)
+            return
+        if op == 'del':
+            await topic.op_del(event.k)
+            return

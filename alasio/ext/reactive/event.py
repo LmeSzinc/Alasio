@@ -33,3 +33,10 @@ class ResponseEvent(Struct, omit_defaults=True):
     # value may be omitted, if so, value is None
     # if operation is "del", value will be omitted
     v: Any = None
+
+
+class AccessDenied(Exception):
+    """
+    Internal error that raises when RequestEvent is not allowed
+    """
+    pass

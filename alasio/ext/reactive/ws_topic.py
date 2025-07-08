@@ -1,13 +1,13 @@
 from typing import TYPE_CHECKING
 
-from .event import ResponseEvent
+from .event import AccessDenied, ResponseEvent
 from .rx_trio import AsyncReactiveCallback, async_reactive
 from ..deep import deep_iter_patch
 from ..singleton import SingletonNamed
 
 if TYPE_CHECKING:
     # For IDE typehint, avoid recursive import
-    from .ws_server import WebsocketServer
+    from .ws_server import WebsocketTopicServer
 
 
 class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
@@ -15,7 +15,14 @@ class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
     # If topic name is empty, class name will be used
     # The following names are preserved:
     # - "error", the builtin topic to give response to invalid input
-    topic = ''
+    name = ''
+
+    @classmethod
+    def topic_name(cls):
+        if cls.name:
+            return cls.name
+        else:
+            return cls.__name__
 
     def __init__(self, conn_id, server):
         """
@@ -24,16 +31,10 @@ class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
 
         Args:
             conn_id (str):
-            server (WebsocketServer):
+            server (WebsocketTopicServer):
         """
         self.conn_id = conn_id
         self.server = server
-
-        cls = self.__class__
-        if cls.topic:
-            self.topic = cls.topic
-        else:
-            self.topic = cls.__name__
 
     @async_reactive
     async def data(self):
@@ -48,7 +49,7 @@ class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
                 # Put the real data fetching on thread to avoid blocking event loop
                 return await run_sync(ConfigScanSource.scan)
         """
-        raise NotImplementedError
+        raise AccessDenied('Topic did not implement "data" method')
 
     async def getdata(self):
         """
@@ -57,7 +58,7 @@ class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
         """
         return await self.data
 
-    async def subscribe(self):
+    async def op_sub(self):
         """
         Subscribe to this topic, once subscribe the data will flow
 
@@ -86,7 +87,8 @@ class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
         data = await self.getdata()
 
         # prepare event
-        event = ResponseEvent(t=self.topic, o='full', v=data)
+        topic = self.topic_name()
+        event = ResponseEvent(t=topic, o='full', v=data)
 
         # send event
         await self.server.send(event)
@@ -95,14 +97,43 @@ class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
         """
         Callback function to send diff when `self.data` is re-computed
         """
-        topic = self.topic
+        topic = self.topic_name()
         for op, keys, value in deep_iter_patch(old, new):
             event = ResponseEvent(t=topic, o=op, k=keys, v=value)
             await self.server.send(event)
 
-    async def unsubscribe(self):
+    async def op_unsub(self):
         """
         Release current data topic
         """
         cls = self.__class__
         cls.singleton_remove(self.conn_id)
+
+    async def op_add(self, keys, value):
+        """
+        Override this method to handle operation "add"
+
+        Args:
+            keys (tuple[str]):
+            value (Any):
+        """
+        raise AccessDenied('Operation "add" is not allowed')
+
+    async def op_set(self, keys, value):
+        """
+        Override this method to handle operation "set"
+
+        Args:
+            keys (tuple[str]):
+            value (Any):
+        """
+        raise AccessDenied('Operation "set" is not allowed')
+
+    async def op_del(self, keys):
+        """
+        Override this method to handle operation "del"
+
+        Args:
+            keys (tuple[str]):
+        """
+        raise AccessDenied('Operation "del" is not allowed')

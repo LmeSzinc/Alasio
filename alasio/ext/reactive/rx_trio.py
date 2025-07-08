@@ -161,7 +161,7 @@ class async_reactive(Generic[T]):
             if old is _NOT_FOUND:
                 old = getattr(obj, self.cache_attr, _NOT_FOUND)
             if new is _NOT_FOUND:
-                new = self.compute(obj)
+                new = await self.compute(obj)
             observer_items = list(self.observers.items())
 
         # Check if value changed

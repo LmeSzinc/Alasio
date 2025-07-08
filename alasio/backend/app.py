@@ -10,7 +10,7 @@ def create_app():
 
     # Global websocket
     from starlette.routing import WebSocketRoute
-    from alasio.ext.reactive.ws_server import WebsocketServer
+    from alasio.backend.topic import WebsocketServer
     app.routes.append(WebSocketRoute('/api/ws', WebsocketServer.endpoint))
 
     # Mod APIs

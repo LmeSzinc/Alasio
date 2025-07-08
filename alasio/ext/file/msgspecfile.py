@@ -54,3 +54,22 @@ def write_msgspec(file, obj, skip_same=False):
     else:
         atomic_write(file, data)
         return True
+
+
+def deepcopy_msgpack(data):
+    """
+    Deepcopy a json compatible object, by encoding decoding it.
+    This function is 7x faster than vanilla deepcopy.
+
+    ================================================================
+    Performance Test Results
+    ================================================================
+    Function                     Iterations   Average      Slower
+    ----------------------------------------------------------------
+    rebuild_msgpack              318          972.150us    (fastest)
+    rebuild_json                 279          1.060ms      1.09x
+    pickle_deepcopy              147          1.952ms      2.01x
+    deepcopy                     40           7.832ms      8.06x
+    ----------------------------------------------------------------
+    """
+    return decode(encode(data))
