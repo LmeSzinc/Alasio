@@ -322,6 +322,13 @@ class WebsocketManager {
   sendRaw(payload: RequestEvent) {
     this.#send(payload);
   }
+
+  /**
+   * Returns the list of default subscriptions.
+   */
+  getDefaultSubscriptions(): string[] {
+    return this.#options.defaultSubscriptions;
+  }
 }
 
 // --- Singleton Instantiation ---

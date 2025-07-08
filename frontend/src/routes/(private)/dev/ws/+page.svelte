@@ -18,9 +18,51 @@
   let value = $state('{"new_key": "new_value"}');
 
   // --- Client State & Subscription Management ---
-  const connectionState = websocketClient.connectionState;
   const topicsData = websocketClient.topics;
   let activeSubs = $state<Record<string, TopicClient>>({});
+
+  // Directly access the reactive state from the websocketClient for the badge.
+  const badgeVariant = $derived(
+    websocketClient.connectionState === "open"
+      ? "default"
+      : websocketClient.connectionState === "closed"
+        ? "destructive"
+        : "secondary",
+  );
+
+  // For this test page, we want to initiate the connection as soon as it loads.
+  // This does not affect the lazy-loading nature of the client in the rest of the app.
+  $effect(() => {
+    websocketClient.connect();
+  });
+
+  // Get default subscriptions for sorting
+  const defaultSubscriptions = websocketClient.getDefaultSubscriptions();
+
+  // Define a type alias for clarity
+  type SortedTopicEntry = [string, any];
+
+  // Use $state and $effect for sortedTopicsData to ensure explicit array type
+  let sortedTopicsData: SortedTopicEntry[] = $state([]);
+
+  $effect(() => {
+    const sorted: SortedTopicEntry[] = [];
+    const nonDefault: SortedTopicEntry[] = [];
+
+    // First, add default subscriptions
+    for (const [topicName, data] of Object.entries(topicsData)) {
+      if (defaultSubscriptions.includes(topicName)) {
+        sorted.push([topicName, data]);
+      } else {
+        nonDefault.push([topicName, data]);
+      }
+    }
+
+    // Then, add non-default subscriptions
+    sorted.push(...nonDefault);
+
+    sortedTopicsData = sorted; // Update the $state variable
+  });
 
   /**
    * An effect to declaratively manage the state of the key inputs.
@@ -90,113 +132,107 @@
   onDestroy(websocketClient.unsubAll);
 </script>
 
-<div class="container mx-auto space-y-8 p-4 md:p-8">
-  <header class="flex items-center justify-between">
+<div class="container mx-auto p-4 md:p-8">
+  <header class="mb-8 flex items-center justify-between">
     <h1 class="text-3xl font-bold tracking-tight">WebSocket Test Client</h1>
-    <Badge
-      variant={connectionState === "open" ? "default" : connectionState === "closed" ? "destructive" : "secondary"}
-      class="capitalize transition-colors"
-    >
-      {connectionState}
-    </Badge>
   </header>
 
-  <!-- Command Panel -->
-  <Card.Root>
-    <Card.Header>
-      <Card.Title>Send Command</Card.Title>
-      <Card.Description>Construct and send a message to the WebSocket server.</Card.Description>
-    </Card.Header>
-    <Card.Content class="space-y-6">
-      <!-- Topic Input -->
-      <div class="grid gap-2">
-        <Label for="topic">Topic</Label>
-        <Input id="topic" bind:value={topic} placeholder="e.g., ConfigScan or logs" />
-      </div>
-
-      <!-- Operation Toggle Group -->
-      <div class="grid gap-2">
-        <Label>Operation</Label>
-        <ToggleGroup.Root type="single" bind:value={operation} class="flex flex-wrap items-center gap-1">
-          {#each ["sub", "unsub", "add", "set", "del"] as op}
-            <ToggleGroup.Item value={op} class="font-mono" aria-label={`Select operation ${op}`}>
-              {op}
-            </ToggleGroup.Item>
-          {/each}
-        </ToggleGroup.Root>
-      </div>
-
-      <!-- Keys Input (Conditional) -->
-      {#if ["add", "set", "del"].includes(operation)}
-        <div class="grid gap-2">
-          <Label>Keys (path to data, leave empty for root)</Label>
-          <div class="space-y-2">
-            {#each keys as key, i (i)}
-              <Input
-                bind:value={keys[i]}
-                placeholder={i === 0 ? "e.g., preferences" : "e.g., theme or 0"}
-              />
-            {/each}
+  <div class="grid grid-cols-1 gap-8 lg:grid-cols-2">
+    <!-- Left Column: Command Panel -->
+    <div class="space-y-6">
+      <Card.Root class="relative">
+        <Badge variant={badgeVariant} class="absolute top-4 right-4 capitalize transition-colors">
+          {websocketClient.connectionState}
+        </Badge>
+        <Card.Header>
+          <Card.Title>Send Command</Card.Title>
+          <Card.Description>Construct and send a message to the WebSocket server.</Card.Description>
+        </Card.Header>
+        <Card.Content class="space-y-6">
+          <!-- Topic Input -->
+          <div class="grid gap-2">
+            <Label for="topic">Topic</Label>
+            <Input id="topic" bind:value={topic} placeholder="e.g., ConfigScan or logs" />
           </div>
+
+          <!-- Operation Toggle Group -->
+          <div class="grid gap-2">
+            <Label>Operation</Label>
+            <ToggleGroup.Root type="single" bind:value={operation} class="flex flex-wrap items-center gap-1">
+              {#each ["sub", "unsub", "add", "set", "del"] as op}
+                <ToggleGroup.Item value={op} class="font-mono" aria-label={`Select operation ${op}`}>
+                  {op}
+                </ToggleGroup.Item>
+              {/each}
+            </ToggleGroup.Root>
+          </div>
+
+          <!-- Keys Input (Conditional) -->
+          {#if ["add", "set", "del"].includes(operation)}
+            <div class="grid gap-2">
+              <Label>Keys (path to data, leave empty for root)</Label>
+              <div class="space-y-2">
+                {#each keys as key, i (i)}
+                  <Input bind:value={keys[i]} placeholder={i === 0 ? "e.g., preferences" : "e.g., theme or 0"} />
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          <!-- Value Textarea (Conditional) -->
+          {#if ["add", "set"].includes(operation)}
+            <div class="grid gap-2">
+              <Label for="value">Value (JSON format)</Label>
+              <textarea
+                id="value"
+                bind:value
+                class="border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-[100px] w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+                placeholder={'{"key": "value"'}
+              ></textarea>
+            </div>
+          {/if}
+        </Card.Content>
+        <Card.Footer>
+          <Button onclick={handleSubmit} class="w-full">Send Command</Button>
+        </Card.Footer>
+      </Card.Root>
+    </div>
+
+    <!-- Right Column: Subscriptions -->
+    <div class="space-y-4">
+      <h2 class="text-2xl font-semibold tracking-tight">Subscribed Topics Data</h2>
+
+      {#if Object.keys(topicsData).length === 0}
+        <!-- This message shows only when there is absolutely no topic data -->
+        <div class="rounded-lg border-2 border-dashed py-10 text-center">
+          <p class="text-muted-foreground">No data received yet.</p>
+          <p class="text-muted-foreground text-sm">Subscribe to a topic to see its data here.</p>
+        </div>
+      {:else}
+        <!-- This container arranges the cards -->
+        <div class="space-y-4">
+          {#each sortedTopicsData as [topicName, data]}
+            <Card.Root class="flex max-h-[32rem] w-full flex-col">
+              <Card.Header class="flex flex-row items-center justify-between">
+                <Card.Title>{topicName}</Card.Title>
+                {#if activeSubs[topicName]}
+                  <Badge variant="outline">Subscribed</Badge>
+                {/if}
+              </Card.Header>
+
+              <Card.Content class="flex-grow overflow-auto">
+                {#if typeof data === "object" && data !== null}
+                  <pre class="h-full font-mono text-sm whitespace-pre-wrap select-text"><code
+                      >{JSON.stringify(data, null, 2)}</code
+                    ></pre>
+                {:else}
+                  <div class="font-mono text-sm whitespace-pre-wrap select-text">{data}</div>
+                {/if}
+              </Card.Content>
+            </Card.Root>
+          {/each}
         </div>
       {/if}
-
-      <!-- Value Textarea (Conditional) -->
-      {#if ["add", "set"].includes(operation)}
-        <div class="grid gap-2">
-          <Label for="value">Value (JSON format)</Label>
-          <textarea
-            id="value"
-            bind:value
-            class="border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-[100px] w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
-            placeholder={'{"key": "value"}'}
-          ></textarea>
-        </div>
-      {/if}
-    </Card.Content>
-    <Card.Footer>
-      <Button onclick={handleSubmit} class="w-full">Send Command</Button>
-    </Card.Footer>
-  </Card.Root>
-
-  <div class="space-y-4">
-    <h2 class="text-2xl font-semibold tracking-tight">Subscribed Topics Data</h2>
-
-    {#if Object.keys(topicsData).length === 0}
-      <!-- This message shows only when there is absolutely no topic data -->
-      <div class="rounded-lg border-2 border-dashed py-10 text-center">
-        <p class="text-muted-foreground">No data received yet.</p>
-        <p class="text-muted-foreground text-sm">Subscribe to a topic to see its data here.</p>
-      </div>
-    {:else}
-      <!-- This container uses flexbox to arrange the cards -->
-      <div class="flex flex-wrap gap-4">
-        {#each Object.entries(topicsData) as [topicName, data]}
-          <!-- 
-						Each card is a flex item with max dimensions.
-						It's also a column-based flex container itself to manage its internal layout.
-					-->
-          <Card.Root class="flex max-h-96 w-full max-w-lg flex-col">
-            <Card.Header class="flex flex-row items-center justify-between">
-              <Card.Title>{topicName}</Card.Title>
-              {#if activeSubs[topicName]}
-                <Badge variant="outline">Subscribed</Badge>
-              {/if}
-            </Card.Header>
-
-            <!-- 
-							The content area grows to fill available space and handles scrolling.
-						-->
-            <Card.Content class="flex-grow overflow-auto">
-              <!-- 
-								The <pre> tag allows text selection and is styled for code.
-								It takes the full height of its scrolling parent.
-							-->
-              <pre class="h-full text-sm select-text"><code>{JSON.stringify(data, null, 2)}</code></pre>
-            </Card.Content>
-          </Card.Root>
-        {/each}
-      </div>
-    {/if}
+    </div>
   </div>
 </div>
