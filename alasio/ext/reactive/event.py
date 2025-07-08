@@ -13,7 +13,7 @@ class RequestEvent(Struct, omit_defaults=True):
     # keys.
     # keys can be omitted, if so, keys is consider to be (), meaning doing operation at data root
     # if operation is "sub" or "unsub", keys should be omitted
-    k: Tuple[Union[str, int]] = ()
+    k: Tuple[Union[str, int], ...] = ()
     # value.
     # value can be omitted, if so, value is consider to be None
     # if operation is "sub" or "unsub" or "del", value should be omitted
@@ -28,7 +28,7 @@ class ResponseEvent(Struct, omit_defaults=True):
     o: Literal['full', 'add', 'set', 'del'] = 'add'
     # keys.
     # keys may be omitted, if so, keys is (), meaning doing operation at data root
-    k: Tuple[Union[str, int]] = ()
+    k: Tuple[Union[str, int], ...] = ()
     # value.
     # value may be omitted, if so, value is None
     # if operation is "del", value will be omitted
