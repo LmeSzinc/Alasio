@@ -1,5 +1,5 @@
 from hashlib import sha1
-from zlib import decompress
+from zlib import decompress, compress
 
 from alasio.ext.gitpython.eol import eol_crlf_remove
 from alasio.ext.path.atomic import atomic_read_bytes
@@ -23,9 +23,18 @@ def git_hash(data):
         str: sha1
     """
     # {objtype} {length}\x00{data}
-    data = b'blob ' + f'{len(data)}'.encode() + b'\0' + data
+    data = b''.join([b'blob ', f'{len(data)}'.encode(), b'\0', data])
 
     return sha1(data).hexdigest()
+
+
+def encode_loosedata(data):
+    """
+    Create content of loose object from raw file content
+    """
+    data = b''.join([b'blob ', f'{len(data)}'.encode(), b'\0', data])
+
+    return compress(data, level=9)
 
 
 def git_file_hash(file):

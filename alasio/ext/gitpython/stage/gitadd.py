@@ -1,9 +1,11 @@
 import os
 import stat
 
-from alasio.ext.gitpython.stage.hashobj import git_file_hash
+from alasio.ext.gitpython.eol import eol_crlf_remove
+from alasio.ext.gitpython.stage.hashobj import encode_loosedata, git_hash
 from alasio.ext.gitpython.stage.index import GitIndex, GitIndexEntry
 from alasio.ext.path import PathStr
+from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.ext.path.calc import is_abspath, subpath_to, to_posix
 from alasio.logger import logger
 
@@ -20,6 +22,19 @@ class GitAdd(GitIndex):
         # track if entry modified
         self.entry_modified = False
         super().__init__(file)
+
+    def filepath_loose(self, sha1):
+        """
+        Get filepath of a loose object from sha1
+
+        Args:
+            sha1 (str, bytes):
+        """
+        if isinstance(sha1, bytes):
+            sha1 = sha1.decode()
+        folder = sha1[:2]
+        file = sha1[2:]
+        return self.path.joinpath(f'.git/objects/{folder}/{file}')
 
     def _stage_restore(self, path):
         """
@@ -85,19 +100,27 @@ class GitAdd(GitIndex):
 
         # add file
         try:
-            sha1 = git_file_hash(abspath)
+            data = atomic_read_bytes(abspath)
         except FileNotFoundError:
             # race condition that file not exist anymore
             self._stage_restore(path)
             return False
-        sha1 = bytes.fromhex(sha1)
 
+        data = eol_crlf_remove(path, data)
+        sha1 = git_hash(data)
+
+        # write loose file
+        logger.info(f'stage_add, loose object sha1={sha1}')
+        content = encode_loosedata(data)
+        atomic_write(self.filepath_loose(sha1), content)
+
+        # add index entry
         entry = GitIndexEntry(
             ctime_s=int(st.st_ctime), ctime_ns=st.st_ctime_ns % 1000000000,
             mtime_s=int(st.st_mtime), mtime_ns=st.st_mtime_ns % 1000000000,
             dev=0, ino=0, mode=st.st_mode,
             uid=0, gid=0, size=st.st_size,
-            sha1=sha1, path=path,
+            sha1=bytes.fromhex(sha1), path=path,
         )
         logger.info(f'stage_add, entry={entry}')
         self.dict_entry[(path, 0)] = entry
