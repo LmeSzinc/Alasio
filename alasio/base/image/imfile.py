@@ -464,7 +464,7 @@ def image_fixup_any(path):
     if os.path.isdir(path):
         count = 0
         # Local import
-        from alasio.ext.path import iter_files
+        from alasio.ext.path.iter import iter_files
         files = iter_files(path, ext='.png', recursive=True)
         for file in files:
             if image_fixup(file):
