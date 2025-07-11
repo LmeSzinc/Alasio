@@ -107,11 +107,17 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
             rpc_id (str):
         """
         if not rpc_id:
-            raise AccessDenied('Missing RPC ID in event')
+            msg = 'Missing RPC ID in event'
+            event = ResponseEvent(t=self.topic_name(), v=msg, i=rpc_id)
+            await self.server.send(event)
+            return
         try:
             method = self.rpc_methods[func]
         except KeyError:
-            raise AccessDenied(f'RPC method not found "{func}"')
+            msg = f'RPC method not found "{func}"'
+            event = ResponseEvent(t=self.topic_name(), v=msg, i=rpc_id)
+            await self.server.send(event)
+            return
 
         # RPC call
         try:

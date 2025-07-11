@@ -363,7 +363,12 @@ class WebsocketTopicServer:
             try:
                 topic = self.subscribed[event.t]
             except KeyError:
-                raise AccessDenied(f'Cannot do RPC before subscribing topic: {event.t}')
+                # note that every RPC calls should have a Response with the same RPC ID
+                # instead of just raising errors
+                msg = f'Cannot do RPC before subscribing topic: "{event.t}"'
+                event = ResponseEvent(t=event.t, v=msg, i=event.i)
+                await self.send(event)
+                return
             # do RPC call
             await topic.op_rpc(func=event.f, value=event.v, rpc_id=event.i)
             return

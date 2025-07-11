@@ -132,9 +132,9 @@
           <!-- Operation Toggle Group -->
           <div class="grid gap-2">
             <Label>Operation</Label>
-            <ToggleGroup.Root type="single" bind:value={operation} variant="outline" class="w-full">
+            <ToggleGroup.Root type="single" bind:value={operation} variant="outline">
               {#each ["sub", "unsub", "rpc"] as op}
-                <ToggleGroup.Item value={op} class="w-full font-mono" aria-label={`Select operation ${op}`}>
+                <ToggleGroup.Item value={op} class="font-mono" aria-label={`Select operation ${op}`}>
                   {op}
                 </ToggleGroup.Item>
               {/each}
@@ -143,8 +143,6 @@
 
           <!-- RPC Inputs (Conditional) -->
           {#if operation === "rpc"}
-            <div class="grid gap-4 rounded-md border p-4">
-              <h3 class="text-lg font-semibold">RPC Call</h3>
               <div class="grid gap-2">
                 <Label for="func">Function</Label>
                 <Input id="func" bind:value={func} placeholder="e.g., get_config" />
@@ -184,7 +182,6 @@
               {#if rpc.successMsg}
                 <Help variant="default">Call succeeded. ID: {rpc.successMsg}</Help>
               {/if}
-            </div>
           {/if}
         </Card.Content>
         <Card.Footer>
