@@ -108,6 +108,8 @@ def eol_crlf_remove(path, data):
         return data.replace(b'\r\n', b'\n')
     # name
     _, _, name = path.rpartition('/')
+    if '\\' in name:
+        _, _, name = name.rpartition('\\')
     if name in SET_BINARY_NAME:
         return data
     if name in SET_TEXT_NAME:
@@ -136,6 +138,8 @@ def eol_crlf_readd(path, data):
         return data.replace(b'\n', b'\r\n')
     # name
     _, _, name = path.rpartition('/')
+    if '\\' in name:
+        _, _, name = name.rpartition('\\')
     if name in SET_BINARY_NAME:
         return data
     if name in SET_TEXT_NAME:
