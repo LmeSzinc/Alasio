@@ -2,19 +2,18 @@
   import { onDestroy } from "svelte";
   import { websocketClient } from "$lib/ws";
   import { createRpc } from "$lib/ws/rpc.svelte";
+  import { Loader2 } from "@lucide/svelte";
 
   // Import UI components
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
-  import * as ToggleGroup from "$lib/components/ui/toggle-group";
   import { Badge } from "$lib/components/ui/badge";
   import Help from "$lib/components/ui/help/help.svelte";
 
   // --- Form State ---
   let topic = $state("ConfigScan");
-  let operation: "sub" | "unsub" | "rpc" = $state("sub");
   let func = $state("get_config");
   let args = $state('{"keys": ["alas.debug.print_exception"]}');
 
@@ -70,39 +69,32 @@
     sortedTopicsData = sorted; // Update the $state variable
   });
 
-  /**
-   * Handles form submission to send commands via the WebSocket client.
-   */
-  function handleSubmit() {
+  function handleRpcSubmit() {
     if (!topic) {
       alert("Topic is required.");
       return;
     }
-
-    switch (operation) {
-      case "sub":
-        websocketClient.sub(topic, true);
-        return;
-      case "unsub":
-        websocketClient.unsub(topic, true);
-        return;
-      case "rpc":
-        if (!func) {
-          alert("Function name is required for RPC.");
-          return;
-        }
-        try {
-          const parsedArgs = args ? JSON.parse(args) : {};
-          rpc.send(func, parsedArgs);
-        } catch (e) {
-          alert("Invalid JSON in arguments field.");
-          console.error(e);
-        }
-        return;
+    if (!func) {
+      alert("Function name is required for RPC.");
+      return;
+    }
+    try {
+      const parsedArgs = args ? JSON.parse(args) : {};
+      rpc.call(func, parsedArgs);
+    } catch (e) {
+      alert("Invalid JSON in arguments field.");
+      console.error(e);
     }
   }
 
-  // Clean up all subscriptions on component destruction
+  function handleSubscribe() {
+    if (topic) websocketClient.sub(topic, true);
+  }
+
+  function handleUnsubscribe() {
+    if (topic) websocketClient.unsub(topic, true);
+  }
+
   onDestroy(websocketClient.unsubAll);
 </script>
 
@@ -120,78 +112,50 @@
         </Badge>
         <Card.Header>
           <Card.Title>Send Command</Card.Title>
-          <Card.Description>Construct and send a message to the WebSocket server.</Card.Description>
+          <Card.Description>Manage topic subscriptions and send RPC calls.</Card.Description>
         </Card.Header>
         <Card.Content class="space-y-6">
-          <!-- Topic Input -->
+          <!-- Topic Management -->
           <div class="grid gap-2">
             <Label for="topic">Topic</Label>
-            <Input id="topic" bind:value={topic} placeholder="e.g., ConfigScan or logs" />
+            <div class="flex items-center gap-2">
+              <Input id="topic" class="flex-grow font-mono" bind:value={topic} placeholder="e.g., ConfigScan" />
+              <Button variant="outline" onclick={handleSubscribe}>Sub</Button>
+              <Button variant="outline" onclick={handleUnsubscribe}>Unsub</Button>
+            </div>
           </div>
 
-          <!-- Operation Toggle Group -->
+          <!-- RPC Inputs -->
           <div class="grid gap-2">
-            <Label>Operation</Label>
-            <ToggleGroup.Root type="single" bind:value={operation} variant="outline">
-              {#each ["sub", "unsub", "rpc"] as op}
-                <ToggleGroup.Item value={op} class="font-mono" aria-label={`Select operation ${op}`}>
-                  {op}
-                </ToggleGroup.Item>
-              {/each}
-            </ToggleGroup.Root>
+            <Label for="func">RPC Function</Label>
+            <Input id="func" class="font-mono" bind:value={func} placeholder="e.g., get_config" />
           </div>
-
-          <!-- RPC Inputs (Conditional) -->
-          {#if operation === "rpc"}
-              <div class="grid gap-2">
-                <Label for="func">Function</Label>
-                <Input id="func" bind:value={func} placeholder="e.g., get_config" />
-              </div>
-              <!-- Value Textarea (Conditional) -->
-              <div class="grid gap-2">
-                <Label for="args">Arguments (JSON format)</Label>
-                <textarea
-                  id="args"
-                  bind:value={args}
-                  class="border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-[80px] w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
-                  placeholder={'{"key": "value"}'}
-                ></textarea>
-              </div>
-              {#if rpc.isPending}
-                <div class="text-muted-foreground flex items-center gap-2 text-sm">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    class="h-4 w-4 animate-spin"
-                  >
-                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                  </svg>
-                  <span>Sending...</span>
-                </div>
-              {/if}
-              {#if rpc.errorMsg}
-                <Help variant="error">{rpc.errorMsg}</Help>
-              {/if}
-              {#if rpc.successMsg}
-                <Help variant="default">Call succeeded. ID: {rpc.successMsg}</Help>
-              {/if}
-          {/if}
+          <div class="grid gap-2">
+            <Label for="args">RPC Arguments (JSON format)</Label>
+            <textarea
+              id="args"
+              bind:value={args}
+              class="border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-[80px] w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+              placeholder={'{"key": "value"}'}
+            ></textarea>
+          </div>
         </Card.Content>
         <Card.Footer>
-          <Button onclick={handleSubmit} class="w-full">
-            {#if operation === "rpc"}
-              Send RPC
-            {:else}
-              Update Subscription
+          <div class="grid w-full gap-2">
+            {#if rpc.isPending}
+              <div class="text-muted-foreground flex items-center gap-2 text-sm">
+                <Loader2 class="h-4 w-4 animate-spin" />
+                <span>Sending...</span>
+              </div>
             {/if}
-          </Button>
+            {#if rpc.errorMsg}
+              <Help variant="error">{rpc.errorMsg}</Help>
+            {/if}
+            {#if rpc.successMsg}
+              <Help variant="default">Call succeeded. ID: {rpc.successMsg}</Help>
+            {/if}
+            <Button onclick={handleRpcSubmit}>RPC Call</Button>
+          </div>
         </Card.Footer>
       </Card.Root>
     </div>
@@ -215,7 +179,6 @@
                   <Badge variant="outline">Subscribed</Badge>
                 {/if}
               </Card.Header>
-
               <Card.Content class="flex-grow overflow-auto">
                 {#if typeof data === "object" && data !== null}
                   <pre class="h-full font-mono text-sm whitespace-pre-wrap select-text"><code
