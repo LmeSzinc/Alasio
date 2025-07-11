@@ -14,19 +14,22 @@
     "lint": "prettier --check ."
   },
   "devDependencies": {
-    "@lucide/svelte": "^0.514.0",
+    "@internationalized/date": "^3.8.2",
+    "@lucide/svelte": "^0.515.0",
     "@sveltejs/adapter-static": "^3.0.8",
     "@sveltejs/kit": "^2.16.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tailwindcss/forms": "^0.5.9",
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "^4.0.0",
+    "bits-ui": "^2.8.10",
     "clsx": "^2.1.1",
     "prettier": "^3.4.2",
     "prettier-plugin-svelte": "^3.3.3",
     "prettier-plugin-tailwindcss": "^0.6.11",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
+    "svelte-dnd-action": "^0.9.63",
     "tailwind-merge": "^3.3.1",
     "tailwind-variants": "^1.0.0",
     "tailwindcss": "^4.0.0",
@@ -38,8 +41,5 @@
     "onlyBuiltDependencies": [
       "esbuild"
     ]
-  },
-  "dependencies": {
-    "bits-ui": "^2.6.0"
   }
 }

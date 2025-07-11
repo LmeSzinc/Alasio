@@ -1,5 +1,3 @@
-// src/lib/ws/utils.ts
-
 type Key = string | number;
 
 /**

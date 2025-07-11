@@ -358,17 +358,14 @@ class WebsocketTopicServer:
             await topic.op_unsub()
             return
 
-        # going to do add/set/del, check if topic subscribed
-        try:
-            topic = self.subscribed[event.t]
-        except KeyError:
-            raise AccessDenied(f'Cannot do operation on topic before subscribing, topic={event.t}')
-        if op == 'set':
-            await topic.op_set(event.k, event.v)
+        if op == 'rpc':
+            # check if topic subscribed
+            try:
+                topic = self.subscribed[event.t]
+            except KeyError:
+                raise AccessDenied(f'Cannot do RPC before subscribing topic: {event.t}')
+            # do RPC call
+            await topic.op_rpc(func=event.f, value=event.v, rpc_id=event.i)
             return
-        if op == 'add':
-            await topic.op_add(event.k, event.v)
-            return
-        if op == 'del':
-            await topic.op_del(event.k)
-            return
+
+        raise AccessDenied(f'Operation not allowed: {op}')

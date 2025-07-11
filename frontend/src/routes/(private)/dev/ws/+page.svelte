@@ -1,25 +1,25 @@
-<!-- src/routes/ws-test/+page.svelte -->
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { websocketClient, type TopicClient } from "$lib/ws";
+  import { websocketClient } from "$lib/ws";
+  import { createRpc } from "$lib/ws/rpc.svelte";
 
-  // Import UI components from shadcn-svelte/bits-ui
+  // Import UI components
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
-  import * as ToggleGroup from "$lib/components/ui/toggle-group/index";
+  import * as ToggleGroup from "$lib/components/ui/toggle-group";
   import { Badge } from "$lib/components/ui/badge";
+  import Help from "$lib/components/ui/help/help.svelte";
 
-  // --- Form State (using Svelte 5 runes) ---
+  // --- Form State ---
   let topic = $state("ConfigScan");
-  let operation: "sub" | "unsub" | "add" | "set" | "del" = $state("sub");
-  let keys = $state([""]);
-  let value = $state('{"new_key": "new_value"}');
+  let operation: "sub" | "unsub" | "rpc" = $state("sub");
+  let func = $state("get_config");
+  let args = $state('{"keys": ["alas.debug.print_exception"]}');
 
-  // --- Client State & Subscription Management ---
+  // --- Client and Subscription State ---
   const topicsData = websocketClient.topics;
-  let activeSubs = $state<Record<string, TopicClient>>({});
 
   // Directly access the reactive state from the websocketClient for the badge.
   const badgeVariant = $derived(
@@ -30,9 +30,14 @@
         : "secondary",
   );
 
-  // For this test page, we want to initiate the connection as soon as it loads.
-  // This does not affect the lazy-loading nature of the client in the rest of the app.
+  // --- RPC State ---
+  // Use $derived to create a new RPC handler whenever the topic changes.
+  // This ensures the RPC calls are always sent to the currently selected topic.
+  const rpc = $derived(createRpc(topic, websocketClient));
+
+  // --- Lifecycle and Effects ---
   $effect(() => {
+    // Connect on component mount
     websocketClient.connect();
   });
 
@@ -46,6 +51,7 @@
   let sortedTopicsData: SortedTopicEntry[] = $state([]);
 
   $effect(() => {
+    // Sort topics to show default subscriptions first
     const sorted: SortedTopicEntry[] = [];
     const nonDefault: SortedTopicEntry[] = [];
 
@@ -65,24 +71,6 @@
   });
 
   /**
-   * An effect to declaratively manage the state of the key inputs.
-   * It ensures there is always exactly one empty input at the end of the list.
-   */
-  $effect(() => {
-    // 1. Filter out any empty keys that are not at the end.
-    const nonEmptyKeys = keys.filter((k) => k.trim() !== "");
-
-    // 2. Construct the desired state: all non-empty keys followed by one empty key.
-    const desiredKeys = [...nonEmptyKeys, ""];
-
-    // 3. Only update the state if it's different from the desired state.
-    //    This check is crucial to prevent an infinite loop of updates.
-    if (JSON.stringify(keys) !== JSON.stringify(desiredKeys)) {
-      keys = desiredKeys;
-    }
-  });
-
-  /**
    * Handles form submission to send commands via the WebSocket client.
    */
   function handleSubmit() {
@@ -98,37 +86,23 @@
       case "unsub":
         websocketClient.unsub(topic, true);
         return;
-    }
-
-    const finalKeys = keys
-      .filter((k) => k.trim() !== "")
-      .map((k) => {
-        const num = parseInt(k, 10);
-        return isNaN(num) || String(num) !== k ? k : num;
-      });
-
-    let finalValue: any;
-    if (operation === "add" || operation === "set") {
-      try {
-        finalValue = JSON.parse(value);
-      } catch (e) {
-        alert("Invalid JSON in value field.");
-        console.error(e);
+      case "rpc":
+        if (!func) {
+          alert("Function name is required for RPC.");
+          return;
+        }
+        try {
+          const parsedArgs = args ? JSON.parse(args) : {};
+          rpc.send(func, parsedArgs);
+        } catch (e) {
+          alert("Invalid JSON in arguments field.");
+          console.error(e);
+        }
         return;
-      }
     }
-
-    websocketClient.sendRaw({
-      t: topic,
-      o: operation,
-      k: finalKeys,
-      v: finalValue,
-    });
   }
 
-  /**
-   * Clean up all active subscriptions when the component is destroyed.
-   */
+  // Clean up all subscriptions on component destruction
   onDestroy(websocketClient.unsubAll);
 </script>
 
@@ -158,42 +132,69 @@
           <!-- Operation Toggle Group -->
           <div class="grid gap-2">
             <Label>Operation</Label>
-            <ToggleGroup.Root type="single" bind:value={operation} variant="outline">
-              {#each ["sub", "unsub", "add", "set", "del"] as op}
-                <ToggleGroup.Item value={op} class="font-mono" aria-label={`Select operation ${op}`}>
+            <ToggleGroup.Root type="single" bind:value={operation} variant="outline" class="w-full">
+              {#each ["sub", "unsub", "rpc"] as op}
+                <ToggleGroup.Item value={op} class="w-full font-mono" aria-label={`Select operation ${op}`}>
                   {op}
                 </ToggleGroup.Item>
               {/each}
             </ToggleGroup.Root>
           </div>
 
-          <!-- Keys Input (Conditional) -->
-          {#if ["add", "set", "del"].includes(operation)}
-            <div class="grid gap-2">
-              <Label>Keys (path to data, leave empty for root)</Label>
-              <div class="space-y-2">
-                {#each keys as key, i (i)}
-                  <Input bind:value={keys[i]} placeholder={i === 0 ? "e.g., preferences" : "e.g., theme or 0"} />
-                {/each}
+          <!-- RPC Inputs (Conditional) -->
+          {#if operation === "rpc"}
+            <div class="grid gap-4 rounded-md border p-4">
+              <h3 class="text-lg font-semibold">RPC Call</h3>
+              <div class="grid gap-2">
+                <Label for="func">Function</Label>
+                <Input id="func" bind:value={func} placeholder="e.g., get_config" />
               </div>
-            </div>
-          {/if}
-
-          <!-- Value Textarea (Conditional) -->
-          {#if ["add", "set"].includes(operation)}
-            <div class="grid gap-2">
-              <Label for="value">Value (JSON format)</Label>
-              <textarea
-                id="value"
-                bind:value
-                class="border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-[100px] w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
-                placeholder={'{"key": "value"'}
-              ></textarea>
+              <!-- Value Textarea (Conditional) -->
+              <div class="grid gap-2">
+                <Label for="args">Arguments (JSON format)</Label>
+                <textarea
+                  id="args"
+                  bind:value={args}
+                  class="border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-[80px] w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+                  placeholder={'{"key": "value"}'}
+                ></textarea>
+              </div>
+              {#if rpc.isPending}
+                <div class="text-muted-foreground flex items-center gap-2 text-sm">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="h-4 w-4 animate-spin"
+                  >
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                  <span>Sending...</span>
+                </div>
+              {/if}
+              {#if rpc.errorMsg}
+                <Help variant="error">{rpc.errorMsg}</Help>
+              {/if}
+              {#if rpc.successMsg}
+                <Help variant="default">Call succeeded. ID: {rpc.successMsg}</Help>
+              {/if}
             </div>
           {/if}
         </Card.Content>
         <Card.Footer>
-          <Button onclick={handleSubmit} class="w-full">Send Command</Button>
+          <Button onclick={handleSubmit} class="w-full">
+            {#if operation === "rpc"}
+              Send RPC
+            {:else}
+              Update Subscription
+            {/if}
+          </Button>
         </Card.Footer>
       </Card.Root>
     </div>
@@ -201,9 +202,7 @@
     <!-- Right Column: Subscriptions -->
     <div class="space-y-4">
       <h2 class="text-2xl font-semibold tracking-tight">Subscribed Topics Data</h2>
-
-      {#if Object.keys(topicsData).length === 0}
-        <!-- This message shows only when there is absolutely no topic data -->
+      {#if sortedTopicsData.length === 0}
         <div class="rounded-lg border-2 border-dashed py-10 text-center">
           <p class="text-muted-foreground">No data received yet.</p>
           <p class="text-muted-foreground text-sm">Subscribe to a topic to see its data here.</p>

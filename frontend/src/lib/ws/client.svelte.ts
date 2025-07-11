@@ -1,24 +1,8 @@
-// src/lib/ws/client.ts
-
 import { browser } from "$app/environment";
-import { goto } from "$app/navigation";
-import { invalidateAll } from "$app/navigation";
-import { deepSet, deepDel } from "./deep";
-
-// --- Type Definitions matching the Python backend ---
-interface RequestEvent {
-  t: string;
-  o?: "sub" | "unsub" | "add" | "set" | "del";
-  k?: (string | number)[];
-  v?: any;
-}
-
-interface ResponseEvent {
-  t: string;
-  o?: "full" | "add" | "set" | "del";
-  k?: (string | number)[];
-  v?: any;
-}
+import { goto, invalidateAll } from "$app/navigation";
+import { deepDel, deepSet } from "./deep";
+import type { RequestEvent, ResponseEvent } from "./event";
+import { createRpc, type RpcCallbacks, type RpcOptions } from "./rpc.svelte";
 
 /**
  * Configuration options for the WebsocketManager.
@@ -42,6 +26,8 @@ class WebsocketManager {
   // --- Private properties ---
   #ws: WebSocket | null = null;
   subscriptions = $state<Record<string, number>>({});
+  #rpcCallbacks = new Map<string, { onSuccess: (v: string) => void; onError: (v: string) => void }>();
+
   #messageQueue: RequestEvent[] = [];
   #reconnectAttempts = 0;
   #reconnectTimeout: number | undefined = undefined;
@@ -160,6 +146,25 @@ class WebsocketManager {
    * Processes a single event from the server, routing it to the correct handler.
    */
   #handleEvent(data: ResponseEvent) {
+    // 1. Check if it's an RPC response.
+    if (data.i) {
+      if (this.#rpcCallbacks.has(data.i)) {
+        const callbacks = this.#rpcCallbacks.get(data.i)!;
+        // Backend contract: if 'v' is present, it's an error string. Otherwise, success.
+        if (data.v) {
+          callbacks.onError(String(data.v));
+        } else {
+          callbacks.onSuccess("");
+        }
+        // The operation itself is responsible for unregistering the callback via its cleanup function.
+        return; // Handled. Stop processing.
+      } else {
+        // It has an ID, but we're no longer waiting for it (e.g., timed out). Discard silently.
+        return;
+      }
+    }
+
+    // 2. If not an RPC response, handle as a standard data event.
     // Apply defaults based on the backend spec for omitted fields.
     const { t: topic, o: op = "add", k: keys = [], v: value = null } = data;
 
@@ -258,6 +263,17 @@ class WebsocketManager {
     }
   }
 
+  // --- Implementation of RpcContext ---
+  registerRpcCall(id: string, callbacks: RpcCallbacks) {
+    this.#rpcCallbacks.set(id, callbacks);
+  }
+  unregisterRpcCall(id: string) {
+    this.#rpcCallbacks.delete(id);
+  }
+  hasRpcCall(id: string): boolean {
+    return this.#rpcCallbacks.has(id);
+  }
+
   /**
    * Subscribes to a topic and returns a client object for interaction.
    */
@@ -279,7 +295,7 @@ class WebsocketManager {
         this.#send({ t: topic });
       }
     }
-    const instance = this;
+    const client = this;
 
     return {
       /**
@@ -287,19 +303,23 @@ class WebsocketManager {
        * It uses the captured `instance` to access the correct `topics` state.
        */
       get data() {
-        return instance.topics[topic];
+        return client.topics[topic];
       },
 
-      set: (keys: (string | number)[], value: any) => this.#send({ t: topic, o: "set", k: keys, v: value }),
-      add: (keys: (string | number)[], value: any) => this.#send({ t: topic, o: "add", k: keys, v: value }),
-      del: (keys: (string | number)[]) => this.#send({ t: topic, o: "del", k: keys }),
+      /**
+       * Creates a stateful RPC handler for this topic.
+       */
+      // The implementation signature also uses the interface.
+      rpc(options?: RpcOptions) {
+        return createRpc(topic, client, options);
+      },
     };
   }
   /**
    * Unsubscribes to a topic.
    * Call this in a component's `onDestroy` to clean up the subscription.
    */
-  unsub (topic: string, forceSend: boolean = false) {
+  unsub(topic: string, forceSend: boolean = false) {
     if (this.#options.defaultSubscriptions.includes(topic)) return;
 
     const currentCount = this.subscriptions[topic] || 0;
@@ -325,9 +345,9 @@ class WebsocketManager {
   }
   unsubAll = () => {
     for (const topic in this.subscriptions) {
-      this.unsub(topic)
+      this.unsub(topic);
     }
-  }
+  };
 
   /**
    * A raw send method for direct use, e.g., in a testing UI.

@@ -1,9 +1,12 @@
 import time
+from typing import List
 
+import msgspec
 import trio
 
 from alasio.config.table.scan import ScanTable
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
+from alasio.ext.reactive.base_rpc import rpc
 from alasio.ext.reactive.rx_trio import async_reactive, async_reactive_source
 from alasio.ext.reactive.ws_topic import BaseTopic
 from alasio.ext.singleton import Singleton
@@ -36,6 +39,12 @@ class ConfigScanSource(metaclass=Singleton):
         return {}
 
 
+class DndRequest(msgspec.Struct):
+    name: str
+    gid: int
+    iid: int
+
+
 class ConfigScan(BaseTopic):
     @async_reactive
     async def data(self):
@@ -46,3 +55,19 @@ class ConfigScan(BaseTopic):
         # re-scan before getting data
         await ConfigScanSource().scan()
         return await self.data
+
+    @rpc
+    async def config_add(self, name: str, mod: str):
+        pass
+
+    async def config_copy(self, old_name: str, new_name: str):
+        pass
+
+    async def config_del(self, name: str):
+        pass
+
+    async def config_dnd(self, config: DndRequest):
+        pass
+
+    async def group_dnd(self, configs: List[DndRequest]):
+        pass

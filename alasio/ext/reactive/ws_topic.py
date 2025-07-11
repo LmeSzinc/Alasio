@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+from .base_topic import BaseTopic as BaseMixin
 from .event import AccessDenied, ResponseEvent
 from .rx_trio import AsyncReactiveCallback, async_reactive
 from ..deep import deep_iter_patch
@@ -10,20 +11,7 @@ if TYPE_CHECKING:
     from .ws_server import WebsocketTopicServer
 
 
-class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
-    # subclasses should override `topic` and topic name should be unique
-    # If topic name is empty, class name will be used
-    # The following names are preserved:
-    # - "error", the builtin topic to give response to invalid input
-    name = ''
-
-    @classmethod
-    def topic_name(cls):
-        if cls.name:
-            return cls.name
-        else:
-            return cls.__name__
-
+class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
     def __init__(self, conn_id, server):
         """
         Create a data topic, that supports subscribe/unsubscribe
@@ -109,31 +97,33 @@ class BaseTopic(AsyncReactiveCallback, metaclass=SingletonNamed):
         cls = self.__class__
         cls.singleton_remove(self.conn_id)
 
-    async def op_add(self, keys, value):
+    async def op_rpc(self, func, value, rpc_id):
         """
-        Override this method to handle operation "add"
+        Do RPC call on current topic
 
         Args:
-            keys (tuple[str]):
-            value (Any):
+            func (str): RPC method name
+            value (Any): RPC method args
+            rpc_id (str):
         """
-        raise AccessDenied('Operation "add" is not allowed')
+        if not rpc_id:
+            raise AccessDenied('Missing RPC ID in event')
+        try:
+            method = self.rpc_methods[func]
+        except KeyError:
+            raise AccessDenied(f'RPC method not found "{func}"')
 
-    async def op_set(self, keys, value):
-        """
-        Override this method to handle operation "set"
+        # RPC call
+        try:
+            await method.call_async(self, value)
+        except Exception as e:
+            # failed
+            msg = f'{e.__class__.__name__}: {e}'
+            event = ResponseEvent(t=self.topic_name(), v=msg, i=rpc_id)
+            await self.server.send(event)
+            return
 
-        Args:
-            keys (tuple[str]):
-            value (Any):
-        """
-        raise AccessDenied('Operation "set" is not allowed')
-
-    async def op_del(self, keys):
-        """
-        Override this method to handle operation "del"
-
-        Args:
-            keys (tuple[str]):
-        """
-        raise AccessDenied('Operation "del" is not allowed')
+        # success
+        event = ResponseEvent(t=self.topic_name(), i=rpc_id)
+        await self.server.send(event)
+        return
