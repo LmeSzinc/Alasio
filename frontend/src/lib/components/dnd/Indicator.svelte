@@ -10,18 +10,21 @@
     ],
     variants: {
       edge: {
-        top: ["left-0 right-0 h-[2px] top-0 -translate-y-1/2", "before:left-0 before:top-1/2 before:-translate-y-1/2"],
+        top: [
+          "left-0 right-0 h-[2px] top-0 -translate-y-1/2",
+          "before:left-0 before:top-1/2 before:-translate-y-1/2 before:-translate-x-full",
+        ],
         bottom: [
           "left-0 right-0 h-[2px] bottom-0 translate-y-1/2",
-          "before:left-0 before:top-1/2 before:-translate-y-1/2",
+          "before:left-0 before:top-1/2 before:-translate-y-1/2 before:-translate-x-full",
         ],
         left: [
           "top-0 bottom-0 w-[2px] left-0 -translate-x-1/2",
-          "before:top-0 before:left-1/2 before:-translate-x-1/2",
+          "before:top-0 before:left-1/2 before:-translate-x-1/2 before:-translate-y-full",
         ],
         right: [
           "top-0 bottom-0 w-[2px] right-0 translate-x-1/2",
-          "before:top-0 before:left-1/2 before:-translate-x-1/2",
+          "before:top-0 before:left-1/2 before:-translate-x-1/2 before:-translate-y-full",
         ],
       },
     },
