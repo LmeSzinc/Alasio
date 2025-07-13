@@ -2,6 +2,7 @@
   import {
     DndContext,
     DragOverlay,
+    KeyboardSensor,
     MouseSensor,
     TouchSensor,
     useSensor,
@@ -46,18 +47,8 @@
     orientation,
   });
 
-  // FIX: Define the input sensors. This is what enables dragging.
-  const sensors = useSensors(
-    useSensor(MouseSensor, {
-      // Require the mouse to move by 5px before starting a drag
-      // activationConstraint: {
-      // 	distance: 5
-      // }
-    }),
-    useSensor(TouchSensor, {
-      // Press delay of 250ms, with a tolerance of 5px of movement
-    }),
-  );
+  // Define the input sensors. This is what enables dragging.
+  const sensors = useSensors(useSensor(MouseSensor), useSensor(TouchSensor), useSensor(KeyboardSensor));
 
   // Define a null drop animation to prevent the "fly back" effect.
   const dropAnimation: DropAnimation | null = null;
