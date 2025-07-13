@@ -1,4 +1,5 @@
 from collections import deque
+from copy import deepcopy
 
 import msgspec
 
@@ -35,6 +36,12 @@ def iter_local_files():
         name = file.stem
         if name not in PROTECTED_NAMES:
             yield ConfigFile(name=name, mod='')
+
+
+class DndRequest(msgspec.Struct):
+    name: str
+    gid: int
+    iid: int
 
 
 class ConfigInfo(msgspec.Struct):
@@ -76,6 +83,120 @@ class ScanTable(AlasioGuiDB):
     """
     MODEL = ConfigInfo
 
+    @staticmethod
+    def resort_configs(configs):
+        """
+        Re-sorts a dictionary of ConfigInfo objects in-place.
+
+        This function sorts the values of the input dictionary based on their current gid/iid
+        and then assigns new, clean, 1-based, continuous integer gid/iid values directly to the objects.
+
+        Args:
+            configs (dict[str, ConfigInfo]):
+                key: config name, value: ConfigInfo object
+        """
+        sorted_rows = sorted(configs.values(), key=lambda r: (r.gid, r.iid))
+
+        new_gid = 0
+        new_iid = 0
+        last_gid = float('-inf')
+
+        for row in sorted_rows:
+            if row.gid > last_gid:
+                # row request itself a new gid
+                new_gid += 1
+                new_iid = 1
+            else:
+                # row in the same group, increase iid
+                new_iid += 1
+
+            last_gid = row.gid
+
+            # In-place modification
+            row.gid = new_gid
+            row.iid = new_iid
+
+    def update_with_conflict_resolution(self, old_configs, new_configs, _cursor_):
+        """
+        Updates the database from an old state to a new state, resolving conflicts.
+        old_configs and new_configs should have rows with the same config names.
+
+        Args:
+            old_configs (dict[str, ConfigInfo]):
+            new_configs (dict[str, ConfigInfo]):
+            _cursor_:
+        """
+        pending_updates = []
+        current_positions = {(row.gid, row.iid) for row in old_configs.values()}
+
+        # iter updates
+        for name, new_row in new_configs.items():
+            try:
+                old_row = old_configs[name]
+            except KeyError:
+                # this should happen
+                continue
+            if old_row.gid != new_row.gid or old_row.iid != new_row.iid:
+                # logger.info(f"Planning update for '{name}': "
+                #             f"old=({old_row.gid}, {old_row.iid}), new=({new_row.gid}, {new_row.iid})")
+                pending_updates.append({
+                    'row': new_row,
+                    'old_pos': (old_row.gid, old_row.iid),
+                    'new_pos': (new_row.gid, new_row.iid)
+                })
+
+        # resolve update conflicts
+        # database check UNIQUE(gid, iid) on each sql call, so you can't just do UPDATE literally
+        updated_in_last_pass = True
+        while pending_updates and updated_in_last_pass:
+            updated_in_last_pass = False
+            remaining_updates = []
+
+            for update in pending_updates:
+                target_pos = update['new_pos']
+
+                # check if target (gid, iid) is available
+                if target_pos not in current_positions:
+                    # we are safe
+                    row = update['row']
+                    old_pos = update['old_pos']
+
+                    row.gid, row.iid = target_pos
+                    self.update_row(row, updates=('gid', 'iid'), _cursor_=_cursor_)
+
+                    current_positions.remove(old_pos)
+                    current_positions.add(target_pos)
+                    updated_in_last_pass = True
+                    logger.info(f'Resolved and updated "{row.name}" from {old_pos} to {target_pos}')
+                else:
+                    # target already in use, skip and check in the next pass
+                    remaining_updates.append(update)
+
+            pending_updates = remaining_updates
+
+        # Check deadlock
+        if pending_updates:
+            # A->B, B->A shouldn't happen
+            def pretty(u):
+                config_name = u['row'].name
+                return f'{config_name} from {u["old_pos"]} to {u["new_pos"]}'
+
+            unresolved = ', '.join([pretty(u) for u in pending_updates])
+            error_message = f"Detected an unresolvable circular dependency in gid/iid update: {unresolved}"
+            logger.error(error_message)
+            raise RuntimeError(error_message)
+
+    def select_rows(self, _cursor_=None):
+        """
+        Returns:
+            dict[str, ConfigInfo]:
+        """
+        rows = self.select(_orderby_=('gid', 'iid'), _cursor_=_cursor_)
+        record: "dict[str, ConfigInfo]" = {}
+        for row in rows:
+            record[row.name] = row
+        return record
+
     def scan(self):
         """
         Scan local files and maintain consistency with gui.db
@@ -83,7 +204,7 @@ class ScanTable(AlasioGuiDB):
         Returns:
             dict[str, ConfigInfo]:
         """
-        job = WORKER_POOL.start_thread_soon(self.select, _orderby_=('gid', 'iid'))
+        job = WORKER_POOL.start_thread_soon(self.select_rows)
 
         # local config files
         files = deque()
@@ -97,10 +218,7 @@ class ScanTable(AlasioGuiDB):
                 local[row.name] = row
 
         # configs in gui.db
-        rows = job.get()
-        record: "dict[str, ConfigInfo]" = {}
-        for row in rows:
-            record[row.name] = row
+        record = job.get()
 
         with self.cursor(lazy=True) as c:
             # remove not exist
@@ -128,41 +246,26 @@ class ScanTable(AlasioGuiDB):
                     continue
 
             # re-sort gid and iid
-            gid = 0
-            iid = 0
-            for row in record.values():
-                if gid == 0 or row.iid <= 0:
-                    # new gid
-                    if row.gid != gid or row.iid != iid:
-                        row.gid = gid
-                        row.iid = iid
-                        logger.info(f'Config sorted: {row}')
-                        self.update_row(row, updates=('gid', 'iid'), _cursor_=c)
-                    gid += 1
-                    iid = 0
-                else:
-                    # same gid, new iid
-                    iid += 1
-                    if row.gid != gid or row.iid != iid:
-                        row.gid = gid
-                        row.iid = iid
-                        logger.info(f'Config sorted: {row}')
-                        self.update_row(row, updates=('gid', 'iid'), _cursor_=c)
+            new_record = deepcopy(record)
+            self.resort_configs(new_record)
+            self.update_with_conflict_resolution(old_configs=record, new_configs=new_record, _cursor_=c)
+            record = new_record
 
-            # ensure new gid
-            if iid > 0:
-                gid += 1
-                iid = 0
+            # starts from maximum gid
+            gid = 0
+            for row in record.values():
+                if row.gid > gid:
+                    gid = row.gid
 
             # add new config
             for row in local.values():
                 if row.name in record:
                     continue
+                gid += 1
+                iid = 1
                 new = ConfigInfo(name=row.name, mod=row.mod, gid=gid, iid=iid)
                 logger.info(f'Config appear: {new}')
                 self.insert_row(new, _cursor_=c)
-                gid += 1
-                iid = 0
                 record[row.name] = new
 
             # lazy commit
@@ -239,3 +342,42 @@ class ScanTable(AlasioGuiDB):
         except FileNotFoundError:
             raise FileExistsError(f'Source file to copy not found: {source_file}') from None
         atomic_write(target_file, content)
+
+    def config_dnd(self, requests):
+        """
+        Handles drag-and-drop sorting requests from the frontend.
+
+        Let's say we have:
+        A: (gid=1, iid=1)
+        B: (gid=2, iid=1)
+        C: (gid=3, iid=1)
+        If you request C: (gid=1.99, iid=1)
+            C will be inserted between A and B, and hava a standalone group, gid=2,
+            B will be pushed to gid=3
+        If you request C: (gid=2, iid=0.99)
+            C will be inserted in to B's group (gid=2) and before B, iid=1
+            B will be pushed to iid=2
+        If you request C: (gid=2, iid=1.99)
+            C will be inserted in to B's group (gid=2) and after B, iid=2
+
+        Args:
+            requests (list[DndRequest]):
+        """
+        with self.cursor(lazy=True) as c:
+            record = self.select_rows(_cursor_=c)
+            if not record:
+                return
+            new_record = deepcopy(record)
+
+            # apply request to temp configs
+            for req in requests:
+                try:
+                    row = new_record[req.name]
+                except KeyError:
+                    # trying to dnd a non-exist row
+                    continue
+                row.gid = req.gid
+                row.iid = req.iid
+
+            self.resort_configs(new_record)
+            self.update_with_conflict_resolution(old_configs=record, new_configs=new_record, _cursor_=c)

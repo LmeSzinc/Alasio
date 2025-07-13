@@ -43,7 +43,7 @@ def iter_class_field(cls):
 class LazyCursor:
     def __init__(self, table):
         """
-        A cursor wrapper that lazy executes sql.
+        LazyCursor is a cursor wrapper that lazy executes sql.
         `execute()` and `executemany()` calls will be captured into self.query, then run at `commit()`
         if self.query is empty, `commit()` will do nothing
 
@@ -133,7 +133,10 @@ class AlasioTable:
         Create a cursor to operate sqlite
 
         Args:
-            lazy (bool): True to create a LazyCursor
+            lazy (bool): True to create a LazyCursor.
+                LazyCursor is a cursor wrapper that lazy executes sql.
+                `execute()` and `executemany()` calls will be captured into self.query, then run at `commit()`
+                if self.query is empty, `commit()` will do nothing
 
         Returns:
             SqlitePoolCursor:
