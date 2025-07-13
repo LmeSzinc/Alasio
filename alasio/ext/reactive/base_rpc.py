@@ -60,7 +60,7 @@ class RPCMethod:
                 raise ValidationError(f'Missing arg: "{name}"')
 
             # try to convert arg
-            anno = dict_annotation.get(SIG_EMPTY)
+            anno = dict_annotation.get(name, SIG_EMPTY)
             if anno is not SIG_EMPTY:
                 try:
                     value = convert(value, anno)
