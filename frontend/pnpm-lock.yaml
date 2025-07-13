@@ -8,6 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@dnd-kit-svelte/core':
+        specifier: ^0.0.8
+        version: 0.0.8(svelte@5.33.19)
+      '@dnd-kit-svelte/sortable':
+        specifier: ^0.0.8
+        version: 0.0.8(svelte@5.33.19)
       '@internationalized/date':
         specifier: ^3.8.2
         version: 3.8.2
@@ -56,6 +62,9 @@ importers:
       svelte-dnd-action:
         specifier: ^0.9.63
         version: 0.9.63(svelte@5.33.19)
+      svelte-sonner:
+        specifier: ^1.0.5
+        version: 1.0.5(svelte@5.33.19)
       tailwind-merge:
         specifier: ^3.3.1
         version: 3.3.1
@@ -80,6 +89,26 @@ packages:
   '@ampproject/remapping@2.3.0':
     resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
     engines: {node: '>=6.0.0'}
+
+  '@dnd-kit-svelte/accessibility@0.0.8':
+    resolution: {integrity: sha512-Dm+6jTIuorEI4fkOh9ZcbVeJfUAPQGdseT2HfG9gu30PtxHTd9offH5cGWKxsdxjKZjkr5OH2O3DVeNtFjOPxQ==}
+    peerDependencies:
+      svelte: ^5.0.0
+
+  '@dnd-kit-svelte/core@0.0.8':
+    resolution: {integrity: sha512-c77kG70L2DX+af9NW7EbbByKXcHF4y+8sqbZjj81N6QnAtdqrfZdQug/39qSMC3hxLkiS1UowVhSQRJgpdFWGA==}
+    peerDependencies:
+      svelte: ^5.0.0
+
+  '@dnd-kit-svelte/sortable@0.0.8':
+    resolution: {integrity: sha512-4lHgd7ttFqQqfuxeg2GofqnM2nHrAqtFsxqXf/Vr7/s4rEusPO8cZkQ6n2KTr08lvHGpQM2l8aLBUDyQtWtCVQ==}
+    peerDependencies:
+      svelte: ^5.0.0
+
+  '@dnd-kit-svelte/utilities@0.0.8':
+    resolution: {integrity: sha512-fiBPmbHS94cuigysqyRA7T8WpNP94uEw2DsYX9En81mOkAN9UH9RU2DlJ63luZwn4BG9k+DjYT0jt2AEaRuYIg==}
+    peerDependencies:
+      svelte: ^5.0.0
 
   '@esbuild/aix-ppc64@0.25.5':
     resolution: {integrity: sha512-9o3TMmpmftaCMepOdA5k/yDw8SfInyzWWTjYTFCX3kPSDJMROQTb8jg+h9Cnwnmm1vOzvxN7gIfB5V2ewpjtGA==}
@@ -846,6 +875,16 @@ packages:
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
     hasBin: true
 
+  runed@0.23.4:
+    resolution: {integrity: sha512-9q8oUiBYeXIDLWNK5DfCWlkL0EW3oGbk845VdKlPeia28l751VpfesaB/+7pI6rnbx1I6rqoZ2fZxptOJLxILA==}
+    peerDependencies:
+      svelte: ^5.7.0
+
+  runed@0.28.0:
+    resolution: {integrity: sha512-k2xx7RuO9hWcdd9f+8JoBeqWtYrm5CALfgpkg2YDB80ds/QE4w0qqu34A7fqiAwiBBSBQOid7TLxwxVC27ymWQ==}
+    peerDependencies:
+      svelte: ^5.7.0
+
   runed@0.29.2:
     resolution: {integrity: sha512-0cq6cA6sYGZwl/FvVqjx9YN+1xEBu9sDDyuWdDW1yWX7JF2wmvmVKfH+hVCZs+csW+P3ARH92MjI3H9QTagOQA==}
     peerDependencies:
@@ -881,6 +920,17 @@ packages:
     resolution: {integrity: sha512-nYbLmLeUlqbg8LG4OygItFPWkkESs9J34MkRp5VhFe4EKNJTWZnw3rDRBl3lmt+cmFIuy3l8lKCw2vDehvUzWQ==}
     peerDependencies:
       svelte: '>=3.23.0 || ^5.0.0-next.0'
+
+  svelte-sonner@1.0.5:
+    resolution: {integrity: sha512-9dpGPFqKb/QWudYqGnEz93vuY+NgCEvyNvxoCLMVGw6sDN/3oVeKV1xiEirW2E1N3vJEyj5imSBNOGltQHA7mg==}
+    peerDependencies:
+      svelte: ^5.0.0
+
+  svelte-toolbelt@0.7.1:
+    resolution: {integrity: sha512-HcBOcR17Vx9bjaOceUvxkY3nGmbBmCBBbuWLLEWO6jtmWH8f/QoWmbyUfQZrpDINH39en1b8mptfPQT9VKQ1xQ==}
+    engines: {node: '>=18', pnpm: '>=8.7.0'}
+    peerDependencies:
+      svelte: ^5.0.0
 
   svelte-toolbelt@0.9.3:
     resolution: {integrity: sha512-HCSWxCtVmv+c6g1ACb8LTwHVbDqLKJvHpo6J8TaqwUme2hj9ATJCpjCPNISR1OCq2Q4U1KT41if9ON0isINQZw==}
@@ -1001,6 +1051,34 @@ snapshots:
     dependencies:
       '@jridgewell/gen-mapping': 0.3.8
       '@jridgewell/trace-mapping': 0.3.25
+
+  '@dnd-kit-svelte/accessibility@0.0.8(svelte@5.33.19)':
+    dependencies:
+      '@dnd-kit-svelte/utilities': 0.0.8(svelte@5.33.19)
+      esm-env: 1.2.2
+      runed: 0.23.4(svelte@5.33.19)
+      svelte: 5.33.19
+
+  '@dnd-kit-svelte/core@0.0.8(svelte@5.33.19)':
+    dependencies:
+      '@dnd-kit-svelte/accessibility': 0.0.8(svelte@5.33.19)
+      '@dnd-kit-svelte/utilities': 0.0.8(svelte@5.33.19)
+      runed: 0.23.4(svelte@5.33.19)
+      svelte: 5.33.19
+      svelte-toolbelt: 0.7.1(svelte@5.33.19)
+
+  '@dnd-kit-svelte/sortable@0.0.8(svelte@5.33.19)':
+    dependencies:
+      '@dnd-kit-svelte/core': 0.0.8(svelte@5.33.19)
+      '@dnd-kit-svelte/utilities': 0.0.8(svelte@5.33.19)
+      runed: 0.23.4(svelte@5.33.19)
+      svelte: 5.33.19
+      svelte-toolbelt: 0.7.1(svelte@5.33.19)
+
+  '@dnd-kit-svelte/utilities@0.0.8(svelte@5.33.19)':
+    dependencies:
+      svelte: 5.33.19
+      svelte-toolbelt: 0.7.1(svelte@5.33.19)
 
   '@esbuild/aix-ppc64@0.25.5':
     optional: true
@@ -1550,6 +1628,16 @@ snapshots:
       '@rollup/rollup-win32-x64-msvc': 4.43.0
       fsevents: 2.3.3
 
+  runed@0.23.4(svelte@5.33.19):
+    dependencies:
+      esm-env: 1.2.2
+      svelte: 5.33.19
+
+  runed@0.28.0(svelte@5.33.19):
+    dependencies:
+      esm-env: 1.2.2
+      svelte: 5.33.19
+
   runed@0.29.2(svelte@5.33.19):
     dependencies:
       esm-env: 1.2.2
@@ -1587,6 +1675,18 @@ snapshots:
 
   svelte-dnd-action@0.9.63(svelte@5.33.19):
     dependencies:
+      svelte: 5.33.19
+
+  svelte-sonner@1.0.5(svelte@5.33.19):
+    dependencies:
+      runed: 0.28.0(svelte@5.33.19)
+      svelte: 5.33.19
+
+  svelte-toolbelt@0.7.1(svelte@5.33.19):
+    dependencies:
+      clsx: 2.1.1
+      runed: 0.23.4(svelte@5.33.19)
+      style-to-object: 1.0.9
       svelte: 5.33.19
 
   svelte-toolbelt@0.9.3(svelte@5.33.19):

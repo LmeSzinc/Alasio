@@ -4,5 +4,5 @@ pnpm-lock.yaml
 yarn.lock
 bun.lock
 bun.lockb
-/src/lib
+/src/lib/components/ui
 *.md

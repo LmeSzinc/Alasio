@@ -14,6 +14,8 @@
     "lint": "prettier --check ."
   },
   "devDependencies": {
+    "@dnd-kit-svelte/core": "^0.0.8",
+    "@dnd-kit-svelte/sortable": "^0.0.8",
     "@internationalized/date": "^3.8.2",
     "@lucide/svelte": "^0.515.0",
     "@sveltejs/adapter-static": "^3.0.8",
@@ -30,6 +32,7 @@
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "svelte-dnd-action": "^0.9.63",
+    "svelte-sonner": "^1.0.5",
     "tailwind-merge": "^3.3.1",
     "tailwind-variants": "^1.0.0",
     "tailwindcss": "^4.0.0",
