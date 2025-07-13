@@ -1,0 +1,24 @@
+@layer components {
+  /* 
+    This is our reusable utility for any element that needs a drag-and-drop placeholder.
+    It targets any element with the `.drag-placeholder` class that ALSO has the `data-dragging="true"` attribute.
+  */
+  .drag-placeholder[data-dragging="true"] {
+    /* The ::before pseudo-element becomes our placeholder. */
+    &::before {
+      content: "";
+      position: absolute;
+      inset: 0; /* Fills the parent div completely */
+      border-radius: inherit; /* Inherits the parent's border-radius */
+      border-width: 2px;
+      border-style: dashed;
+      border-color: hsl(var(--primary) / 0.5);
+      background-color: hsl(var(--primary) / 0.1);
+    }
+
+    /* The direct child (the actual content) becomes invisible. */
+    & > :first-child {
+      visibility: hidden;
+    }
+  }
+}

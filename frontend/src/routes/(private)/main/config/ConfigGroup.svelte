@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Indicator from '$lib/components/dnd/Indicator.svelte';
+  import { Indicator } from "$lib/components/dnd";
   import * as Card from "$lib/components/ui/card";
   import { cn } from "$lib/utils";
   import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
@@ -30,7 +30,7 @@
   });
 </script>
 
-<div use:setDraggableNode data-dragging={isDragging.current} class="relative rounded-lg">
+<div use:setDraggableNode data-dragging={isDragging.current} class="drag-placeholder relative rounded-lg">
   <div class="rounded-lg">
     <Card.Root>
       <Card.Header class="flex flex-row items-center justify-between px-4 py-3">
@@ -60,24 +60,7 @@
   </div>
   {#if indicator === "before"}
     <Indicator edge="top" />
-  {:else if indicator == "after"}
+  {:else if indicator === "after"}
     <Indicator edge="bottom" />
   {/if}
 </div>
-
-<style>
-  [data-dragging="true"] > :first-child {
-    visibility: hidden;
-  }
-
-  [data-dragging="true"]::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit; /* Inherits the parent's rounded-lg */
-    border-width: 2px;
-    border-style: dashed;
-    border-color: hsl(var(--primary) / 0.5);
-    background-color: hsl(var(--primary) / 0.1);
-  }
-</style>

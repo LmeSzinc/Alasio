@@ -1,7 +1,6 @@
 <script lang="ts">
+  import { DndProvider, type DndEndCallbackDetail } from "$lib/components/dnd";
   import { Badge } from "$lib/components/ui/badge";
-  import type { DndEndCallbackDetail } from "$lib/components/dnd/dndProvider.svelte";
-  import DndProvider from "$lib/components/dnd/dndProvider.svelte";
   import { websocketClient } from "$lib/ws";
   import { arrayMove } from "@dnd-kit-svelte/sortable";
   import { Loader2 } from "@lucide/svelte";

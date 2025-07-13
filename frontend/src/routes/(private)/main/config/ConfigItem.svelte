@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Indicator from "$lib/components/dnd/Indicator.svelte";
+  import { Indicator } from "$lib/components/dnd";
   import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
   import { GripVertical } from "@lucide/svelte";
 
@@ -34,7 +34,12 @@
   });
 </script>
 
-<div use:setDraggableNode use:setDroppableNode data-dragging={isDragging.current} class="relative rounded-md">
+<div
+  use:setDraggableNode
+  use:setDroppableNode
+  data-dragging={isDragging.current}
+  class="drag-placeholder relative rounded-md"
+>
   <!-- The real content is the only direct child -->
   <div class="bg-card text-card-foreground flex h-14 items-center rounded-md border p-2 shadow-sm">
     <div
@@ -51,26 +56,7 @@
   </div>
   {#if indicator === "before"}
     <Indicator edge="top" />
-  {:else if indicator == "after"}
+  {:else if indicator === "after"}
     <Indicator edge="bottom" />
   {/if}
 </div>
-
-<style>
-  /* When dragging, hide the real content */
-  [data-dragging="true"] > :first-child {
-    visibility: hidden;
-  }
-
-  /* And show the ::before pseudo-element as a placeholder */
-  [data-dragging="true"]::before {
-    content: "";
-    position: absolute;
-    inset: 0; /* Fills the parent div completely */
-    border-radius: inherit; /* Inherits the parent's rounded-md */
-    border-width: 2px;
-    border-style: dashed;
-    border-color: hsl(var(--primary) / 0.5);
-    background-color: hsl(var(--primary) / 0.1);
-  }
-</style>
