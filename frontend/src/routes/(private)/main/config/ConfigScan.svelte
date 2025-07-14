@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { DndProvider, type DndEndCallbackDetail } from "$lib/components/dnd";
+  import { DndProvider, applyDnd, type DndEndCallbackDetail } from "$lib/components/dnd";
   import { Badge } from "$lib/components/ui/badge";
   import { websocketClient } from "$lib/ws";
-  import { arrayMove } from "@dnd-kit-svelte/sortable";
   import { Loader2 } from "@lucide/svelte";
+  import type { ConfigGroupData } from "./ConfigGroup.svelte";
   import ConfigGroup from "./ConfigGroup.svelte";
   import type { Config } from "./ConfigItem.svelte";
   import ConfigItem from "./ConfigItem.svelte";
@@ -11,11 +11,6 @@
   // SINGLE SOURCE OF TRUTH (from server)
   const topicClient = websocketClient.sub("ConfigScan");
   const rpc = topicClient.rpc();
-
-  type ConfigGroupData = {
-    id: number;
-    items: Config[];
-  };
 
   // UI state (what the user sees and manipulates). It's a mutable $state variable.
   let uiGroups = $state<ConfigGroupData[]>([]);
@@ -39,7 +34,10 @@
       .sort(([gidA], [gidB]) => gidA - gidB)
       .map(([gid, items]) => {
         items.sort((a, b) => a.iid - b.iid);
-        return { id: gid, items };
+        // ConfigItem will have id=row.id as integer
+        // ConfigGroup will have id=`group-${gid}` as string
+        // so they are unique within uiGroups
+        return { id: `group-${gid}`, gid, items };
       });
 
     // By assigning here, we sync our mutable UI state with the server's truth.
@@ -80,61 +78,16 @@
   /**
    * Performs optimistic UI updates by only moving elements within the `uiGroups` array.
    */
-  function handleDndEnd(detail: DndEndCallbackDetail) {
-    const { active, over, position } = detail;
+  function handleDndEnd({ active, over, position }: DndEndCallbackDetail) {
     const activeType = active.data?.type;
     const overType = over.data?.type;
-    if (!activeType) return;
+    if (!activeType || !overType) return;
 
     // Group Drag Logic
-    if (activeType === "group") {
-      if (overType !== "group") return;
-      const sourceIndex = uiGroups.findIndex((g) => g.id === active.id);
-      const targetIndex = uiGroups.findIndex((g) => g.id === over.id);
-      if (sourceIndex === -1 || targetIndex === -1) return;
-      uiGroups = arrayMove(uiGroups, sourceIndex, targetIndex);
-    }
-    // Item Drag Logic
-    else if (activeType === "item") {
-      const sourceContainerId = active.data?.containerId as number;
-      const sourceGroupIndex = uiGroups.findIndex((g) => g.id === sourceContainerId);
-      if (sourceGroupIndex === -1) return;
-
-      const targetContainerId = overType === "item" ? over.data?.containerId : over.id;
-      const targetGroupIndex = uiGroups.findIndex((g) => g.id === targetContainerId);
-      if (targetGroupIndex === -1) return;
-
-      // FIX 1: Use `arrayMove` for the simple in-group reordering case.
-      if (sourceGroupIndex === targetGroupIndex) {
-        const sourceItemIndex = uiGroups[sourceGroupIndex].items.findIndex((i) => i.name === active.id);
-        const targetItemIndex = uiGroups[targetGroupIndex].items.findIndex((i) => i.name === over.id);
-        if (sourceItemIndex === -1 || targetItemIndex === -1) return;
-        uiGroups[sourceGroupIndex].items = arrayMove(
-          uiGroups[sourceGroupIndex].items,
-          sourceItemIndex,
-          targetItemIndex,
-        );
-      } else {
-        // Move between groups
-        const sourceItemIndex = uiGroups[sourceGroupIndex].items.findIndex((i) => i.name === active.id);
-        if (sourceItemIndex === -1) return;
-        const [movedItem] = uiGroups[sourceGroupIndex].items.splice(sourceItemIndex, 1);
-
-        let targetItemIndex = -1;
-        if (overType === "item") {
-          targetItemIndex = uiGroups[targetGroupIndex].items.findIndex((i) => i.name === over.id);
-          if (position === "after") targetItemIndex++;
-        } else {
-          // Dropped on a group container
-          targetItemIndex = 0;
-        }
-        if (targetItemIndex === -1) return;
-        uiGroups[targetGroupIndex].items.splice(targetItemIndex, 0, movedItem);
-
-        if (uiGroups[sourceGroupIndex].items.length === 0) {
-          uiGroups.splice(sourceGroupIndex, 1);
-        }
-      }
+    if (active.data?.type === "item" && over.data?.type === "group") {
+      //
+    } else {
+      applyDnd(uiGroups, active, over, position, "items");
     }
     syncChangesToServer();
   }

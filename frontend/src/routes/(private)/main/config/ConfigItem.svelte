@@ -24,17 +24,17 @@
     isDragging,
     setNodeRef: setDraggableNode,
   } = useDraggable({
-    id: config.name,
-    data: { type: "item", config: config, containerId: config.gid },
+    id: config.id,
+    data: { type: "item", config: config },
   });
 
   const { setNodeRef: setDroppableNode } = useDroppable({
-    id: config.name,
-    data: { type: "item", config: config, containerId: config.gid },
+    id: config.id,
+    data: { type: "item", config: config },
   });
 
   // Compute the indicator specifically for this item.
-  const indicator = $derived(dropIndicator?.targetId === config.name ? dropIndicator.position : null);
+  const indicator = $derived(dropIndicator?.targetId === config.id ? dropIndicator.position : null);
 </script>
 
 <div

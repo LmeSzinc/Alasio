@@ -11,9 +11,6 @@ importers:
       '@dnd-kit-svelte/core':
         specifier: ^0.0.8
         version: 0.0.8(svelte@5.33.19)
-      '@dnd-kit-svelte/sortable':
-        specifier: ^0.0.8
-        version: 0.0.8(svelte@5.33.19)
       '@internationalized/date':
         specifier: ^3.8.2
         version: 3.8.2
@@ -97,11 +94,6 @@ packages:
 
   '@dnd-kit-svelte/core@0.0.8':
     resolution: {integrity: sha512-c77kG70L2DX+af9NW7EbbByKXcHF4y+8sqbZjj81N6QnAtdqrfZdQug/39qSMC3hxLkiS1UowVhSQRJgpdFWGA==}
-    peerDependencies:
-      svelte: ^5.0.0
-
-  '@dnd-kit-svelte/sortable@0.0.8':
-    resolution: {integrity: sha512-4lHgd7ttFqQqfuxeg2GofqnM2nHrAqtFsxqXf/Vr7/s4rEusPO8cZkQ6n2KTr08lvHGpQM2l8aLBUDyQtWtCVQ==}
     peerDependencies:
       svelte: ^5.0.0
 
@@ -1062,14 +1054,6 @@ snapshots:
   '@dnd-kit-svelte/core@0.0.8(svelte@5.33.19)':
     dependencies:
       '@dnd-kit-svelte/accessibility': 0.0.8(svelte@5.33.19)
-      '@dnd-kit-svelte/utilities': 0.0.8(svelte@5.33.19)
-      runed: 0.23.4(svelte@5.33.19)
-      svelte: 5.33.19
-      svelte-toolbelt: 0.7.1(svelte@5.33.19)
-
-  '@dnd-kit-svelte/sortable@0.0.8(svelte@5.33.19)':
-    dependencies:
-      '@dnd-kit-svelte/core': 0.0.8(svelte@5.33.19)
       '@dnd-kit-svelte/utilities': 0.0.8(svelte@5.33.19)
       runed: 0.23.4(svelte@5.33.19)
       svelte: 5.33.19

@@ -15,7 +15,6 @@
   },
   "devDependencies": {
     "@dnd-kit-svelte/core": "^0.0.8",
-    "@dnd-kit-svelte/sortable": "^0.0.8",
     "@internationalized/date": "^3.8.2",
     "@lucide/svelte": "^0.515.0",
     "@sveltejs/adapter-static": "^3.0.8",

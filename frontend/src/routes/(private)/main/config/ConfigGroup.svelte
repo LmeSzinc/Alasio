@@ -7,7 +7,8 @@
   import ConfigItem, { type Config } from "./ConfigItem.svelte";
 
   export type ConfigGroupData = {
-    id: number;
+    id: string;
+    gid: number;
     items: Config[];
   };
 
@@ -40,7 +41,7 @@
   <div class="rounded-lg">
     <Card.Root>
       <Card.Header class="flex flex-row items-center justify-between px-4 py-3">
-        <Card.Title class="text-lg">Group {group.id}</Card.Title>
+        <Card.Title class="text-lg">Group {group.gid}</Card.Title>
         <div
           {...listeners.current}
           {...attributes.current}
