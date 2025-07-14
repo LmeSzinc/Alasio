@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Indicator } from "$lib/components/dnd";
+  import { Indicator, type DropIndicatorState } from "$lib/components/dnd";
   import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
   import { GripVertical } from "@lucide/svelte";
 
@@ -14,9 +14,9 @@
 
   type Props = {
     config: Config;
-    indicator?: "before" | "after" | null;
+    dropIndicator?: DropIndicatorState | null;
   };
-  let { config, indicator = null }: Props = $props();
+  let { config, dropIndicator = null }: Props = $props();
 
   const {
     attributes,
@@ -32,6 +32,9 @@
     id: config.name,
     data: { type: "item", config: config, containerId: config.gid },
   });
+
+  // Compute the indicator specifically for this item.
+  const indicator = $derived(dropIndicator?.targetId === config.name ? dropIndicator.position : null);
 </script>
 
 <div
@@ -40,10 +43,9 @@
   data-dragging={isDragging.current}
   class="drag-placeholder relative rounded-md"
 >
-  <!-- The real content is the only direct child -->
   <div class="bg-card text-card-foreground flex h-14 items-center rounded-md border p-2 shadow-sm">
     <div
-      {...listeners.current as any}
+      {...listeners.current}
       {...attributes.current}
       class="text-muted-foreground flex h-full cursor-grab items-center px-2 active:cursor-grabbing"
     >
@@ -54,9 +56,10 @@
       {config.mod}
     </div>
   </div>
-  {#if indicator === "before"}
+  <!-- Display drop indicator based on props -->
+  {#if indicator === "top"}
     <Indicator edge="top" />
-  {:else if indicator === "after"}
+  {:else if indicator === "bottom"}
     <Indicator edge="bottom" />
   {/if}
 </div>

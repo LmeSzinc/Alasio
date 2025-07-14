@@ -15,11 +15,12 @@
     type Over,
   } from "@dnd-kit-svelte/core";
   import type { Snippet } from "svelte";
+  import { createClosestEdgeCollision, verticalDistance, horizontalDistance } from "./collision";
 
   // --- Type Definitions ---
   export type DropIndicatorState = {
     targetId: string | number | null;
-    position: "before" | "after";
+    position: "top" | "bottom" | "left" | "right";
     orientation: "horizontal" | "vertical";
   };
 
@@ -29,23 +30,52 @@
     position: DropIndicatorState["position"];
   };
 
+  /**
+   * A map defining which active types can be dropped onto which droppable types.
+   * Key: The `type` of the droppable element (`over.type`).
+   * Value: An array of `type`s of the active draggable element (`active.type`) that are accepted.
+   * If not provided, no type checking will occur.
+   * @example { group: ['item', 'group'], item: ['item'] }
+   */
+  export type DndRules = Record<string, string[]>;
+
   type Props = {
-    children: Snippet<[{ dropIndicator: DropIndicatorState; active: Active | null }]>;
+    children: Snippet<[{ dropIndicator: DropIndicatorState }]>;
     dragOverlay: Snippet<[{ active: Active | null }]>;
     onDndEnd: (detail: DndEndCallbackDetail) => void;
     orientation?: "horizontal" | "vertical";
+    // The dndRules prop is optional for maximum flexibility.
+    dndRules?: DndRules;
   };
 
   // --- Component Props ---
-  let { children, dragOverlay, onDndEnd, orientation = "horizontal" }: Props = $props();
+  let { children, dragOverlay, onDndEnd, orientation = "vertical", dndRules = undefined }: Props = $props();
 
   // --- Svelte 5 State (Runes) ---
   let active = $state<Active | null>(null);
+  let lastOver = $state<Over | null>(null);
   let dropIndicator = $state<DropIndicatorState>({
     targetId: null,
-    position: "before",
+    position: "top", // Default position
     orientation,
   });
+  // Reset indicator state at the start of a drag.
+  function clearIndicator() {
+    lastOver = null;
+    dropIndicator = { targetId: null, position: "top", orientation };
+  }
+
+  // --- Collision Algorithm Creation ---
+  // The collision algorithm is created reactively and internally based on props.
+  // This is the "magic" that makes the provider so easy to use.
+  const collisionDetection = $derived(
+    createClosestEdgeCollision({
+      orientation,
+      accepts: dndRules,
+    }),
+  );
+
+  // --- Drag Handlers ---
 
   // Define the input sensors. This is what enables dragging.
   const sensors = useSensors(useSensor(MouseSensor), useSensor(TouchSensor), useSensor(KeyboardSensor));
@@ -53,59 +83,89 @@
   // Define a null drop animation to prevent the "fly back" effect.
   const dropAnimation: DropAnimation | null = null;
 
-  // --- Drag Handlers ---
   function handleDragStart(event: DragStartEvent) {
     active = event.active;
-    dropIndicator = { targetId: null, position: "before", orientation };
+    clearIndicator();
   }
 
-  function handleDragOver({ active: activeEvent, over }: DragOverEvent) {
-    // This logic is now simple and correct. It reports what it sees.
-    if (!over || !over.rect || !activeEvent.rect.translated) {
-      dropIndicator = { targetId: null, position: "before", orientation };
+  function handleDragMove({ over, active }: DragOverEvent) {
+    // We need the `active` object to get the pointer coordinates.
+    // The pointer coordinates are not directly on the event, but we can get them
+    // from the active element's translated rectangle.
+    const activeRect = active.rect.translated;
+    if (!activeRect) {
+      clearIndicator();
       return;
     }
-    const midpoint = over.rect.top + over.rect.height / 2;
-    const isAfter = activeEvent.rect.translated.top > midpoint;
+    const pointer = {
+      x: activeRect.left + activeRect.width / 2,
+      y: activeRect.top + activeRect.height / 2,
+    };
+
+    if (!over || !over.rect) {
+      clearIndicator();
+      return;
+    }
+
+    // The `over` object is the one our collision algorithm correctly chose.
+    // Now, we perform the final geometric calculation here.
+    // The `edge` is the calculated 'top', 'bottom', 'left', or 'right'.
+    const { edge } =
+      orientation === "vertical" ? verticalDistance(over.rect, pointer) : horizontalDistance(over.rect, pointer);
 
     dropIndicator = {
       targetId: over.id,
-      position: isAfter ? "after" : "before",
+      position: edge,
       orientation,
     };
+    lastOver = over;
   }
 
-  function handleDragEnd({ active: activeEvent, over }: DragEndEvent) {
-    if (over && activeEvent.id !== over.id) {
-      // Encapsulate the microtask logic within the provider.
-      // This gives dnd-kit-svelte time to reset its internal state (isDragging)
-      // before we notify the parent to update the UI.
-      queueMicrotask(() => {
+  function handleDragEnd({ active: activeEvent }: DragEndEvent) {
+    const finalOver = lastOver;
+    const finalPosition = dropIndicator.position;
+
+    // A drop is only valid if there is a target and it's not the item itself.
+    const success = finalOver && activeEvent.id !== finalOver.id;
+    // Encapsulate the microtask logic within the provider.
+    // This gives dnd-kit-svelte time to reset its internal state (isDragging)
+    // before we notify the parent to update the UI.
+    queueMicrotask(() => {
+      if (success) {
         onDndEnd({
           active: activeEvent,
-          over,
-          position: dropIndicator.position,
+          over: finalOver,
+          // The dropIndicator already holds the most accurate position ('top', 'bottom', etc.).
+          position: finalPosition,
         });
-      });
-    }
+      }
+      active = null;
+      clearIndicator();
+    });
+
+    // Reset state after the drag operation concludes.
     active = null;
-    dropIndicator = { targetId: null, position: "before", orientation };
+    clearIndicator();
   }
 
+  // Note that handleDragCancel only fires when user press ESC to cancel
   function handleDragCancel() {
-    active = null;
-    dropIndicator = { targetId: null, position: "before", orientation };
+    queueMicrotask(() => {
+      active = null;
+      clearIndicator();
+    });
   }
 </script>
 
 <DndContext
   {sensors}
   onDragStart={handleDragStart}
-  onDragOver={handleDragOver}
+  onDragMove={handleDragMove}
   onDragEnd={handleDragEnd}
   onDragCancel={handleDragCancel}
+  {collisionDetection}
 >
-  {@render children({ dropIndicator, active })}
+  {@render children({ dropIndicator })}
 
   <DragOverlay {dropAnimation}>
     {@render dragOverlay({ active })}

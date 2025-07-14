@@ -152,23 +152,11 @@
       <p class="text-muted-foreground">Waiting for configuration data...</p>
     </div>
   {:else}
-    <DndProvider onDndEnd={handleDndEnd}>
-      {#snippet children({ dropIndicator, active })}
+    <DndProvider onDndEnd={handleDndEnd} orientation="vertical">
+      {#snippet children({ dropIndicator })}
         <div class="space-y-2">
           {#each uiGroups as group (group.id)}
-            <ConfigGroup
-              {group}
-              indicator={dropIndicator.targetId === group.id && active?.data?.type === "group"
-                ? dropIndicator.position
-                : null}
-            >
-              {#each group.items as config (config.name)}
-                <ConfigItem
-                  {config}
-                  indicator={dropIndicator.targetId === config.name ? dropIndicator.position : null}
-                />
-              {/each}
-            </ConfigGroup>
+            <ConfigGroup {group} {dropIndicator} />
           {/each}
         </div>
       {/snippet}
@@ -182,11 +170,7 @@
             </div>
           {:else if activeType === "group"}
             <div class="w-full opacity-95 shadow-2xl">
-              <ConfigGroup group={active.data.group}>
-                {#each active.data.group.items as config (config.name)}
-                  <ConfigItem {config} />
-                {/each}
-              </ConfigGroup>
+              <ConfigGroup group={active.data.group} />
             </div>
           {/if}
         {/if}
