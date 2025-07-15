@@ -29,7 +29,12 @@
   const indicator = $derived(dropIndicator?.targetId === group.id ? dropIndicator.position : null);
 </script>
 
-<div use:setDraggableNode data-dragging={isDragging.current} class="drag-placeholder relative rounded-lg">
+<div
+  use:setDraggableNode
+  use:setDroppableNode
+  data-dragging={isDragging.current}
+  class="drag-placeholder relative rounded-lg"
+>
   <div class="rounded-lg">
     <Card.Root>
       <Card.Header class="flex flex-row items-center justify-between px-4 py-3">
@@ -42,22 +47,20 @@
           <GripVertical class="h-5 w-5" />
         </div>
       </Card.Header>
-      <div use:setDroppableNode>
-        <Card.Content class={cn("space-y-1 p-4 pt-0 transition-colors", { "bg-primary/5": isOver.current })}>
-          {#if group.items.length > 0}
-            <!-- Pass the indicator state down to the children -->
-            {#each group.items as item (item.id)}
-              <ConfigItem config={item} {dropIndicator} />
-            {/each}
-          {:else}
-            <div
-              class="text-muted-foreground flex h-14 items-center justify-center rounded-md border border-dashed text-sm"
-            >
-              Drop items here
-            </div>
-          {/if}
-        </Card.Content>
-      </div>
+      <Card.Content class={cn("space-y-1 p-4 pt-0 transition-colors", { "bg-primary/5": isOver.current })}>
+        {#if group.items.length > 0}
+          <!-- Pass the indicator state down to the children -->
+          {#each group.items as item (item.id)}
+            <ConfigItem config={item} {dropIndicator} />
+          {/each}
+        {:else}
+          <div
+            class="text-muted-foreground flex h-14 items-center justify-center rounded-md border border-dashed text-sm"
+          >
+            Drop items here
+          </div>
+        {/if}
+      </Card.Content>
     </Card.Root>
   </div>
   <!-- Display drop indicator based on props -->
