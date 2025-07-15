@@ -2,6 +2,7 @@
   import { DndProvider, applyDnd, type DndEndCallbackDetail } from "$lib/components/dnd";
   import { websocketClient } from "$lib/ws";
   import { Loader2 } from "@lucide/svelte";
+  import { onDestroy } from "svelte";
   import type { ConfigGroupData } from "./ConfigGroup.svelte";
   import ConfigGroup from "./ConfigGroup.svelte";
   import type { Config } from "./ConfigItem.svelte";
@@ -10,6 +11,7 @@
   // SINGLE SOURCE OF TRUTH (from server)
   const topicClient = websocketClient.sub("ConfigScan");
   const rpc = topicClient.rpc();
+  onDestroy(topicClient.unsub)
 
   // UI state (what the user sees and manipulates).
   // Note that this variable deep copies topicClient.data, and might get dirty during optimistic update

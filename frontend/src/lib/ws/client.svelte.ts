@@ -313,6 +313,15 @@ class WebsocketManager {
       rpc(options?: RpcOptions) {
         return createRpc(topic, client, options);
       },
+
+      /*
+       * A helper method to unsubscribe within topic, so you can do:
+       * const topicClient = websocketClient.sub("ConfigScan");
+       * onDestroy(topicClient.unsub);
+       */
+      unsub() {
+        client.unsub(topic);
+      },
     };
   }
   /**
