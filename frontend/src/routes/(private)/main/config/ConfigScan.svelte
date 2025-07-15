@@ -14,6 +14,7 @@
   // UI state (what the user sees and manipulates).
   // Note that this variable deep copies topicClient.data, and might get dirty during optimistic update
   let uiGroups = $state<ConfigGroupData[]>([]);
+  const dndRules = { group: ["item", "group"], item: ["item"] };
 
   // This effect now correctly depends on the true reactive source: `websocketClient.topics`.
   // It runs whenever the server sends new data for 'ConfigScan', resetting the UI to the canonical state.
@@ -48,6 +49,17 @@
           items: copiedAndSortedItems,
         };
       });
+  });
+  // A helper map to lookup the correct acvite object during optimistic update
+  const itemMap = $derived.by(() => {
+    const map = new Map<string | number, Config | ConfigGroupData>();
+    for (const group of uiGroups) {
+      map.set(group.id, group);
+      for (const item of group.items) {
+        map.set(item.id, item);
+      }
+    }
+    return map;
   });
 
   /**
@@ -185,7 +197,7 @@
       <p class="text-muted-foreground">Waiting for configuration data...</p>
     </div>
   {:else}
-    <DndProvider onDndEnd={handleDndEnd} orientation="vertical">
+    <DndProvider onDndEnd={handleDndEnd} orientation="vertical" {dndRules}>
       {#snippet children({ dropIndicator })}
         <div class="space-y-2">
           {#each uiGroups as group (group.id)}
@@ -196,14 +208,15 @@
 
       {#snippet dragOverlay({ active })}
         {#if active && active.data}
+          {@const activeData = itemMap.get(active.id)}
           {@const activeType = active.data.type}
           {#if activeType === "item"}
             <div class="opacity-95 shadow-xl">
-              <ConfigItem config={active.data.config} />
+              <ConfigItem config={activeData as Config} />
             </div>
           {:else if activeType === "group"}
-            <div class="w-full opacity-95 shadow-2xl">
-              <ConfigGroup group={active.data.group} />
+            <div class="opacity-95 shadow-2xl">
+              <ConfigGroup group={activeData as ConfigGroupData} />
             </div>
           {/if}
         {/if}

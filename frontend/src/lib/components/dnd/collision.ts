@@ -126,8 +126,8 @@ export const createClosestEdgeCollision = (options: ClosestEdgeOptions): Collisi
     for (const droppable of droppableContainers) {
       // If `accepts` rules are provided, perform type checking.
       if (options.accepts) {
-        const activeType = active.data?.current?.type as string | undefined;
-        const droppableType = droppable.data?.current?.type as string | undefined;
+        const activeType = active.data?.type as string | undefined;
+        const droppableType = droppable.data?.type as string | undefined;
 
         // If either element lacks a type, it cannot satisfy the rules.
         if (!activeType || !droppableType) continue;

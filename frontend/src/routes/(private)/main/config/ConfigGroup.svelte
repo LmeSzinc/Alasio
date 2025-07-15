@@ -18,20 +18,12 @@
   };
   let { group, dropIndicator = null }: Props = $props();
 
-  const { isOver, setNodeRef: setDroppableNode } = useDroppable({
-    id: group.id,
-    data: { type: "group" },
-  });
-
-  const {
-    attributes,
-    listeners,
-    isDragging,
-    setNodeRef: setDraggableNode,
-  } = useDraggable({
+  const dndData = {
     id: group.id,
     data: { type: "group", group: group },
-  });
+  };
+  const { isOver, setNodeRef: setDroppableNode } = useDroppable(dndData);
+  const { attributes, listeners, isDragging, setNodeRef: setDraggableNode } = useDraggable(dndData);
 
   // Compute the indicator specifically for this group.
   const indicator = $derived(dropIndicator?.targetId === group.id ? dropIndicator.position : null);

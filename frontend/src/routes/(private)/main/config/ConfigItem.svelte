@@ -18,20 +18,12 @@
   };
   let { config, dropIndicator = null }: Props = $props();
 
-  const {
-    attributes,
-    listeners,
-    isDragging,
-    setNodeRef: setDraggableNode,
-  } = useDraggable({
+  const dndData = {
     id: config.id,
     data: { type: "item", config: config },
-  });
-
-  const { setNodeRef: setDroppableNode } = useDroppable({
-    id: config.id,
-    data: { type: "item", config: config },
-  });
+  };
+  const { attributes, listeners, isDragging, setNodeRef: setDraggableNode } = useDraggable(dndData);
+  const { setNodeRef: setDroppableNode } = useDroppable(dndData);
 
   // Compute the indicator specifically for this item.
   const indicator = $derived(dropIndicator?.targetId === config.id ? dropIndicator.position : null);

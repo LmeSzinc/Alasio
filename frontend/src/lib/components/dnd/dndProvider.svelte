@@ -122,6 +122,8 @@
   }
 
   function handleDragEnd({ active: activeEvent }: DragEndEvent) {
+    // We use the lastOver instead of the Over object in DragEndEvent, so users can have a predictable behaviour
+    // that item will move to where the indicator is pointing at instead of some random area at drag end.
     const finalOver = lastOver;
     const finalPosition = dropIndicator.position;
 
