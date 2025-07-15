@@ -15,7 +15,7 @@ class NoCacheStaticFiles(StaticFiles):
         # We've seen too many styling issues in ALAS. We use electron as client and chromium caches static files on
         # user's disk. Those files may get broke for unknown reason, causing the styling issues.
         # To fix that, we tell the browsers don't cache any. Bandwidth increase should be acceptable on local service.
-        resp.headers.setdefault('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        resp.headers.setdefault('Cache-Control', 'private, must-revalidate, max-age=0')
         resp.headers.setdefault('Expires', '0')
         resp.headers.setdefault('Pragma', 'no-cache')
 
