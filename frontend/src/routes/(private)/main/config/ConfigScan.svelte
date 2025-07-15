@@ -199,7 +199,7 @@
   {:else}
     <DndProvider onDndEnd={handleDndEnd} orientation="vertical" {dndRules}>
       {#snippet children({ dropIndicator })}
-        <div class="space-y-2">
+        <div class="space-y-1">
           {#each uiGroups as group (group.id)}
             <ConfigGroup {group} {dropIndicator} />
           {/each}
@@ -207,18 +207,16 @@
       {/snippet}
 
       {#snippet dragOverlay({ active })}
-        {#if active && active.data}
-          {@const activeData = itemMap.get(active.id)}
-          {@const activeType = active.data.type}
-          {#if activeType === "item"}
-            <div class="opacity-95 shadow-xl">
-              <ConfigItem config={activeData as Config} />
-            </div>
-          {:else if activeType === "group"}
-            <div class="opacity-95 shadow-2xl">
-              <ConfigGroup group={activeData as ConfigGroupData} />
-            </div>
-          {/if}
+        {@const activeType = active?.data?.type}
+        {@const activeData = active ? itemMap.get(active.id) : null}
+        {#if activeType === "item"}
+          <div class="opacity-95 shadow-xl">
+            <ConfigItem config={activeData as Config} />
+          </div>
+        {:else if activeType === "group"}
+          <div class="opacity-95 shadow-2xl">
+            <ConfigGroup group={activeData as ConfigGroupData} />
+          </div>
         {/if}
       {/snippet}
     </DndProvider>

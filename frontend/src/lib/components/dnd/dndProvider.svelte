@@ -127,6 +127,8 @@
     const finalOver = lastOver;
     const finalPosition = dropIndicator.position;
 
+    if (!activeEvent || !finalOver) return;
+
     // A drop is only valid if there is a target and it's not the item itself.
     const success = finalOver && activeEvent.id !== finalOver.id;
     // Encapsulate the microtask logic within the provider.

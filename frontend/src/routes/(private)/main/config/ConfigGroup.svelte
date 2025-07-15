@@ -1,6 +1,5 @@
 <script lang="ts">
   import { Indicator, type DropIndicatorState } from "$lib/components/dnd";
-  import * as Card from "$lib/components/ui/card";
   import { cn } from "$lib/utils";
   import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
   import { GripVertical } from "@lucide/svelte";
@@ -29,40 +28,35 @@
   const indicator = $derived(dropIndicator?.targetId === group.id ? dropIndicator.position : null);
 </script>
 
-<div
-  use:setDraggableNode
-  use:setDroppableNode
-  data-dragging={isDragging.current}
-  class="drag-placeholder relative rounded-lg"
->
-  <div class="rounded-lg">
-    <Card.Root>
-      <Card.Header class="flex flex-row items-center justify-between px-4 py-3">
-        <Card.Title class="text-lg">Group {group.gid}</Card.Title>
+<div use:setDraggableNode use:setDroppableNode data-dragging={isDragging.current} class="drag-placeholder relative">
+  <div class="group-container relative rounded-lg p-3 pt-4">
+    <div class="z-2 absolute -top-2 left-6 flex items-center">
+      <!-- icon and text cover the border -->
+      <span class="text-muted-foreground bg-background pl-2 text-xs">Group {group.gid}</span>
+      <div
+        {...listeners.current}
+        {...attributes.current}
+        class="text-muted-foreground bg-background cursor-grab px-2 py-1 active:cursor-grabbing"
+      >
+        <GripVertical class="h-3 w-3" />
+      </div>
+    </div>
+
+    <div class={cn("transition-colors", { "bg-accent/30 rounded-md": isOver.current })}>
+      {#if group.items.length > 0}
+        {#each group.items as item (item.id)}
+          <ConfigItem config={item} {dropIndicator} />
+        {/each}
+      {:else}
         <div
-          {...listeners.current}
-          {...attributes.current}
-          class="text-muted-foreground cursor-grab p-2 active:cursor-grabbing"
+          class="text-muted-foreground flex h-20 items-center justify-center rounded-md border border-dashed text-sm"
         >
-          <GripVertical class="h-5 w-5" />
+          Drop items here
         </div>
-      </Card.Header>
-      <Card.Content class={cn("space-y-1 p-4 pt-0 transition-colors", { "bg-primary/5": isOver.current })}>
-        {#if group.items.length > 0}
-          <!-- Pass the indicator state down to the children -->
-          {#each group.items as item (item.id)}
-            <ConfigItem config={item} {dropIndicator} />
-          {/each}
-        {:else}
-          <div
-            class="text-muted-foreground flex h-14 items-center justify-center rounded-md border border-dashed text-sm"
-          >
-            Drop items here
-          </div>
-        {/if}
-      </Card.Content>
-    </Card.Root>
+      {/if}
+    </div>
   </div>
+
   <!-- Display drop indicator based on props -->
   {#if indicator === "top"}
     <Indicator edge="top" />
@@ -70,3 +64,15 @@
     <Indicator edge="bottom" />
   {/if}
 </div>
+
+<style>
+  /* dashed border */
+  .group-container::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px dashed var(--border);
+    border-radius: 0.625rem;
+    pointer-events: none;
+  }
+</style>
