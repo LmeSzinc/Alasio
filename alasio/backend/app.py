@@ -48,7 +48,8 @@ def create_app():
 
     # Mount static files
     from alasio.ext.path import PathStr
-    root = PathStr(__file__).uppath(2).joinpath('ext')
+    # for frontend local builds
+    root = PathStr(__file__).uppath(3).joinpath('frontend/build')
     static_app = NoCacheStaticFiles(directory=root, html=True)
     app.mount('/', static_app, name='static')
 

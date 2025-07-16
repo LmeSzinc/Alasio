@@ -145,7 +145,8 @@ async def auth_renew(
     except jwt.PyJWTError:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            detail='Token invalid or expired',
+            # detail must be quoted to become a valid json
+            detail='"Token invalid or expired"',
             headers={'WWW-Authenticate': 'Bearer'},
         ) from None
 
