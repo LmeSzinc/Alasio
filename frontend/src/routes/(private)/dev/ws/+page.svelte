@@ -98,7 +98,7 @@
   onDestroy(websocketClient.unsubAll);
 </script>
 
-<div class="container mx-auto p-4 md:p-8">
+<div class="mx-auto p-2">
   <header class="mb-8 flex items-center justify-between">
     <h1 class="text-3xl font-bold tracking-tight">WebSocket Test Client</h1>
   </header>

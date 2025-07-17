@@ -2,4 +2,4 @@
   import ConfigScan from "./ConfigScan.svelte";
 </script>
 
-<ConfigScan />
+<ConfigScan class="mx-auto max-w-300 p-4 pt-6" />

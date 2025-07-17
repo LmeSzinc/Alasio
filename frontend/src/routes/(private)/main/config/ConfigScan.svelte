@@ -8,10 +8,16 @@
   import type { Config } from "./ConfigItem.svelte";
   import ConfigItem from "./ConfigItem.svelte";
 
+  // props
+  type $$props = {
+    class?: string;
+  };
+  const { class: className }: $$props = $props();
+
   // SINGLE SOURCE OF TRUTH (from server)
   const topicClient = websocketClient.sub("ConfigScan");
   const rpc = topicClient.rpc();
-  onDestroy(topicClient.unsub)
+  onDestroy(topicClient.unsub);
 
   // UI state (what the user sees and manipulates).
   // Note that this variable deep copies topicClient.data, and might get dirty during optimistic update
@@ -188,7 +194,7 @@
   }
 </script>
 
-<div class="container mx-auto p-4 md:p-8">
+<div class={className}>
   <header class="mb-6 flex items-center justify-between">
     <h1 class="text-3xl font-bold tracking-tight">Configuration Manager</h1>
   </header>
