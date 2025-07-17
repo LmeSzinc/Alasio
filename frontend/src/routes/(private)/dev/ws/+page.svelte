@@ -20,6 +20,10 @@
   // --- Client and Subscription State ---
   const topicsData = websocketClient.topics;
 
+  // Track subscriptions made by this component
+  // Use array to allow duplicate subscriptions for testing
+  const componentSubscriptions: string[] = $state([]);
+
   // Directly access the reactive state from the websocketClient for the badge.
   const badgeVariant = $derived(
     websocketClient.connectionState === "open"
@@ -88,14 +92,33 @@
   }
 
   function handleSubscribe() {
-    if (topic) websocketClient.sub(topic, true);
+    if (topic) {
+      websocketClient.sub(topic, true);
+      // Track this subscription (allow duplicates for testing)
+      componentSubscriptions.push(topic);
+    }
   }
 
   function handleUnsubscribe() {
-    if (topic) websocketClient.unsub(topic, true);
+    if (topic) {
+      websocketClient.unsub(topic, true);
+      // Remove one instance from tracked subscriptions
+      const index = componentSubscriptions.indexOf(topic);
+      if (index > -1) {
+        componentSubscriptions.splice(index, 1);
+      }
+    }
   }
 
-  onDestroy(websocketClient.unsubAll);
+  // Clean up only this component's subscriptions on destroy
+  onDestroy(() => {
+    // Unsubscribe from all topics that this component subscribed to
+    // This respects the count of subscriptions
+    for (const subscribedTopic of componentSubscriptions) {
+      websocketClient.unsub(subscribedTopic);
+    }
+    componentSubscriptions.length = 0;
+  });
 </script>
 
 <div class="mx-auto p-2">
@@ -175,9 +198,20 @@
             <Card.Root class="flex max-h-[32rem] w-full flex-col">
               <Card.Header class="flex flex-row items-center justify-between">
                 <Card.Title>{topicName}</Card.Title>
-                {#if topicsData[topicName]}
-                  <Badge variant="outline">Subscribed</Badge>
-                {/if}
+                <div class="flex items-center gap-2">
+                  {#if topicsData[topicName]}
+                    <Badge variant="outline">Subscribed</Badge>
+                  {/if}
+                  {#if componentSubscriptions.includes(topicName)}
+                    {@const componentCount = componentSubscriptions.filter((t) => t === topicName).length}
+                    <Badge variant="secondary">
+                      This ({componentCount})
+                    </Badge>
+                  {/if}
+                  {#if websocketClient.subscriptions[topicName]}
+                    <Badge variant="default">Count: {websocketClient.subscriptions[topicName]}</Badge>
+                  {/if}
+                </div>
               </Card.Header>
               <Card.Content class="flex-grow overflow-auto">
                 {#if typeof data === "object" && data !== null}
