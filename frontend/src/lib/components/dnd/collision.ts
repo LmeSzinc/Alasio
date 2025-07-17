@@ -27,9 +27,9 @@ export interface ClosestEdgeOptions {
  * @interface CollisionDataWithEdge
  * Defines the shape of the data that will be injected into the collision object.
  */
-interface CollisionDataWithEdge extends Data {
+export interface CollisionWithEdge extends Collision {
   // The closest edge that was detected.
-  closestEdge: "top" | "bottom" | "left" | "right";
+  edge: "top" | "bottom" | "left" | "right";
   // The calculated distance to that edge. This is used for sorting.
   distance: number;
 }
@@ -114,16 +114,34 @@ export function horizontalDistance(
  */
 export const createClosestEdgeCollision = (options: ClosestEdgeOptions): CollisionDetection => {
   return (args) => {
-    const { active, droppableContainers, droppableRects, pointerCoordinates: pointer } = args;
+    const { active, collisionRect, droppableContainers, droppableRects, pointerCoordinates } = args;
 
-    // The algorithm cannot run without a pointer position.
+    // Try to get pointer coordinates, with fallback for keyboard navigation
+    let pointer = pointerCoordinates;
+
+    // If no pointer coordinates (common with keyboard navigation),
+    // use the active element's center as fallback
+    if (!pointer && collisionRect) {
+      pointer = {
+        x: collisionRect.left + collisionRect.width / 2,
+        y: collisionRect.top + collisionRect.height / 2,
+      };
+    }
+
+    // If we still don't have coordinates, we can't perform collision detection
     if (!pointer) {
+      console.warn("No pointer coordinates available for collision detection");
       return [];
     }
 
-    const collisions: Collision[] = [];
+    const collisions: CollisionWithEdge[] = [];
 
     for (const droppable of droppableContainers) {
+      // Skip self-collision (don't drop on yourself)
+      if (droppable.id === active.id) {
+        continue;
+      }
+
       // If `accepts` rules are provided, perform type checking.
       if (options.accepts) {
         const activeType = active.data?.type as string | undefined;
@@ -143,16 +161,17 @@ export const createClosestEdgeCollision = (options: ClosestEdgeOptions): Collisi
       if (!rect) continue;
 
       // Based on the configured orientation, call the appropriate distance function.
-      const { distance } =
+      const { distance, edge } =
         options.orientation === "vertical" ? verticalDistance(rect, pointer) : horizontalDistance(rect, pointer);
 
       collisions.push({
         id: droppable.id,
         data: {
           ...droppable.data?.current,
-          // The 'value' is now the raw distance, used for sorting.
-          value: distance,
         },
+        // The 'value' is now the raw distance, used for sorting.
+        distance: distance,
+        edge: edge,
       });
     }
 
@@ -160,7 +179,7 @@ export const createClosestEdgeCollision = (options: ClosestEdgeOptions): Collisi
     return collisions.sort((a, b) => {
       // Guard against undefined data, though our logic should prevent this.
       if (!a.data || !b.data) return 0;
-      return a.data.value - b.data.value;
+      return a.distance - b.distance;
     });
   };
 };

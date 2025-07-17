@@ -15,7 +15,12 @@
     type Over,
   } from "@dnd-kit-svelte/core";
   import type { Snippet } from "svelte";
-  import { createClosestEdgeCollision, verticalDistance, horizontalDistance } from "./collision";
+  import {
+    createClosestEdgeCollision,
+    horizontalDistance,
+    verticalDistance,
+    type CollisionWithEdge,
+  } from "./collision";
 
   // --- Type Definitions ---
   export type DropIndicatorState = {
@@ -88,7 +93,23 @@
     clearIndicator();
   }
 
-  function handleDragMove({ over, active }: DragOverEvent) {
+  function handleDragMove({ over, active, collisions }: DragOverEvent) {
+    // Happy path that we should get edge from our custom CollisionDetection algorithm.
+    if (collisions && collisions.length > 1) {
+      const firstCollision = collisions[0] as CollisionWithEdge;
+      const firstEdge = firstCollision.edge;
+      if (firstEdge) {
+        dropIndicator = {
+          targetId: firstCollision.id,
+          position: firstEdge,
+          orientation,
+        };
+        lastOver = over;
+        return;
+      }
+    }
+    // Rest of the code are just fallback method.
+
     // We need the `active` object to get the pointer coordinates.
     // The pointer coordinates are not directly on the event, but we can get them
     // from the active element's translated rectangle.
@@ -131,6 +152,7 @@
 
     // A drop is only valid if there is a target and it's not the item itself.
     const success = finalOver && activeEvent.id !== finalOver.id;
+
     // Encapsulate the microtask logic within the provider.
     // This gives dnd-kit-svelte time to reset its internal state (isDragging)
     // before we notify the parent to update the UI.
