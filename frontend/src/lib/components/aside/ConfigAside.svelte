@@ -1,38 +1,37 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
+  import { cn } from "$lib/utils.js";
   import { websocketClient } from "$lib/ws";
   import { Settings } from "@lucide/svelte";
   import { onDestroy } from "svelte";
-  import type { ConfigLike as BasicConfigLike } from "./ConfigItem.svelte";
   import ConfigItem from "./ConfigItem.svelte";
-
-  // Minimal type requirements
-  type ConfigLike = {
-    name: string;
-    mod: string;
-    gid: number;
-    iid: number;
-    [key: string]: any; // Allow any other properties
-  };
-
-  type ConfigGroupData = {
-    id: string;
-    gid: number;
-    items: ConfigLike[];
-  };
+  import type { ConfigLike, ConfigTopicLike } from "./types";
 
   // Subscribe to ConfigScan topic
   const topicClient = websocketClient.sub("ConfigScan");
   const rpc = topicClient.rpc();
   onDestroy(topicClient.unsub);
 
+  // props
+  type $$props = {
+    activeId?: number;
+    class?: string;
+    onNavigate?: () => void;
+  };
+  let { activeId, class: className, onNavigate = () => {} }: $$props = $props();
+
   // UI state
+  type ConfigGroupData = {
+    id: string;
+    gid: number;
+    items: ConfigLike[];
+  };
   let groups = $state<ConfigGroupData[]>([]);
 
   // This effect syncs server data with UI state
   $effect(() => {
-    const serverData = topicClient.data as Record<string, ConfigLike> | undefined;
+    const serverData = topicClient.data as ConfigTopicLike | undefined;
 
     if (!serverData) {
       groups = [];
@@ -57,11 +56,12 @@
   });
 
   // Handle config item click
-  async function handleConfigClick(config: BasicConfigLike) {
+  async function handleConfigClick(config: ConfigLike) {
     // Call RPC to set the config
-    rpc.call("set_current_config", { name: config.name });
+    rpc.call("set_config", { name: config.name });
     // Navigate to dashboard
-    await goto("/config/dashboard");
+    onNavigate();
+    await goto(`/config/${config.id}`);
   }
 
   // Navigate to settings
@@ -71,38 +71,37 @@
 </script>
 
 <aside
-  class="bg-card border-border flex h-full w-20 flex-col border-r absolute"
+  class={cn("bg-background flex h-full max-h-screen w-20 flex-col", className)}
   role="navigation"
   aria-label="Configuration sidebar"
 >
-  <ScrollArea class="flex-1">
-    <div class="px-1 py-2" role="list">
-      <div class="space-y-2">
-        {#each groups as group (group.id)}
-          {#if group.items.length === 1}
-            <!-- Single item in group - display directly -->
-            <div role="listitem" class="px-1">
-              <ConfigItem config={group.items[0]} onclick={handleConfigClick} />
-            </div>
-          {:else if group.items.length > 1}
-            <!-- Multiple items in group - display with border -->
-            <div
-              role="group"
-              aria-label="Configuration group {group.gid}"
-              class="border-border relative rounded-lg border border-dashed px-1"
-            >
+  <ScrollArea class="min-h-0 flex-1">
+    <div class="space-y-2 px-1 py-2" role="list">
+      {#each groups as group (group.id)}
+        {#if group.items.length === 1}
+          <!-- Single item in group - display directly -->
+          {@const item = group.items[0]}
+          {@const variant = activeId && item.id === activeId ? "active" : "default"}
+          <div role="listitem" class="px-1">
+            <ConfigItem config={item} {variant} onclick={handleConfigClick} />
+          </div>
+        {:else if group.items.length > 1}
+          <!-- Multiple items in group - display with border -->
+          <div
+            role="group"
+            aria-label="Configuration group {group.gid}"
+            class="border-border relative space-y-1 rounded-lg border border-dashed px-1"
+          >
+            {#each group.items as item (item.id)}
               <!-- Items in vertical layout -->
-              <div class="space-y-1" role="list">
-                {#each group.items as item (item.id)}
-                  <div role="listitem">
-                    <ConfigItem config={item} onclick={handleConfigClick} />
-                  </div>
-                {/each}
+              {@const variant = activeId && item.id === activeId ? "active" : "default"}
+              <div role="listitem">
+                <ConfigItem config={item} {variant} onclick={handleConfigClick} />
               </div>
-            </div>
-          {/if}
-        {/each}
-      </div>
+            {/each}
+          </div>
+        {/if}
+      {/each}
     </div>
   </ScrollArea>
 

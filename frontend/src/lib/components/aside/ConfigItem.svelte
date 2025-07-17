@@ -1,19 +1,34 @@
-<script lang="ts">
-  import { Play } from "@lucide/svelte";
+<script lang="ts" module>
+  import { tv, type VariantProps } from "tailwind-variants";
 
-  // Generic type that only requires name and mod properties
-  export type ConfigLike = {
-    name: string;
-    mod: string;
-    [key: string]: any; // Allow any other properties
-  };
+  export const badgeVariants = tv({
+    base: "hover:bg-accent/50 focus:ring-ring flex w-full cursor-pointer flex-col items-center gap-1 mt-2 rounded-md transition-colors",
+    variants: {
+      variant: {
+        default: "",
+        active: "",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  });
+  export type ItemVariant = VariantProps<typeof badgeVariants>["variant"];
+</script>
+
+<script lang="ts">
+  import { cn } from "$lib/utils.js";
+  import { Play } from "@lucide/svelte";
+  import type { ConfigLike } from "./types";
 
   // props
   type Props<T extends ConfigLike = ConfigLike> = {
     config: T;
+    variant?: ItemVariant;
+    class?: string;
     onclick?: (config: T) => void;
   };
-  let { config, onclick }: Props = $props();
+  let { config, variant = "default", class: className, onclick }: Props = $props();
 
   // icon handing
   let iconError = $state(false);
@@ -32,7 +47,7 @@
 </script>
 
 <button
-  class="hover:bg-accent/50 focus:ring-ring flex w-full cursor-pointer flex-col items-center gap-1 rounded-md transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none"
+  class={cn(badgeVariants({ variant }), className)}
   onclick={handleClick}
   disabled={!onclick}
   aria-label="Open configuration: {config.name}"
@@ -43,13 +58,13 @@
       src="/static/icon/{config.mod}.svg"
       alt=""
       role="presentation"
-      class="h-6 w-6 object-contain"
+      class="h-8 w-8 object-contain"
       onerror={handleIconError}
     />
   {:else}
-    <Play class="text-primary fill-primary h-6 w-6" aria-hidden="true" />
+    <Play class="text-primary fill-primary h-8 w-8" aria-hidden="true" />
   {/if}
-  <span class="text-muted-foreground line-clamp-2 text-center font-mono text-xs break-all" aria-hidden="true">
+  <span class="text-muted-foreground line-clamp-2 text-center text-xs break-all" aria-hidden="true">
     {config.name}
   </span>
 </button>
