@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { browser } from "$app/environment";
   import { invalidateAll } from "$app/navigation";
   import ConfigAside from "$lib/components/aside/ConfigAside.svelte";
   import { Header } from "$lib/components/header";
@@ -25,8 +26,18 @@
   let isSheetOpen = $state(false);
   const openSheet = () => (isSheetOpen = true);
   const closeSheet = () => (isSheetOpen = false);
+
+  // Auto close sheet if window get resized
+  let innerWidth = $state(0);
+  $effect(() => {
+    // 768 is media=md
+    if (browser && isSheetOpen && innerWidth >= 768) {
+      closeSheet();
+    }
+  });
 </script>
 
+<svelte:window bind:innerWidth />
 {#if data.success}
   <!-- 1. Main layout -->
   <div class="app-container flex h-screen w-full flex-col">
