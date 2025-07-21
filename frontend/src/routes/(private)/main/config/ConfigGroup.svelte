@@ -34,17 +34,17 @@
   <div class="group-container relative rounded-lg p-3 pt-4">
     <div class="absolute -top-2 left-6 z-2 flex items-center">
       <!-- icon and text cover the border -->
-      <span class="text-muted-foreground bg-background pl-2 text-xs">Group {group.gid}</span>
+      <span class="text-muted-foreground bg-sidebar pl-2 text-xs">Group {group.gid}</span>
       <div
         {...listeners.current}
         {...attributes.current}
-        class="text-muted-foreground bg-background cursor-grab px-2 py-1 active:cursor-grabbing"
+        class="text-muted-foreground bg-sidebar cursor-grab px-2 py-1 active:cursor-grabbing"
       >
         <GripVertical class="h-3 w-3" />
       </div>
     </div>
 
-    <div class={cn("transition-colors", { "bg-accent/30 rounded-md": isOver.current })}>
+    <div class={cn("transition-colors space-y-1", { "bg-accent/30 rounded-md": isOver.current })}>
       {#if group.items.length > 0}
         {#each group.items as item (item.id)}
           <ConfigItem config={item} {dropIndicator} {onCopy} {onDelete} />
