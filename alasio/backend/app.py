@@ -111,8 +111,13 @@ if __name__ == '__main__':
     from hypercorn.trio import serve
 
     config = Config()
+    # No poor wait, just exit directly on CTRL+C
+    config.graceful_timeout = 0.
+
+    # Bind address
     config.bind = '0.0.0.0:8000'
     # config.bind = ['0.0.0.0:8000', '[::]:8000']
+
     # To enable assess log
     config.accesslog = '-'
 
