@@ -14,8 +14,10 @@
   type Props = {
     group: ConfigGroupData;
     dropIndicator?: DropIndicatorState | null;
+    onCopy?: (config: Config) => void;
+    onDelete?: (config: Config) => void;
   };
-  let { group, dropIndicator = null }: Props = $props();
+  let { group, dropIndicator = null, onCopy, onDelete }: Props = $props();
 
   const dndData = {
     id: group.id,
@@ -30,7 +32,7 @@
 
 <div use:setDraggableNode use:setDroppableNode data-dragging={isDragging.current} class="drag-placeholder relative">
   <div class="group-container relative rounded-lg p-3 pt-4">
-    <div class="z-2 absolute -top-2 left-6 flex items-center">
+    <div class="absolute -top-2 left-6 z-2 flex items-center">
       <!-- icon and text cover the border -->
       <span class="text-muted-foreground bg-background pl-2 text-xs">Group {group.gid}</span>
       <div
@@ -45,7 +47,7 @@
     <div class={cn("transition-colors", { "bg-accent/30 rounded-md": isOver.current })}>
       {#if group.items.length > 0}
         {#each group.items as item (item.id)}
-          <ConfigItem config={item} {dropIndicator} />
+          <ConfigItem config={item} {dropIndicator} {onCopy} {onDelete} />
         {/each}
       {:else}
         <div

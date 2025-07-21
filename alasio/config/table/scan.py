@@ -1,5 +1,6 @@
 from collections import deque
 from copy import deepcopy
+from typing import Union
 
 import msgspec
 
@@ -9,6 +10,7 @@ from alasio.ext import env
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_remove, atomic_write
 from alasio.ext.path.validate import validate_filename
 from alasio.ext.pool import WORKER_POOL
+from alasio.ext.reactive.event import RpcValueError
 from alasio.logger import logger
 
 PROTECTED_NAMES = {'gui', 'template'}
@@ -33,6 +35,10 @@ def iter_local_files():
     """
     folder = env.PROJECT_ROOT / 'config'
     for file in folder.iter_files(ext='.db'):
+        try:
+            validate_filename(file.name)
+        except ValueError:
+            continue
         name = file.stem
         if name not in PROTECTED_NAMES:
             yield ConfigFile(name=name, mod='')
@@ -40,8 +46,8 @@ def iter_local_files():
 
 class DndRequest(msgspec.Struct):
     name: str
-    gid: int
-    iid: int
+    gid: Union[float, int]
+    iid: Union[float, int]
 
 
 class ConfigInfo(msgspec.Struct):
@@ -287,11 +293,11 @@ class ScanTable(AlasioGuiDB):
         """
         validate_filename(name)
         if name.lower() in PROTECTED_NAMES:
-            raise ValueError(f'Config name is protected: {name}')
+            raise RpcValueError(f'Config name to add is protected: {name}')
 
         file = AlasioConfigDB.config_file(name)
         if file.exists():
-            raise FileExistsError
+            raise RpcValueError(f'Config file to add already exists {file}')
 
         # create
         table = AlasioKeyTable(name)
@@ -310,7 +316,7 @@ class ScanTable(AlasioGuiDB):
         """
         validate_filename(name)
         if name.lower() in PROTECTED_NAMES:
-            raise ValueError(f'Config name is protected: {name}')
+            raise RpcValueError(f'Config name is protected: {name}')
 
         # delete
         file = AlasioConfigDB.config_file(name)
@@ -326,21 +332,21 @@ class ScanTable(AlasioGuiDB):
         """
         validate_filename(source)
         if source.lower() in PROTECTED_NAMES:
-            raise ValueError(f'Config name is protected: {source}')
+            raise RpcValueError(f'Source config name is protected: {source}')
         validate_filename(target)
         if target.lower() in PROTECTED_NAMES:
-            raise ValueError(f'Config name is protected: {target}')
+            raise RpcValueError(f'Target config name is protected: {target}')
 
         source_file = AlasioConfigDB.config_file(source)
         target_file = AlasioConfigDB.config_file(target)
         if target_file.exists():
-            raise FileExistsError(f'Target file to copy already exists: {target_file}')
+            raise RpcValueError(f'Target file to copy already exists: {target_file}')
 
         # copy
         try:
             content = atomic_read_bytes(source_file)
         except FileNotFoundError:
-            raise FileExistsError(f'Source file to copy not found: {source_file}') from None
+            raise RpcValueError(f'Source file to copy not found: {source_file}') from None
         atomic_write(target_file, content)
 
     def config_dnd(self, requests):
@@ -363,7 +369,8 @@ class ScanTable(AlasioGuiDB):
         Args:
             requests (list[DndRequest]):
         """
-        with self.cursor(lazy=True) as c:
+        # No lazy cursor, since we select first
+        with self.cursor() as c:
             record = self.select_rows(_cursor_=c)
             if not record:
                 return
@@ -375,7 +382,7 @@ class ScanTable(AlasioGuiDB):
                     row = new_record[req.name]
                 except KeyError:
                     # trying to dnd a non-exist row
-                    continue
+                    raise RpcValueError(f'Config name "{req.name}" does not exist, cannot perform DND') from None
                 row.gid = req.gid
                 row.iid = req.iid
 

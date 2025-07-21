@@ -1,10 +1,13 @@
 from typing import TYPE_CHECKING
 
+from msgspec import DecodeError, ValidationError
+
 from .base_topic import BaseTopic as BaseMixin
-from .event import AccessDenied, ResponseEvent
+from .event import AccessDenied, ResponseEvent, RpcValueError
 from .rx_trio import AsyncReactiveCallback, async_reactive
 from ..deep import deep_iter_patch
 from ..singleton import SingletonNamed
+from ...logger import logger
 
 if TYPE_CHECKING:
     # For IDE typehint, avoid recursive import
@@ -122,8 +125,15 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         # RPC call
         try:
             await method.call_async(self, value)
+        except (ValidationError, DecodeError, UnicodeDecodeError, AccessDenied, RpcValueError) as e:
+            # input errors
+            msg = f'{e.__class__.__name__}: {e}'
+            event = ResponseEvent(t=self.topic_name(), v=msg, i=rpc_id)
+            await self.server.send(event)
+            return
         except Exception as e:
-            # failed
+            # unexpected internal errors
+            logger.exception(e)
             msg = f'{e.__class__.__name__}: {e}'
             event = ResponseEvent(t=self.topic_name(), v=msg, i=rpc_id)
             await self.server.send(event)

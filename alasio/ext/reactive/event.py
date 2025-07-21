@@ -46,6 +46,15 @@ class ResponseEvent(Struct, omit_defaults=True):
 
 class AccessDenied(Exception):
     """
-    Internal error that raises when RequestEvent is not allowed
+    Internal error that raises when RequestEvent is not allowed.
+    This error won't be exposed to frontend.
+    """
+    pass
+
+
+class RpcValueError(Exception):
+    """
+    Internal error that raises when RPC input value is incorrect.
+    This error won't be exposed to frontend.
     """
     pass

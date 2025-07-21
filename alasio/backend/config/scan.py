@@ -16,21 +16,25 @@ class ConfigScanSource(metaclass=Singleton):
         self.lastrun = 0
         self.lock = trio.Lock()
 
-    async def scan(self):
+    async def scan(self, force=False):
         now = time.time()
-        if now - self.lastrun < 5:
+        if not force and now - self.lastrun < 5:
             return self.data
 
         async with self.lock:
             # Double lock check
-            now = time.time()
-            if now - self.lastrun < 5:
-                return self.data
+            if not force:
+                now = time.time()
+                if now - self.lastrun < 5:
+                    return self.data
 
             # call
-            data = ScanTable().scan()
+            table = ScanTable()
+            data = await trio.to_thread.run_sync(table.scan)
             # run_sync
             await ConfigScanSource.data.mutate(self, data)
+            # record time after all awaits
+            self.lastrun = time.time()
             return data
 
     @async_reactive_source
@@ -51,20 +55,64 @@ class ConfigScan(BaseTopic):
 
     @rpc
     async def config_add(self, name: str, mod: str):
-        print(name, mod)
+        """
+        Create a new config file.
+
+        Args:
+            name (str): Config name
+            mod (str): Module name
+        """
+        # Run the synchronous ScanTable.config_add in a thread
+        scan_table = ScanTable()
+        await trio.to_thread.run_sync(scan_table.config_add, name, mod)
+
+        # Force rescan to update the data and notify observers
+        await ConfigScanSource().scan(force=True)
 
     @rpc
     async def config_copy(self, old_name: str, new_name: str):
-        print(old_name, new_name)
+        """
+        Copy an existing config as a new config.
+
+        Args:
+            old_name (str): Source config name
+            new_name (str): Target config name
+        """
+        # Run the synchronous ScanTable.config_copy in a thread
+        scan_table = ScanTable()
+        await trio.to_thread.run_sync(scan_table.config_copy, old_name, new_name)
+
+        # Force rescan to update the data and notify observers
+        await ConfigScanSource().scan(force=True)
 
     @rpc
     async def config_del(self, name: str):
-        print(name)
+        """
+        Delete a config file.
+
+        Args:
+            name (str): Config name to delete
+        """
+        # Run the synchronous ScanTable.config_del in a thread
+        scan_table = ScanTable()
+        await trio.to_thread.run_sync(scan_table.config_del, name)
+
+        # Force rescan to update the data and notify observers
+        await ConfigScanSource().scan(force=True)
 
     @rpc
-    async def config_dnd(self, config: DndRequest):
-        print(config)
+    async def config_dnd(self, configs: List[DndRequest]):
+        """
+        Drag and drop configs.
+        Requests will be treated as instructions that where would the user like to insert this config onto.
+        ScanTable will re-sort all configs based on user's request.
 
-    @rpc
-    async def group_dnd(self, configs: List[DndRequest]):
-        print(configs)
+        Args:
+            configs (List[DndRequest]): List of drag and drop requests
+        """
+        # Run the synchronous ScanTable.config_dnd in a thread
+        scan_table = ScanTable()
+        await trio.to_thread.run_sync(scan_table.config_dnd, configs)
+
+        # Force rescan to update the data and notify observers
+        await ConfigScanSource().scan(force=True)
