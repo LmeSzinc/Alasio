@@ -166,9 +166,10 @@
       }
     } else if (activeType === "group" && overType === "group") {
       // Group dropped on another group
-      const activeGroup = active.data.group as ConfigGroupData;
-      const overGroup = over.data.group as ConfigGroupData;
+      const activeGroup = itemMap.get(active.id) as ConfigGroupData;
+      const overGroup = itemMap.get(over.id) as ConfigGroupData;
 
+      if (!activeGroup || !overGroup) return;
       if (activeGroup.id === overGroup.id) return; // Same group, no change needed
 
       let targetGid: number;
@@ -297,7 +298,7 @@
 </script>
 
 <div class={className}>
-  <header class="mb-6 flex items-center justify-between">
+  <header class="my-6 mx-4 flex items-center justify-between">
     <h1 class="text-3xl font-bold tracking-tight">Configuration Manager</h1>
     <Button onclick={handleAddConfig} class="flex items-center gap-2">
       <Plus class="h-4 w-4" />
