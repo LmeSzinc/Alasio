@@ -6,6 +6,7 @@ import msgspec
 
 from alasio.config.table.base import AlasioConfigDB, AlasioGuiDB
 from alasio.config.table.key import AlasioKeyTable
+from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_remove, atomic_write
 from alasio.ext.path.validate import validate_filename
@@ -375,7 +376,7 @@ class ScanTable(AlasioGuiDB):
         # delete
         logger.info(f'config_del: name={name}')
         file = AlasioConfigDB.config_file(name)
-        atomic_remove(file)
+        SQLITE_POOL.delete_file(file)
 
     def config_copy(self, source, target):
         """

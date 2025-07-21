@@ -3,6 +3,8 @@ import sqlite3
 import time
 from threading import Lock
 
+from alasio.ext.path.atomic import atomic_remove
+
 
 class SqlitePoolCursor(sqlite3.Cursor):
     def __init__(self, conn):
@@ -39,6 +41,36 @@ class SqlitePoolCursor(sqlite3.Cursor):
         """
         self.connection.commit()
 
+    def create_table(self):
+        """
+        Create table if CREATE_TABLE is set
+
+        Returns:
+            bool: If created
+
+        Raises:
+            sqlite3.OperationalError
+        """
+        if not self.CREATE_TABLE:
+            return False
+        try:
+            if self.TABLE_NAME:
+                # Yes this is a simple string.format to create SQL,
+                # because placeholder is now allowed in the table name of CREATE TABLE
+                # It's acceptable that TABLE_NAME is manually configured, not a user input
+                sql = self.CREATE_TABLE.format(TABLE_NAME=self.TABLE_NAME)
+                super().execute(sql)
+            else:
+                super().execute(self.CREATE_TABLE)
+            return True
+        except sqlite3.OperationalError as e:
+            # table ... already exists
+            if 'already exists' in str(e):
+                # race condition that another thread just created the table
+                return False
+            else:
+                raise
+
     def execute(self, *args, **kwargs):
         try:
             return super().execute(*args, **kwargs)
@@ -49,13 +81,7 @@ class SqlitePoolCursor(sqlite3.Cursor):
             else:
                 raise
 
-        # auto create table if `CREATE_TABLE` is set
-        if self.TABLE_NAME:
-            # TABLE_NAME can be dynamic
-            sql = self.CREATE_TABLE.format(TABLE_NAME=self.TABLE_NAME)
-        else:
-            sql = self.CREATE_TABLE
-        super().execute(sql)
+        self.create_table()
         return super().execute(*args, **kwargs)
 
     def executemany(self, *args, **kwargs):
@@ -68,13 +94,7 @@ class SqlitePoolCursor(sqlite3.Cursor):
             else:
                 raise
 
-        # auto create table if `CREATE_TABLE` is set
-        if self.TABLE_NAME:
-            # TABLE_NAME can be dynamic
-            sql = self.CREATE_TABLE.format(TABLE_NAME=self.TABLE_NAME)
-        else:
-            sql = self.CREATE_TABLE
-        super().execute(sql)
+        self.create_table()
         return super().executemany(*args, **kwargs)
 
 
@@ -271,44 +291,38 @@ class ConnectionPool:
     def gc(self, idle=60):
         """
         Close connections that have not been used for more than 60s
-        This method is not thread-safe so there should only be one thread doing gc
         """
+        to_close = []
         with self.create_lock:
             now = time.time()
             # List keys first, so we can delete while iterating
-            list_conn = []
-            for conn in self.idle_workers:
+            idle_workers = list(self.idle_workers)
+            for conn in idle_workers:
                 try:
                     last_use = self.last_use[conn]
                 except KeyError:
                     # no last_ues, probably a newly created connection
                     continue
-                # record idle connections
-                if now - last_use > idle:
-                    list_conn.append(conn)
+                if now - last_use <= idle:
+                    # not an idle connection
+                    continue
 
-        for conn in list_conn:
-            # remove from idle_workers, so other threads cannot take it
-            try:
-                del self.idle_workers[conn]
-            except KeyError:
-                # already taken by other thread
-                continue
-            # check idle time again
-            try:
-                last_use = self.last_use[conn]
-            except KeyError:
-                # no last_use, probably a newly created connection
-                # return conn back
-                self.idle_workers[conn] = None
-                continue
-            if now - last_use <= idle:
-                # no longer idle, probably another thread used and renew it
-                # return conn back
-                self.idle_workers[conn] = None
-                continue
+                # now this is an idle connection
+                # remove from idle_workers, so other threads cannot take it
+                try:
+                    del self.idle_workers[conn]
+                except KeyError:
+                    # already taken by other thread
+                    continue
+                try:
+                    del self.last_use[conn]
+                except KeyError:
+                    continue
+                # mark this connection is ready to close
+                to_close.append(conn)
 
-            # now we have unique access to connection
+        # close connection outside of lock to improve performance
+        for conn in to_close:
             try:
                 del self.all_workers[conn]
             except KeyError:
@@ -317,6 +331,24 @@ class ConnectionPool:
             self.release_full_lock()
             # close
             conn.close()
+
+    def release_all(self):
+        """
+        Release all connections at the end of lifespan
+        """
+        # copy with lock, release without lock
+        with self.create_lock:
+            all_conn = list(self.all_workers.keys())
+            self.idle_workers.clear()
+            self.last_use.clear()
+            self.all_workers.clear()
+            self.release_full_lock()
+
+        for conn in all_conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 class SqlitePool:
@@ -379,7 +411,6 @@ class SqlitePool:
     def gc(self, idle=60):
         """
         Close connections that have not been used for more than 60s
-        This method is not thread-safe so there should only be one thread doing gc
         """
         with self.create_lock:
             # List pools first, so we can delete while iterating
@@ -400,6 +431,37 @@ class SqlitePool:
                 except KeyError:
                     # this shouldn't happen
                     continue
+
+    def release_all(self):
+        """
+        Release all connections at the end of lifespan
+        """
+        # copy with lock, release without lock
+        with self.create_lock:
+            all_pool = list(self.all_pool.values())
+            self.all_pool.clear()
+
+        for pool in all_pool:
+            pool.release_all()
+
+    def delete_file(self, file):
+        """
+        Release pool of specific file and delete the file.
+
+        Args:
+            file (str):
+        """
+        with self.create_lock:
+            try:
+                pool = self.all_pool.pop(file)
+            except KeyError:
+                # no such pool, no need to release
+                return
+
+            # Delete within create_lock, because we need to prevent other threads starts using the file
+            pool.release_all()
+            # delete file
+            atomic_remove(file)
 
 
 SQLITE_POOL = SqlitePool()

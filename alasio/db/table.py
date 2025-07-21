@@ -1,4 +1,3 @@
-import sqlite3
 from typing import Type, TypeVar
 
 import msgspec
@@ -156,18 +155,14 @@ class AlasioTable:
 
         Returns:
             bool: If created
+
+        Raises:
+            sqlite3.OperationalError
         """
         if not self.CREATE_TABLE:
             AlasioTableError(f'AlasioTable {self.__class__.__name__} has no CREATE_TABLE defined')
-        try:
-            with self.cursor() as c:
-                c.execute(self.CREATE_TABLE)
-            return True
-        except sqlite3.OperationalError as e:
-            if 'already exists' in str(e):
-                return False
-            else:
-                raise
+        with self.cursor() as c:
+            return c.create_table()
 
     def drop_table(self):
         """

@@ -1,3 +1,6 @@
+import contextlib
+
+import trio
 from starlette.middleware.gzip import GZipResponder
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
@@ -6,6 +9,47 @@ from starlette.staticfiles import StaticFiles
 from alasio.ext.patch import patch_mimetype
 
 patch_mimetype()
+
+
+async def task_gc(wait=8):
+    """
+    Coroutine task that do garbage collect periodically at background
+
+    wait=8 is a magic number. Trio working thread exits after 10s of idle,
+    so wait=8 would ensure gc thread won't start/stop everytime, and we have a free thread when gc is not running
+    """
+    from alasio.logger import logger
+    while 1:
+        # sleep first, no need to do gc at startup
+        await trio.sleep(wait)
+
+        from alasio.db.conn import SQLITE_POOL
+        try:
+            await trio.to_thread.run_sync(SQLITE_POOL.gc, wait)
+        except trio.Cancelled:
+            # We've got a CTRL+C during GC
+            raise
+        except Exception as e:
+            logger.exception(e)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app):
+    """
+    A global starlette lifespan
+    """
+    async with trio.open_nursery() as nursery:
+        # startup
+        nursery.start_soon(task_gc)
+
+        # actual backend runs here
+        yield
+        # cancel nursery to stop task_gc()
+        nursery.cancel_scope.cancel()
+
+    # cleanup
+    from alasio.db.conn import SQLITE_POOL
+    SQLITE_POOL.release_all()
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -27,7 +71,7 @@ class NoCacheStaticFiles(StaticFiles):
 
 def create_app():
     from alasio.ext.starapi.router import StarAPI
-    app = StarAPI()
+    app = StarAPI(lifespan=lifespan)
 
     # All APIs should under /api
     # Builtin APIs
@@ -63,7 +107,6 @@ def create_app():
 
 
 if __name__ == '__main__':
-    import trio
     from hypercorn import Config
     from hypercorn.trio import serve
 
