@@ -67,7 +67,11 @@ class WebsocketTopicServer:
         topics = list(self.subscribed.values())
         self.subscribed = {}
         for topic in topics:
-            await topic.op_unsub()
+            try:
+                await topic.op_unsub()
+            except Exception as e:
+                logger.exception(e)
+                continue
 
     async def serve(self):
         """

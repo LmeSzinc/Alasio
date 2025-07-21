@@ -12,6 +12,7 @@ class Singleton(type):
     Subclasses will have their own unique singleton instance.
     This implementation is thread-safe.
     """
+
     def __init__(cls, name, bases, dct):
         super().__init__(name, bases, dct)
         cls.__instances = None
@@ -51,6 +52,7 @@ class SingletonNamed(type):
     Each class will have its own separate cache of named instances.
     This implementation is thread-safe.
     """
+
     def __init__(cls, name, bases, dct):
         super().__init__(name, bases, dct)
         cls.__instances = {}
@@ -97,3 +99,12 @@ class SingletonNamed(type):
         """
         with cls.__lock:
             cls.__instances.clear()
+
+    def singleton_instances(cls):
+        """
+        Access all instances directly
+
+        Returns:
+            dict:
+        """
+        return cls.__instances
