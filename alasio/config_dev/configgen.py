@@ -1,4 +1,4 @@
-from alasio.config_dev.parse import DefinitionError, ParseConfig
+from alasio.config_dev.parse import DefinitionError, NavConfig
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import write_json
@@ -15,7 +15,7 @@ class ConfigGen:
         self.index_path: PathStr = self.root.joinpath('module/config')
 
         # key: filepath, value: parser
-        self.file_parser: "dict[str, ParseConfig]" = {}
+        self.file_parser: "dict[str, NavConfig]" = {}
         self._path_checked = False
 
     def set_index_path(self, path):
@@ -58,12 +58,12 @@ class ConfigGen:
         self._path_checked = True
 
     @cached_property
-    def dict_config(self):
+    def dict_nav_config(self):
         """
-        All yaml parser objects
+        All ParseNavConfig objects
 
         Returns:
-            dict[PathStr, ParseConfig]:
+            dict[PathStr, NavConfig]:
                 key: filepath
                 value: parser
         """
@@ -71,7 +71,7 @@ class ConfigGen:
         for path in self.config_path:
             for file in iter_files(path, ext='.args.yaml', recursive=True):
                 file = PathStr(file)
-                parser = ParseConfig(file)
+                parser = NavConfig(file)
                 dict_parser[file] = parser
         return dict_parser
 
@@ -95,7 +95,7 @@ class ConfigGen:
                 value: {'file': file, 'cls': class_name}
         """
         out = {}
-        for file, config in self.dict_config.items():
+        for file, config in self.dict_nav_config.items():
             # calculate module file
             file = config.model_file.subpath_to(self.root)
             if file == config.model_file:
@@ -118,7 +118,7 @@ class ConfigGen:
         return out
 
     @cached_property
-    def model_index(self):
+    def model_index_data(self):
         """
         model data in model.index.json
 
@@ -131,7 +131,7 @@ class ConfigGen:
                     - {'task': task_name}, if reference a group from another task
         """
         out = {}
-        for file, config in self.dict_config.items():
+        for file, config in self.dict_nav_config.items():
             for task_name, task_data in config.tasks_data.items():
                 # task name must be unique
                 if task_name in out:
@@ -173,33 +173,33 @@ class ConfigGen:
         return out
 
     """
-    {index_path}/gui.index.json
+    {index_path}/config.index.json
     """
 
     @cached_property
-    def gui_file(self):
-        # {index_path}/gui.index.json
-        return self.index_path.joinpath('gui.index.json')
+    def config_index_file(self):
+        # {index_path}/config.index.json
+        return self.index_path.joinpath('config.index.json')
 
     @cached_property
     def dict_group2file(self):
         """
-        Convert group name to {aside}.gui.json to read
+        Convert group name to {nav}.config.json to read
 
         Returns:
             dict[str, str]:
                 key: {group_name}
-                value: relative path to {aside}.gui.json
+                value: relative path to {nav}.config.json
         """
         out = {}
-        for file, config in self.dict_config.items():
+        for file, config in self.dict_nav_config.items():
             # calculate module file
-            file = config.gui_file.subpath_to(self.root).replace('\\', '/')
+            file = config.config_file.subpath_to(self.root).replace('\\', '/')
             if file == config.model_file:
                 raise DefinitionError(
-                    f'gui_file is not a subpath of root, model_file={config.gui_file}, root={self.root}')
+                    f'gui_file is not a subpath of root, model_file={config.config_file}, root={self.root}')
             # iter group models
-            for group_name in config.gui.keys():
+            for group_name in config.config_data.keys():
                 # group must be unique
                 if group_name in out:
                     raise DefinitionError(
@@ -212,24 +212,24 @@ class ConfigGen:
         return out
 
     @cached_property
-    def gui_index(self):
+    def config_index_data(self):
         """
-        gui data in gui.index.json
+        data in config.index.json
 
         Returns:
             dict[str, dict[str, dict[str, str | dict[str, str]]]]:
-                key: {aside}.{display_group}.{display_flatten}
+                key: {nav}.{display_group}.{display_flatten}
                 value:
                     - group_file, for basic group, task_name is display_group
                     - {'task': task_name, 'file': group_file}, if display group from another task
         """
         out = {}
-        for file, config in self.dict_config.items():
-            # aside
-            aside = file.rootstem
-            if aside in out:
+        for file, config in self.dict_nav_config.items():
+            # nav
+            nav = file.rootstem
+            if nav in out:
                 raise DefinitionError(
-                    f'Duplicate aside name: {aside}',
+                    f'Duplicate nav name: {nav}',
                     file=file,
                 )
             for task_name, task in config.tasks_data.items():
@@ -243,7 +243,7 @@ class ConfigGen:
                             # display group from current task
                             data = group_file
                         # set
-                        keys = [aside, task_name, group.group]
+                        keys = [nav, task_name, group.group]
                         deep_set(out, keys=keys, value=data)
 
         return out
@@ -256,20 +256,20 @@ class ConfigGen:
         self._path_check()
 
         # update configs
-        for parser in self.dict_config.values():
+        for parser in self.dict_nav_config.values():
             parser.write()
 
         # tasks.index.json
-        if self.model_index:
-            op = write_json(self.model_index_file, self.model_index, skip_same=True)
+        if self.model_index_data:
+            op = write_json(self.model_index_file, self.model_index_data, skip_same=True)
             if op:
                 logger.info(f'Write file {self.model_index_file}')
 
-        # gui.index.json
-        if self.model_index:
-            op = write_json(self.gui_file, self.gui_index, skip_same=True)
+        # config.index.json
+        if self.model_index_data:
+            op = write_json(self.config_index_file, self.config_index_data, skip_same=True)
             if op:
-                logger.info(f'Write file {self.gui_file}')
+                logger.info(f'Write file {self.config_index_file}')
 
 
 if __name__ == '__main__':

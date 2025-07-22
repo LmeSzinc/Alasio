@@ -225,13 +225,13 @@ class ArgData(Struct, omit_defaults=True):
 
 
 class ParseArgs:
-    # Path to *.args.yaml
+    # Absolute filepath to <nav>.args.yaml
     file: PathStr
 
     @cached_property
     def args_data(self):
         """
-        Structured data of {aside}.tasks.yaml
+        Structured data of {nav}.tasks.yaml
 
         Returns:
             dict[str, dict[str, ArgData]]:

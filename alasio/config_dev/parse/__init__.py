@@ -1,2 +1,2 @@
-from .parse import ParseConfig
+from .parse import NavConfig
 from .exception import DefinitionError
