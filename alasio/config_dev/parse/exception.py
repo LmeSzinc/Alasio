@@ -5,11 +5,13 @@ class DefinitionError(Exception):
     def __init__(self, msg, file='', keys='', value=_EMPTY):
         """
         Args:
-            msg (str): Error message
+            msg (str | Exception): Error message
             file (str):
             keys (list[str] | str):
             value (Any):
         """
+        if isinstance(msg, Exception):
+            msg = f'{msg.__class__.__name__}({msg})'
         self.msg = msg
         self.file = file
         self.keys = keys
