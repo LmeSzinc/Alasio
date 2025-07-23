@@ -53,4 +53,4 @@ def to_literal(items):
     Returns:
         LiteralType[T]:
     """
-    return Literal._getitem(Literal, *items)
+    return Literal.__getitem__(tuple(items))
