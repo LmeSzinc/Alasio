@@ -6,7 +6,7 @@ from alasio.ext.file.jsonfile import write_json
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path import PathStr
 from alasio.logger import logger
-from .parse_args import ArgData, ParseArgs, TYPE_ARG_LIST, TYPE_ARG_LITERAL
+from .parse_args import ArgData, ParseArgs, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
 from .parse_tasks import ParseTasks
 
 
@@ -84,6 +84,7 @@ class NavConfig(ParseArgs, ParseTasks):
         """
         gen = CodeGen()
         gen.RawImport("""
+        import datetime as d
         import typing as t
 
         import msgspec as m
@@ -101,8 +102,9 @@ class NavConfig(ParseArgs, ParseTasks):
             # Define model class
             with gen.Class(class_name, inherit='m.Struct, omit_defaults=True'):
                 for arg_name, arg in deep_iter_depth1(arg_data):
+                    arg: ArgData
                     # Expand list
-                    if arg.dt in TYPE_ARG_LIST:
+                    if arg.dt in TYPE_ARG_TUPLE:
                         gen.Var(arg_name, anno=arg.get_anno(), value=arg.default, auto_multiline=120)
                         continue
                     # Expand literal
@@ -118,7 +120,7 @@ class NavConfig(ParseArgs, ParseTasks):
                                     gen.Item(option)
                             continue
                     # inline
-                    gen.Anno(arg_name, anno=arg.get_anno(), value=arg.default)
+                    gen.Anno(arg_name, anno=arg.get_anno(), value=arg.get_default())
             gen.Empty(2)
 
         # gen.print()

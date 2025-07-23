@@ -6,21 +6,38 @@ from msgspec import Struct, UNSET, UnsetType
 
 from alasio.ext.backport import to_literal
 from alasio.ext.cache import cached_property
+from alasio.ext.codegen import ReprWrapper
 from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.file.yamlfile import read_yaml
 from alasio.ext.path import PathStr
 from .exception import DefinitionError
 from .parse_range import parse_range
 
-# Requires manual maintain
-TYPE_YAML_TO_ARG = {
+"""
+The following dicts require manual maintain
+
+Concepts explained:
+    1. "dt" is the data type of an "arg".
+        It tells frontend which component should be used to display the "arg"
+"""
+# Convert yaml value to "dt"
+# Example:
+#   `Enable: true` will be populated to {'dt': 'checkbox'}
+TYPE_YAML_TO_DT = {
     bool: 'checkbox',
     int: 'input-int',
     float: 'input-float',
     str: 'input',
     datetime: 'datetime',
 }
-TYPE_ARG_TO_PYTHON = {
+# Convert "dt" to python typehint
+# Example:
+#   {'dt': 'input-float'} means this field is a float in python
+# Notes:
+#   To be compatible with py3.8, you should use "t.Tuple" instead of "tuple[str]"
+#   Default value must be static, you should use "t.Tuple" instead of "t.List"
+#   All datetime should be timezone aware
+TYPE_DT_TO_PYTHON = {
     # text input
     'input': 'str',
     'input-int': 'int',
@@ -29,23 +46,30 @@ TYPE_ARG_TO_PYTHON = {
     # checkbox
     'checkbox': 'bool',
     # select
-    'dropdown': 'str',
+    'select': 'str',
     'radio': 'str',
-    'multi-dropdown': 't.Tuple[str]',
+    'multi-select': 't.Tuple[str]',
     'multi-radio': 't.Tuple[str]',
     # datatime
-    'datetime': 'datetime',
+    'datetime': 't.Annotated[d.datetime, m.Meta(tz=True)]',
     # filter
     'filter': 't.Tuple[str]',
     'filter-order': 't.Tuple[str]',
 }
+# Define which "dt" is literal type
+# Example:
+#   {'dt': 'select'} is a literal in python: Literal["option-A", "option-B"]
 TYPE_ARG_LITERAL = {
-    'dropdown', 'radio', 'multi-dropdown', 'multi-radio',
+    'select', 'radio', 'multi-select', 'multi-radio',
 }
-TYPE_ARG_LIST = {
-    'multi-dropdown', 'multi-radio',
-    'filter', 'filter-order',
-}
+# Define which "dt" is a tuple of value
+# Example:
+#   You define `value: option-A > option-B > option-C`
+#   It's default value will be: ("option-A", "option-B", "option-C")
+TYPE_ARG_TUPLE = set()
+for _dt, _anno in TYPE_DT_TO_PYTHON.items():
+    if 't.Tuple' in _anno:
+        TYPE_ARG_TUPLE.add(_dt)
 
 
 def populate_arg(value) -> dict:
@@ -58,7 +82,7 @@ def populate_arg(value) -> dict:
     """
     # Only default value
     vtype = type(value)
-    dt = TYPE_YAML_TO_ARG.get(vtype, None)
+    dt = TYPE_YAML_TO_DT.get(vtype, None)
     if dt:
         return {'dt': dt, 'default': value}
 
@@ -79,24 +103,24 @@ def populate_arg(value) -> dict:
         if 'dt' in value:
             # Having pre-defined type, check if valid
             dt = value['dt']
-            if dt not in TYPE_ARG_TO_PYTHON:
+            if dt not in TYPE_DT_TO_PYTHON:
                 raise DefinitionError(f'Invalid datatype {dt}')
             # Check if literal args have option
             if dt in TYPE_ARG_LITERAL and 'option' not in value:
                 raise DefinitionError(f'datatype {dt} must have "option" defined')
             return value
-        # No pre-defined type, if it has option, predict as dropdown
+        # No pre-defined type, if it has option, predict as select
         if 'option' in value:
             option = value['option']
             if not option:
                 raise DefinitionError('"option" is an empty list')
             if default not in option:
                 raise DefinitionError('Default value is not in "option"')
-            value['dt'] = 'dropdown'
+            value['dt'] = 'select'
             return value
         # No pre-defined type, predict by default value
         vtype = type(default)
-        dt = TYPE_YAML_TO_ARG.get(vtype, None)
+        dt = TYPE_YAML_TO_DT.get(vtype, None)
         if dt:
             value['dt'] = dt
             return value
@@ -112,7 +136,7 @@ MSGSPEC_CONSTRAINT = [
 
 
 class ArgData(Struct, omit_defaults=True):
-    dt: to_literal(TYPE_ARG_TO_PYTHON.keys())
+    dt: to_literal(TYPE_DT_TO_PYTHON.keys())
     default: Any
     option: Union[list, UnsetType] = UNSET
     advanced: bool = False
@@ -156,7 +180,7 @@ class ArgData(Struct, omit_defaults=True):
         if vtype is datetime and not default.tzinfo:
             self.default = default.replace(tzinfo=timezone.utc)
         # Split filters
-        if self.dt in TYPE_ARG_LIST and vtype is str:
+        if self.dt in TYPE_ARG_TUPLE and vtype is str:
             self.default = tuple(s.strip() for s in default.split('>'))
         return self
 
@@ -206,7 +230,7 @@ class ArgData(Struct, omit_defaults=True):
             option = ', '.join([repr(o) for o in self.option])
             return f't.Literal[{option}]'
         # Find in pre-defined dict
-        return TYPE_ARG_TO_PYTHON.get(self.dt, 'Any')
+        return TYPE_DT_TO_PYTHON.get(self.dt, 'Any')
 
     def get_anno(self) -> str:
         """
@@ -223,6 +247,20 @@ class ArgData(Struct, omit_defaults=True):
         else:
             return python_type
 
+    def get_default(self):
+        """
+        Generate default value in python code from ArgData
+
+        Examples:
+            d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+        """
+        if type(self.default) is datetime:
+            default = repr(self.default)
+            default = default.replace('datetime.datetime', 'd.datetime')
+            default = default.replace('datetime.timezone', 'd.timezone')
+            return ReprWrapper(default)
+        # others
+        return self.default
 
 class ParseArgs:
     # Absolute filepath to <nav>.args.yaml

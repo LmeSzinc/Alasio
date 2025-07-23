@@ -469,3 +469,15 @@ class CodeGen:
                 args = 'self'
         prefix = f'def {name}({args}):'
         return self.tab(prefix=prefix, tab_type='def')
+
+
+class ReprWrapper:
+    def __init__(self, value: str):
+        """
+        Wrap a string that repr(ReprWrapper(value)) = value
+        Useful to generate a string as code directly, instead of generate as a quoted string
+        """
+        self.value = value
+
+    def __repr__(self):
+        return self.value
