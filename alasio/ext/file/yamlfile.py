@@ -92,3 +92,30 @@ def write_yaml(file, obj, skip_same=False):
     else:
         atomic_write(file, data)
         return True
+
+
+def format_yaml(file, formatter):
+    """
+    Args:
+        file (str): Absolute filepath to yaml file
+        formatter (callable): A function that receives bytes and return bytes
+
+    Returns:
+        bool: If formatted
+    """
+    try:
+        data = atomic_read_bytes(file)
+    except FileNotFoundError:
+        # no need to format
+        return False
+    try:
+        yaml_loads(data)
+    except yaml.YAMLError:
+        # format valid yaml only
+        return False
+    new = formatter(data)
+    if new == data:
+        # same content, no need to write
+        return False
+    atomic_write(file, new)
+    return True
