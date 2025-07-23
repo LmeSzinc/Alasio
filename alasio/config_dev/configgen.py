@@ -1,61 +1,21 @@
+from alasio.config.entry.const import DICT_MOD_ENTRY, ModEntryInfo
 from alasio.config_dev.parse import DefinitionError, NavConfig
+from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import write_json
 from alasio.ext.path import PathStr
-from alasio.ext.path.calc import is_abspath
-from alasio.ext.path.iter import iter_files
 from alasio.logger import logger
 
 
 class ConfigGen:
-    def __init__(self, root=''):
-        self.root = PathStr.new(root).abspath()
-        self.config_path: "list[PathStr]" = []
-        self.index_path: PathStr = self.root.joinpath('module/config')
+    def __init__(self, entry: ModEntryInfo):
+        self.root = PathStr.new(entry.root).abspath()
+        self.path_config: PathStr = self.root.joinpath(entry.path_config)
 
         # key: filepath, value: parser
         self.file_parser: "dict[str, NavConfig]" = {}
         self._path_checked = False
-
-    def set_index_path(self, path):
-        """
-        Args:
-            path (str):
-        """
-        if not is_abspath(path):
-            path = self.root.joinpath(path)
-        self.index_path = path
-        self._path_checked = False
-
-    def add_config_path(self, path):
-        """
-        Args:
-            path (list[str] | str):
-        """
-        if isinstance(path, list):
-            path = [p if is_abspath(p) else self.root.joinpath(p) for p in path]
-            self.config_path += path
-        else:
-            if not is_abspath(path):
-                path = self.root.joinpath(path)
-            self.config_path.append(path)
-        self._path_checked = False
-
-    def _path_check(self):
-        """
-        Log if path not exist
-        """
-        if self._path_checked:
-            return True
-        if not self.root.exists():
-            logger.warning(f'ConfigGen root not exist: {self.root}')
-        if not self.index_path.exists():
-            logger.warning(f'ConfigGen index_path not exist: {self.index_path}')
-        for path in self.config_path:
-            if not path.exists():
-                logger.warning(f'ConfigGen config_path not exist: {path}')
-        self._path_checked = True
 
     @cached_property
     def dict_nav_config(self):
@@ -68,21 +28,19 @@ class ConfigGen:
                 value: parser
         """
         dict_parser = {}
-        for path in self.config_path:
-            for file in iter_files(path, ext='.args.yaml', recursive=True):
-                file = PathStr(file)
-                parser = NavConfig(file)
-                dict_parser[file] = parser
+        for file in self.path_config.iter_files(ext='.args.yaml', recursive=True):
+            parser = NavConfig(file)
+            dict_parser[file] = parser
         return dict_parser
 
     """
-    {index_path}/tasks.index.json
+    {path_config}/tasks.index.json
     """
 
     @cached_property
     def model_index_file(self):
-        # {index_path}/model.index.json
-        return self.index_path.joinpath('model.index.json')
+        # {path_config}/model.index.json
+        return self.path_config.joinpath('model.index.json')
 
     @cached_property
     def dict_group_ref(self):
@@ -173,13 +131,13 @@ class ConfigGen:
         return out
 
     """
-    {index_path}/config.index.json
+    {path_config}/config.index.json
     """
 
     @cached_property
     def config_index_file(self):
-        # {index_path}/config.index.json
-        return self.index_path.joinpath('config.index.json')
+        # {path_config}/config.index.json
+        return self.path_config.joinpath('config.index.json')
 
     @cached_property
     def dict_group2file(self):
@@ -253,7 +211,11 @@ class ConfigGen:
     """
 
     def generate(self):
-        self._path_check()
+        # check path
+        if not self.root.exists():
+            logger.warning(f'ConfigGen root not exist: {self.root}')
+        if not self.path_config.exists():
+            logger.warning(f'ConfigGen path_config not exist: {self.path_config}')
 
         # update configs
         for parser in self.dict_nav_config.values():
@@ -273,7 +235,7 @@ class ConfigGen:
 
 
 if __name__ == '__main__':
-    self = ConfigGen(PathStr.new(__file__).uppath(3))
-    self.set_index_path('alasio/config_alasio')
-    self.add_config_path('alasio/config_alasio')
+    _entry = DICT_MOD_ENTRY['alasio'].copy()
+    _entry.root = env.PROJECT_ROOT.joinpath('alasio')
+    self = ConfigGen(_entry)
     self.generate()

@@ -19,7 +19,6 @@ def yaml_formatter(yaml_bytes):
         bytes: Formatted YAML text
     """
     lines = yaml_bytes.strip().splitlines()
-    print(repr(lines))
     if not lines:
         return b''
 
