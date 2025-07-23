@@ -88,6 +88,7 @@ class NavConfig(ParseArgs, ParseTasks):
         import typing as t
 
         import msgspec as m
+        import typing_extensions as e
         """)
         gen.Empty()
         gen.CommentCodeGen('alasio.config.dev.configgen')

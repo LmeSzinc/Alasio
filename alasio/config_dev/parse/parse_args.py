@@ -34,7 +34,8 @@ TYPE_YAML_TO_DT = {
 # Example:
 #   {'dt': 'input-float'} means this field is a float in python
 # Notes:
-#   To be compatible with py3.8, you should use "t.Tuple" instead of "tuple[str]"
+#   Syntax "tuple[str]" is on py3.9, to be compatible with py3.8, you should use "t.Tuple" instead of "tuple[str]"
+#   Annotated is on py3.9, to be compatible with py3.8, you should use "e.Annotated", where "e" is typing_extensions
 #   Default value must be static, you should use "t.Tuple" instead of "t.List"
 #   All datetime should be timezone aware
 TYPE_DT_TO_PYTHON = {
@@ -51,7 +52,7 @@ TYPE_DT_TO_PYTHON = {
     'multi-select': 't.Tuple[str]',
     'multi-radio': 't.Tuple[str]',
     # datatime
-    'datetime': 't.Annotated[d.datetime, m.Meta(tz=True)]',
+    'datetime': 'e.Annotated[d.datetime, m.Meta(tz=True)]',
     # filter
     'filter': 't.Tuple[str]',
     'filter-order': 't.Tuple[str]',
@@ -243,7 +244,7 @@ class ArgData(Struct, omit_defaults=True):
         python_type = self.get_python_type()
         meta = self.get_meta()
         if meta:
-            return f"t.Annotated[{python_type}, {meta}]"
+            return f"e.Annotated[{python_type}, {meta}]"
         else:
             return python_type
 
