@@ -155,18 +155,18 @@ class NavConfig(ParseArgs, ParseTasks):
             value = deep_get(old, key, default='')
             if not value:
                 value = f'{group_name}.{arg_name}'
-            deep_set(new, key, value)
+            deep_set(new, key, str(value))
             # help
             key = ['i18n', lang, 'help']
             value = deep_get(old, key, default='')
-            deep_set(new, key, value)
+            deep_set(new, key, str(value))
         # option
         if arg.option:
             for option in arg.option:
                 for lang in Const.GUI_LANGUAGE:
                     key = ['i18n_option', lang, option]
                     value = deep_get(old, key, default=option)
-                    deep_set(new, key, value)
+                    deep_set(new, key, str(value))
         return new
 
     def _update_config_info(self, group_name, arg_name):
@@ -182,11 +182,11 @@ class NavConfig(ParseArgs, ParseTasks):
             value = deep_get(old, key, default='')
             if not value:
                 value = f'{group_name}.{arg_name}'
-            deep_set(new, key, value)
+            deep_set(new, key, str(value))
             # help
             key = ['i18n', lang, 'help']
             value = deep_get(old, key, default='')
-            deep_set(new, key, value)
+            deep_set(new, key, str(value))
         return new
 
     @cached_property
