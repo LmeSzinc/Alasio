@@ -1,5 +1,4 @@
 from alasio.config.const import Const
-from alasio.config_dev.format.format_yaml import yaml_formatter
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_iter_depth1, deep_set
@@ -8,14 +7,15 @@ from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.file.yamlfile import format_yaml
 from alasio.ext.path import PathStr
 from alasio.logger import logger
-from .parse_args import ArgData, ParseArgs, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
-from .parse_tasks import ParseTasks
+from .format.format_yaml import yaml_formatter
+from .parse.parse_args import ArgData, ParseArgs, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
+from .parse.parse_tasks import ParseTasks
 
 
-class NavConfig(ParseArgs, ParseTasks):
+class ConfigGenerator(ParseArgs, ParseTasks):
     def __init__(self, file):
         """
-        维护数据一个nav下所有文件的数据一致性，一个nav对应前端导航组件中的一个组。
+        维护一个nav下所有文件的数据一致性，一个nav对应前端导航组件中的一个组。
         数据文件夹的目录结构应该像这样：
         <nav>
             - <nav>.args.yaml
@@ -28,7 +28,9 @@ class NavConfig(ParseArgs, ParseTasks):
             self.config.{group}_{arg}。你只需要定义一次，就可以在前端/后端/数据库/脚本运行时 访问它，Alasio框架会维护一致性。
             它可以有msgspec字段约束，并且可以有额外自定义内容传递给前端。
         2. "group" 是一个设置组，一个 "group" 包含一个或多个 "args"。
+            注意：在同一个MOD中group name必须是唯一的。
         3. "task" 是一个在调度器中运行的任务。一个 "task" 包含一个或多个 "group"。
+            注意：在同一个MOD中task name必须是唯一的。
             在数据库中，用户设置具有 task.group.arg 三个层级，而在任务运行时只有 group.arg 两个层级。
             这个降维操作称为绑定（bind），一个 task 可以绑定它旗下的 group，也可以绑定其他任务中的 group。
             Alasio会将变量self.config.{group}_{arg}与数据库中的对应值双向绑定，这个变量的值就是数据库中的真实值，可以直接使用，
@@ -38,6 +40,10 @@ class NavConfig(ParseArgs, ParseTasks):
         5. "display", "display_task", "display_group" 它们是展示给用户的 "task" 和 "group"。
             这是容易与 "task" "group" 混淆的概念，如果我们完全展示底层的 "task" "group" 给用户很可能造成垃圾信息多 重点不突出。
             所以在Alasio中，你可以自由组合来展示给用户。
+            display_task会显示为卡片，而所有display_group.arg会被flatten，在卡片中显示为一维的输入组件。
+            注意：在同一个MOD中display_task必须是唯一的，display_group必须是唯一的。
+                如果一个display_task与task重名，那么重名task相关的设置会被自动载入，display_group同理。
+                如果一个display_task没有对应的task，那么对应的i18n需要手动编辑，display_group同理。
         6. "nav" 是前端导航组件中的行。用户选择这行，然后前端展示相关设置。
 
         文件解释：
@@ -52,15 +58,13 @@ class NavConfig(ParseArgs, ParseTasks):
             你不应该修改这个文件。
 
         Args:
-            file (PathStr): Absolute filepath to <nav>.args.yaml
+            file (PathStr): Absolute filepath to {nav}.args.yaml
         """
-        self.file = file
+        super().__init__(file)
 
-    @cached_property
-    def model_file(self):
-        # {nav}.args.yaml -> {nav}_model.py
-        # Use "_" in file name because python can't import filename with "." easily
-        return self.file.with_name(f'{self.file.rootstem}_model.py')
+    """
+    Generate model
+    """
 
     @cached_property
     def dict_group2class(self):
@@ -132,10 +136,9 @@ class NavConfig(ParseArgs, ParseTasks):
         else:
             return None
 
-    @cached_property
-    def config_file(self):
-        # {nav}.args.yaml -> {nav}_config.json
-        return self.file.with_name(f'{self.file.rootstem}_config.json')
+    """
+    Generate config
+    """
 
     @cached_property
     def _config_old(self):
@@ -214,9 +217,13 @@ class NavConfig(ParseArgs, ParseTasks):
         del_cached_property(self, '_config_old')
         return new
 
-    def write(self):
+    """
+    Generate all
+    """
+
+    def generate(self):
         """
-        Generate configs and write msgspec models
+        Generate configs and msgspec models
         """
         # Auto create {nav}.tasks.yaml
         if self.file.exists():

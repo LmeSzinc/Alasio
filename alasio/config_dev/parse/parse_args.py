@@ -9,8 +9,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.codegen import ReprWrapper
 from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.file.yamlfile import read_yaml
-from alasio.ext.path import PathStr
-from .exception import DefinitionError
+from .base import DefinitionError, ParseBase
 from .parse_range import parse_range
 
 """
@@ -263,10 +262,8 @@ class ArgData(Struct, omit_defaults=True):
         # others
         return self.default
 
-class ParseArgs:
-    # Absolute filepath to <nav>.args.yaml
-    file: PathStr
 
+class ParseArgs(ParseBase):
     @cached_property
     def args_data(self):
         """

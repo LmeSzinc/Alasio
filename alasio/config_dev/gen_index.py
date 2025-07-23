@@ -1,5 +1,6 @@
 from alasio.config.entry.const import DICT_MOD_ENTRY, ModEntryInfo
-from alasio.config_dev.parse import DefinitionError, NavConfig
+from alasio.config_dev.gen_config import ConfigGenerator
+from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
@@ -8,14 +9,43 @@ from alasio.ext.path import PathStr
 from alasio.logger import logger
 
 
-class ConfigGen:
+class IndexGenerator:
     def __init__(self, entry: ModEntryInfo):
+        """
+        维护一个MOD下所有设置文件的数据一致性，生成json索引文件。
+
+        1. "model.index.json" 指导当前MOD下的task有哪些group，具有 task.group 二级结构。
+            这个文件会在脚本运行时被使用。
+            当Alasio脚本实例启动时，它需要读取与某个task相关的设置：
+            - 在"model.index.json"中查询当前task
+            - 遍历task下有哪些group，得到group所在的{nav}_model.py文件路径
+            - 载入python文件，查询{nav}_model.py中的group对应的msgspec模型
+            - 读取用户数据，使用msgspec模型校验数据
+
+        2. "config.index.json" 指导当前MOD有哪些设置，具有 nav.display_task.display_group 三级结构。
+            这个文件会在前端显示时被使用。
+            当前端需要显示某个nav下的用户设置时：
+            - 在"config.index.json"中查询当前nav
+            - 以depth=2遍历display_task.display_group，得到group所在的{nav}_config.json文件路径
+            - 查询{nav}_config.json中的group
+            - 聚合所有内容
+
+        3. "nav.index.json" 指导当前MOD的导航组件应该显示什么内容，具有nav.display_task二级结构。
+            这个文件会在前端显示时被使用。
+            注意这是一个半自动生成文件，Alasio会维护它的数据结构，但是需要人工编辑nav对应的i18n，
+            display_task的i18n会从{nav}_config.json生成，不需要编辑。
+            当前端需要显示导航组件时：
+            - 读取"nav.index.json"返回给前端
+        """
         self.root = PathStr.new(entry.root).abspath()
         self.path_config: PathStr = self.root.joinpath(entry.path_config)
 
-        # key: filepath, value: parser
-        self.file_parser: "dict[str, NavConfig]" = {}
-        self._path_checked = False
+        # {path_config}/model.index.json
+        self.model_index_file = self.path_config.joinpath('model.index.json')
+        # {path_config}/config.index.json
+        self.config_index_file = self.path_config.joinpath('config.index.json')
+        # {path_config}/nav.index.json
+        self.nav_index_file = self.path_config.joinpath('nav.index.json')
 
     @cached_property
     def dict_nav_config(self):
@@ -23,24 +53,19 @@ class ConfigGen:
         All ParseNavConfig objects
 
         Returns:
-            dict[PathStr, NavConfig]:
+            dict[PathStr, ConfigGenerator]:
                 key: filepath
-                value: parser
+                value: generator
         """
         dict_parser = {}
         for file in self.path_config.iter_files(ext='.args.yaml', recursive=True):
-            parser = NavConfig(file)
+            parser = ConfigGenerator(file)
             dict_parser[file] = parser
         return dict_parser
 
     """
-    {path_config}/tasks.index.json
+    Generate model.index.json
     """
-
-    @cached_property
-    def model_index_file(self):
-        # {path_config}/model.index.json
-        return self.path_config.joinpath('model.index.json')
 
     @cached_property
     def dict_group_ref(self):
@@ -131,13 +156,8 @@ class ConfigGen:
         return out
 
     """
-    {path_config}/config.index.json
+    Generate config.index.json
     """
-
-    @cached_property
-    def config_index_file(self):
-        # {path_config}/config.index.json
-        return self.path_config.joinpath('config.index.json')
 
     @cached_property
     def dict_group2file(self):
@@ -207,7 +227,7 @@ class ConfigGen:
         return out
 
     """
-    generate
+    Generate all
     """
 
     def generate(self):
@@ -217,9 +237,9 @@ class ConfigGen:
         if not self.path_config.exists():
             logger.warning(f'ConfigGen path_config not exist: {self.path_config}')
 
-        # update configs
-        for parser in self.dict_nav_config.values():
-            parser.write()
+        # update nav configs
+        for nav in self.dict_nav_config.values():
+            nav.generate()
 
         # tasks.index.json
         if self.model_index_data:
@@ -237,5 +257,5 @@ class ConfigGen:
 if __name__ == '__main__':
     _entry = DICT_MOD_ENTRY['alasio'].copy()
     _entry.root = env.PROJECT_ROOT.joinpath('alasio')
-    self = ConfigGen(_entry)
+    self = IndexGenerator(_entry)
     self.generate()

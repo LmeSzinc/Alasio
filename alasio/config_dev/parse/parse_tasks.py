@@ -6,7 +6,7 @@ from msgspec import Struct, field
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.file.yamlfile import read_yaml
-from alasio.ext.path import PathStr
+from .base import ParseBase
 from .parse_args import DefinitionError
 
 
@@ -84,15 +84,7 @@ class TaskData(Struct):
     display: List[List[TaskGroup]] = field(default_factory=list)
 
 
-class ParseTasks:
-    # Absolute filepath to <nav>.args.yaml
-    file: PathStr
-
-    @cached_property
-    def tasks_file(self):
-        # {nav}.args.yaml -> {nav}.tasks.yaml
-        return self.file.with_multisuffix('.tasks.yaml')
-
+class ParseTasks(ParseBase):
     @cached_property
     def tasks_data(self):
         """

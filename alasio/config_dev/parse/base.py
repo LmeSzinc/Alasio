@@ -1,3 +1,20 @@
+class ParseBase:
+    def __init__(self, file):
+        """
+        Args:
+            file (PathStr): Absolute filepath to {nav}.args.yaml
+        """
+        # {nav}.args.yaml
+        self.file = file
+        # {nav}.tasks.yaml
+        self.tasks_file = file.with_multisuffix('.tasks.yaml')
+        # {nav}.config.json
+        self.config_file = file.with_name(f'{file.rootstem}_config.json')
+        # {nav}_model.py
+        # Use "_" in file name because python can't import filename with "." easily
+        self.model_file = file.with_name(f'{file.rootstem}_model.py')
+
+
 _EMPTY = object()
 
 
