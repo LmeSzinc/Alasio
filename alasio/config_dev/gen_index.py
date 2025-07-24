@@ -111,9 +111,13 @@ class IndexGenerator:
              dict[str, dict[str, str | dict[str, str]]]:
                 key: {task_name}.{group_name}
                 value:
-                    - file, for basic group, class_name is group_name
-                    - {'file': file, 'cls': class_name}, if group override
-                    - {'task': task_name}, if reference a group from another task
+                    - file (endswith ".py") for basic group,
+                        reference file={file}, class={group_name}
+                    - ref_task_name (only contains A-Za-z0-9), for cross-task reference,
+                        reference {ref_task_name}.{group_name} in output
+                    - {'file': file, 'cls': class_name}, for override task group
+                        reference file={file}, class={class_name}
+                        class_name is "{task_name}_{group_name}" and inherits from class {group_name}
         """
         out = {}
         for file, config in self.dict_nav_config.items():
@@ -137,23 +141,26 @@ class IndexGenerator:
                         )
                     if group.task:
                         # reference {task_ref}.{group}
-                        ref = {'task': group.task}
+                        ref = group.task
                         deep_set(out, [task_name, group.group], ref)
                     else:
                         # reference a group
                         if ref['cls'] == group.group:
-                            # class name is the same as group name
+                            # basic group, class_name is the same as group_name
                             ref = ref['file']
+                        # else: just keep {'file': file, 'cls': class_name}
                         deep_set(out, [task_name, group.group], ref)
 
-        # check if {task_ref}.{group} reference has corresponding value
+        # check if {ref_task_name}.{group_name} reference has corresponding value
         for _, group, ref in deep_iter_depth2(out):
-            if 'task' in ref:
-                task = ref["task"]
-                if not deep_exist(out, [task, group]):
-                    raise DefinitionError(
-                        f'Cross-task ref has no corresponding value: {task}.{group}',
-                    )
+            if type(ref) is not str:
+                continue
+            if ref.endswith('.py'):
+                continue
+            if not deep_exist(out, [ref, group]):
+                raise DefinitionError(
+                    f'Cross-task ref has no corresponding value: {ref}.{group}',
+                )
 
         return out
 
