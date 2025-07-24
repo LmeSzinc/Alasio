@@ -5,7 +5,7 @@ from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext import env
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.deep import deep_exist, deep_get, deep_iter_depth2, deep_set
-from alasio.ext.file.jsonfile import write_json
+from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path import PathStr
 from alasio.logger import logger
@@ -149,7 +149,7 @@ class IndexGenerator:
                             # basic group, class_name is the same as group_name
                             ref = ref['file']
                         # else: just keep {'file': file, 'cls': class_name}
-                        deep_set(out, [task_name, group.group], ref)
+                        deep_set(out, [task_name, group.group], NoIndent(ref))
 
         # check if {ref_task_name}.{group_name} reference has corresponding value
         for _, group, ref in deep_iter_depth2(out):
@@ -251,7 +251,7 @@ class IndexGenerator:
 
                         if display.task and display.task != task_name:
                             # display group from another task
-                            data = {'task': display.task, 'file': group_file}
+                            data = NoIndent({'task': display.task, 'file': group_file})
                         else:
                             # display group from current task
                             data = group_file
@@ -322,17 +322,17 @@ class IndexGenerator:
         _ = self.model_index_data
         if not self.model_index_data:
             return
-        op = write_json(self.model_index_file, self.model_index_data, skip_same=True)
+        op = write_json_custom_indent(self.model_index_file, self.model_index_data, skip_same=True)
         if op:
             logger.info(f'Write file {self.model_index_file}')
 
         # config.index.json
-        op = write_json(self.config_index_file, self.config_index_data, skip_same=True)
+        op = write_json_custom_indent(self.config_index_file, self.config_index_data, skip_same=True)
         if op:
             logger.info(f'Write file {self.config_index_file}')
 
         # nav.index.json
-        op = write_json(self.nav_index_file, self.nav_index_data, skip_same=True)
+        op = write_json_custom_indent(self.nav_index_file, self.nav_index_data, skip_same=True)
         if op:
             logger.info(f'Write file {self.nav_index_file}')
 

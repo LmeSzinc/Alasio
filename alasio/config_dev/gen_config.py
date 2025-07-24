@@ -2,7 +2,7 @@ from alasio.config.const import Const
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_iter_depth1, deep_set
-from alasio.ext.file.jsonfile import write_json
+from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.file.yamlfile import format_yaml
 from alasio.ext.path import PathStr
@@ -155,23 +155,49 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         old = deep_get(self._config_old, [group_name, arg_name], default={})
         new = arg.to_dict()
         for lang in Const.GUI_LANGUAGE:
-            # name
+            # name, name must not be empty, default to {group_name}.{arg_name}
             key = ['i18n', lang, 'name']
             value = deep_get(old, key, default='')
             if not value:
                 value = f'{group_name}.{arg_name}'
             deep_set(new, key, str(value))
-            # help
+            # help, help can be empty
             key = ['i18n', lang, 'help']
             value = deep_get(old, key, default='')
             deep_set(new, key, str(value))
         # option
         if arg.option:
-            for option in arg.option:
-                for lang in Const.GUI_LANGUAGE:
-                    key = ['i18n_option', lang, option]
-                    value = deep_get(old, key, default=option)
-                    deep_set(new, key, str(value))
+            for lang in Const.GUI_LANGUAGE:
+                inline = True
+                for option in arg.option:
+                    default = str(option)
+                    if not default.isdigit():
+                        inline = False
+                    # option name must not be empty, default to {option}
+                    key = ['i18n_option', lang, default]
+                    value = deep_get(old, key, default='')
+                    if not value:
+                        value = default
+                    if default != value:
+                        inline = False
+                    deep_set(new, key, value)
+                # if options are all digit and option name is same as option, make it inline
+                if inline:
+                    key = ['i18n_option', lang]
+                    i18n_option = deep_get(new, key, default=None)
+                    deep_set(new, key, NoIndent(i18n_option))
+
+        # make inline list
+        for key in ['option', 'default']:
+            try:
+                value = new[key]
+            except KeyError:
+                # this shouldn't happen
+                continue
+            # wrap as NoIndent
+            vtype = type(value)
+            if vtype is list or vtype is tuple:
+                new[key] = NoIndent(value)
         return new
 
     def _update_config_info(self, group_name, arg_name):
@@ -182,13 +208,13 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         old = deep_get(self._config_old, [group_name, arg_name], default={})
         new = {}
         for lang in Const.GUI_LANGUAGE:
-            # name
+            # name, name must not be empty, default to {group_name}
             key = ['i18n', lang, 'name']
             value = deep_get(old, key, default='')
             if not value:
-                value = f'{group_name}.{arg_name}'
+                value = group_name
             deep_set(new, key, str(value))
-            # help
+            # help, help can be empty
             key = ['i18n', lang, 'help']
             value = deep_get(old, key, default='')
             deep_set(new, key, str(value))
@@ -239,7 +265,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
 
         # {nav}_config.json
         if self.config_data:
-            op = write_json(self.config_file, self.config_data, skip_same=True)
+            op = write_json_custom_indent(self.config_file, self.config_data, skip_same=True)
             if op:
                 logger.info(f'Write file {self.config_file}')
 
