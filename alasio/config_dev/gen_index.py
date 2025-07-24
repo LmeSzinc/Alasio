@@ -1,10 +1,12 @@
+from alasio.config.const import Const
 from alasio.config.entry.const import DICT_MOD_ENTRY, ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext import env
-from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
+from alasio.ext.cache import cached_property, del_cached_property
+from alasio.ext.deep import deep_exist, deep_get, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import write_json
+from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path import PathStr
 from alasio.logger import logger
 
@@ -196,7 +198,7 @@ class IndexGenerator:
 
         Returns:
             dict[str, dict[str, dict[str, str | dict[str, str]]]]:
-                key: {nav}.{display_group}.{display_flatten}
+                key: {nav}.{display_task}.{display_group}
                 value:
                     - group_file, for basic group, task_name is display_group
                     - {'task': task_name, 'file': group_file}, if display group from another task
@@ -211,19 +213,87 @@ class IndexGenerator:
                     file=file,
                 )
             for task_name, task in config.tasks_data.items():
-                for display_group in task.display:
-                    for group in display_group:
-                        group_file = self.dict_group2file[group.group]
-                        if group.task and group.task != task_name:
+                # all groups within this task
+                all_groups = set(group.group for group in task.group)
+
+                for display_list in task.display:
+                    for display in display_list:
+                        # If display an in-task group, group must within this task
+                        if not display.task and display.group not in all_groups:
+                            raise DefinitionError(
+                                f'In-task display ref "{display.group}" is not in task "{task_name}"',
+                                file=config.tasks_file,
+                                keys=[task_name, 'display']
+                            )
+                        # If display a cross-task group, group must exist
+                        if display.task and not deep_exist(self.model_index_data, keys=[display.task, display.group]):
+                            raise DefinitionError(
+                                f'Cross-task display ref "{display.task}.{display.group}" does not exist',
+                                file=config.tasks_file,
+                                keys=[task_name, 'display']
+                            )
+                        # display group must be defined
+                        try:
+                            group_file = self.dict_group2file[display.group]
+                        except KeyError:
+                            raise DefinitionError(
+                                f'Display ref "{display.group}" of task "{task_name}" does not exist',
+                                file=config.tasks_file,
+                                keys=[task_name, 'display']
+                            )
+
+                        if display.task and display.task != task_name:
                             # display group from another task
-                            data = {'task': group.task, 'file': group_file}
+                            data = {'task': display.task, 'file': group_file}
                         else:
                             # display group from current task
                             data = group_file
                         # set
-                        keys = [nav, task_name, group.group]
+                        keys = [nav, task_name, display.group]
                         deep_set(out, keys=keys, value=data)
 
+        return out
+
+    """
+    Generate nav.index.json
+    """
+
+    @cached_property
+    def _nav_index_old(self):
+        """
+        Old nav.index.json, with manual written i18n
+        """
+        return read_msgspec(self.nav_index_file)
+
+    def _update_nav_info(self, out, nav, display_task):
+        """
+        Update {nav}.{display_task} in {nav}_config.json
+        Generate with default name, then merge with the i18n from old configs
+        """
+        old = deep_get(self._nav_index_old, [nav, display_task], default={})
+        for lang in Const.GUI_LANGUAGE:
+            # name
+            key = [nav, display_task, lang]
+            value = deep_get(old, key, default='')
+            # navigation must have name
+            if not value:
+                if display_task == '_info':
+                    value = nav
+                else:
+                    value = display_task
+            deep_set(out, key, str(value))
+
+    @cached_property
+    def nav_index_data(self):
+        """
+        data of nav.index.json
+        """
+        _ = self._nav_index_old
+        out = {}
+        for nav, display_task, _ in deep_iter_depth2(self.config_index_data):
+            self._update_nav_info(out, nav, '_info')
+            self._update_nav_info(out, nav, display_task)
+        del_cached_property(self, '_nav_index_old')
         return out
 
     """
@@ -242,16 +312,22 @@ class IndexGenerator:
             nav.generate()
 
         # tasks.index.json
-        if self.model_index_data:
-            op = write_json(self.model_index_file, self.model_index_data, skip_same=True)
-            if op:
-                logger.info(f'Write file {self.model_index_file}')
+        _ = self.model_index_data
+        if not self.model_index_data:
+            return
+        op = write_json(self.model_index_file, self.model_index_data, skip_same=True)
+        if op:
+            logger.info(f'Write file {self.model_index_file}')
 
         # config.index.json
-        if self.model_index_data:
-            op = write_json(self.config_index_file, self.config_index_data, skip_same=True)
-            if op:
-                logger.info(f'Write file {self.config_index_file}')
+        op = write_json(self.config_index_file, self.config_index_data, skip_same=True)
+        if op:
+            logger.info(f'Write file {self.config_index_file}')
+
+        # nav.index.json
+        op = write_json(self.nav_index_file, self.nav_index_data, skip_same=True)
+        if op:
+            logger.info(f'Write file {self.nav_index_file}')
 
 
 if __name__ == '__main__':
