@@ -9,7 +9,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.codegen import ReprWrapper
 from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.file.yamlfile import read_yaml
-from .base import DefinitionError, ParseBase
+from .base import DefinitionError, ParseBase, iscapitalized
 from .parse_range import parse_range
 
 """
@@ -277,9 +277,31 @@ class ParseArgs(ParseBase):
         output = {}
         data = read_yaml(self.file)
         for group_name, group_value in deep_iter_depth1(data):
+            # check group_name
+            if not group_name.isalnum():
+                raise DefinitionError(
+                    'Group name must be alphanumeric',
+                    file=self.file, keys=[], value=group_name
+                )
+            if not iscapitalized(group_name):
+                raise DefinitionError(
+                    'Group name must be capitalized',
+                    file=self.file, keys=[], value=group_name
+                )
             # Keep empty group in args, so they can be empty group to display on GUI
             output[group_name] = {}
             for arg_name, value in deep_iter_depth1(group_value):
+                # check arg_name
+                if not arg_name.isalnum():
+                    raise DefinitionError(
+                        'Arg name must be alphanumeric',
+                        file=self.file, keys=[group_name], value=arg_name
+                    )
+                if not iscapitalized(arg_name):
+                    raise DefinitionError(
+                        'Arg name must be capitalized',
+                        file=self.file, keys=[group_name], value=arg_name
+                    )
                 # Create ArgData object from manual arg definition
                 try:
                     value = populate_arg(value)

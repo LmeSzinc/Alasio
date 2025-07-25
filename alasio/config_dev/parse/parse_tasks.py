@@ -6,7 +6,7 @@ from msgspec import Struct, field
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.file.yamlfile import read_yaml
-from .base import ParseBase
+from .base import ParseBase, iscapitalized
 from .parse_args import DefinitionError
 
 
@@ -98,6 +98,17 @@ class ParseTasks(ParseBase):
         output = {}
         data = read_yaml(self.tasks_file)
         for task_name, value in deep_iter_depth1(data):
+            # check task_name
+            if not task_name.isalnum():
+                raise DefinitionError(
+                    'Task name must be alphanumeric',
+                    file=self.tasks_file, keys=[], value=task_name
+                )
+            if not iscapitalized(task_name):
+                raise DefinitionError(
+                    'Task name must be capitalized',
+                    file=self.tasks_file, keys=[], value=task_name
+                )
             # Create TaskData object from manual arg definition
             try:
                 value = populate_task(value)
