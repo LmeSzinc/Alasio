@@ -16,10 +16,10 @@ class IndexGenerator:
         """
         维护一个MOD下所有设置文件的数据一致性，生成json索引文件。
 
-        1. "model.index.json" 指导当前MOD下的task有哪些group，具有 task.group 二级结构。
+        1. "tasks.index.json" 指导当前MOD下的task有哪些group，具有 task.group 二级结构。
             这个文件会在脚本运行时被使用。
             当Alasio脚本实例启动时，它需要读取与某个task相关的设置：
-            - 在"model.index.json"中查询当前task
+            - 在"tasks.index.json"中查询当前task
             - 遍历task下有哪些group，得到group所在的{nav}_model.py文件路径
             - 载入python文件，查询{nav}_model.py中的group对应的msgspec模型
             - 读取用户数据，使用msgspec模型校验数据
@@ -42,8 +42,8 @@ class IndexGenerator:
         self.root = PathStr.new(entry.root).abspath()
         self.path_config: PathStr = self.root.joinpath(entry.path_config)
 
-        # {path_config}/model.index.json
-        self.model_index_file = self.path_config.joinpath('model.index.json')
+        # {path_config}/tasks.index.json
+        self.tasks_index_file = self.path_config.joinpath('tasks.index.json')
         # {path_config}/config.index.json
         self.config_index_file = self.path_config.joinpath('config.index.json')
         # {path_config}/nav.index.json
@@ -66,7 +66,7 @@ class IndexGenerator:
         return dict_parser
 
     """
-    Generate model.index.json
+    Generate tasks.index.json
     """
 
     @cached_property
@@ -93,7 +93,7 @@ class IndexGenerator:
                 if group_name in out:
                     raise DefinitionError(
                         f'Duplicate group name: {group_name}',
-                        file=config.tasks_file,
+                        file=config.file,
                         keys=group_name,
                     )
                 # build model reference
@@ -102,10 +102,28 @@ class IndexGenerator:
 
         return out
 
-    @cached_property
-    def model_index_data(self):
+    @staticmethod
+    def _update_task_info(old, new, task_name):
         """
-        model data in model.index.json
+        Update {task_name}._info in tasks.index.json
+        Generate with default name, then merge with the i18n from old configs
+        """
+        for lang in Const.GUI_LANGUAGE:
+            # task name, name must not be empty
+            keys = [task_name, '_info', 'i18n', lang, 'name']
+            value = deep_get(old, keys=keys, default='')
+            if not value:
+                value = task_name
+            deep_set(new, keys=keys, value=str(value))
+            # task help, help can be empty
+            keys = [task_name, '_info', 'i18n', lang, 'help']
+            value = deep_get(old, keys=keys, default='')
+            deep_set(new, keys=keys, value=str(value))
+
+    @cached_property
+    def tasks_index_data(self):
+        """
+        model data in tasks.index.json
 
         Returns:
              dict[str, dict[str, str | dict[str, str]]]:
@@ -118,8 +136,11 @@ class IndexGenerator:
                     - {'file': file, 'cls': class_name}, for override task group
                         reference file={file}, class={class_name}
                         class_name is "{task_name}_{group_name}" and inherits from class {group_name}
+                    - {'i18n', ...} for task info
         """
+        old = read_msgspec(self.tasks_index_file)
         out = {}
+
         for file, config in self.dict_nav_config.items():
             for task_name, task_data in config.tasks_data.items():
                 # task name must be unique
@@ -129,6 +150,9 @@ class IndexGenerator:
                         file=config.tasks_file,
                         keys=task_name,
                     )
+                # generate {task_name}._info
+                self._update_task_info(old, out, task_name)
+                # generate groups
                 for group in task_data.group:
                     # check if group exists
                     try:
@@ -319,12 +343,12 @@ class IndexGenerator:
             nav.generate()
 
         # tasks.index.json
-        _ = self.model_index_data
-        if not self.model_index_data:
+        _ = self.tasks_index_data
+        if not self.tasks_index_data:
             return
-        op = write_json_custom_indent(self.model_index_file, self.model_index_data, skip_same=True)
+        op = write_json_custom_indent(self.tasks_index_file, self.tasks_index_data, skip_same=True)
         if op:
-            logger.info(f'Write file {self.model_index_file}')
+            logger.info(f'Write file {self.tasks_index_file}')
 
         # config.index.json
         op = write_json_custom_indent(self.config_index_file, self.config_index_data, skip_same=True)
