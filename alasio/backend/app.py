@@ -6,7 +6,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 
-from alasio.ext.patch import patch_mimetype
+from alasio.ext.env import patch_mimetype
 
 patch_mimetype()
 
