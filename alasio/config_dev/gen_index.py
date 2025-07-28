@@ -44,8 +44,8 @@ class IndexGenerator:
         self.root = PathStr.new(entry.root).abspath()
         self.path_config: PathStr = self.root.joinpath(entry.path_config)
 
-        # {path_config}/tasks.index.json
-        self.tasks_index_file = self.path_config.joinpath('tasks.index.json')
+        # {path_config}/model.index.json
+        self.model_index_file = self.path_config.joinpath('model.index.json')
         # {path_config}/config.index.json
         self.config_index_file = self.path_config.joinpath('config.index.json')
         # {path_config}/nav.index.json
@@ -68,7 +68,7 @@ class IndexGenerator:
         return dict_parser
 
     """
-    Generate tasks.index.json
+    Generate model.index.json
     """
 
     @cached_property
@@ -104,28 +104,10 @@ class IndexGenerator:
 
         return out
 
-    @staticmethod
-    def _update_task_info(old, new, task_name):
-        """
-        Update {task_name}._info in tasks.index.json
-        Generate with default name, then merge with the i18n from old configs
-        """
-        for lang in Const.GUI_LANGUAGE:
-            # task name, name must not be empty
-            keys = [task_name, '_info', 'i18n', lang, 'name']
-            value = deep_get(old, keys=keys, default='')
-            if not value:
-                value = task_name
-            deep_set(new, keys=keys, value=str(value))
-            # task help, help can be empty
-            keys = [task_name, '_info', 'i18n', lang, 'help']
-            value = deep_get(old, keys=keys, default='')
-            deep_set(new, keys=keys, value=str(value))
-
     @cached_property
-    def tasks_index_data(self):
+    def model_index_data(self):
         """
-        model data in tasks.index.json
+        model data in model.index.json
 
         Returns:
              dict[str, dict[str, str | dict[str, str]]]:
@@ -138,11 +120,8 @@ class IndexGenerator:
                     - {'file': file, 'cls': class_name}, for override task group
                         reference file={file}, class={class_name}
                         class_name is "{task_name}_{group_name}" and inherits from class {group_name}
-                    - {'i18n', ...} for task info
         """
-        old = read_msgspec(self.tasks_index_file)
         out = {}
-
         for file, config in self.dict_nav_config.items():
             for task_name, task_data in config.tasks_data.items():
                 # task name must be unique
@@ -152,8 +131,6 @@ class IndexGenerator:
                         file=config.tasks_file,
                         keys=task_name,
                     )
-                # generate {task_name}._info
-                self._update_task_info(old, out, task_name)
                 # generate groups
                 for group in task_data.group:
                     # check if group exists
@@ -174,8 +151,10 @@ class IndexGenerator:
                         if ref['cls'] == group.group:
                             # basic group, class_name is the same as group_name
                             ref = ref['file']
-                        # else: just keep {'file': file, 'cls': class_name}
-                        deep_set(out, [task_name, group.group], NoIndent(ref))
+                            deep_set(out, [task_name, group.group], ref)
+                        else:
+                            # else: just keep {'file': file, 'cls': class_name}
+                            deep_set(out, [task_name, group.group], NoIndent(ref))
 
         # check if {ref_task_name}.{group_name} reference has corresponding value
         for _, group, ref in deep_iter_depth2(out):
@@ -299,7 +278,7 @@ class IndexGenerator:
                 )
             if display.task:
                 # If display a cross-task group, group must exist
-                if not deep_exist(self.tasks_index_data, keys=[display.task, display.group]):
+                if not deep_exist(self.model_index_data, keys=[display.task, display.group]):
                     raise DefinitionError(
                         f'Cross-task display ref "{display.task}.{display.group}" does not exist',
                         file=config.tasks_file, keys=[task_name, 'display']
@@ -307,7 +286,7 @@ class IndexGenerator:
                 yield {'task': display.task, 'group': display.group, 'file': file}
             else:
                 # If display an in-task group, group must within this task
-                if not deep_exist(self.tasks_index_data, keys=[task_name, display.group]):
+                if not deep_exist(self.model_index_data, keys=[task_name, display.group]):
                     raise DefinitionError(
                         f'In-task display ref "{display.group}" is not in task "{task_name}"',
                         file=config.tasks_file, keys=[task_name, 'display']
@@ -413,13 +392,13 @@ class IndexGenerator:
         for nav in self.dict_nav_config.values():
             nav.generate()
 
-        # tasks.index.json
-        _ = self.tasks_index_data
-        if not self.tasks_index_data:
+        # model.index.json
+        _ = self.model_index_data
+        if not self.model_index_data:
             return
-        op = write_json_custom_indent(self.tasks_index_file, self.tasks_index_data, skip_same=True)
+        op = write_json_custom_indent(self.model_index_file, self.model_index_data, skip_same=True)
         if op:
-            logger.info(f'Write file {self.tasks_index_file}')
+            logger.info(f'Write file {self.model_index_file}')
 
         # config.index.json
         op = write_json_custom_indent(self.config_index_file, self.config_index_data, skip_same=True)
