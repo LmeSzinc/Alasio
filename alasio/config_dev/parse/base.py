@@ -1,18 +1,31 @@
+from alasio.ext.backport import removesuffix
+from alasio.ext.path import PathStr
+
+
 class ParseBase:
     def __init__(self, file):
         """
         Args:
             file (PathStr): Absolute filepath to {nav}.args.yaml
         """
+        if not file.endswith('.args.yaml'):
+            raise DefinitionError('Arg file must endswith ".args.yaml"', file=file)
         # {nav}.args.yaml
-        self.file = file
+        self.file: PathStr = file
+
+        # nav name
+        nav = removesuffix(file.name, '.args.yaml')
+        if not nav.isalnum():
+            raise DefinitionError(f'Nav name must be alphanumeric, but got "{nav}"', file=file)
+        self.nav_name = nav
+
         # {nav}.tasks.yaml
-        self.tasks_file = file.with_multisuffix('.tasks.yaml')
+        self.tasks_file = file.with_name(f'{nav}.tasks.yaml')
         # {nav}.config.json
-        self.config_file = file.with_name(f'{file.rootstem}_config.json')
+        self.config_file = file.with_name(f'{nav}_config.json')
         # {nav}_model.py
         # Use "_" in file name because python can't import filename with "." easily
-        self.model_file = file.with_name(f'{file.rootstem}_model.py')
+        self.model_file = file.with_name(f'{nav}_model.py')
 
 
 _EMPTY = object()

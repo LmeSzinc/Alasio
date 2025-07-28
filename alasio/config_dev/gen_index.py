@@ -57,15 +57,22 @@ class IndexGenerator:
         All ParseNavConfig objects
 
         Returns:
-            dict[PathStr, ConfigGenerator]:
-                key: filepath
+            dict[str, ConfigGenerator]:
+                key: nav_name
                 value: generator
         """
-        dict_parser = {}
+        out = {}
         for file in self.path_config.iter_files(ext='.args.yaml', recursive=True):
             parser = ConfigGenerator(file)
-            dict_parser[file] = parser
-        return dict_parser
+            # nav
+            nav = parser.nav_name
+            if nav in out:
+                raise DefinitionError(
+                    f'Duplicate nav name: {nav}',
+                    file=file,
+                )
+            out[nav] = parser
+        return out
 
     """
     Generate model.index.json
@@ -82,7 +89,7 @@ class IndexGenerator:
                 value: {'file': file, 'cls': class_name}
         """
         out = {}
-        for file, config in self.dict_nav_config.items():
+        for config in self.dict_nav_config.values():
             # calculate module file
             file = config.model_file.subpath_to(self.root)
             if file == config.model_file:
@@ -122,7 +129,7 @@ class IndexGenerator:
                         class_name is "{task_name}_{group_name}" and inherits from class {group_name}
         """
         out = {}
-        for file, config in self.dict_nav_config.items():
+        for config in self.dict_nav_config.values():
             for task_name, task_data in config.tasks_data.items():
                 # task name must be unique
                 if task_name in out:
@@ -191,7 +198,7 @@ class IndexGenerator:
                 value: relative path to {nav}.config.json
         """
         out = {}
-        for file, config in self.dict_nav_config.items():
+        for config in self.dict_nav_config.values():
             # calculate module file
             file = config.config_file.subpath_to(self.root)
             if file == config.model_file:
@@ -309,14 +316,8 @@ class IndexGenerator:
                         "task" indicates to read {task_name}.{group_name} in user config
         """
         out = {}
-        for file, config in self.dict_nav_config.items():
-            # nav
-            nav = file.rootstem
-            if nav in out:
-                raise DefinitionError(
-                    f'Duplicate nav name: {nav}',
-                    file=file,
-                )
+        for config in self.dict_nav_config.values():
+            nav = config.nav_name
             for task_name, task in config.tasks_data.items():
                 is_flat = len(task.display) == 1
                 for display_flat in task.display:
