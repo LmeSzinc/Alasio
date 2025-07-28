@@ -4,7 +4,7 @@ from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.parse_tasks import TaskGroup
 from alasio.ext import env
-from alasio.ext.cache import cached_property, del_cached_property
+from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_get, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
@@ -18,26 +18,25 @@ class IndexGenerator:
         """
         维护一个MOD下所有设置文件的数据一致性，生成json索引文件。
 
-        1. "tasks.index.json" 指导当前MOD下的task有哪些group，具有 task.group 二级结构。
+        1. "model.index.json" 指导当前MOD下的task有哪些group，具有 task.group 二级结构。
             这个文件会在脚本运行时被使用。
             当Alasio脚本实例启动时，它需要读取与某个task相关的设置：
-            - 在"tasks.index.json"中查询当前task
+            - 在"model.index.json"中查询当前task
             - 遍历task下有哪些group，得到group所在的{nav}_model.py文件路径
             - 载入python文件，查询{nav}_model.py中的group对应的msgspec模型
             - 读取用户数据，使用msgspec模型校验数据
 
-        2. "config.index.json" 指导当前MOD有哪些设置，具有 nav.display_task.display_group 三级结构。
+        2. "config.index.json" 指导当前MOD有哪些设置，具有 nav.card 三级结构。
             这个文件会在前端显示时被使用。
             当前端需要显示某个nav下的用户设置时：
-            - 在"config.index.json"中查询当前nav
-            - 以depth=2遍历display_task.display_group，得到group所在的{nav}_config.json文件路径
-            - 查询{nav}_config.json中的group
+            - 在"config.index.json"中查询当前nav，遍历card
+            - 加载info ref和display ref 指向的{nav}_config.json，查询其中的group_name
+            - 按display ref指示，加载用户设置中的{task}.{group}设置组
             - 聚合所有内容
 
-        3. "nav.index.json" 指导当前MOD的导航组件应该显示什么内容，具有nav.display_task二级结构。
+        3. "nav.index.json" 是任务和任务导航的i18n，具有 name 一级结构。
             这个文件会在前端显示时被使用。
             注意这是一个半自动生成文件，Alasio会维护它的数据结构，但是需要人工编辑nav对应的i18n，
-            display_task的i18n会从{nav}_config.json生成，不需要编辑。
             当前端需要显示导航组件时：
             - 读取"nav.index.json"返回给前端
         """
@@ -324,10 +323,10 @@ class IndexGenerator:
                     # generate display
                     display = list(self._iter_display(config, task_name, display_flat))
                     if is_flat:
-                        card_name = f'card_{task_name}'
+                        card_name = f'card-{task_name}'
                     else:
                         card_name = '_'.join([d['group'] for d in display])
-                        card_name = f'card_{task_name}-{card_name}'
+                        card_name = f'card-{task_name}-{card_name}'
                     # generate _info
                     info = self._get_display_info(config, task_name, display_flat)
                     deep_set(out, keys=[nav, card_name, '_info'], value=NoIndent(info))
@@ -341,41 +340,43 @@ class IndexGenerator:
     """
 
     @cached_property
-    def _nav_index_old(self):
-        """
-        Old nav.index.json, with manual written i18n
-        """
-        return read_msgspec(self.nav_index_file)
-
-    def _update_nav_info(self, out, nav, display_task):
-        """
-        Update {nav}.{display_task} in {nav}_config.json
-        Generate with default name, then merge with the i18n from old configs
-        """
-        old = deep_get(self._nav_index_old, [nav, display_task], default={})
-        for lang in Const.GUI_LANGUAGE:
-            # name
-            key = [nav, display_task, lang]
-            value = deep_get(old, key, default='')
-            # navigation must have name
-            if not value:
-                if display_task == '_info':
-                    value = nav
-                else:
-                    value = display_task
-            deep_set(out, key, str(value))
-
-    @cached_property
     def nav_index_data(self):
         """
         data of nav.index.json
+
+        Returns:
+            dict[str, dict[str, str]]:
+                key: {name}.{lang}
+                    name can be "nav-{nav_name}" or {task_name}
+                value: i18n translation
         """
-        _ = self._nav_index_old
+        old = read_msgspec(self.nav_index_file)
         out = {}
-        for nav, display_task, _ in deep_iter_depth2(self.config_index_data):
-            self._update_nav_info(out, nav, '_info')
-            self._update_nav_info(out, nav, display_task)
-        del_cached_property(self, '_nav_index_old')
+
+        for nav_name, config in self.dict_nav_config.items():
+            # nav name, which must not empty
+            for lang in Const.GUI_LANGUAGE:
+                key = [f'nav-{nav_name}', lang]
+                value = deep_get(old, key, default='')
+                if not value:
+                    value = nav_name
+                deep_set(out, key, value)
+            # iter tasks
+            for task_name in config.tasks_data:
+                # check if task_name has collision with nav_name
+                if task_name in out:
+                    raise DefinitionError(
+                        f'Task name "{task_name}" has collision, existing={list(out.keys())}',
+                        file=config.tasks_file, value=task_name
+                    )
+                # task name, which must not empty
+                for lang in Const.GUI_LANGUAGE:
+                    key = [task_name, lang]
+                    value = deep_get(old, key, default='')
+                    if not value:
+                        value = task_name
+                    deep_set(out, key, value)
+
         return out
 
     """

@@ -37,13 +37,11 @@ class ConfigGenerator(ParseArgs, ParseTasks):
             当你改变这个变量的时候，会触发数据库写入。
         4. "model" 是msgspec校验模型。当你编写 "group" 之后，Alasio会生成对应的msgspec模型，校验模型只有 group.arg 两个层级。
             当用户在前端修改设置的时候，Alasio会找到 group 对应的校验模型校验用户输入。
-        5. "display", "display_task", "display_group" 它们是展示给用户的 "task" 和 "group"。
+        5. "card" 是前端设置界面的设置组。
             这是容易与 "task" "group" 混淆的概念，如果我们完全展示底层的 "task" "group" 给用户很可能造成垃圾信息多 重点不突出。
-            所以在Alasio中，你可以自由组合来展示给用户。
-            display_task会显示为卡片，而所有display_group.arg会被flatten，在卡片中显示为一维的输入组件。
-            注意：在同一个MOD中display_task必须是唯一的，display_group必须是唯一的。
-                如果一个display_task与task重名，那么重名task相关的设置会被自动载入，display_group同理。
-                如果一个display_task没有对应的task，那么对应的i18n需要手动编辑，display_group同理。
+            所以在Alasio中，你可以自由地将任何group聚合为card。前端会展示list[card]，而每个card内可以定义display group。
+            card中可以包含一个或多个group，group.arg会被flatten并在卡片中显示为一维的输入组件。
+            当card中包含多个group时，_info是第一个非Scheduler的group，你也可以使用inforef:{group}手动指定。
         6. "nav" 是前端导航组件中的行。用户选择这行，然后前端展示相关设置。
 
         文件解释：
