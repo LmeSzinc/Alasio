@@ -2,12 +2,14 @@ from alasio.config.const import Const
 from alasio.config.entry.const import DICT_MOD_ENTRY, ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
+from alasio.config_dev.parse.parse_tasks import TaskGroup
 from alasio.ext import env
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.deep import deep_exist, deep_get, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path import PathStr
+from alasio.ext.path.calc import to_posix
 from alasio.logger import logger
 
 
@@ -193,6 +195,13 @@ class IndexGenerator:
     """
 
     @cached_property
+    def _old_config_index(self):
+        """
+        Old nav.index.json, with manual written i18n
+        """
+        return read_msgspec(self.config_index_file)
+
+    @cached_property
     def dict_group2file(self):
         """
         Convert group name to {nav}.config.json to read
@@ -205,11 +214,12 @@ class IndexGenerator:
         out = {}
         for file, config in self.dict_nav_config.items():
             # calculate module file
-            file = config.config_file.subpath_to(self.root).replace('\\', '/')
+            file = config.config_file.subpath_to(self.root)
             if file == config.model_file:
                 raise DefinitionError(
                     f'gui_file is not a subpath of root, model_file={config.config_file}, root={self.root}')
             # iter group models
+            file = to_posix(file)
             for group_name in config.config_data.keys():
                 # group must be unique
                 if group_name in out:
@@ -222,17 +232,102 @@ class IndexGenerator:
 
         return out
 
+    def _get_display_info(
+            self, config: ConfigGenerator, task_name: str, display_flat: "list[TaskGroup]"
+    ) -> dict:
+        """
+        Predict info reference from a list of display_flat
+        """
+        try:
+            first = display_flat[0]
+        except IndexError:
+            raise DefinitionError(
+                f'Empty display_flat: {display_flat}',
+                file=config.tasks_file, keys=[task_name, 'display']
+            )
+        # use info ref first
+        if first.inforef:
+            try:
+                file = self.dict_group2file[first.inforef]
+            except KeyError:
+                raise DefinitionError(
+                    f'inforef "{first.inforef}" does not exists',
+                    file=config.tasks_file, keys=[task_name, 'display']
+                )
+            return {'group': first.inforef, 'file': file}
+
+        # no info ref, use the first group that is not Scheduler
+        for group in display_flat:
+            if group.group == 'Scheduler':
+                continue
+            try:
+                file = self.dict_group2file[group.group]
+            except KeyError:
+                raise DefinitionError(
+                    f'Display group "{group.group}" does not exists',
+                    file=config.tasks_file, keys=[task_name, 'display']
+                )
+            return {'group': group.group, 'file': file}
+
+        # no luck, just use the first group
+        try:
+            file = self.dict_group2file[first.group]
+        except KeyError:
+            raise DefinitionError(
+                f'Display group "{first.group}" does not exists',
+                file=config.tasks_file, keys=[task_name, 'display']
+            )
+        return {'group': first.group, 'file': file}
+
+    def _iter_display(
+            self, config: ConfigGenerator, task_name: str, display_flat: "list[TaskGroup]"
+    ) -> dict:
+        """
+        Iter display reference from a list of display_flat
+        """
+        for display in display_flat:
+            # skip info ref
+            if display.inforef:
+                continue
+            # display group must be defined
+            try:
+                file = self.dict_group2file[display.group]
+            except KeyError:
+                raise DefinitionError(
+                    f'Display ref "{display.group}" of task "{task_name}" does not exist',
+                    file=config.tasks_file, keys=[task_name, 'display']
+                )
+            if display.task:
+                # If display a cross-task group, group must exist
+                if not deep_exist(self.tasks_index_data, keys=[display.task, display.group]):
+                    raise DefinitionError(
+                        f'Cross-task display ref "{display.task}.{display.group}" does not exist',
+                        file=config.tasks_file, keys=[task_name, 'display']
+                    )
+                yield {'task': display.task, 'group': display.group, 'file': file}
+            else:
+                # If display an in-task group, group must within this task
+                if not deep_exist(self.tasks_index_data, keys=[task_name, display.group]):
+                    raise DefinitionError(
+                        f'In-task display ref "{display.group}" is not in task "{task_name}"',
+                        file=config.tasks_file, keys=[task_name, 'display']
+                    )
+                yield {'task': task_name, 'group': display.group, 'file': file}
+
     @cached_property
     def config_index_data(self):
         """
         data in config.index.json
 
         Returns:
-            dict[str, dict[str, dict[str, str | dict[str, str]]]]:
-                key: {nav}.{display_task}.{display_group}
-                value:
-                    - group_file, for basic group, task_name is display_group
-                    - {'task': task_name, 'file': group_file}, if display group from another task
+            dict[str, dict[str, dict[str, dict[str, str]]]]:
+                key: {nav}.{card_name}
+                value: {"_info": info_ref, "display": list[display_ref]}
+                    - info_ref is: {"group": group_name, "file": file}
+                        where file is {nav}_config.json and will reference key {group_name}._info in the file
+                    - display_ref is {"task": task_name, "group": group_name, "file": file}
+                        where file is {nav}_config.json and will reference key {group_name} in the file
+                        "task" indicates to read {task_name}.{group_name} in user config
         """
         out = {}
         for file, config in self.dict_nav_config.items():
@@ -244,44 +339,20 @@ class IndexGenerator:
                     file=file,
                 )
             for task_name, task in config.tasks_data.items():
-                # all groups within this task
-                all_groups = set(group.group for group in task.group)
-
-                for display_list in task.display:
-                    for display in display_list:
-                        # If display an in-task group, group must within this task
-                        if not display.task and display.group not in all_groups:
-                            raise DefinitionError(
-                                f'In-task display ref "{display.group}" is not in task "{task_name}"',
-                                file=config.tasks_file,
-                                keys=[task_name, 'display']
-                            )
-                        # If display a cross-task group, group must exist
-                        if display.task and not deep_exist(self.model_index_data, keys=[display.task, display.group]):
-                            raise DefinitionError(
-                                f'Cross-task display ref "{display.task}.{display.group}" does not exist',
-                                file=config.tasks_file,
-                                keys=[task_name, 'display']
-                            )
-                        # display group must be defined
-                        try:
-                            group_file = self.dict_group2file[display.group]
-                        except KeyError:
-                            raise DefinitionError(
-                                f'Display ref "{display.group}" of task "{task_name}" does not exist',
-                                file=config.tasks_file,
-                                keys=[task_name, 'display']
-                            )
-
-                        if display.task and display.task != task_name:
-                            # display group from another task
-                            data = NoIndent({'task': display.task, 'file': group_file})
-                        else:
-                            # display group from current task
-                            data = group_file
-                        # set
-                        keys = [nav, task_name, display.group]
-                        deep_set(out, keys=keys, value=data)
+                is_flat = len(task.display) == 1
+                for display_flat in task.display:
+                    # generate display
+                    display = list(self._iter_display(config, task_name, display_flat))
+                    if is_flat:
+                        card_name = f'card_{task_name}'
+                    else:
+                        card_name = '_'.join([d['group'] for d in display])
+                        card_name = f'card_{task_name}-{card_name}'
+                    # generate _info
+                    info = self._get_display_info(config, task_name, display_flat)
+                    deep_set(out, keys=[nav, card_name, '_info'], value=NoIndent(info))
+                    display = [NoIndent(d) for d in display]
+                    deep_set(out, keys=[nav, card_name, 'display'], value=display)
 
         return out
 

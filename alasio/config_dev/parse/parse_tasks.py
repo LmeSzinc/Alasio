@@ -15,20 +15,30 @@ class TaskGroup(msgspec.Struct):
     task: str
     group: str
 
+    # TaskGroup can also reference "{group}._info" as "_info"
+    inforef: str = ''
+
     @classmethod
-    def from_str(cls, task_group: str) -> "TaskGroup":
+    def from_str(cls, task_group: str, ref=False) -> "TaskGroup":
         """
         Convert "{group}" and "{task_ref}.{group}" to TaskGroup object
         """
+        # info reference
+        if ref and ':' in task_group:
+            ref, _, name = task_group.partition(':')
+            if ref == 'inforef':
+                return TaskGroup(task='', group='', inforef=name)
+            raise DefinitionError(f'Info reference tag can only be "inforef", got "{task_group}"')
+        # reference a cross-task group
         if '.' in task_group:
             task, _, group = task_group.rpartition('.')
             return TaskGroup(task=task, group=group)
-        else:
-            return TaskGroup(task='', group=task_group)
+        # reference an in-task group
+        return TaskGroup(task='', group=task_group)
 
     @classmethod
-    def from_liststr(cls, list_groups: "list[str]") -> "list[TaskGroup]":
-        return [cls.from_str(str(g)) for g in list_groups]
+    def from_liststr(cls, list_groups: "list[str]", ref=False) -> "list[TaskGroup]":
+        return [cls.from_str(str(g), ref=ref) for g in list_groups]
 
 
 def populate_task(value: dict) -> dict:
@@ -55,21 +65,22 @@ def populate_task(value: dict) -> dict:
 
     # display
     display = value.get('display', [])
-    # convert display="flatten" and display="group"
+    # convert display="flat" and display="group"
     if display == 'group':
-        display = [group]
-    elif display == 'flatten':
         display = [[g] for g in group]
+    elif display == 'flat':
+        display = [group]
     elif type(display) is list:
         # populate simple list to nested list
         if display:
-            display = [TaskGroup.from_liststr(d) if type(d) is list else TaskGroup.from_liststr([str(d)])
-                       for d in display]
+            display = [
+                TaskGroup.from_liststr(d, ref=True) if type(d) is list
+                else TaskGroup.from_liststr([str(d)], ref=True) for d in display]
         else:
             # Allow empty display, probably an internal task
             pass
     else:
-        raise DefinitionError('display should be "flatten" or "group" or a list of groups')
+        raise DefinitionError('display should be "flat" or "group" or a list of groups')
     value['display'] = display
 
     return value
