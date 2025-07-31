@@ -1,5 +1,6 @@
 KEY_at = ' - at `'
 KEY_got = ', got '
+KEY_in = '` in `'
 
 
 def _path_split_key(path):
@@ -94,7 +95,7 @@ def _path_split(path):
             yield from _path_split_part(field_index)
 
 
-def get_error_key(error):
+def get_error_field(error):
     """
     Args:
         error (str):
@@ -131,12 +132,20 @@ def get_error_path(error):
     Returns:
         tuple[Union[int, str]]
     """
-    key = get_error_key(error)
+    field = get_error_field(error)
     if KEY_at in error:
         # Expected `MyCustomClass`, got `str` - at `$.custom_field`
         reason, _, error = error.rpartition(KEY_at)
         if error.endswith('`'):
             error = error[:-1]
+        # When having invalid dict key, we define a new special path "...key"
+        # Expected `str`, got `int` - at `key` in `$.member_map`
+        # will be parsed as ('member_map', '...key')
+        if KEY_in in error:
+            _, _, error = error.partition(KEY_in)
+            is_dict_key = True
+        else:
+            is_dict_key = False
         # $.field
         if error.startswith('$.'):
             error = error[2:]
@@ -145,15 +154,19 @@ def get_error_path(error):
             error = error[1:]
 
         # pydantic style that tells you ('custom_field', 'id') is missing
-        if key:
+        if field:
             path = list(_path_split(error))
-            path.append(key)
+            path.append(field)
+            return tuple(path)
+        elif is_dict_key:
+            path = list(_path_split(error))
+            path.append('...key')
             return tuple(path)
         else:
             return tuple(_path_split(error))
     else:
         # no path
-        if key:
-            return (key,)
+        if field:
+            return (field,)
         else:
             return ()

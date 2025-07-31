@@ -60,7 +60,6 @@ class TestGetErrorPathDirectly:
                 id="combo_list_in_list"
             ),
             pytest.param(
-                # Corrected version for dict-in-dict
                 "Expected `int`, got `str` - at `$.users[...][...].name`",
                 ('users', '...', '...', 'name'),
                 id="combo_dict_in_dict"
@@ -103,6 +102,13 @@ class TestGetErrorPathDirectly:
                 "Object contains unknown field `color` - at `$.items[1]`",
                 ('items', 1, 'color'),
                 id="unknown_subpath_list"
+            ),
+
+            # === Dict keys ===
+            pytest.param(
+                "Expected `str`, got `int` - at `key` in `$.member_map`",
+                ('member_map', '...key'),
+                id="dict_key"
             ),
 
             # === Edge Cases ===
