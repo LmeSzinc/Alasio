@@ -209,6 +209,13 @@ def get_error_type(error):
 
     # Group 1: Expected ... errors
     if error.startswith('Expected'):
+        # Expected `array` of length
+        # Check expect array before KEY_got, because it has KEY_got too
+        if error.startswith('Expected `array` '):
+            remaining = error[17:]
+            ctx = get_length_ctx(remaining)
+            return ErrorType.ARRAY_LENGTH_CONSTRAINT, ctx
+
         # Expected `int`, got `str`
         if KEY_got in error:
             return ErrorType.TYPE_MISMATCH, NODEFAULT
@@ -224,12 +231,6 @@ def get_error_type(error):
             _, _, remaining = error.partition('matching regex ')
             ctx = get_pattern_ctx(remaining)
             return ErrorType.PATTERN_CONSTRAINT, ctx
-
-        # Expected `array` of length
-        if error.startswith('Expected `array` '):
-            remaining = error[17:]
-            ctx = get_length_ctx(remaining)
-            return ErrorType.ARRAY_LENGTH_CONSTRAINT, ctx
 
         # Expected `object` of length
         if error.startswith('Expected `object` '):
