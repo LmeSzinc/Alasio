@@ -1,7 +1,15 @@
+import datetime
+import decimal
 import sys
 import typing
+import uuid
+from typing import Any, TypeVar, Union
 
+import msgspec
+from msgspec import NODEFAULT, UnsetType
 from msgspec._utils import _CONCRETE_TYPES
+from msgspec.inspect import _is_attrs, _is_dataclass, _is_enum, _is_namedtuple, _is_struct, _is_typeddict
+from typing_extensions import Literal
 
 # Backport typing alias in msgspec._utils, so we can keep supporting py3.8
 # <-- Start of the copied code -->
@@ -11,7 +19,7 @@ except Exception:
     _types_UnionType = type("UnionType", (), {})  # type: ignore
 
 try:
-    from typing import Final, TypeAliasType as _TypeAliasType, Union  # type: ignore
+    from typing import Final, TypeAliasType as _TypeAliasType  # type: ignore
 except Exception:
     _TypeAliasType = type("TypeAliasType", (), {})  # type: ignore
 
@@ -121,3 +129,152 @@ def origin_args(t):
         if args == ((),):
             args = ()
     return origin, args
+
+
+def get_default(t, guess_default=True):
+    """
+    Calculates a default value for a given type hint
+
+    Args:
+        t: Any typehint
+        guess_default (bool): If True (default), invalid primitive
+            values (like int, str, bytes) will be replaced by their "zero"
+            or "empty" values (0, "", b""). If False, a validation error for
+            such a type will cause the repair to fail, unless an explicit
+
+            default is set on the model field. This does not affect container
+            types (e.g., a list field with a non-list value will still default
+            to `[]`), Optional fields (which default to `None`), or Enums/Literals
+            (which are never guessed).
+
+    Returns:
+        Any:
+    """
+    origin, args = origin_args(t)
+
+    # --- Most common types first for performance ---
+
+    # Handle `None` (very common in Optional[T])
+    if origin is None or origin is type(None):
+        return None
+
+    # Handle `str`
+    if origin is str:
+        return "" if guess_default else NODEFAULT
+
+    # Handle `int`
+    if origin is int:
+        return 0 if guess_default else NODEFAULT
+
+    # Handle `list` (the most common collection)
+    if origin is list:
+        return []
+
+    # Handle `dict`
+    if origin is dict:
+        return {}
+
+    # Handle `bool`
+    if origin is bool:
+        return False if guess_default else NODEFAULT
+
+    # --- Structured object types ---
+
+    # All struct-like types default to an empty object (`{}`), representing a
+    # valid but empty structure, which is useful for error correction.
+    if (
+            _is_struct(origin)
+            or _is_typeddict(origin)
+            or _is_dataclass(origin)
+            or _is_attrs(origin)
+            or _is_namedtuple(origin)
+    ):
+        return {}
+
+    # --- Union types ---
+
+    if origin is Union:
+        # If None is a member of the union (i.e., Optional[T]), it's the best default.
+        for arg in args:
+            if arg is UnsetType:
+                continue
+            if arg is None or arg is type(None):
+                return None
+
+        # Otherwise, recursively find the first type in the union that can provide a default.
+        for arg in args:
+            if arg is UnsetType:
+                continue
+            default = get_default(arg, guess_default)
+            if default is not NODEFAULT:
+                return default
+
+        # If no type in the union can be defaulted, the union itself cannot.
+        return NODEFAULT
+
+    # --- Other container types ---
+
+    if origin is set:
+        return set()
+
+    if origin is frozenset:
+        return frozenset()
+
+    if origin is tuple:
+        # An empty tuple is a safe default for both fixed and variable-length tuples.
+        return ()
+
+    # --- Types that cannot be safely guessed ---
+
+    # We cannot safely pick a default value from an Enum or a set of Literals.
+    if _is_enum(origin):
+        return NODEFAULT
+
+    if origin is Literal:
+        return NODEFAULT
+
+    # --- Less common scalar and special types ---
+
+    if origin is float:
+        return 0.0 if guess_default else NODEFAULT
+
+    if origin is bytes:
+        return b"" if guess_default else NODEFAULT
+
+    if origin is bytearray:
+        return bytearray()
+
+    if origin is memoryview:
+        # A memoryview of an empty bytes object is a safe default.
+        return memoryview(b"")
+
+    # For complex objects, we avoid guessing a default (e.g., datetime.now())
+    # as it can have side effects or be misleading.
+    if origin in (
+            datetime.datetime,
+            datetime.time,
+            datetime.date,
+            datetime.timedelta,
+            uuid.UUID,
+            decimal.Decimal,
+            msgspec.Raw,
+            msgspec.msgpack.Ext,
+    ):
+        return NODEFAULT
+
+    # --- Abstract and generic types ---
+
+    if origin is Any:
+        return NODEFAULT
+
+    if isinstance(origin, TypeVar):
+        # If the TypeVar is bound to another type, try to get the default of that bound type.
+        if origin.__bound__ is not None:
+            return get_default(origin.__bound__, guess_default)
+        return NODEFAULT
+
+    # --- Fallback ---
+
+    # If the type is not recognized by any of the guards above, it's treated as a
+    # custom or unknown type for which we cannot provide a default.
+    return NODEFAULT
