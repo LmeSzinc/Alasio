@@ -257,3 +257,11 @@ class ErrorType(str, Enum):
                  (e.g., in a `dec_hook`, `__post_init__`, or a custom type's
                  `__init__`) and wraps it in a `ValidationError`.
     """
+
+    UNICODE_DECODE_ERROR = 'UNICODE_DECODE_ERROR'
+    """
+    Our custom error type to wrap UnicodeDecodeError.
+    msgspec doesn't give detail loc of UnicodeDecodeError, we will do that.
+    Format: 'utf-8' codec can't decode byte 0x80 in position 3: invalid start byte
+    Triggered by: Invalid unicode in bytes
+    """

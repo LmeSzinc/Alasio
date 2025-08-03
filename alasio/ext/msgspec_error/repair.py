@@ -1,11 +1,12 @@
-from typing import Any, Dict, Type
+from collections import deque
+from typing import Any, Dict, Literal, Type
 
 from msgspec import DecodeError, NODEFAULT, ValidationError, convert
 from msgspec.inspect import _is_struct
 from msgspec.json import decode as decode_json
 
 from alasio.ext.msgspec_error.const import ErrorType
-from alasio.ext.msgspec_error.error import ErrorCtx, MsgspecError, parse_msgspec_error
+from alasio.ext.msgspec_error.error import MsgspecError, parse_msgspec_error
 from alasio.ext.msgspec_error.parse_struct import get_field_default, get_field_typehint
 from alasio.ext.msgspec_error.parse_type import get_default, origin_args
 
@@ -222,7 +223,6 @@ def _handle_obj_repair(
         # repair once
         raw_error = error
         raw_obj, error = _repair_once(raw_obj, model, error)
-        print(raw_obj, error)
         if error is NODEFAULT:
             # don't collect this error
             if raw_obj is NODEFAULT:
@@ -262,9 +262,7 @@ def _handle_root_error(
     Returns:
         tuple[any, list[MsgspecError]]:
     """
-    error = MsgspecError(
-        type=ErrorType.WRAPPED_ERROR, loc=(), msg=str(error), ctx=ErrorCtx()
-    )
+    error = MsgspecError(type=ErrorType.WRAPPED_ERROR, loc=(), msg=str(error))
     raw_obj, error = _repair_once({}, model, error)
     if error is NODEFAULT:
         errors = []
@@ -281,15 +279,130 @@ def _handle_root_error(
         return NODEFAULT, errors
 
 
+def _find_unicode_errors(obj: Any) -> "list[MsgspecError]":
+    """
+    Iteratively and with maximum efficiency, finds all locations (paths)
+    within a Python object that contain a Unicode replacement character.
+    This version uses guard clauses and lazy path construction to optimize performance.
+
+    Args:
+        obj: The Python object (decoded from JSON) to scan.
+
+    Returns:
+        A list of tuples, where each tuple represents the path to an error.
+    """
+    obj_type = type(obj)
+
+    # --- Guard Clauses for Non-Container Root Objects ---
+    # Handle the case where the root object itself is a string.
+    if obj_type is str:
+        if '\ufffd' in obj:
+            error = MsgspecError(
+                'Invalid UTF-8 sequence in root',
+                type=ErrorType.UNICODE_DECODE_ERROR, loc=())
+            return [error]
+        else:
+            return []
+
+    # If the root object is not a container, there's nothing to traverse.
+    if obj_type is not dict and obj_type is not list:
+        return []
+
+    # --- Main Iterative Traversal for Containers ---
+    # From this point, `obj` is guaranteed to be a dict or a list.
+    errors = []
+    stack = deque()
+    stack.append((obj, ()))
+    replacement_char = '\ufffd'
+
+    while 1:
+        new_stack = deque()
+        for container, path in stack:
+            if type(container) is dict:
+                for key, value in container.items():
+                    value_type = type(value)
+
+                    # Check the dict key
+                    if type(key) is str and replacement_char in key:
+                        error = MsgspecError(
+                            'Invalid UTF-8 sequence in dict key',
+                            type=ErrorType.UNICODE_DECODE_ERROR, loc=path + (key,))
+                        errors.append(error)
+
+                    # Check the dict value.
+                    if value_type is str:
+                        if replacement_char in value:
+                            error = MsgspecError(
+                                'Invalid UTF-8 sequence in dict value',
+                                type=ErrorType.UNICODE_DECODE_ERROR, loc=path + (key,))
+                            errors.append(error)
+                    elif value_type is dict or value_type is list:
+                        new_stack.append((value, path + (key,)))
+            else:
+                # It must be a list, as the stack only contains dicts or lists.
+                for i, item in enumerate(container):
+                    item_type = type(item)
+
+                    # Check list item
+                    if item_type is str:
+                        if replacement_char in item:
+                            error = MsgspecError(
+                                'Invalid UTF-8 sequence in list item',
+                                type=ErrorType.UNICODE_DECODE_ERROR, loc=path + (i,))
+                            errors.append(error)
+                    elif item_type is dict or item_type is list:
+                        new_stack.append((item, path + (i,)))
+
+        if new_stack:
+            stack = new_stack
+        else:
+            break
+
+    return errors
+
+
+def _handle_json_unicode_repair(
+        data: bytes,
+        utf8_error: "Literal['replace', 'ignore']"
+) -> "tuple[bytes, list[MsgspecError]]":
+    """
+    Helper function to repair json data that has unicode error
+    """
+    if utf8_error == 'replace':
+        data_str = data.decode('utf-8', errors=utf8_error)
+        data = data_str.encode('utf-8')
+        try:
+            raw_obj = decode_json(data)
+        except DecodeError:
+            return data, []
+        return data, _find_unicode_errors(raw_obj)
+    elif utf8_error == 'ignore':
+        data_str = data.decode('utf-8', errors=utf8_error)
+        data = data_str.encode('utf-8')
+        return data, []
+    else:
+        # this shouldn't happen
+        return data, []
+
+
 def load_json_with_default(
-        data, model
+        data: bytes,
+        model: Any,
+        utf8_error: "Literal['strict', 'replace', 'ignore']" = 'replace',
 ) -> "tuple[Any, list[MsgspecError]]":
     """
-    Decodes bytes, substituting defaults for fields that fail validation.
+    Decodes bytes, substituting defaults for fields that fail validation or have invalid unicode.
 
     Args:
         data (bytes): The input bytes to decode.
         model (type): The target type to decode into.
+        utf8_error: The error handling scheme to use for the handling of decoding errors.
+            - "strict", any UnicodeDecodeError will be treated as root level error and generate a root level default.
+                You may lose tons of useful data because of one unicode error.
+            - "replace", replace error bytes with � (U+FFFD, '\uFFFD', \xef\xbf\xbd).
+                Most data will be preserved, but you may have a U+FFFD in string.
+            - "ignore", remove error bytes.
+                Most data will be preserved, but you may lose the error data
 
     Returns:
         tuple[any, list[MsgspecError]]: (result, errors) validated result and a list of collected errors
@@ -313,13 +426,37 @@ def load_json_with_default(
         # [MsgspecError(msg='Expected `int`, got `str` - at `$.s.a`',
         # type=<ErrorType.TYPE_MISMATCH>, loc=('s', 'a'), ctx=ErrorCtx())]
     """
-    try:
-        return decode_json(data, type=model), []
-    except ValidationError as e:
+    collected_errors = []
+    for _ in range(2):
         try:
-            raw_obj = decode_json(data)
-        except (DecodeError, UnicodeDecodeError) as error:
+            # happy path, return directly
+            return decode_json(data, type=model), collected_errors
+        except ValidationError as e:
+            try:
+                raw_obj = decode_json(data)
+            except DecodeError as error:
+                return _handle_root_error(model, error)
+            except UnicodeDecodeError as error:
+                if utf8_error in ['replace', 'ignore']:
+                    data, new_errors = _handle_json_unicode_repair(data, utf8_error)
+                    collected_errors.extend(new_errors)
+                    continue
+                else:
+                    return _handle_root_error(model, error)
+            # Most errors will enter here
+            raw_obj, new_errors = _handle_obj_repair(raw_obj, model, e)
+            collected_errors.extend(new_errors)
+            return raw_obj, collected_errors
+        except DecodeError as error:
             return _handle_root_error(model, error)
-        return _handle_obj_repair(raw_obj, model, e)
-    except (DecodeError, UnicodeDecodeError) as error:
-        return _handle_root_error(model, error)
+        except UnicodeDecodeError as error:
+            if utf8_error in ['replace', 'ignore']:
+                data, new_errors = _handle_json_unicode_repair(data, utf8_error)
+                collected_errors.extend(new_errors)
+                continue
+            else:
+                return _handle_root_error(model, error)
+
+    # this shouldn't happen
+    error = RuntimeError(f'Failed to solve UnicodeDecodeError')
+    return _handle_root_error(model, error)
