@@ -131,21 +131,53 @@ def origin_args(t):
     return origin, args
 
 
-def get_default(t, guess_default=True):
+def is_struct_like(t):
+    """
+    Equivalent to the followings, functions are from msgspec.inspect
+
+    _is_struct(t)
+    or _is_typeddict(t)
+    or _is_dataclass(t)
+    or _is_attrs(t)
+    or _is_namedtuple(t)
+    """
+    # _is_struct()
+    if type(t) is type(msgspec.Struct):
+        return True
+    # _is_dataclass()
+    if hasattr(t, "__dataclass_fields__"):
+        return True
+    try:
+        # _is_typeddict()
+        if issubclass(t, dict) and hasattr(t, "__total__"):
+            return True
+        # _is_namedtuple(t)
+        if issubclass(t, tuple) and hasattr(t, "_fields"):
+            return True
+    except TypeError:
+        return False
+    # _is_attrs()
+    if hasattr(t, "__attrs_attrs__"):
+        return True
+    return False
+
+
+def get_default(t, guess_default=False):
     """
     Calculates a default value for a given type hint
 
     Args:
         t: Any typehint
-        guess_default (bool): If True (default), invalid primitive
-            values (like int, str, bytes) will be replaced by their "zero"
-            or "empty" values (0, "", b""). If False, a validation error for
-            such a type will cause the repair to fail, unless an explicit
-
-            default is set on the model field. This does not affect container
-            types (e.g., a list field with a non-list value will still default
-            to `[]`), Optional fields (which default to `None`), or Enums/Literals
-            (which are never guessed).
+        guess_default (bool):
+            False by default for safety.
+            If True, invalid primitive values (like int, str, bytes) will be replaced by their "zero"
+                or "empty" values (0, "", b"").
+            If False, a validation error for such a type will cause the repair to fail,
+                unless an explicit default is set on the model field.
+            This does not affect:
+            - container types (e.g., a list field with a non-list value will still default to `[]`),
+            - Optional fields (which default to `None`)
+            - Enums/Literals (which are never guessed)
 
     Returns:
         Any:
@@ -182,13 +214,7 @@ def get_default(t, guess_default=True):
 
     # All struct-like types default to an empty object (`{}`), representing a
     # valid but empty structure, which is useful for error correction.
-    if (
-            _is_struct(origin)
-            or _is_typeddict(origin)
-            or _is_dataclass(origin)
-            or _is_attrs(origin)
-            or _is_namedtuple(origin)
-    ):
+    if is_struct_like(origin):
         return {}
 
     # --- Union types ---
