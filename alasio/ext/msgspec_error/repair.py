@@ -3,7 +3,8 @@ from typing import Any, Dict, Literal, Type
 
 from msgspec import DecodeError, NODEFAULT, ValidationError, convert
 from msgspec.inspect import _is_struct
-from msgspec.json import decode as decode_json
+from msgspec.json import Decoder as JsonDecoder, decode as decode_json
+from msgspec.msgpack import Decoder as MsgpackDecoder, decode as decode_msgpack
 
 from alasio.ext.msgspec_error.const import ErrorType
 from alasio.ext.msgspec_error.error import MsgspecError, parse_msgspec_error
@@ -364,21 +365,21 @@ def _find_unicode_errors(obj: Any) -> "list[MsgspecError]":
 def _handle_json_unicode_repair(
         data: bytes,
         utf8_error: "Literal['replace', 'ignore']"
-) -> "tuple[bytes, list[MsgspecError]]":
+) -> "tuple[bytes | str, list[MsgspecError]]":
     """
     Helper function to repair json data that has unicode error
     """
     if utf8_error == 'replace':
-        data_str = data.decode('utf-8', errors=utf8_error)
-        data = data_str.encode('utf-8')
+        data = data.decode('utf-8', errors=utf8_error)
+        # msgspec allow decoding json in str, so we just keep in str
+        # data = data_str.encode('utf-8')
         try:
             raw_obj = decode_json(data)
         except DecodeError:
             return data, []
         return data, _find_unicode_errors(raw_obj)
     elif utf8_error == 'ignore':
-        data_str = data.decode('utf-8', errors=utf8_error)
-        data = data_str.encode('utf-8')
+        data = data.decode('utf-8', errors=utf8_error)
         return data, []
     else:
         # this shouldn't happen
@@ -389,6 +390,7 @@ def load_json_with_default(
         data: bytes,
         model: Any,
         utf8_error: "Literal['strict', 'replace', 'ignore']" = 'replace',
+        decoder: JsonDecoder = None,
 ) -> "tuple[Any, list[MsgspecError]]":
     """
     Decodes bytes, substituting defaults for fields that fail validation or have invalid unicode.
@@ -403,6 +405,7 @@ def load_json_with_default(
                 Most data will be preserved, but you may have a U+FFFD in string.
             - "ignore", remove error bytes.
                 Most data will be preserved, but you may lose the error data
+        decoder: Custom decoder to use
 
     Returns:
         tuple[any, list[MsgspecError]]: (result, errors) validated result and a list of collected errors
@@ -430,7 +433,10 @@ def load_json_with_default(
     for _ in range(2):
         try:
             # happy path, return directly
-            return decode_json(data, type=model), collected_errors
+            if decoder is None:
+                return decode_json(data, type=model), collected_errors
+            else:
+                return decoder.decode(data), collected_errors
         except ValidationError as e:
             try:
                 raw_obj = decode_json(data)
@@ -460,3 +466,38 @@ def load_json_with_default(
     # this shouldn't happen
     error = RuntimeError(f'Failed to solve UnicodeDecodeError')
     return _handle_root_error(model, error)
+
+
+def load_msgpack_with_default(
+        data: bytes,
+        model: Any,
+        decoder: MsgpackDecoder = None,
+) -> "tuple[Any, list[MsgspecError]]":
+    """
+    Decodes bytes, substituting defaults for fields that fail validation.
+    Note that load_msgpack_with_default can't handle UnicodeDecodeError, will act like utf8_error='strict'
+
+    See load_json_with_default for more info.
+    """
+    collected_errors = []
+    try:
+        # happy path, return directly
+        if decoder is None:
+            return decode_msgpack(data, type=model), collected_errors
+        else:
+            return decoder.decode(data), collected_errors
+    except ValidationError as e:
+        try:
+            raw_obj = decode_json(data)
+        except DecodeError as error:
+            return _handle_root_error(model, error)
+        except UnicodeDecodeError as error:
+            return _handle_root_error(model, error)
+        # Most errors will enter here
+        raw_obj, new_errors = _handle_obj_repair(raw_obj, model, e)
+        collected_errors.extend(new_errors)
+        return raw_obj, collected_errors
+    except DecodeError as error:
+        return _handle_root_error(model, error)
+    except UnicodeDecodeError as error:
+        return _handle_root_error(model, error)
