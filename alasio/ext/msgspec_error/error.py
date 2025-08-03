@@ -1,7 +1,7 @@
 from collections import deque
-from typing import Tuple, Union
+from typing import Tuple, Type, Union
 
-from msgspec import NODEFAULT, Struct
+from msgspec import NODEFAULT, Struct, field
 
 from .const import ErrorType
 from .path import KEY_at, KEY_got, get_error_path
@@ -50,7 +50,7 @@ class MsgspecError(Struct, omit_defaults=True):
     # note that dict keys are shown as [...] in msgspec, so they are parsed as "..."
     loc: Tuple[Union[int, str]]
     # Additional info
-    ctx: ErrorCtx
+    ctx: ErrorCtx = field(default_factory=ErrorCtx)
 
 
 KEY_to = ' to '
@@ -61,15 +61,15 @@ KEY_le = '<= '
 KEY_multiple_of = 'multiple of '
 
 
-def get_pattern_ctx(msg):
+def get_pattern_ctx(msg) -> "ErrorCtx | Type[NODEFAULT]":
     """
     Args:
         msg (str): Error message with reason removed
             "`<pattern>` - at `<Path>`"
 
     Returns:
-        ErrorCtx: with `pattern` set
-            If failed to parse, return empty ErrorCtx
+        ErrorCtx with `pattern` set
+        Or NODEFAULT if failed to parse
     """
     # remove path and leave regex
     msg, _, _ = msg.rpartition(KEY_at)
@@ -81,10 +81,10 @@ def get_pattern_ctx(msg):
         return ErrorCtx(pattern=msg)
     else:
         # Empty regex
-        return ErrorCtx()
+        return NODEFAULT
 
 
-def get_length_ctx(msg):
+def get_length_ctx(msg) -> "ErrorCtx | Type[NODEFAULT]":
     """
     Args:
         msg (str): Error message with reason removed
@@ -95,8 +95,8 @@ def get_length_ctx(msg):
             "of length 5"
 
     Returns:
-        ErrorCtx: with `min_length` or `max_length` set
-            If failed to parse, return empty ErrorCtx
+        ErrorCtx with `min_length` or `max_length` set
+        Or NODEFAULT if failed to parse
     """
     msg, _, _ = msg.partition(KEY_at)
     msg, _, _ = msg.partition(KEY_got)
@@ -108,25 +108,25 @@ def get_length_ctx(msg):
             try:
                 return ErrorCtx(min_length=int(min_length), max_length=int(max_length))
             except ValueError:
-                return ErrorCtx()
+                return NODEFAULT
         # of length >= 3
         if msg.startswith(KEY_ge):
             msg = msg[3:]
             try:
                 return ErrorCtx(min_length=int(msg))
             except ValueError:
-                return ErrorCtx()
+                return NODEFAULT
         if msg.startswith(KEY_le):
             msg = msg[3:]
             try:
                 return ErrorCtx(max_length=int(msg))
             except ValueError:
-                return ErrorCtx()
+                return NODEFAULT
         # 3 (bare number)
         try:
             return ErrorCtx(min_length=int(msg), max_length=int(msg))
         except ValueError:
-            return ErrorCtx()
+            return NODEFAULT
 
     # of at (least|most) length 3
     elif msg.startswith('of at least length '):
@@ -134,19 +134,19 @@ def get_length_ctx(msg):
         try:
             return ErrorCtx(min_length=int(msg))
         except ValueError:
-            return ErrorCtx()
+            return NODEFAULT
     elif msg.startswith('of at most length '):
         msg = msg[18:]
         try:
             return ErrorCtx(max_length=int(msg))
         except ValueError:
-            return ErrorCtx()
+            return NODEFAULT
     else:
         # No match
-        return ErrorCtx()
+        return NODEFAULT
 
 
-def get_number_ctx(msg):
+def get_number_ctx(msg) -> "ErrorCtx | Type[NODEFAULT]":
     """
     Args:
         msg (str): Error message with reason removed
@@ -155,8 +155,8 @@ def get_number_ctx(msg):
             "that's a multiple of 6"
 
     Returns:
-        ErrorCtx: with `ge`, or `gt`, or `le`, or `lt` set
-            If failed to parse, return empty ErrorCtx
+        ErrorCtx with `ge`, or `gt`, or `le`, or `lt` set
+        Or NODEFAULT if failed to parse
     """
     msg, _, _ = msg.partition(KEY_at)
     if msg.startswith(KEY_ge):
@@ -164,42 +164,42 @@ def get_number_ctx(msg):
         try:
             return ErrorCtx(ge=int(msg))
         except ValueError:
-            return ErrorCtx()
+            return NODEFAULT
     if msg.startswith(KEY_le):
         msg = msg[3:]
         try:
             return ErrorCtx(le=int(msg))
         except ValueError:
-            return ErrorCtx()
+            return NODEFAULT
     if msg.startswith(KEY_gt):
         msg = msg[2:]
         try:
             return ErrorCtx(gt=int(msg))
         except ValueError:
-            return ErrorCtx()
+            return NODEFAULT
     if msg.startswith(KEY_lt):
         msg = msg[2:]
         try:
             return ErrorCtx(lt=int(msg))
         except ValueError:
-            return ErrorCtx()
+            return NODEFAULT
     if KEY_multiple_of in msg:
         _, _, msg = msg.rpartition(KEY_multiple_of)
         try:
             return ErrorCtx(multiple_of=int(msg))
         except ValueError:
-            return ErrorCtx()
+            return NODEFAULT
     # unknown
-    return ErrorCtx()
+    return NODEFAULT
 
 
-def get_error_type(error):
+def get_error_type(error) -> "tuple[ErrorType, ErrorCtx | Type[NODEFAULT]]":
     """
     Args:
         error (str):
 
     Returns:
-        tuple[ErrorType, ErrorCtx]: (error_type, context)
+        (error_type, context)
     """
     # Group 2: Structural Errors
     if error.startswith('Object missing required field '):
@@ -324,7 +324,6 @@ def parse_msgspec_error(error):
     typ, ctx = get_error_type(msg)
     loc = get_error_path(msg)
     if ctx is NODEFAULT:
-        ctx = ErrorCtx()
-        return MsgspecError(msg=msg, type=typ, loc=loc, ctx=ctx)
+        return MsgspecError(msg=msg, type=typ, loc=loc)
     else:
         return MsgspecError(msg=msg, type=typ, loc=loc, ctx=ctx)
