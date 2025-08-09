@@ -213,3 +213,18 @@ def set_cached_property(instance, attrname, value):
             f"does not support item assignment for caching {attrname!r} property."
         )
         raise TypeError(msg) from None
+
+
+def warm_cached_property(instance, attrname):
+    """
+    Warmup a cached property.
+    Return None to avoid passing big cached objects across threads.
+
+    Args:
+        instance:
+        attrname (str):
+    """
+    try:
+        getattr(instance, attrname)
+    except AttributeError:
+        pass
