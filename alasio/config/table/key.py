@@ -1,3 +1,4 @@
+import sqlite3
 from typing import Type, TypeVar
 
 import msgspec
@@ -143,7 +144,11 @@ class AlasioKeyTable(AlasioConfigDB):
         Returns:
             str: Mod name or "" if unknown
         """
-        value = self.get_value('Mod', None)
+        try:
+            value = self.get_value('Mod', '')
+        except sqlite3.DatabaseError:
+            # Broken file, or not a sqlite database
+            return ''
         if not value:
             return ''
         try:
