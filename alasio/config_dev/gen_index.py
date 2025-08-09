@@ -34,7 +34,7 @@ class IndexGenerator:
             - 按display ref指示，加载用户设置中的{task}.{group}设置组
             - 聚合所有内容
 
-        3. "nav.index.json" 是任务和任务导航的i18n，具有 name 一级结构。
+        3. "nav.index.json" 是任务和任务导航的i18n，具有 component.name.lang 三级结构。
             这个文件会在前端显示时被使用。
             注意这是一个半自动生成文件，Alasio会维护它的数据结构，但是需要人工编辑nav对应的i18n，
             当前端需要显示导航组件时：
@@ -346,8 +346,8 @@ class IndexGenerator:
 
         Returns:
             dict[str, dict[str, str]]:
-                key: {name}.{lang}
-                    name can be "nav-{nav_name}" or {task_name}
+                key: {component}.{name}.{lang}
+                    component can be "nav", "task"
                 value: i18n translation
         """
         old = read_msgspec(self.nav_index_file)
@@ -355,23 +355,17 @@ class IndexGenerator:
 
         for nav_name, config in self.dict_nav_config.items():
             # nav name, which must not empty
-            for lang in Const.GUI_LANGUAGE:
-                key = [f'nav-{nav_name}', lang]
-                value = deep_get(old, key, default='')
-                if not value:
-                    value = nav_name
-                deep_set(out, key, value)
-            # iter tasks
-            for task_name in config.tasks_data:
-                # check if task_name has collision with nav_name
-                if task_name in out:
-                    raise DefinitionError(
-                        f'Task name "{task_name}" has collision, existing={list(out.keys())}',
-                        file=config.tasks_file, value=task_name
-                    )
-                # task name, which must not empty
+            if config.tasks_data:
                 for lang in Const.GUI_LANGUAGE:
-                    key = [task_name, lang]
+                    key = ['nav', nav_name, lang]
+                    value = deep_get(old, key, default='')
+                    if not value:
+                        value = nav_name
+                    deep_set(out, key, value)
+            # task name, which must not empty
+            for task_name in config.tasks_data:
+                for lang in Const.GUI_LANGUAGE:
+                    key = ['task', task_name, lang]
                     value = deep_get(old, key, default='')
                     if not value:
                         value = task_name
