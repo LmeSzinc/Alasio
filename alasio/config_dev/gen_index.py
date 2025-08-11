@@ -118,14 +118,13 @@ class IndexGenerator:
         Returns:
              dict[str, dict[str, str | dict[str, str]]]:
                 key: {task_name}.{group_name}
-                value:
-                    - file (endswith ".py") for basic group,
-                        reference file={file}, class={group_name}
-                    - ref_task_name (only contains A-Za-z0-9), for cross-task reference,
-                        reference {ref_task_name}.{group_name} in output
-                    - {'file': file, 'cls': class_name}, for override task group
-                        reference file={file}, class={class_name}
-                        class_name is "{task_name}_{group_name}" and inherits from class {group_name}
+                value: {'file': file, 'cls': class_name, 'task': ref_task_name}
+                    which indicates:
+                    - read config from task={ref_task_name} and group={group_name}
+                    - validate with model file={file}, class {class_name}
+                    class_name can be:
+                    - {group_name} for normal group
+                    - {task_name}_{group_name} that inherits from class {group_name}, for override task group
         """
         out = {}
         for config in self.dict_nav_config.values():
@@ -139,38 +138,33 @@ class IndexGenerator:
                     )
                 # generate groups
                 for group in task_data.group:
+                    if group.task:
+                        # reference {ref_task_name}.{group_name}
+                        ref_task = group.task
+                    else:
+                        # reference task self
+                        ref_task = task_name
                     # check if group exists
                     try:
                         ref = self.dict_group_ref[group.group]
                     except KeyError:
                         raise DefinitionError(
-                            f'Group ref "{group.group}" of task "{task_name}" does not exist',
+                            f'Group ref "{group.group}" of task "{ref_task}" does not exist',
                             file=config.tasks_file,
                             keys=[task_name, 'group']
                         )
-                    if group.task:
-                        # reference {task_ref}.{group}
-                        ref = group.task
-                        deep_set(out, [task_name, group.group], ref)
-                    else:
-                        # reference a group
-                        if ref['cls'] == group.group:
-                            # basic group, class_name is the same as group_name
-                            ref = ref['file']
-                            deep_set(out, [task_name, group.group], ref)
-                        else:
-                            # else: just keep {'file': file, 'cls': class_name}
-                            deep_set(out, [task_name, group.group], NoIndent(ref))
+                    # copy ref, set ref_task
+                    ref = {k: v for k, v in ref.items()}
+                    ref['task'] = ref_task
+                    deep_set(out, [task_name, group.group], NoIndent(ref))
 
         # check if {ref_task_name}.{group_name} reference has corresponding value
         for _, group, ref in deep_iter_depth2(out):
-            if type(ref) is not str:
-                continue
-            if ref.endswith('.py'):
-                continue
-            if not deep_exist(out, [ref, group]):
+            ref = ref.value
+            ref_task = ref['task']
+            if not deep_exist(out, [ref_task, group]):
                 raise DefinitionError(
-                    f'Cross-task ref has no corresponding value: {ref}.{group}',
+                    f'Cross-task group ref does not exist: {ref_task}.{group}',
                 )
 
         return out
@@ -345,7 +339,7 @@ class IndexGenerator:
         data of nav.index.json
 
         Returns:
-            dict[str, dict[str, str]]:
+            dict[str, dict[str, dict[str, str]]]:
                 key: {component}.{name}.{lang}
                     component can be "nav", "task"
                 value: i18n translation
