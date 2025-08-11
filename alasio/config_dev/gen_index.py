@@ -160,7 +160,8 @@ class IndexGenerator:
 
         # check if {ref_task_name}.{group_name} reference has corresponding value
         for _, group, ref in deep_iter_depth2(out):
-            ref = ref.value
+            if isinstance(ref, NoIndent):
+                ref = ref.value
             ref_task = ref['task']
             if not deep_exist(out, [ref_task, group]):
                 raise DefinitionError(
@@ -172,13 +173,6 @@ class IndexGenerator:
     """
     Generate config.index.json
     """
-
-    @cached_property
-    def _old_config_index(self):
-        """
-        Old nav.index.json, with manual written i18n
-        """
-        return read_msgspec(self.config_index_file)
 
     @cached_property
     def dict_group2file(self):
@@ -211,6 +205,20 @@ class IndexGenerator:
 
         return out
 
+    @cached_property
+    def dict_group2configgen(self):
+        """
+        Convert group name to ConfigGenerator object
+
+        Returns:
+            dict[str, ConfigGenerator]:
+        """
+        out = {}
+        for config in self.dict_nav_config.values():
+            for group_name in config.config_data.keys():
+                out[group_name] = config
+        return out
+
     def _get_display_info(
             self, config: ConfigGenerator, task_name: str, display_flat: "list[TaskGroup]"
     ) -> dict:
@@ -237,16 +245,17 @@ class IndexGenerator:
 
         # no info ref, use the first group that is not Scheduler
         for group in display_flat:
-            if group.group == 'Scheduler':
+            group_name = group.group
+            if group_name == 'Scheduler':
                 continue
             try:
-                file = self.dict_group2file[group.group]
+                file = self.dict_group2file[group_name]
             except KeyError:
                 raise DefinitionError(
-                    f'Display group "{group.group}" does not exists',
+                    f'Display group "{group_name}" does not exists',
                     file=config.tasks_file, keys=[task_name, 'display']
                 )
-            return {'group': group.group, 'file': file}
+            return {'group': group_name, 'file': file}
 
         # no luck, just use the first group
         try:
@@ -259,10 +268,17 @@ class IndexGenerator:
         return {'group': first.group, 'file': file}
 
     def _iter_display(
-            self, config: ConfigGenerator, task_name: str, display_flat: "list[TaskGroup]"
-    ) -> dict:
+            self, config: ConfigGenerator, task_name: str, display_flat
+    ):
         """
         Iter display reference from a list of display_flat
+
+        Args：
+            config ():
+            display_flat (list[TaskGroup]):
+
+        Yields:
+            dict:
         """
         for display in display_flat:
             # skip info ref
@@ -300,7 +316,7 @@ class IndexGenerator:
 
         Returns:
             dict[str, dict[str, dict[str, dict[str, str]]]]:
-                key: {nav}.{card_name}
+                key: {nav_name}.{card_name}
                 value: {"_info": info_ref, "display": list[display_ref]}
                     - info_ref is: {"group": group_name, "file": file}
                         where file is {nav}_config.json and will reference key {group_name}._info in the file
@@ -334,6 +350,46 @@ class IndexGenerator:
     """
 
     @cached_property
+    def dict_group_name_i18n(self):
+        """
+        Returns:
+            dict[str, dict[str, str]]:
+                key: {group_name}.{lang}
+                value: translation
+        """
+        out = {}
+        for config in self.dict_nav_config.values():
+            for group_name, group_data in config.config_data.items():
+                i18n = deep_get(group_data, ['_info', 'i18n'], default={})
+                name = self._get_i18n_name(i18n)
+                out[group_name] = name
+        return out
+
+    @staticmethod
+    def _get_i18n_name(i18n):
+        """
+        Get "name" from a nested i18n dict
+
+        Args:
+            i18n (dict[str, dict[str, str]]):
+                key: {lang}.{field}
+                value: translation
+
+        Returns:
+            dict[str, str]:
+                key: {lang}
+                value: translation
+        """
+        out = {}
+        for lang, field_data in i18n.items():
+            try:
+                name = field_data['name']
+            except KeyError:
+                name = ''
+            out[lang] = name
+        return out
+
+    @cached_property
     def nav_index_data(self):
         """
         data of nav.index.json
@@ -364,6 +420,23 @@ class IndexGenerator:
                     if not value:
                         value = task_name
                     deep_set(out, key, value)
+        # card name
+        for nav_name, card_name, data in deep_iter_depth2(self.config_index_data):
+            try:
+                info = data['_info']
+            except KeyError:
+                raise DefinitionError(f'Card "{nav_name}.{card_name}" has no "_info"')
+            if isinstance(info, NoIndent):
+                info = info.value
+            try:
+                group_name = info['group']
+            except KeyError:
+                raise DefinitionError(f'Card "{nav_name}.{card_name}._info" has no "group"')
+            try:
+                name = self.dict_group_name_i18n[group_name]
+            except KeyError:
+                raise DefinitionError(f'Card "{nav_name}.{card_name}._info" reference a non-exist group: {group_name}')
+            deep_set(out, ['card', nav_name, card_name], name)
 
         return out
 
