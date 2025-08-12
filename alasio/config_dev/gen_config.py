@@ -63,6 +63,8 @@ class ConfigGenerator(ParseArgs, ParseTasks):
             file (PathStr): Absolute filepath to {nav}.args.yaml
         """
         super().__init__(file)
+        # real data will be set in _generate_nav_config_json()
+        self.config_data = {}
 
     """
     Generate model
