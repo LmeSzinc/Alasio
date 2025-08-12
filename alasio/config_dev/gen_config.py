@@ -49,10 +49,14 @@ class ConfigGenerator(ParseArgs, ParseTasks):
             你需要在里面定义"group"，定义每个"group"包含的"arg"，定义每个"arg"的属性。
         2. <nav>.tasks.yaml 是一个手动定义的文件，它具有task一个层级。
             你需要定义每个task包含的group，定义前端如何展示这些group。
-        3. <nav>_config.json 是一个半自动生成的文件，它有group.arg两个层级。
-            Alasio会将<nav>.args.yaml中的简易定义扩充为具有固定结构的数据，
-            你只需要编辑其中的i18n属性。
-        4. <nav>_model.py 是一个全自动生成的文件，里面定义了msgspec校验模型。
+        3. <nav>_i18n.json 是一个半自动生成的文件，它有group.arg.lang三个层级。
+            Alasio会维护其中的数据结构，
+            你只需要编辑其中的i18n文本。
+        4. <nav>_config.json 是一个全自动生成的文件，它有group.arg两个层级。
+            Alasio会将<nav>.args.yaml中的简易定义扩充为具有固定结构的数据。
+            当前端请求nav content的时候，Alasio会返回<nav>_config.json，
+            并且根据 "_readi18n" 指示加载i18n, 根据 "_readconfig" 加载用户设置。
+        5. <nav>_model.py 是一个全自动生成的文件，里面定义了msgspec校验模型。
             你不应该修改这个文件。
 
         Args:
@@ -135,32 +139,37 @@ class ConfigGenerator(ParseArgs, ParseTasks):
             return None
 
     """
-    Generate config
+    Generate i18n
     """
 
     @cached_property
-    def _config_old(self):
+    def _i18n_old(self):
         """
-        Old {nav}_config.json, with manual written i18n
+        Old {nav}_i18n.json, with manual written i18n
         """
-        return read_msgspec(self.config_file)
+        return read_msgspec(self.i18n_file)
 
-    def _update_config_arg(self, group_name, arg_name, arg: ArgData):
+    def _update_arg_i18n(self, group_name, arg_name, arg: ArgData):
         """
-        Update {group_name}.{arg_name} in {nav}_config.json
-        Generate data structure from `arg`, then merge with the i18n from old configs
+        Update i18n of {group_name}.{arg_name}
+
+        Returns:
+            dict[str, dict[str, Any]]:
+                key: {lang}.{field}
+                    where field is "name", "help", "option_i18n", etc.
+                value: translation
         """
-        old = deep_get(self._config_old, [group_name, arg_name], default={})
-        new = arg.to_dict()
+        old = deep_get(self._i18n_old, [group_name, arg_name], default={})
+        new = {}
         for lang in Const.GUI_LANGUAGE:
             # name, name must not be empty, default to {group_name}.{arg_name}
-            key = ['i18n', lang, 'name']
+            key = [lang, 'name']
             value = deep_get(old, key, default='')
             if not value:
                 value = f'{group_name}.{arg_name}'
             deep_set(new, key, str(value))
             # help, help can be empty
-            key = ['i18n', lang, 'help']
+            key = [lang, 'help']
             value = deep_get(old, key, default='')
             deep_set(new, key, str(value))
         # option
@@ -172,7 +181,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
                     if not default.isdigit():
                         inline = False
                     # option name must not be empty, default to {option}
-                    key = ['i18n_option', lang, default]
+                    key = [lang, 'option_i18n', default]
                     value = deep_get(old, key, default='')
                     if not value:
                         value = default
@@ -181,64 +190,74 @@ class ConfigGenerator(ParseArgs, ParseTasks):
                     deep_set(new, key, value)
                 # if options are all digit and option name is same as option, make it inline
                 if inline:
-                    key = ['i18n_option', lang]
+                    key = [lang, 'option_i18n']
                     i18n_option = deep_get(new, key, default=None)
                     deep_set(new, key, NoIndent(i18n_option))
 
-        # make inline list
-        for key in ['option', 'default']:
+        # if help is empty, make name-help inline
+        for lang, data in new.items():
+            if len(data) != 2:
+                continue
             try:
-                value = new[key]
+                value = data['help']
             except KeyError:
                 # this shouldn't happen
                 continue
-            # wrap as NoIndent
-            vtype = type(value)
-            if vtype is list or vtype is tuple:
-                new[key] = NoIndent(value)
+            if not value:
+                new[lang] = NoIndent(data)
         return new
 
-    def _update_config_info(self, group_name, arg_name):
+    def _update_info_i18n(self, group_name, arg_name='_info'):
         """
-        Update {group_name}._info in {nav}_config.json
-        Generate group info with default name, then merge with the i18n from old configs
+        Update i18n of {group_name}._info
+
+        Returns:
+            dict[str, dict[str, Any]]:
+                key: {lang}.{field}
+                    where field is "name", "help"
+                value: translation
         """
-        old = deep_get(self._config_old, [group_name, arg_name], default={})
+        old = deep_get(self._i18n_old, [group_name, arg_name], default={})
         new = {}
         for lang in Const.GUI_LANGUAGE:
             # name, name must not be empty, default to {group_name}
-            key = ['i18n', lang, 'name']
+            key = [lang, 'name']
             value = deep_get(old, key, default='')
             if not value:
                 value = group_name
             deep_set(new, key, str(value))
             # help, help can be empty
-            key = ['i18n', lang, 'help']
+            key = [lang, 'help']
             value = deep_get(old, key, default='')
-            deep_set(new, key, str(value))
+            value = str(value)
+            deep_set(new, key, value)
+            # if help is empty, make name-help inline
+            if not value:
+                new[lang] = NoIndent(new[lang])
         return new
 
     @cached_property
-    def config_data(self):
+    def i18n_data(self):
         """
-        data of {nav}_config.json
+        data of {nav}_i18n.json
 
         Returns:
-            dict[str, dict[str, ArgData]]:
-                key: {group_name}.{arg_name}
-                value: ArgData, that populated with i18n and i18n_option
+            dict[str, dict[str, dict[str, dict[str, Any]]]]:
+                key: {group_name}.{arg_name}.{lang}.{field}
+                    where field is "name", "help", "option_i18n", etc.
+                value: translation
         """
-        _ = self._config_old
+        _ = self._i18n_old
         new = {}
         for group_name, arg_data in deep_iter_depth1(self.args_data):
             # {group}._info
-            row = self._update_config_info(group_name, '_info')
+            row = self._update_info_i18n(group_name, '_info')
             deep_set(new, [group_name, '_info'], row)
             for arg_name, arg in deep_iter_depth1(arg_data):
                 # {group}.{arg}
-                row = self._update_config_arg(group_name, arg_name, arg)
+                row = self._update_arg_i18n(group_name, arg_name, arg)
                 deep_set(new, [group_name, arg_name], row)
-        del_cached_property(self, '_config_old')
+        del_cached_property(self, '_i18n_old')
         return new
 
     """
@@ -261,11 +280,11 @@ class ConfigGenerator(ParseArgs, ParseTasks):
             if op:
                 logger.info(f'Write file {self.model_file}')
 
-        # {nav}_config.json
-        if self.config_data:
-            op = write_json_custom_indent(self.config_file, self.config_data, skip_same=True)
+        # {nav}_i18n.json
+        if self.i18n_data:
+            op = write_json_custom_indent(self.i18n_file, self.i18n_data, skip_same=True)
             if op:
-                logger.info(f'Write file {self.config_file}')
+                logger.info(f'Write file {self.i18n_file}')
 
         # format yaml
         op = format_yaml(self.file, yaml_formatter)

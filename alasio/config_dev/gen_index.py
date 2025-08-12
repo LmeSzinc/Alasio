@@ -2,6 +2,7 @@ from alasio.config.const import Const
 from alasio.config.entry.const import DICT_MOD_ENTRY, ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
+from alasio.config_dev.parse.parse_args import ArgData
 from alasio.config_dev.parse.parse_tasks import TaskGroup
 from alasio.ext import env
 from alasio.ext.cache import cached_property
@@ -160,8 +161,6 @@ class IndexGenerator:
 
         # check if {ref_task_name}.{group_name} reference has corresponding value
         for _, group, ref in deep_iter_depth2(out):
-            if isinstance(ref, NoIndent):
-                ref = ref.value
             ref_task = ref['task']
             if not deep_exist(out, [ref_task, group]):
                 raise DefinitionError(
@@ -171,7 +170,7 @@ class IndexGenerator:
         return out
 
     """
-    Generate config.index.json
+    Generate {nav}_i18n.json
     """
 
     @cached_property
@@ -187,13 +186,13 @@ class IndexGenerator:
         out = {}
         for config in self.dict_nav_config.values():
             # calculate module file
-            file = config.config_file.subpath_to(self.root)
+            file = config.i18n_file.subpath_to(self.root)
             if file == config.model_file:
                 raise DefinitionError(
-                    f'gui_file is not a subpath of root, model_file={config.config_file}, root={self.root}')
+                    f'gui_file is not a subpath of root, model_file={config.i18n_file}, root={self.root}')
             # iter group models
             file = to_posix(file)
-            for group_name in config.config_data.keys():
+            for group_name in config.i18n_data.keys():
                 # group must be unique
                 if group_name in out:
                     raise DefinitionError(
@@ -215,13 +214,28 @@ class IndexGenerator:
         """
         out = {}
         for config in self.dict_nav_config.values():
-            for group_name in config.config_data.keys():
+            for group_name in config.args_data.keys():
                 out[group_name] = config
         return out
 
+    def _group_name_to_data(self, group_name: str) -> "dict[str, ArgData]":
+        """
+        Convert group_name to group data
+        """
+        try:
+            config = self.dict_group2configgen[group_name]
+        except KeyError:
+            raise DefinitionError(f'Group name is not defined: {group_name}')
+        try:
+            data = config.args_data[group_name]
+        except KeyError:
+            # this shouldn't happen, because dict_group2configgen is build from config.args_data
+            raise DefinitionError(f'Nav args "{config.file}" has no group_name={group_name}')
+        return data
+
     def _get_display_info(
             self, config: ConfigGenerator, task_name: str, display_flat: "list[TaskGroup]"
-    ) -> dict:
+    ) -> TaskGroup:
         """
         Predict info reference from a list of display_flat
         """
@@ -235,13 +249,13 @@ class IndexGenerator:
         # use info ref first
         if first.inforef:
             try:
-                file = self.dict_group2file[first.inforef]
+                _ = self.dict_group2file[first.inforef]
             except KeyError:
                 raise DefinitionError(
                     f'inforef "{first.inforef}" does not exists',
                     file=config.tasks_file, keys=[task_name, 'display']
                 )
-            return {'group': first.inforef, 'file': file}
+            return TaskGroup(task='', group=first.inforef)
 
         # no info ref, use the first group that is not Scheduler
         for group in display_flat:
@@ -249,36 +263,32 @@ class IndexGenerator:
             if group_name == 'Scheduler':
                 continue
             try:
-                file = self.dict_group2file[group_name]
+                _ = self.dict_group2file[group_name]
             except KeyError:
                 raise DefinitionError(
                     f'Display group "{group_name}" does not exists',
                     file=config.tasks_file, keys=[task_name, 'display']
                 )
-            return {'group': group_name, 'file': file}
+            return TaskGroup(task='', group=group_name)
 
         # no luck, just use the first group
         try:
-            file = self.dict_group2file[first.group]
+            _ = self.dict_group2file[first.group]
         except KeyError:
             raise DefinitionError(
                 f'Display group "{first.group}" does not exists',
                 file=config.tasks_file, keys=[task_name, 'display']
             )
-        return {'group': first.group, 'file': file}
+        return TaskGroup(task='', group=first.group)
 
     def _iter_display(
-            self, config: ConfigGenerator, task_name: str, display_flat
+            self, config: ConfigGenerator, task_name: str, display_flat: "list[TaskGroup]",
     ):
         """
         Iter display reference from a list of display_flat
 
-        Args：
-            config ():
-            display_flat (list[TaskGroup]):
-
         Yields:
-            dict:
+            TaskGroup:
         """
         for display in display_flat:
             # skip info ref
@@ -286,7 +296,7 @@ class IndexGenerator:
                 continue
             # display group must be defined
             try:
-                file = self.dict_group2file[display.group]
+                _ = self.dict_group2file[display.group]
             except KeyError:
                 raise DefinitionError(
                     f'Display ref "{display.group}" of task "{task_name}" does not exist',
@@ -299,7 +309,7 @@ class IndexGenerator:
                         f'Cross-task display ref "{display.task}.{display.group}" does not exist',
                         file=config.tasks_file, keys=[task_name, 'display']
                     )
-                yield {'task': display.task, 'group': display.group, 'file': file}
+                yield TaskGroup(task=display.task, group=display.group)
             else:
                 # If display an in-task group, group must within this task
                 if not deep_exist(self.model_index_data, keys=[task_name, display.group]):
@@ -307,43 +317,77 @@ class IndexGenerator:
                         f'In-task display ref "{display.group}" is not in task "{task_name}"',
                         file=config.tasks_file, keys=[task_name, 'display']
                     )
-                yield {'task': task_name, 'group': display.group, 'file': file}
+                yield TaskGroup(task=task_name, group=display.group)
 
-    @cached_property
-    def config_index_data(self):
+    def _generate_nav_config_json(self, config: ConfigGenerator):
         """
-        data in config.index.json
-
-        Returns:
-            dict[str, dict[str, dict[str, dict[str, str]]]]:
-                key: {nav_name}.{card_name}
-                value: {"_info": info_ref, "display": list[display_ref]}
-                    - info_ref is: {"group": group_name, "file": file}
-                        where file is {nav}_config.json and will reference key {group_name}._info in the file
-                    - display_ref is {"task": task_name, "group": group_name, "file": file}
-                        where file is {nav}_config.json and will reference key {group_name} in the file
-                        "task" indicates to read {task_name}.{group_name} in user config
+        Generate {nav}_config.json from one nav config
         """
         out = {}
-        for config in self.dict_nav_config.values():
-            nav = config.nav_name
-            for task_name, task in config.tasks_data.items():
-                is_flat = len(task.display) == 1
-                for display_flat in task.display:
-                    # generate display
-                    display = list(self._iter_display(config, task_name, display_flat))
-                    if is_flat:
-                        card_name = f'card-{task_name}'
-                    else:
-                        card_name = '_'.join([d['group'] for d in display])
-                        card_name = f'card-{task_name}-{card_name}'
-                    # generate _info
-                    info = self._get_display_info(config, task_name, display_flat)
-                    deep_set(out, keys=[nav, card_name, '_info'], value=NoIndent(info))
-                    display = [NoIndent(d) for d in display]
-                    deep_set(out, keys=[nav, card_name, 'display'], value=display)
+        for task_name, task in config.tasks_data.items():
+            is_flat = len(task.display) == 1
+            for display_flat in task.display:
+                # get display
+                display = list(self._iter_display(config, task_name, display_flat))
+                if is_flat:
+                    card_name = f'card-{task_name}'
+                else:
+                    card_name = '_'.join([d.group for d in display])
+                    card_name = f'card-{task_name}-{card_name}'
+                # get _info
+                info_group = self._get_display_info(config, task_name, display_flat)
+                # gen _info
+                row = {'group': info_group.group, 'arg': '_info'}
+                deep_set(out, keys=[card_name, '_info'], value=NoIndent(row))
+                # gen args
+                for display_group in display:
+                    group_data = self._group_name_to_data(display_group.group)
+                    for arg_name, arg_data in group_data.items():
+                        row = {'task': display_group.task, 'group': display_group.group, 'arg': arg_name}
+                        row.update(arg_data.to_dict())
+                        arg_name = f'{display_group.group}_{arg_name}'
+                        deep_set(out, keys=[card_name, arg_name], value=row)
+                        # arg data post-process
+                        # no default to frontend
+                        row.pop('default', None)
+                        # inline option
+                        if 'option' in row:
+                            row['option'] = NoIndent(row['option'])
+
+        # generate i18nread
+        i18nread = {}
+        for nav, card, arg in deep_iter_depth2(out):
+            try:
+                group_name = arg['group']
+            except KeyError:
+                # this shouldn't happen, because dict is build at above
+                raise DefinitionError(f'Missing "group" in {nav}.{card}', file=config.config_file)
+            try:
+                read = self.dict_group2file[group_name]
+            except KeyError:
+                # this shouldn't happen, because group_name is already validated
+                raise DefinitionError(
+                    f'Group "{group_name}" is not defined in any file',  file=config.config_file)
+            i18nread[read] = None
+        if i18nread:
+            out['_readi18n'] = list(i18nread)
 
         return out
+
+    def generate_config_json(self):
+        """
+        Generate {nav}_config.json for all nav
+        """
+        for config in self.dict_nav_config.values():
+            data = self._generate_nav_config_json(config)
+            # {nav}_i18n.json
+            if data:
+                op = write_json_custom_indent(config.config_file, data, skip_same=True)
+                if op:
+                    logger.info(f'Write file {config.config_file}')
+            else:
+                if config.config_file.atomic_remove():
+                    logger.info(f'Delete file {config.config_file}')
 
     """
     Generate nav.index.json
@@ -359,7 +403,7 @@ class IndexGenerator:
         """
         out = {}
         for config in self.dict_nav_config.values():
-            for group_name, group_data in config.config_data.items():
+            for group_name, group_data in config.i18n_data.items():
                 i18n = deep_get(group_data, ['_info', 'i18n'], default={})
                 name = self._get_i18n_name(i18n)
                 out[group_name] = name
@@ -426,8 +470,6 @@ class IndexGenerator:
                 info = data['_info']
             except KeyError:
                 raise DefinitionError(f'Card "{nav_name}.{card_name}" has no "_info"')
-            if isinstance(info, NoIndent):
-                info = info.value
             try:
                 group_name = info['group']
             except KeyError:
@@ -463,15 +505,13 @@ class IndexGenerator:
         if op:
             logger.info(f'Write file {self.model_index_file}')
 
-        # config.index.json
-        op = write_json_custom_indent(self.config_index_file, self.config_index_data, skip_same=True)
-        if op:
-            logger.info(f'Write file {self.config_index_file}')
+        # {nav}_config.json
+        self.generate_config_json()
 
         # nav.index.json
-        op = write_json_custom_indent(self.nav_index_file, self.nav_index_data, skip_same=True)
-        if op:
-            logger.info(f'Write file {self.nav_index_file}')
+        # op = write_json_custom_indent(self.nav_index_file, self.nav_index_data, skip_same=True)
+        # if op:
+        #     logger.info(f'Write file {self.nav_index_file}')
 
 
 if __name__ == '__main__':

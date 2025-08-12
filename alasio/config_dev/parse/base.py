@@ -21,7 +21,9 @@ class ParseBase:
 
         # {nav}.tasks.yaml
         self.tasks_file = file.with_name(f'{nav}.tasks.yaml')
-        # {nav}.config.json
+        # {nav}_i18n.json
+        self.i18n_file = file.with_name(f'{nav}_i18n.json')
+        # {nav}_config.json
         self.config_file = file.with_name(f'{nav}_config.json')
         # {nav}_model.py
         # Use "_" in file name because python can't import filename with "." easily
