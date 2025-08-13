@@ -23,3 +23,23 @@ def patch_mimetype():
         db = mimetypes.MimeTypes()
         mimetypes._db = db
         mimetypes.inited = True
+
+
+def patch_std():
+    """
+    Force use utf-8 in stdin, stdout, stderr, ignoring any user env.
+
+    Returns:
+        bool: if success
+    """
+    # note that reconfigure() requires python>=3.7
+    import sys
+    try:
+        sys.stdin.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+        return True
+    except (AttributeError, TypeError):
+        # std may get replaced by user's TextIO
+        # which does not have reconfigure()
+        return False
