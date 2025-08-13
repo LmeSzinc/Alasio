@@ -43,3 +43,82 @@ def patch_std():
         # std may get replaced by user's TextIO
         # which does not have reconfigure()
         return False
+
+
+def patch_environ():
+    """
+    Remove all python related environs, updated to python 3.15
+
+    You can AI to extract the list from https://docs.python.org/3/using/cmdline.html
+    """
+    python_environment_variables = [
+        "FORCE_COLOR",
+        "NO_COLOR",
+        "PYTHONASYNCIODEBUG",
+        "PYTHONBREAKPOINT",
+        "PYTHONCASEOK",
+        "PYTHONCOERCECLOCALE",
+        "PYTHONDEBUG",
+        "PYTHONDEVMODE",
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTHONDUMPREFS",
+        "PYTHONDUMPREFSFILE",
+        "PYTHONEXECUTABLE",
+        "PYTHONFAULTHANDLER",
+        "PYTHONHASHSEED",
+        "PYTHONHOME",
+        "PYTHONINSPECT",
+        "PYTHONINTMAXSTRDIGITS",
+        "PYTHONIOENCODING",
+        "PYTHONLEGACYWINDOWSFSENCODING",
+        "PYTHONLEGACYWINDOWSSTDIO",
+        "PYTHONMALLOC",
+        "PYTHONMALLOCSTATS",
+        "PYTHONNODEBUGRANGES",
+        "PYTHONNOUSERSITE",
+        "PYTHONOPTIMIZE",
+        "PYTHONPATH",
+        "PYTHONPERFSUPPORT",
+        "PYTHONPLATLIBDIR",
+        "PYTHONPROFILEIMPORTTIME",
+        "PYTHONPYCACHEPREFIX",
+        "PYTHONSAFEPATH",
+        "PYTHONSTARTUP",
+        "PYTHONTRACEMALLOC",
+        "PYTHONUNBUFFERED",
+        "PYTHONUSERBASE",
+        "PYTHONUTF8",
+        "PYTHONVERBOSE",
+        "PYTHONWARNDEFAULTENCODING",
+        "PYTHONWARNINGS",
+        "PYTHON_BASIC_REPL",
+        "PYTHON_COLORS",
+        "PYTHON_CONTEXT_AWARE_WARNINGS",
+        "PYTHON_CPU_COUNT",
+        "PYTHON_DISABLE_REMOTE_DEBUG",
+        "PYTHON_FROZEN_MODULES",
+        "PYTHON_GIL",
+        "PYTHON_HISTORY",
+        "PYTHON_JIT",
+        "PYTHON_PERF_JIT_SUPPORT",
+        "PYTHON_PRESITE",
+        "PYTHON_THREAD_INHERIT_CONTEXT",
+        "PYTHON_TLBC",
+    ]
+    proxy_environment_variables = [
+        'HTTP_PROXY',
+        'HTTPS_PROXY',
+        'ALL_PROXY',
+        'NO_PROXY',
+        'HTTPPROXY',
+        'HTTPSPROXY',
+        'ALLPROXY',
+        'NOPROXY',
+    ]
+    removes = set(python_environment_variables + proxy_environment_variables)
+
+    import os
+    environs = [key.upper() for key in os.environ]
+    for key in environs:
+        if key in removes:
+            os.environ.pop(key, None)
