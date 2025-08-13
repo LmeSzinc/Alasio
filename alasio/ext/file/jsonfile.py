@@ -56,6 +56,9 @@ class NoIndent:
         # A magic unique placeholder, note that "τ" is U+03C4
         return f'No|1NdEnτ-{id(self)}'
 
+    def __bool__(self):
+        return bool(self.value)
+
     def __getitem__(self, item):
         return self.value[item]
 
@@ -72,6 +75,9 @@ class NoIndentNoSpace:
     def __str__(self):
         # A magic unique placeholder, note that "τ" is U+03C4, "æ" is ae
         return f'No|1NdEnτ-n0SpaCæ-{id(self)}'
+
+    def __bool__(self):
+        return bool(self.value)
 
     def __getitem__(self, item):
         return self.value[item]

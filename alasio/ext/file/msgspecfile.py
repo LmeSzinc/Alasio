@@ -1,7 +1,8 @@
-import msgspec
-from msgspec.json import decode, encode
+from msgspec import DecodeError
+from msgspec.json import Decoder, decode, encode
 
-from ..path.atomic import atomic_read_bytes, atomic_write
+from alasio.ext.cache.resource import ResourceCacheTTL, T
+from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 
 
 def read_msgspec(file, default_factory=dict):
@@ -21,7 +22,7 @@ def read_msgspec(file, default_factory=dict):
         return default_factory()
     try:
         return decode(data)
-    except msgspec.DecodeError:
+    except DecodeError:
         # msgspec.DecodeError: Input data was truncated
         return default_factory()
 
@@ -73,3 +74,15 @@ def deepcopy_msgpack(data):
     ----------------------------------------------------------------
     """
     return decode(encode(data))
+
+
+class JsonCacheTTL(ResourceCacheTTL):
+    def load_resource(self, file: str, decoder: Decoder = None) -> T:
+        content = atomic_read_bytes(file)
+        if decoder is None:
+            return decode(content)
+        else:
+            return decoder.decode(content)
+
+
+JSON_CACHE_TTL = JsonCacheTTL()

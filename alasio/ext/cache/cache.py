@@ -92,27 +92,14 @@ class threaded_cached_property:
 
         # create pre-instance-property lock
         lock_name = f"_cached_property_lock_for_{attrname}"
-        try:
-            lock = cache[lock_name]
-        except KeyError:
-            with self.create_lock:
-                # double-checked locking
-                # check if in cache first to bypass except KeyError for faster because it's not in cache at happy path
-                if lock_name in cache:
-                    try:
-                        lock = cache[attrname]
-                    except KeyError:
-                        # race condition
-                        lock = Lock()
-                        try:
-                            cache[lock_name] = lock
-                        except TypeError:
-                            msg = (
-                                f"The '__dict__' attribute on {type(instance).__name__!r} instance "
-                                f"does not support item assignment for caching {lock_name!r} property."
-                            )
-                            raise TypeError(msg) from None
-                else:
+        with self.create_lock:
+            # double-checked locking
+            # check if in cache first to bypass except KeyError for faster because it's not in cache at happy path
+            if lock_name in cache:
+                try:
+                    lock = cache[attrname]
+                except KeyError:
+                    # race condition
                     lock = Lock()
                     try:
                         cache[lock_name] = lock
@@ -122,6 +109,16 @@ class threaded_cached_property:
                             f"does not support item assignment for caching {lock_name!r} property."
                         )
                         raise TypeError(msg) from None
+            else:
+                lock = Lock()
+                try:
+                    cache[lock_name] = lock
+                except TypeError:
+                    msg = (
+                        f"The '__dict__' attribute on {type(instance).__name__!r} instance "
+                        f"does not support item assignment for caching {lock_name!r} property."
+                    )
+                    raise TypeError(msg) from None
 
         # calculate value with lock
         with lock:
@@ -130,10 +127,17 @@ class threaded_cached_property:
             # check if in cache first to bypass except KeyError for faster because it's not in cache at happy path
             if attrname in cache:
                 try:
-                    return cache[attrname]
+                    value = cache[attrname]
                 except KeyError:
                     # race condition
                     pass
+                else:
+                    try:
+                        del cache[lock_name]
+                    except KeyError:
+                        # this shouldn't happen
+                        pass
+                    return value
 
             # calculate
             value = self.func(instance)
