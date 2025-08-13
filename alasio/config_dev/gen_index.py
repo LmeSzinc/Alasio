@@ -1,12 +1,16 @@
+from collections import defaultdict
+
 from alasio.config.const import Const
 from alasio.config.entry.const import DICT_MOD_ENTRY
+from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.gen_cross import CrossNavGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_get, deep_iter_depth2, deep_set
-from alasio.ext.file.jsonfile import write_json_custom_indent
+from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
+from alasio.ext.path.calc import to_posix
 from alasio.logger import logger
 
 
@@ -23,12 +27,12 @@ class IndexGenerator(CrossNavGenerator):
             - 载入python文件，查询{nav}_model.py中的group对应的msgspec模型
             - 读取用户数据，使用msgspec模型校验数据
 
-        2. "config.index.json" 指导当前MOD有哪些设置，具有 nav.card 三级结构。
+        2. "config.index.json" 指导当前MOD有哪些设置，具有 nav 一级结构。
             这个文件会在前端显示时被使用。
             当前端需要显示某个nav下的用户设置时：
-            - 在"config.index.json"中查询当前nav，遍历card
-            - 加载info ref和display ref 指向的{nav}_config.json，查询其中的group_name
-            - 按display ref指示，加载用户设置中的{task}.{group}设置组
+            - 按file指示，加载{nav}_config.json作为结构
+            - 按i18n指示，加载{nav}_i18n.json
+            - 按config指示，加载用户设置中的task和group
             - 聚合所有内容
 
         3. "nav.index.json" 是任务和任务导航的i18n，具有 component.name.lang 三级结构。
@@ -47,6 +51,145 @@ class IndexGenerator(CrossNavGenerator):
         self.nav_index_file = self.path_config.joinpath('nav.index.json')
 
     """
+    Generate config.index.json
+    """
+
+    @cached_property
+    def dict_intask_group(self):
+        """
+        Returns:
+            dict[str, set[str]]:
+                key: task_name
+                value: A set of group name in task
+        """
+        out = defaultdict(set)
+        for task_name, group_name, ref in deep_iter_depth2(self.model_index_data):
+            try:
+                task = ref['task']
+            except KeyError:
+                # this shouldn't happen, because ref is generated
+                raise DefinitionError(f'Group ref of {task_name}.{group_name} does not have "task": {ref}')
+            if task_name != task:
+                # skip cross task ref
+                continue
+            out[task_name].add(group_name)
+        return out
+
+    def _regroup_intask_group(self, all_task_groups, current_task=''):
+        """
+        Regroup task groups to simplify database query condition
+        Convert:
+            [("Alas", "Emulator"), ("OpsiDaily", "Scheduler"),
+             ("OpsiDaily", "OpsiDaily"), ("OpsiGeneral", "OpsiGeneral")]
+        to:
+            tasks=[OpsiDaily, OpsiGeneral]
+            task_groups=[("Alas", "Emulator")]
+
+        Args:
+            all_task_groups (list[tuple[str, str]] | iterator[tuple[str, str]]]):
+                A list of (task, group)
+            current_task (str):
+
+        Returns:
+            tuple[list[str], list[tuple[str, str]]]: tasks, task_groups
+        """
+        unique_task_group = defaultdict(set)
+        for task, group in all_task_groups:
+            unique_task_group[task].add(group)
+
+        tasks = []
+        task_groups = []
+        for task_name, group_set in unique_task_group.items():
+            try:
+                intask_group = self.dict_intask_group[task_name]
+            except KeyError:
+                # this shouldn't happen, because task_name is already validated
+                raise DefinitionError(f'No such task "{task_name}"')
+            if task_name == current_task:
+                # in current task, visit the entire task
+                tasks.append(task_name)
+            elif group_set == intask_group:
+                # given `groups` equals intask groups,
+                # convert individual group queries to one task query
+                tasks.append(task_name)
+            else:
+                # visit individual groups
+                for group_name in sorted(group_set):
+                    task_groups.append([task_name, group_name])
+
+        return tasks, task_groups
+
+    def _get_nav_config_i18n(self, config: ConfigGenerator):
+        """
+        Returns:
+            list[str]: indicates to read {nav}_i18n.json
+        """
+        i18n = {}
+        for nav, card, arg in deep_iter_depth2(config.config_data):
+            try:
+                group_name = arg['group']
+            except KeyError:
+                # this shouldn't happen, because dict is build at above
+                raise DefinitionError(f'Missing "group" in {nav}.{card}', file=config.config_file)
+            try:
+                read = self.dict_group2file[group_name]
+            except KeyError:
+                # this shouldn't happen, because group_name is already validated
+                raise DefinitionError(
+                    f'Group "{group_name}" is not defined in any file', file=config.config_file)
+            i18n[read] = None
+        return list(i18n)
+
+    def _get_nav_config_task(self, config: ConfigGenerator):
+        """
+        Returns:
+            dict: {"task": list[str], "group": list[tuple[str, str]]}
+                # indicates to read task and taskgroups in user config
+        """
+        all_task_groups = []
+        for _, arg_name, arg_data in deep_iter_depth2(config.config_data):
+            if arg_name.startswith('_'):
+                continue
+            try:
+                task = arg_data['task']
+                group = arg_data['group']
+            except KeyError:
+                # this shouldn't happen, because arg_data is generated
+                raise DefinitionError(f'arg_data does not have "task" or "group": {arg_data}')
+            all_task_groups.append((task, group))
+
+        tasks, task_groups = self._regroup_intask_group(all_task_groups)
+        return {'task': tasks, 'group': task_groups}
+
+    @cached_property
+    def config_index_data(self):
+        """
+        Returns:
+            dict[str, dict]:
+                key: {nav_name}
+                value: {
+                    "file": str,  # indicates to read {nav}_config.json
+                    "i18n": list[str],  # indicates to read {nav}_i18n.json
+                    "task": {"task": list[str], "group": list[tuple[str, str]]}
+                        # indicates to read task and taskgroups in user config
+                }
+        """
+        out = {}
+        for nav_name, config in self.dict_nav_config.items():
+            if not config.config_data:
+                continue
+            file = config.config_file.subpath_to(self.root)
+            file = to_posix(file)
+            i18n = self._get_nav_config_i18n(config)
+            config = self._get_nav_config_task(config)
+            out[nav_name] = {
+                'file': file,
+                'i18n': i18n,
+                'config': {k: NoIndent(v) for k, v in config.items()}
+            }
+        return out
+
+    """
     Generate nav.index.json
     """
 
@@ -61,33 +204,15 @@ class IndexGenerator(CrossNavGenerator):
         out = {}
         for config in self.dict_nav_config.values():
             for group_name, group_data in config.i18n_data.items():
-                i18n = deep_get(group_data, ['_info', 'i18n'], default={})
-                name = self._get_i18n_name(i18n)
-                out[group_name] = name
-        return out
+                i18n = deep_get(group_data, ['_info'], default={})
+                # get "name" from a nested i18n dict
+                for lang, field_data in i18n.items():
+                    try:
+                        name = field_data['name']
+                    except KeyError:
+                        name = ''
+                    deep_set(out, [group_name, lang], name)
 
-    @staticmethod
-    def _get_i18n_name(i18n):
-        """
-        Get "name" from a nested i18n dict
-
-        Args:
-            i18n (dict[str, dict[str, str]]):
-                key: {lang}.{field}
-                value: translation
-
-        Returns:
-            dict[str, str]:
-                key: {lang}
-                value: translation
-        """
-        out = {}
-        for lang, field_data in i18n.items():
-            try:
-                name = field_data['name']
-            except KeyError:
-                name = ''
-            out[lang] = name
         return out
 
     @cached_property
@@ -122,20 +247,24 @@ class IndexGenerator(CrossNavGenerator):
                         value = task_name
                     deep_set(out, key, value)
         # card name
-        for nav_name, card_name, data in deep_iter_depth2(self.config_index_data):
-            try:
-                info = data['_info']
-            except KeyError:
-                raise DefinitionError(f'Card "{nav_name}.{card_name}" has no "_info"')
-            try:
-                group_name = info['group']
-            except KeyError:
-                raise DefinitionError(f'Card "{nav_name}.{card_name}._info" has no "group"')
-            try:
-                name = self.dict_group_name_i18n[group_name]
-            except KeyError:
-                raise DefinitionError(f'Card "{nav_name}.{card_name}._info" reference a non-exist group: {group_name}')
-            deep_set(out, ['card', nav_name, card_name], name)
+        for nav_name, config in self.dict_nav_config.items():
+            for card_name, data in config.config_data.items():
+                if card_name.startswith('_'):
+                    continue
+                try:
+                    info = data['_info']
+                except KeyError:
+                    raise DefinitionError(f'Card "{nav_name}.{card_name}" has no "_info"')
+                try:
+                    group_name = info['group']
+                except KeyError:
+                    raise DefinitionError(f'Card "{nav_name}.{card_name}._info" has no "group"')
+                try:
+                    name = self.dict_group_name_i18n[group_name]
+                except KeyError:
+                    raise DefinitionError(
+                        f'Card "{nav_name}.{card_name}._info" reference a non-exist group: {group_name}')
+                deep_set(out, ['card', nav_name, card_name], name)
 
         return out
 
@@ -165,10 +294,15 @@ class IndexGenerator(CrossNavGenerator):
         # {nav}_config.json
         self.generate_config_json()
 
+        # config.index.json
+        op = write_json_custom_indent(self.config_index_file, self.config_index_data, skip_same=True)
+        if op:
+            logger.info(f'Write file {self.config_index_file}')
+
         # nav.index.json
-        # op = write_json_custom_indent(self.nav_index_file, self.nav_index_data, skip_same=True)
-        # if op:
-        #     logger.info(f'Write file {self.nav_index_file}')
+        op = write_json_custom_indent(self.nav_index_file, self.nav_index_data, skip_same=True)
+        if op:
+            logger.info(f'Write file {self.nav_index_file}')
 
 
 if __name__ == '__main__':

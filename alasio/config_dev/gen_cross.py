@@ -65,7 +65,7 @@ class CrossNavGenerator:
             if file == config.model_file:
                 raise DefinitionError(
                     f'model_file is not a subpath of root, model_file={config.model_file}, root={self.root}')
-            file = file.to_posix()
+            file = to_posix(file)
             # iter group models
             for group_name, class_name in config.dict_group2class.items():
                 # group must be unique
@@ -292,6 +292,14 @@ class CrossNavGenerator:
     def _generate_nav_config_json(self, config: ConfigGenerator):
         """
         Generate {nav}_config.json from one nav config
+
+        Returns:
+            dict[str, dict[str, dict]]:
+                key: {card_name}.{arg_name}
+                value:
+                    {"group": group, "arg": "_info"} for _info
+                    {"task": task, "group": group, "arg": arg, **ArgData.to_dict()} for normal args
+                        which is arg path appended with ArgData
         """
         out = {}
         for task_name, task in config.tasks_data.items():
@@ -323,24 +331,6 @@ class CrossNavGenerator:
                         # inline option
                         if 'option' in row:
                             row['option'] = NoIndent(row['option'])
-
-        # generate i18nread
-        i18nread = {}
-        for nav, card, arg in deep_iter_depth2(out):
-            try:
-                group_name = arg['group']
-            except KeyError:
-                # this shouldn't happen, because dict is build at above
-                raise DefinitionError(f'Missing "group" in {nav}.{card}', file=config.config_file)
-            try:
-                read = self.dict_group2file[group_name]
-            except KeyError:
-                # this shouldn't happen, because group_name is already validated
-                raise DefinitionError(
-                    f'Group "{group_name}" is not defined in any file', file=config.config_file)
-            i18nread[read] = None
-        if i18nread:
-            out['_readi18n'] = list(i18nread)
 
         # store in config object, so other methods can reuse
         config.config_data = out
