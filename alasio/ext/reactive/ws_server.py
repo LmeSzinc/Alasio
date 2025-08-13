@@ -1,4 +1,3 @@
-import time
 from typing import Type
 
 import msgspec
@@ -8,8 +7,8 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from alasio.logger import logger
 from .event import AccessDenied, RequestEvent, ResponseEvent
+from .safeid import SafeIDGenerator
 from .ws_topic import BaseTopic
-from ..area.rng import random_id
 
 TRIO_CHANNEL_ERRORS = (trio.BrokenResourceError, trio.BusyResourceError, trio.ClosedResourceError, trio.EndOfChannel)
 WEBSOCKET_ERRORS = (WebSocketDisconnect, RuntimeError)
@@ -17,6 +16,7 @@ DECODE_ERRORS = (ValidationError, DecodeError, UnicodeDecodeError)
 ENCODE_ERRORS = (EncodeError, UnicodeEncodeError)
 REQUEST_EVENT_DECODER = msgspec.json.Decoder(RequestEvent)
 RESPONSE_EVENT_ENCODER = msgspec.json.Encoder()
+CONN_ID_GENERATOR = SafeIDGenerator(prefix='conn')
 
 
 class WebsocketTopicServer:
@@ -44,7 +44,7 @@ class WebsocketTopicServer:
 
     def __init__(self, ws: WebSocket):
         self.ws = ws
-        self.id = f'{int(time.time())}_{random_id(6)}'
+        self.id = CONN_ID_GENERATOR.get()
 
         # timestamp of last activity, used to calculate the next "ping"
         self.last_active = 0.
