@@ -49,6 +49,8 @@ class IndexGenerator(CrossNavGenerator):
         self.config_index_file = self.path_config.joinpath('config.index.json')
         # {path_config}/nav.index.json
         self.nav_index_file = self.path_config.joinpath('nav.index.json')
+        # {path_config}/queue.index.json
+        self.queue_index_file = self.path_config.joinpath('queue.index.json')
 
     """
     Generate model.index.json
@@ -261,33 +263,22 @@ class IndexGenerator(CrossNavGenerator):
 
         Returns:
             dict[str, dict[str, dict[str, str]]]:
-                key: {component}.{name}.{lang}
-                    component can be "nav", "task"
+                key: {nav_name}.{card_name}.{lang}
                 value: i18n translation
         """
         old = read_msgspec(self.nav_index_file)
         out = {}
-
         for nav_name, config in self.dict_nav_config.items():
             # nav name, which must not empty
             if config.tasks_data:
                 for lang in Const.GUI_LANGUAGE:
-                    key = ['nav', nav_name, lang]
+                    key = [nav_name, '_info', lang]
                     value = deep_get(old, key, default='')
                     if not value:
                         value = nav_name
                     deep_set(out, key, value)
-            # task name, which must not empty
-            for task_name in config.tasks_data:
-                for lang in Const.GUI_LANGUAGE:
-                    key = ['task', task_name, lang]
-                    value = deep_get(old, key, default='')
-                    if not value:
-                        value = task_name
-                    deep_set(out, key, value)
-        # card name
-        for nav_name, config in self.dict_nav_config.items():
             for card_name, data in config.config_data.items():
+                # card name
                 if card_name.startswith('_'):
                     continue
                 try:
@@ -303,8 +294,37 @@ class IndexGenerator(CrossNavGenerator):
                 except KeyError:
                     raise DefinitionError(
                         f'Card "{nav_name}.{card_name}._info" reference a non-exist group: {group_name}')
-                deep_set(out, ['card', nav_name, card_name], name)
+                deep_set(out, [nav_name, card_name], name)
 
+        return out
+
+    """
+    Generate queue.index.json
+    """
+
+    @cached_property
+    def queue_index_data(self):
+        """
+        data of queue.index.json
+
+        Returns:
+            dict[str, dict[str, str]]:
+                key: {task_name}.{lang}
+                value: i18n translation
+        """
+        old = read_msgspec(self.nav_index_file)
+        out = {}
+        for nav_name, config in self.dict_nav_config.items():
+            # task name, which must not empty
+            for task_name, task_data in config.tasks_data.items():
+                if not task_data.group:
+                    continue
+                for lang in Const.GUI_LANGUAGE:
+                    key = [task_name, lang]
+                    value = deep_get(old, key, default='')
+                    if not value:
+                        value = task_name
+                    deep_set(out, key, value)
         return out
 
     """
@@ -344,6 +364,11 @@ class IndexGenerator(CrossNavGenerator):
         op = write_json_custom_indent(self.nav_index_file, self.nav_index_data, skip_same=True)
         if op:
             logger.info(f'Write file {self.nav_index_file}')
+
+        # queue.index.json
+        op = write_json_custom_indent(self.queue_index_file, self.queue_index_data, skip_same=True)
+        if op:
+            logger.info(f'Write file {self.queue_index_file}')
 
 
 if __name__ == '__main__':
