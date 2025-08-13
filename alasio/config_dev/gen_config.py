@@ -42,7 +42,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
             所以在Alasio中，你可以自由地将任何group聚合为card。前端会展示list[card]，而每个card内可以定义display group。
             card中可以包含一个或多个group，group.arg会被flatten并在卡片中显示为一维的输入组件。
             当card中包含多个group时，_info是第一个非Scheduler的group，你也可以使用inforef:{group}手动指定。
-        6. "nav" 是前端导航组件中的行。用户选择这行，然后前端展示相关设置。
+        6. "nav" 是前端导航组件中的组。用户选择这组，然后前端展示相关设置。
 
         文件解释：
         1. <nav>.args.yaml 是一个手动定义的文件。它有group.arg两个层级。

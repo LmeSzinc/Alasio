@@ -19,7 +19,7 @@ class IndexGenerator(CrossNavGenerator):
         """
         维护一个MOD下所有设置文件的数据一致性，生成json索引文件。
 
-        1. "model.index.json" 指导当前MOD下的task有哪些group，具有 task.group 二级结构。
+        1. "tasks.index.json" 指导当前MOD下有哪些task。
             这个文件会在脚本运行时被使用。
             当Alasio脚本实例启动时，它需要读取与某个task相关的设置：
             - 在"model.index.json"中查询当前task
@@ -43,15 +43,15 @@ class IndexGenerator(CrossNavGenerator):
         """
         super().__init__(*args, **kwargs)
 
-        # {path_config}/model.index.json
-        self.model_index_file = self.path_config.joinpath('model.index.json')
+        # {path_config}/task.index.json
+        self.task_index_file = self.path_config.joinpath('task.index.json')
         # {path_config}/config.index.json
         self.config_index_file = self.path_config.joinpath('config.index.json')
         # {path_config}/nav.index.json
         self.nav_index_file = self.path_config.joinpath('nav.index.json')
 
     """
-    Generate config.index.json
+    Generate model.index.json
     """
 
     @cached_property
@@ -63,7 +63,7 @@ class IndexGenerator(CrossNavGenerator):
                 value: A set of group name in task
         """
         out = defaultdict(set)
-        for task_name, group_name, ref in deep_iter_depth2(self.model_index_data):
+        for task_name, group_name, ref in deep_iter_depth2(self.model_data):
             try:
                 task = ref['task']
             except KeyError:
@@ -119,6 +119,45 @@ class IndexGenerator(CrossNavGenerator):
 
         return tasks, task_groups
 
+    @cached_property
+    def task_index_data(self):
+        """
+        Returns:
+            dict[str, dict]:
+                key: task_name
+                value: {"group": list[dict], "config": dict}
+                    "group" is a list of {'file': file, 'cls': class_name, 'task': ref_task_name}
+                    which indicates:
+                    - read config from task={ref_task_name} and group={group_name}
+                    - validate with model file={file}, class {class_name}
+                    class_name can be:
+                    - {group_name} for normal group
+                    - {task_name}_{group_name} that inherits from class {group_name}, for override task group
+
+                    "config" is {"task": list[str], "group": list[tuple[str, str]]}
+                    which indicates to read task and taskgroups in user config
+        """
+        out = {}
+        for task_name, group_data in self.model_data.items():
+            all_task_groups = []
+            for group_name, ref in group_data.items():
+                try:
+                    task = ref['task']
+                except KeyError:
+                    # this shouldn't happen, because arg_data is generated
+                    raise DefinitionError(f'Group ref does not have "task": {ref}')
+                all_task_groups.append((task, group_name))
+            tasks, groups = self._regroup_intask_group(all_task_groups, current_task=task_name)
+            out[task_name] = {
+                'group': group_data,
+                'config': {'task': NoIndent(tasks), 'group': NoIndent(groups)},
+            }
+        return out
+
+    """
+    Generate config.index.json
+    """
+
     def _get_nav_config_i18n(self, config: ConfigGenerator):
         """
         Returns:
@@ -170,7 +209,7 @@ class IndexGenerator(CrossNavGenerator):
                 value: {
                     "file": str,  # indicates to read {nav}_config.json
                     "i18n": list[str],  # indicates to read {nav}_i18n.json
-                    "task": {"task": list[str], "group": list[tuple[str, str]]}
+                    "config": {"task": list[str], "group": list[tuple[str, str]]}
                         # indicates to read task and taskgroups in user config
                 }
         """
@@ -284,15 +323,17 @@ class IndexGenerator(CrossNavGenerator):
             nav.generate()
 
         # model.index.json
-        _ = self.model_index_data
-        if not self.model_index_data:
+        _ = self.model_data
+        if not self.model_data:
             return
-        op = write_json_custom_indent(self.model_index_file, self.model_index_data, skip_same=True)
-        if op:
-            logger.info(f'Write file {self.model_index_file}')
 
         # {nav}_config.json
         self.generate_config_json()
+
+        # task.index.json
+        op = write_json_custom_indent(self.task_index_file, self.task_index_data, skip_same=True)
+        if op:
+            logger.info(f'Write file {self.task_index_file}')
 
         # config.index.json
         op = write_json_custom_indent(self.config_index_file, self.config_index_data, skip_same=True)

@@ -82,10 +82,8 @@ class CrossNavGenerator:
         return out
 
     @cached_property
-    def model_index_data(self):
+    def model_data(self):
         """
-        model data in model.index.json
-
         Returns:
              dict[str, dict[str, str | dict[str, str]]]:
                 key: {task_name}.{group_name}
@@ -274,7 +272,7 @@ class CrossNavGenerator:
                 )
             if display.task:
                 # If display a cross-task group, group must exist
-                if not deep_exist(self.model_index_data, keys=[display.task, display.group]):
+                if not deep_exist(self.model_data, keys=[display.task, display.group]):
                     raise DefinitionError(
                         f'Cross-task display ref "{display.task}.{display.group}" does not exist',
                         file=config.tasks_file, keys=[task_name, 'display']
@@ -282,7 +280,7 @@ class CrossNavGenerator:
                 yield TaskGroup(task=display.task, group=display.group)
             else:
                 # If display an in-task group, group must within this task
-                if not deep_exist(self.model_index_data, keys=[task_name, display.group]):
+                if not deep_exist(self.model_data, keys=[task_name, display.group]):
                     raise DefinitionError(
                         f'In-task display ref "{display.group}" is not in task "{task_name}"',
                         file=config.tasks_file, keys=[task_name, 'display']
