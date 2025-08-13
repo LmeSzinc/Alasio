@@ -7,6 +7,8 @@ class ModEntryInfo(Struct):
     """
     ModEntryInfo
     """
+    # mod name
+    name: str
     # absolute path to mod root folder, or relative path from running folder to mod root folder
     # default to ""
     root: str = ''
@@ -26,5 +28,5 @@ class ModEntryInfo(Struct):
 # default mod entry
 # key: mod name, value: path to mod root folder
 DICT_MOD_ENTRY = {
-    'alasio': ModEntryInfo(path_config='config_alasio'),
+    'alasio': ModEntryInfo(name='alasio', root='alasio', path_config='config_alasio'),
 }
