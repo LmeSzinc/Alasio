@@ -88,6 +88,8 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         """
         Callback function to send diff when `self.data` is re-computed
         """
+        if name != 'data':
+            return
         topic = self.topic_name()
         for op, keys, value in deep_iter_patch(old, new):
             event = ResponseEvent(t=topic, o=op, k=keys, v=value)

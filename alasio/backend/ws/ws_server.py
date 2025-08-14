@@ -6,6 +6,8 @@ from msgspec import DecodeError, EncodeError, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from alasio.backend.ws.ws_topic import BaseTopic
+from alasio.config.const import Const
+from alasio.ext.locale.accept_language import negotiate_accept_language
 from alasio.ext.reactive.event import AccessDenied, RequestEvent, ResponseEvent
 from alasio.ext.reactive.safeid import SafeIDGenerator
 from alasio.logger import logger
@@ -59,6 +61,10 @@ class WebsocketTopicServer:
     def __str__(self):
         return f'WebsocketServer({self.id})'
 
+    """
+    Websocket lifespan
+    """
+
     async def cleanup(self):
         """
         Cleanup all subscribed topics
@@ -102,6 +108,57 @@ class WebsocketTopicServer:
             # heartbeat
             nursery.start_soon(self.task_heartbeat)
 
+            # init
+            await self.init()
+
+    async def init(self):
+        """
+        Initialization after websocket established
+        """
+        # Default subscribe to ConnState
+        from alasio.backend.topic.state import ConnState
+        topic = ConnState(self.id, self)
+        self.subscribed[topic.topic_name()] = topic
+        # set language
+        lang = self._negotiate_lang()
+        await ConnState.lang.mutate(topic, lang)
+
+    def _negotiate_lang(self, default='en-US'):
+        """
+        Parse request into one available language
+
+        Returns:
+            str:
+        """
+        available = Const.GUI_LANGUAGE
+        ws = self.ws
+        # try to match the lang in cookie
+        prefer = ws.cookies.get('alasio_lang', '')
+        if prefer:
+            use = negotiate_accept_language(prefer, available)
+            if use:
+                return use
+        # try to match Accept-Language header
+        try:
+            prefer = ws.headers['Accept-Language']
+        except KeyError:
+            # this shouldn't happen, most browsers would post Accept-Language header
+            prefer = ''
+        if prefer:
+            use = negotiate_accept_language(prefer, available)
+            if use:
+                return use
+        # no luck, try to use default
+        if default in available:
+            return default
+        # ohno, default language is not available, use the first language
+        try:
+            return available[0]
+        except IndexError:
+            # empty available languages, there's nothing we can do
+            # return default anyway
+            return default
+
     async def close(self, code=1000, reason=None):
         """
         Close websocket connection with error handling
@@ -115,6 +172,10 @@ class WebsocketTopicServer:
                 await self.ws.close(code=code, reason=reason)
             except WEBSOCKET_ERRORS:
                 pass
+
+    """
+    Websocket methods
+    """
 
     async def send(self, data: ResponseEvent):
         """
@@ -138,6 +199,10 @@ class WebsocketTopicServer:
             data = ResponseEvent(t='error', o='full', v=data)
 
         await self.send(data)
+
+    """
+    Async tasks
+    """
 
     async def _ws_receive(self, ws: WebSocket):
         """
