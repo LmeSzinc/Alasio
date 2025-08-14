@@ -1,5 +1,5 @@
-from alasio.backend.config.scan import ConfigScan
-from alasio.ext.reactive.ws_server import WebsocketTopicServer
+from alasio.backend.topic.scan import ConfigScan
+from alasio.backend.ws.ws_server import WebsocketTopicServer
 
 
 class WebsocketServer(WebsocketTopicServer):

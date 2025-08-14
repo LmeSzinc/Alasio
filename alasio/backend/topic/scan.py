@@ -7,7 +7,7 @@ from alasio.config.table.scan import DndRequest, ScanTable
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.reactive.base_rpc import rpc
 from alasio.ext.reactive.rx_trio import async_reactive, async_reactive_source
-from alasio.ext.reactive.ws_topic import BaseTopic
+from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.ext.singleton import Singleton
 
 

@@ -79,7 +79,7 @@ def create_app():
     app.add_router('/api', auth.router)
 
     # Global websocket
-    from alasio.backend.topic import WebsocketServer
+    from alasio.backend.ws.topic import WebsocketServer
     app.routes.append(WebSocketRoute('/api/ws', WebsocketServer.endpoint))
 
     # Alasio should be a local service and should not be exposed on public network
