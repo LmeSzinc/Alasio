@@ -450,18 +450,22 @@ class SqlitePool:
 
         Args:
             file (str):
+
+        Returns:
+            bool: If success
         """
         with self.create_lock:
             try:
                 pool = self.all_pool.pop(file)
             except KeyError:
                 # no such pool, no need to release
-                return
+                pass
+            else:
+                # Delete within create_lock, because we need to prevent other threads starts using the file
+                pool.release_all()
 
-            # Delete within create_lock, because we need to prevent other threads starts using the file
-            pool.release_all()
             # delete file
-            atomic_remove(file)
+            return atomic_remove(file)
 
 
 SQLITE_POOL = SqlitePool()
