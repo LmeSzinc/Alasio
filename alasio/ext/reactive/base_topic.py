@@ -7,7 +7,8 @@ class BaseTopic:
     # The following names are preserved:
     # - "error", the builtin topic to give response to invalid input
     name = ''
-    # a collection of RPC methods
+    # A collection of RPC methods
+    # Note that this is auto generated and should be static, don't modify it at runtime
     rpc_methods: "dict[str, RPCMethod]" = {}
 
     @classmethod
@@ -27,9 +28,13 @@ class BaseTopic:
 
         # Create a new registry for this specific subclass, inheriting from parent
         # This prevents child classes from modifying the parent's registry.
-        cls._rpc_methods_ = cls.rpc_methods.copy()
+        cls.rpc_methods = {}
 
-        for name, member in cls.__dict__.items():
-            if callable(member) and hasattr(member, '_rpc_method_instance'):
-                # The decorator has already done the heavy lifting. We just collect the result.
-                cls.rpc_methods[name] = member._rpc_method_instance
+        for base in cls.__mro__:
+            # stop at self
+            if base is BaseTopic:
+                break
+            for name, member in base.__dict__.items():
+                if callable(member) and hasattr(member, '_rpc_method_instance'):
+                    # The decorator has already done the heavy lifting. We just collect the result.
+                    cls.rpc_methods[name] = member._rpc_method_instance
