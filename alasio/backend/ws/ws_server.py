@@ -401,14 +401,13 @@ class WebsocketTopicServer:
         """
         Dispatch request event to topic objects
         """
-        # check if topic valid
-        try:
-            topic_class = self.ALL_TOPIC_CLASS[event.t]
-        except KeyError:
-            raise AccessDenied(f'No such topic: {event.t}')
-
         op = event.o
         if op == 'sub':
+            # check if topic valid
+            try:
+                topic_class = self.ALL_TOPIC_CLASS[event.t]
+            except KeyError:
+                raise AccessDenied(f'No such topic: "{event.t}"')
             # if topic is already subscribed, ignore this event
             if event.t in self.subscribed:
                 return
@@ -428,6 +427,18 @@ class WebsocketTopicServer:
             return
 
         if op == 'rpc':
+            # RPC calls must pair with RPC ID
+            if not event.i:
+                msg = 'Missing RPC ID in event'
+                event = ResponseEvent(t='error', v=msg, i=event.i)
+                await self.send(event)
+                return
+            # check if topic valid
+            if event.t not in self.ALL_TOPIC_CLASS:
+                msg = f'No such topic: "{event.t}"'
+                event = ResponseEvent(t=event.t, v=msg, i=event.i)
+                await self.send(event)
+                return
             # check if topic subscribed
             try:
                 topic = self.subscribed[event.t]

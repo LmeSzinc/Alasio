@@ -111,11 +111,6 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
             value (Any): RPC method args
             rpc_id (str):
         """
-        if not rpc_id:
-            msg = 'Missing RPC ID in event'
-            event = ResponseEvent(t=self.topic_name(), v=msg, i=rpc_id)
-            await self.server.send(event)
-            return
         try:
             method = self.rpc_methods[func]
         except KeyError:
