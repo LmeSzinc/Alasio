@@ -5,6 +5,7 @@ import trio
 from msgspec import DecodeError, EncodeError, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
+from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
 from alasio.ext.locale.accept_language import negotiate_accept_language
@@ -43,6 +44,9 @@ class WebsocketTopicServer:
     # all topic classes, subclasses should override this
     # key: topic name, value: topic class
     ALL_TOPIC_CLASS: "dict[str, Type[BaseTopic]]" = {}
+    # default subscribed topics on connection init
+    # key: topic name, value: topic class
+    DEFAULT_TOPIC_CLASS: "dict[str, Type[BaseTopic]]" = {}
 
     def __init__(self, ws: WebSocket):
         self.ws = ws
@@ -115,10 +119,10 @@ class WebsocketTopicServer:
         """
         Initialization after websocket established
         """
-        # Default subscribe to ConnState
-        from alasio.backend.topic.state import ConnState
-        topic = ConnState(self.id, self)
-        self.subscribed[topic.topic_name()] = topic
+        # Default subscribe
+        for topic_name, topic_class in self.DEFAULT_TOPIC_CLASS.items():
+            topic = topic_class(self.id, self)
+            self.subscribed[topic_name] = topic
         # set language
         lang = self._negotiate_lang()
         await ConnState.lang.mutate(topic, lang)
@@ -402,14 +406,18 @@ class WebsocketTopicServer:
         Dispatch request event to topic objects
         """
         op = event.o
+        t = event.t
         if op == 'sub':
+            # cannot double subscribe a default-subscribed topic
+            if t in self.DEFAULT_TOPIC_CLASS:
+                return
             # check if topic valid
             try:
-                topic_class = self.ALL_TOPIC_CLASS[event.t]
+                topic_class = self.ALL_TOPIC_CLASS[t]
             except KeyError:
-                raise AccessDenied(f'No such topic: "{event.t}"')
+                raise AccessDenied(f'No such topic: "{t}"')
             # if topic is already subscribed, ignore this event
-            if event.t in self.subscribed:
+            if t in self.subscribed:
                 return
             # create new topic
             topic = topic_class(self.id, self)
@@ -417,8 +425,11 @@ class WebsocketTopicServer:
             await topic.op_sub()
             return
         if op == 'unsub':
+            # cannot unsubscribe a default-subscribed topic
+            if t in self.DEFAULT_TOPIC_CLASS:
+                return
             try:
-                topic = self.subscribed.pop(event.t)
+                topic = self.subscribed.pop(t)
             except KeyError:
                 # if topic is never subscribed, ignore this event
                 return
@@ -434,18 +445,18 @@ class WebsocketTopicServer:
                 await self.send(event)
                 return
             # check if topic valid
-            if event.t not in self.ALL_TOPIC_CLASS:
-                msg = f'No such topic: "{event.t}"'
-                event = ResponseEvent(t=event.t, v=msg, i=event.i)
+            if t not in self.ALL_TOPIC_CLASS:
+                msg = f'No such topic: "{t}"'
+                event = ResponseEvent(t=t, v=msg, i=event.i)
                 await self.send(event)
                 return
             # check if topic subscribed
             try:
-                topic = self.subscribed[event.t]
+                topic = self.subscribed[t]
             except KeyError:
                 # note that every RPC calls should have a Response with the same RPC ID
                 # instead of just raising errors
-                msg = f'Cannot do RPC before subscribing topic: "{event.t}"'
+                msg = f'Cannot do RPC before subscribing topic: "{t}"'
                 event = ResponseEvent(t=event.t, v=msg, i=event.i)
                 await self.send(event)
                 return

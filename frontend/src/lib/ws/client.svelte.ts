@@ -15,7 +15,7 @@ interface WebsocketManagerOptions {
 }
 
 // --- Base configurations ---
-const BASE_DEFAULT_SUBSCRIPTIONS = ["error"];
+const BASE_DEFAULT_SUBSCRIPTIONS = ["ConnState"];
 const BASE_SCROLL_TOPICS = { log: 1000 };
 
 class WebsocketManager {
