@@ -52,6 +52,12 @@ class ConfigScanSource(metaclass=Singleton):
 class ConfigScan(BaseTopic):
     @async_reactive
     async def data(self):
+        """
+        Returns:
+            dict[str, dict[str, Any]]:
+                key: config_name
+                value: ConfigInfo in dict
+        """
         data = await ConfigScanSource().data
         return deepcopy_msgpack(data)
 
