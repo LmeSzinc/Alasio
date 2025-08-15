@@ -96,7 +96,11 @@ def rpc(func):
     A decorator that transforms a method into an RPCMethod object and marks it for registration.
 
     Note that, if an RPC method success, success response will be sent.
-    If an RPC method raises error, error will be converted to error message and error response will be sent.
+    - If an RPC call success, its return value won't be sent.
+        You should always send data through topic subscription,
+        so every connection can get side effect updates instead of the RPC caller itself.
+    - If an RPC call raises error,
+        error will be converted to error message and error response will be sent.
 
     Examples:
         class ConfigScan(BaseTopic):

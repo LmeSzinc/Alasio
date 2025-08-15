@@ -142,6 +142,8 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
             return
 
         # success
+        # RPC success has no return value sent, omitting "v" means success, having "v" means error
+        # The real RPC response will go through existing topic subscription
         event = ResponseEvent(t=self.topic_name(), i=rpc_id)
         await self.server.send(event)
         return

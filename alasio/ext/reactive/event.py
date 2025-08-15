@@ -41,6 +41,7 @@ class ResponseEvent(Struct, omit_defaults=True):
     # RPC event ID only comes with topic and value.
     # - If event success, value is omitted.
     # - If event failed, value is a string of error message.
+    # An RPC response omitting "v" means success, having "v" means error
     i: str = ''
 
 
