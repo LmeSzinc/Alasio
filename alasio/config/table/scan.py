@@ -8,7 +8,7 @@ from alasio.config.table.base import AlasioConfigDB, AlasioGuiDB
 from alasio.config.table.key import AlasioKeyTable
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
-from alasio.ext.path.atomic import atomic_read_bytes, atomic_remove, atomic_write
+from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.ext.path.validate import validate_filename
 from alasio.ext.pool import WORKER_POOL
 from alasio.ext.reactive.event import RpcValueError
@@ -27,6 +27,25 @@ class ConfigFile(msgspec.Struct):
         self.mod = AlasioKeyTable(self.name).mod_get()
 
 
+def validate_config_name(config_name):
+    """
+    Args:
+        config_name (str):
+
+    Returns:
+        str: error message if config name is invalid
+            or empty string "" if valid
+    """
+    try:
+        validate_filename(config_name)
+    except ValueError as e:
+        return str(e)
+    # Internal names are not allowed
+    if config_name in PROTECTED_NAMES:
+        return f'Config name is protected: {config_name}'
+    return ''
+
+
 def iter_local_files():
     """
     Scan all config files, except gui.db
@@ -36,13 +55,11 @@ def iter_local_files():
     """
     folder = env.PROJECT_ROOT / 'config'
     for file in folder.iter_files(ext='.db'):
-        try:
-            validate_filename(file.name)
-        except ValueError:
+        name = file.stem.lower()
+        error = validate_config_name(name)
+        if error:
             continue
-        name = file.stem
-        if name not in PROTECTED_NAMES:
-            yield ConfigFile(name=name, mod='')
+        yield ConfigFile(name=name, mod='')
 
 
 class DndRequest(msgspec.Struct):
@@ -339,12 +356,9 @@ class ScanTable(AlasioGuiDB):
             ValueError: If config name is invalid
             FileExistsError: If config file already exists
         """
-        try:
-            validate_filename(name)
-        except ValueError as e:
-            raise RpcValueError(str(e))
-        if name.lower() in PROTECTED_NAMES:
-            raise RpcValueError(f'Config name to add is protected: {name}')
+        error = validate_config_name(name)
+        if error:
+            raise RpcValueError(error)
 
         file = AlasioConfigDB.config_file(name)
         if file.exists():
@@ -366,12 +380,9 @@ class ScanTable(AlasioGuiDB):
         Raises:
             ValueError: If config name is invalid
         """
-        try:
-            validate_filename(name)
-        except ValueError as e:
-            raise RpcValueError(str(e))
-        if name.lower() in PROTECTED_NAMES:
-            raise RpcValueError(f'Config name is protected: {name}')
+        error = validate_config_name(name)
+        if error:
+            raise RpcValueError(error)
 
         # delete
         logger.info(f'config_del: name={name}')
@@ -386,19 +397,15 @@ class ScanTable(AlasioGuiDB):
             source (str):
             target (str):
         """
-        try:
-            validate_filename(source)
-        except ValueError as e:
-            raise RpcValueError(str(e))
-        if source.lower() in PROTECTED_NAMES:
-            raise RpcValueError(f'Source config name is protected: {source}')
-        try:
-            validate_filename(target)
-        except ValueError as e:
-            raise RpcValueError(str(e))
-        if target.lower() in PROTECTED_NAMES:
-            raise RpcValueError(f'Target config name is protected: {target}')
+        error = validate_config_name(source)
+        if error:
+            raise RpcValueError(error)
+        error = validate_config_name(target)
+        if error:
+            raise RpcValueError(error)
 
+        if source == target:
+            raise RpcValueError(f'Target is the same as source: {target}')
         source_file = AlasioConfigDB.config_file(source)
         target_file = AlasioConfigDB.config_file(target)
         if target_file.exists():
@@ -432,6 +439,11 @@ class ScanTable(AlasioGuiDB):
         Args:
             configs (list[DndRequest]):
         """
+        for config in configs:
+            error = validate_config_name(config.name)
+            if error:
+                raise RpcValueError(error)
+
         # No lazy cursor, since we select first
         with self.cursor() as c:
             record = self.select_rows(_cursor_=c)

@@ -3,11 +3,11 @@ from typing import List
 
 import trio
 
-from alasio.config.table.scan import DndRequest, ScanTable
+from alasio.backend.ws.ws_topic import BaseTopic
+from alasio.config.table.scan import ConfigInfo, DndRequest, ScanTable
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.reactive.base_rpc import rpc
 from alasio.ext.reactive.rx_trio import async_reactive, async_reactive_source
-from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.ext.singleton import Singleton
 
 
@@ -17,6 +17,13 @@ class ConfigScanSource(metaclass=Singleton):
         self.lock = trio.Lock()
 
     async def scan(self, force=False):
+        """
+        Args:
+            force:
+
+        Returns:
+            dict[str, ConfigInfo]:
+        """
         now = time.time()
         if not force and now - self.lastrun < 5:
             return self.data
