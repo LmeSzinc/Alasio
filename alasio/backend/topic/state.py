@@ -23,40 +23,40 @@ class ConnState(BaseTopic):
         return 'en-US'
 
     @rpc
-    async def set_lang(self, value: str):
-        use = negotiate_accept_language(value, Const.GUI_LANGUAGE)
+    async def set_lang(self, lang: str):
+        use = negotiate_accept_language(lang, Const.GUI_LANGUAGE)
         if not use:
-            raise RpcValueError(f'Language "{value}" does not match any available languages')
+            raise RpcValueError(f'Language "{lang}" does not match any available languages')
         # set
-        await self.__class__.lang.mutate(self, value)
+        await self.__class__.lang.mutate(self, lang)
 
     @async_reactive_source
     async def nav_state(self):
         return NavState()
 
     @rpc
-    async def set_config(self, value: str):
+    async def set_config(self, name: str):
         """
         Set config name, and change nav_state accordingly
         """
-        error = validate_config_name(value)
+        error = validate_config_name(name)
         if error:
             raise RpcValueError(error)
 
         # get current configs
         data = await ConfigScan(self.conn_id).data
-        if value not in data:
-            raise RpcValueError(f'No such config {value}')
+        if name not in data:
+            raise RpcValueError(f'No such config {name}')
 
         # set
         # note that mod_name is calculated in backend to ensure consistency of mod_name and config_name
         state: NavState = await self.nav_state
         config_before = state.config_name
-        if config_before == value:
+        if config_before == name:
             # same config, no need to change it
             return
-        mod_name = deep_get(data, keys=[value, 'Mod'], default='')
-        state.config_name = value
+        mod_name = deep_get(data, keys=[name, 'Mod'], default='')
+        state.config_name = name
         state.mod_name = mod_name
         # reset nav when switching to new config
         state.nav_name = ''

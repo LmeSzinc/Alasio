@@ -10,8 +10,10 @@
 
   // Subscribe to ConfigScan topic
   const topicClient = websocketClient.sub("ConfigScan");
-  const rpc = topicClient.rpc();
   onDestroy(topicClient.unsub);
+  const stateClient = websocketClient.sub("ConnState");
+  const rpc = stateClient.rpc();
+  onDestroy(stateClient.unsub);
 
   // props
   type $$props = {
