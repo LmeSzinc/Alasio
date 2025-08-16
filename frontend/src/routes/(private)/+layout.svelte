@@ -3,13 +3,15 @@
   import { invalidateAll } from "$app/navigation";
   import ConfigAside from "$lib/components/aside/ConfigAside.svelte";
   import { Header } from "$lib/components/header";
-  import { MainNav } from "$lib/components/nav";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import * as Sheet from "$lib/components/ui/sheet";
-
+  import { initNavContext } from "$lib/navcontext.svelte";
   // props
   let { data, children } = $props();
+
+  // nav context
+  const slots = initNavContext();
 
   // error page
   let isRetrying = $state<boolean>(false);
@@ -55,16 +57,22 @@
           <div class="aside-item border-border border-r xl:shadow-sm">
             <ConfigAside class="" />
           </div>
-          <div class="aside-item xl:shadow-sm">
-            <MainNav class="w-60 " />
-          </div>
+          {#if slots.nav}
+            <div class="aside-item w-60 xl:shadow-sm">
+              {@render slots.nav()}
+            </div>
+          {/if}
         </div>
         <!-- 1.2.2 If media<md, aside and nav show as sheet  -->
         <Sheet.Root bind:open={isSheetOpen}>
           <Sheet.Content side="left" class="max-width-85vw">
             <div class="flex h-full">
               <ConfigAside onNavigate={closeSheet} class="border-border border-r" />
-              <MainNav class="flex-1" />
+              <div class="flex-1">
+                {#if slots.nav}
+                  {@render slots.nav()}
+                {/if}
+              </div>
             </div>
           </Sheet.Content>
         </Sheet.Root>
