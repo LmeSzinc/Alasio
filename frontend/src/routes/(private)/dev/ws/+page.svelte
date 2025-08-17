@@ -47,11 +47,7 @@
 
   // Define a type alias for clarity
   type SortedTopicEntry = [string, any];
-
-  // Use $state and $effect for sortedTopicsData to ensure explicit array type
-  let sortedTopicsData: SortedTopicEntry[] = $state([]);
-
-  $effect(() => {
+  const sortedTopicsData: SortedTopicEntry[] = $derived.by(() => {
     // Sort topics to show default subscriptions first
     const sorted: SortedTopicEntry[] = [];
     const nonDefault: SortedTopicEntry[] = [];
@@ -64,11 +60,7 @@
         nonDefault.push([topicName, data]);
       }
     }
-
-    // Then, add non-default subscriptions
-    sorted.push(...nonDefault);
-
-    sortedTopicsData = sorted; // Update the $state variable
+    return [...sorted, ...nonDefault];
   });
 
   function handleRpcSubmit() {
