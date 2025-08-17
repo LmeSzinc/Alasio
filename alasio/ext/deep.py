@@ -254,13 +254,27 @@ def deep_iter_depth1(data):
         data:
 
     Yields:
-        Any: Key
-        Any: Value
+        tuple[Any, Any]: key, value
     """
     try:
-        for k, v in data.items():
-            yield k, v
+        yield from data.items()
+    except AttributeError:
+        # `data` is not dict
         return
+
+
+def deep_values_depth1(data):
+    """
+    Equivalent to data.values() but suppress error if data is not a dict
+
+    Args:
+        data:
+
+    Yields:
+        Any:
+    """
+    try:
+        yield from data.values()
     except AttributeError:
         # `data` is not dict
         return
@@ -275,15 +289,39 @@ def deep_iter_depth2(data):
         data:
 
     Yields:
-        Any: Key1
-        Any: Key2
-        Any: Value
+        tuple[Any, Any, Any]: key1, key2, value
     """
     try:
         for k1, v1 in data.items():
-            if type(v1) is dict:
+            try:
                 for k2, v2 in v1.items():
                     yield k1, k2, v2
+            except AttributeError:
+                # `v1` is not dict
+                return
+    except AttributeError:
+        # `data` is not dict
+        return
+
+
+def deep_values_depth2(data):
+    """
+    Iter key and value in nested dict of depth 2
+    A simplified deep_iter
+
+    Args:
+        data:
+
+    Yields:
+        Any:
+    """
+    try:
+        for v1 in data.values():
+            try:
+                yield from v1.values()
+            except AttributeError:
+                # `v1` is not dict
+                return
     except AttributeError:
         # `data` is not dict
         return
@@ -301,8 +339,7 @@ def deep_iter(data, min_depth=None, depth=3):
         depth:
 
     Yields:
-        list[str]: Key path
-        Any: Value
+        tuple[list[Any], Any]: list[key], value
     """
     if min_depth is None:
         min_depth = depth
