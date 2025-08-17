@@ -70,7 +70,7 @@
 </script>
 
 <aside
-  class={cn("bg-background flex h-full max-h-screen w-20 flex-col", className)}
+  class={cn("flex h-full max-h-screen w-20 flex-col", className)}
   role="navigation"
   aria-label="Configuration sidebar"
 >

@@ -54,11 +54,11 @@
         <!-- If media<xl, aside and nav show as one sidebar -->
         <!-- If media>=xl, aside and nav show as standalone cards -->
         <div class="aside-container hidden md:flex">
-          <div class="aside-item border-border border-r xl:shadow-sm">
+          <div class="aside-item border-border bg-background border-r xl:shadow-sm">
             <ConfigAside class="" />
           </div>
           {#if slots.nav}
-            <div class="aside-item w-60 xl:shadow-sm">
+            <div class="aside-item bg-background w-60 xl:shadow-sm">
               {@render slots.nav()}
             </div>
           {/if}
