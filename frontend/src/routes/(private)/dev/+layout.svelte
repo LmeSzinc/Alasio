@@ -1,14 +1,11 @@
 <script lang="ts">
   import { MainNav } from "$lib/components/nav";
-  import { setNavContext, cleanNavContext } from "$lib/navcontext.svelte";
+  import { useNavContext } from "$lib/navcontext.svelte";
 
   let { children } = $props();
 
   // nav context
-  setNavContext(nav);
-  $effect(() => {
-    return cleanNavContext;
-  });
+  useNavContext(nav);
 </script>
 
 {#snippet nav()}

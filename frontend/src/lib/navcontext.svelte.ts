@@ -17,10 +17,36 @@ export function initNavContext() {
 
 export function setNavContext(nav: Snippet) {
   const context = getContext<SlotContext>(key);
-  Object.assign(context, { nav });
+  if (!context) {
+    return;
+  }
+  context.nav = nav;
 }
 
-export function cleanNavContext() {
+export function cleanNavContext(nav?: Snippet) {
   const context = getContext<SlotContext>(key);
-  Object.assign(context, { nav: undefined });
+  if (!context) {
+    return;
+  }
+  if (nav === undefined || context.nav === nav) {
+    context.nav = undefined;
+  }
+}
+/**
+ * A reactive utility to manage the navigation snippet for the component's lifecycle.
+ * It automatically sets the nav snippet when the component mounts (or when the snippet changes)
+ * and cleans it up when the component is destroyed (or when the snippet changes).
+ *
+ * @param nav The nav snippet to be set in the context. Can be a reactive value.
+ *            If the snippet becomes undefined, it will be cleaned from the context.
+ */
+export function useNavContext(nav: Snippet | undefined) {
+  $effect(() => {
+    if (nav) {
+      setNavContext(nav);
+      return () => {
+        cleanNavContext(nav);
+      };
+    }
+  });
 }
