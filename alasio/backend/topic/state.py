@@ -46,7 +46,7 @@ class ConnState(BaseTopic):
         # get current configs
         data = await ConfigScan(self.conn_id).data
         if name not in data:
-            raise RpcValueError(f'No such config {name}')
+            raise RpcValueError(f'No such config: "{name}"')
 
         # set
         # note that mod_name is calculated in backend to ensure consistency of mod_name and config_name
@@ -55,7 +55,7 @@ class ConnState(BaseTopic):
         if config_before == name:
             # same config, no need to change it
             return
-        mod_name = deep_get(data, keys=[name, 'Mod'], default='')
+        mod_name = deep_get(data, keys=[name, 'mod'], default='')
         state.config_name = name
         state.mod_name = mod_name
         # reset nav when switching to new config
