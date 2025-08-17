@@ -2,9 +2,8 @@
   import { DndProvider, applyDnd, type DndEndCallbackDetail } from "$lib/components/dnd";
   import { Button } from "$lib/components/ui/button";
   import { Help } from "$lib/components/ui/help";
-  import { websocketClient } from "$lib/ws";
+  import { useTopic } from "$lib/ws";
   import { Loader2, Plus } from "@lucide/svelte";
-  import { onDestroy } from "svelte";
   import type { ConfigGroupData } from "./ConfigGroup.svelte";
   import ConfigGroup from "./ConfigGroup.svelte";
   import type { Config } from "./ConfigItem.svelte";
@@ -20,9 +19,8 @@
   const { class: className }: $$props = $props();
 
   // SINGLE SOURCE OF TRUTH (from server)
-  const topicClient = websocketClient.sub("ConfigScan");
+  const topicClient = useTopic("ConfigScan");
   const rpc = topicClient.rpc();
-  onDestroy(topicClient.unsub);
 
   // RPC handlers for dialogs
   const addRpc = topicClient.rpc();

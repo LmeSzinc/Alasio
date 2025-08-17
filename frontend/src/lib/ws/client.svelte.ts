@@ -295,34 +295,6 @@ class WebsocketManager {
         this.#send({ t: topic });
       }
     }
-    const client = this;
-
-    return {
-      /**
-       * A reactive getter for the topic's data.
-       * It uses the captured `instance` to access the correct `topics` state.
-       */
-      get data() {
-        return client.topics[topic];
-      },
-
-      /**
-       * Creates a stateful RPC handler for this topic.
-       */
-      // The implementation signature also uses the interface.
-      rpc(options?: RpcOptions) {
-        return createRpc(topic, client, options);
-      },
-
-      /*
-       * A helper method to unsubscribe within topic, so you can do:
-       * const topicClient = websocketClient.sub("ConfigScan");
-       * onDestroy(topicClient.unsub);
-       */
-      unsub() {
-        client.unsub(topic);
-      },
-    };
   }
   /**
    * Unsubscribes to a topic.

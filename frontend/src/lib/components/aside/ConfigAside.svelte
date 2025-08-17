@@ -2,18 +2,15 @@
   import { goto } from "$app/navigation";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { cn } from "$lib/utils.js";
-  import { websocketClient } from "$lib/ws";
+  import { useTopic } from "$lib/ws";
   import { Settings } from "@lucide/svelte";
-  import { onDestroy } from "svelte";
   import ConfigItem from "./ConfigItem.svelte";
   import type { ConfigLike, ConfigTopicLike } from "./types";
 
   // Subscribe to ConfigScan topic
-  const topicClient = websocketClient.sub("ConfigScan");
-  onDestroy(topicClient.unsub);
-  const stateClient = websocketClient.sub("ConnState");
+  const topicClient = useTopic("ConfigScan");
+  const stateClient = useTopic("ConnState");
   const rpc = stateClient.rpc();
-  onDestroy(stateClient.unsub);
 
   // props
   type $$props = {

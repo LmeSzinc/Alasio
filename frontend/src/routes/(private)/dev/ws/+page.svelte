@@ -1,16 +1,14 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { Badge } from "$lib/components/ui/badge";
+  import { Button } from "$lib/components/ui/button";
+  import * as Card from "$lib/components/ui/card";
+  import Help from "$lib/components/ui/help/help.svelte";
+  import { Input } from "$lib/components/ui/input";
+  import { Label } from "$lib/components/ui/label";
   import { websocketClient } from "$lib/ws";
   import { createRpc } from "$lib/ws/rpc.svelte";
   import { Loader2 } from "@lucide/svelte";
-
-  // Import UI components
-  import { Button } from "$lib/components/ui/button";
-  import * as Card from "$lib/components/ui/card";
-  import { Input } from "$lib/components/ui/input";
-  import { Label } from "$lib/components/ui/label";
-  import { Badge } from "$lib/components/ui/badge";
-  import Help from "$lib/components/ui/help/help.svelte";
+  import { onDestroy } from "svelte";
 
   // --- Form State ---
   let topic = $state("ConfigScan");
