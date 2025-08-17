@@ -4,7 +4,8 @@ import alasio.config.entry.const as const
 from alasio.config.entry.mod import Mod
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_iter, deep_iter_depth2
+from alasio.ext.deep import deep_get, deep_iter_depth2, deep_values_depth2
+from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import is_abspath, joinpath
 from alasio.logger import logger
@@ -89,7 +90,8 @@ class ModLoader:
         try:
             mod = self.dict_mod[mod_name]
         except KeyError:
-            raise KeyError(f'No such mod: mod="{mod_name}"') from None
+            # raise KeyError(f'No such mod: "{mod_name}"') from None
+            return {}
 
         data = mod.nav_index_data()
         out = defaultdict(dict)
@@ -99,10 +101,56 @@ class ModLoader:
             out[nav_name][card_name] = i18n
         return out
 
+    def get_gui_config(self, mod_name, config_name, nav_name, lang):
+        """
+        Args:
+            mod_name (str):
+            config_name (str):
+            nav_name (str):
+            lang (str):
 
-if __name__ == '__main__':
-    self = ModLoader(PathStr.new(r'E:\ProgramData\Pycharm\Alasio'))
-    self.build()
-    d = self.get_gui_nav('alasio', 'zh-CN')
-    for k, v in deep_iter(d, depth=2):
-        print(k, v)
+        Returns:
+
+        """
+        try:
+            mod = self.dict_mod[mod_name]
+        except KeyError:
+            # raise KeyError(f'No such mod: "{mod_name}"') from None
+            return {}
+
+        # prepare output dict
+        config_index_data = mod.config_index_data()
+        try:
+            nav_ref = config_index_data[nav_name]
+        except KeyError:
+            # raise KeyError(f'No such nav: "{mod_name}"') from None
+            return {}
+        out = mod.nav_config_json(nav_ref.file)
+        # copy as output, so we can safely modify
+        out = deepcopy_msgpack(out)
+
+        # prepare i18n reference
+        i18n = {}
+        for file in nav_ref.i18n:
+            group_i18n = mod.nav_i18n_json(file)
+            i18n.update(group_i18n)
+
+        # insert i18n
+        for arg_data in deep_values_depth2(out):
+            try:
+                group_name = arg_data['group']
+                arg_name = arg_data['arg']
+            except KeyError:
+                # this shouldn't happen
+                continue
+            i18n_data = deep_get(i18n, [group_name, arg_name, lang])
+            try:
+                arg_data.update(i18n_data)
+            except TypeError:
+                # this shouldn't happen, as i18n_data should be dict
+                continue
+
+        return out
+
+
+MOD_LOADER = ModLoader(env.PROJECT_ROOT)
