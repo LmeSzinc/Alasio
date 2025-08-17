@@ -2,11 +2,11 @@
   import { tv, type VariantProps } from "tailwind-variants";
 
   export const badgeVariants = tv({
-    base: "hover:bg-accent/50 focus:ring-ring flex w-full cursor-pointer flex-col items-center gap-1 mt-2 rounded-md transition-colors",
+    base: "focus:ring-ring flex w-full cursor-pointer flex-col items-center py-1.5 rounded-md transition-colors",
     variants: {
       variant: {
-        default: "",
-        active: "",
+        default: "hover:bg-accent/50 text-primary ",
+        active: "bg-primary hover:bg-primary/90 text-primary-foreground/85",
       },
     },
     defaultVariants: {
@@ -62,9 +62,9 @@
       onerror={handleIconError}
     />
   {:else}
-    <Play class="text-primary fill-primary h-8 w-8" aria-hidden="true" />
+    <Play class="h-8 w-8" aria-hidden="true" />
   {/if}
-  <span class="text-muted-foreground line-clamp-2 text-center text-xs break-all" aria-hidden="true">
+  <span class="line-clamp-2 text-center text-xs break-all" aria-hidden="true">
     {config.name}
   </span>
 </button>

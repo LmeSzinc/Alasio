@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { page } from "$app/state"
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { cn } from "$lib/utils.js";
   import { useTopic } from "$lib/ws";
@@ -54,13 +55,18 @@
       }));
   });
 
+  // Get current config_name from URL
+  const activeConfigName = $derived(
+    page.params.config_name ? decodeURIComponent(page.params.config_name) : undefined
+  );
+
   // Handle config item click
   async function handleConfigClick(config: ConfigLike) {
-    // Call RPC to set the config
-    rpc.call("set_config", { name: config.name });
-    // Navigate to dashboard
+    // push to `/config/{config_name}`, target page will do rpc call
+    const encodedConfigName = encodeURIComponent(config.name);
+    await goto(`/config/${encodedConfigName}`);
+    // additional callback
     onNavigate();
-    await goto(`/config/${config.id}`);
   }
 
   // Navigate to settings
@@ -75,12 +81,12 @@
   aria-label="Configuration sidebar"
 >
   <ScrollArea class="min-h-0 flex-1">
-    <div class="space-y-2 px-1 py-2" role="list">
+    <div class="space-y-1 px-1 py-2" role="list">
       {#each groups as group (group.id)}
         {#if group.items.length === 1}
           <!-- Single item in group - display directly -->
           {@const item = group.items[0]}
-          {@const variant = activeId && item.id === activeId ? "active" : "default"}
+          {@const variant = activeConfigName === item.name ? "active" : "default"}
           <div role="listitem" class="px-1">
             <ConfigItem config={item} {variant} onclick={handleConfigClick} />
           </div>
@@ -89,11 +95,11 @@
           <div
             role="group"
             aria-label="Configuration group {group.gid}"
-            class="border-border relative space-y-1 rounded-lg border border-dashed px-1"
+            class="border-border relative rounded-lg border border-dashed p-1"
           >
             {#each group.items as item (item.id)}
               <!-- Items in vertical layout -->
-              {@const variant = activeId && item.id === activeId ? "active" : "default"}
+              {@const variant = activeConfigName === item.name ? "active" : "default"}
               <div role="listitem">
                 <ConfigItem config={item} {variant} onclick={handleConfigClick} />
               </div>
