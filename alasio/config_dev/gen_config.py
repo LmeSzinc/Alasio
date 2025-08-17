@@ -116,7 +116,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
                     arg: ArgData
                     # Expand list
                     if arg.dt in TYPE_ARG_TUPLE:
-                        gen.Var(arg_name, anno=arg.get_anno(), value=arg.default, auto_multiline=120)
+                        gen.Var(arg_name, anno=arg.get_anno(), value=arg.value, auto_multiline=120)
                         continue
                     # Expand literal
                     if arg.dt in TYPE_ARG_LITERAL:
@@ -125,13 +125,13 @@ class ConfigGenerator(ParseArgs, ParseTasks):
                             # {name}: t.Literal[
                             #     ...
                             # } = ...
-                            with gen.tab(prefix=f'{arg_name}: t.Literal[', suffix=f'] = {repr(arg.default)}',
+                            with gen.tab(prefix=f'{arg_name}: t.Literal[', suffix=f'] = {repr(arg.value)}',
                                          line_ending=',', tab_type='list'):
                                 for option in arg.option:
                                     gen.Item(option)
                             continue
                     # inline
-                    gen.Anno(arg_name, anno=arg.get_anno(), value=arg.get_default())
+                    gen.Anno(arg_name, anno=arg.get_anno(), value=arg.get_value())
             gen.Empty(2)
 
         # gen.print()

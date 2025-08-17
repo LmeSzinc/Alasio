@@ -324,11 +324,9 @@ class CrossNavGenerator:
                         arg_name = f'{display_group.group}_{arg_name}'
                         deep_set(out, keys=[card_name, arg_name], value=row)
                         # arg data post-process
-                        # no default to frontend
-                        row.pop('default', None)
-                        # inline option
-                        if 'option' in row:
-                            row['option'] = NoIndent(row['option'])
+                        for key in ['value', 'option']:
+                            if key in row:
+                                row[key] = NoIndent(row[key])
 
         # store in config object, so other methods can reuse
         config.config_data = out

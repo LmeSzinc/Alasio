@@ -84,14 +84,14 @@ def populate_arg(value) -> dict:
     vtype = type(value)
     dt = TYPE_YAML_TO_DT.get(vtype, None)
     if dt:
-        return {'dt': dt, 'default': value}
+        return {'dt': dt, 'value': value}
 
     # dict
     if vtype is dict:
         try:
-            default = value['default']
+            default = value['value']
         except KeyError:
-            raise DefinitionError(f'Missing "default" attribute')
+            raise DefinitionError(f'Missing "value" attribute')
         # Parse range
         if 'range' in value:
             range_str = value['range']
@@ -137,7 +137,7 @@ MSGSPEC_CONSTRAINT = [
 
 class ArgData(Struct, omit_defaults=True):
     dt: to_literal(TYPE_DT_TO_PYTHON.keys())
-    default: Any
+    value: Any
     option: Union[list, UnsetType] = UNSET
     advanced: bool = False
 
@@ -174,14 +174,14 @@ class ArgData(Struct, omit_defaults=True):
     # extra: Union[Dict, UnsetType] = UNSET
 
     def __post_init__(self):
-        default = self.default
-        vtype = type(default)
+        value = self.value
+        vtype = type(value)
         # Timezone default to UTC
-        if vtype is datetime and not default.tzinfo:
-            self.default = default.replace(tzinfo=timezone.utc)
+        if vtype is datetime and not value.tzinfo:
+            self.value = value.replace(tzinfo=timezone.utc)
         # Split filters
         if self.dt in TYPE_ARG_TUPLE and vtype is str:
-            self.default = tuple(s.strip() for s in default.split('>'))
+            self.value = tuple(s.strip() for s in value.split('>'))
         return self
 
     def to_dict(self) -> dict:
@@ -247,20 +247,20 @@ class ArgData(Struct, omit_defaults=True):
         else:
             return python_type
 
-    def get_default(self):
+    def get_value(self):
         """
         Generate default value in python code from ArgData
 
         Examples:
             d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
         """
-        if type(self.default) is datetime:
-            default = repr(self.default)
-            default = default.replace('datetime.datetime', 'd.datetime')
-            default = default.replace('datetime.timezone', 'd.timezone')
-            return ReprWrapper(default)
+        if type(self.value) is datetime:
+            value = repr(self.value)
+            value = value.replace('datetime.datetime', 'd.datetime')
+            value = value.replace('datetime.timezone', 'd.timezone')
+            return ReprWrapper(value)
         # others
-        return self.default
+        return self.value
 
 
 class ParseArgs(ParseBase):
