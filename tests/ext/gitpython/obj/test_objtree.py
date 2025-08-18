@@ -1,5 +1,3 @@
-import zlib
-
 import pytest
 
 from alasio.ext.gitpython.file.exception import ObjectBroken
@@ -25,11 +23,8 @@ obj_tree = (b'100644 assets.py\x00~\xa5A\x10\xe3_\xe9\x85\xba\xf0\xc2\x80\x9c*Ve
 
 def test_parse_tree_success():
     """Test successful parsing of a valid tree object."""
-    # Compress the tree object to simulate git object storage
-    compressed_data = zlib.compress(obj_tree)
-
-    # Parse the tree
-    entries = parse_tree(compressed_data)
+    # Parse the tree directly (no compression needed anymore)
+    entries = parse_tree(obj_tree)
 
     # Check that we got the expected number of entries
     assert len(entries) == 16
@@ -37,10 +32,13 @@ def test_parse_tree_success():
     # Check a few specific entries to ensure correct parsing
     assert entries[0].name == "assets.py"
     assert entries[0].mode == b"100644"
-    assert len(entries[0].sha1) == 20
+    # sha1 is now a hex string
+    assert len(entries[0].sha1) == 40  # 20 bytes = 40 hex chars
+    assert entries[0].sha1 == b'~\xa5A\x10\xe3_\xe9\x85\xba\xf0\xc2\x80\x9c*Ve\xbe\r\xba\x02'.hex()
 
     assert entries[4].name == "grid.py"
     assert entries[4].mode == b"100644"
+    assert entries[4].sha1 == b'A\x91\x9a1v\x14\x94\xe0\x985\xb0\x9b\x82e@\xf5\xb4\xace\x93'.hex()
 
     # Check the last entry
     assert entries[-1].name == "ui_mask.png"
@@ -58,26 +56,30 @@ def test_different_valid_modes():
             b'160000 submodule\x00' + b'e' * 20  # Gitlink/submodule
     )
 
-    compressed_data = zlib.compress(sample_tree)
-    entries = parse_tree(compressed_data)
+    entries = parse_tree(sample_tree)
 
     assert len(entries) == 5
 
     # Verify each mode type
     assert entries[0].mode == b'100644'
     assert entries[0].name == 'regular_file.txt'
+    assert entries[0].sha1 == (b'a' * 20).hex()
 
     assert entries[1].mode == b'100755'
     assert entries[1].name == 'executable.sh'
+    assert entries[1].sha1 == (b'b' * 20).hex()
 
     assert entries[2].mode == b'40000'
     assert entries[2].name == 'directory'
+    assert entries[2].sha1 == (b'c' * 20).hex()
 
     assert entries[3].mode == b'120000'
     assert entries[3].name == 'symlink'
+    assert entries[3].sha1 == (b'd' * 20).hex()
 
     assert entries[4].mode == b'160000'
     assert entries[4].name == 'submodule'
+    assert entries[4].sha1 == (b'e' * 20).hex()
 
 
 def test_invalid_file_mode():
@@ -85,11 +87,9 @@ def test_invalid_file_mode():
     # Create a tree object with an invalid mode
     invalid_mode_tree = b'123456 invalid.txt\x00' + b'a' * 20
 
-    compressed_data = zlib.compress(invalid_mode_tree)
-
     # Parsing should raise ObjectBroken exception
     with pytest.raises(ObjectBroken) as excinfo:
-        parse_tree(compressed_data)
+        parse_tree(invalid_mode_tree)
 
     # Verify the exception message contains information about the invalid mode
     assert "Invalid filemode" in str(excinfo.value)
@@ -101,11 +101,9 @@ def test_unicode_decode_error():
     # Create a tree object with a filename containing invalid UTF-8 bytes
     invalid_filename_tree = b'100644 \xff\xfe\x00invalid.txt\x00' + b'a' * 20
 
-    compressed_data = zlib.compress(invalid_filename_tree)
-
     # Parsing should raise ObjectBroken exception
     with pytest.raises(ObjectBroken) as excinfo:
-        parse_tree(compressed_data)
+        parse_tree(invalid_filename_tree)
 
     # Verify the exception message contains information about the decode error
     assert "Failed to decode filename" in str(excinfo.value)
@@ -116,39 +114,23 @@ def test_invalid_sha1():
     # Create a tree object with a short SHA1
     short_sha1_tree = b'100644 file.txt\x00' + b'a' * 10  # SHA1 should be 20 bytes
 
-    compressed_data = zlib.compress(short_sha1_tree)
-
     # Parsing should raise ObjectBroken exception
     with pytest.raises(ObjectBroken) as excinfo:
-        parse_tree(compressed_data)
+        parse_tree(short_sha1_tree)
 
     # Verify the exception message contains information about the invalid SHA1
     assert "Invalid entry sha1" in str(excinfo.value)
 
 
-def test_decompression_error():
-    """Test handling of zlib decompression errors."""
-    # Create invalid compressed data
-    invalid_compressed_data = b'not a valid zlib compressed data'
-
-    # Parsing should raise ObjectBroken exception
-    with pytest.raises(ObjectBroken) as excinfo:
-        parse_tree(invalid_compressed_data)
-
-    # The exception should wrap the original zlib error
-    assert "zlib" in str(excinfo.value).lower() or "error" in str(excinfo.value).lower()
-
-
 def test_empty_tree():
     """Test parsing an empty tree."""
-    # An empty tree is not valid in git, but let's test the handling
+    # An empty tree is valid and should return an empty list
     empty_tree = b''
 
-    compressed_data = zlib.compress(empty_tree)
+    entries = parse_tree(empty_tree)
 
-    # This should raise an exception since a valid tree must have at least one entry
-    with pytest.raises(ObjectBroken):
-        parse_tree(compressed_data)
+    # Should return an empty list for an empty tree
+    assert entries == []
 
 
 def test_filename_with_spaces():
@@ -156,13 +138,12 @@ def test_filename_with_spaces():
     # Create a tree with a filename containing spaces
     spaced_filename_tree = b'100644 file with spaces.txt\x00' + b'a' * 20
 
-    compressed_data = zlib.compress(spaced_filename_tree)
-
-    entries = parse_tree(compressed_data)
+    entries = parse_tree(spaced_filename_tree)
 
     assert len(entries) == 1
     assert entries[0].name == "file with spaces.txt"
     assert entries[0].mode == b"100644"
+    assert entries[0].sha1 == (b'a' * 20).hex()
 
 
 def test_filename_with_null_bytes():
@@ -171,16 +152,14 @@ def test_filename_with_null_bytes():
     This is an edge case that should not happen in valid git trees, but we should
     test how the parser handles it.
     """
-    # The code actually doesn't handle this case specifically because it uses partition,
-    # so the first null byte will be treated as the separator. Let's test this behavior.
+    # The code uses partition, so the first null byte will be treated as the separator
+    # This will result in a parse error because the SHA1 will be wrong
     filename_with_null = b'100644 file\x00with\x00nulls.txt\x00' + b'a' * 20
-
-    compressed_data = zlib.compress(filename_with_null)
 
     # The function will interpret the first \x00 as the separator between name and SHA1
     # This will result in a parse error because the SHA1 will be wrong
     with pytest.raises(ObjectBroken):
-        parse_tree(compressed_data)
+        parse_tree(filename_with_null)
 
 
 def test_sha1_with_null_bytes():
@@ -192,13 +171,11 @@ def test_sha1_with_null_bytes():
 
     tree_with_null_sha1 = b'100644 test.txt\x00' + sha1_with_null
 
-    compressed_data = zlib.compress(tree_with_null_sha1)
-
-    entries = parse_tree(compressed_data)
+    entries = parse_tree(tree_with_null_sha1)
 
     assert len(entries) == 1
     assert entries[0].name == "test.txt"
-    assert entries[0].sha1 == sha1_with_null
+    assert entries[0].sha1 == sha1_with_null.hex()
 
 
 def test_multiple_entries_same_name():
@@ -212,13 +189,57 @@ def test_multiple_entries_same_name():
             b'100644 file.txt\x00' + b'b' * 20
     )
 
-    compressed_data = zlib.compress(duplicate_names_tree)
-
-    entries = parse_tree(compressed_data)
+    entries = parse_tree(duplicate_names_tree)
 
     # Parser should return both entries without error
     assert len(entries) == 2
     assert entries[0].name == "file.txt"
     assert entries[1].name == "file.txt"
-    # Check they have different SHA1s
+    # Check they have different SHA1s (now hex strings)
     assert entries[0].sha1 != entries[1].sha1
+    assert entries[0].sha1 == (b'a' * 20).hex()
+    assert entries[1].sha1 == (b'b' * 20).hex()
+
+
+def test_single_entry_tree():
+    """Test parsing a tree with exactly one entry."""
+    single_entry_tree = b'100644 single.txt\x00' + b'x' * 20
+
+    entries = parse_tree(single_entry_tree)
+
+    assert len(entries) == 1
+    assert entries[0].name == "single.txt"
+    assert entries[0].mode == b"100644"
+    assert entries[0].sha1 == (b'x' * 20).hex()
+
+
+def test_tree_with_special_characters():
+    """Test parsing a tree with filenames containing special characters."""
+    # Create a tree with special characters in filenames
+    special_chars_tree = (
+            b'100644 file-with-dash.txt\x00' + b'a' * 20 +
+            b'100644 file_with_underscore.py\x00' + b'b' * 20 +
+            b'100644 file.with.dots.js\x00' + b'c' * 20 +
+            b'100644 file@special#chars.md\x00' + b'd' * 20
+    )
+
+    entries = parse_tree(special_chars_tree)
+
+    assert len(entries) == 4
+    assert entries[0].name == "file-with-dash.txt"
+    assert entries[1].name == "file_with_underscore.py"
+    assert entries[2].name == "file.with.dots.js"
+    assert entries[3].name == "file@special#chars.md"
+
+
+def test_malformed_entry_missing_space():
+    """Test parsing a tree with a malformed entry missing space between mode and name."""
+    # Create an entry without space between mode and filename
+    malformed_tree = b'100644filename.txt\x00' + b'a' * 20
+
+    # The parser will treat the entire "100644filename.txt" as the mode
+    # which is invalid
+    with pytest.raises(ObjectBroken) as excinfo:
+        parse_tree(malformed_tree)
+
+    assert "Invalid filemode" in str(excinfo.value)

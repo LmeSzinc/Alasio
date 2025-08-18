@@ -28,6 +28,8 @@ def parse_tree(data):
         list[EntryObject]:
     """
     remain = data
+    if not remain:
+        return []
 
     list_entry = []
     append = list_entry.append
