@@ -1,6 +1,6 @@
 from typing import Type
 
-from alasio.backend.topic.nav import ConfigNav
+from alasio.backend.topic.config import ConfigArg, ConfigNav
 from alasio.backend.topic.scan import ConfigScan
 from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.ws_server import WebsocketTopicServer
@@ -19,6 +19,7 @@ class WebsocketServer(WebsocketTopicServer):
         ConnState,
         ConfigScan,
         ConfigNav,
+        ConfigArg,
     ])
     DEFAULT_TOPIC_CLASS = create_topic_dict([
         ConnState,
