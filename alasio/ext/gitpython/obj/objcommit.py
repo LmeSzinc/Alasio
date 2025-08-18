@@ -98,7 +98,7 @@ def parse_commit(data):
         raise ObjectBroken(f'Commit tree is not a sha1: {tree}', data)
 
     # parent
-    parent = b''
+    parent = None
     while 1:
         if remain.startswith(b'author'):
             break
