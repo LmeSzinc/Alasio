@@ -100,10 +100,12 @@ class GitObjectManager:
         """
         Build object dict from sub managers
         """
-        dict_object = {}
-        dict_object_data = {}
-        dict_object_unread = {}
-        dict_object_from = {}
+        # we prefer pack files to be the final data, because it does not need extra read
+        # this is different from git
+        dict_object: "dict[str, GitObject | GitLooseObject]" = self.loose.dict_object
+        dict_object_data: "dict[str, memoryview]" = self.loose.dict_object_data
+        dict_object_unread: "dict[str, PackFile | LoosePath]" = self.loose.dict_object_unread
+        dict_object_from: "dict[str, PackFile | LoosePath]" = dict.fromkeys(self.loose.dict_object_unread, self.loose)
 
         # if multiple pack files contain the same object, the newer one will be used
         for pack in self.dict_pack.values():
@@ -112,14 +114,6 @@ class GitObjectManager:
             dict_object_unread.update(pack.dict_object_unread)
             object_from = dict.fromkeys(pack.dict_offset, pack)
             dict_object_from.update(object_from)
-
-        # if loose object exists, use loose object first
-        dict_object.update(self.loose.dict_object)
-        # loose objects don't have data, they just get decoded directly
-        # dict_object_data.update(self.loose.dict_object_data)
-        dict_object_unread.update(self.loose.dict_object_unread)
-        object_from = dict.fromkeys(self.loose.dict_object_unread, self.loose)
-        dict_object_from.update(object_from)
 
         self.dict_object = dict_object
         self.dict_object_data = dict_object_data
@@ -198,17 +192,14 @@ class GitObjectManager:
         """
         # existing object
         dict_object = self.dict_object
-        try:
-            return dict_object[sha1]
-        except KeyError:
-            pass
+        obj = dict_object.get(sha1)
+        if obj is not None:
+            return obj
+
         # data -> obj
         dict_object_data = self.dict_object_data
-        try:
-            data = dict_object_data[sha1]
-        except KeyError:
-            pass
-        else:
+        data = dict_object_data.get(sha1)
+        if data is not None:
             obj = parse_objdata(data)
             dict_object[sha1] = obj
             try:
@@ -217,11 +208,13 @@ class GitObjectManager:
                 # may be deleted by another thread
                 pass
             return obj
+
         # read file -> data -> obj
         dict_object_unread = self.dict_object_unread
         try:
             file = dict_object_unread[sha1]
         except KeyError:
+            # this shouldn't happen
             pass
         else:
             obj = file.addread(sha1)
