@@ -1,6 +1,6 @@
 import zlib
 from collections import deque
-from typing import Tuple
+from typing import Deque, Tuple
 from zlib import decompress
 
 import msgspec
@@ -18,7 +18,7 @@ class OfsDeltaObj(msgspec.Struct):
     # deque of instructions
     # if delta instruction is copy:   offset, size, None
     # if delta instruction is append:      0,    0, append_data
-    all_instructions: deque[Tuple[int, int, memoryview]]
+    all_instructions: Deque[Tuple[int, int, memoryview]]
 
 
 class RefDeltaObj(msgspec.Struct):
@@ -31,7 +31,7 @@ class RefDeltaObj(msgspec.Struct):
     # deque of instructions
     # if delta instruction is copy:   offset, size, None
     # if delta instruction is append:      0,    0, append_data
-    all_instructions: deque[Tuple[int, int, memoryview]]
+    all_instructions: Deque[Tuple[int, int, memoryview]]
 
 
 def parse_ofs_delta(data):
