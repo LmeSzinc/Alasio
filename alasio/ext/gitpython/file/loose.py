@@ -1,8 +1,9 @@
 import os
 
-from alasio.ext.path.atomic import atomic_read_bytes
 from alasio.ext.gitpython.file.exception import ObjectBroken, PackBroken
-from alasio.ext.gitpython.obj.obj import GitLooseObject, parse_loosedata
+from alasio.ext.gitpython.obj.obj import GitLooseObject, parse_loosedata, read_loose_objtype
+from alasio.ext.path.atomic import atomic_read_bytes
+from alasio.ext.path.calc import normpath
 
 
 class LoosePath:
@@ -106,7 +107,7 @@ class LoosePath:
             PackBroken:
             ObjectBroken:
         """
-        file = f'{self.path}/{sha1[:2]}/{sha1[2:]}'
+        file = normpath(f'{self.path}/{sha1[:2]}/{sha1[2:]}')
         # read
         try:
             data = atomic_read_bytes(file)
@@ -118,3 +119,18 @@ class LoosePath:
         # self.dict_object[sha1] = obj
         # self.dict_object_unread.pop(sha1, None)
         return obj
+
+    def read_objtype(self, sha1):
+        """
+        Args:
+            sha1 (str): sha1 of length 40
+
+        Returns:
+            int: 1 to 4
+
+        Raises:
+            PackBroken:
+            ObjectBroken:
+        """
+        file = normpath(f'{self.path}/{sha1[:2]}/{sha1[2:]}')
+        return read_loose_objtype(file)

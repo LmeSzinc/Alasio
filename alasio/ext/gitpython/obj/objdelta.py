@@ -87,6 +87,31 @@ def parse_ofs_delta(data):
     )
 
 
+def parse_ofs_delta_offset(data):
+    """
+    Args:
+        data (memoryview):
+
+    Returns:
+        int:
+    """
+    # read reverse offset
+    offset = 0
+    index = 1
+    for byte in data:
+        # add in the next 7 bits of data
+        if byte >= 128:
+            # byte & 0x7f + 1
+            offset += byte - 127
+            offset *= 128
+            index += 1
+        else:
+            # end reverse_offset, start source_size
+            offset += byte
+            break
+    return offset
+
+
 def parse_ref_delta(data):
     """
     Args:
@@ -116,6 +141,19 @@ def parse_ref_delta(data):
         result_size=result_size,
         all_instructions=all_instructions,
     )
+
+
+def parse_ref_delta_ref(data):
+    """
+    Args:
+        data (memoryview):
+
+    Returns:
+        str:
+    """
+    # 20 bytes sha1 in header
+    # copy memory view to bytes
+    return data[:20].hex()
 
 
 def parse_delta_object(data):

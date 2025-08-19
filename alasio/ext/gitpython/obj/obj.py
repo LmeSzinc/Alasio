@@ -1,6 +1,5 @@
-import zlib
 from typing import Union
-from zlib import decompress
+from zlib import decompress, decompressobj, error as zlib_error
 
 import msgspec
 
@@ -51,7 +50,7 @@ class GitObject(msgspec.Struct, dict=True):
         if objtype == 3:
             try:
                 data = decompress(self.data)
-            except zlib.error as e:
+            except zlib_error as e:
                 raise ObjectBroken(str(e), self.data)
             self.data = data
             return data
@@ -67,7 +66,7 @@ class GitObject(msgspec.Struct, dict=True):
         if objtype == 2:
             try:
                 data = decompress(self.data)
-            except zlib.error as e:
+            except zlib_error as e:
                 raise ObjectBroken(str(e), self.data)
             result = parse_tree(data)
             self.data = data
@@ -75,7 +74,7 @@ class GitObject(msgspec.Struct, dict=True):
         if objtype == 1:
             try:
                 data = decompress(self.data)
-            except zlib.error as e:
+            except zlib_error as e:
                 raise ObjectBroken(str(e), self.data)
             result = parse_commit(data)
             self.data = data
@@ -83,7 +82,7 @@ class GitObject(msgspec.Struct, dict=True):
         if objtype == 4:
             try:
                 data = decompress(self.data)
-            except zlib.error as e:
+            except zlib_error as e:
                 raise ObjectBroken(str(e), self.data)
             result = parse_tag(data)
             self.data = data
@@ -150,6 +149,104 @@ def parse_objdata(data):
     return GitObject(type=objtype, size=size, data=data)
 
 
+def parse_objtype(data):
+    """
+    Parse object data in pack file into obj_type
+
+    Args:
+        data (memoryview):
+
+    Returns:
+        int:
+    """
+    # objtype at first byte
+    try:
+        byte = data[0]
+    except IndexError:
+        return 0
+    if byte >= 128:
+        byte -= 128
+    return byte // 16
+
+
+def parse_objtype_rest(data):
+    """
+    Parse object data in pack file into obj_type
+
+    Args:
+        data (memoryview):
+
+    Returns:
+        int:
+    """
+    # objtype at first byte
+    try:
+        byte = data[0]
+    except IndexError:
+        return 0
+    if byte >= 128:
+        byte -= 128
+    objtype = byte // 16
+    if objtype in OBJTYPE_BASIC:
+        return objtype, None
+    # skip obj size
+    for index, byte in enumerate(data, start=1):
+        if byte < 128:
+            break
+    # ignore IDE warning
+    # because we have data[0], so data is not empty and index is guaranteed
+    return objtype, data[index:]
+
+
+def parse_objdata_type_offset(data):
+    """
+    Get objtype, ref or offset from obj data
+    A fast path of parse_objdata, parse_ofs_delta_offset, parse_ref_delta_ref
+
+    Args:
+        data (memoryview):
+
+    Returns:
+        tuple[int, int | str]: (objtype, ref_or_offset)
+    """
+    # objtype at first byte
+    byte = data[0]
+    if byte >= 128:
+        byte -= 128
+    objtype = byte // 16
+    if objtype in OBJTYPE_BASIC:
+        return objtype, 0
+    # skip obj size
+    for index, byte in enumerate(data, start=1):
+        if byte < 128:
+            break
+    # ignore IDE warning
+    # because we have data[0], so data is not empty and index is guaranteed
+    data = data[index:]
+    if objtype == 7:
+        # 20 bytes sha1 in header
+        # copy memory view to bytes
+        return objtype, data[:20].hex()
+    if objtype == 6:
+        # read reverse offset
+        offset = 0
+        index = 1
+        for byte in data:
+            # add in the next 7 bits of data
+            if byte >= 128:
+                # byte & 0x7f + 1
+                offset += byte - 127
+                offset *= 128
+                index += 1
+            else:
+                # end reverse_offset, start source_size
+                offset += byte
+                break
+        return objtype, offset
+    # this shouldn't happen
+    return objtype, 0
+
+
 DICT_HEADER_TO_OBJTYPE = {
     b'commit': 1,
     b'tree': 2,
@@ -214,7 +311,7 @@ def parse_loosedata(data):
     """
     try:
         data = decompress(data)
-    except zlib.error as e:
+    except zlib_error as e:
         raise ObjectBroken(str(e), data)
 
     # {objtype} {length}\x00{data}
@@ -234,3 +331,54 @@ def parse_loosedata(data):
         raise ObjectBroken(f'Invalid loose size not match, size={size}, len(data)={len(data)}', data)
 
     return GitLooseObject(type=objtype, size=size, data=data)
+
+
+def read_loose_objtype(file, chunk_size=128):
+    """
+    Read objtype from a loose file, avoid reading the entire file.
+
+    Args:
+        file (str):
+        chunk_size (int):
+
+    Returns:
+        int: 1 to 4
+
+    Raises:
+        ObjectBroken:
+    """
+    decompressor = decompressobj().decompress
+    content = b''
+
+    try:
+        # we read a very small chunk, so disable buffering to reduce read
+        with open(file, 'rb', buffering=0) as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    # file ends
+                    break
+
+                chunk = decompressor(chunk)
+                if not chunk:
+                    # not enough data to decompress
+                    continue
+
+                content += chunk
+                if len(content) >= 6:
+                    break
+    except FileNotFoundError:
+        raise ObjectBroken(f'Missing loose object file={file}')
+    except zlib_error as e:
+        raise ObjectBroken(str(e))
+
+    # check header, order by appear frequency
+    if content.startswith(b'blob'):
+        return 3
+    if content.startswith(b'tree'):
+        return 2
+    if content.startswith(b'commit'):
+        return 1
+    if content.startswith(b'tag'):
+        return 4
+    raise ObjectBroken(f'Invalid loose header: {content}')
