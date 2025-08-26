@@ -44,11 +44,13 @@ class GitObject(msgspec.Struct, dict=True):
         if objtype == 7:
             # REF_DELTA
             result = parse_ref_delta(self.data)
+            self.size = result.result_size
             # self.data = b''
             return result
         if objtype == 6:
             # OFS_DELTA
             result = parse_ofs_delta(self.data)
+            self.size = result.result_size
             # keep data, data will be set in `GitObjectManager.cat()`
             # self.data = b''
             return result
@@ -173,6 +175,49 @@ def parse_objdata(data):
 
     data = data[index:]
     return GitObject(type=objtype, size=size, data=data)
+
+
+def parse_objdata_return_info(data):
+    """
+    See parse_objdata()
+
+    Args:
+        data (memoryview):
+
+    Returns:
+        tuple[int, int, int]: objtype, size, index
+    """
+    # Decode obj type and size
+    shift = 16
+    objtype = 0
+    size = 0
+    index = 1
+    # By iter, each byte auto turn into int
+
+    for byte in data:
+        if byte >= 128:
+            if index > 1:
+                # second and later bytes
+                size += (byte - 128) * shift
+                shift *= 128
+            else:
+                # first digit
+                byte -= 128
+                objtype = byte // 16
+                size = byte % 16
+            index += 1
+        else:
+            if index > 1:
+                # ends at second and later byte
+                size += byte * shift
+                break
+            else:
+                # end at first byte
+                objtype = byte // 16
+                size = byte % 16
+                break
+
+    return objtype, size, index
 
 
 def parse_objtype(data):
