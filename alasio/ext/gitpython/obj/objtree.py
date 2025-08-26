@@ -41,11 +41,11 @@ def parse_tree(data):
         head, _, remain = remain.partition(b'\x00')
         mode, _, name = head.partition(b' ')
         if mode not in SET_VALID_MODE:
-            raise ObjectBroken(f'Invalid filemode: "{mode}"', data)
+            raise ObjectBroken(f'Invalid filemode={mode}, at file {name}', data)
         try:
             name = name.decode('utf-8')
         except UnicodeDecodeError:
-            raise ObjectBroken(f'Failed to decode filename: "{name}"', data)
+            raise ObjectBroken(f'Failed to decode filename: {name}', data)
         sha1 = remain[:20]
         remain = remain[20:]
         if remain:

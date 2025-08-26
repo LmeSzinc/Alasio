@@ -56,7 +56,7 @@ def parse_tag(data):
     row, _, remain = data.partition(b'\n')
     key, _, obj = row.partition(b' ')
     if key != b'object':
-        raise ObjectBroken(f'Object should startswith "object" not "{key}"', data)
+        raise ObjectBroken(f'Object should startswith "object" not {key}', data)
     try:
         obj = obj.decode()
     except ValueError:
@@ -66,21 +66,21 @@ def parse_tag(data):
     row, _, remain = remain.partition(b'\n')
     key, _, typ = row.partition(b' ')
     if key != b'type':
-        raise ObjectBroken(f'Object should have "type" not "{key}"', data)
+        raise ObjectBroken(f'Object should have "type" not {key}', data)
     try:
         typ = typ.decode()
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode tag type: "{typ}"', data)
+        raise ObjectBroken(f'Failed to decode tag type: {typ}', data)
 
     # tag
     row, _, remain = remain.partition(b'\n')
     key, _, tag = row.partition(b' ')
     if key != b'tag':
-        raise ObjectBroken(f'Object should have "tag" not "{key}"', data)
+        raise ObjectBroken(f'Object should have "tag" not {key}', data)
     try:
         tag = tag.decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode tag name: "{tag}"', data)
+        raise ObjectBroken(f'Failed to decode tag name: {tag}', data)
 
     # tagger
     # same format as tagger in commit
@@ -92,17 +92,17 @@ def parse_tag(data):
     try:
         tagger_name = tagger_name.decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode tagger name: "{tagger_name}"', data)
+        raise ObjectBroken(f'Failed to decode tagger name: {tagger_name}', data)
     tagger_email, _, row = row.partition(b'> ')
     try:
         tagger_email = tagger_email.decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode tagger email: "{tagger_email}"', data)
+        raise ObjectBroken(f'Failed to decode tagger email: {tagger_email}', data)
     tagger_time, _, tz = row.partition(b' ')
     try:
         tagger_time = int(tagger_time)
     except ValueError:
-        raise ObjectBroken(f'Tagger time is not int: "{tagger_time}"', data)
+        raise ObjectBroken(f'Tagger time is not int: {tagger_time}', data)
     try:
         tz = tz2delta(tz)
     except ValueError:

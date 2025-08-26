@@ -70,7 +70,7 @@ def parse_commit_tree(data):
     row, _, _ = data.partition(b'\n')
     key, _, tree = row.partition(b' ')
     if key != b'tree':
-        raise ObjectBroken(f'Object should startswith "tree" not "{key}"', data)
+        raise ObjectBroken(f'Object should startswith "tree" not {key}', data)
     try:
         return tree.decode()
     except ValueError:
@@ -91,7 +91,7 @@ def parse_commit(data):
     row, _, remain = data.partition(b'\n')
     key, _, tree = row.partition(b' ')
     if key != b'tree':
-        raise ObjectBroken(f'Object should startswith "tree" not "{key}"', data)
+        raise ObjectBroken(f'Object should startswith "tree" not {key}', data)
     try:
         tree = tree.decode()
     except ValueError:
@@ -129,21 +129,21 @@ def parse_commit(data):
     try:
         author_name = author_name.decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode author name: "{author_name}"', data)
+        raise ObjectBroken(f'Failed to decode author name: {author_name}', data)
     author_email, _, row = row.partition(b'> ')
     try:
         author_email = author_email.decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode author email: "{author_email}"', data)
+        raise ObjectBroken(f'Failed to decode author email: {author_email}', data)
     author_time, _, tz = row.partition(b' ')
     try:
         author_time = int(author_time)
     except ValueError:
-        raise ObjectBroken(f'Author time is not int: "{author_time}"', data)
+        raise ObjectBroken(f'Author time is not int: {author_time}', data)
     try:
         tz = tz2delta(tz)
     except ValueError:
-        raise ObjectBroken(f'Failed to parse author timezone: "{tz}"', data)
+        raise ObjectBroken(f'Failed to parse author timezone: {tz}', data)
     author_time += tz
 
     # committer
@@ -157,21 +157,21 @@ def parse_commit(data):
     try:
         committer_name = committer_name.decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode committer name: "{committer_name}"', data)
+        raise ObjectBroken(f'Failed to decode committer name: {committer_name}', data)
     committer_email, _, row = row.partition(b'> ')
     try:
         committer_email = committer_email.decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode committer email: "{committer_email}"', data)
+        raise ObjectBroken(f'Failed to decode committer email: {committer_email}', data)
     committer_time, _, tz = row.partition(b' ')
     try:
         committer_time = int(committer_time)
     except ValueError:
-        raise ObjectBroken(f'Committer time is not int: "{committer_time}"', data)
+        raise ObjectBroken(f'Committer time is not int: {committer_time}', data)
     try:
         tz = tz2delta(tz)
     except ValueError:
-        raise ObjectBroken(f'Failed to parse committer timezone: "{tz}"', data)
+        raise ObjectBroken(f'Failed to parse committer timezone: {tz}', data)
     committer_time += tz
 
     # message
@@ -179,7 +179,7 @@ def parse_commit(data):
     try:
         message = message.strip().decode('utf-8')
     except UnicodeDecodeError:
-        raise ObjectBroken(f'Failed to decode commit message: "{message}"', data)
+        raise ObjectBroken(f'Failed to decode commit message: {message}', data)
 
     return CommitObj(
         tree=tree,
