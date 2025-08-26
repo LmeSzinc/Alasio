@@ -1,18 +1,12 @@
 import os
 from collections import defaultdict, deque
-from os import DirEntry
 
-from alasio.ext.cache import set_cached_property
-from alasio.ext.path.calc import joinnormpath
-from alasio.ext.pool import WORKER_POOL
 from alasio.ext.gitpython.file.exception import PackBroken
 from alasio.ext.gitpython.file.loose import LoosePath
 from alasio.ext.gitpython.file.pack import PackFile
-from alasio.ext.gitpython.obj.obj import GitLooseObject, GitObject, OBJTYPE_BASIC, OBJTYPE_DELTA, parse_objdata
-from alasio.ext.gitpython.obj.objcommit import parse_commit
-from alasio.ext.gitpython.obj.objdelta import apply_delta
-from alasio.ext.gitpython.obj.objtag import parse_tag
-from alasio.ext.gitpython.obj.objtree import parse_tree
+from alasio.ext.gitpython.obj.obj import GitLooseObject, GitObject, OBJTYPE_BASIC, parse_objdata
+from alasio.ext.path.calc import joinnormpath
+from alasio.ext.pool import WORKER_POOL
 
 
 class GitObjectManager:
@@ -24,7 +18,7 @@ class GitObjectManager:
         self.path: str = path
 
         # key: filepath to pack file, value: PackFile object
-        self.dict_pack: "dict[DirEntry, PackFile]" = {}
+        self.dict_pack: "dict[os.DirEntry, PackFile]" = {}
         # LoosePath object to manage loose files
         self.loose: LoosePath = None
 
@@ -293,28 +287,11 @@ class GitObjectManager:
 
         # apply delta
         # queue is (source, delta, delta, ...)
-        source_obj = queue.popleft()
-        _ = source_obj.decoded
-        result = source_obj.data
+        source = queue.popleft()
+        _ = source.decoded
         for delta in queue:
-            decoded = delta.decoded
-            result = apply_delta(result, decoded)
-            # copy result to delta objects
-            if delta.type in OBJTYPE_DELTA:
-                delta.type = typ = source_obj.type
-                if typ == 3:
-                    decoded = result
-                elif typ == 2:
-                    decoded = parse_tree(result)
-                elif typ == 1:
-                    decoded = parse_commit(result)
-                elif typ == 4:
-                    decoded = parse_tag(result)
-                else:
-                    raise PackBroken(f'Unexpected object type {typ} after cat, sha1={result_sha1}')
-                # set cache
-                delta.data = result
-                set_cached_property(delta, 'decoded', decoded)
+            delta.apply_delta_from_source(source)
+            source = delta
 
         # result_obj is the last object of queue and obj.decoded should have be set
         return result_obj

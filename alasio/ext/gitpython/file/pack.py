@@ -1,9 +1,9 @@
 from typing import Tuple
 
-from alasio.ext.path.atomic import atomic_read_bytes
 from alasio.ext.gitpython.file.exception import PackBroken
 from alasio.ext.gitpython.file.idx import IdxFile
 from alasio.ext.gitpython.obj.obj import GitObject, parse_objdata
+from alasio.ext.path.atomic import atomic_read_bytes
 
 
 class PackFile(IdxFile):
@@ -324,11 +324,3 @@ class PackFile(IdxFile):
             # self.dict_object_data[sha1] = object_data
             # self.dict_object_unread.pop(sha1, None)
             return obj
-
-
-# if __name__ == '__main__':
-#     self = PackFile(r'E:\ProgramData\Pycharm\Alasio\alasio\gitpython\cmd\pack.idx')
-#     self.idx_read()
-#     self.pack_read_full()
-#     for sha1, obj in self.dict_object_data.items():
-#         print(sha1, parse_objdata(obj).decoded)

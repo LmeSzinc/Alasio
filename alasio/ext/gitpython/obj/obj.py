@@ -2,10 +2,10 @@ from zlib import decompress, decompressobj, error as zlib_error
 
 import msgspec
 
-from alasio.ext.cache import cached_property
+from alasio.ext.cache import cached_property, set_cached_property
 from alasio.ext.gitpython.file.exception import ObjectBroken
 from alasio.ext.gitpython.obj.objcommit import parse_commit
-from alasio.ext.gitpython.obj.objdelta import parse_ofs_delta, parse_ref_delta
+from alasio.ext.gitpython.obj.objdelta import apply_delta, parse_ofs_delta, parse_ref_delta
 from alasio.ext.gitpython.obj.objtag import parse_tag
 from alasio.ext.gitpython.obj.objtree import parse_tree
 
@@ -84,6 +84,40 @@ class GitObject(msgspec.Struct, dict=True):
                 f'Object type {objtype} is a preserved value, it should not be used', self.data)
         raise ObjectBroken(
             f'Unknown object type {objtype}', self.data)
+
+    def apply_delta_from_source(self, source: "GitObject"):
+        """
+        Apply delta to source, and set result to self.
+
+        This object must be a DELTA object and source must not be a DELTA object
+
+        Args:
+            source:
+        """
+        data = source.data
+        data = apply_delta(data, self.decoded)
+        # no need to check because apply_delta() already checked
+        if len(data) != self.size:
+            raise ObjectBroken(f'Unexpected data langth after apply_data, size={self.size}, actual={len(data)}')
+
+        # set
+        objtype = source.type
+        self.type = objtype
+        if objtype == 3:
+            decoded = memoryview(data)
+            self.data = decoded
+        elif objtype == 2:
+            decoded = parse_tree(data)
+            self.data = memoryview(data)
+        elif objtype == 1:
+            decoded = parse_commit(data)
+            self.data = memoryview(data)
+        elif objtype == 4:
+            decoded = parse_tag(data)
+            self.data = memoryview(data)
+        else:
+            raise ObjectBroken(f'Unexpected source type: {objtype}, source={source}')
+        set_cached_property(self, 'decoded', decoded)
 
 
 def parse_objdata(data):
