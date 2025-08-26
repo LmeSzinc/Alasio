@@ -4,6 +4,7 @@ from alasio.ext.gitpython.file.exception import ObjectBroken
 
 SET_VALID_MODE = {
     b'100644',  # Regular file
+    b'100666',  # Donno why this exists
     b'100755',  # Executable file
     b'40000',  # Directory (reference another tree)
     b'120000',  # Symlink
