@@ -1,4 +1,3 @@
-from typing import Union
 from zlib import decompress, decompressobj, error as zlib_error
 
 import msgspec
@@ -27,20 +26,7 @@ class GitObject(msgspec.Struct, dict=True):
     size: int
     # object data in pack file
     # if object decoded, `data` will be set to decompressed data
-    data: Union[memoryview, bytes]
-
-    def decompress(self):
-        """
-        Only object type commit, tree, blob, tag can be decompressed
-        Decompressing object type OFS_DELTA and REF_DELTA would raise ObjectBroken
-
-        Returns:
-            memoryview:
-
-        Raises:
-            ObjectBroken:
-        """
-        return decompress(self.data)
+    data: memoryview
 
     @cached_property
     def decoded(self):
@@ -48,44 +34,50 @@ class GitObject(msgspec.Struct, dict=True):
         # sorted by object proportion
         # delete self.data to release reference to original file data
         if objtype == 3:
+            # blob
             try:
                 data = decompress(self.data)
             except zlib_error as e:
                 raise ObjectBroken(str(e), self.data)
-            self.data = data
+            self.data = memoryview(data)
             return data
+        if objtype == 7:
+            # REF_DELTA
+            result = parse_ref_delta(self.data)
+            # self.data = b''
+            return result
         if objtype == 6:
+            # OFS_DELTA
             result = parse_ofs_delta(self.data)
             # keep data, data will be set in `GitObjectManager.cat()`
             # self.data = b''
             return result
-        if objtype == 7:
-            result = parse_ref_delta(self.data)
-            # self.data = b''
-            return result
         if objtype == 2:
+            # tree
             try:
                 data = decompress(self.data)
             except zlib_error as e:
                 raise ObjectBroken(str(e), self.data)
             result = parse_tree(data)
-            self.data = data
+            self.data = memoryview(data)
             return result
         if objtype == 1:
+            # commit
             try:
                 data = decompress(self.data)
             except zlib_error as e:
                 raise ObjectBroken(str(e), self.data)
             result = parse_commit(data)
-            self.data = data
+            self.data = memoryview(data)
             return result
         if objtype == 4:
+            # tag
             try:
                 data = decompress(self.data)
             except zlib_error as e:
                 raise ObjectBroken(str(e), self.data)
             result = parse_tag(data)
-            self.data = data
+            self.data = memoryview(data)
             return result
         if objtype == 5:
             raise ObjectBroken(
