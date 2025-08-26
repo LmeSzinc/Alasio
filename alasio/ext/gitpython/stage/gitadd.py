@@ -2,7 +2,7 @@ import os
 import stat
 
 from alasio.ext.gitpython.eol import eol_crlf_remove
-from alasio.ext.gitpython.stage.hashobj import encode_loosedata, git_hash
+from alasio.ext.gitpython.stage.hashobj import encode_loosedata, blob_hash
 from alasio.ext.gitpython.stage.index import GitIndex, GitIndexEntry
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
@@ -107,7 +107,7 @@ class GitAdd(GitIndex):
             return False
 
         data = eol_crlf_remove(path, data)
-        sha1 = git_hash(data)
+        sha1 = blob_hash(data)
 
         # write loose file
         logger.info(f'stage_add, loose object sha1={sha1}')

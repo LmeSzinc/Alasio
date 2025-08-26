@@ -1,3 +1,4 @@
+from hashlib import sha1
 from zlib import decompress, decompressobj, error as zlib_error
 
 import msgspec
@@ -11,6 +12,18 @@ from alasio.ext.gitpython.obj.objtree import parse_tree
 
 OBJTYPE_BASIC = {1, 2, 3, 4}
 OBJTYPE_DELTA = {6, 7}
+DICT_OBJTYPE_TO_HEADER = {
+    1: b'commit ',
+    2: b'tree ',
+    3: b'blob ',
+    4: b'tag ',
+}
+DICT_HEADER_TO_OBJTYPE = {
+    b'commit': 1,
+    b'tree': 2,
+    b'blob': 3,
+    b'tag': 4,
+}
 
 
 class GitObject(msgspec.Struct, dict=True):
@@ -99,8 +112,8 @@ class GitObject(msgspec.Struct, dict=True):
         data = source.data
         data = apply_delta(data, self.decoded)
         # no need to check because apply_delta() already checked
-        if len(data) != self.size:
-            raise ObjectBroken(f'Unexpected data langth after apply_data, size={self.size}, actual={len(data)}')
+        # if len(data) != self.size:
+        #     raise ObjectBroken(f'Unexpected data length after apply_data, size={self.size}, actual={len(data)}')
 
         # set
         objtype = source.type
@@ -120,6 +133,24 @@ class GitObject(msgspec.Struct, dict=True):
         else:
             raise ObjectBroken(f'Unexpected source type: {objtype}, source={source}')
         set_cached_property(self, 'decoded', decoded)
+
+    def sha1(self):
+        """
+        Returns:
+            bytes:
+        """
+        # {objtype} {length}\x00{data}
+        try:
+            objtype = DICT_OBJTYPE_TO_HEADER[self.type]
+        except KeyError:
+            # this shouldn't happen
+            raise ObjectBroken(f'Objtype "{self.type}" is not in DICT_OBJTYPE_TO_HEADER', data=self.data)
+
+        data = self.data
+        header = b''.join([objtype, f'{len(data)}'.encode(), b'\0'])
+        sha = sha1(header)
+        sha.update(data)
+        return sha.digest()
 
 
 def parse_objdata(data):
@@ -316,14 +347,6 @@ def parse_objdata_type_offset(data):
         return objtype, offset
     # this shouldn't happen
     return objtype, 0
-
-
-DICT_HEADER_TO_OBJTYPE = {
-    b'commit': 1,
-    b'tree': 2,
-    b'blob': 3,
-    b'tag': 4,
-}
 
 
 class GitLooseObject(msgspec.Struct, dict=True):

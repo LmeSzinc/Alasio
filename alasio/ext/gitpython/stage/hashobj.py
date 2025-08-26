@@ -1,40 +1,52 @@
 from hashlib import sha1
-from zlib import decompress, compress
+from zlib import compressobj
 
 from alasio.ext.gitpython.eol import eol_crlf_remove
 from alasio.ext.path.atomic import atomic_read_bytes
 
-DICT_TYPE_TO_HEAD = {
-    1: b'commit ',
-    2: b'tree ',
-    3: b'blob ',
-    4: b'tag ',
-}
 
-
-def git_hash(data):
+def blob_hash(data):
     """
     Calculate the git sha1 hash from binary data
 
     Args:
-        data (bytes): File content
+        data (bytes | memoryview): File content
 
     Returns:
         str: sha1
     """
     # {objtype} {length}\x00{data}
-    data = b''.join([b'blob ', f'{len(data)}'.encode(), b'\0', data])
 
-    return sha1(data).hexdigest()
+    # data = b''.join([b'blob ', f'{len(data)}'.encode(), b'\0', data])
+    # return sha1(data).hexdigest()
+
+    # 1.05x time cost, but less memory impact
+    header = b''.join([b'blob ', f'{len(data)}'.encode(), b'\0'])
+    sha = sha1(header)
+    sha.update(data)
+    return sha.hexdigest()
 
 
 def encode_loosedata(data):
     """
     Create content of loose object from raw file content
-    """
-    data = b''.join([b'blob ', f'{len(data)}'.encode(), b'\0', data])
 
-    return compress(data, level=9)
+    Args:
+        data (bytes | memoryview):
+
+    Returns:
+        bytes:
+    """
+    # data = b''.join([b'blob ', f'{len(data)}'.encode(), b'\0', data])
+    # return compress(data, level=9)
+
+    # 0.96x timecost, and also less memory impact
+    compressor = compressobj(level=9)
+    header = b''.join([b'blob ', f'{len(data)}'.encode(), b'\0'])
+    c1 = compressor.compress(header)
+    c2 = compressor.compress(data)
+    c3 = compressor.flush()
+    return b''.join([c1, c2, c3])
 
 
 def git_file_hash(file):
@@ -52,26 +64,5 @@ def git_file_hash(file):
     """
     data = atomic_read_bytes(file)
     data = eol_crlf_remove(file, data)
-    sha1 = git_hash(data)
-    return sha1
-
-
-def obj_hash(objtype, data):
-    """
-    Re-calculate sha1 from git object data, which is zlib compressed
-    usually to be used to validate hash
-
-    Args:
-        objtype (int):
-        data (bytes):
-
-    Raises:
-        KeyError: If git won't compress object type, so no need to validate
-        zlib.error: If data broken
-    """
-    head = DICT_TYPE_TO_HEAD[objtype]
-    data = decompress(data)
-
-    # {objtype} {length}\x00{data}
-    data = head + f'{len(data)}'.encode() + b'\0' + data
-    return sha1(data).digest()
+    sha = blob_hash(data)
+    return sha
