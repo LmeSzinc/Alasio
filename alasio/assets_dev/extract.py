@@ -6,11 +6,11 @@ from alasio.config.const import Const
 from alasio.ext.cache import cached_property, del_cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.file.watchdog import PathEvent, Watchdog
-from alasio.ext.gitpython.stage.gitadd import GitAdd
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_remove
 from alasio.ext.path.calc import get_rootstem, get_suffix, subpath_to, uppath
 from alasio.ext.path.iter import iter_files
+from alasio.git.stage.gitadd import GitAdd
 from alasio.logger import logger
 
 REGEX_ASSETS_NAME = re.compile(r'^[a-zA-Z0-9_]+$')
