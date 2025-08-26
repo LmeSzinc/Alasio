@@ -112,6 +112,33 @@ def parse_ofs_delta_offset(data):
     return offset
 
 
+def parse_ofs_delta_info(data):
+    """
+    See parse_ofs_delta()
+
+    Args:
+        data (memoryview):
+
+    Returns:
+        tuple[int, int]
+    """
+    # read reverse offset
+    offset = 0
+    index = 1
+    for byte in data:
+        # add in the next 7 bits of data
+        if byte >= 128:
+            # byte & 0x7f + 1
+            offset += byte - 127
+            offset *= 128
+            index += 1
+        else:
+            # end reverse_offset, start source_size
+            offset += byte
+            break
+    return offset, index
+
+
 def parse_ref_delta(data):
     """
     Args:
