@@ -39,23 +39,39 @@ const GLOBAL_FETCH_OPTIONS: RequestInit = {
  * It will re-throw a specific error on abort, which is handled by the query layer.
  */
 async function http<TData>(url: string, options: RequestInit): Promise<ApiResponse<TData>> {
+	let response: Response;
 	try {
-		const response = await fetch(url, options);
-        const bodyIsEmpty = response.headers.get('content-length') === '0' || response.status === 204;
-		const data = bodyIsEmpty ? null : await response.json();
-
-		return new SmartResponse<TData>(response.ok, response.status, data);
-
+		response = await fetch(url, options);
 	} catch (e: any) {
 		// Critical: Identify abort errors and re-throw them silently.
 		// This allows the upper layer (createQuery) to catch and ignore them.
 		if (e.name === 'AbortError') {
 			throw e;
 		}
+		console.error('HTTP Client Error - Network Error:', e);
+		const errorPayload = { message: 'Network error' } as TData;
+		// status 0 for client-side errors
+		return new SmartResponse<TData>(false, 0, errorPayload as PossibleData<TData>);
+	}
+	// Empty response
+	const bodyIsEmpty = response.headers.get('content-length') === '0' || response.status === 204;
+    if (bodyIsEmpty) {
+        return new SmartResponse<TData>(response.ok, response.status, null as any);
+    }
 
-		console.error('HTTP Client Error:', e);
-		const errorPayload = { message: 'Network error or invalid JSON response' } as TData;
-		return new SmartResponse<TData>(false, 0, errorPayload as PossibleData<TData>); // status 0 for client-side errors
+	try {
+		// success
+		const data = await response.json();
+		return new SmartResponse<TData>(response.ok, response.status, data);
+	} catch (e: any) {
+		// Critical: Identify abort errors and re-throw them silently.
+		// This allows the upper layer (createQuery) to catch and ignore them.
+		if (e.name === 'AbortError') {
+			throw e;
+		}
+		console.error('HTTP Client Error - Invalid JSON Response:', e);
+		const errorPayload = { message: 'Invalid JSON response' } as TData;
+		return new SmartResponse<TData>(false, response.status, errorPayload as PossibleData<TData>);
 	}
 }
 

@@ -10,14 +10,14 @@ export const load: LayoutLoad = async () => {
       throw redirect(307, `/auth`);
     }
 
-    // any captured error
-    if (response.status === 0) {
+    if (response.status === 200) {
+      // success
+      return { success: true, data: null };
+    } else {
+      // any captured error
       console.error(response.data);
       return { success: false, errorMsg: response.data?.message };
     }
-
-    // success
-    return { success: true, data: null };
   } catch (error: any) {
     // redirect
     if (error.status && error.status >= 300 && error.status < 400) {
