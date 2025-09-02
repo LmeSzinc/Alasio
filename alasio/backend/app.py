@@ -11,6 +11,16 @@ from alasio.ext.env import patch_mimetype
 patch_mimetype()
 
 
+def sync_task_gc(wait=8):
+    """
+    Synchronous task that do garbage collect periodically at background
+    """
+    from alasio.db.conn import SQLITE_POOL
+    SQLITE_POOL.gc(wait)
+    from alasio.ext.file.msgspecfile import JSON_CACHE_TTL
+    JSON_CACHE_TTL.gc(wait)
+
+
 async def task_gc(wait=8):
     """
     Coroutine task that do garbage collect periodically at background
@@ -23,9 +33,8 @@ async def task_gc(wait=8):
         # sleep first, no need to do gc at startup
         await trio.sleep(wait)
 
-        from alasio.db.conn import SQLITE_POOL
         try:
-            await trio.to_thread.run_sync(SQLITE_POOL.gc, wait)
+            await trio.to_thread.run_sync(sync_task_gc)
         except trio.Cancelled:
             # We've got a CTRL+C during GC
             raise
