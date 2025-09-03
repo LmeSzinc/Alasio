@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict
 
 import alasio.config.entry.const as const
@@ -7,7 +8,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_get, deep_iter_depth2, deep_values_depth2
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.path import PathStr
-from alasio.ext.path.calc import is_abspath, joinpath
+from alasio.ext.path.calc import is_abspath, joinnormpath
 from alasio.logger import logger
 
 
@@ -25,6 +26,21 @@ class ModLoader:
             dict_mod_entry = const.DICT_MOD_ENTRY
         self.dict_mod_entry = dict_mod_entry
 
+    @staticmethod
+    def _may_mod_folder(path):
+        """
+        Args:
+            path (str):
+
+        Returns:
+            bool:
+        """
+        # Mod must have config.index.json
+        config_index = joinnormpath(path, 'module/config/config.index.json')
+        if not os.path.exists(config_index):
+            return False
+        return True
+
     @cached_property
     def dict_mod(self):
         """
@@ -34,15 +50,46 @@ class ModLoader:
                 value: Mod
         """
         out = {}
-        for name, entry in self.dict_mod_entry.items():
+
+        # iter mod folders in depth=1
+        for name in self.root.iter_foldernames(recursive=False):
+            # mod must startswith capital letter
+            try:
+                if not name[0].isupper():
+                    continue
+            except IndexError:
+                # this shouldn't happen, as folder name should not empty
+                continue
+            # static mod entry
+            if name in const.DICT_MOD_ENTRY:
+                continue
+            # folder must be mod like
+            path = joinnormpath(self.root,  name)
+            if not self._may_mod_folder(path):
+                continue
+            # set
+            entry = const.ModEntryInfo(name=name, root=path, path_config='module/config')
+            mod = Mod(entry)
+            # check if mod has override mod_name
+            name = mod.mod_index_data.get('mod_name', name)
+            mod.name = name
+            out[name] = mod
+
+        # override with static pre-definitions
+        for name, entry in const.DICT_MOD_ENTRY.items():
             if not entry.root:
                 # logger.warning(f'Mod entry root empty: name={name}, entry={entry.root}')
                 # continue
                 entry.root = env.PROJECT_ROOT
             elif not is_abspath(entry.root):
-                entry.root = joinpath(env.PROJECT_ROOT, entry.root)
+                entry.root = joinnormpath(env.PROJECT_ROOT, entry.root)
+            # folder must be mod like
+            if not self._may_mod_folder(entry.root):
+                continue
+            # set
             mod = Mod(entry)
             out[name] = mod
+
         return out
 
     def show(self):

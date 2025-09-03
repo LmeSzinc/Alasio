@@ -1,6 +1,7 @@
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX
-from alasio.ext.file.msgspecfile import JSON_CACHE_TTL
+from alasio.ext.cache import cached_property
+from alasio.ext.file.msgspecfile import JSON_CACHE_TTL, read_msgspec
 from alasio.ext.path import PathStr
 
 
@@ -19,7 +20,15 @@ class Mod:
         """
         Mod(name="alasio", root="E:/ProgramData/Pycharm/Alasio/alasio")
         """
-        return f'{self.__class__.__name__}(name="{self.name}"", root="{self.root.to_posix()}")'
+        return f'{self.__class__.__name__}(name="{self.name}", root="{self.root.to_posix()}")'
+
+    @cached_property
+    def mod_index_data(self):
+        """
+        Returns:
+            dict[str, Any]:
+        """
+        return read_msgspec(self.path_config / 'mod.index.json')
 
     def nav_index_data(self):
         """
