@@ -1,6 +1,7 @@
 from typing import Type
 
 from alasio.backend.topic.config import ConfigArg, ConfigNav
+from alasio.backend.topic.mod import ModList
 from alasio.backend.topic.scan import ConfigScan
 from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.ws_server import WebsocketTopicServer
@@ -17,6 +18,7 @@ def create_topic_dict(topic_classes: "list[Type[BaseTopic]]") -> "dict[str, Type
 class WebsocketServer(WebsocketTopicServer):
     ALL_TOPIC_CLASS = create_topic_dict([
         ConnState,
+        ModList,
         ConfigScan,
         ConfigNav,
         ConfigArg,

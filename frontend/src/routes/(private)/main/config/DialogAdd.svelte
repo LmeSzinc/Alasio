@@ -5,6 +5,7 @@
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { useTopic } from "$lib/ws";
   import type { Rpc } from "$lib/ws/rpc.svelte";
 
   type Props = {
@@ -15,11 +16,13 @@
   let name = $state("");
   let mod = $state("");
 
-  // Hardcode MOD names for now
-  const AVAILABLE_MODS = [
-    { value: "alas", label: "alas" },
-    { value: "src", label: "src" },
-  ];
+  // ModList
+  type ModOption = {
+    value: string;
+    label: string;
+  };
+  const topicClient = useTopic<ModOption[]>("ModList");
+  const AVAILABLE_MODS = $derived(topicClient.data || []);
 
   // Reactive validation
   const isFormValid = $derived(name.trim().length > 0 && mod.length > 0);
@@ -68,12 +71,15 @@
           </Select.Trigger>
           <Select.Content>
             <Select.Group>
-              <Select.Label>Available Modules</Select.Label>
-              {#each AVAILABLE_MODS as modOption (modOption.value)}
-                <Select.Item value={modOption.value} label={modOption.label}>
-                  {modOption.label}
-                </Select.Item>
-              {/each}
+              {#if AVAILABLE_MODS.length > 0}
+                {#each AVAILABLE_MODS as modOption (modOption.value)}
+                  <Select.Item value={modOption.value} label={modOption.label}>
+                    {modOption.label}
+                  </Select.Item>
+                {/each}
+              {:else}
+                <Select.Label>No available mod</Select.Label>
+              {/if}
             </Select.Group>
           </Select.Content>
         </Select.Root>
