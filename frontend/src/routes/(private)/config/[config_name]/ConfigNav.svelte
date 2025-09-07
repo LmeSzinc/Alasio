@@ -6,33 +6,22 @@
   import { cn } from "$lib/utils.js";
   import { useTopic } from "$lib/ws";
 
-  // --- Type definitions for callbacks ---
-  type CardClickDetail = { navKey: string; cardKey: string };
-  type NavClickCallback = (navKey: string) => void;
-  type CardClickCallback = (detail: CardClickDetail) => void;
-
   // --- Props Definition (Svelte 5 Runes) ---
   type $$props = {
     // Input: The name of the main configuration.
     config_name: string;
     // Input: The key of the card to be visually indicated (e.g., from URL or parent state).
     indicateCard?: string;
-    // Callback: Fires when a card is clicked.
-    onCardClick?: CardClickCallback;
     // Callback: Fires when a navigation accordion is opened.
-    onNavClick?: NavClickCallback;
+    onNavClick?: (nav_name: string) => void;
+    // Callback: Fires when a card is clicked.
+    onCardClick?: (nav_name: string, card_name: string) => void;
     // Optional class for custom styling.
     class?: string;
   };
 
   // Assign props to reactive variables, providing default empty functions for callbacks.
-  let {
-    config_name,
-    indicateCard,
-    onCardClick = () => {},
-    onNavClick = () => {},
-    class: className,
-  }: $$props = $props();
+  let { config_name, indicateCard, onNavClick, onCardClick, class: className }: $$props = $props();
 
   // --- Internal UI State (Svelte 5 Runes) ---
   let nav_name = $state<string>(""); // Key of the currently open accordion
@@ -53,6 +42,8 @@
   $effect(() => {
     if (config_name) {
       rpc.call("set_config", { name: config_name });
+      nav_name = "";
+      card_name = "";
     }
   });
 
@@ -85,7 +76,7 @@
   $effect(() => {
     // We only call the callback if nav_name is set to a valid string.
     if (nav_name) {
-      onNavClick(nav_name);
+      onNavClick?.(nav_name);
     }
   });
 
@@ -100,7 +91,8 @@
     nav_name = clickedNavKey;
 
     // Call the external callback with details.
-    onCardClick({ navKey: clickedNavKey, cardKey: clickedCardKey });
+    rpc.call("set_nav", { name: clickedNavKey });
+    onCardClick?.(clickedNavKey, clickedCardKey);
   }
 </script>
 

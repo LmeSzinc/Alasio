@@ -25,8 +25,7 @@ class Mod:
         """
         Returns:
             dict[str, dict[str, dict[str, str]]]:
-                key: {component}.{name}.{lang}
-                    component can be "nav", "task"
+                key: {nav_name}.{card_name}.{lang}
                 value: i18n translation
         """
         file = self.path_config / 'nav.index.json'

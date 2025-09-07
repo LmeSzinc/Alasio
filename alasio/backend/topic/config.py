@@ -22,8 +22,6 @@ class ConfigNav(BaseTopic):
         if not mod_name:
             return {}
 
-        # for dev now
-        mod_name = 'alasio'
         data = await trio.to_thread.run_sync(
             MOD_LOADER.get_gui_nav,
             mod_name, lang
@@ -48,16 +46,14 @@ class ConfigArg(BaseTopic):
                 }
         """
         state = ConnState(self.conn_id, self.server)
-        nav_state: NavState = await state.nav_state
-        mod_name = nav_state.mod_name
-        config_name = nav_state.config_name
-        nav_name = nav_state.nav_name
+        nav: NavState = await state.nav_state
+        mod_name = nav.mod_name
+        config_name = nav.config_name
+        nav_name = nav.nav_name
         lang: str = await state.lang
         if not mod_name or not config_name or not nav_name:
             return {}
 
-        # for dev now
-        mod_name = 'alasio'
         data = await trio.to_thread.run_sync(
             MOD_LOADER.get_gui_config,
             mod_name, config_name, nav_name, lang

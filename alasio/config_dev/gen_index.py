@@ -35,7 +35,7 @@ class IndexGenerator(CrossNavGenerator):
             - 按config指示，加载用户设置中的task和group
             - 聚合所有内容
 
-        3. "nav.index.json" 是任务和任务导航的i18n，具有 component.name.lang 三级结构。
+        3. "nav.index.json" 是任务和任务导航的i18n，具有 nav_name.card_name.lang 三级结构。
             这个文件会在前端显示时被使用。
             注意这是一个半自动生成文件，Alasio会维护它的数据结构，但是需要人工编辑nav对应的i18n，
             当前端需要显示导航组件时：

@@ -39,9 +39,15 @@ class ConnState(BaseTopic):
         """
         Set config name, and change nav_state accordingly
         """
+        # check if name is a validate filename
         error = validate_config_name(name)
         if error:
             raise RpcValueError(error)
+
+        state: NavState = await self.nav_state
+        if state.config_name == name:
+            # same config, no need to change it
+            return
 
         # get current configs
         data = await ConfigScan(self.conn_id).data
@@ -50,15 +56,27 @@ class ConnState(BaseTopic):
 
         # set
         # note that mod_name is calculated in backend to ensure consistency of mod_name and config_name
-        state: NavState = await self.nav_state
-        config_before = state.config_name
-        if config_before == name:
-            # same config, no need to change it
-            return
         mod_name = deep_get(data, keys=[name, 'mod'], default='')
         state.config_name = name
         state.mod_name = mod_name
         # reset nav when switching to new config
         state.nav_name = ''
+
+        # broadcast
+        await self.__class__.nav_state.mutate(self, state)
+
+    @rpc
+    async def set_nav(self, name: str):
+        """
+        Set config name, and change nav_state accordingly
+        """
+        state: NavState = await self.nav_state
+        if state.nav_name == name:
+            # same nav, no need to change it
+            return
+
+        # maybe we don't need to validate nav_name, as ConfigArg can handle
+        state.nav_name = name
+
         # broadcast
         await self.__class__.nav_state.mutate(self, state)
