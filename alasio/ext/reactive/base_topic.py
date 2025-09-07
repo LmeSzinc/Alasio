@@ -6,15 +6,17 @@ class BaseTopic:
     # If topic name is empty, class name will be used
     # The following names are preserved:
     # - "error", the builtin topic to give response to invalid input
-    name = ''
+    NAME = ''
     # A collection of RPC methods
     # Note that this is auto generated and should be static, don't modify it at runtime
     rpc_methods: "dict[str, RPCMethod]" = {}
+    # Whether this topic update with fill event only
+    FULL_EVENT_ONLY = False
 
     @classmethod
     def topic_name(cls):
-        if cls.name:
-            return cls.name
+        if cls.NAME:
+            return cls.NAME
         else:
             return cls.__name__
 

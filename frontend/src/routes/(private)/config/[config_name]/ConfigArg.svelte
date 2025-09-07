@@ -4,22 +4,16 @@
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
 
-  // --- Type definitions ---
-  type ArgGroupData = {
-    _info: { name?: string; help?: string };
-  } & {
-    [argKey: string]: ArgData;
-  };
-
   // --- Props Definition (Svelte 5 Runes) ---
   type $$props = {
+    indicateCard?: string;
     class?: string;
   };
-
-  let { class: className }: $$props = $props();
+  let { indicateCard, class: className }: $$props = $props();
 
   // --- WebSocket & RPC Setup ---
-  const topicClient = useTopic("ConfigArg");
+  type ConfigArgData = Record<string, Record<string, ArgData>>;
+  const topicClient = useTopic<ConfigArgData>("ConfigArg");
 
   // --- Reactive Logic (Svelte 5 Runes) ---
 
@@ -33,6 +27,8 @@
   }
 </script>
 
-<div class={cn("mt-2 h-full w-full", className)}>
-  <ArgGroups bind:data={topicClient.data} {handleEdit} {handleReset} />
+<div class={cn("mt-2 w-full", className)}>
+  {#if topicClient.data}
+    <ArgGroups bind:data={topicClient.data} {indicateCard} {handleEdit} {handleReset} />
+  {/if}
 </div>

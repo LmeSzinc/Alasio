@@ -91,9 +91,13 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         if name != 'data':
             return
         topic = self.topic_name()
-        for op, keys, value in deep_iter_patch(old, new):
-            event = ResponseEvent(t=topic, o=op, k=keys, v=value)
+        if self.FULL_EVENT_ONLY:
+            event = ResponseEvent(t=topic, o='full', v=new)
             await self.server.send(event)
+        else:
+            for op, keys, value in deep_iter_patch(old, new):
+                event = ResponseEvent(t=topic, o=op, k=keys, v=value)
+                await self.server.send(event)
 
     async def op_unsub(self):
         """

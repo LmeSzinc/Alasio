@@ -7,6 +7,8 @@ from alasio.ext.reactive.rx_trio import async_reactive
 
 
 class ConfigNav(BaseTopic):
+    FULL_EVENT_ONLY = True
+
     @async_reactive
     async def data(self):
         """
@@ -30,6 +32,8 @@ class ConfigNav(BaseTopic):
 
 
 class ConfigArg(BaseTopic):
+    FULL_EVENT_ONLY = True
+
     @async_reactive
     async def data(self):
         """
