@@ -26,7 +26,9 @@ class ModEntryInfo(Struct):
 
 
 # default mod entry
-# key: mod name, value: path to mod root folder
-DICT_MOD_ENTRY = {
-    'alasio': ModEntryInfo(name='alasio', root='alasio', path_config='config_alasio'),
-}
+# key: mod name, value: ModEntryInfo
+DICT_MOD_ENTRY = {m.name: m for m in [
+    ModEntryInfo(name='example_mod', root='ExampleMod'),
+    ModEntryInfo(name='alas', root='AzurlaneAutoScript'),
+    ModEntryInfo(name='src', root='StarRailCopilot'),
+]}

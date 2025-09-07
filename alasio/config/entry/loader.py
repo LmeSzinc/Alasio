@@ -50,33 +50,7 @@ class ModLoader:
                 value: Mod
         """
         out = {}
-
-        # iter mod folders in depth=1
-        for name in self.root.iter_foldernames(recursive=False):
-            # mod must startswith capital letter
-            try:
-                if not name[0].isupper():
-                    continue
-            except IndexError:
-                # this shouldn't happen, as folder name should not empty
-                continue
-            # static mod entry
-            if name in const.DICT_MOD_ENTRY:
-                continue
-            # folder must be mod like
-            path = joinnormpath(self.root,  name)
-            if not self._may_mod_folder(path):
-                continue
-            # set
-            entry = const.ModEntryInfo(name=name, root=path, path_config='module/config')
-            mod = Mod(entry)
-            # check if mod has override mod_name
-            name = mod.mod_index_data.get('mod_name', name)
-            mod.name = name
-            out[name] = mod
-
-        # override with static pre-definitions
-        for name, entry in const.DICT_MOD_ENTRY.items():
+        for entry in const.DICT_MOD_ENTRY.values():
             if not entry.root:
                 # logger.warning(f'Mod entry root empty: name={name}, entry={entry.root}')
                 # continue
@@ -88,7 +62,7 @@ class ModLoader:
                 continue
             # set
             mod = Mod(entry)
-            out[name] = mod
+            out[entry.name] = mod
 
         return out
 
