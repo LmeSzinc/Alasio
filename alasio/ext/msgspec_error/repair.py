@@ -479,24 +479,21 @@ def load_msgpack_with_default(
 
     See load_json_with_default for more info.
     """
-    collected_errors = []
     try:
         # happy path, return directly
         if decoder is None:
-            return decode_msgpack(data, type=model), collected_errors
+            return decode_msgpack(data, type=model), []
         else:
-            return decoder.decode(data), collected_errors
+            return decoder.decode(data), []
     except ValidationError as e:
         try:
-            raw_obj = decode_json(data)
+            raw_obj = decode_msgpack(data)
         except DecodeError as error:
             return _handle_root_error(model, error)
         except UnicodeDecodeError as error:
             return _handle_root_error(model, error)
         # Most errors will enter here
-        raw_obj, new_errors = _handle_obj_repair(raw_obj, model, e)
-        collected_errors.extend(new_errors)
-        return raw_obj, collected_errors
+        return _handle_obj_repair(raw_obj, model, e)
     except DecodeError as error:
         return _handle_root_error(model, error)
     except UnicodeDecodeError as error:
