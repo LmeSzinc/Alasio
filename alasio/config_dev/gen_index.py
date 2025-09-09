@@ -127,8 +127,10 @@ class IndexGenerator(CrossNavGenerator):
         Returns:
             dict[str, dict]:
                 key: task_name
-                value: {"group": list[dict], "config": dict}
-                    "group" is a list of {'file': file, 'cls': class_name, 'task': ref_task_name}
+                value: {"group": dict[str, dict], "config": dict}
+                    "group" is a dict of:
+                    - key: group_name
+                    - value: {'file': file, 'cls': class_name, 'task': ref_task_name}
                     which indicates:
                     - read config from task={ref_task_name} and group={group_name}
                     - validate with model file={file}, class {class_name}

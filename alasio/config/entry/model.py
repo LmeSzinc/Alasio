@@ -51,9 +51,9 @@ class ModelGroupRef(Struct):
 
 class ModelTaskRef(Struct):
     """
-    {"group": list[dict], "config": dict}
+    {"group": dict[str, dict], "config": dict}
     """
-    group: List[ModelGroupRef]
+    group: Dict[str, ModelGroupRef]
     config: ModelConfigRef
 
 
