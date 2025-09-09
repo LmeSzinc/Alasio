@@ -1,9 +1,8 @@
 import os.path
-import threading
-from collections import defaultdict
-from typing import Any
+import types
 
-from ..path.calc import get_stem
+from alasio.ext.cache.resource import ResourceCache
+from alasio.ext.path.calc import get_stem
 
 
 def loadpy(file):
@@ -72,79 +71,9 @@ def loadpy(file):
     return module
 
 
-class LoadpyCache:
-    def __init__(self):
-        # all cache
-        # key: filepath, value: cache
-        self.cache: "dict[str, Any]" = {}
-        # global lock to create per-file lock
-        self.create_lock = threading.Lock()
-        # per-file lock
-        # key: filepath, value: lock
-        self.dict_lock: "dict[str, threading.Lock]" = defaultdict(threading.Lock)
-
-    def loadpy(self, file):
-        """
-        Dynamically load a python file.
-        see loadpy()
-
-        Args:
-            file (str): Absolute filepath to python file
-
-        Returns:
-            a python module object
-
-        Raises:
-            ImportError: if encounter any error
-        """
-        # Quick access, no global lock
-        try:
-            return self.cache[file]
-        except KeyError:
-            pass
-
-        # get file lock, defaultdict.__getitem__ might not be threadsafe
-        with self.create_lock:
-            lock = self.dict_lock[file]
-
-        # read file
-        with lock:
-            # Another thread may have read file when current thread was waiting for lock
-            try:
-                data = self.cache[file]
-                # if we success to get from cache, remove file lock
-                try:
-                    del self.dict_lock[file]
-                except KeyError:
-                    # already deleted by another thread
-                    pass
-                return data
-            except KeyError:
-                pass
-
-            # Read file
-            data = loadpy(file)
-            self.cache[file] = data
-
-        # remove file lock
-        # no global lock because dict set/get/del are threadsafe
-        try:
-            del self.dict_lock[file]
-        except KeyError:
-            # already deleted by another thread
-            pass
-
-        return data
-
-    def gc(self):
-        """
-        clear all cache
-        """
-        with self.create_lock:
-            self.dict_lock.clear()
-            self.cache.clear()
-        import gc
-        gc.collect()
+class LoadpyCache(ResourceCache[types.ModuleType]):
+    def load_resource(self, file: str, **kwargs):
+        return loadpy(file)
 
 
 LOADPY_CACHE = LoadpyCache()
