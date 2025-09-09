@@ -273,31 +273,27 @@ class AlasioTable:
         Examples:
             rows = table.select(task='Main')
         """
+        # generate sql
         if kwargs:
             conditions = self.sql_select_kwargs_to_condition(kwargs)
             sql = f'SELECT * FROM "{self.TABLE_NAME}" WHERE {conditions}'
             sql = self.sql_select_expr(
                 sql, _groupby_=_groupby_, _orderby_=_orderby_, _orderby_desc_=_orderby_desc_,
                 _limit_=_limit_, _offset_=_offset_)
-            if _cursor_ is None:
-                with self.cursor() as c:
-                    c.execute(sql, kwargs)
-                    result = c.fetchall()
-            else:
-                _cursor_.execute(sql, kwargs)
-                result = _cursor_.fetchall()
         else:
             sql = f'SELECT * FROM "{self.TABLE_NAME}"'
             sql = self.sql_select_expr(
                 sql, _groupby_=_groupby_, _orderby_=_orderby_, _orderby_desc_=_orderby_desc_,
                 _limit_=_limit_, _offset_=_offset_)
-            if _cursor_ is None:
-                with self.cursor() as c:
-                    c.execute(sql, kwargs)
-                    result = c.fetchall()
-            else:
-                _cursor_.execute(sql, kwargs)
-                result = _cursor_.fetchall()
+
+        # query
+        if _cursor_ is None:
+            with self.cursor() as c:
+                c.execute(sql, kwargs)
+                result = c.fetchall()
+        else:
+            _cursor_.execute(sql, kwargs)
+            result = _cursor_.fetchall()
 
         # convert to msgspec model
         try:
@@ -334,31 +330,90 @@ class AlasioTable:
         Examples:
             row = table.select_first(task='Main')
         """
+        # generate sql
         if kwargs:
             conditions = self.sql_select_kwargs_to_condition(kwargs)
             sql = f'SELECT * FROM "{self.TABLE_NAME}" WHERE {conditions}'
             sql = self.sql_select_expr(
                 sql, _groupby_=_groupby_, _orderby_=_orderby_, _orderby_desc_=_orderby_desc_,
                 _limit_=1, _offset_=_offset_)
-            if _cursor_ is None:
-                with self.cursor() as c:
-                    c.execute(sql, kwargs)
-                    result = c.fetchone()
-            else:
-                _cursor_.execute(sql, kwargs)
-                result = _cursor_.fetchone()
         else:
             sql = f'SELECT * FROM "{self.TABLE_NAME}"'
             sql = self.sql_select_expr(
                 sql, _groupby_=_groupby_, _orderby_=_orderby_, _orderby_desc_=_orderby_desc_,
                 _limit_=1, _offset_=_offset_)
-            if _cursor_ is None:
-                with self.cursor() as c:
+
+        # query
+        if _cursor_ is None:
+            with self.cursor() as c:
+                c.execute(sql)
+                result = c.fetchone()
+        else:
+            _cursor_.execute(sql)
+            result = _cursor_.fetchone()
+
+        # convert to msgspec model
+        if result is not None:
+            try:
+                model = self.MODEL
+            except AttributeError:
+                raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no MODEL defined')
+            result = model(**result)
+        return result
+
+    def select_by_sql(self, sql, params=None, _cursor_=None) -> "list[T_model]":
+        """
+        Query database by raw sql
+
+        Args:
+            sql (str):
+            params (list[Any], tuple[Any], dict[str, Any]):
+                sql parameters to avoid sql injection
+            _cursor_ (SqlitePoolCursor | None): to reuse cursor
+        """
+        if _cursor_ is None:
+            with self.cursor() as c:
+                if params is None:
                     c.execute(sql)
-                    result = c.fetchone()
-            else:
+                else:
+                    c.execute(sql, params)
+                result = c.fetchall()
+        else:
+            if params is None:
                 _cursor_.execute(sql)
-                result = _cursor_.fetchone()
+            else:
+                _cursor_.execute(sql, params)
+            result = _cursor_.fetchall()
+
+        # convert to msgspec model
+        try:
+            model = self.MODEL
+        except AttributeError:
+            raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no MODEL defined')
+        result = [model(**row) for row in result]
+        return result
+
+    def select_one_by_sql(self, sql, params=None, _cursor_=None) -> "T_model | None":
+        """
+        Args:
+            sql (str):
+            params (list[Any], tuple[Any], dict[str, Any]):
+                sql parameters to avoid sql injection
+            _cursor_ (SqlitePoolCursor | None): to reuse cursor
+        """
+        if _cursor_ is None:
+            with self.cursor() as c:
+                if params is None:
+                    c.execute(sql)
+                else:
+                    c.execute(sql, params)
+                result = c.fetchone()
+        else:
+            if params is None:
+                _cursor_.execute(sql)
+            else:
+                _cursor_.execute(sql, params)
+            result = _cursor_.fetchone()
 
         # convert to msgspec model
         if result is not None:
