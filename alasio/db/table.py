@@ -1,6 +1,7 @@
 from typing import Type, TypeVar
 
 import msgspec
+from msgspec.structs import asdict
 
 from alasio.db.conn import SQLITE_POOL, SqlitePoolCursor
 from alasio.ext.cache import cached_property
@@ -493,9 +494,9 @@ class AlasioTable:
         if isinstance(rows, list):
             if has_pk:
                 # filter rows with PRIMARY_KEY
-                rows = [msgspec.structs.asdict(row) for row in rows if self._row_has_pk(row)]
+                rows = [asdict(row) for row in rows if self._row_has_pk(row)]
             else:
-                rows = [msgspec.structs.asdict(row) for row in rows]
+                rows = [asdict(row) for row in rows]
             if not rows:
                 return
             # execute
@@ -510,7 +511,7 @@ class AlasioTable:
                 # filter rows with PRIMARY_KEY
                 if not self._row_has_pk(rows):
                     return
-            rows = msgspec.structs.asdict(rows)
+            rows = asdict(rows)
             # execute
             if _cursor_ is None:
                 with self.cursor() as c:
