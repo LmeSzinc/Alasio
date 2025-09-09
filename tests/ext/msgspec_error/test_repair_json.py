@@ -221,3 +221,34 @@ class TestLoadJsonWithDefault:
         assert result == WithDefaults(a=42, b="default", c=[])
         assert len(errors) > 0
         assert errors[-1].loc == ()  # The final error is at the root level.
+
+    def test_wrong_root_type_for_list_model(self):
+        """Test decoding a JSON object into a list model, which should fall back to an empty list."""
+        data = b'{}'  # JSON root is an object, but model is a list
+        result, errors = load_json_with_default(data, List[str])
+
+        # A root-level type error occurs, but `List[str]` can be default-constructed to `[]`.
+        assert result == []
+        assert len(errors) > 0
+        assert errors[-1].loc == ()
+        assert "Expected `array`" in errors[-1].msg
+
+    def test_wrong_root_type_for_int_model(self):
+        """Test decoding a JSON string into an int model, which should fall back to 0."""
+        data = b'"not a number"'  # JSON root is a string, but model is an int
+        result, errors = load_json_with_default(data, int)
+
+        assert result == NODEFAULT
+        assert len(errors) > 0
+        assert errors[-1].loc == ()
+        assert "Expected `int`" in errors[-1].msg
+
+    def test_wrong_root_type_for_str_model(self):
+        """Test decoding a JSON number into a str model, which should fall back to an empty string."""
+        data = b'123'  # JSON root is a number, but model is a string
+        result, errors = load_json_with_default(data, str)
+
+        assert result == NODEFAULT
+        assert len(errors) > 0
+        assert errors[-1].loc == ()
+        assert "Expected `str`" in errors[-1].msg

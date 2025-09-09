@@ -226,21 +226,26 @@ def _handle_obj_repair(
         raw_obj, error = _repair_once(raw_obj, model, error)
         if error is NODEFAULT:
             # don't collect this error
-            if raw_obj is NODEFAULT:
-                # repair failed
-                return NODEFAULT, collected_errors
             error_info = (raw_error.loc, raw_error.msg)
         else:
             collected_errors.append(error)
-            if raw_obj is NODEFAULT:
-                # repair failed
-                return NODEFAULT, collected_errors
             error_info = (error.loc, error.msg)
 
-        # check deadlock
-        if error_info in seen_errors:
-            # We are in a loop, probably because the field default doesn't match custom post init validation
-            return NODEFAULT, collected_errors
+        if (
+                # repair failed
+                raw_obj is NODEFAULT
+                # check deadlock
+                # We are in a loop, probably because the field default doesn't match custom post init validation
+                or error_info in seen_errors
+        ):
+            # try if model can be default constructed
+            raw_obj = get_default(model, return_struct=True)
+            if raw_obj is NODEFAULT:
+                return NODEFAULT, collected_errors
+            try:
+                return convert(raw_obj, model), collected_errors
+            except ValidationError:
+                return NODEFAULT, collected_errors
 
         # try if all repaired
         try:
@@ -263,21 +268,15 @@ def _handle_root_error(
     Returns:
         tuple[any, list[MsgspecError]]:
     """
-    error = MsgspecError(type=ErrorType.WRAPPED_ERROR, loc=(), msg=str(error))
-    raw_obj, error = _repair_once({}, model, error)
-    if error is NODEFAULT:
-        errors = []
-    else:
-        errors = [error]
-
-    # try if all repaired
-    if raw_obj is NODEFAULT:
-        return NODEFAULT, errors
+    collected_errors = [MsgspecError(type=ErrorType.WRAPPED_ERROR, loc=(), msg=str(error))]
+    # try if model can be default constructed
+    default = get_default(model, return_struct=True)
+    if default is NODEFAULT:
+        return NODEFAULT, collected_errors
     try:
-        return convert(raw_obj, model), errors
-    except ValidationError as e:
-        errors.append(parse_msgspec_error(e))
-        return NODEFAULT, errors
+        return convert(default, model), collected_errors
+    except ValidationError:
+        return NODEFAULT, collected_errors
 
 
 def _find_unicode_errors(obj: Any) -> "list[MsgspecError]":
