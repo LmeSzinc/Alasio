@@ -162,7 +162,7 @@ def is_struct_like(t):
     return False
 
 
-def get_default(t, guess_default=False):
+def get_default(t, guess_default=False, return_struct=False):
     """
     Calculates a default value for a given type hint
 
@@ -178,9 +178,12 @@ def get_default(t, guess_default=False):
             - container types (e.g., a list field with a non-list value will still default to `[]`),
             - Optional fields (which default to `None`)
             - Enums/Literals (which are never guessed)
+        return_struct (bool):
+            True to return msgspec.Struct instead of {}
 
     Returns:
-        Any:
+        Any: If `t` can be default constructed, return value in type `t`
+            Otherwise return NODEFAULT
     """
     origin, args = origin_args(t)
 
@@ -212,6 +215,13 @@ def get_default(t, guess_default=False):
 
     # --- Structured object types ---
 
+    if return_struct and type(t) is type(msgspec.Struct):
+        # try if `t` can be default constructed
+        try:
+            return t()
+        except Exception:
+            return NODEFAULT
+
     # All struct-like types default to an empty object (`{}`), representing a
     # valid but empty structure, which is useful for error correction.
     if is_struct_like(origin):
@@ -231,7 +241,7 @@ def get_default(t, guess_default=False):
         for arg in args:
             if arg is UnsetType:
                 continue
-            default = get_default(arg, guess_default)
+            default = get_default(arg, guess_default, return_struct)
             if default is not NODEFAULT:
                 return default
 

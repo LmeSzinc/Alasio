@@ -22,7 +22,13 @@ class MyEnum(Enum):
 
 
 class MyStruct(msgspec.Struct):
+    # This struct cannot be default-constructed
     x: int
+
+
+class MyDefaultConstructibleStruct(msgspec.Struct):
+    # This struct CAN be default-constructed
+    x: int = 1
 
 
 @dataclass
@@ -107,14 +113,36 @@ def test_unguessable_types_always_return_nodefault(type_hint):
 
 
 @pytest.mark.parametrize(
-    "struct_type",
-    [MyStruct, MyDataClass, MyTypedDict, MyNamedTuple, MyAttrsClass],
+    "struct_type, struct_flag, expected",
+    [
+        # --- Default behavior (struct=False) ---
+        (MyStruct, False, {}),
+        (MyDataClass, False, {}),
+        (MyTypedDict, False, {}),
+        (MyNamedTuple, False, {}),
+        (MyAttrsClass, False, {}),
+        (MyDefaultConstructibleStruct, False, {}),
+
+        # --- New behavior (struct=True) ---
+        # msgspec.Struct that is not default-constructible -> NODEFAULT
+        (MyStruct, True, NODEFAULT),
+        # msgspec.Struct that IS default-constructible -> instance
+        (MyDefaultConstructibleStruct, True, MyDefaultConstructibleStruct()),
+        # Other struct-like types are unaffected -> {}
+        (MyDataClass, True, {}),
+        (MyTypedDict, True, {}),
+        (MyNamedTuple, True, {}),
+        (MyAttrsClass, True, {}),
+    ]
 )
-def test_structured_types_always_default_to_empty_dict(struct_type):
-    """Tests that all supported structured types default to an empty dict `{}`."""
-    expected = {}
-    assert get_default(struct_type, guess_default=True) == expected
-    assert get_default(struct_type, guess_default=False) == expected
+def test_structured_types(struct_type, struct_flag, expected):
+    """Tests how structured types default, including the behavior of the `struct` parameter."""
+    # The result here should be independent of guess_default
+    res = get_default(struct_type, return_struct=struct_flag)
+    if expected is NODEFAULT:
+        assert res is NODEFAULT
+    else:
+        assert res == expected
 
 
 @pytest.mark.parametrize(
@@ -264,3 +292,27 @@ def test_forward_references(attr_name, expected_default):
     # because none of the results depend on guessing a primitive.
     assert get_default(type_hint, guess_default=True) == expected_default
     assert get_default(type_hint, guess_default=False) == expected_default
+
+
+def test_union_with_struct_parameter():
+    """Tests the interaction between Union types and the `struct=True` parameter."""
+    # Case 1: Union with a non-default-constructible Struct.
+    # `get_default` should skip it and find the next defaultable type.
+    type_hint1 = typing.Union[MyStruct, list]
+    assert get_default(type_hint1, return_struct=True) == []
+
+    # Case 2: Union with a default-constructible Struct.
+    # `get_default` should return an instance of that struct.
+    type_hint2 = typing.Union[MyDefaultConstructibleStruct, list]
+    assert get_default(type_hint2, return_struct=True) == MyDefaultConstructibleStruct()
+
+    # Case 3: Order matters. `int` with guessing enabled is chosen over the struct.
+    type_hint3 = typing.Union[int, MyDefaultConstructibleStruct]
+    assert get_default(type_hint3, return_struct=True, guess_default=True) == 0
+    # Without guessing, `int` is skipped, and the struct is chosen.
+    assert get_default(type_hint3, return_struct=True, guess_default=False) == MyDefaultConstructibleStruct()
+
+    # Case 4: Another order check. Struct is first, so it's always chosen.
+    type_hint4 = typing.Union[MyDefaultConstructibleStruct, int]
+    assert get_default(type_hint4, return_struct=True, guess_default=True) == MyDefaultConstructibleStruct()
+    assert get_default(type_hint4, return_struct=True, guess_default=False) == MyDefaultConstructibleStruct()
