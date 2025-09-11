@@ -347,10 +347,10 @@ class AlasioTable:
         # query
         if _cursor_ is None:
             with self.cursor() as c:
-                c.execute(sql)
+                c.execute(sql, kwargs)
                 result = c.fetchone()
         else:
-            _cursor_.execute(sql)
+            _cursor_.execute(sql, kwargs)
             result = _cursor_.fetchone()
 
         # convert to msgspec model
