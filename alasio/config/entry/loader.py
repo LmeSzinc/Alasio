@@ -5,7 +5,7 @@ import alasio.config.entry.const as const
 from alasio.config.entry.mod import Mod
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_get, deep_iter_depth2, deep_values_depth2
+from alasio.ext.deep import deep_get, deep_get_with_error, deep_iter_depth2, deep_values_depth2
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import is_abspath, joinnormpath
@@ -155,21 +155,34 @@ class ModLoader:
         for file in nav_ref.i18n:
             group_i18n = mod.nav_i18n_json(file)
             i18n.update(group_i18n)
+        # prepare config
+        config = mod.config_read(config_name, nav_ref.config)
 
-        # insert i18n
         for arg_data in deep_values_depth2(out):
             try:
+                task_name = arg_data['task']
                 group_name = arg_data['group']
                 arg_name = arg_data['arg']
             except KeyError:
                 # this shouldn't happen
                 continue
+
+            # insert i18n
             i18n_data = deep_get(i18n, [group_name, arg_name, lang])
             try:
                 arg_data.update(i18n_data)
             except TypeError:
                 # this shouldn't happen, as i18n_data should be dict
                 continue
+            # insert config
+            try:
+                value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
+            except KeyError:
+                # this shouldn't happen
+                logger.warning(f'DataInconsistent: Missing config of {task_name}.{group_name}.{arg_name} '
+                               f'when getting mod={mod_name}, nav={nav_name}')
+                continue
+            arg_data['value'] = value
 
         return out
 
