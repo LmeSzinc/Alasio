@@ -1,6 +1,9 @@
 import type { Component } from "svelte";
 
 export type ArgData = {
+  task: string,
+  group: string,
+  arg: string,
   dt: string;
   value: any;
   name?: string;

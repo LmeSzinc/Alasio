@@ -246,6 +246,30 @@ def deep_pop(d, keys, default=None):
         return default
 
 
+def dict_update(d, new):
+    """
+    Safely do dict.update()
+
+    Args:
+        d (dict):
+        new (dict):
+
+    Returns:
+
+    """
+    try:
+        d.update(new)
+        return d
+    except AttributeError:
+        # AttributeError: 'NoneType' object has no attribute 'update'
+        return new
+    except TypeError:
+        # `new` is not dict
+        if type(new) is dict:
+            return new
+        return d
+
+
 def deep_iter_depth1(data):
     """
     Equivalent to data.items() but suppress error if data is not a dict

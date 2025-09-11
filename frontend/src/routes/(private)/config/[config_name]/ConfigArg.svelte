@@ -14,16 +14,26 @@
   // --- WebSocket & RPC Setup ---
   type ConfigArgData = Record<string, Record<string, ArgData>>;
   const topicClient = useTopic<ConfigArgData>("ConfigArg");
+  const rpc = topicClient.rpc();
 
   // --- Reactive Logic (Svelte 5 Runes) ---
 
   // --- Event Handlers (passed down to ArgGroups) ---
-  function handleEdit(updatedArg: ArgData) {
-    console.log("Arg edited, sending update to server:", updatedArg.value);
+  function handleEdit(data: ArgData) {
+    rpc.call("set", {
+      task: data.task,
+      group: data.group,
+      arg: data.arg,
+      value: data.value,
+    });
   }
 
-  function handleReset(argToReset: ArgData) {
-    console.log("Arg reset requested:", argToReset.name);
+  function handleReset(data: ArgData) {
+    rpc.call("set", {
+      task: data.task,
+      group: data.group,
+      arg: data.arg,
+    });
   }
 </script>
 

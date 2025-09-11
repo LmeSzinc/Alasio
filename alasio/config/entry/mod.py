@@ -1,15 +1,25 @@
-from msgspec import NODEFAULT
+from collections import defaultdict
+from typing import Any
+
+from msgspec import NODEFAULT, Struct, convert
 from msgspec.structs import asdict
 
 from alasio.config.entry.const import ModEntryInfo
-from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX, MODEL_TASK_INDEX, ModelConfigRef
-from alasio.config.table.config import AlasioConfigTable
-from alasio.ext.deep import deep_set
+from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX, MODEL_TASK_INDEX, ModelConfigRef, ModelGroupRef
+from alasio.config.table.config import AlasioConfigTable, ConfigRow
+from alasio.ext.deep import deep_set, dict_update
 from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.ext.file.msgspecfile import JSON_CACHE_TTL
 from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.ext.path import PathStr
 from alasio.logger import logger
+
+
+class ConfigSetEvent(Struct):
+    task: str
+    group: str
+    arg: str
+    value: Any
 
 
 class Mod:
@@ -98,6 +108,28 @@ class Mod:
         file = self.root / file
         return LOADPY_CACHE.get(file)
 
+    def _get_task_model(self, model_ref: ModelGroupRef):
+        """
+        Get msgspec validation model from model_ref
+
+        Returns:
+            msgspec.Struct | None:
+        """
+        try:
+            module = self.task_model_py(model_ref.file)
+        except ImportError as e:
+            # DataInconsistent error.
+            # We just log warnings to reduce runtime crash, missing config will fall back to default
+            logger.warning(
+                f'DataInconsistent: failed to import model.py "{model_ref.file}": {e}')
+            return None
+        model = getattr(module, model_ref.cls, None)
+        if model is None:
+            logger.warning(
+                f'DataInconsistent: Missing class "{model_ref.cls}" in "{model_ref.file}"')
+            return None
+        return model
+
     """
     Config read/write
     """
@@ -127,19 +159,10 @@ class Mod:
 
                 key = (task_name, group_name)
                 # get model
-                try:
-                    module = self.task_model_py(model_ref.file)
-                except ImportError as e:
-                    # DataInconsistent error.
-                    # We just log warnings to reduce runtime crash, missing config will fall back to default
-                    logger.warning(
-                        f'DataInconsistent: failed to import model.py "{model_ref.file}": {e}')
-                    continue
-                model = getattr(module, model_ref.cls, None)
+                model = self._get_task_model(model_ref)
                 if model is None:
-                    logger.warning(
-                        f'DataInconsistent: Missing class "{model_ref.cls}" in "{model_ref.file}"')
                     continue
+                # construct a default value from model
                 try:
                     default = model()
                 except TypeError:
@@ -180,3 +203,75 @@ class Mod:
             deep_set(out, keys=key, value=value)
 
         return out
+
+    def config_set(self, config_name, events: "list[ConfigSetEvent]"):
+        """
+        Args:
+            config_name:
+            events:
+
+        Raises:
+            ValidationError:
+        """
+
+        # prepare model and default
+        task_index_data = self.task_index_data()
+
+        dict_model = {}
+        dict_value = defaultdict(dict)
+        for event in events:
+            key = (event.task, event.group)
+            if key in dict_model:
+                continue
+            try:
+                model_ref = task_index_data[event.task].group[event.group]
+            except KeyError:
+                logger.warning(f'Cannot set non-exist group {event.task}.{event.group}')
+                continue
+            # get model
+            model = self._get_task_model(model_ref)
+            if model is None:
+                continue
+            dict_model[key] = model
+            dict_value[key][event.arg] = event.value
+            # deep_set(dict_value, keys=[key, event.arg], value=event.value)
+
+        # validate
+        for key, value in dict_value.items():
+            try:
+                model = dict_model[key]
+            except KeyError:
+                # this shouldn't happen
+                continue
+            # may raise error
+            # if any event failed to validate, entire config_set will break
+            # just to validate, result doesn't matter
+            convert(value, model)
+            dict_value[key] = value
+        del dict_model
+
+        # init table
+        show = [f'{e.task}.{e.group}.{e.arg}={e.value}' for e in events]
+        logger.info(f'config_set "{config_name}": {", ".join(show)}')
+        table = AlasioConfigTable(config_name)
+        decode = DECODER_CACHE.MSGPACK_DECODER.decode
+        encode = DECODER_CACHE.MSGPACK_ENCODER.encode
+
+        # write after validation
+        # so invalid value won't lock up the entire database
+        with table.exclusive_transaction() as c:
+            # read
+            dict_old = {}
+            rows = table.read_rows(events, _cursor_=c)
+            for row in rows:
+                dict_old[(row.task, row.group)] = decode(row.value)
+            # update
+            rows = []
+            for key, value in dict_value.items():
+                old = dict_old.get(key, {})
+                value = dict_update(old, value)
+                value = encode(value)
+                task, group = key
+                rows.append(ConfigRow(task=task, group=group, value=value))
+            # write
+            table.upsert_row(rows, conflicts=('task', 'group'), updates='value', _cursor_=c)

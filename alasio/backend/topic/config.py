@@ -1,8 +1,11 @@
+from typing import Any
+
 import trio.to_thread
 
 from alasio.backend.topic.state import ConnState, NavState
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
+from alasio.ext.reactive.base_rpc import rpc
 from alasio.ext.reactive.rx_trio import async_reactive
 
 
@@ -54,12 +57,29 @@ class ConfigArg(BaseTopic):
         mod_name = nav.mod_name
         config_name = nav.config_name
         nav_name = nav.nav_name
-        lang: str = await state.lang
         if not mod_name or not config_name or not nav_name:
             return {}
 
+        lang: str = await state.lang
         data = await trio.to_thread.run_sync(
             MOD_LOADER.get_gui_config,
             mod_name, config_name, nav_name, lang
         )
         return data
+
+    @rpc
+    async def set(self, task: str, group: str, arg: str, value: Any):
+        if not task or not group or not arg:
+            return
+        # get config_name
+        state = ConnState(self.conn_id, self.server)
+        nav: NavState = await state.nav_state
+        mod_name = nav.mod_name
+        config_name = nav.config_name
+        if not config_name:
+            return
+
+        await trio.to_thread.run_sync(
+            MOD_LOADER.gui_config_set,
+            mod_name, config_name, task, group, arg, value
+        )
