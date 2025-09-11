@@ -231,21 +231,13 @@ def _handle_obj_repair(
             collected_errors.append(error)
             error_info = (error.loc, error.msg)
 
-        if (
-                # repair failed
-                raw_obj is NODEFAULT
-                # check deadlock
-                # We are in a loop, probably because the field default doesn't match custom post init validation
-                or error_info in seen_errors
-        ):
-            # try if model can be default constructed
-            raw_obj = get_default(model, return_struct=True)
-            if raw_obj is NODEFAULT:
-                return NODEFAULT, collected_errors
-            try:
-                return convert(raw_obj, model), collected_errors
-            except ValidationError:
-                return NODEFAULT, collected_errors
+        # repair failed
+        if raw_obj is NODEFAULT:
+            return get_default(model, return_obj=True), collected_errors
+        # check deadlock
+        # We are in a loop, probably because the field default doesn't match custom post init validation
+        if error_info in seen_errors:
+            return get_default(model, return_obj=True), collected_errors
 
         # try if all repaired
         try:
@@ -270,13 +262,7 @@ def _handle_root_error(
     """
     collected_errors = [MsgspecError(type=ErrorType.WRAPPED_ERROR, loc=(), msg=str(error))]
     # try if model can be default constructed
-    default = get_default(model, return_struct=True)
-    if default is NODEFAULT:
-        return NODEFAULT, collected_errors
-    try:
-        return convert(default, model), collected_errors
-    except ValidationError:
-        return NODEFAULT, collected_errors
+    return get_default(model, return_obj=True), collected_errors
 
 
 def _find_unicode_errors(obj: Any) -> "list[MsgspecError]":

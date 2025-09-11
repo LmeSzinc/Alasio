@@ -113,32 +113,77 @@ def test_unguessable_types_always_return_nodefault(type_hint):
 
 
 @pytest.mark.parametrize(
-    "struct_type, struct_flag, expected",
+    "struct_type",
     [
-        # --- Default behavior (struct=False) ---
-        (MyStruct, False, {}),
-        (MyDataClass, False, {}),
-        (MyTypedDict, False, {}),
-        (MyNamedTuple, False, {}),
-        (MyAttrsClass, False, {}),
-        (MyDefaultConstructibleStruct, False, {}),
-
-        # --- New behavior (struct=True) ---
-        # msgspec.Struct that is not default-constructible -> NODEFAULT
-        (MyStruct, True, NODEFAULT),
-        # msgspec.Struct that IS default-constructible -> instance
-        (MyDefaultConstructibleStruct, True, MyDefaultConstructibleStruct()),
-        # Other struct-like types are unaffected -> {}
-        (MyDataClass, True, {}),
-        (MyTypedDict, True, {}),
-        (MyNamedTuple, True, {}),
-        (MyAttrsClass, True, {}),
-    ]
+        MyStruct,
+        MyDataClass,
+        MyTypedDict,
+        MyNamedTuple,
+        MyAttrsClass,
+        MyDefaultConstructibleStruct,
+    ],
 )
-def test_structured_types(struct_type, struct_flag, expected):
-    """Tests how structured types default, including the behavior of the `struct` parameter."""
-    # The result here should be independent of guess_default
-    res = get_default(struct_type, return_struct=struct_flag)
+def test_get_default_on_structured_types(struct_type):
+    """
+    Tests that get_default (with return_obj=False) returns an empty dict `{}`
+    for any struct-like type.
+    """
+    # This behavior should be independent of the guess_default flag.
+    assert get_default(struct_type, guess_default=True, return_obj=False) == {}
+    assert get_default(struct_type, guess_default=False, return_obj=False) == {}
+
+
+@pytest.mark.parametrize(
+    "type_hint, guess, expected",
+    [
+        # Primitives
+        (int, True, 0),
+        (int, False, NODEFAULT),
+        (str, True, ""),
+        (str, False, NODEFAULT),
+        # Containers
+        (list, True, []),
+        (list, False, []),
+        (dict, True, {}),
+        (dict, False, {}),
+        # Unguessable
+        (MyEnum, True, NODEFAULT),
+        (MyEnum, False, NODEFAULT),
+    ],
+)
+def test_get_default_with_return_obj_on_common_types(type_hint, guess, expected):
+    """
+    Tests that get_default (with return_obj=True) correctly returns a constructed
+    object for common types.
+    """
+    res = get_default(type_hint, guess_default=guess, return_obj=True)
+    if expected is NODEFAULT:
+        assert res is NODEFAULT
+    else:
+        assert res == expected
+
+
+@pytest.mark.parametrize(
+    "struct_type, expected",
+    [
+        # msgspec.Struct that is not default-constructible -> NODEFAULT
+        (MyStruct, NODEFAULT),
+        # msgspec.Struct that IS default-constructible -> instance
+        (MyDefaultConstructibleStruct, MyDefaultConstructibleStruct(x=1)),
+        # Other struct-like types with required fields -> NODEFAULT on conversion
+        (MyDataClass, NODEFAULT),
+        (MyNamedTuple, NODEFAULT),
+        (MyAttrsClass, NODEFAULT),
+        # TypedDict conversion failed because it has required keys
+        (MyTypedDict, NODEFAULT),
+    ],
+)
+def test_get_default_with_return_obj_on_structured_types(struct_type, expected):
+    """
+    Tests that get_default (with return_obj=True) attempts to construct a default object,
+    succeeding for default-constructible types and failing for others.
+    """
+    res = get_default(struct_type, return_obj=True)
     if expected is NODEFAULT:
         assert res is NODEFAULT
     else:
@@ -168,16 +213,16 @@ def test_structured_types(struct_type, struct_flag, expected):
     ],
 )
 def test_union_and_optional_logic(type_hint, expected_guess, expected_no_guess):
-    """Tests the complex logic for Union and Optional types."""
+    """Tests the complex logic for Union and Optional types with return_obj=False."""
     # Test with guess_default=True
-    res_guess = get_default(type_hint, guess_default=True)
+    res_guess = get_default(type_hint, guess_default=True, return_obj=False)
     if expected_guess is NODEFAULT:
         assert res_guess is NODEFAULT
     else:
         assert res_guess == expected_guess
 
     # Test with guess_default=False
-    res_no_guess = get_default(type_hint, guess_default=False)
+    res_no_guess = get_default(type_hint, guess_default=False, return_obj=False)
     if expected_no_guess is NODEFAULT:
         assert res_no_guess is NODEFAULT
     else:
@@ -281,38 +326,37 @@ def test_forward_references(attr_name, expected_default):
     This test uses `typing.get_type_hints()` to resolve the string annotations
     at runtime, which is the standard library's method for this task.
     """
-    # Resolve all forward references in the container class.
-    # We pass `globals()` so it can find `ForwardRefTargetStruct` etc.
     resolved_hints = typing.get_type_hints(TestForwardRefContainer, globalns=globals())
-
-    # Get the specific, now-resolved type hint for the current test case.
     type_hint = resolved_hints[attr_name]
-
-    # The behavior should be the same regardless of the `guess_default` flag
-    # because none of the results depend on guessing a primitive.
     assert get_default(type_hint, guess_default=True) == expected_default
     assert get_default(type_hint, guess_default=False) == expected_default
 
 
-def test_union_with_struct_parameter():
-    """Tests the interaction between Union types and the `struct=True` parameter."""
-    # Case 1: Union with a non-default-constructible Struct.
-    # `get_default` should skip it and find the next defaultable type.
-    type_hint1 = typing.Union[MyStruct, list]
-    assert get_default(type_hint1, return_struct=True) == []
+@pytest.mark.parametrize(
+    "type_hint, guess, expected",
+    [
+        # Case 1: Union with non-constructible Struct. Should skip MyStruct and default to list.
+        (typing.Union[MyStruct, list], True, []),
+        (typing.Union[MyStruct, list], False, []),
 
-    # Case 2: Union with a default-constructible Struct.
-    # `get_default` should return an instance of that struct.
-    type_hint2 = typing.Union[MyDefaultConstructibleStruct, list]
-    assert get_default(type_hint2, return_struct=True) == MyDefaultConstructibleStruct()
+        # Case 2: Union with a constructible Struct. MyDefaultConstructibleStruct is first and succeeds.
+        (typing.Union[MyDefaultConstructibleStruct, list], True, MyDefaultConstructibleStruct(x=1)),
+        (typing.Union[MyDefaultConstructibleStruct, list], False, MyDefaultConstructibleStruct(x=1)),
 
-    # Case 3: Order matters. `int` with guessing enabled is chosen over the struct.
-    type_hint3 = typing.Union[int, MyDefaultConstructibleStruct]
-    assert get_default(type_hint3, return_struct=True, guess_default=True) == 0
-    # Without guessing, `int` is skipped, and the struct is chosen.
-    assert get_default(type_hint3, return_struct=True, guess_default=False) == MyDefaultConstructibleStruct()
+        # Case 3: Order matters. list is first, so its default [] is returned.
+        (typing.Union[list, MyDefaultConstructibleStruct], True, []),
+        (typing.Union[list, MyDefaultConstructibleStruct], False, []),
 
-    # Case 4: Another order check. Struct is first, so it's always chosen.
-    type_hint4 = typing.Union[MyDefaultConstructibleStruct, int]
-    assert get_default(type_hint4, return_struct=True, guess_default=True) == MyDefaultConstructibleStruct()
-    assert get_default(type_hint4, return_struct=True, guess_default=False) == MyDefaultConstructibleStruct()
+        # Case 4: Order matters. With guessing, `int` is chosen and converted to 0.
+        (typing.Union[int, MyDefaultConstructibleStruct], True, 0),
+        # Without guessing, `int` fails, so the constructible struct is chosen next.
+        (typing.Union[int, MyDefaultConstructibleStruct], False, MyDefaultConstructibleStruct(x=1)),
+    ]
+)
+def test_get_default_with_return_obj_and_unions(type_hint, guess, expected):
+    """Tests the interaction between Union types and the return_obj=True flag."""
+    res = get_default(type_hint, guess_default=guess, return_obj=True)
+    if expected is NODEFAULT:
+        assert res is NODEFAULT
+    else:
+        assert res == expected

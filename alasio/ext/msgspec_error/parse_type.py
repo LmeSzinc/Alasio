@@ -6,9 +6,9 @@ import uuid
 from typing import Any, TypeVar, Union
 
 import msgspec
-from msgspec import NODEFAULT, UnsetType
+from msgspec import NODEFAULT, Struct, UnsetType, convert
 from msgspec._utils import _CONCRETE_TYPES
-from msgspec.inspect import _is_attrs, _is_dataclass, _is_enum, _is_namedtuple, _is_struct, _is_typeddict
+from msgspec.inspect import _is_enum
 from typing_extensions import Literal
 
 # Backport typing alias in msgspec._utils, so we can keep supporting py3.8
@@ -142,7 +142,7 @@ def is_struct_like(t):
     or _is_namedtuple(t)
     """
     # _is_struct()
-    if type(t) is type(msgspec.Struct):
+    if type(t) is type(Struct):
         return True
     # _is_dataclass()
     if hasattr(t, "__dataclass_fields__"):
@@ -162,7 +162,7 @@ def is_struct_like(t):
     return False
 
 
-def get_default(t, guess_default=False, return_struct=False):
+def get_default(t, guess_default=False, return_obj=False):
     """
     Calculates a default value for a given type hint
 
@@ -178,8 +178,9 @@ def get_default(t, guess_default=False, return_struct=False):
             - container types (e.g., a list field with a non-list value will still default to `[]`),
             - Optional fields (which default to `None`)
             - Enums/Literals (which are never guessed)
-        return_struct (bool):
-            True to return msgspec.Struct instead of {}
+        return_obj (bool):
+            False to return default value in json
+            True to convert default value to type `t`
 
     Returns:
         Any: If `t` can be default constructed, return value in type `t`
@@ -215,17 +216,17 @@ def get_default(t, guess_default=False, return_struct=False):
 
     # --- Structured object types ---
 
-    if return_struct and type(t) is type(msgspec.Struct):
-        # try if `t` can be default constructed
-        try:
-            return t()
-        except Exception:
-            return NODEFAULT
-
     # All struct-like types default to an empty object (`{}`), representing a
     # valid but empty structure, which is useful for error correction.
     if is_struct_like(origin):
-        return {}
+        if return_obj:
+            try:
+                return convert({}, origin)
+            except Exception:
+                # TypeError or ValidationError when object cannot be default constructed
+                return NODEFAULT
+        else:
+            return {}
 
     # --- Union types ---
 
@@ -241,7 +242,7 @@ def get_default(t, guess_default=False, return_struct=False):
         for arg in args:
             if arg is UnsetType:
                 continue
-            default = get_default(arg, guess_default, return_struct)
+            default = get_default(arg, guess_default, return_obj)
             if default is not NODEFAULT:
                 return default
 
