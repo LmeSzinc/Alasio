@@ -624,7 +624,7 @@ class AlasioTable:
         conflict_clause = ','.join([f'"{field}"' for field in conflicts])
         # "task"=excluded."task","group"=excluded."group",...
         update_clause = ','.join([f'"{field}"=excluded."{field}"' for field in updates])
-        sql = f'INSERT INTO "{self.TABLE_NAME}" ({columns}) VALUES ({placeholders})' \
+        sql = f'INSERT INTO "{self.TABLE_NAME}" ({columns}) VALUES ({placeholders}) ' \
               f'ON CONFLICT ({conflict_clause}) DO UPDATE SET {update_clause}'
 
         self.execute_one_or_many(sql, rows, _cursor_=_cursor_)

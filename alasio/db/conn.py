@@ -4,6 +4,7 @@ import time
 from threading import Lock
 
 from alasio.ext.path.atomic import atomic_remove
+from alasio.logger import logger
 
 
 class SqlitePoolCursor(sqlite3.Cursor):
@@ -25,6 +26,20 @@ class SqlitePoolCursor(sqlite3.Cursor):
         super().close()
         conn = self.connection
         pool = self.pool
+
+        # check transaction
+        if conn is not None:
+            if conn.in_transaction:
+                logger.error(
+                    f'DEV ERROR: A transaction was not explicitly committed or rolled back, '
+                    f'please check your code')
+            # rollback to prevent connection pollution
+            try:
+                conn.rollback()
+            except Exception as e:
+                logger.error(f'Failed to rollback transaction: {e}')
+
+        # return connection
         if pool is not None:
             # Update last_visit again as SQL query may take long
             pool.last_use[conn] = time.time()
