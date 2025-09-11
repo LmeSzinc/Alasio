@@ -150,6 +150,23 @@ class AlasioTable:
         cursor.CREATE_TABLE = self.CREATE_TABLE
         return cursor
 
+    def exclusive_transaction(self):
+        """
+        Provides a cursor within a single EXCLUSIVE transaction.
+        Commits on successful exit, rolls back on exception.
+
+        Usage:
+            with self.exclusive_transaction() as cursor:
+                # IMPORTANT: reuse this cursor
+                self.execute_one_or_many(..., _cursor_=c)
+                self.execute_one_or_many(..., _cursor_=c)
+        """
+        transaction = SQLITE_POOL.exclusive_transaction(self.file)
+        # copy CREATE_TABLE to cursor, so it can auto create table if table not exists
+        transaction.cursor.TABLE_NAME = self.TABLE_NAME
+        transaction.cursor.CREATE_TABLE = self.CREATE_TABLE
+        return transaction
+
     def create_table(self):
         """
         Table is auto created, but you can still create it manually.

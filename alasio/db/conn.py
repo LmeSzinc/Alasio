@@ -113,6 +113,28 @@ class SqlitePoolCursor(sqlite3.Cursor):
         return super().executemany(*args, **kwargs)
 
 
+class ExclusiveTransaction:
+    def __init__(self, cursor):
+        """
+        Args:
+            cursor (SqlitePoolCursor):
+        """
+        self.cursor = cursor
+
+    def __enter__(self):
+        self.cursor.execute("BEGIN EXCLUSIVE;")
+        return self.cursor
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            if exc_type is None:
+                self.cursor.commit()
+            else:
+                self.cursor.connection.rollback()
+        finally:
+            self.cursor.close()
+
+
 class ConnectionPool:
     def __init__(self, file, pool_size=4):
         """
@@ -145,7 +167,7 @@ class ConnectionPool:
             sqlite3.Connection:
         """
         try:
-            conn = sqlite3.connect(file, check_same_thread=False)
+            conn = sqlite3.connect(file, timeout=10.0, check_same_thread=False)
             cls.set_conn_pragma(conn)
             return conn
         except sqlite3.OperationalError as e:
@@ -159,7 +181,7 @@ class ConnectionPool:
         folder = os.path.dirname(file)
         os.makedirs(folder, exist_ok=True)
 
-        conn = sqlite3.connect(file, check_same_thread=False)
+        conn = sqlite3.connect(file, timeout=10.0, check_same_thread=False)
         cls.set_conn_pragma(conn)
         return conn
 
@@ -303,6 +325,19 @@ class ConnectionPool:
         cursor.pool = self
         return cursor
 
+    def exclusive_transaction(self):
+        """
+        Provides a cursor within a single EXCLUSIVE transaction.
+        Commits on successful exit, rolls back on exception.
+
+        Usage:
+            with pool.exclusive_transaction() as c:
+                cursor.execute(...)
+                cursor.execute(...)
+        """
+        cursor = self.cursor()
+        return ExclusiveTransaction(cursor)
+
     def gc(self, idle=60):
         """
         Close connections that have not been used for more than 60s
@@ -422,6 +457,25 @@ class SqlitePool:
         """
         pool = self.get_pool(file)
         return pool.cursor()
+
+    def exclusive_transaction(self, file):
+        """
+        Provides a cursor within a single EXCLUSIVE transaction.
+        Commits on successful exit, rolls back on exception.
+
+        Args:
+            file (str): Absolute path to database file
+
+        Returns:
+            ExclusiveTransaction:
+
+        Usage:
+            with pool.exclusive_transaction() as cursor:
+                cursor.execute(...)
+                cursor.execute(...)
+        """
+        pool = self.get_pool(file)
+        return pool.exclusive_transaction()
 
     def gc(self, idle=60):
         """
