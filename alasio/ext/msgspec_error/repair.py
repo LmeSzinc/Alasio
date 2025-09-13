@@ -172,17 +172,11 @@ def _repair_once(
             if is_last:
                 # fix obj
                 # try field default first
-                default, default_factory = get_field_default(model, part)
-                if default is not NODEFAULT:
-                    value = default
-                elif default_factory is not NODEFAULT:
-                    try:
-                        value = default_factory()
-                    except Exception:
-                        # Failed to run default_factory
-                        value = NODEFAULT
-                else:
-                    value = NODEFAULT
+                try:
+                    value = get_field_default(model, part)
+                except AttributeError:
+                    # this shouldn't happen, unless raw_obj and error.loc don't match
+                    return NODEFAULT, error
                 # if field doesn't have a default, try to get from type
                 if value is NODEFAULT:
                     child_model = get_field_typehint(model, part)

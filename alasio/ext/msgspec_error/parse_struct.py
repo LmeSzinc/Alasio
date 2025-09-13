@@ -1,7 +1,7 @@
 import sys
 from typing import ForwardRef, Generic, Type, TypeVar
 
-from msgspec import NODEFAULT, Struct, UNSET, field
+from msgspec import NODEFAULT, Struct, UNSET
 from msgspec._core import Factory
 from msgspec._utils import _apply_params, _get_class_mro_and_typevar_mappings
 
@@ -53,8 +53,10 @@ def get_field_default(model: "Type[Struct]", field_name):
         field_name (str):
 
     Returns:
-        tuple[Any | NODEFAULT, Callable | NODEFAULT]:
-            default and default_factory, either can be NODEFAULT if field does not have a default
+        Any | NODEFAULT:
+            default value of given field
+            NODEFAULT if field doesn't have a default
+            NODEFAULT if default factory can't be constructed
 
     Raises:
         AttributeError: if failed
@@ -83,12 +85,15 @@ def get_field_default(model: "Type[Struct]", field_name):
             raise AttributeError(f'Type {model} default_idx={default_idx} is out of __struct_defaults__={defaults}')
 
         if default_obj is NODEFAULT or default_obj is UNSET:
-            return NODEFAULT, NODEFAULT
+            return NODEFAULT
         if isinstance(default_obj, Factory):
-            return NODEFAULT, default_obj.factory
-        return default_obj, NODEFAULT
+            try:
+                return default_obj.factory()
+            except Exception:
+                return NODEFAULT
+        return default_obj
 
-    return NODEFAULT, NODEFAULT
+    return NODEFAULT
 
 
 def _contains_typevar(tp):

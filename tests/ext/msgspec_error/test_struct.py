@@ -1,11 +1,8 @@
-# test_parse_struct.py
-
 from typing import ForwardRef, Generic, List, Optional, TypeVar, Union
 
 import pytest
 from msgspec import NODEFAULT, Struct, UNSET, UnsetType, field
 
-# --- Assume the functions are in this module as requested ---
 from alasio.ext.msgspec_error.parse_struct import (
     get_field_default,
     get_field_name,
@@ -69,6 +66,15 @@ class NotAStruct:
     pass
 
 
+# A struct with a factory that will raise an error, for testing error handling.
+def _failing_factory():
+    raise ValueError("Factory intentionally fails")
+
+
+class StructWithFailingFactory(Struct):
+    failing_field: list = field(default_factory=_failing_factory)
+
+
 # =================================================================
 # Test Class for `get_field_name`
 # =================================================================
@@ -118,36 +124,42 @@ class TestGetFieldDefault:
     """Tests for the `get_field_default` utility function."""
 
     @pytest.mark.parametrize(
-        "field_name, expected_default, expected_factory",
+        "field_name, expected_value",
         [
-            # A required field has no default and no factory.
-            ("a_required", NODEFAULT, NODEFAULT),
+            # A required field has no default.
+            ("a_required", NODEFAULT),
             # A field with a simple default value.
-            ("c_default_value", 3.14, NODEFAULT),
-            # A field with a default_factory.
-            ("d_default_factory", NODEFAULT, list),
+            ("c_default_value", 3.14),
+            # A field with a default_factory; the factory is called to get the value.
+            ("d_default_factory", []),
             # A field marked as UNSET has no effective default.
-            ("e_unset", NODEFAULT, NODEFAULT),
+            ("e_unset", NODEFAULT),
             # A field with `None` as its default value.
-            ("f_default_none", None, NODEFAULT),
+            ("f_default_none", None),
         ],
     )
-    def test_get_defaults_and_factories(self, field_name, expected_default, expected_factory):
+    def test_get_defaults(self, field_name, expected_value):
         """
-        Tests various default value scenarios: required, default value,
+        Tests various default scenarios: required, simple value,
         default_factory, UNSET, and None.
         """
-        default, factory = get_field_default(SimpleStruct, field_name)
-        assert default == expected_default
-        assert factory == expected_factory
+        default = get_field_default(SimpleStruct, field_name)
+        assert default == expected_value
 
     def test_default_unset_in_child_class(self):
         """
         Tests that a field with a default in the parent, when set to UNSET
         in the child, is correctly identified as having no default.
         """
-        # The child makes `overridden_field` required, removing the parent's default.
-        assert get_field_default(Child, "overridden_field") == (NODEFAULT, NODEFAULT)
+        # The child makes `overridden_field` required, so it has no default.
+        assert get_field_default(Child, "overridden_field") is NODEFAULT
+
+    def test_failing_factory_returns_nodefault(self):
+        """
+        Tests that if a default_factory raises an exception during invocation,
+        the function returns NODEFAULT.
+        """
+        assert get_field_default(StructWithFailingFactory, "failing_field") is NODEFAULT
 
     def test_non_existent_field_name_raises_attribute_error(self):
         """
@@ -239,8 +251,8 @@ class TestGetFieldTypehint:
         cannot be found in the model's MRO.
         """
         with pytest.raises(
-            AttributeError,
-            match=f'Type {Child} has no field with field_name="non_existent"',
+                AttributeError,
+                match=f'Type {Child} has no field with field_name="non_existent"',
         ):
             get_field_typehint(Child, "non_existent")
 
@@ -251,7 +263,7 @@ class TestGetFieldTypehint:
         """
         # UPDATED: Check for the new explicit error from the try/except block.
         with pytest.raises(
-            AttributeError,
-            match=f"Type {NotAStruct} is not a valid msgspec.Struct"
+                AttributeError,
+                match=f"Type {NotAStruct} is not a valid msgspec.Struct"
         ):
             get_field_typehint(NotAStruct, "any_field")
