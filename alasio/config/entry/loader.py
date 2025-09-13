@@ -190,6 +190,8 @@ class ModLoader:
 
     def gui_config_set(self, mod_name, config_name, task_name, group_name, arg_name, value):
         """
+        See Mod.config_set()
+
         Args:
             mod_name (str):
             config_name (str):
@@ -197,6 +199,9 @@ class ModLoader:
             group_name (str):
             arg_name (str):
             value (Any):
+
+        Returns:
+            tuple[bool, ConfigSetEvent]:
         """
         try:
             mod = self.dict_mod[mod_name]
@@ -204,7 +209,8 @@ class ModLoader:
             raise ValidationError(f'No such mod: "{mod_name}"') from None
 
         event = ConfigSetEvent(task=task_name, group=group_name, arg=arg_name, value=value)
-        mod.config_set(config_name, events=[event])
+        success, responses = mod.config_set(config_name, events=[event])
+        return success, responses[0]
 
 
 MOD_LOADER = ModLoader(env.PROJECT_ROOT)

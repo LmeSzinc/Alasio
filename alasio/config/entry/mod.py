@@ -1,7 +1,7 @@
 from collections import defaultdict
-from typing import Any
+from typing import Any, Optional
 
-from msgspec import NODEFAULT, Struct, convert
+from msgspec import NODEFAULT, Struct, ValidationError, convert
 from msgspec.structs import asdict
 
 from alasio.config.entry.const import ModEntryInfo
@@ -10,7 +10,9 @@ from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.deep import deep_set, dict_update
 from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.ext.file.msgspecfile import JSON_CACHE_TTL
-from alasio.ext.msgspec_error import load_msgpack_with_default
+from alasio.ext.msgspec_error import MsgspecError, load_msgpack_with_default
+from alasio.ext.msgspec_error.error import parse_msgspec_error
+from alasio.ext.msgspec_error.parse_struct import get_field_default
 from alasio.ext.path import PathStr
 from alasio.logger import logger
 
@@ -20,6 +22,7 @@ class ConfigSetEvent(Struct):
     group: str
     arg: str
     value: Any
+    error: Optional[MsgspecError] = None
 
 
 class Mod:
@@ -113,7 +116,7 @@ class Mod:
         Get msgspec validation model from model_ref
 
         Returns:
-            msgspec.Struct | None:
+            Type[msgspec.Struct] | None:
         """
         try:
             module = self.task_model_py(model_ref.file)
@@ -204,16 +207,27 @@ class Mod:
 
         return out
 
-    def config_set(self, config_name, events: "list[ConfigSetEvent]"):
+    def config_set(self, config_name, events):
         """
+        Batch set config.
+        If any event failed to validate, entire config_set is consider failed.
+
         Args:
-            config_name:
-            events:
+            config_name (str):
+            events (list[ConfigSetEvent]):
 
-        Raises:
-            ValidationError:
+        Returns:
+            tuple[bool, list[ConfigSetEvent]]:
+                note that the return type of event.value will match the model definition,
+                which might differ from input.
+                If success, returns True and a list of set event.
+                    - event.value might be NODEFAULT
+                    - event.error is None
+                If failed, returns False and a list of rollback event.
+                    - event.arg might be NODEFAULT
+                    - event.value might be NODEFAULT
+                    - event.error is parsed error message
         """
-
         # prepare model and default
         task_index_data = self.task_index_data()
 
@@ -234,20 +248,50 @@ class Mod:
                 continue
             dict_model[key] = model
             dict_value[key][event.arg] = event.value
-            # deep_set(dict_value, keys=[key, event.arg], value=event.value)
 
         # validate
+        rollback: "list[ConfigSetEvent]" = []
+        success: "list[ConfigSetEvent]" = []
         for key, value in dict_value.items():
             try:
                 model = dict_model[key]
             except KeyError:
                 # this shouldn't happen
                 continue
-            # may raise error
-            # if any event failed to validate, entire config_set will break
-            # just to validate, result doesn't matter
-            convert(value, model)
-            dict_value[key] = value
+            task, group = key
+            try:
+                # may raise error
+                value_obj = convert(value, model)
+                # note that value type might change after convert
+            except ValidationError as e:
+                error = parse_msgspec_error(e)
+                try:
+                    arg = error.loc[0]
+                except IndexError:
+                    # can't parse
+                    logger.warning(f'Failed to parse error.loc from "{e}"')
+                    rollback.append(ConfigSetEvent(task=task, group=group, arg=NODEFAULT, value=NODEFAULT, error=error))
+                    continue
+                try:
+                    default = get_field_default(model, arg)
+                except AttributeError:
+                    # no default
+                    default = NODEFAULT
+                # note that default might be NODEFAULT
+                if default == NODEFAULT:
+                    logger.warning(f'Failed to default from {model} field "{arg}"')
+                rollback.append(ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=error))
+                continue
+            # validate success
+            for arg in value:
+                arg_value = getattr(value_obj, arg, NODEFAULT)
+                success.append(ConfigSetEvent(task=task, group=group, arg=arg, value=arg_value))
+            # we will do dict.update later
+            dict_value[key] = asdict(value_obj)
+
+        # if any event failed to validate, entire config_set is consider failed
+        if rollback:
+            return False, rollback
         del dict_model
 
         # init table
@@ -268,6 +312,8 @@ class Mod:
             # update
             rows = []
             for key, value in dict_value.items():
+                # update new value onto old value
+                # note that extra fields on old value will be kept, we will need cleanup in another way
                 old = dict_old.get(key, {})
                 value = dict_update(old, value)
                 value = encode(value)
@@ -275,3 +321,5 @@ class Mod:
                 rows.append(ConfigRow(task=task, group=group, value=value))
             # write
             table.upsert_row(rows, conflicts=('task', 'group'), updates='value', _cursor_=c)
+
+        return True, success
