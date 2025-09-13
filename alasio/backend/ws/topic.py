@@ -16,13 +16,24 @@ def create_topic_dict(topic_classes: "list[Type[BaseTopic]]") -> "dict[str, Type
 
 
 class WebsocketServer(WebsocketTopicServer):
+    async def init(self):
+        await super().init()
+        # set language
+        topic = self.subscribed.get(ConnState.topic_name(), None)
+        if topic is not None:
+            lang = self._negotiate_lang()
+            await ConnState.lang.mutate(topic, lang)
+
+    DEFAULT_TOPIC_CLASS = create_topic_dict([
+        # must contain ConnState
+        ConnState,
+    ])
+
     ALL_TOPIC_CLASS = create_topic_dict([
+        # must contain ConnState
         ConnState,
         ModList,
         ConfigScan,
         ConfigNav,
         ConfigArg,
-    ])
-    DEFAULT_TOPIC_CLASS = create_topic_dict([
-        ConnState,
     ])

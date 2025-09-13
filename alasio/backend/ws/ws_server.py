@@ -5,7 +5,6 @@ import trio
 from msgspec import DecodeError, EncodeError, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
 from alasio.ext.locale.accept_language import negotiate_accept_language
@@ -123,9 +122,6 @@ class WebsocketTopicServer:
         for topic_name, topic_class in self.DEFAULT_TOPIC_CLASS.items():
             topic = topic_class(self.id, self)
             self.subscribed[topic_name] = topic
-        # set language
-        lang = self._negotiate_lang()
-        await ConnState.lang.mutate(topic, lang)
 
     def _negotiate_lang(self, default='en-US'):
         """
