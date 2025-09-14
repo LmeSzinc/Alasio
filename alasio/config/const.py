@@ -1,3 +1,14 @@
+class DataInconsistent(Exception):
+    """
+    Raised when config definition does not match the known format.
+
+    Example:
+        - task.index.json indicates to read a class, but class is missing
+        - Validation model cannot be default constructed
+    """
+    pass
+
+
 class Const:
     """
     Define const of project

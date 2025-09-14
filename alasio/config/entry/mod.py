@@ -4,6 +4,7 @@ from typing import Any, Optional
 from msgspec import NODEFAULT, Struct, ValidationError, convert
 from msgspec.structs import asdict
 
+from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX, MODEL_TASK_INDEX, ModelConfigRef, ModelGroupRef
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
@@ -221,12 +222,12 @@ class Mod:
                 note that the return type of event.value will match the model definition,
                 which might differ from input.
                 If success, returns True and a list of set event.
-                    - event.value might be NODEFAULT
                     - event.error is None
                 If failed, returns False and a list of rollback event.
-                    - event.arg might be NODEFAULT
-                    - event.value might be NODEFAULT
                     - event.error is parsed error message
+
+        Raises:
+            DataInconsistent:
         """
         # prepare model and default
         task_index_data = self.task_index_data()
@@ -269,9 +270,7 @@ class Mod:
                     arg = error.loc[0]
                 except IndexError:
                     # can't parse
-                    logger.warning(f'Failed to parse error.loc from "{e}"')
-                    rollback.append(ConfigSetEvent(task=task, group=group, arg=NODEFAULT, value=NODEFAULT, error=error))
-                    continue
+                    raise DataInconsistent(f'Failed to parse error.loc from "{e}"') from None
                 try:
                     default = get_field_default(model, arg)
                 except AttributeError:
@@ -279,12 +278,15 @@ class Mod:
                     default = NODEFAULT
                 # note that default might be NODEFAULT
                 if default == NODEFAULT:
-                    logger.warning(f'Failed to default from {model} field "{arg}"')
+                    raise DataInconsistent(f'Failed to default from {model} field "{arg}"')
                 rollback.append(ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=error))
                 continue
             # validate success
             for arg in value:
                 arg_value = getattr(value_obj, arg, NODEFAULT)
+                if arg_value is NODEFAULT:
+                    raise DataInconsistent(
+                        f'Missing arg "{arg}" after converting value, value={value}, value_obj={value_obj}')
                 success.append(ConfigSetEvent(task=task, group=group, arg=arg, value=arg_value))
             # we will do dict.update later
             dict_value[key] = asdict(value_obj)
