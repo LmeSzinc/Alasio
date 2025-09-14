@@ -50,6 +50,8 @@ async def lifespan(app):
     async with trio.open_nursery() as nursery:
         # startup
         nursery.start_soon(task_gc)
+        from alasio.backend.ws.topic import WebsocketServer
+        nursery.start_soon(WebsocketServer.task_msgbus)
 
         # actual backend runs here
         yield

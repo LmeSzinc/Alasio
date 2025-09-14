@@ -2,10 +2,11 @@ from typing import TYPE_CHECKING
 
 from msgspec import DecodeError, ValidationError
 
+from alasio.backend.msgbus.share import ConfigEvent
+from alasio.ext.deep import deep_iter_patch
 from alasio.ext.reactive.base_topic import BaseTopic as BaseMixin
 from alasio.ext.reactive.event import AccessDenied, ResponseEvent, RpcValueError
 from alasio.ext.reactive.rx_trio import AsyncReactiveCallback, async_reactive
-from alasio.ext.deep import deep_iter_patch
 from alasio.ext.singleton import SingletonNamed
 from alasio.logger import logger
 
@@ -146,3 +147,12 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         event = ResponseEvent(t=self.topic_name(), i=rpc_id)
         await self.server.send(event)
         return
+
+    async def on_config_event(self, event: ConfigEvent):
+        """
+        Handle config event from msg bus
+        If a topic reads from config, it needs to implement this
+
+        When on_config_event is called, do_config_event() guarantees event.t is current topic
+        """
+        pass
