@@ -7,7 +7,7 @@
   import { X } from "@lucide/svelte";
 
   let { data = $bindable(), class: className, handleEdit, handleReset }: InputProps = $props();
-  const arg = useArgValue<string>(data);
+  const arg = $derived(useArgValue<string>(data));
 
   let debounceTimer: ReturnType<typeof setTimeout>;
   function onInput(event: Event) {

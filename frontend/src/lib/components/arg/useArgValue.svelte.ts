@@ -1,10 +1,15 @@
 import type { ArgData, InputProps } from "$lib/components/arg/types";
-import { untrack } from "svelte";
 
 /**
  * A Svelte 5 composable function (hook) to manage the state of an argument input.
  * It handles local state, synchronization with parent props, optimistic updates,
  * and conditional submission.
+ * 
+ * Note that you should always deco with $derived because this is an enclosure 
+ * function that arg won't get update if the entire data changed.
+ * Usage:
+ *    const arg = $derived(useArgValue<boolean>(data));
+ *    <Checkbox bind:checked={arg.value} onCheckedChange={onChange} />
  *
  * @param data The ArgData object passed from the parent component. For optimistic
  *             updates to work, the parent must use `bind:data`.
@@ -16,17 +21,6 @@ export function useArgValue<T>(data: ArgData) {
   //    It's initialized from the `data` prop.
   let currentValue = $state(data.value as T);
 
-  // 2. PROP SYNCHRONIZATION: Use an effect to keep the local state in sync
-  //    with the `data` prop from the parent. This ensures that if the data
-  //    is updated externally, the UI reflects the change.
-  $effect.pre(() => {
-    // `untrack()` prevents this effect from re-running when `currentValue` changes.
-    // We only want this effect to trigger when the incoming `data.value` prop changes.
-    if (data.value !== untrack(() => currentValue)) {
-      currentValue = data.value;
-    }
-  });
-
   /**
    * Submits the current value if it has changed.
    * This function performs an optimistic update and then calls an optional handler.
@@ -35,7 +29,7 @@ export function useArgValue<T>(data: ArgData) {
    *                   like an API call.
    */
   function submit(handleEdit?: InputProps["handleEdit"]) {
-    // 3. DIRTY CHECK: Only proceed if the local value is different from the
+    // 2. DIRTY CHECK: Only proceed if the local value is different from the
     //    last known value from the prop. This prevents redundant operations.
     if (currentValue !== data.value) {
       // a. OPTIMISTIC UPDATE: Directly mutate the `data` prop's value.
@@ -50,7 +44,7 @@ export function useArgValue<T>(data: ArgData) {
     }
   }
 
-  // 4. RETURN API: Expose the local value and the submit function to the component.
+  // 3. RETURN API: Expose the local value and the submit function to the component.
   //    The getter/setter pair allows the component to use `bind:value={arg.value}`.
   return {
     get value() {
