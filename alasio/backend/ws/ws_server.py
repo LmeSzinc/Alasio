@@ -24,6 +24,15 @@ MSGBUS_SEND, MSGBUS_RECV = trio.open_memory_channel(128)
 
 
 class WebsocketTopicServer:
+    """
+    """
+
+    """
+    Class methods that manage all connections
+    """
+
+    server_terminated = trio.Event()
+
     @classmethod
     async def endpoint(cls, ws: WebSocket):
         """
@@ -35,6 +44,13 @@ class WebsocketTopicServer:
             await server.serve()
         finally:
             await server.cleanup()
+
+    @classmethod
+    async def close_all_connections(cls):
+        """
+        Iterates over all active connections and requests them to close gracefully.
+        """
+        cls.server_terminated.set()
 
     # If no activity for X seconds,
     # we will send a "ping" to client
@@ -49,10 +65,15 @@ class WebsocketTopicServer:
     # key: topic name, value: topic class
     DEFAULT_TOPIC_CLASS: "dict[str, Type[BaseTopic]]" = {}
 
+    """
+    Instance methods that manage current connection
+    """
+
     def __init__(self, ws: WebSocket):
         self.ws = ws
         self.id = CONN_ID_GENERATOR.get()
 
+        self.conn_terminated = trio.Event()
         # timestamp of last activity, used to calculate the next "ping"
         self.last_active = 0.
         # track if "pong" is received
@@ -283,6 +304,7 @@ class WebsocketTopicServer:
 
         # close from upstream to downstream, so downstream can still finish curren job
         await send_buffer.aclose()
+        # logger.info(f'{self} task_recv closed')
 
     async def task_job(
             self,
@@ -310,9 +332,12 @@ class WebsocketTopicServer:
                 await self.send_error('Internal Error')
                 continue
 
-        # close from upstream to downstream, so downstream can still finish curren job
+        # close from upstream to downstream, so downstream can still finish current job
         if self.send_buffer is not None:
             await self.send_buffer.aclose()
+        # task_job is the final downstream, once it finished, we tell task_heartbeat to close
+        self.conn_terminated.set()
+        # logger.info(f'{self} task_job closed')
 
     async def task_send(
             self,
@@ -355,19 +380,65 @@ class WebsocketTopicServer:
 
         # confirm websocket is closed
         await self.close()
+        # logger.info(f'{self} task_send closed')
+
+    async def _task_wait_server_terminated(self, nursery, out):
+        """
+        Args:
+            nursery (trio.Nursery):
+            out (list[str]):
+        """
+        await self.__class__.server_terminated.wait()
+        # server terminated
+        out.append('server')
+        await self.close(code=1001, reason='Server shutdown')
+        nursery.cancel_scope.cancel()
+
+    async def _task_wait_conn_terminated(self, nursery, out):
+        """
+        Args:
+            nursery (trio.Nursery):
+            out (list[str]):
+        """
+        await self.conn_terminated.wait()
+        # connection terminated
+        out.append('conn')
+        await self.close()
+        nursery.cancel_scope.cancel()
+
+    async def _wait_terminated(self, max_wait_time):
+        """
+        Args:
+            max_wait_time (int | float):
+
+        Returns:
+            str: the waited event, or "" to keep connection
+        """
+        if max_wait_time <= 0:
+            return ''
+        out = []
+        with trio.move_on_after(max_wait_time):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(self._task_wait_server_terminated, nursery, out)
+                nursery.start_soon(self._task_wait_conn_terminated, nursery, out)
+        if out:
+            return out[0]
+        else:
+            return ''
 
     async def task_heartbeat(self):
         """
         Coroutine task that send "ping" to keep websocket alive if it idled for 30s
         """
+
         while True:
             now = trio.current_time()
             next_ping = self.last_active + 30
-            wait_time = next_ping - now
+            max_wait_time = next_ping - now
 
-            # wait until next ping time
-            if wait_time > 0:
-                await trio.sleep(wait_time)
+            # wait until next ping time or server terminated
+            if await self._wait_terminated(max_wait_time):
+                break
 
             # woke up, check activity
             now = trio.current_time()
@@ -398,6 +469,7 @@ class WebsocketTopicServer:
 
         # confirm websocket is closed
         await self.close()
+        # logger.info(f'{self} task_heartbeat closed')
 
     async def handle_job(self, event: RequestEvent):
         """

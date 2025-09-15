@@ -10,6 +10,82 @@ from alasio.ext.env import patch_mimetype
 
 patch_mimetype()
 
+# stored context object
+WorkerContext_obj = None
+
+
+def patch_context_cls():
+    """
+    Patch should before hypercorn.trio.serve() runs
+    """
+    # local import
+    from hypercorn.trio import worker_context, run
+
+    class WorkerContextTracking(worker_context.WorkerContext):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            # store self so we can access context in lifespan
+            global WorkerContext_obj
+            WorkerContext_obj = self
+
+    # monkey patch WorkerContext
+    run.WorkerContext = WorkerContextTracking
+
+
+def restore_context_cls():
+    """
+    Restore should before lifespan starts
+    It should be fine without restore, as WorkerContext only created once,
+    but for safety we restore it asap.
+    """
+    # local import
+    from hypercorn.trio import worker_context, run
+    run.WorkerContext = worker_context.WorkerContext
+
+
+async def on_shutdown():
+    """
+    Do things if requested a shutdown
+    """
+    from alasio.backend.ws.topic import WebsocketServer
+    await WebsocketServer.close_all_connections()
+
+
+async def task_listen_shutdown():
+    """
+    Coroutine task that listens shutdown request.
+
+    This is a monkey patch magic to read from hypercorn
+    which relays on:
+        # hypercorn/tri/run.py worker_serve()
+        try:
+            async with trio.open_nursery(strict_exception_groups=True) as nursery:
+                ...
+        finally:
+            await context.terminated.set()
+            server_nursery.cancel_scope.deadline = trio.current_time() + config.graceful_timeout
+
+    If application receives CTRL+C, nursery is cancelled and context.terminated is set.
+    The idea is to monkey patch WorkerContext to capture the local variable `context = WorkerContext(max_requests)`
+    in function worker_serve(), so we can wait for the signal.
+
+    We have a 3s window time to gracefully shutdown before the outer `server_nursery` cancelled
+    (which will trigger force shutdown)
+    """
+    from alasio.logger import logger
+    if WorkerContext_obj is None:
+        logger.error(f'Empty WorkerContext_obj, cannot listen to shutdown')
+        return
+
+    try:
+        # wait until hypercorn shutdown TCP connections but not yet shutdown server_nursery
+        await WorkerContext_obj.terminated.wait()
+        # we have 3s by default to gracefully shutdown our websocket connections
+        await on_shutdown()
+    except Exception as e:
+        logger.error(f'task_listen_shutdown error: {e}')
+        logger.exception(e)
+
 
 def sync_task_gc(wait=8):
     """
@@ -39,6 +115,7 @@ async def task_gc(wait=8):
             # We've got a CTRL+C during GC
             raise
         except Exception as e:
+            logger.error(f'task_gc error: {e}')
             logger.exception(e)
 
 
@@ -47,9 +124,13 @@ async def lifespan(app):
     """
     A global starlette lifespan
     """
+    restore_context_cls()
     async with trio.open_nursery() as nursery:
-        # startup
+        # start listening shutdown
+        nursery.start_soon(task_listen_shutdown)
+        # start gc task
         nursery.start_soon(task_gc)
+        # start message bus task
         from alasio.backend.ws.topic import WebsocketServer
         nursery.start_soon(WebsocketServer.task_msgbus)
 
@@ -61,6 +142,11 @@ async def lifespan(app):
     # cleanup
     from alasio.db.conn import SQLITE_POOL
     SQLITE_POOL.release_all()
+
+
+async def serve_app(*args, **kwargs):
+    patch_context_cls()
+    await serve(*args, **kwargs)
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -122,8 +208,6 @@ if __name__ == '__main__':
     from hypercorn.trio import serve
 
     config = Config()
-    # No poor wait, just exit directly on CTRL+C
-    config.graceful_timeout = 0.
 
     # Bind address
     config.bind = '0.0.0.0:8000'
@@ -132,4 +216,4 @@ if __name__ == '__main__':
     # To enable assess log
     config.accesslog = '-'
 
-    trio.run(serve, create_app(), config)
+    trio.run(serve_app, create_app(), config)
