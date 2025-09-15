@@ -53,6 +53,12 @@ async function http<TData>(url: string, options: RequestInit): Promise<ApiRespon
 		// status 0 for client-side errors
 		return new SmartResponse<TData>(false, 0, errorPayload as PossibleData<TData>);
 	}
+	if (response.status >= 500 && response.status <= 599) {
+		const errorText = await response.text();
+		console.error(`HTTP Server Error: Status ${response.status}`, errorText);
+		const errorPayload = { message: `Server error: ${response.status} ${response.statusText}` };
+		return new SmartResponse<TData>(false, response.status, errorPayload as any);
+	}
 	// Empty response
 	const bodyIsEmpty = response.headers.get('content-length') === '0' || response.status === 204;
     if (bodyIsEmpty) {
