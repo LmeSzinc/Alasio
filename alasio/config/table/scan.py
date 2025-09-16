@@ -312,8 +312,8 @@ class ScanTable(AlasioGuiDB):
                 if row.mod != local_row.mod:
                     # mod changed
                     logger.info(f'ConfigScan: Config mod changed to {local_row.mod}: {record[name]}')
-                    self.update_row(row, updates='mod', _cursor_=c)
                     row.mod = local_row.mod
+                    self.update_row(row, updates='mod', _cursor_=c)
                     continue
 
             # re-sort gid and iid
