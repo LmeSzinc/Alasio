@@ -81,7 +81,7 @@
   aria-label="Configuration sidebar"
 >
   <ScrollArea class="min-h-0 flex-1">
-    <div class="space-y-1 px-1 py-2" role="list">
+    <div class="space-y-1 p-1" role="list">
       {#each groups as group (group.id)}
         {#if group.items.length === 1}
           <!-- Single item in group - display directly -->

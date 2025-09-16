@@ -7,6 +7,7 @@
   import * as Card from "$lib/components/ui/card";
   import * as Sheet from "$lib/components/ui/sheet";
   import { initNavContext } from "$lib/navcontext.svelte";
+  import { cn } from "$lib/utils.js";
   // props
   let { data, children } = $props();
 
@@ -37,6 +38,8 @@
       closeSheet();
     }
   });
+  // I just don't know why "xl:neushadow" doesn't work, so just adding class name dymacally
+  const isXlScreen = $derived(innerWidth >= 1280);
 </script>
 
 <svelte:window bind:innerWidth />
@@ -48,17 +51,17 @@
       <Header onMenuClick={openSheet} />
     </div>
     <!-- 1.2 Layout body -->
-    <div class="app-layout-body bg-sidebar flex-1 overflow-hidden">
+    <div class="app-layout-body neubackground flex-1 overflow-hidden">
       <div class="mx-auto flex h-full max-w-7xl">
         <!-- 1.2.1 Aside and nav -->
         <!-- If media<xl, aside and nav show as one sidebar -->
         <!-- If media>=xl, aside and nav show as standalone cards -->
         <div class="aside-container hidden md:flex">
-          <div class="aside-item border-border bg-background border-r xl:shadow-sm">
-            <ConfigAside class="" />
+          <div class={cn("aside-item border-border bg-background border-r", isXlScreen && "neushadow")}>
+            <ConfigAside class="pt-1 xl:pt-0" />
           </div>
           {#if slots.nav}
-            <div class="aside-item bg-background w-60 xl:shadow-sm">
+            <div class={cn("aside-item bg-background w-60 pt-1 xl:pt-0", isXlScreen && "neushadow")}>
               {@render slots.nav()}
             </div>
           {/if}
@@ -125,7 +128,7 @@
   @media (min-width: 1280px) {
     .aside-container {
       margin-top: 0.5rem;
-      gap: 0.5rem;
+      gap: 1rem;
       box-shadow: none;
       overflow: visible;
       background-color: transparent;
@@ -133,7 +136,7 @@
     .aside-item {
       overflow: hidden;
       border: none;
-      border-radius: var(--radius);
+      border-radius: calc(var(--radius) + 2px);
       background-color: var(--color-background);
       align-self: flex-start;
       min-height: 20rem;

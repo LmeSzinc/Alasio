@@ -120,3 +120,16 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .neubackground {
+    background: #f8f8f8;
+  }
+  .neushadow {
+    box-shadow:
+      8px 8px 12px rgb(174 174 192 / 12%),
+      -8px -8px 12px #ffffff,
+      inset 8px 8px 32px rgb(174 174 192 / 12%),
+      inset -8px -8px 32px #ffffff;
+  }
+}

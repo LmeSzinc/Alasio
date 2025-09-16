@@ -30,11 +30,11 @@
   });
 </script>
 
-<div use:sizeObserver={containerSize} class={cn("space-y-2", className)}>
+<div use:sizeObserver={containerSize} class={cn("space-y-4", className)}>
   {#each Object.entries(data || {}) as [groupKey, groupData]}
     {@const { _info, ...args } = groupData}
-    <div bind:this={groupElements[groupKey]} class="scroll-mt-6">
-      <Card.Root class="mx-auto max-w-180 gap-0">
+    <div bind:this={groupElements[groupKey]} class="shadow-custom-complex scroll-mt-8">
+      <Card.Root class="neushadow mx-auto max-w-180 gap-0 border-none">
         <!-- Group name and help -->
         <Card.Header>
           {#if _info?.name}

@@ -81,7 +81,7 @@
   }
 </script>
 
-<nav class={cn("w-full space-y-2 p-4", className)} aria-label="Configuration Navigation">
+<nav class={cn("w-full space-y-2 p-4 shadow-custom-complex", className)} aria-label="Configuration Navigation">
   <ScrollArea class="h-full w-full">
     {#if configRpc.errorMsg}
       <p class="text-muted-foreground p-4 text-center text-sm">{configRpc.errorMsg}</p>

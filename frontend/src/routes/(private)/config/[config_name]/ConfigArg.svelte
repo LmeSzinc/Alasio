@@ -37,7 +37,7 @@
   }
 </script>
 
-<div class={cn("mt-2 w-full", className)}>
+<div class={cn("mt-4 w-full", className)}>
   {#if topicClient.data}
     <ArgGroups bind:data={topicClient.data} {indicateCard} {handleEdit} {handleReset} />
   {/if}
