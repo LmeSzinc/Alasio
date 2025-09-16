@@ -22,6 +22,21 @@ class WebsocketManager {
   // --- State Management (Svelte 5 Runes) ---
   connectionState = $state<"connecting" | "open" | "closed" | "reconnecting">("closed");
   topics = $state<Record<string, any>>({});
+  /**
+   * A counter that increments each time the websocket successfully connects.
+   * This is a monotonically increasing "session ID" for the connection,
+   * crucial for resilient operations to detect reconnections and re-fetch data.
+   * It never resets during the application's lifecycle.
+   */
+  connectionGeneration = $state(0);
+
+  /**
+   * Tracks which topics have received their initial 'full' message,
+   * serving as a stable signal for subscription readiness.
+   * Key is topic name, value is boolean. This is decoupled from the topic data itself
+   * to avoid triggering effects on high-frequency data updates.
+   */
+  topicReady = $state<Record<string, boolean>>({});
 
   // --- Private properties ---
   #ws: WebSocket | null = null;
@@ -78,8 +93,14 @@ class WebsocketManager {
 
     this.#ws.onopen = () => {
       this.connectionState = "open";
+      this.connectionGeneration++;
       this.#reconnectAttempts = 0;
       clearTimeout(this.#reconnectTimeout);
+
+      // Immediately mark all default topics as "ready".
+      for (const topic of this.#options.defaultSubscriptions) {
+        this.topicReady[topic] = true;
+      }
 
       // Resubscribe to all topics that have active component subscriptions.
       for (const topic in this.subscriptions) {
@@ -134,6 +155,9 @@ class WebsocketManager {
       }
 
       // For all other cases (e.g., normal closure, network issues), attempt to reconnect.
+      // Note that for better user experience, we don't clear topic data on reconnect,
+      // so page can keep status quo on random disconnection instead of flashing.
+      this.#clearTopicReady();
       this.#scheduleReconnect();
     };
 
@@ -221,6 +245,13 @@ class WebsocketManager {
     // Clear all topic data to prevent displaying stale information.
     for (const key in this.topics) {
       delete this.topics[key];
+    }
+    this.#clearTopicReady();
+  }
+  #clearTopicReady() {
+    // Clear the readiness state to ensure it's re-evaluated on next connect.
+    for (const key in this.topicReady) {
+      delete this.topicReady[key];
     }
   }
 
@@ -322,6 +353,7 @@ class WebsocketManager {
     if (this.subscriptions[topic] <= 0) {
       delete this.subscriptions[topic];
       delete this.topics[topic];
+      delete this.topicReady[topic];
     }
   }
   unsubAll = () => {

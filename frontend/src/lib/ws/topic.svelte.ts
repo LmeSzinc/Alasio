@@ -1,6 +1,6 @@
 import { onDestroy } from "svelte";
 import { websocketClient } from "./client.svelte";
-import { createRpc, type RpcOptions } from "./rpc.svelte"; // 确保 createRpc 被导出
+import { createResilientRpc, createRpc, type RpcOptions } from "./rpc.svelte";
 
 /**
  * A custom Svelte 5 Rune to subscribe to a WebSocket topic.
@@ -10,7 +10,7 @@ import { createRpc, type RpcOptions } from "./rpc.svelte"; // 确保 createRpc �
  * @param topic The name of the topic to subscribe to.
  * @returns A readonly object with a reactive `.data` signal and an `.rpc()` method factory.
  */
-export function useTopic<T = any>(topic: string) { 
+export function useTopic<T = any>(topic: string) {
   // --- Step 1: Manage Subscription Lifecycle ---
   // On creation, tell the manager we're subscribing.
   websocketClient.sub(topic);
@@ -28,6 +28,7 @@ export function useTopic<T = any>(topic: string) {
   // Create the RPC factory function for this topic.
   // It needs the topic name and the websocketClient instance (as the RpcContext).
   const rpc = (options?: RpcOptions) => createRpc(topic, websocketClient, options);
+  const resilientRpc = (options?: RpcOptions) => createResilientRpc(topic, websocketClient, options);
 
   // --- Step 3: Return the final, user-friendly API ---
   return {
@@ -44,5 +45,6 @@ export function useTopic<T = any>(topic: string) {
      * Example: `const myAction = navTopic.rpc();`
      */
     rpc,
+    resilientRpc,
   };
 }

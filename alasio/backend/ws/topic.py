@@ -17,11 +17,13 @@ def create_topic_dict(topic_classes: "list[Type[BaseTopic]]") -> "dict[str, Type
 
 
 class WebsocketServer(WebsocketTopicServer):
-    DEFAULT_TOPIC_CLASS = create_topic_dict([
-        # must contain ConnState
-        ConnState,
-    ])
-
+    # Alasio transfer data via topics, not one-time request-response
+    #
+    # Frontend can subscribe to these topics, backend will send a "full" event immediately,
+    # and push data events if any data changes. Once frontend unsubscribed, data push ends.
+    #
+    # After subscribing, frontend can call RPC function under that topic.
+    # RPC functions won't give response data, it will trigger internal data changes and push topic data updates.
     ALL_TOPIC_CLASS = create_topic_dict([
         # must contain ConnState
         ConnState,
@@ -29,6 +31,14 @@ class WebsocketServer(WebsocketTopicServer):
         ConfigScan,
         ConfigNav,
         ConfigArg,
+    ])
+    # List of default subscribed topics.
+    # Without actively subscribing:
+    # - Frontend can send and backend should accept RPC calls.
+    # - Backend will send and frontend should accept data updates.
+    DEFAULT_TOPIC_CLASS = create_topic_dict([
+        # must contain ConnState
+        ConnState,
     ])
 
     async def init(self):

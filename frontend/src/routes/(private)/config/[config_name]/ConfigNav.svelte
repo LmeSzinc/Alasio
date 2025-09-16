@@ -29,7 +29,8 @@
   // --- WebSocket & RPC Setup ---
   const topicClient = useTopic("ConfigNav");
   const stateClient = useTopic("ConnState");
-  const rpc = stateClient.rpc();
+  const configRpc = stateClient.resilientRpc();
+  const navRpc = stateClient.resilientRpc()
 
   // --- Data Types ---
   type CardItem = { key: string; name: string };
@@ -40,7 +41,7 @@
   // Effect to call RPC when config_name changes.
   $effect(() => {
     if (config_name) {
-      rpc.call("set_config", { name: config_name });
+      configRpc.call("set_config", { name: config_name });
       nav_name = "";
       card_name = "";
     }
@@ -64,7 +65,7 @@
   // Effect to run the onNavClick callback when the user opens a new accordion.
   $effect(() => {
     if (nav_name) {
-      rpc.call("set_nav", { name: nav_name });
+      navRpc.call("set_nav", { name: nav_name });
       onNavClick?.(nav_name);
     }
   });
@@ -82,8 +83,8 @@
 
 <nav class={cn("w-full space-y-2 p-4", className)} aria-label="Configuration Navigation">
   <ScrollArea class="h-full w-full">
-    {#if rpc.errorMsg}
-      <p class="text-muted-foreground p-4 text-center text-sm">{rpc.errorMsg}</p>
+    {#if configRpc.errorMsg}
+      <p class="text-muted-foreground p-4 text-center text-sm">{configRpc.errorMsg}</p>
     {:else if navItems.length}
       <!-- 
           Accordion's value is bound to our internal `nav_name` state.

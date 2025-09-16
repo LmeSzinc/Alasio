@@ -1,3 +1,5 @@
+import { untrack } from "svelte";
+import { websocketClient } from "./client.svelte";
 import type { RequestEvent } from "./event";
 
 /**
@@ -50,7 +52,6 @@ export interface Rpc {
   /** A helper method to reset state and open a bound dialog. */
   open(): void;
 }
-
 
 /**
  * Creates and manages the state for a single operation instance.
@@ -158,5 +159,85 @@ export function createRpc(
     call,
     reset,
     open,
+  };
+}
+
+/**
+ * Creates an RPC instance that automatically re-sends its last call upon WebSocket reconnection,
+ * crucially waiting for its dependent topic subscription to be confirmed by the server before firing.
+ *
+ * It wraps the base `createRpc` by adding a reactive `$effect` that monitors both
+ * the connection generation and the presence of the topic's data.
+ *
+ * @param topic - The WebSocket topic this RPC call depends on. Its presence in `websocketClient.topics`
+ *                is used as a signal that the subscription is ready.
+ * @param context - The RpcContext, typically the `websocketClient` instance.
+ * @param options - Configuration options, same as `createRpc`.
+ * @returns A stateful `Rpc` object with added resilience.
+ */
+export function createResilientRpc(topic: string, context: RpcContext, options: RpcOptions = {}): Rpc {
+  const rpc = createRpc(topic, context, options);
+
+  let lastCall: { func: string; args: any } | null = $state(null);
+  let dataGeneration = $state(-1);
+
+  $effect(() => {
+    // 1. Read dependencies.
+    const topicReady = websocketClient.topicReady[topic];
+    if (!topicReady) {
+      // if websocket closed, websocketClient will set all topicReady to false
+      // so we can update dataGeneration to the latest connectionGeneration
+      dataGeneration = untrack(() => websocketClient.connectionGeneration);
+      return;
+    }
+
+    const last = untrack(() => lastCall);
+    if (!last) {
+      // No stored call
+      return;
+    }
+    if (untrack(() => rpc.isPending)) {
+      // last call still running
+      return;
+    }
+    const rpcGeneration = untrack(() => dataGeneration);
+    const currentGeneration = untrack(() => websocketClient.connectionGeneration);
+
+    if (rpcGeneration > 0 && rpcGeneration < currentGeneration) {
+      dataGeneration = currentGeneration;
+      // console.log(
+      //   `[Resilient RPC] Topic '${topic}' is ready, re-calling '${last.func}' for connection generation ${currentGeneration}`,
+      // );
+      rpc.call(last.func, last.args);
+    }
+  });
+
+  // Wrap the `call` method to store the arguments for later.
+  const call = (func: string, args: any = {}) => {
+    lastCall = { func, args };
+    dataGeneration = untrack(() => websocketClient.connectionGeneration);
+    rpc.call(func, args);
+  };
+
+  // Return an object that conforms to the Rpc interface, but with our enhanced `call` method.
+  return {
+    get isPending() {
+      return rpc.isPending;
+    },
+    get errorMsg() {
+      return rpc.errorMsg;
+    },
+    get successMsg() {
+      return rpc.successMsg;
+    },
+    get isOpen() {
+      return rpc.isOpen;
+    },
+    set isOpen(value) {
+      rpc.isOpen = value;
+    },
+    reset: rpc.reset,
+    open: rpc.open,
+    call, // Our wrapped version.
   };
 }
