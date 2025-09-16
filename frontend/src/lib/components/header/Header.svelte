@@ -11,7 +11,7 @@
   let { class: className, onMenuClick }: HTMLAttributes<HTMLHeadElement> & $$props = $props();
 </script>
 
-<header class={cn("bg-background flex h-12.5 w-full items-center gap-4 px-4 pr-13", className)}>
+<header class={cn("bg-card flex h-12.5 w-full items-center gap-4 px-4 pr-13", className)}>
   <!-- Mobile menu button, hidden on medium screens and up -->
   <Button variant="ghost" size="icon" class="shrink-0 md:hidden" onclick={onMenuClick}>
     <Menu class="h-5 w-5" />

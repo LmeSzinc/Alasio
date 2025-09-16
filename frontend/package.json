@@ -43,5 +43,8 @@
     "onlyBuiltDependencies": [
       "esbuild"
     ]
+  },
+  "dependencies": {
+    "mode-watcher": "^1.1.0"
   }
 }

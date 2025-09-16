@@ -6,6 +6,7 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import * as Sheet from "$lib/components/ui/sheet";
+  import { ThemeToggle } from "$lib/components/ui/theme/index.js";
   import { initNavContext } from "$lib/navcontext.svelte";
   import { cn } from "$lib/utils.js";
   // props
@@ -43,6 +44,7 @@
 </script>
 
 <svelte:window bind:innerWidth />
+<ThemeToggle class="absolute right-5 bottom-5 z-50"></ThemeToggle>
 {#if data.success}
   <!-- 1. Main layout -->
   <div class="app-container flex h-screen w-full flex-col">
@@ -51,17 +53,17 @@
       <Header onMenuClick={openSheet} />
     </div>
     <!-- 1.2 Layout body -->
-    <div class="app-layout-body neubackground flex-1 overflow-hidden">
+    <div class="app-layout-body flex-1 overflow-hidden">
       <div class="mx-auto flex h-full max-w-7xl">
         <!-- 1.2.1 Aside and nav -->
         <!-- If media<xl, aside and nav show as one sidebar -->
         <!-- If media>=xl, aside and nav show as standalone cards -->
         <div class="aside-container hidden md:flex">
-          <div class={cn("aside-item border-border bg-background border-r", isXlScreen && "neushadow")}>
+          <div class={cn("aside-item bg-card border-border border-r", isXlScreen && "neushadow")}>
             <ConfigAside class="pt-1 xl:pt-0" />
           </div>
           {#if slots.nav}
-            <div class={cn("aside-item bg-background w-60 pt-1 xl:pt-0", isXlScreen && "neushadow")}>
+            <div class={cn("aside-item bg-card w-60 pt-1 xl:pt-0", isXlScreen && "neushadow")}>
               {@render slots.nav()}
             </div>
           {/if}
@@ -127,7 +129,7 @@
   }
   @media (min-width: 1280px) {
     .aside-container {
-      margin-top: 0.5rem;
+      margin-top: 1rem;
       gap: 1rem;
       box-shadow: none;
       overflow: visible;
@@ -137,7 +139,6 @@
       overflow: hidden;
       border: none;
       border-radius: calc(var(--radius) + 2px);
-      background-color: var(--color-background);
       align-self: flex-start;
       min-height: 20rem;
     }

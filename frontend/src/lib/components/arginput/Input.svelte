@@ -34,7 +34,7 @@
     class={cn(
       // --- CORE CHANGES ---
       // 1. Remove all native borders to ensure consistent box-sizing.
-      "border-0 shadow-none",
+      "bg-card dark:bg-card border-0 shadow-none",
 
       // 2. Create the "bottom border" using a box-shadow.
       //    Syntax: `shadow-[offsetX offsetY blur spread color]`
