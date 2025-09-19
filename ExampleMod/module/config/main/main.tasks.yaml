@@ -1,0 +1,22 @@
+Main:
+  group:
+    - Scheduler
+    - Campaign
+    - Fleet1
+    - Fleet2
+  display:
+    - Scheduler
+    - Campaign
+    - [ inforef:Fleet, Fleet1, Fleet2 ]
+
+Main2:
+  group:
+    - Scheduler
+    - Campaign
+    - Fleet1
+    - Fleet2
+  display: group
+
+DisplayOpsiGeneral:
+  display:
+    - OpsiGeneral.OpsiGeneral

@@ -1,0 +1,29 @@
+OpsiExplore:
+  group:
+    - Scheduler
+    - OpsiExplore
+  # "flatten" or "group"
+  display: flat
+
+#  default:
+#    Scheduler:
+#      Enable: true
+#  override:
+#    OpsiExplore:
+#      SpecialRadar: false
+#  trigger:
+#    on:
+#      - OpsiExplore.OpsiExplore.SpecialRadar == true
+#    set:
+#  trigger_show: OpsiExplore.OpsiExplore.SpecialRadar == true
+
+OpsiDaily:
+  group:
+    - Scheduler
+    - OpsiDaily
+    - OpsiGeneral.OpsiGeneral
+  display: flat
+
+OpsiGeneral:
+  group:
+    - OpsiGeneral

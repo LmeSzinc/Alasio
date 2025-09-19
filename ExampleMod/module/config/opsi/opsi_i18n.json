@@ -1,0 +1,477 @@
+{
+  "OpsiAshAssist": {
+    "_info": {
+      "zh-CN": {"name": "META支援", "help": ""},
+      "zh-TW": {"name": "OpsiAshAssist", "help": ""},
+      "en-US": {"name": "OpsiAshAssist", "help": ""},
+      "ja-JP": {"name": "OpsiAshAssist", "help": ""}
+    },
+    "Tier": {
+      "zh-CN": {"name": "OpsiAshAssist.Tier", "help": ""},
+      "zh-TW": {"name": "OpsiAshAssist.Tier", "help": ""},
+      "en-US": {"name": "OpsiAshAssist.Tier", "help": ""},
+      "ja-JP": {"name": "OpsiAshAssist.Tier", "help": ""}
+    }
+  },
+  "OpsiGeneral": {
+    "_info": {
+      "zh-CN": {
+        "name": "大世界通用设置",
+        "help": "fn43iogh nf9340gh0934 v43pg934 fn34igh34 n4h03j34"
+      },
+      "zh-TW": {"name": "OpsiGeneral", "help": ""},
+      "en-US": {"name": "OpsiGeneral", "help": ""},
+      "ja-JP": {"name": "OpsiGeneral", "help": ""}
+    },
+    "UseLogger": {
+      "zh-CN": {"name": "OpsiGeneral.UseLogger", "help": ""},
+      "zh-TW": {"name": "OpsiGeneral.UseLogger", "help": ""},
+      "en-US": {"name": "OpsiGeneral.UseLogger", "help": ""},
+      "ja-JP": {"name": "OpsiGeneral.UseLogger", "help": ""}
+    },
+    "BuyActionPointLimit": {
+      "zh-CN": {
+        "name": "OpsiGeneral.BuyActionPointLimit",
+        "help": "fn43iogh nf9340gh0934 v43pg934 fn34igh34 n4h03j34 g3084h0 g305hg05",
+        "option_i18n": {"0": "0", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5"}
+      },
+      "zh-TW": {
+        "name": "OpsiGeneral.BuyActionPointLimit",
+        "help": "",
+        "option_i18n": {"0": "0", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5"}
+      },
+      "en-US": {
+        "name": "OpsiGeneral.BuyActionPointLimit",
+        "help": "",
+        "option_i18n": {"0": "0", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5"}
+      },
+      "ja-JP": {
+        "name": "OpsiGeneral.BuyActionPointLimit",
+        "help": "",
+        "option_i18n": {"0": "0", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5"}
+      }
+    },
+    "OilLimit": {
+      "zh-CN": {"name": "OpsiGeneral.OilLimit", "help": ""},
+      "zh-TW": {"name": "OpsiGeneral.OilLimit", "help": ""},
+      "en-US": {"name": "OpsiGeneral.OilLimit", "help": ""},
+      "ja-JP": {"name": "OpsiGeneral.OilLimit", "help": ""}
+    },
+    "RepairThreshold": {
+      "zh-CN": {"name": "OpsiGeneral.RepairThreshold", "help": ""},
+      "zh-TW": {"name": "OpsiGeneral.RepairThreshold", "help": ""},
+      "en-US": {"name": "OpsiGeneral.RepairThreshold", "help": ""},
+      "ja-JP": {"name": "OpsiGeneral.RepairThreshold", "help": ""}
+    },
+    "DoRandomMapEvent": {
+      "zh-CN": {"name": "OpsiGeneral.DoRandomMapEvent", "help": ""},
+      "zh-TW": {"name": "OpsiGeneral.DoRandomMapEvent", "help": ""},
+      "en-US": {"name": "OpsiGeneral.DoRandomMapEvent", "help": ""},
+      "ja-JP": {"name": "OpsiGeneral.DoRandomMapEvent", "help": ""}
+    },
+    "AkashiShopFilter": {
+      "zh-CN": {"name": "OpsiGeneral.AkashiShopFilter", "help": ""},
+      "zh-TW": {"name": "OpsiGeneral.AkashiShopFilter", "help": ""},
+      "en-US": {"name": "OpsiGeneral.AkashiShopFilter", "help": ""},
+      "ja-JP": {"name": "OpsiGeneral.AkashiShopFilter", "help": ""}
+    }
+  },
+  "OpsiAshBeacon": {
+    "_info": {
+      "zh-CN": {"name": "OpsiAshBeacon", "help": ""},
+      "zh-TW": {"name": "OpsiAshBeacon", "help": ""},
+      "en-US": {"name": "OpsiAshBeacon", "help": ""},
+      "ja-JP": {"name": "OpsiAshBeacon", "help": ""}
+    },
+    "AttackMode": {
+      "zh-CN": {
+        "name": "OpsiAshBeacon.AttackMode",
+        "help": "",
+        "option_i18n": {
+          "current": "current",
+          "current_dossier": "current_dossier"
+        }
+      },
+      "zh-TW": {
+        "name": "OpsiAshBeacon.AttackMode",
+        "help": "",
+        "option_i18n": {
+          "current": "current",
+          "current_dossier": "current_dossier"
+        }
+      },
+      "en-US": {
+        "name": "OpsiAshBeacon.AttackMode",
+        "help": "",
+        "option_i18n": {
+          "current": "current",
+          "current_dossier": "current_dossier"
+        }
+      },
+      "ja-JP": {
+        "name": "OpsiAshBeacon.AttackMode",
+        "help": "",
+        "option_i18n": {
+          "current": "current",
+          "current_dossier": "current_dossier"
+        }
+      }
+    },
+    "OneHitMode": {
+      "zh-CN": {"name": "OpsiAshBeacon.OneHitMode", "help": ""},
+      "zh-TW": {"name": "OpsiAshBeacon.OneHitMode", "help": ""},
+      "en-US": {"name": "OpsiAshBeacon.OneHitMode", "help": ""},
+      "ja-JP": {"name": "OpsiAshBeacon.OneHitMode", "help": ""}
+    },
+    "DossierAutoAttackMode": {
+      "zh-CN": {"name": "OpsiAshBeacon.DossierAutoAttackMode", "help": ""},
+      "zh-TW": {"name": "OpsiAshBeacon.DossierAutoAttackMode", "help": ""},
+      "en-US": {"name": "OpsiAshBeacon.DossierAutoAttackMode", "help": ""},
+      "ja-JP": {"name": "OpsiAshBeacon.DossierAutoAttackMode", "help": ""}
+    },
+    "RequestAssist": {
+      "zh-CN": {"name": "OpsiAshBeacon.RequestAssist", "help": ""},
+      "zh-TW": {"name": "OpsiAshBeacon.RequestAssist", "help": ""},
+      "en-US": {"name": "OpsiAshBeacon.RequestAssist", "help": ""},
+      "ja-JP": {"name": "OpsiAshBeacon.RequestAssist", "help": ""}
+    },
+    "EnsureFullyCollected": {
+      "zh-CN": {"name": "OpsiAshBeacon.EnsureFullyCollected", "help": ""},
+      "zh-TW": {"name": "OpsiAshBeacon.EnsureFullyCollected", "help": ""},
+      "en-US": {"name": "OpsiAshBeacon.EnsureFullyCollected", "help": ""},
+      "ja-JP": {"name": "OpsiAshBeacon.EnsureFullyCollected", "help": ""}
+    }
+  },
+  "OpsiFleetFilter": {
+    "_info": {
+      "zh-CN": {"name": "OpsiFleetFilter", "help": ""},
+      "zh-TW": {"name": "OpsiFleetFilter", "help": ""},
+      "en-US": {"name": "OpsiFleetFilter", "help": ""},
+      "ja-JP": {"name": "OpsiFleetFilter", "help": ""}
+    },
+    "Filter": {
+      "zh-CN": {"name": "OpsiFleetFilter.Filter", "help": ""},
+      "zh-TW": {"name": "OpsiFleetFilter.Filter", "help": ""},
+      "en-US": {"name": "OpsiFleetFilter.Filter", "help": ""},
+      "ja-JP": {"name": "OpsiFleetFilter.Filter", "help": ""}
+    }
+  },
+  "OpsiFleet": {
+    "_info": {
+      "zh-CN": {"name": "OpsiFleet", "help": ""},
+      "zh-TW": {"name": "OpsiFleet", "help": ""},
+      "en-US": {"name": "OpsiFleet", "help": ""},
+      "ja-JP": {"name": "OpsiFleet", "help": ""}
+    },
+    "Fleet": {
+      "zh-CN": {
+        "name": "OpsiFleet.Fleet",
+        "help": "",
+        "option_i18n": {"1": "1", "2": "2", "3": "3", "4": "4"}
+      },
+      "zh-TW": {
+        "name": "OpsiFleet.Fleet",
+        "help": "",
+        "option_i18n": {"1": "1", "2": "2", "3": "3", "4": "4"}
+      },
+      "en-US": {
+        "name": "OpsiFleet.Fleet",
+        "help": "",
+        "option_i18n": {"1": "1", "2": "2", "3": "3", "4": "4"}
+      },
+      "ja-JP": {
+        "name": "OpsiFleet.Fleet",
+        "help": "",
+        "option_i18n": {"1": "1", "2": "2", "3": "3", "4": "4"}
+      }
+    },
+    "Submarine": {
+      "zh-CN": {"name": "OpsiFleet.Submarine", "help": ""},
+      "zh-TW": {"name": "OpsiFleet.Submarine", "help": ""},
+      "en-US": {"name": "OpsiFleet.Submarine", "help": ""},
+      "ja-JP": {"name": "OpsiFleet.Submarine", "help": ""}
+    }
+  },
+  "OpsiExplore": {
+    "_info": {
+      "zh-CN": {"name": "OpsiExplore", "help": ""},
+      "zh-TW": {"name": "OpsiExplore", "help": ""},
+      "en-US": {"name": "OpsiExplore", "help": ""},
+      "ja-JP": {"name": "OpsiExplore", "help": ""}
+    },
+    "SpecialRadar": {
+      "zh-CN": {"name": "OpsiExplore.SpecialRadar", "help": ""},
+      "zh-TW": {"name": "OpsiExplore.SpecialRadar", "help": ""},
+      "en-US": {"name": "OpsiExplore.SpecialRadar", "help": ""},
+      "ja-JP": {"name": "OpsiExplore.SpecialRadar", "help": ""}
+    },
+    "ForceRun": {
+      "zh-CN": {"name": "OpsiExplore.ForceRun", "help": ""},
+      "zh-TW": {"name": "OpsiExplore.ForceRun", "help": ""},
+      "en-US": {"name": "OpsiExplore.ForceRun", "help": ""},
+      "ja-JP": {"name": "OpsiExplore.ForceRun", "help": ""}
+    },
+    "LastZone": {
+      "zh-CN": {"name": "OpsiExplore.LastZone", "help": ""},
+      "zh-TW": {"name": "OpsiExplore.LastZone", "help": ""},
+      "en-US": {"name": "OpsiExplore.LastZone", "help": ""},
+      "ja-JP": {"name": "OpsiExplore.LastZone", "help": ""}
+    }
+  },
+  "OpsiShop": {
+    "_info": {
+      "zh-CN": {"name": "OpsiShop", "help": ""},
+      "zh-TW": {"name": "OpsiShop", "help": ""},
+      "en-US": {"name": "OpsiShop", "help": ""},
+      "ja-JP": {"name": "OpsiShop", "help": ""}
+    },
+    "PresetFilter": {
+      "zh-CN": {
+        "name": "OpsiShop.PresetFilter",
+        "help": "",
+        "option_i18n": {
+          "max_benefit": "max_benefit",
+          "max_benefit_meta": "max_benefit_meta",
+          "no_meta": "no_meta",
+          "all": "all",
+          "custom": "custom"
+        }
+      },
+      "zh-TW": {
+        "name": "OpsiShop.PresetFilter",
+        "help": "",
+        "option_i18n": {
+          "max_benefit": "max_benefit",
+          "max_benefit_meta": "max_benefit_meta",
+          "no_meta": "no_meta",
+          "all": "all",
+          "custom": "custom"
+        }
+      },
+      "en-US": {
+        "name": "OpsiShop.PresetFilter",
+        "help": "",
+        "option_i18n": {
+          "max_benefit": "max_benefit",
+          "max_benefit_meta": "max_benefit_meta",
+          "no_meta": "no_meta",
+          "all": "all",
+          "custom": "custom"
+        }
+      },
+      "ja-JP": {
+        "name": "OpsiShop.PresetFilter",
+        "help": "",
+        "option_i18n": {
+          "max_benefit": "max_benefit",
+          "max_benefit_meta": "max_benefit_meta",
+          "no_meta": "no_meta",
+          "all": "all",
+          "custom": "custom"
+        }
+      }
+    },
+    "CustomFilter": {
+      "zh-CN": {"name": "OpsiShop.CustomFilter", "help": ""},
+      "zh-TW": {"name": "OpsiShop.CustomFilter", "help": ""},
+      "en-US": {"name": "OpsiShop.CustomFilter", "help": ""},
+      "ja-JP": {"name": "OpsiShop.CustomFilter", "help": ""}
+    }
+  },
+  "OpsiVoucher": {
+    "_info": {
+      "zh-CN": {"name": "OpsiVoucher", "help": ""},
+      "zh-TW": {"name": "OpsiVoucher", "help": ""},
+      "en-US": {"name": "OpsiVoucher", "help": ""},
+      "ja-JP": {"name": "OpsiVoucher", "help": ""}
+    },
+    "Filter": {
+      "zh-CN": {"name": "OpsiVoucher.Filter", "help": ""},
+      "zh-TW": {"name": "OpsiVoucher.Filter", "help": ""},
+      "en-US": {"name": "OpsiVoucher.Filter", "help": ""},
+      "ja-JP": {"name": "OpsiVoucher.Filter", "help": ""}
+    }
+  },
+  "OpsiDaily": {
+    "_info": {
+      "zh-CN": {"name": "OpsiDaily", "help": ""},
+      "zh-TW": {"name": "OpsiDaily", "help": ""},
+      "en-US": {"name": "OpsiDaily", "help": ""},
+      "ja-JP": {"name": "OpsiDaily", "help": ""}
+    },
+    "DoMission": {
+      "zh-CN": {"name": "OpsiDaily.DoMission", "help": ""},
+      "zh-TW": {"name": "OpsiDaily.DoMission", "help": ""},
+      "en-US": {"name": "OpsiDaily.DoMission", "help": ""},
+      "ja-JP": {"name": "OpsiDaily.DoMission", "help": ""}
+    },
+    "UseTuningSample": {
+      "zh-CN": {"name": "OpsiDaily.UseTuningSample", "help": ""},
+      "zh-TW": {"name": "OpsiDaily.UseTuningSample", "help": ""},
+      "en-US": {"name": "OpsiDaily.UseTuningSample", "help": ""},
+      "ja-JP": {"name": "OpsiDaily.UseTuningSample", "help": ""}
+    }
+  },
+  "OpsiObscure": {
+    "_info": {
+      "zh-CN": {"name": "OpsiObscure", "help": ""},
+      "zh-TW": {"name": "OpsiObscure", "help": ""},
+      "en-US": {"name": "OpsiObscure", "help": ""},
+      "ja-JP": {"name": "OpsiObscure", "help": ""}
+    },
+    "ForceRun": {
+      "zh-CN": {"name": "OpsiObscure.ForceRun", "help": ""},
+      "zh-TW": {"name": "OpsiObscure.ForceRun", "help": ""},
+      "en-US": {"name": "OpsiObscure.ForceRun", "help": ""},
+      "ja-JP": {"name": "OpsiObscure.ForceRun", "help": ""}
+    }
+  },
+  "OpsiAbyssal": {
+    "_info": {
+      "zh-CN": {"name": "OpsiAbyssal", "help": ""},
+      "zh-TW": {"name": "OpsiAbyssal", "help": ""},
+      "en-US": {"name": "OpsiAbyssal", "help": ""},
+      "ja-JP": {"name": "OpsiAbyssal", "help": ""}
+    },
+    "ForceRun": {
+      "zh-CN": {"name": "OpsiAbyssal.ForceRun", "help": ""},
+      "zh-TW": {"name": "OpsiAbyssal.ForceRun", "help": ""},
+      "en-US": {"name": "OpsiAbyssal.ForceRun", "help": ""},
+      "ja-JP": {"name": "OpsiAbyssal.ForceRun", "help": ""}
+    }
+  },
+  "OpsiStronghold": {
+    "_info": {
+      "zh-CN": {"name": "OpsiStronghold", "help": ""},
+      "zh-TW": {"name": "OpsiStronghold", "help": ""},
+      "en-US": {"name": "OpsiStronghold", "help": ""},
+      "ja-JP": {"name": "OpsiStronghold", "help": ""}
+    },
+    "ForceRun": {
+      "zh-CN": {"name": "OpsiStronghold.ForceRun", "help": ""},
+      "zh-TW": {"name": "OpsiStronghold.ForceRun", "help": ""},
+      "en-US": {"name": "OpsiStronghold.ForceRun", "help": ""},
+      "ja-JP": {"name": "OpsiStronghold.ForceRun", "help": ""}
+    }
+  },
+  "OpsiMonthBoss": {
+    "_info": {
+      "zh-CN": {"name": "OpsiMonthBoss", "help": ""},
+      "zh-TW": {"name": "OpsiMonthBoss", "help": ""},
+      "en-US": {"name": "OpsiMonthBoss", "help": ""},
+      "ja-JP": {"name": "OpsiMonthBoss", "help": ""}
+    },
+    "Mode": {
+      "zh-CN": {
+        "name": "OpsiMonthBoss.Mode",
+        "help": "",
+        "option_i18n": {
+          "normal": "normal",
+          "normal_hard": "normal_hard"
+        }
+      },
+      "zh-TW": {
+        "name": "OpsiMonthBoss.Mode",
+        "help": "",
+        "option_i18n": {
+          "normal": "normal",
+          "normal_hard": "normal_hard"
+        }
+      },
+      "en-US": {
+        "name": "OpsiMonthBoss.Mode",
+        "help": "",
+        "option_i18n": {
+          "normal": "normal",
+          "normal_hard": "normal_hard"
+        }
+      },
+      "ja-JP": {
+        "name": "OpsiMonthBoss.Mode",
+        "help": "",
+        "option_i18n": {
+          "normal": "normal",
+          "normal_hard": "normal_hard"
+        }
+      }
+    },
+    "CheckAdaptability": {
+      "zh-CN": {"name": "OpsiMonthBoss.CheckAdaptability", "help": ""},
+      "zh-TW": {"name": "OpsiMonthBoss.CheckAdaptability", "help": ""},
+      "en-US": {"name": "OpsiMonthBoss.CheckAdaptability", "help": ""},
+      "ja-JP": {"name": "OpsiMonthBoss.CheckAdaptability", "help": ""}
+    },
+    "ForceRun": {
+      "zh-CN": {"name": "OpsiMonthBoss.ForceRun", "help": ""},
+      "zh-TW": {"name": "OpsiMonthBoss.ForceRun", "help": ""},
+      "en-US": {"name": "OpsiMonthBoss.ForceRun", "help": ""},
+      "ja-JP": {"name": "OpsiMonthBoss.ForceRun", "help": ""}
+    }
+  },
+  "OpsiMeowfficerFarming": {
+    "_info": {
+      "zh-CN": {"name": "OpsiMeowfficerFarming", "help": ""},
+      "zh-TW": {"name": "OpsiMeowfficerFarming", "help": ""},
+      "en-US": {"name": "OpsiMeowfficerFarming", "help": ""},
+      "ja-JP": {"name": "OpsiMeowfficerFarming", "help": ""}
+    },
+    "ActionPointPreserve": {
+      "zh-CN": {"name": "OpsiMeowfficerFarming.ActionPointPreserve", "help": ""},
+      "zh-TW": {"name": "OpsiMeowfficerFarming.ActionPointPreserve", "help": ""},
+      "en-US": {"name": "OpsiMeowfficerFarming.ActionPointPreserve", "help": ""},
+      "ja-JP": {"name": "OpsiMeowfficerFarming.ActionPointPreserve", "help": ""}
+    },
+    "HazardLevel": {
+      "zh-CN": {
+        "name": "OpsiMeowfficerFarming.HazardLevel",
+        "help": "",
+        "option_i18n": {"3": "3", "4": "4", "5": "5", "6": "6", "10": "10"}
+      },
+      "zh-TW": {
+        "name": "OpsiMeowfficerFarming.HazardLevel",
+        "help": "",
+        "option_i18n": {"3": "3", "4": "4", "5": "5", "6": "6", "10": "10"}
+      },
+      "en-US": {
+        "name": "OpsiMeowfficerFarming.HazardLevel",
+        "help": "",
+        "option_i18n": {"3": "3", "4": "4", "5": "5", "6": "6", "10": "10"}
+      },
+      "ja-JP": {
+        "name": "OpsiMeowfficerFarming.HazardLevel",
+        "help": "",
+        "option_i18n": {"3": "3", "4": "4", "5": "5", "6": "6", "10": "10"}
+      }
+    }
+  },
+  "OpsiHazard1Leveling": {
+    "_info": {
+      "zh-CN": {"name": "OpsiHazard1Leveling", "help": ""},
+      "zh-TW": {"name": "OpsiHazard1Leveling", "help": ""},
+      "en-US": {"name": "OpsiHazard1Leveling", "help": ""},
+      "ja-JP": {"name": "OpsiHazard1Leveling", "help": ""}
+    },
+    "TargetZone": {
+      "zh-CN": {
+        "name": "OpsiHazard1Leveling.TargetZone",
+        "help": "",
+        "option_i18n": {"0": "0", "44": "44", "22": "22"}
+      },
+      "zh-TW": {
+        "name": "OpsiHazard1Leveling.TargetZone",
+        "help": "",
+        "option_i18n": {"0": "0", "44": "44", "22": "22"}
+      },
+      "en-US": {
+        "name": "OpsiHazard1Leveling.TargetZone",
+        "help": "",
+        "option_i18n": {"0": "0", "44": "44", "22": "22"}
+      },
+      "ja-JP": {
+        "name": "OpsiHazard1Leveling.TargetZone",
+        "help": "",
+        "option_i18n": {"0": "0", "44": "44", "22": "22"}
+      }
+    }
+  }
+}

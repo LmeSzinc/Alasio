@@ -1,0 +1,56 @@
+{
+  "Main": {
+    "group": {
+      "Scheduler": {"file": "module/config/scheduler/scheduler_model.py", "cls": "Scheduler", "task": "Main"},
+      "Campaign": {"file": "module/config/main/main_model.py", "cls": "Campaign", "task": "Main"},
+      "Fleet1": {"file": "module/config/main/main_model.py", "cls": "Fleet1", "task": "Main"},
+      "Fleet2": {"file": "module/config/main/main_model.py", "cls": "Fleet2", "task": "Main"}
+    },
+    "config": {
+      "task": ["Main"],
+      "group": []
+    }
+  },
+  "Main2": {
+    "group": {
+      "Scheduler": {"file": "module/config/scheduler/scheduler_model.py", "cls": "Scheduler", "task": "Main2"},
+      "Campaign": {"file": "module/config/main/main_model.py", "cls": "Campaign", "task": "Main2"},
+      "Fleet1": {"file": "module/config/main/main_model.py", "cls": "Fleet1", "task": "Main2"},
+      "Fleet2": {"file": "module/config/main/main_model.py", "cls": "Fleet2", "task": "Main2"}
+    },
+    "config": {
+      "task": ["Main2"],
+      "group": []
+    }
+  },
+  "OpsiExplore": {
+    "group": {
+      "Scheduler": {"file": "module/config/scheduler/scheduler_model.py", "cls": "Scheduler", "task": "OpsiExplore"},
+      "OpsiExplore": {"file": "module/config/opsi/opsi_model.py", "cls": "OpsiExplore", "task": "OpsiExplore"}
+    },
+    "config": {
+      "task": ["OpsiExplore"],
+      "group": []
+    }
+  },
+  "OpsiDaily": {
+    "group": {
+      "Scheduler": {"file": "module/config/scheduler/scheduler_model.py", "cls": "Scheduler", "task": "OpsiDaily"},
+      "OpsiDaily": {"file": "module/config/opsi/opsi_model.py", "cls": "OpsiDaily", "task": "OpsiDaily"},
+      "OpsiGeneral": {"file": "module/config/opsi/opsi_model.py", "cls": "OpsiGeneral", "task": "OpsiGeneral"}
+    },
+    "config": {
+      "task": ["OpsiDaily", "OpsiGeneral"],
+      "group": []
+    }
+  },
+  "OpsiGeneral": {
+    "group": {
+      "OpsiGeneral": {"file": "module/config/opsi/opsi_model.py", "cls": "OpsiGeneral", "task": "OpsiGeneral"}
+    },
+    "config": {
+      "task": ["OpsiGeneral"],
+      "group": []
+    }
+  }
+}

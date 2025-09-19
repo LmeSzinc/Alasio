@@ -1,0 +1,32 @@
+{
+  "Main": {
+    "zh-CN": "Main",
+    "zh-TW": "Main",
+    "en-US": "Main",
+    "ja-JP": "Main"
+  },
+  "Main2": {
+    "zh-CN": "Main2",
+    "zh-TW": "Main2",
+    "en-US": "Main2",
+    "ja-JP": "Main2"
+  },
+  "OpsiExplore": {
+    "zh-CN": "OpsiExplore",
+    "zh-TW": "OpsiExplore",
+    "en-US": "OpsiExplore",
+    "ja-JP": "OpsiExplore"
+  },
+  "OpsiDaily": {
+    "zh-CN": "OpsiDaily",
+    "zh-TW": "OpsiDaily",
+    "en-US": "OpsiDaily",
+    "ja-JP": "OpsiDaily"
+  },
+  "OpsiGeneral": {
+    "zh-CN": "OpsiGeneral",
+    "zh-TW": "OpsiGeneral",
+    "en-US": "OpsiGeneral",
+    "ja-JP": "OpsiGeneral"
+  }
+}

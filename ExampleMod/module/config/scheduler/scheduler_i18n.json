@@ -1,0 +1,28 @@
+{
+  "Scheduler": {
+    "_info": {
+      "zh-CN": {"name": "Scheduler", "help": ""},
+      "zh-TW": {"name": "Scheduler", "help": ""},
+      "en-US": {"name": "Scheduler", "help": ""},
+      "ja-JP": {"name": "Scheduler", "help": ""}
+    },
+    "Enable": {
+      "zh-CN": {"name": "Scheduler.Enable", "help": ""},
+      "zh-TW": {"name": "Scheduler.Enable", "help": ""},
+      "en-US": {"name": "Scheduler.Enable", "help": ""},
+      "ja-JP": {"name": "Scheduler.Enable", "help": ""}
+    },
+    "NextRun": {
+      "zh-CN": {"name": "Scheduler.NextRun", "help": ""},
+      "zh-TW": {"name": "Scheduler.NextRun", "help": ""},
+      "en-US": {"name": "Scheduler.NextRun", "help": ""},
+      "ja-JP": {"name": "Scheduler.NextRun", "help": ""}
+    },
+    "ServerUpdate": {
+      "zh-CN": {"name": "Scheduler.ServerUpdate", "help": ""},
+      "zh-TW": {"name": "Scheduler.ServerUpdate", "help": ""},
+      "en-US": {"name": "Scheduler.ServerUpdate", "help": ""},
+      "ja-JP": {"name": "Scheduler.ServerUpdate", "help": ""}
+    }
+  }
+}

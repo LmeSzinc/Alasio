@@ -1,0 +1,4 @@
+Scheduler:
+  Enable: true
+  NextRun: 2020-01-01T00:00:00
+  ServerUpdate: 00:00

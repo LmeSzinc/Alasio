@@ -1,0 +1,359 @@
+{
+  "card-Main-Scheduler": {
+    "_info": {"group": "Scheduler", "arg": "_info"},
+    "Scheduler_Enable": {
+      "task": "Main",
+      "group": "Scheduler",
+      "arg": "Enable",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Scheduler_NextRun": {
+      "task": "Main",
+      "group": "Scheduler",
+      "arg": "NextRun",
+      "dt": "datetime",
+      "value": "2020-01-01T00:00:00Z"
+    },
+    "Scheduler_ServerUpdate": {
+      "task": "Main",
+      "group": "Scheduler",
+      "arg": "ServerUpdate",
+      "dt": "input",
+      "value": "00:00"
+    }
+  },
+  "card-Main-Campaign": {
+    "_info": {"group": "Campaign", "arg": "_info"},
+    "Campaign_Name": {
+      "task": "Main",
+      "group": "Campaign",
+      "arg": "Name",
+      "dt": "input",
+      "value": "12-4"
+    },
+    "Campaign_Event": {
+      "task": "Main",
+      "group": "Campaign",
+      "arg": "Event",
+      "dt": "select",
+      "value": "campaign_main",
+      "option": ["campaign_main"]
+    },
+    "Campaign_Mode": {
+      "task": "Main",
+      "group": "Campaign",
+      "arg": "Mode",
+      "dt": "select",
+      "value": "normal",
+      "option": ["normal", "hard"]
+    },
+    "Campaign_UseClearMode": {
+      "task": "Main",
+      "group": "Campaign",
+      "arg": "UseClearMode",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Campaign_UseFleetLock": {
+      "task": "Main",
+      "group": "Campaign",
+      "arg": "UseFleetLock",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Campaign_UseAutoSearch": {
+      "task": "Main",
+      "group": "Campaign",
+      "arg": "UseAutoSearch",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Campaign_Use2xBook": {
+      "task": "Main",
+      "group": "Campaign",
+      "arg": "Use2xBook",
+      "dt": "checkbox",
+      "value": false
+    },
+    "Campaign_AmbushEvade": {
+      "task": "Main",
+      "group": "Campaign",
+      "arg": "AmbushEvade",
+      "dt": "checkbox",
+      "value": true
+    }
+  },
+  "card-Main-Fleet1_Fleet2": {
+    "_info": {"group": "Fleet", "arg": "_info"},
+    "Fleet1_Fleet": {
+      "task": "Main",
+      "group": "Fleet1",
+      "arg": "Fleet",
+      "dt": "select",
+      "value": 1,
+      "option": [1, 2, 3, 4, 5, 6]
+    },
+    "Fleet1_Formation": {
+      "task": "Main",
+      "group": "Fleet1",
+      "arg": "Formation",
+      "dt": "select",
+      "value": "double_line",
+      "option": ["line_ahead", "double_line", "diamond"]
+    },
+    "Fleet1_FleetMode": {
+      "task": "Main",
+      "group": "Fleet1",
+      "arg": "FleetMode",
+      "dt": "select",
+      "value": "combat_auto",
+      "option": ["combat_auto", "combat_manual", "stand_still_in_the_middle", "hide_in_bottom_left"]
+    },
+    "Fleet1_FleetStep": {
+      "task": "Main",
+      "group": "Fleet1",
+      "arg": "FleetStep",
+      "dt": "select",
+      "value": 3,
+      "option": [2, 3, 4, 5]
+    },
+    "Fleet2_Fleet": {
+      "task": "Main",
+      "group": "Fleet2",
+      "arg": "Fleet",
+      "dt": "select",
+      "value": 1,
+      "option": [1, 2, 3, 4, 5, 6]
+    },
+    "Fleet2_Formation": {
+      "task": "Main",
+      "group": "Fleet2",
+      "arg": "Formation",
+      "dt": "select",
+      "value": "double_line",
+      "option": ["line_ahead", "double_line", "diamond"]
+    },
+    "Fleet2_FleetMode": {
+      "task": "Main",
+      "group": "Fleet2",
+      "arg": "FleetMode",
+      "dt": "select",
+      "value": "combat_auto",
+      "option": ["combat_auto", "combat_manual", "stand_still_in_the_middle", "hide_in_bottom_left"]
+    },
+    "Fleet2_FleetStep": {
+      "task": "Main",
+      "group": "Fleet2",
+      "arg": "FleetStep",
+      "dt": "select",
+      "value": 3,
+      "option": [2, 3, 4, 5]
+    }
+  },
+  "card-Main2-Scheduler": {
+    "_info": {"group": "Scheduler", "arg": "_info"},
+    "Scheduler_Enable": {
+      "task": "Main2",
+      "group": "Scheduler",
+      "arg": "Enable",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Scheduler_NextRun": {
+      "task": "Main2",
+      "group": "Scheduler",
+      "arg": "NextRun",
+      "dt": "datetime",
+      "value": "2020-01-01T00:00:00Z"
+    },
+    "Scheduler_ServerUpdate": {
+      "task": "Main2",
+      "group": "Scheduler",
+      "arg": "ServerUpdate",
+      "dt": "input",
+      "value": "00:00"
+    }
+  },
+  "card-Main2-Campaign": {
+    "_info": {"group": "Campaign", "arg": "_info"},
+    "Campaign_Name": {
+      "task": "Main2",
+      "group": "Campaign",
+      "arg": "Name",
+      "dt": "input",
+      "value": "12-4"
+    },
+    "Campaign_Event": {
+      "task": "Main2",
+      "group": "Campaign",
+      "arg": "Event",
+      "dt": "select",
+      "value": "campaign_main",
+      "option": ["campaign_main"]
+    },
+    "Campaign_Mode": {
+      "task": "Main2",
+      "group": "Campaign",
+      "arg": "Mode",
+      "dt": "select",
+      "value": "normal",
+      "option": ["normal", "hard"]
+    },
+    "Campaign_UseClearMode": {
+      "task": "Main2",
+      "group": "Campaign",
+      "arg": "UseClearMode",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Campaign_UseFleetLock": {
+      "task": "Main2",
+      "group": "Campaign",
+      "arg": "UseFleetLock",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Campaign_UseAutoSearch": {
+      "task": "Main2",
+      "group": "Campaign",
+      "arg": "UseAutoSearch",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Campaign_Use2xBook": {
+      "task": "Main2",
+      "group": "Campaign",
+      "arg": "Use2xBook",
+      "dt": "checkbox",
+      "value": false
+    },
+    "Campaign_AmbushEvade": {
+      "task": "Main2",
+      "group": "Campaign",
+      "arg": "AmbushEvade",
+      "dt": "checkbox",
+      "value": true
+    }
+  },
+  "card-Main2-Fleet1": {
+    "_info": {"group": "Fleet1", "arg": "_info"},
+    "Fleet1_Fleet": {
+      "task": "Main2",
+      "group": "Fleet1",
+      "arg": "Fleet",
+      "dt": "select",
+      "value": 1,
+      "option": [1, 2, 3, 4, 5, 6]
+    },
+    "Fleet1_Formation": {
+      "task": "Main2",
+      "group": "Fleet1",
+      "arg": "Formation",
+      "dt": "select",
+      "value": "double_line",
+      "option": ["line_ahead", "double_line", "diamond"]
+    },
+    "Fleet1_FleetMode": {
+      "task": "Main2",
+      "group": "Fleet1",
+      "arg": "FleetMode",
+      "dt": "select",
+      "value": "combat_auto",
+      "option": ["combat_auto", "combat_manual", "stand_still_in_the_middle", "hide_in_bottom_left"]
+    },
+    "Fleet1_FleetStep": {
+      "task": "Main2",
+      "group": "Fleet1",
+      "arg": "FleetStep",
+      "dt": "select",
+      "value": 3,
+      "option": [2, 3, 4, 5]
+    }
+  },
+  "card-Main2-Fleet2": {
+    "_info": {"group": "Fleet2", "arg": "_info"},
+    "Fleet2_Fleet": {
+      "task": "Main2",
+      "group": "Fleet2",
+      "arg": "Fleet",
+      "dt": "select",
+      "value": 1,
+      "option": [1, 2, 3, 4, 5, 6]
+    },
+    "Fleet2_Formation": {
+      "task": "Main2",
+      "group": "Fleet2",
+      "arg": "Formation",
+      "dt": "select",
+      "value": "double_line",
+      "option": ["line_ahead", "double_line", "diamond"]
+    },
+    "Fleet2_FleetMode": {
+      "task": "Main2",
+      "group": "Fleet2",
+      "arg": "FleetMode",
+      "dt": "select",
+      "value": "combat_auto",
+      "option": ["combat_auto", "combat_manual", "stand_still_in_the_middle", "hide_in_bottom_left"]
+    },
+    "Fleet2_FleetStep": {
+      "task": "Main2",
+      "group": "Fleet2",
+      "arg": "FleetStep",
+      "dt": "select",
+      "value": 3,
+      "option": [2, 3, 4, 5]
+    }
+  },
+  "card-DisplayOpsiGeneral": {
+    "_info": {"group": "OpsiGeneral", "arg": "_info"},
+    "OpsiGeneral_UseLogger": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "UseLogger",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OpsiGeneral_BuyActionPointLimit": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "BuyActionPointLimit",
+      "dt": "select",
+      "value": 0,
+      "option": [0, 1, 2, 3, 4, 5]
+    },
+    "OpsiGeneral_OilLimit": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "OilLimit",
+      "dt": "input-int",
+      "value": 1000,
+      "ge": 500,
+      "le": 20000
+    },
+    "OpsiGeneral_RepairThreshold": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "RepairThreshold",
+      "dt": "input-float",
+      "value": 0.4,
+      "ge": 0.0,
+      "le": 1.0
+    },
+    "OpsiGeneral_DoRandomMapEvent": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "DoRandomMapEvent",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OpsiGeneral_AkashiShopFilter": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "AkashiShopFilter",
+      "dt": "filter",
+      "value": ["ActionPoint", "PurpleCoins"]
+    }
+  }
+}

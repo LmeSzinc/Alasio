@@ -1,0 +1,132 @@
+{
+  "card-OpsiExplore": {
+    "_info": {"group": "OpsiExplore", "arg": "_info"},
+    "Scheduler_Enable": {
+      "task": "OpsiExplore",
+      "group": "Scheduler",
+      "arg": "Enable",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Scheduler_NextRun": {
+      "task": "OpsiExplore",
+      "group": "Scheduler",
+      "arg": "NextRun",
+      "dt": "datetime",
+      "value": "2020-01-01T00:00:00Z"
+    },
+    "Scheduler_ServerUpdate": {
+      "task": "OpsiExplore",
+      "group": "Scheduler",
+      "arg": "ServerUpdate",
+      "dt": "input",
+      "value": "00:00"
+    },
+    "OpsiExplore_SpecialRadar": {
+      "task": "OpsiExplore",
+      "group": "OpsiExplore",
+      "arg": "SpecialRadar",
+      "dt": "checkbox",
+      "value": false
+    },
+    "OpsiExplore_ForceRun": {
+      "task": "OpsiExplore",
+      "group": "OpsiExplore",
+      "arg": "ForceRun",
+      "dt": "checkbox",
+      "value": false
+    },
+    "OpsiExplore_LastZone": {
+      "task": "OpsiExplore",
+      "group": "OpsiExplore",
+      "arg": "LastZone",
+      "dt": "input-int",
+      "value": 0
+    }
+  },
+  "card-OpsiDaily": {
+    "_info": {"group": "OpsiDaily", "arg": "_info"},
+    "Scheduler_Enable": {
+      "task": "OpsiDaily",
+      "group": "Scheduler",
+      "arg": "Enable",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Scheduler_NextRun": {
+      "task": "OpsiDaily",
+      "group": "Scheduler",
+      "arg": "NextRun",
+      "dt": "datetime",
+      "value": "2020-01-01T00:00:00Z"
+    },
+    "Scheduler_ServerUpdate": {
+      "task": "OpsiDaily",
+      "group": "Scheduler",
+      "arg": "ServerUpdate",
+      "dt": "input",
+      "value": "00:00"
+    },
+    "OpsiDaily_DoMission": {
+      "task": "OpsiDaily",
+      "group": "OpsiDaily",
+      "arg": "DoMission",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OpsiDaily_UseTuningSample": {
+      "task": "OpsiDaily",
+      "group": "OpsiDaily",
+      "arg": "UseTuningSample",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OpsiGeneral_UseLogger": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "UseLogger",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OpsiGeneral_BuyActionPointLimit": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "BuyActionPointLimit",
+      "dt": "select",
+      "value": 0,
+      "option": [0, 1, 2, 3, 4, 5]
+    },
+    "OpsiGeneral_OilLimit": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "OilLimit",
+      "dt": "input-int",
+      "value": 1000,
+      "ge": 500,
+      "le": 20000
+    },
+    "OpsiGeneral_RepairThreshold": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "RepairThreshold",
+      "dt": "input-float",
+      "value": 0.4,
+      "ge": 0.0,
+      "le": 1.0
+    },
+    "OpsiGeneral_DoRandomMapEvent": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "DoRandomMapEvent",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OpsiGeneral_AkashiShopFilter": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "AkashiShopFilter",
+      "dt": "filter",
+      "value": ["ActionPoint", "PurpleCoins"]
+    }
+  }
+}

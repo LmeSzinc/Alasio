@@ -1,0 +1,53 @@
+Campaign:
+  Name: 12-4
+  Event:
+    value: campaign_main
+    option: [ campaign_main ]
+  Mode:
+    value: normal
+    option: [ normal, hard ]
+  UseClearMode: true
+  UseFleetLock: true
+  UseAutoSearch: true
+  Use2xBook: false
+  AmbushEvade: true
+
+StopCondition:
+  OilLimit: 1000
+  RunCount: 0
+  MapAchievement:
+    value: non_stop
+    option: [ non_stop, 100_percent_clear, map_3_stars, threat_safe, threat_safe_without_3_stars ]
+  StageIncrease: false
+  GetNewShip: false
+  ReachLevel: 0
+
+Fleet:
+
+Fleet1:
+  Fleet:
+    value: 1
+    option: [ 1, 2, 3, 4, 5, 6 ]
+  Formation:
+    value: double_line
+    option: [ line_ahead, double_line, diamond ]
+  FleetMode:
+    value: combat_auto
+    option: [ combat_auto, combat_manual, stand_still_in_the_middle, hide_in_bottom_left ]
+  FleetStep:
+    value: 3
+    option: [ 2, 3, 4, 5 ]
+
+Fleet2:
+  Fleet:
+    value: 1
+    option: [ 1, 2, 3, 4, 5, 6 ]
+  Formation:
+    value: double_line
+    option: [ line_ahead, double_line, diamond ]
+  FleetMode:
+    value: combat_auto
+    option: [ combat_auto, combat_manual, stand_still_in_the_middle, hide_in_bottom_left ]
+  FleetStep:
+    value: 3
+    option: [ 2, 3, 4, 5 ]

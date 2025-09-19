@@ -1,0 +1,78 @@
+{
+  "main": {
+    "_info": {
+      "zh-CN": "main",
+      "zh-TW": "main",
+      "en-US": "main",
+      "ja-JP": "main"
+    },
+    "card-Main-Scheduler": {
+      "zh-CN": "Scheduler",
+      "zh-TW": "Scheduler",
+      "en-US": "Scheduler",
+      "ja-JP": "Scheduler"
+    },
+    "card-Main-Campaign": {
+      "zh-CN": "Campaign",
+      "zh-TW": "Campaign",
+      "en-US": "Campaign",
+      "ja-JP": "Campaign"
+    },
+    "card-Main-Fleet1_Fleet2": {
+      "zh-CN": "Fleet",
+      "zh-TW": "Fleet",
+      "en-US": "Fleet",
+      "ja-JP": "Fleet"
+    },
+    "card-Main2-Scheduler": {
+      "zh-CN": "Scheduler",
+      "zh-TW": "Scheduler",
+      "en-US": "Scheduler",
+      "ja-JP": "Scheduler"
+    },
+    "card-Main2-Campaign": {
+      "zh-CN": "Campaign",
+      "zh-TW": "Campaign",
+      "en-US": "Campaign",
+      "ja-JP": "Campaign"
+    },
+    "card-Main2-Fleet1": {
+      "zh-CN": "Fleet1",
+      "zh-TW": "Fleet1",
+      "en-US": "Fleet1",
+      "ja-JP": "Fleet1"
+    },
+    "card-Main2-Fleet2": {
+      "zh-CN": "Fleet2",
+      "zh-TW": "Fleet2",
+      "en-US": "Fleet2",
+      "ja-JP": "Fleet2"
+    },
+    "card-DisplayOpsiGeneral": {
+      "zh-CN": "大世界通用设置",
+      "zh-TW": "OpsiGeneral",
+      "en-US": "OpsiGeneral",
+      "ja-JP": "OpsiGeneral"
+    }
+  },
+  "opsi": {
+    "_info": {
+      "zh-CN": "opsi",
+      "zh-TW": "opsi",
+      "en-US": "opsi",
+      "ja-JP": "opsi"
+    },
+    "card-OpsiExplore": {
+      "zh-CN": "OpsiExplore",
+      "zh-TW": "OpsiExplore",
+      "en-US": "OpsiExplore",
+      "ja-JP": "OpsiExplore"
+    },
+    "card-OpsiDaily": {
+      "zh-CN": "OpsiDaily",
+      "zh-TW": "OpsiDaily",
+      "en-US": "OpsiDaily",
+      "ja-JP": "OpsiDaily"
+    }
+  }
+}
