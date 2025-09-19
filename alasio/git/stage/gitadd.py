@@ -10,6 +10,25 @@ from alasio.git.stage.index import GitIndex, GitIndexEntry
 from alasio.logger import logger
 
 
+def convert_file_mode(mode):
+    """
+    Convert filemode 6xx to 644, 7xx to 755, and keep others unchanged.
+
+    Windows st.st_mode returns 666 but file can only be 644 or 755
+    """
+    rwx = mode & 0o777
+    other = mode & ~0o777
+
+    user_perms = rwx & 0o700
+    if user_perms == 0o700:
+        rwx = 0o755
+    elif user_perms == 0o600:
+        rwx = 0o644
+    else:
+        rwx = 0o644
+    return other | rwx
+
+
 class GitAdd(GitIndex):
     def __init__(self, path):
         """
@@ -73,7 +92,7 @@ class GitAdd(GitIndex):
             self._stage_restore(path)
             return False
 
-        mode = st.st_mode
+        mode = convert_file_mode(st.st_mode)
         if stat.S_ISREG(mode):
             # File
             pass
@@ -118,7 +137,7 @@ class GitAdd(GitIndex):
         entry = GitIndexEntry(
             ctime_s=int(st.st_ctime), ctime_ns=st.st_ctime_ns % 1000000000,
             mtime_s=int(st.st_mtime), mtime_ns=st.st_mtime_ns % 1000000000,
-            dev=0, ino=0, mode=st.st_mode,
+            dev=0, ino=0, mode=mode,
             uid=0, gid=0, size=st.st_size,
             sha1=bytes.fromhex(sha1), path=path,
         )
