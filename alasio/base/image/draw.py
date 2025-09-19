@@ -12,7 +12,7 @@ def show_as_pillow(image):
     from PIL import Image
     if channel == 3:
         Image.fromarray(image, mode='RGB').show()
-    elif channel == 0:
+    elif channel == 1:
         Image.fromarray(image, mode='L').show()
     elif channel == 4:
         Image.fromarray(image, mode='RGBA').show()
@@ -111,7 +111,7 @@ def image_paint_white(image, area):
     if channel == 3:
         # RGB
         image[y1:y2, x1:x2] = (255, 255, 255)
-    elif channel == 0:
+    elif channel == 1:
         # grayscale
         image[y1:y2, x1:x2] = 255
     elif channel == 4:
@@ -140,7 +140,7 @@ def image_paint_black(image, area):
     if channel == 3:
         # RGB
         image[y1:y2, x1:x2] = (0, 0, 0)
-    elif channel == 0:
+    elif channel == 1:
         # grayscale
         image[y1:y2, x1:x2] = 0
     elif channel == 4:
@@ -176,7 +176,7 @@ def get_bbox(image, threshold=0):
         # RGB
         mask = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         cv2.threshold(mask, threshold, 255, cv2.THRESH_BINARY, dst=mask)
-    elif channel == 0:
+    elif channel == 1:
         # grayscale
         _, mask = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
     elif channel == 4:
@@ -237,7 +237,7 @@ def get_bbox_reversed(image, threshold=255):
         # RGB
         mask = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         cv2.threshold(mask, 0, threshold, cv2.THRESH_BINARY, dst=mask)
-    elif channel == 0:
+    elif channel == 1:
         # grayscale
         _, mask = cv2.threshold(image, 0, threshold, cv2.THRESH_BINARY)
     elif channel == 4:

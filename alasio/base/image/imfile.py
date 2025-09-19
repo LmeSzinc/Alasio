@@ -27,11 +27,11 @@ def image_channel(image) -> int:
         image (np.ndarray):
 
     Returns:
-        int: 0 for grayscale, 3 for RGB, 4 for RGBA
+        int: 1 for grayscale, 3 for RGB, 4 for RGBA
     """
     shape = image.shape
     if len(shape) == 2:
-        return 0
+        return 1
     else:
         return shape[2]
 
@@ -46,6 +46,22 @@ def image_size(image):
     """
     shape = image.shape
     return shape[1], shape[0]
+
+
+def image_shape(image):
+    """
+    Args:
+        image (np.ndarray):
+
+    Returns:
+        tuple[int, int, int]: width, height, channel.
+            channel: 1 for grayscale, 3 for RGB, 4 for RGBA
+    """
+    shape = image.shape
+    if len(shape) == 2:
+        return shape[1], shape[0], 1
+    else:
+        return shape[1], shape[0], shape[2]
 
 
 def image_copy(src):
@@ -161,7 +177,7 @@ def cvt_color_decode(image, area=None):
             # RGB
             image = crop(image, area, copy=False)
             return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        elif channel == 0:
+        elif channel == 1:
             # grayscale
             return crop(image, area, copy=True)
         elif channel == 4:
@@ -320,7 +336,7 @@ def cvt_color_encode(image):
     if channel == 3:
         # RGB
         return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    elif channel == 0:
+    elif channel == 1:
         # grayscale, keep grayscale unchanged
         return image
     elif channel == 4:

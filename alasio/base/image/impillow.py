@@ -53,7 +53,7 @@ def image_save_pillow(image, file):
     channel = image_channel(image)
     if channel == 3:
         mode = 'RGB'
-    elif channel == 0:
+    elif channel == 1:
         mode = 'L'
     elif channel == 4:
         mode = 'RGBA'
