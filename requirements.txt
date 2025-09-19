@@ -1,0 +1,19 @@
+# alasio
+msgspec
+PyYAML
+
+httpx
+httpx-ws
+
+# image detection
+# one of opencv-python, opencv-python-headless, opencv-contrib-python, opencv-contrib-python-headless
+opencv-python-headless
+
+# alasio[backend]
+hypercorn
+trio
+starlette>=0.19.0
+PyJWT
+
+# test
+pytest
