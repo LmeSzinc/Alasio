@@ -93,8 +93,8 @@ def sync_task_gc(wait=8):
     """
     from alasio.db.conn import SQLITE_POOL
     SQLITE_POOL.gc(wait)
-    from alasio.ext.file.msgspecfile import JSON_CACHE_TTL
-    JSON_CACHE_TTL.gc(wait)
+    from alasio.config.entry.mod import MOD_JSON_CACHE
+    MOD_JSON_CACHE.gc(wait)
 
 
 async def task_gc(wait=8):

@@ -10,12 +10,14 @@ from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX, MODEL_T
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.deep import deep_set, dict_update
 from alasio.ext.file.loadpy import LOADPY_CACHE
-from alasio.ext.file.msgspecfile import JSON_CACHE_TTL
+from alasio.ext.file.msgspecfile import JsonCacheTTL
 from alasio.ext.msgspec_error import MsgspecError, load_msgpack_with_default
 from alasio.ext.msgspec_error.error import parse_msgspec_error
 from alasio.ext.msgspec_error.parse_struct import get_field_default
 from alasio.ext.path import PathStr
 from alasio.logger import logger
+
+MOD_JSON_CACHE = JsonCacheTTL()
 
 
 class ConfigSetEvent(Struct):
@@ -56,21 +58,21 @@ class Mod:
         """
         file = self.path_config / 'nav.index.json'
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY
-        return JSON_CACHE_TTL.get(file, decoder=decoder)
+        return MOD_JSON_CACHE.get(file, decoder=decoder)
 
     def config_index_data(self) -> MODEL_CONFIG_INDEX:
         """
         """
         file = self.path_config / 'config.index.json'
         decoder = DECODER_CACHE.MODEL_CONFIG_INDEX
-        return JSON_CACHE_TTL.get(file, decoder=decoder)
+        return MOD_JSON_CACHE.get(file, decoder=decoder)
 
     def task_index_data(self) -> MODEL_TASK_INDEX:
         """
         """
         file = self.path_config / 'task.index.json'
         decoder = DECODER_CACHE.MODEL_TASK_INDEX
-        return JSON_CACHE_TTL.get(file, decoder=decoder)
+        return MOD_JSON_CACHE.get(file, decoder=decoder)
 
     def nav_config_json(self, file):
         """
@@ -87,7 +89,7 @@ class Mod:
         """
         file = self.root / file
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY
-        return JSON_CACHE_TTL.get(file, decoder=decoder)
+        return MOD_JSON_CACHE.get(file, decoder=decoder)
 
     def nav_i18n_json(self, file):
         """
@@ -102,7 +104,7 @@ class Mod:
         """
         file = self.root / file
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY
-        return JSON_CACHE_TTL.get(file, decoder=decoder)
+        return MOD_JSON_CACHE.get(file, decoder=decoder)
 
     def task_model_py(self, file):
         """

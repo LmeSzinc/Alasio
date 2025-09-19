@@ -1,7 +1,7 @@
 from msgspec import DecodeError
 from msgspec.json import Decoder, decode, encode
 
-from alasio.ext.cache.resource import ResourceCacheTTL, T
+from alasio.ext.cache.resource import ResourceCache, ResourceCacheTTL, T
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 
 
@@ -76,7 +76,7 @@ def deepcopy_msgpack(data):
     return decode(encode(data))
 
 
-class JsonCacheTTL(ResourceCacheTTL):
+class JsonCache(ResourceCache):
     def load_resource(self, file: str, decoder: Decoder = None) -> T:
         content = atomic_read_bytes(file)
         if decoder is None:
@@ -85,4 +85,10 @@ class JsonCacheTTL(ResourceCacheTTL):
             return decoder.decode(content)
 
 
-JSON_CACHE_TTL = JsonCacheTTL()
+class JsonCacheTTL(ResourceCacheTTL):
+    def load_resource(self, file: str, decoder: Decoder = None) -> T:
+        content = atomic_read_bytes(file)
+        if decoder is None:
+            return decode(content)
+        else:
+            return decoder.decode(content)
