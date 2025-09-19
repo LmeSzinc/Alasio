@@ -312,10 +312,8 @@ def image_load(file, area=None):
         return gif_load_fframe(file, area=area)
     # cv2.imread can't handle non-ascii filepath and PIL.Image.open is slow
     # Here we read with numpy first
-    try:
-        content = atomic_read_bytes(file)
-    except FileNotFoundError as e:
-        raise ImageBroken(str(e))
+    # may raise FileNotFoundError
+    content = atomic_read_bytes(file)
     data = np.frombuffer(content, dtype=np.uint8)
     if not data.size:
         raise ImageBroken(f'Image with size=0: {file}')

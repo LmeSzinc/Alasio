@@ -4,7 +4,7 @@ from typing import Iterator, List, Tuple
 
 from alasio.base.image.color import get_color
 from alasio.base.image.draw import get_bbox
-from alasio.base.image.imfile import image_fixup, image_load, image_size
+from alasio.base.image.imfile import ImageBroken, image_load, image_size
 from alasio.config.const import Const
 from alasio.ext.area.area import Area
 from alasio.ext.area.slist import Slist
@@ -63,7 +63,12 @@ class AssetImage:
         """
         Parse image file, get bbox and mean
         """
-        image = image_load(self.file)
+        try:
+            image = image_load(self.file)
+        except (FileNotFoundError, ImageBroken) as e:
+            logger.warning(f'{self.file}: {e}')
+            self.valid = False
+            return
         # must match resolution
         size = image_size(image)
         resolution = Const.ASSETS_RESOLUTION
