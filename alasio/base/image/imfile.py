@@ -450,12 +450,12 @@ def image_fixup(file, need_crop=False):
     # Convert numpy array to bytes is slower than directly writing into file
     # but here we want to compare before and after
     new_content = data.tobytes()
-    if content == new_content:
+    if content != new_content:
+        atomic_write(file, new_content)
+        return True
+    else:
         # Same as before, no need to write
         return False
-    else:
-        atomic_write(file, data)
-        return True
 
 
 def image_fixup_any(path):
