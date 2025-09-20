@@ -8,6 +8,8 @@ IS_WINDOWS = os.name == 'nt'
 WINDOWS_MAX_ATTEMPT = 5
 # Base time to wait between retries (seconds)
 WINDOWS_RETRY_DELAY = 0.05
+# Default chunk size to 256KB
+CHUNK_SIZE = 262144
 
 
 def random_id():
@@ -198,6 +200,10 @@ def file_write(file, data):
         newline = None
         # Create memoryview as Pathlib do
         data = memoryview(data)
+    elif isinstance(data, (bytearray, memoryview)):
+        mode = 'wb'
+        encoding = None
+        newline = None
     else:
         typename = str(type(data))
         if typename == "<class 'numpy.ndarray'>":
@@ -255,7 +261,7 @@ def file_write_stream(file, data_generator):
         mode = 'w'
         encoding = 'utf-8'
         newline = ''
-    elif isinstance(first_chunk, bytes):
+    elif isinstance(first_chunk, (bytes, bytearray, memoryview)):
         mode = 'wb'
         encoding = None
         newline = None
@@ -285,6 +291,63 @@ def file_write_stream(file, data_generator):
     with open(file, mode=mode, encoding=encoding, newline=newline) as f:
         f.write(first_chunk)
         for chunk in data_iter:
+            f.write(chunk)
+        # Ensure data flush to disk
+        f.flush()
+        os.fsync(f.fileno())
+
+
+async def afile_write_stream(file, data_iter):
+    """
+    Only creates a file if the generator yields at least one data chunk.
+    Auto determines write mode based on the type of first chunk.
+
+    Args:
+        file (str): Target file path
+        data_iter (Iterable): An iterable that yields data chunks (str or bytes)
+    """
+    # Try to get the first chunk
+    try:
+        first_chunk = await data_iter.__anext__()
+    except StopAsyncIteration:
+        # Generator is empty, no file will be created
+        return
+
+    # Determine mode, encoding and newline from first chunk
+    if isinstance(first_chunk, str):
+        mode = 'w'
+        encoding = 'utf-8'
+        newline = ''
+    elif isinstance(first_chunk, bytes):
+        mode = 'wb'
+        encoding = None
+        newline = None
+    else:
+        # Default to text mode for other types
+        mode = 'w'
+        encoding = 'utf-8'
+        newline = ''
+
+    try:
+        # Write temp file
+        with open(file, mode=mode, encoding=encoding, newline=newline) as f:
+            f.write(first_chunk)
+            async for chunk in data_iter:
+                f.write(chunk)
+            # Ensure data flush to disk
+            f.flush()
+            os.fsync(f.fileno())
+        return
+    except FileNotFoundError:
+        pass
+    # Create parent directory
+    directory = os.path.dirname(file)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    # Write again
+    with open(file, mode=mode, encoding=encoding, newline=newline) as f:
+        f.write(first_chunk)
+        async for chunk in data_iter:
             f.write(chunk)
         # Ensure data flush to disk
         f.flush()
@@ -342,7 +405,7 @@ def file_read_text(file, encoding='utf-8', errors='strict'):
         return f.read()
 
 
-def file_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=262144):
+def file_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=CHUNK_SIZE):
     """
     Read text file content as stream
 
@@ -353,8 +416,8 @@ def file_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=26
             'strict', 'ignore', 'replace' and any other errors mode in open()
         chunk_size (int): Size of chunks to read. Defaults to 256KB.
 
-    Returns:
-        Iterable[str]: Generator yielding file content chunks
+    Yields:
+        str: Generator yielding file content chunks
     """
     with open(file, mode='r', encoding=encoding, errors=errors) as f:
         while 1:
@@ -380,7 +443,7 @@ def file_read_bytes(file):
         return f.read()
 
 
-def file_read_bytes_stream(file, chunk_size=262144):
+def file_read_bytes_stream(file, chunk_size=CHUNK_SIZE):
     """
     Read binary file content as stream
 
@@ -388,8 +451,8 @@ def file_read_bytes_stream(file, chunk_size=262144):
         file (str): Source file path
         chunk_size (int): Size of chunks to read. Defaults to 256KB.
 
-    Returns:
-        Iterable[bytes]: Generator yielding file content chunks
+    Yields:
+        bytes: Generator yielding file content chunks
     """
     with open(file, mode='rb') as f:
         while 1:
@@ -397,6 +460,25 @@ def file_read_bytes_stream(file, chunk_size=262144):
             if not chunk:
                 return
             yield chunk
+
+
+def file_read_bytes_into(file, buffer):
+    """
+    Read binary file content into memoryview(bytearray())
+
+    Args:
+        file (str): Source file path
+        buffer (memoryview | bytearray):
+
+    Yields:
+        int: Length read
+    """
+    with open(file, mode='rb') as f:
+        while 1:
+            n = f.readinto(buffer)
+            if not n:
+                return
+            yield n
 
 
 def atomic_read_text(file, encoding='utf-8', errors='strict'):
@@ -430,7 +512,7 @@ def atomic_read_text(file, encoding='utf-8', errors='strict'):
         return file_read_text(file, encoding=encoding, errors=errors)
 
 
-def atomic_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=262144):
+def atomic_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=CHUNK_SIZE):
     """
     Atomic file read with streaming support
 
@@ -441,8 +523,8 @@ def atomic_read_text_stream(file, encoding='utf-8', errors='strict', chunk_size=
             'strict', 'ignore', 'replace' and any other errors mode in open()
         chunk_size (int): Size of chunks to read. Defaults to 256KB.
 
-    Returns:
-        Iterable[str]: Generator yielding file content chunks
+    Yields:
+        str: Generator yielding file content chunks
     """
     if IS_WINDOWS:
         # PermissionError on Windows if another process is replacing
@@ -492,6 +574,114 @@ def atomic_read_bytes(file):
         return file_read_bytes(file)
 
 
+def atomic_read_bytes_stream(file, chunk_size=CHUNK_SIZE):
+    """
+    Atomic file read with streaming support
+
+    Args:
+        file (str): Source file path
+        chunk_size (int): Size of chunks to read. Defaults to 256KB.
+
+    Yields:
+        bytes: Generator yielding file content chunks
+    """
+    if IS_WINDOWS:
+        # PermissionError on Windows if another process is replacing
+        last_error = None
+        for attempt in range(WINDOWS_MAX_ATTEMPT):
+            try:
+                yield from file_read_bytes_stream(file, chunk_size=chunk_size)
+                return
+            except PermissionError as e:
+                last_error = e
+                delay = windows_attempt_delay(attempt)
+                time.sleep(delay)
+                continue
+        if last_error is not None:
+            raise last_error from None
+    else:
+        # Linux and Mac allow reading while replacing
+        yield from file_read_bytes_stream(file, chunk_size=chunk_size)
+        return
+
+
+def atomic_read_bytes_into(file, buffer):
+    """
+    Read binary file content into memoryview(bytearray())
+
+    Args:
+        file (str): Source file path
+        buffer (memoryview | bytearray):
+
+    Yields:
+        int: Length read
+    """
+    if IS_WINDOWS:
+        # PermissionError on Windows if another process is replacing
+        last_error = None
+        for attempt in range(WINDOWS_MAX_ATTEMPT):
+            try:
+                yield from file_read_bytes_into(file, buffer)
+                return
+            except PermissionError as e:
+                last_error = e
+                delay = windows_attempt_delay(attempt)
+                time.sleep(delay)
+                continue
+        if last_error is not None:
+            raise last_error from None
+    else:
+        # Linux and Mac allow reading while replacing
+        yield from file_read_bytes_into(file, buffer)
+        return
+
+
+def _copy_iter(source, buffer, chunk_size):
+    """
+    Args:
+        source (str): Source file path
+        buffer (memoryview | bytearray):
+
+    Yields:
+        buffer
+    """
+    for n in atomic_read_bytes_into(source, buffer):
+        if not n:
+            return
+        elif n < chunk_size:
+            yield buffer[:n]
+        else:
+            yield buffer
+
+
+def file_copy(source, target, chunk_size=CHUNK_SIZE):
+    """
+    Copy file with memory reuse
+
+    Args:
+        source (str):
+        target (str):
+        chunk_size (int):
+    """
+    buffer = memoryview(bytearray(chunk_size))
+    stream = _copy_iter(source, buffer, chunk_size)
+    file_write_stream(target, stream)
+
+
+def atomic_copy(source, target, chunk_size=CHUNK_SIZE):
+    """
+    Atomic file write with minimal IO operation and memory usage
+
+    Args:
+        source (str):
+        target (str):
+        chunk_size (int):
+    """
+    tmp = to_tmp_file(source)
+    file_copy(source, tmp, chunk_size=chunk_size)
+    replace_tmp(tmp, target)
+
+
 def file_ensure_exist(file, mode=0o666, default=b''):
     """
     Ensure a file exists with minimal I/O operations using os.open.
@@ -530,6 +720,7 @@ def file_touch(file, mode=0o666, exist_ok=True):
     - If file exist, set modify time to now
 
     Args:
+        file (str):
         mode (int):
         exist_ok (bool):
     """
@@ -549,37 +740,6 @@ def file_touch(file, mode=0o666, exist_ok=True):
         flags |= os.O_EXCL
     fd = os.open(file, flags, mode)
     os.close(fd)
-
-
-def atomic_read_bytes_stream(file, chunk_size=262144):
-    """
-    Atomic file read with streaming support
-
-    Args:
-        file (str): Source file path
-        chunk_size (int): Size of chunks to read. Defaults to 256KB.
-
-    Returns:
-        Iterable[bytes]: Generator yielding file content chunks
-    """
-    if IS_WINDOWS:
-        # PermissionError on Windows if another process is replacing
-        last_error = None
-        for attempt in range(WINDOWS_MAX_ATTEMPT):
-            try:
-                yield from file_read_bytes_stream(file, chunk_size=chunk_size)
-                return
-            except PermissionError as e:
-                last_error = e
-                delay = windows_attempt_delay(attempt)
-                time.sleep(delay)
-                continue
-        if last_error is not None:
-            raise last_error from None
-    else:
-        # Linux and Mac allow reading while replacing
-        yield from file_read_bytes_stream(file, chunk_size=chunk_size)
-        return
 
 
 def file_remove(file):
