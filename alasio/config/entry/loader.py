@@ -1,4 +1,3 @@
-import os
 from collections import defaultdict
 
 from msgspec import ValidationError
@@ -7,7 +6,7 @@ import alasio.config.entry.const as const
 from alasio.config.entry.mod import ConfigSetEvent, Mod
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_get, deep_get_with_error, deep_iter_depth2, deep_values_depth2
+from alasio.ext.deep import deep_get, deep_get_with_error, deep_iter, deep_iter_depth2, deep_values_depth2
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import is_abspath, joinnormpath
@@ -15,33 +14,20 @@ from alasio.logger import logger
 
 
 class ModLoader:
-    def __init__(self, root, dict_mod_entry=None):
+    def __init__(self, root=None, dict_mod_entry=None):
         """
         Args:
             root (PathStr): Absolute path to run path
-            dict_mod_entry (dict[str, ModEntryInfo):
+            dict_mod_entry (dict[str, ModEntryInfo]):
                 see const.DICT_MOD_ENTRY
         """
+        if root is None:
+            root = env.PROJECT_ROOT
         self.root = root
         if dict_mod_entry is None:
             # dynamic use, just maybe someone want to monkeypatch it
             dict_mod_entry = const.DICT_MOD_ENTRY
         self.dict_mod_entry = dict_mod_entry
-
-    @staticmethod
-    def _may_mod_folder(path):
-        """
-        Args:
-            path (str):
-
-        Returns:
-            bool:
-        """
-        # Mod must have config.index.json
-        config_index = joinnormpath(path, 'module/config/config.index.json')
-        if not os.path.exists(config_index):
-            return False
-        return True
 
     @cached_property
     def dict_mod(self):
@@ -52,7 +38,7 @@ class ModLoader:
                 value: Mod
         """
         out = {}
-        for entry in const.DICT_MOD_ENTRY.values():
+        for entry in self.dict_mod_entry.values():
             if not entry.root:
                 # logger.warning(f'Mod entry root empty: name={name}, entry={entry.root}')
                 # continue
@@ -60,7 +46,7 @@ class ModLoader:
             elif not is_abspath(entry.root):
                 entry.root = joinnormpath(env.PROJECT_ROOT, entry.root)
             # folder must be mod like
-            if not self._may_mod_folder(entry.root):
+            if not entry.exist():
                 continue
             # set
             mod = Mod(entry)
