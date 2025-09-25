@@ -191,7 +191,7 @@ def cvt_color_decode(image, area=None):
             # RGB
             cv2.cvtColor(image, cv2.COLOR_BGR2RGB, dst=image)
             return image
-        elif channel == 0:
+        elif channel == 1:
             # grayscale
             return image
         elif channel == 4:
