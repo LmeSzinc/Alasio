@@ -10,6 +10,31 @@ def get_local_tz() -> datetime.tzinfo:
     return datetime.datetime.now().astimezone().tzinfo
 
 
+def fromisoformat(text) -> datetime.datetime:
+    """
+    A backport of datetime.fromisoformat that supports the 'Z' suffix for UTC
+    on Python versions prior to 3.11.
+
+    On Python 3.11+, this function is redundant but harmless. On older versions,
+    it provides crucial missing functionality by translating 'Z' to '+00:00'
+    before parsing.
+
+    Args:
+        text (str): An ISO 8601 formatted string. e.g., '2023-10-27T15:30:00Z'
+
+    Returns:
+        datetime.datetime:
+
+    Raises:
+        ValueError:
+        TypeError:
+    """
+    if isinstance(text, str):
+        if text.endswith('Z') or text.endswith('z'):
+            text = text[:-1] + '+00:00'
+    return datetime.datetime.fromisoformat(text)
+
+
 def to_local_naive(time_input: "Union[str, datetime.datetime]") -> datetime.datetime:
     """
     Converts a time input (string or datetime object) to a naive datetime
