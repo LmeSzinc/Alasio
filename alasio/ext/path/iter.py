@@ -230,6 +230,48 @@ def iter_foldernames(root, recursive=False, follow_symlinks=False):
             return
 
 
+def iter_entry(root, recursive=False, follow_symlinks=False):
+    """
+    Iter DirEntry objects in folder with good performance
+
+    This yields the actual DirEntry objects from os.scandir(), which can be
+    more efficient than yielding paths since DirEntry caches filesystem info.
+    You can then call entry.path, entry.name, entry.is_file(), entry.is_dir(),
+    entry.stat(), etc. on the results without additional filesystem calls.
+
+    Args:
+        root (str): Root directory to iterate
+        recursive (bool): True to recursively traverse subdirectories
+        follow_symlinks (bool): True to follow symlinks
+
+    Yields:
+        os.DirEntry: Directory entry object with cached filesystem info
+    """
+    if recursive:
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    # Yield the entry itself
+                    yield entry
+                    # Recurse into subdirectories
+                    try:
+                        is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
+                    except FileNotFoundError:
+                        continue
+                    if is_dir:
+                        yield from iter_entry(entry.path, recursive, follow_symlinks)
+        except (FileNotFoundError, NotADirectoryError):
+            return
+    else:
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    # Yield the entry itself
+                    yield entry
+        except (FileNotFoundError, NotADirectoryError):
+            return
+
+
 _NO_CACHE = object()
 
 
