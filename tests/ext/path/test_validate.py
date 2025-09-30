@@ -41,6 +41,20 @@ from alasio.ext.path.validate import validate_filename
     "COM5.zip",
     "NUL",
     "aux.json",
+    # windows will ignore <space> prefix, <space> <dot> suffix
+    "CON ",
+    " CON",
+    "CON.",
+    "CON. ",
+    "CON .",
+    "LPT1.txt",
+    "LPT1 .txt",
+    " LPT1.txt",
+    "LPT1..txt",
+    "LPT1.txt.",
+    "LPT1.abc.txt",
+    "LPT1 .abc.txt",
+    " LPT1.abc.txt",
 
     # Check 5: Invalid start/end characters
     " starts-with-space.txt",

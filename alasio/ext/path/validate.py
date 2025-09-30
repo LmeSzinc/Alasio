@@ -1,4 +1,4 @@
-from .calc import get_stem
+from .calc import get_rootstem
 
 
 def validate_filename(filename):
@@ -36,7 +36,15 @@ def validate_filename(filename):
         if char_ord < 32 or char_ord == 127:
             raise ValueError(f'Filename should not contain control character (ASCII: {char_ord})')
 
-    # --- Check 4: Reserved Names ---
+    # --- Check 4: Ending Character Restriction ---
+    if filename.startswith(' '):
+        raise ValueError('Filename cannot start with a <space>')
+    if filename.endswith(' '):
+        raise ValueError('Filename cannot end with a <space>')
+    if filename.endswith('.'):
+        raise ValueError('Filename cannot end with a <dot>')
+
+    # --- Check 5: Reserved Names ---
     # Check for exact matches against names like `$MFT` or `.`
     if filename == '.' or filename == '..':
         raise ValueError(f'Filename cannot be directory pointer: "{filename}"')
@@ -48,21 +56,13 @@ def validate_filename(filename):
         raise ValueError(f'Filename cannot be NTFS metadata name: {upper}')
 
     # Check for basenames like `CON` or `LPT1`
-    base_name = get_stem(upper)
+    base_name = get_rootstem(upper).lstrip(' ').rstrip('. ')
     if base_name in [
         "CON", "PRN", "AUX", "NUL",
         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ]:
         raise ValueError(f'Filename cannot be reserved system name: {base_name}')
-
-    # --- Check 5: Ending Character Restriction ---
-    if filename.startswith(' '):
-        raise ValueError('Filename cannot start with a <space>')
-    if filename.endswith(' '):
-        raise ValueError('Filename cannot end with a <space>')
-    if filename.endswith('.'):
-        raise ValueError('Filename cannot end with a <dot>')
 
     # --- Check 6: Final Byte-Length Check (Most Expensive) ---
     # This is the definitive check for multi-byte character strings (e.g., UTF-8).
