@@ -1,38 +1,43 @@
+import sys
 from typing import Literal
 
+if sys.version_info >= (3, 9):
+    def removeprefix(s, prefix):
+        return s.removeprefix(prefix)
 
-def removeprefix(s, prefix):
-    """
-    Backport `string.removeprefix(prefix)`, which is on Python>=3.9
+    def removesuffix(s, prefix):
+        return s.removesuffix(prefix)
 
-    Args:
-        s (T):
-        suffix (T):
+else:
+    # Backport `string.removeprefix(prefix)`, which is on Python>=3.9
+    def removeprefix(s, prefix):
+        """
+        Args:
+            s (T):
+            prefix (T):
 
-    Returns:
-        T:
-    """
-    if s.startswith(prefix):
-        return s[len(prefix):]
-    else:
-        return s
+        Returns:
+            T:
+        """
+        if s.startswith(prefix):
+            return s[len(prefix):]
+        else:
+            return s
 
+    # Backport `string.removesuffix(suffix)`, which is on Python>=3.9
+    def removesuffix(s, suffix):
+        """
+        Args:
+            s (T):
+            suffix (T):
 
-def removesuffix(s, suffix):
-    """
-    Backport `string.removesuffix(suffix)`, which is on Python>=3.9
-
-    Args:
-        s (T):
-        suffix (T):
-
-    Returns:
-        T:
-    """
-    if s.endswith(suffix):
-        return s[:-len(suffix)]
-    else:
-        return s
+        Returns:
+            T:
+        """
+        if s.endswith(suffix):
+            return s[:-len(suffix)]
+        else:
+            return s
 
 
 # Quote LiteralType because typing_extensions.LiteralType is not available on 3.8
@@ -43,7 +48,7 @@ def to_literal(items):
     Useful when you don't want to write the same things twice like:
         lang = ['zh', 'en', 'ja', 'kr']
         langT = Literal['zh', 'en', 'ja', 'kr']
-    With backport you have:
+    With backport you can do:
         lang = ['zh', 'en', 'ja', 'kr']
         langT = to_literal(lang)
 
