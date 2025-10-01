@@ -2,6 +2,7 @@ from typing import Type
 
 from alasio.backend.msgbus.share import ConfigEvent
 from alasio.backend.topic.config import ConfigArg, ConfigNav
+from alasio.backend.topic.dev_assets import DevAssetsManager
 from alasio.backend.topic.mod import ModList
 from alasio.backend.topic.scan import ConfigScan
 from alasio.backend.topic.state import ConnState, DICT_CONFIG_TO_CONN, NavState
@@ -31,6 +32,7 @@ class WebsocketServer(WebsocketTopicServer):
         ConfigScan,
         ConfigNav,
         ConfigArg,
+        DevAssetsManager,
     ])
     # List of default subscribed topics.
     # Without actively subscribing:
