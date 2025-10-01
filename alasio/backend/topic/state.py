@@ -10,7 +10,7 @@ from alasio.ext.deep import deep_get
 from alasio.ext.locale.accept_language import negotiate_accept_language
 from alasio.ext.reactive.base_rpc import rpc
 from alasio.ext.reactive.event import RpcValueError
-from alasio.ext.reactive.rx_trio import async_reactive_source
+from alasio.ext.reactive.rx_trio import async_reactive, async_reactive_source
 
 # dict to speedup message backwards from worker to connection
 # key: config_name, value: set of conn_id
@@ -18,6 +18,7 @@ DICT_CONFIG_TO_CONN: "dict[str, set[str]]" = defaultdict(set)
 
 
 class NavState(Struct):
+    lang: str = 'en-US'
     config_name: str = ''
     mod_name: str = ''
     nav_name: str = ''
@@ -25,8 +26,30 @@ class NavState(Struct):
 
 class ConnState(BaseTopic):
     @async_reactive_source
+    async def nav_state(self):
+        return NavState()
+
+    # Proxy reactive nav_state,
+    # so one modification to nav_state won't trigger mutation to all topics listening to nav_state
+    @async_reactive
     async def lang(self) -> str:
-        return 'en-US'
+        state = await self.nav_state
+        return state.lang
+
+    @async_reactive
+    async def config_name(self) -> str:
+        state = await self.nav_state
+        return state.config_name
+
+    @async_reactive
+    async def mod_name(self) -> str:
+        state = await self.nav_state
+        return state.mod_name
+
+    @async_reactive
+    async def nav_name(self) -> str:
+        state = await self.nav_state
+        return state.nav_name
 
     @rpc
     async def set_lang(self, lang: str):
@@ -34,11 +57,9 @@ class ConnState(BaseTopic):
         if not use:
             raise RpcValueError(f'Language "{lang}" does not match any available languages')
         # set
-        await self.__class__.lang.mutate(self, lang)
-
-    @async_reactive_source
-    async def nav_state(self):
-        return NavState()
+        state: NavState = await self.nav_state
+        state.lang = lang
+        await self.__class__.nav_state.mutate(self, state)
 
     async def op_unsub(self):
         await super().op_unsub()

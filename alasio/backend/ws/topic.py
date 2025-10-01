@@ -44,10 +44,12 @@ class WebsocketServer(WebsocketTopicServer):
     async def init(self):
         await super().init()
         # set language
-        topic = self.subscribed.get(ConnState.topic_name(), None)
+        topic: "ConnState | None" = self.subscribed.get(ConnState.topic_name(), None)
         if topic is not None:
             lang = self._negotiate_lang()
-            await ConnState.lang.mutate(topic, lang)
+            state = await topic.nav_state
+            state.lang = lang
+            await ConnState.nav_state.mutate(topic, state)
 
     @classmethod
     async def handle_config_event(cls, event: ConfigEvent):

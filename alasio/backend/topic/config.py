@@ -25,9 +25,8 @@ class ConfigNav(BaseTopic):
                 value: translation
         """
         state = ConnState(self.conn_id, self.server)
-        nav_state: NavState = await state.nav_state
-        mod_name = nav_state.mod_name
-        lang: str = await state.lang
+        mod_name = await state.mod_name
+        lang = await state.lang
         if not mod_name:
             return {}
 
@@ -60,10 +59,9 @@ class ConfigArg(BaseTopic):
                 }
         """
         state = ConnState(self.conn_id, self.server)
-        nav: NavState = await state.nav_state
-        mod_name = nav.mod_name
-        config_name = nav.config_name
-        nav_name = nav.nav_name
+        mod_name = await state.mod_name
+        config_name = await state.config_name
+        nav_name = await state.nav_name
         if not mod_name or not config_name or not nav_name:
             return {}
 

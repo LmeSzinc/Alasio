@@ -119,6 +119,9 @@ class WebsocketTopicServer:
 
         # handle messages
         async with trio.open_nursery() as nursery:
+            # init before handing messages
+            await self.init()
+
             # open 2 buffers, send buffer and recv buffer
             # start 4 async tasks, sender, receiver, job handler, heartbeat handler
 
@@ -133,9 +136,6 @@ class WebsocketTopicServer:
 
             # heartbeat
             nursery.start_soon(self.task_heartbeat)
-
-            # init
-            await self.init()
 
     async def init(self):
         """
