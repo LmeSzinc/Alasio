@@ -8,56 +8,50 @@
  * Corresponds to ResourceRow struct in Python backend.
  */
 export interface ResourceRow {
-    /**
-     * filename, resource filename always startswith "~"
-     * e.g. ~BATTLE_PREPARATION.png, ~Screenshot_xxx.png
-     */
-    name: string;
-    
-    /**
-     * whether local file exist
-     * An resource file can be one of these type:
-     * - tracked in resource.json and local file exists
-     * - tracked in resource.json but not downloaded yet
-     * - a local file not tracked in resource.json
-     */
-    exist: boolean;
-    
-    /**
-     * whether file is tracked in resource.json
-     */
-    track: boolean;
-  }
-  
   /**
-   * Represents a complete folder's contents from the backend.
-   * Corresponds to FolderResponse struct in Python backend.
+   * filename, resource filename always startswith "~"
+   * e.g. ~BATTLE_PREPARATION.png, ~Screenshot_xxx.png
    */
-  export interface FolderResponse {
-    /**
-     * Sub-folders, list of folder names
-     */
-    folders: string[];
-    
-    /**
-     * All resources
-     * key: resource name for display, without "~" prefix
-     * value: ResourceRow
-     */
-    resources: Record<string, ResourceRow>;
-    
-    /**
-     * All assets
-     * key: button_name, e.g. BATTLE_PREPARATION
-     * value: AssetData
-     */
-    assets: Record<string, unknown>;
-  }
-  
+  name: string;
+
   /**
-   * Extended resource information used internally by components.
-   * Combines display name with ResourceRow data for easier rendering.
+   * Status of the resource file:
+   * - 'tracked': tracked in resource.json and local file exists
+   * - 'not_tracked': local file exists but not tracked in resource.json
+   * - 'not_downloaded': tracked in resource.json but local file doesn't exist
    */
-  export interface ResourceItem extends ResourceRow {
-    displayName: string;
-  }
+  status: "tracked" | "not_tracked" | "not_downloaded";
+}
+
+/**
+ * Represents a complete folder's contents from the backend.
+ * Corresponds to FolderResponse struct in Python backend.
+ */
+export interface FolderResponse {
+  /**
+   * Sub-folders, list of folder names
+   */
+  folders: string[];
+
+  /**
+   * All resources
+   * key: resource name for display, without "~" prefix
+   * value: ResourceRow
+   */
+  resources: Record<string, ResourceRow>;
+
+  /**
+   * All assets
+   * key: button_name, e.g. BATTLE_PREPARATION
+   * value: AssetData
+   */
+  assets: Record<string, unknown>;
+}
+
+/**
+ * Extended resource information used internally by components.
+ * Combines display name with ResourceRow data for easier rendering.
+ */
+export interface ResourceItem extends ResourceRow {
+  displayName: string;
+}

@@ -19,7 +19,8 @@
    * Construct the image URL from the current path and filename.
    */
   const imageUrl = $derived.by(() => {
-    if (!resource.exist) return null;
+    // Only show image if file exists (tracked or not_tracked status)
+    if (resource.status === "not_downloaded") return null;
     const pathParts = currentPath ? [currentPath, resource.name] : [resource.name];
     return `/api/dev_assets/${mod_name}/${pathParts.join("/")}`;
   });
@@ -28,13 +29,13 @@
    * Determine the appropriate status badge based on file state.
    */
   const statusBadge = $derived.by(() => {
-    if (!resource.exist && resource.track) {
+    if (resource.status === "not_downloaded") {
       return { text: "Not Downloaded", color: "bg-yellow-500" };
     }
-    if (resource.exist && !resource.track) {
+    if (resource.status === "not_tracked") {
       return { text: "Untracked", color: "bg-orange-500" };
     }
-    if (resource.exist && resource.track) {
+    if (resource.status === "tracked") {
       return { text: "Tracked", color: "bg-green-500" };
     }
     return null;
@@ -43,7 +44,7 @@
 
 <ResourceDisplay name={resource.displayName}>
   {#snippet content()}
-    {#if resource.exist && imageUrl}
+    {#if resource.status !== "not_downloaded" && imageUrl}
       <Image src={imageUrl} alt={resource.displayName} />
     {:else}
       <div class="bg-muted absolute inset-0 flex flex-col items-center justify-center">

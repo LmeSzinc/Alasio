@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Literal
 
 import numpy as np
 from msgspec import Struct, field
@@ -75,9 +75,7 @@ class ResourceRow(Struct):
     # - tracked in resource.json and local file exists
     # - tracked in resource.json but not downloaded yet
     # - a local file not tracked in resource.json
-    exist: bool
-    # whether file is tracked in resource.json
-    track: bool
+    status: Literal['tracked', 'not_tracked', 'not_downloaded']
 
 
 class FolderResponse(Struct):
@@ -233,11 +231,11 @@ class AssetFolder:
                 if name in resource_data:
                     # known resource
                     n = removeprefix(name, '~')
-                    resources[n] = ResourceRow(name=name, exist=True, track=True)
+                    resources[n] = ResourceRow(name=name, status='tracked')
                 else:
                     # untracked resource
                     n = removeprefix(name, '~')
-                    resources[n] = ResourceRow(name=name, exist=True, track=False)
+                    resources[n] = ResourceRow(name=name, status='not_tracked')
                 continue
             else:
                 # convert any unknown image as untracked resource
@@ -250,14 +248,14 @@ class AssetFolder:
                 except Exception as e:
                     logger.error(e)
                     continue
-                resources[name] = ResourceRow(name=new, exist=True, track=False)
+                resources[name] = ResourceRow(name=new, status='not_tracked')
                 continue
 
         # add resource that doesn't exist on local
         for name in resource_data:
             n = removeprefix(name, '~')
             if n not in resources:
-                resources[n] = ResourceRow(name=name, exist=False, track=True)
+                resources[n] = ResourceRow(name=name, status='not_downloaded')
 
         # sort
         folders = sorted(folders)
