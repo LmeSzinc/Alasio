@@ -1,11 +1,9 @@
 from typing import Dict, List, Literal
 
-import numpy as np
 from msgspec import Struct, field
 from msgspec.structs import asdict
 
 from alasio.assets.model import AssetData, DECODER_CACHE, ResourceData
-from alasio.base.image.imfile import ImageBroken, image_decode, image_encode, image_shape
 from alasio.config.entry.const import ModEntryInfo
 from alasio.ext.backport import removeprefix
 from alasio.ext.cache import cached_property, set_cached_property
@@ -33,6 +31,8 @@ def resource_from_file(source, target=None, fixup=False):
         FileNotFoundError:
         ImageBroken:
     """
+    import numpy as np
+    from alasio.base.image.imfile import ImageBroken, image_decode, image_encode, image_shape
     name = get_name(source)
     # may raise FileNotFoundError
     content = atomic_read_bytes(source)
