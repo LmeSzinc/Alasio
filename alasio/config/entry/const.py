@@ -20,7 +20,7 @@ class ModEntryInfo(Struct):
     # where you have config.index.json, nav.index.json, model.index.json, and all config definitions
     path_config: str = 'module/config'
     # relative path from mod root to assets folder
-    path_asset: str = 'assets'
+    path_assets: str = 'assets'
     # valid file extension of assets
     # png is commonly used because jpg is a lossy compression
     asset_ext: Dict[str, None] = field(default_factory=lambda: dict.fromkeys(['.png', '.gif']))

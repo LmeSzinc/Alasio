@@ -37,7 +37,8 @@ class Mod:
         self.entry = entry
         self.name = entry.name
         self.root = PathStr.new(entry.root)
-        self.path_config = self.root / entry.path_config
+        self.path_config = self.root.joinpath(entry.path_config)
+        self.path_assets = self.root.joinpath(entry.path_assets)
 
     def __str__(self):
         """
