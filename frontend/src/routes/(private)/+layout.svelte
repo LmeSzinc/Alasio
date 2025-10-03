@@ -54,7 +54,7 @@
     </div>
     <!-- 1.2 Layout body -->
     <div class="app-layout-body flex-1 overflow-hidden">
-      <div class="mx-auto flex h-full max-w-7xl">
+      <div class="mx-auto flex h-full xl:ml-4">
         <!-- 1.2.1 Aside and nav -->
         <!-- If media<xl, aside and nav show as one sidebar -->
         <!-- If media>=xl, aside and nav show as standalone cards -->
