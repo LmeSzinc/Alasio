@@ -4,18 +4,13 @@
   import { CloudOff } from "@lucide/svelte";
   import type { ResourceItem } from "./types";
 
-  /**
-   * Accept a ResourceItem object containing all resource metadata.
-   * This approach is more maintainable than individual props because:
-   * 1. Adding new resource properties only requires updating the type, not all call sites
-   * 2. It's clearer that these properties are related and describe a single resource
-   * 3. It reduces the number of props, making the component API simpler
-   */
   let {
     resource,
+    mod_name,
     currentPath = "",
   }: {
     resource: ResourceItem;
+    mod_name: string;
     currentPath?: string;
   } = $props();
 
@@ -25,7 +20,7 @@
   const imageUrl = $derived.by(() => {
     if (!resource.exist) return null;
     const pathParts = currentPath ? [currentPath, resource.name] : [resource.name];
-    return `/assets/${pathParts.join("/")}`;
+    return `/api/dev_assets/${mod_name}/${pathParts.join("/")}`;
   });
 
   /**

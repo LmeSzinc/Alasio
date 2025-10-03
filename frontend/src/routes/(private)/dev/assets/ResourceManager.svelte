@@ -7,12 +7,14 @@
   import type { FolderResponse, ResourceItem } from "./types";
 
   let {
-    folderData,
+    mod_name,
     currentPath = $bindable(""),
+    folderData,
     onNavigate,
   }: {
+    mod_name: string
+    currentPath: string;
     folderData?: FolderResponse;
-    currentPath?: string;
     onNavigate?: (newPath: string) => void;
   } = $props();
 
@@ -75,7 +77,7 @@
           {/each}
 
           {#each resourceList as resource}
-            <ResourceFile {resource} {currentPath} />
+            <ResourceFile {mod_name} {resource} {currentPath} />
           {/each}
         </div>
       {/if}

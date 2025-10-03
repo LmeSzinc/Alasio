@@ -1,11 +1,10 @@
 <script lang="ts">
+  import ModSelector from "$lib/components/arginput/ModSelector.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "$lib/components/ui/dialog";
   import { Help } from "$lib/components/ui/help";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
-  import * as Select from "$lib/components/ui/select/index.js";
-  import { useTopic } from "$lib/ws";
   import type { Rpc } from "$lib/ws/rpc.svelte";
 
   type Props = {
@@ -16,18 +15,8 @@
   let name = $state("");
   let mod = $state("");
 
-  // ModList
-  type ModOption = {
-    value: string;
-    label: string;
-  };
-  const topicClient = useTopic<ModOption[]>("ModList");
-  const AVAILABLE_MODS = $derived(topicClient.data || []);
-
   // Reactive validation
   const isFormValid = $derived(name.trim().length > 0 && mod.length > 0);
-
-  const triggerContent = $derived(AVAILABLE_MODS.find((m) => m.value === mod)?.label ?? "Select a module");
 
   function handleSubmit(event: Event) {
     event.preventDefault();
@@ -65,24 +54,7 @@
 
       <div class="space-y-2">
         <Label for="config-mod">Module</Label>
-        <Select.Root type="single" name="configMod" bind:value={mod} disabled={rpc.isPending}>
-          <Select.Trigger class="w-full">
-            {triggerContent}
-          </Select.Trigger>
-          <Select.Content>
-            <Select.Group>
-              {#if AVAILABLE_MODS.length > 0}
-                {#each AVAILABLE_MODS as modOption (modOption.value)}
-                  <Select.Item value={modOption.value} label={modOption.label}>
-                    {modOption.label}
-                  </Select.Item>
-                {/each}
-              {:else}
-                <Select.Label>No available mod</Select.Label>
-              {/if}
-            </Select.Group>
-          </Select.Content>
-        </Select.Root>
+        <ModSelector bind:mod_name={mod} disabled={rpc.isPending} />
       </div>
 
       {#if rpc.errorMsg}
