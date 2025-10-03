@@ -12,7 +12,7 @@
     folderData,
     onNavigate,
   }: {
-    mod_name: string
+    mod_name: string;
     currentPath: string;
     folderData?: FolderResponse;
     onNavigate?: (newPath: string) => void;
@@ -64,25 +64,27 @@
   </div>
 
   <!-- Main content area -->
-  <ScrollArea class="flex-1">
-    <div class="p-6">
-      {#if folders.length === 0 && resourceList.length === 0}
-        <div class="text-muted-foreground flex h-full items-center justify-center">
-          <p>This folder is empty</p>
-        </div>
-      {:else}
-        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {#each folders as folderName}
-            <ResourceFolder name={folderName} onOpen={() => handleFolderClick(folderName)} />
-          {/each}
+  {#if mod_name}
+    <ScrollArea class="flex-1">
+      <div class="p-6">
+        {#if folders.length === 0 && resourceList.length === 0}
+          <div class="text-muted-foreground flex h-full items-center justify-center">
+            <p>This folder is empty</p>
+          </div>
+        {:else}
+          <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {#each folders as folderName}
+              <ResourceFolder name={folderName} onOpen={() => handleFolderClick(folderName)} />
+            {/each}
 
-          {#each resourceList as resource}
-            <ResourceFile {mod_name} {resource} {currentPath} />
-          {/each}
-        </div>
-      {/if}
-    </div>
-  </ScrollArea>
+            {#each resourceList as resource}
+              <ResourceFile {mod_name} {resource} {currentPath} />
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </ScrollArea>
+  {/if}
 
   <!-- Status bar -->
   <div class="bg-card border-border text-muted-foreground border-t px-4 py-2 text-xs">
