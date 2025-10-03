@@ -6,6 +6,7 @@
     name,
     content,
     badge,
+    selected,
     onclick,
     ondblclick,
     class: className,
@@ -13,6 +14,7 @@
     name: string;
     content?: Snippet;
     badge?: Snippet;
+    selected?: boolean;
     onclick?: () => void;
     ondblclick?: () => void;
     class?: string;
@@ -48,37 +50,48 @@
   onkeydown={handleKeyDown}
   aria-label={name}
   class={cn(
-    "group relative aspect-square w-full rounded-lg border-2",
-    "bg-card cursor-pointer overflow-hidden transition-all duration-200 hover:shadow-md",
-    "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
+    "group relative aspect-square w-32",
+    "cursor-pointer overflow-hidden transition-all duration-200",
+    "hover:bg-card hover:shadow-md",
+    "flex flex-col border-2",
+    selected ? "border-primary" : "border-transparent",
     className,
   )}
 >
   <!-- Content Area -->
-  <div class="relative h-full w-full">
+  <div class="relative w-full" style="height: 75%;">
     {#if content}
-      {@render content()}
+      <div class="h-full w-full overflow-hidden">
+        {@render content()}
+      </div>
     {:else}
-      <div class="absolute inset-0 flex items-center justify-center">
+      <div class="flex h-full w-full items-center justify-center">
         <div class="text-muted-foreground text-sm">No content</div>
+      </div>
+    {/if}
+    <!-- Background highlight effect on hover -->
+    <div
+      class={cn(
+        "bg-primary/5 absolute inset-0 opacity-0",
+        "pointer-events-none transition-opacity group-hover:opacity-100",
+      )}
+    ></div>
+
+    <!-- Badge Area (top-right) -->
+    {#if badge}
+      <div class="absolute top-2 right-2">
+        {@render badge()}
       </div>
     {/if}
   </div>
 
-  <!-- Badge Area (top-right) -->
-  {#if badge}
-    <div class="absolute top-2 right-2">
-      {@render badge()}
-    </div>
-  {/if}
-
   <!-- Name Label (bottom) -->
-  <div class="absolute right-0 bottom-0 left-0 p-2">
+  <div class="items-top flex flex-1 justify-center">
     <p
       class={cn(
-        "text-card-foreground text-xs font-medium group-hover:text-white",
-        "bg-card/90 rounded px-2 py-1 group-hover:bg-transparent",
-        "line-clamp-2 break-all transition-all",
+        "text-card-foreground font-consolas text-center text-xs",
+        "line-clamp-2 break-all transition-colors",
+        "group-hover:text-primary",
       )}
     >
       {name}

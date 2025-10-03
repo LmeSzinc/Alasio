@@ -42,7 +42,7 @@
   }
 </script>
 
-<div class="bg-background flex h-full w-full flex-col">
+<div class="bg-background flex h-1/2 w-1/2 flex-col border">
   <!-- Navigation bar -->
   <div class="bg-card border-border flex items-center gap-3 border-b px-4 py-3">
     <Folder class="text-muted-foreground h-5 w-5" />
@@ -66,13 +66,13 @@
   <!-- Main content area -->
   {#if mod_name}
     <ScrollArea class="flex-1">
-      <div class="p-6">
+      <div class="">
         {#if folders.length === 0 && resourceList.length === 0}
           <div class="text-muted-foreground flex h-full items-center justify-center">
             <p>This folder is empty</p>
           </div>
         {:else}
-          <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div class="flex flex-wrap gap-1">
             {#each folders as folderName}
               <ResourceFolder name={folderName} onOpen={() => handleFolderClick(folderName)} />
             {/each}
