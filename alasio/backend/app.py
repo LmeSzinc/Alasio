@@ -2,7 +2,7 @@ import contextlib
 
 import trio
 from starlette.middleware.gzip import GZipResponder
-from starlette.responses import PlainTextResponse
+from starlette.responses import FileResponse, PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 
@@ -152,11 +152,15 @@ async def serve_app(*args, **kwargs):
 class NoCacheStaticFiles(StaticFiles):
     def file_response(self, *args, **kwargs):
         resp = super().file_response(*args, **kwargs)
+        if not isinstance(resp, FileResponse):
+            # return NotModifiedResponse directly
+            return resp
+
         # No cache for static files
         # We've seen too many styling issues in ALAS. We use electron as client and chromium caches static files on
         # user's disk. Those files may get broke for unknown reason, causing the styling issues.
         # To fix that, we tell the browsers don't cache any. Bandwidth increase should be acceptable on local service.
-        resp.headers.setdefault('Cache-Control', 'private, must-revalidate, max-age=0')
+        resp.headers.setdefault('Cache-Control', 'no-cache, no-store, private, must-revalidate, max-age=0')
         resp.headers.setdefault('Expires', '0')
         resp.headers.setdefault('Pragma', 'no-cache')
 
