@@ -1,10 +1,8 @@
 import contextlib
 
 import trio
-from starlette.middleware.gzip import GZipResponder
-from starlette.responses import FileResponse, PlainTextResponse
+from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
-from starlette.staticfiles import StaticFiles
 
 from alasio.ext.env import patch_mimetype
 
@@ -125,6 +123,8 @@ async def lifespan(app):
     A global starlette lifespan
     """
     restore_context_cls()
+    from alasio.logger import logger
+    logger.info('Lifespan start')
     async with trio.open_nursery() as nursery:
         # start listening shutdown
         nursery.start_soon(task_listen_shutdown)
@@ -142,11 +142,58 @@ async def lifespan(app):
     # cleanup
     from alasio.db.conn import SQLITE_POOL
     SQLITE_POOL.release_all()
+    logger.info('Lifespan end')
 
 
-async def serve_app(*args, **kwargs):
-    patch_context_cls()
-    await serve(*args, **kwargs)
+def mpipe_recv_loop(conn, trio_token, shutdown_event):
+    """
+    Args:
+        conn (PipeConnection):
+        trio_token:
+        shutdown_event (trio.Event):
+    """
+    from alasio.logger import logger
+    while 1:
+        try:
+            msg = conn.recv_bytes()
+        except (EOFError, OSError):
+            logger.info('Backend disconnected to supervisor, shutting down backend')
+            trio.from_thread.run_sync(shutdown_event.set, trio_token=trio_token)
+            break
+
+        if msg == b'stop':
+            logger.info('Backend received stop request from supervisor, shutting down backend')
+            trio.from_thread.run_sync(shutdown_event.set, trio_token=trio_token)
+        else:
+            logger.warning(f'Backend received unknown msg from supervisor: {msg}')
+
+
+def get_shutdown_trigger():
+    """
+    Get shutdown_trigger function, or None if no daemon by supervisor.
+    When shutdown_trigger() runs ended, hypercorn will stop serving connections.
+    """
+    import builtins
+    from alasio.logger import logger
+    conn = getattr(builtins, '__mpipe_conn__', None)
+    if conn is None:
+        # no supervisor, cannot restart
+        logger.info('Backend running without supervisor')
+        return None
+
+    logger.info('Backend running with supervisor')
+    trio_token = trio.lowlevel.current_trio_token()
+    shutdown_event = trio.Event()
+
+    async def shutdown_trigger():
+        # if shutdown event is set, shutdown_trigger() will stop hypercorn
+        await shutdown_event.wait()
+
+    from threading import Thread
+    thread = Thread(target=mpipe_recv_loop, args=(conn, trio_token, shutdown_event),
+                    name='mpipe_child_recv', daemon=True)
+    thread.start()
+    return shutdown_trigger
 
 
 def create_app():
@@ -191,10 +238,8 @@ def create_app():
     return app
 
 
-if __name__ == '__main__':
+def create_config():
     from hypercorn import Config
-    from hypercorn.trio import serve
-
     config = Config()
 
     # Bind address
@@ -204,4 +249,23 @@ if __name__ == '__main__':
     # To enable assess log
     config.accesslog = '-'
 
-    trio.run(serve_app, create_app(), config)
+    return config
+
+
+async def serve_app():
+    from hypercorn.trio import serve
+
+    config = create_config()
+    app = create_app()
+    shutdown_trigger = get_shutdown_trigger()
+
+    patch_context_cls()
+    await serve(app, config, shutdown_trigger=shutdown_trigger)
+
+
+def run():
+    trio.run(serve_app)
+
+
+if __name__ == '__main__':
+    run()

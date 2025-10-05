@@ -6,7 +6,7 @@
 
 ```
 pip install -r requirements.txt
-python -m alasio.backend.app
+python gui.py
 ```
 
 启动前端：
