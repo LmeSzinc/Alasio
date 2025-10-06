@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+import trio
 from msgspec import Struct
 
 from alasio.backend.topic.scan import ConfigScan
@@ -67,6 +68,18 @@ class ConnState(BaseTopic):
         for connections in DICT_CONFIG_TO_CONN.values():
             if self.conn_id in connections:
                 connections.remove(self.conn_id)
+
+    @rpc
+    async def restart(self):
+        """
+        Restart the entire backend
+        """
+        import builtins
+        conn = getattr(builtins, '__mpipe_conn__', None)
+        if conn is None:
+            raise PermissionError(f'Cannot restart backend running without supervisor')
+
+        await trio.to_thread.run_sync(conn.send_bytes, b'restart')
 
     @rpc
     async def set_config(self, name: str):
