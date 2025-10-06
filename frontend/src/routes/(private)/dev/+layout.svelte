@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MainNav } from "$lib/components/nav";
+  import DevNav from "./DevNav.svelte";
   import { useNavContext } from "$lib/navcontext.svelte";
 
   let { children } = $props();
@@ -9,7 +9,7 @@
 </script>
 
 {#snippet nav()}
-  <MainNav />
+  <DevNav />
 {/snippet}
 
 {@render children()}
