@@ -16,7 +16,7 @@
   "devDependencies": {
     "@dnd-kit-svelte/core": "0.0.8",
     "@internationalized/date": "^3.8.2",
-    "@lucide/svelte": "^0.515.0",
+    "@lucide/svelte": "^0.544.0",
     "@sveltejs/adapter-static": "^3.0.8",
     "@sveltejs/kit": "^2.16.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
