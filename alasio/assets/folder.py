@@ -268,7 +268,7 @@ class AssetFolder:
         resources = dict(sorted(resources.items()))
         # return
         return FolderResponse(
-            mod_name=self.entry.name, path=self.path,
+            mod_name=self.entry.name, path=self.path, mod_path_assets=self.entry.path_assets,
             folders=folders, resources=resources, assets=self.asset_data
         )
 

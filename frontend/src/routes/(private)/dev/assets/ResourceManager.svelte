@@ -1,9 +1,8 @@
 <script lang="ts">
-  import { Folder, ChevronLeft } from "@lucide/svelte";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
-  import { cn } from "$lib/utils.js";
-  import ResourceFolder from "./ResourceFolder.svelte";
+  import PathBreadcrumb from "./PathBreadcrumb.svelte";
   import ResourceFile from "./ResourceFile.svelte";
+  import ResourceFolder from "./ResourceFolder.svelte";
   import type { FolderResponse, ResourceItem } from "./types";
 
   let {
@@ -20,6 +19,7 @@
 
   const folders = $derived(folderData?.folders || []);
   const resources = $derived(folderData?.resources || {});
+  const mod_path_assets = $derived(folderData?.mod_path_assets || "assets");
 
   const resourceList = $derived<ResourceItem[]>(
     Object.entries(resources).map(([displayName, resourceRow]) => ({
@@ -32,35 +32,12 @@
     const newPath = path ? `${path}/${folderName}` : folderName;
     onNavigate?.(newPath);
   }
-
-  function handleGoUp(): void {
-    if (!path) return;
-    const parts = path.split("/");
-    parts.pop();
-    const newPath = parts.join("/");
-    onNavigate?.(newPath);
-  }
 </script>
 
 <div class="bg-background flex h-1/2 w-1/2 flex-col border">
-  <!-- Navigation bar -->
+  <!-- Navigation bar with breadcrumb -->
   <div class="bg-card border-border flex items-center gap-3 border-b px-4 py-3">
-    <Folder class="text-muted-foreground h-5 w-5" />
-
-    {#if path}
-      <button
-        onclick={handleGoUp}
-        class={cn("flex items-center gap-1 px-3 py-1 text-sm", "bg-muted hover:bg-accent rounded transition-colors")}
-      >
-        <ChevronLeft class="h-4 w-4" />
-        Back
-      </button>
-    {/if}
-
-    <div class="text-foreground text-sm">
-      <span class="font-medium">Path:</span>
-      <span class="font-mono">{path || "/"}</span>
-    </div>
+    <PathBreadcrumb {mod_path_assets} {path} {onNavigate} />
   </div>
 
   <!-- Main content area -->
