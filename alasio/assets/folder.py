@@ -79,6 +79,12 @@ class ResourceRow(Struct):
 
 
 class FolderResponse(Struct):
+    mod_name: str
+    # Relative path from mod root to assets folder. e.g. assets
+    # `path` must startswith `mod_path_assets`
+    mod_path_assets: str
+    # Relative path from project root to assets folder. e.g. assets/combat
+    path: str
     # Sub-folders, list of folder names
     folders: List[str] = field(default_factory=dict)
     # All resources
@@ -109,7 +115,7 @@ class AssetFolder:
     __repr__ = __str__
 
     def __hash__(self):
-        return hash((self.root, self.path))
+        return hash((self.folder, self.entry.name))
 
     @cached_property
     def resource_data(self) -> "dict[str, ResourceData]":
@@ -261,7 +267,10 @@ class AssetFolder:
         folders = sorted(folders)
         resources = dict(sorted(resources.items()))
         # return
-        return FolderResponse(folders=folders, resources=resources, assets=self.asset_data)
+        return FolderResponse(
+            mod_name=self.entry.name, path=self.path,
+            folders=folders, resources=resources, assets=self.asset_data
+        )
 
     def resource_add(self, source):
         """

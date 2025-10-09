@@ -4,17 +4,13 @@
 
   type Props = {
     mod_name: string;
-    selectFirst?: boolean;
     disabled?: boolean;
     placeholder?: string;
+    // Optional callback when value changed
+    handleEdit?: (value: string) => void;
   };
 
-  let {
-    mod_name = $bindable(),
-    selectFirst = false,
-    disabled = false,
-    placeholder = "Select a module",
-  }: Props = $props();
+  let { mod_name = $bindable(), disabled = false, placeholder = "Select a module", handleEdit }: Props = $props();
 
   type ModOption = {
     value: string;
@@ -26,15 +22,14 @@
 
   const triggerContent = $derived(availableMods.find((m) => m.value === mod_name)?.label ?? placeholder);
 
-  // Auto-select first mod if selectFirst is true and mod_name is empty
-  $effect(() => {
-    if (selectFirst && !mod_name && availableMods.length > 0) {
-      mod_name = availableMods[0].value;
+  function onValueChange(value: string | undefined) {
+    if (value && handleEdit) {
+      handleEdit(value);
     }
-  });
+  }
 </script>
 
-<Select.Root type="single" bind:value={mod_name} {disabled}>
+<Select.Root type="single" value={mod_name} {disabled} {onValueChange}>
   <Select.Trigger class="w-full">
     {triggerContent}
   </Select.Trigger>

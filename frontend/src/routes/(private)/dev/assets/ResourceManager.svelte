@@ -8,12 +8,12 @@
 
   let {
     mod_name,
-    currentPath = $bindable(""),
+    path,
     folderData,
     onNavigate,
   }: {
     mod_name: string;
-    currentPath: string;
+    path: string;
     folderData?: FolderResponse;
     onNavigate?: (newPath: string) => void;
   } = $props();
@@ -29,13 +29,13 @@
   );
 
   function handleFolderClick(folderName: string): void {
-    const newPath = currentPath ? `${currentPath}/${folderName}` : folderName;
+    const newPath = path ? `${path}/${folderName}` : folderName;
     onNavigate?.(newPath);
   }
 
   function handleGoUp(): void {
-    if (!currentPath) return;
-    const parts = currentPath.split("/");
+    if (!path) return;
+    const parts = path.split("/");
     parts.pop();
     const newPath = parts.join("/");
     onNavigate?.(newPath);
@@ -47,7 +47,7 @@
   <div class="bg-card border-border flex items-center gap-3 border-b px-4 py-3">
     <Folder class="text-muted-foreground h-5 w-5" />
 
-    {#if currentPath}
+    {#if path}
       <button
         onclick={handleGoUp}
         class={cn("flex items-center gap-1 px-3 py-1 text-sm", "bg-muted hover:bg-accent rounded transition-colors")}
@@ -59,7 +59,7 @@
 
     <div class="text-foreground text-sm">
       <span class="font-medium">Path:</span>
-      <span class="font-mono">{currentPath || "/"}</span>
+      <span class="font-mono">{path || "/"}</span>
     </div>
   </div>
 
@@ -78,7 +78,7 @@
             {/each}
 
             {#each resourceList as resource}
-              <ResourceFile {mod_name} {resource} {currentPath} />
+              <ResourceFile {mod_name} {resource} currentPath={path} />
             {/each}
           </div>
         {/if}

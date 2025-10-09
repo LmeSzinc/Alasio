@@ -4,13 +4,18 @@
   import ResourceManager from "./ResourceManager.svelte";
   import type { FolderResponse } from "./types";
 
-  let mod_name = $state("");
-  let currentPath = $state("assets/combat");
-
   const topicClient = useTopic<FolderResponse>("DevAssetsManager");
+  const modRpc = topicClient.rpc();
+  const pathRpc = topicClient.rpc();
 
-  function handleNavigate(newPath: string): void {
-    currentPath = newPath;
+  const mod_name = $derived(topicClient.data?.mod_name || "")
+  const path = $derived(topicClient.data?.path || "")
+
+  function handleModChange(value: string) {
+    modRpc.call('set_mod', {"mod_name": value})
+  }
+  function handleNavigate(path: string) {
+    pathRpc.call('set_path', {"path": path})
   }
 </script>
 
@@ -21,12 +26,12 @@
         <h1 class="text-foreground text-2xl font-bold">Asset Browser</h1>
       </div>
       <div class="w-64">
-        <ModSelector bind:mod_name selectFirst />
+        <ModSelector {mod_name} handleEdit={handleModChange} />
       </div>
     </div>
   </div>
 
   <div class="flex-1 overflow-hidden">
-    <ResourceManager {mod_name} folderData={topicClient.data} bind:currentPath onNavigate={handleNavigate} />
+    <ResourceManager {mod_name} folderData={topicClient.data} {path} onNavigate={handleNavigate} />
   </div>
 </div>
