@@ -2,7 +2,6 @@ from msgspec import Struct
 
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
-from alasio.ext.reactive.rx_trio import async_reactive
 
 
 class ModOption(Struct):
@@ -11,8 +10,8 @@ class ModOption(Struct):
 
 
 class ModList(BaseTopic):
-    @async_reactive
-    async def data(self):
+    # one-time-usage
+    async def getdata(self):
         """
         Returns:
             list[ModOption]: List of mod names

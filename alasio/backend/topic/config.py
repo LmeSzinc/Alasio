@@ -10,13 +10,13 @@ from alasio.config.entry.loader import MOD_LOADER
 from alasio.ext.deep import deep_iter_depth2, deep_set
 from alasio.ext.reactive.base_rpc import rpc
 from alasio.ext.reactive.event import ResponseEvent
-from alasio.ext.reactive.rx_trio import async_reactive
+from alasio.ext.reactive.rx_trio import async_reactive_nocache
 
 
 class ConfigNav(BaseTopic):
     FULL_EVENT_ONLY = True
 
-    @async_reactive
+    @async_reactive_nocache
     async def data(self):
         """
         Returns:
@@ -43,7 +43,7 @@ class ConfigArg(BaseTopic):
     # key: (task, group, arg), value: (card_name, arg_name)
     dict_config_to_topic = {}
 
-    @async_reactive
+    @async_reactive_nocache
     async def data(self):
         """
         Returns:
