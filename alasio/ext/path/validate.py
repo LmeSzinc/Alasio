@@ -145,7 +145,7 @@ def _validate_path_component(component: str):
         raise ValueError(f'Path component is too long, byte_length should <= 255')
 
 
-def validate_filepath(path: str):
+def validate_filepath(path):
     """
     Validates a relative path by checking each of its components (directories
     and the final filename) against the strictest cross-platform rules.
@@ -190,7 +190,7 @@ def validate_filepath(path: str):
     # If all checks pass, the function returns silently.
 
 
-def validate_resolve_path(root: str, path: str) -> str:
+def validate_resolve_filepath(root, path):
     """
     The complete, two-stage security function to validate and resolve a user-provided
     relative path, ensuring it points to a safe location.

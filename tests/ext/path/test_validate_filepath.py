@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from alasio.ext.path.validate import validate_resolve_path
+from alasio.ext.path.validate import validate_resolve_filepath
 
 
 @pytest.fixture(scope='module')
@@ -96,7 +96,7 @@ def temp_fs(tmp_path_factory):
 def test_all_invalid_paths_raise_value_error(temp_fs, invalid_path):
     """A comprehensive test for a wide range of invalid and malicious paths."""
     with pytest.raises(ValueError):
-        validate_resolve_path(temp_fs["safe_dir"], invalid_path)
+        validate_resolve_filepath(temp_fs["safe_dir"], invalid_path)
 
 
 def test_symlink_traversal_raises_value_error(temp_fs):
@@ -104,7 +104,7 @@ def test_symlink_traversal_raises_value_error(temp_fs):
         pytest.skip("Symlink could not be created, skipping this test.")
 
     with pytest.raises(ValueError, match="Path traversal detected"):
-        validate_resolve_path(temp_fs["safe_dir"], "link_to_secret")
+        validate_resolve_filepath(temp_fs["safe_dir"], "link_to_secret")
 
 
 @pytest.mark.parametrize("valid_path, expected_suffix", [
@@ -116,7 +116,7 @@ def test_symlink_traversal_raises_value_error(temp_fs):
 def test_valid_paths_return_correct_absolute_path(temp_fs, valid_path, expected_suffix):
     safe_dir = temp_fs["safe_dir"]
     try:
-        resolved_path = validate_resolve_path(safe_dir, valid_path)
+        resolved_path = validate_resolve_filepath(safe_dir, valid_path)
         assert os.path.isabs(resolved_path)
         assert resolved_path.startswith(safe_dir)
         expected_path = os.path.abspath(os.path.join(safe_dir, expected_suffix))
