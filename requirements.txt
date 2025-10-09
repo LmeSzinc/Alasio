@@ -1,6 +1,7 @@
 # alasio
 msgspec
 PyYAML
+lxml
 
 httpx
 httpx-ws
