@@ -190,7 +190,7 @@ def validate_filepath(path: str):
     # If all checks pass, the function returns silently.
 
 
-def validate_and_resolve_path(base_directory: str, user_path: str) -> str:
+def validate_resolve_path(root: str, path: str) -> str:
     """
     The complete, two-stage security function to validate and resolve a user-provided
     relative path, ensuring it points to a safe location.
@@ -208,8 +208,8 @@ def validate_and_resolve_path(base_directory: str, user_path: str) -> str:
     If any check fails, raises a ValueError.
 
     Args:
-        base_directory (str): The absolute path to the safe "jail" directory.
-        user_path (str): The untrusted relative path provided by the user.
+        root (str): The absolute path to the safe "jail" directory.
+        path (str): The untrusted relative path provided by the user.
 
     Returns:
         str: The safe, absolute, real path on the filesystem.
@@ -220,26 +220,26 @@ def validate_and_resolve_path(base_directory: str, user_path: str) -> str:
     # --- Stage 1: Input Sanitization ---
     # First, validate the user's input string before it ever touches the filesystem API.
     # This prevents creating malformed or dangerous filenames.
-    validate_filepath(user_path)
+    validate_filepath(path)
 
     # --- Stage 2: Boundary Checking ---
     # The input string is clean. Now, check where it *actually* points.
 
     # Ensure the base directory is a valid, absolute path to a directory.
     # This is a server configuration check.
-    safe_base_dir = os.path.abspath(base_directory)
+    root = os.path.abspath(root)
 
     # Combine the safe base with the sanitized user path.
-    combined_path = os.path.join(safe_base_dir, user_path)
+    combined_path = os.path.join(root, path)
 
     # Resolve the path to its canonical form, eliminating '..' and following symlinks.
     # This is the most critical step for preventing path traversal.
-    resolved_path = os.path.realpath(combined_path)
+    combined_path = os.path.realpath(combined_path)
 
     # The final check: ensure the resolved path is still inside our safe directory.
-    common_path = os.path.commonpath([safe_base_dir, resolved_path])
-    if common_path != safe_base_dir:
+    common_path = os.path.commonpath([root, combined_path])
+    if common_path != root:
         raise ValueError('Path traversal detected: The path resolves to a location outside the allowed directory.')
 
     # If all checks pass, return the safe, absolute, canonical path.
-    return resolved_path
+    return combined_path
