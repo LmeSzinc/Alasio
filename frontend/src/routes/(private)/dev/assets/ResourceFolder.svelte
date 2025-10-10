@@ -1,18 +1,24 @@
 <script lang="ts">
-  import ResourceDisplay from "./ResourceDisplay.svelte";
-  import { Folder } from "@lucide/svelte";
   import { cn } from "$lib/utils.js";
+  import { Folder } from "@lucide/svelte";
+  import ResourceDisplay from "./ResourceDisplay.svelte";
 
   let {
     name,
-    onOpen,
+    selected,
+    handleSelect,
+    handleOpen,
+    class: className,
   }: {
     name: string;
-    onOpen?: () => void;
+    selected?: boolean;
+    handleSelect?: (event: MouseEvent) => void;
+    handleOpen?: () => void;
+    class?: string;
   } = $props();
 </script>
 
-<ResourceDisplay {name} ondblclick={onOpen}>
+<ResourceDisplay {name} {selected} {handleSelect} {handleOpen} class={className}>
   {#snippet content()}
     <div class="absolute inset-0 flex flex-col items-center justify-center">
       <Folder

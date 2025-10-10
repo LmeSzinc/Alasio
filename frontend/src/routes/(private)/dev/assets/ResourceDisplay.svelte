@@ -7,24 +7,25 @@
     content,
     badge,
     selected,
-    onclick,
-    ondblclick,
+    handleSelect,
+    handleOpen,
     class: className,
   }: {
     name: string;
     content?: Snippet;
     badge?: Snippet;
     selected?: boolean;
-    onclick?: () => void;
-    ondblclick?: () => void;
+    handleSelect?: (event: MouseEvent) => void;
+    handleOpen?: () => void;
     class?: string;
   } = $props();
 
-  function handleClick() {
-    onclick?.();
+  function handleClick(event: MouseEvent) {
+    event.preventDefault()
+    handleSelect?.(event);
   }
   function handleDoubleClick() {
-    ondblclick?.();
+    handleOpen?.();
   }
 
   /**
@@ -33,10 +34,16 @@
    */
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key === "Enter") {
-      if (ondblclick) {
-        ondblclick();
-      } else if (onclick) {
-        onclick();
+      if (handleOpen) {
+        handleOpen();
+      } else if (handleSelect) {
+        // Create a synthetic MouseEvent for keyboard activation
+        const mouseEvent = new MouseEvent("click", {
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+          metaKey: event.metaKey,
+        });
+        handleSelect(mouseEvent);
       }
     }
   }
@@ -50,7 +57,7 @@
   onkeydown={handleKeyDown}
   aria-label={name}
   class={cn(
-    "group relative aspect-square w-32",
+    "group relative aspect-square h-32 w-32",
     "cursor-pointer overflow-hidden transition-all duration-200",
     "hover:bg-card hover:shadow-md",
     "flex flex-col border-2",

@@ -8,10 +8,18 @@
     resource,
     mod_name,
     currentPath = "",
+    selected,
+    handleSelect,
+    handleOpen,
+    class: className,
   }: {
     resource: ResourceItem;
     mod_name: string;
     currentPath?: string;
+    selected?: boolean;
+    handleSelect?: (event: MouseEvent) => void;
+    handleOpen?: () => void;
+    class?: string;
   } = $props();
 
   /**
@@ -25,7 +33,7 @@
   });
 </script>
 
-<ResourceDisplay name={resource.displayName}>
+<ResourceDisplay name={resource.displayName} {selected} {handleSelect} {handleOpen} class={className}>
   {#snippet content()}
     {#if resource.status !== "not_downloaded" && imageUrl}
       <Image src={imageUrl} alt={resource.displayName} />
