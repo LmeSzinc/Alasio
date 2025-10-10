@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ScrollArea } from "$lib/components/ui/scroll-area";
-  import PathBreadcrumb from "./PathBreadcrumb.svelte";
+  import { cn } from "$lib/utils";
   import ResourceFile from "./ResourceFile.svelte";
   import ResourceFolder from "./ResourceFolder.svelte";
   import { selectionState } from "./selectionState.svelte";
@@ -11,16 +11,17 @@
     path,
     folderData,
     onNavigate,
+    class: className,
   }: {
     mod_name: string;
     path: string;
     folderData?: FolderResponse;
     onNavigate?: (newPath: string) => void;
+    class?: string;
   } = $props();
 
   const folders = $derived(folderData?.folders || []);
   const resources = $derived(folderData?.resources || {});
-  const mod_path_assets = $derived(folderData?.mod_path_assets || "assets");
 
   const resourceList = $derived<ResourceItem[]>(
     Object.entries(resources).map(([displayName, resourceRow]) => ({
@@ -77,7 +78,6 @@
 
   let containerRef: HTMLDivElement | null = $state(null);
   function handleBackgroundClick(event: MouseEvent): void {
-    console.log(event.target, containerRef);
     // Only clear if clicking directly on the container, not on children
     if (event.target === containerRef) {
       selectionState.clear();
@@ -93,6 +93,7 @@
 
   function handleKeyDown(event: KeyboardEvent): void {
     if (event.key === "Escape") {
+      event.preventDefault();
       selectionState.clear();
     }
   }
@@ -106,12 +107,7 @@
 
 <svelte:window onkeydown={handleKeyDown} />
 
-<div class="bg-background flex h-1/2 w-1/2 flex-col border">
-  <!-- Navigation bar with breadcrumb -->
-  <div class="bg-card border-border flex items-center gap-3 border-b px-4 py-3">
-    <PathBreadcrumb {mod_path_assets} {path} {onNavigate} />
-  </div>
-
+<div class={cn("bg-background flex flex-col border", className)}>
   <!-- Main content area -->
   {#if mod_name}
     <ScrollArea class="h-full w-full flex-1">
@@ -121,7 +117,7 @@
         </div>
       {:else}
         <div
-          class="flex h-full w-full flex-1 flex-wrap gap-1 p-4"
+          class="flex h-full w-full flex-1 flex-wrap gap-1 p-4 outline-none"
           bind:this={containerRef}
           role="button"
           tabindex="0"

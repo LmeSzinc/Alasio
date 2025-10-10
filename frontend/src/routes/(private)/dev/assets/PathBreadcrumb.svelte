@@ -1,22 +1,25 @@
 <script lang="ts">
   import {
-      Breadcrumb,
-      BreadcrumbItem,
-      BreadcrumbLink,
-      BreadcrumbList,
-      BreadcrumbPage,
-      BreadcrumbSeparator,
+    Breadcrumb,
+    BreadcrumbItem,
+    BreadcrumbLink,
+    BreadcrumbList,
+    BreadcrumbPage,
+    BreadcrumbSeparator,
   } from "$lib/components/ui/breadcrumb";
   import { FolderOpen } from "@lucide/svelte";
+  import { cn } from "$lib/utils";
 
   let {
     mod_path_assets,
     path,
     onNavigate,
+    class: className,
   }: {
     mod_path_assets: string;
     path: string;
     onNavigate?: (path: string) => void;
+    class?: string;
   } = $props();
 
   interface BreadcrumbSegment {
@@ -66,7 +69,7 @@
   }
 </script>
 
-<Breadcrumb>
+<Breadcrumb class={cn("px-4 py-3", className)}>
   <BreadcrumbList>
     <div class="flex items-center gap-2">
       <FolderOpen class="text-muted-foreground h-4 w-4" />

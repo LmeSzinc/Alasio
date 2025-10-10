@@ -21,7 +21,7 @@
   } = $props();
 
   function handleClick(event: MouseEvent) {
-    event.preventDefault()
+    event.preventDefault();
     handleSelect?.(event);
   }
   function handleDoubleClick() {
@@ -58,8 +58,8 @@
   aria-label={name}
   class={cn(
     "group relative aspect-square h-32 w-32",
-    "cursor-pointer overflow-hidden transition-all duration-200",
-    "hover:bg-card hover:shadow-md",
+    "cursor-pointer overflow-hidden outline-none",
+    "hover:bg-card rounded-md hover:shadow-md",
     "flex flex-col border-2",
     selected ? "border-primary" : "border-transparent",
     className,
@@ -76,13 +76,6 @@
         <div class="text-muted-foreground text-sm">No content</div>
       </div>
     {/if}
-    <!-- Background highlight effect on hover -->
-    <div
-      class={cn(
-        "bg-primary/5 absolute inset-0 opacity-0",
-        "pointer-events-none transition-opacity group-hover:opacity-100",
-      )}
-    ></div>
 
     <!-- Badge Area (top-right) -->
     {#if badge}
