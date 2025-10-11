@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ScrollArea } from "$lib/components/ui/scroll-area";
+  import { FileZone, UploadProgress, UploadState } from "$lib/components/upload";
   import { cn } from "$lib/utils";
   import ResourceFile from "./ResourceFile.svelte";
   import ResourceFolder from "./ResourceFolder.svelte";
@@ -11,12 +12,14 @@
     path,
     folderData,
     onNavigate,
+    uploadState,
     class: className,
   }: {
     mod_name: string;
     path: string;
     folderData?: FolderResponse;
     onNavigate?: (newPath: string) => void;
+    uploadState?: UploadState;
     class?: string;
   } = $props();
 
@@ -103,6 +106,11 @@
     path;
     selectionState.clear();
   });
+
+  // Upload functionality
+  function handleFileDrop(files: FileList): void {
+    uploadState?.addFiles(files);
+  }
 </script>
 
 <svelte:window onkeydown={handleKeyDown} />
@@ -110,43 +118,49 @@
 <div class={cn("bg-background flex flex-col border", className)}>
   <!-- Main content area -->
   {#if mod_name}
-    <ScrollArea class="h-full w-full flex-1">
-      {#if folders.length === 0 && resourceList.length === 0}
-        <div class="text-muted-foreground flex h-full items-center justify-center">
-          <p>This folder is empty</p>
-        </div>
-      {:else}
-        <div
-          class="flex h-full w-full flex-1 flex-wrap gap-1 p-4 outline-none"
-          bind:this={containerRef}
-          role="button"
-          tabindex="0"
-          onclick={handleBackgroundClick}
-          onkeydown={handleBackgroundKeyDown}
-          aria-label="Clear selection"
-        >
-          {#each folders as folderName}
-            <ResourceFolder
-              name={folderName}
-              selected={selectionState.isFolderSelected(folderName)}
-              handleSelect={(e) => handleFolderSelect(folderName, e)}
-              handleOpen={() => handleFolderOpen(folderName)}
-            />
-          {/each}
+    <FileZone onDrop={handleFileDrop} disabled={!uploadState} accept="image/*">
+      <ScrollArea class="h-full w-full flex-1">
+        {#if folders.length === 0 && resourceList.length === 0}
+          <div class="text-muted-foreground flex h-full items-center justify-center">
+            <p>This folder is empty</p>
+          </div>
+        {:else}
+          <div
+            class="flex h-full w-full flex-1 flex-wrap gap-1 p-4 outline-none"
+            bind:this={containerRef}
+            role="button"
+            tabindex="0"
+            onclick={handleBackgroundClick}
+            onkeydown={handleBackgroundKeyDown}
+            aria-label="Clear selection"
+          >
+            {#each folders as folderName}
+              <ResourceFolder
+                name={folderName}
+                selected={selectionState.isFolderSelected(folderName)}
+                handleSelect={(e) => handleFolderSelect(folderName, e)}
+                handleOpen={() => handleFolderOpen(folderName)}
+              />
+            {/each}
 
-          {#each resourceList as resource}
-            <ResourceFile
-              {mod_name}
-              {resource}
-              currentPath={path}
-              selected={selectionState.isResourceSelected(resource.name)}
-              handleSelect={(e) => handleResourceSelect(resource, e)}
-              handleOpen={() => handleResourceOpen(resource)}
-            />
-          {/each}
-        </div>
+            {#each resourceList as resource}
+              <ResourceFile
+                {mod_name}
+                {resource}
+                currentPath={path}
+                selected={selectionState.isResourceSelected(resource.name)}
+                handleSelect={(e) => handleResourceSelect(resource, e)}
+                handleOpen={() => handleResourceOpen(resource)}
+              />
+            {/each}
+          </div>
+        {/if}
+      </ScrollArea>
+      <!-- Upload progress component -->
+      {#if uploadState}
+        <UploadProgress {uploadState} />
       {/if}
-    </ScrollArea>
+    </FileZone>
   {/if}
 
   <!-- Status bar -->

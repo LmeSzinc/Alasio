@@ -80,3 +80,12 @@ class DevAssetsManager(BaseTopic):
             raise RpcValueError(e)
 
         await self.__class__.assets_state.mutate(self, state)
+
+    @rpc
+    async def add_resource(self, filename: str, content: str):
+        """
+        Args:
+            filename:
+            content: File content in base64
+        """
+        print(filename, len(content))
