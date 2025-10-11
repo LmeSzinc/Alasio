@@ -178,7 +178,7 @@ class WebsocketManager {
         if (data.v) {
           callbacks.onError(String(data.v));
         } else {
-          callbacks.onSuccess("");
+          callbacks.onSuccess(data.i);
         }
         // The operation itself is responsible for unregistering the callback via its cleanup function.
         return; // Handled. Stop processing.
