@@ -1,10 +1,10 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
+  import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "$lib/components/ui/dialog";
+  import { Help } from "$lib/components/ui/help";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
-  import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "$lib/components/ui/dialog";
-  import { Help } from "$lib/components/ui/help";
-  import type { Rpc } from "$lib/ws/rpc.svelte";
+  import type { Rpc } from "$lib/ws";
   import type { Config } from "./ConfigItem.svelte";
 
   type Props = {

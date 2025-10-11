@@ -1,4 +1,4 @@
 import { websocketClient } from "./client.svelte";
-import type { RpcOptions } from "./rpc.svelte";
+import type { Rpc, RpcOptions } from "./rpc.svelte";
 import { useTopic } from "./topic.svelte";
-export { useTopic, websocketClient, type RpcOptions };
+export { useTopic, websocketClient, type Rpc, type RpcOptions };

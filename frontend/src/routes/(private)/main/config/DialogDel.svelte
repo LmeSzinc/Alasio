@@ -1,9 +1,9 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
-  import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "$lib/components/ui/dialog";
+  import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "$lib/components/ui/dialog";
   import { Help } from "$lib/components/ui/help";
+  import type { Rpc } from "$lib/ws";
   import { AlertTriangle } from "@lucide/svelte";
-  import type { Rpc } from "$lib/ws/rpc.svelte";
   import type { Config } from "./ConfigItem.svelte";
 
   type Props = {

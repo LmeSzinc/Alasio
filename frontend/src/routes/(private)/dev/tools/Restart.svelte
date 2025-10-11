@@ -2,7 +2,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "$lib/components/ui/dialog";
   import { Help } from "$lib/components/ui/help";
-  import type { Rpc } from "$lib/ws/rpc.svelte";
+  import type { Rpc } from "$lib/ws";
 
   type Props = {
     rpc: Rpc;

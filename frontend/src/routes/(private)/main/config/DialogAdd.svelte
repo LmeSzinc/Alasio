@@ -5,7 +5,7 @@
   import { Help } from "$lib/components/ui/help";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
-  import type { Rpc } from "$lib/ws/rpc.svelte";
+  import type { Rpc } from "$lib/ws";
 
   type Props = {
     rpc: Rpc;
