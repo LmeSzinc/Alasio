@@ -185,7 +185,7 @@ class AssetData:
         """
         # Generate `search` from `area`
         if not self.has_raw_search and self.area:
-            search = Area(self.area).pad(Const.ASSETS_SEARCH_PAD).limit_in_screen(Const.ASSETS_RESOLUTION)
+            search = Area(self.area).outset(Const.ASSETS_SEARCH_OUTSET).limit_in_screen(Const.ASSETS_RESOLUTION)
             self.search = search
 
 

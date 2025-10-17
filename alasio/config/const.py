@@ -35,6 +35,6 @@ class Const:
     ASSETS_TEMPLATE_PREFIX = True
     # default pad to calculate assets.search
     # negative value to search a larger area
-    ASSETS_SEARCH_PAD = -20
+    ASSETS_SEARCH_OUTSET = 20
 
     GUI_LANGUAGE = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP']
