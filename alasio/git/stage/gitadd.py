@@ -5,6 +5,7 @@ from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.ext.path.calc import is_abspath, subpath_to, to_posix
 from alasio.git.eol import eol_crlf_remove
+from alasio.git.stage.gitreset import GitReset
 from alasio.git.stage.hashobj import blob_hash, encode_loosedata
 from alasio.git.stage.index import GitIndex, GitIndexEntry
 from alasio.logger import logger
@@ -129,9 +130,14 @@ class GitAdd(GitIndex):
         sha1 = blob_hash(data)
 
         # write loose file
-        logger.info(f'stage_add, loose object sha1={sha1}')
-        content = encode_loosedata(data)
-        atomic_write(self.filepath_loose(sha1), content)
+        file = self.filepath_loose(sha1)
+        if os.path.exists(file):
+            # same sha1 should be same file, no need to write again
+            logger.info(f'stage_add, loose object already exists: sha1={sha1}')
+        else:
+            logger.info(f'stage_add, loose object: sha1={sha1}')
+            content = encode_loosedata(data)
+            atomic_write(file, content)
 
         # add index entry
         entry = GitIndexEntry(
