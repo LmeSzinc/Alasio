@@ -5,9 +5,8 @@ from typing import Iterator, List, Tuple
 from alasio.base.image.color import get_color
 from alasio.base.image.draw import get_bbox
 from alasio.base.image.imfile import ImageBroken, image_load, image_size
+from alasio.base.op import Area, Slist
 from alasio.config.const import Const
-from alasio.ext.area.area import Area
-from alasio.ext.area.slist import Slist
 from alasio.ext.cache import cached_property
 from alasio.ext.path.calc import subpath_to
 from alasio.ext.pool import WORKER_POOL
