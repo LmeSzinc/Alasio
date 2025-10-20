@@ -130,18 +130,19 @@ def rgb2luma(image):
     return luma
 
 
-def get_color(image, area):
+def get_color(image, area=None):
     """Calculate the average color of a particular area of the image.
 
     Args:
         image (np.ndarray): Screenshot.
-        area (tuple): (upper_left_x, upper_left_y, bottom_right_x, bottom_right_y)
+        area (tuple | None): (upper_left_x, upper_left_y, bottom_right_x, bottom_right_y)
 
     Returns:
         tuple: (r, g, b)
     """
-    temp = crop(image, area, copy=False)
-    color = cv2.mean(temp)
+    if area is not None:
+        image = crop(image, area, copy=False)
+    color = cv2.mean(image)
     return color[:3]
 
 
