@@ -162,6 +162,6 @@ class Timer:
 
     def __str__(self):
         # Timer(limit=2.351/3, count=4/6)
-        return f'Timer(limit={round(self.current_count(), 3)}/{self.limit}, count={self._access}/{self.count})'
+        return f'Timer(limit={round(self.current_time(), 3)}/{self.limit}, count={self._access}/{self.count})'
 
     __repr__ = __str__
