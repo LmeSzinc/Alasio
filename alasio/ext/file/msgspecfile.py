@@ -45,16 +45,13 @@ def write_msgspec(file, obj, skip_same=False):
     if skip_same:
         try:
             old = atomic_read_bytes(file)
+            if data == old:
+                return False
         except FileNotFoundError:
-            old = object()
-        if data == old:
-            return False
-        else:
-            atomic_write(file, data)
-            return True
-    else:
-        atomic_write(file, data)
-        return True
+            pass
+
+    atomic_write(file, data)
+    return True
 
 
 def deepcopy_msgpack(data):

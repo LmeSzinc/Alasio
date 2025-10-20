@@ -39,7 +39,7 @@ def image_load_pillow(file, area=None):
     return image
 
 
-def image_save_pillow(image, file):
+def image_save_pillow(file, image):
     """
     Save an image using pillow
     Note that:
@@ -47,8 +47,11 @@ def image_save_pillow(image, file):
         if you write files using pillow, libpng will spam warnings when re-reading it
 
     Args:
-        image (np.ndarray):
         file (str):
+        image (np.ndarray):
+
+    Returns:
+        bool: if write
     """
     channel = image_channel(image)
     if channel == 3:
@@ -73,7 +76,7 @@ def image_save_pillow(image, file):
         pass
     else:
         replace_tmp(tmp, file)
-        return
+        return True
 
     # Create parent directory
     directory = os.path.dirname(file)
@@ -82,3 +85,4 @@ def image_save_pillow(image, file):
     # Write again
     im.save(tmp, format=ext)
     replace_tmp(tmp, file)
+    return True

@@ -93,20 +93,15 @@ class CodeGen:
             try:
                 old = atomic_read_text(file)
                 old = old.replace('\r\n', '\n')
+                if data == old:
+                    return False
             except FileNotFoundError:
-                old = object()
-            if data == old:
-                return False
-            else:
-                atomic_write(file, data)
-                if gitadd:
-                    gitadd.stage_add(file)
-                return True
-        else:
-            atomic_write(file, data)
-            if gitadd:
-                gitadd.stage_add(file)
-            return True
+                pass
+
+        atomic_write(file, data)
+        if gitadd:
+            gitadd.stage_add(file)
+        return True
 
     def add(self, line: str, line_ending=True, newline=True) -> str:
         """

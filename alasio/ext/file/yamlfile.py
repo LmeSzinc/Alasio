@@ -23,8 +23,8 @@ def yaml_loads(data):
         Any:
     """
     # Use the C extension if available
-    Loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
-    return yaml.load(data, Loader)
+    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+    return yaml.load(data, loader)
 
 
 def yaml_dumps(obj):
@@ -36,11 +36,11 @@ def yaml_dumps(obj):
         bytes:
     """
     # Use the C extension if available
-    Dumper = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
+    dumper = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
     if not isinstance(obj, list):
         obj = [obj]
     return yaml.dump_all(
-        obj, Dumper=Dumper, default_flow_style=False, encoding='utf-8', allow_unicode=True, sort_keys=False)
+        obj, Dumper=dumper, default_flow_style=False, encoding='utf-8', allow_unicode=True, sort_keys=False)
 
 
 def read_yaml(file, default_factory=dict):
@@ -82,16 +82,13 @@ def write_yaml(file, obj, skip_same=False):
     if skip_same:
         try:
             old = atomic_read_bytes(file)
+            if data == old:
+                return False
         except FileNotFoundError:
-            old = object()
-        if data == old:
-            return False
-        else:
-            atomic_write(file, data)
-            return True
-    else:
-        atomic_write(file, data)
-        return True
+            pass
+
+    atomic_write(file, data)
+    return True
 
 
 def format_yaml(file, formatter):

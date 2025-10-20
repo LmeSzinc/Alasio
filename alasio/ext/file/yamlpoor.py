@@ -125,9 +125,6 @@ def poor_yaml_write(file, data, template_file, skip_same=False):
     if skip_same:
         if text == old:
             return False
-        else:
-            atomic_write(file, text)
-            return True
-    else:
-        atomic_write(file, text)
-        return True
+
+    atomic_write(file, text)
+    return True

@@ -383,18 +383,33 @@ def image_encode(image, ext='png', encode=None):
     return buf
 
 
-def image_save(image, file, encode=None):
+def image_save(file, image, encode=None, skip_same=False):
     """
     Save an image using pure opencv
 
     Args:
-        image (np.ndarray):
         file (str):
+        image (np.ndarray):
         encode: (list): Encode params
+        skip_same (bool):
+            True to skip writing if existing content is the same as content to write.
+            This would reduce disk write but add disk read
+
+    Returns:
+        bool: if write
     """
     _, _, ext = file.rpartition('.')
     data = image_encode(image, ext=ext, encode=encode)
+    if skip_same:
+        try:
+            old = atomic_read_bytes(file)
+            if data == old:
+                return False
+        except FileNotFoundError:
+            pass
+
     atomic_write(file, data)
+    return True
 
 
 def image_fixup(file, need_crop=False):

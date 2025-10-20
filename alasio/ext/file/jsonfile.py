@@ -210,16 +210,13 @@ def write_json(file, obj, dumper=json_dumps, skip_same=False):
     if skip_same:
         try:
             old = atomic_read_bytes(file)
+            if data == old:
+                return False
         except FileNotFoundError:
-            old = object()
-        if data == old:
-            return False
-        else:
-            atomic_write(file, data)
-            return True
-    else:
-        atomic_write(file, data)
-        return True
+            pass
+
+    atomic_write(file, data)
+    return True
 
 
 def write_json_custom_indent(file, obj, skip_same=False):
