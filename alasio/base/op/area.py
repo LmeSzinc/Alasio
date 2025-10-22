@@ -1,10 +1,10 @@
 class Point(tuple):
     @classmethod
-    def zero(cls):
+    def zero(cls) -> "Point":
         return cls((0, 0))
 
     @classmethod
-    def one(cls):
+    def one(cls) -> "Point":
         return cls((1, 1))
 
     def as_int(self, round_value=True) -> "Point":
@@ -54,6 +54,101 @@ class Point(tuple):
         Move point along Y axis
         """
         return Point((self[0], self[1] + value))
+
+    def __add__(self, other):
+        if isinstance(other, Point):
+            # point + point
+            return Point((self[0] + other[0], self[1] + other[1]))
+        else:
+            # point + number
+            return Point((self[0] + other, self[1] + other))
+
+    def __sub__(self, other):
+        if isinstance(other, Point):
+            return Point((self[0] - other[0], self[1] - other[1]))
+        else:
+            return Point((self[0] - other, self[1] - other))
+
+    def __mul__(self, other):
+        if isinstance(other, Point):
+            return Point((self[0] * other[0], self[1] * other[1]))
+        else:
+            return Point((self[0] * other, self[1] * other))
+
+    def __truediv__(self, other):
+        if isinstance(other, Point):
+            return Point((self[0] / other[0], self[1] / other[1]))
+        else:
+            return Point((self[0] / other, self[1] / other))
+
+    def __floordiv__(self, other):
+        if isinstance(other, Point):
+            return Point((self[0] // other[0], self[1] // other[1]))
+        else:
+            return Point((self[0] // other, self[1] // other))
+
+    def __mod__(self, other):
+        if isinstance(other, Point):
+            return Point((self[0] % other[0], self[1] % other[1]))
+        else:
+            return Point((self[0] % other, self[1] % other))
+
+    def __neg__(self):
+        return Point((-self[0], -self[1]))
+
+    def __abs__(self):
+        return Point((abs(self[0]), abs(self[1])))
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __rsub__(self, other):
+        if isinstance(other, Point):
+            return Point((other[0] - self[0], other[1] - self[1]))
+        else:
+            return Point((other - self[0], other - self[1]))
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+    def __rtruediv__(self, other):
+        if isinstance(other, Point):
+            return Point((other[0] / self[0], other[1] / self[1]))
+        else:
+            return Point((other / self[0], other / self[1]))
+
+    def __rfloordiv__(self, other):
+        if isinstance(other, Point):
+            return Point((other[0] // self[0], other[1] // self[1]))
+        else:
+            return Point((other // self[0], other // self[1]))
+
+    def magnitude(self) -> float:
+        """
+        Calculate the magnitude (length) of the point vector
+        """
+        return (self[0] ** 2 + self[1] ** 2) ** 0.5
+
+    def normalize(self) -> "Point":
+        """
+        Return a normalized point (unit vector)
+        """
+        mag = self.magnitude()
+        if mag == 0:
+            return Point((0, 0))
+        return Point((self[0] / mag, self[1] / mag))
+
+    def dot(self, other: "Point") -> float:
+        """
+        Dot product with another point
+        """
+        return self[0] * other[0] + self[1] * other[1]
+
+    def cross(self, other: "Point") -> float:
+        """
+        2D cross product (returns scalar z-component)
+        """
+        return self[0] * other[1] - self[1] * other[0]
 
     def is_in_screen(self, res: "tuple[int, int]") -> bool:
         """
@@ -231,6 +326,8 @@ class Point(tuple):
             Point((50, 60)).to_positive(res) -> Point((50, 60))
         """
         px, py = self
+        if px >= 0 and py >= 0:
+            return self
         rx, ry = res
         if px < 0:
             px = rx + px
@@ -241,11 +338,11 @@ class Point(tuple):
 
 class Area(tuple):
     @classmethod
-    def zero(cls):
+    def zero(cls) -> "Area":
         return cls((0, 0, 0, 0))
 
     @classmethod
-    def one(cls):
+    def one(cls) -> "Area":
         return cls((1, 1, 1, 1))
 
     def as_int(self, round_value=True) -> "Area":
@@ -510,6 +607,7 @@ class Area(tuple):
     def inset(self, value: int) -> "Area":
         """
         Shrinks the area by padding amount on all sides
+        Note that you may get an invalid area after inset
         """
         x1, y1, x2, y2 = self
         return Area((x1 + value, y1 + value, x2 - value, y2 - value))
@@ -520,6 +618,23 @@ class Area(tuple):
         """
         x1, y1, x2, y2 = self
         return Area((x1 - value, y1 - value, x2 + value, y2 + value))
+
+    def inset_xy(self, point: "Point | tuple[int, int]") -> "Area":
+        """
+        Shrinks the area by padding X Y
+        Note that you may get an invalid area after inset
+        """
+        x1, y1, x2, y2 = self
+        px, py = point
+        return Area((x1 + px, y1 + py, x2 - px, y2 - py))
+
+    def outset_xy(self, point: "Point | tuple[int, int]") -> "Area":
+        """
+        Expands the area by padding X Y
+        """
+        x1, y1, x2, y2 = self
+        px, py = point
+        return Area((x1 - px, y1 - py, x2 + px, y2 + py))
 
     def size(self) -> "Point":
         x1, y1, x2, y2 = self
@@ -786,6 +901,8 @@ class Area(tuple):
             Area((-1, -1, -1, -1)).to_positive(res) -> Area((99, 99, 99, 99))
         """
         x1, y1, x2, y2 = self
+        if x1 >= 0 and y1 >= 0 and x2 >= 0 and y2 >= 0:
+            return self
         rx, ry = res
         if x1 < 0:
             x1 = rx + x1
