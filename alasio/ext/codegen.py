@@ -168,7 +168,7 @@ class CodeGen:
         for line in text.splitlines():
             line = line.strip()
             if line:
-                self.add(f'# {line}')
+                self.add(f'# {line}', line_ending=False)
 
     def CommentCodeGen(self, file):
         """
