@@ -47,6 +47,14 @@ class ModEntryInfo(Struct):
         file = joinnormpath(file, 'config.index.json')
         return os.path.exists(file)
 
+    def iter_asset_lang(self):
+        """
+        Yields:
+            str: share first, then asset_lang
+        """
+        yield ''
+        yield from self.asset_lang
+
 
 # default mod entry
 # key: mod name, value: ModEntryInfo
