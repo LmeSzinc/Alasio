@@ -4,6 +4,7 @@ from alasio.assets.template import Asset, Template
 # ``` python -m dev_tools.button_extract ```
 
 _path_ = 'assets/model'
+
 # This is a battle preparation button
 # Used in the main menu
 BATTLE_PREPARATION = Asset(
@@ -30,5 +31,5 @@ BATTLE_PREPARATION = Asset(
         ),
     ),
     # ref='~Screenshot_123.png'
-    #ref = '~Screenshot_456.png'
+    # ref='~Screenshot_456.png'
 )

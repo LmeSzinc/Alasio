@@ -212,16 +212,34 @@ class AssetParser:
 
         return template
 
-    def build_templates_from_lambda(self, lambda_node: ast.Lambda) -> List[MetaTemplate]:
-        """Build Template list from lambda node"""
+    def build_templates(self, template_node: ast.AST) -> List[MetaTemplate]:
+        """
+        Build Template list from template parameter
+        Supports both lambda and direct tuple forms
+
+        Args:
+            template_node: Can be ast.Lambda or ast.Tuple
+        """
         templates = []
 
-        if isinstance(lambda_node.body, ast.Tuple):
-            for elt in lambda_node.body.elts:
-                if isinstance(elt, ast.Call):
-                    if isinstance(elt.func, ast.Name) and elt.func.id == 'Template':
-                        template = self.build_template_from_call(elt)
-                        templates.append(template)
+        # Handle lambda: lambda: (...)
+        if isinstance(template_node, ast.Lambda):
+            if isinstance(template_node.body, ast.Tuple):
+                template_calls = template_node.body.elts
+            else:
+                return templates
+        # Handle direct tuple: (...)
+        elif isinstance(template_node, ast.Tuple):
+            template_calls = template_node.elts
+        else:
+            return templates
+
+        # Build templates from call nodes
+        for elt in template_calls:
+            if isinstance(elt, ast.Call):
+                if isinstance(elt.func, ast.Name) and elt.func.id == 'Template':
+                    template = self.build_template_from_call(elt)
+                    templates.append(template)
 
         return templates
 
@@ -266,8 +284,8 @@ class AssetParser:
                 attr_name = keyword.arg
 
                 # Special handling for template parameter (lambda function)
-                if attr_name == 'template' and isinstance(keyword.value, ast.Lambda):
-                    meta_templates = self.build_templates_from_lambda(keyword.value)
+                if attr_name == 'template':
+                    meta_templates = self.build_templates(keyword.value)
                 else:
                     attr_value = self.extract_value_from_node(keyword.value)
                     kwargs[attr_name] = attr_value

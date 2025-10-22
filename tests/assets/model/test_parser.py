@@ -120,6 +120,47 @@ MULTI_TEMPLATE = Asset(
         assert templates[2].lang == 'zh'
         assert templates[2].frame == 2
 
+    def test_parse_template_as_direct_tuple(self):
+        """Test parsing Asset with template as direct tuple (not lambda)"""
+        code = """
+DIRECT_TUPLE = Asset(
+    path='assets/test',
+    name='DIRECT_TUPLE',
+    template=(
+        Template(area=(10, 20, 30, 40), color=(255, 128, 64)),
+        Template(area=(50, 60, 70, 80), color=(128, 255, 64), lang='en'),
+    ),
+)
+"""
+        parser = AssetParser(code)
+        assets = parser.parse_assets()
+
+        templates = assets[0].meta_templates
+        assert len(templates) == 2
+
+        assert templates[0].area == (10, 20, 30, 40)
+        assert templates[0].color == (255, 128, 64)
+        assert templates[1].area == (50, 60, 70, 80)
+        assert templates[1].lang == 'en'
+
+    def test_parse_template_single_direct_tuple(self):
+        """Test parsing Asset with single template as direct tuple"""
+        code = """
+SINGLE_DIRECT = Asset(
+    path='assets/test',
+    name='SINGLE_DIRECT',
+    template=(
+        Template(area=(10, 20, 30, 40), color=(255, 128, 64)),
+    ),
+)
+"""
+        parser = AssetParser(code)
+        assets = parser.parse_assets()
+
+        assert len(assets[0].meta_templates) == 1
+        template = assets[0].meta_templates[0]
+        assert template.area == (10, 20, 30, 40)
+
 
 class TestCommentsParsing:
     """Test parsing of commented attributes"""
