@@ -104,6 +104,34 @@ class Timer:
         """
         return self._access
 
+    def set(self, current=None, count=None, speed=0.5):
+        """
+        Set internal state directly
+
+        Args:
+            current (int, float):
+            count (int):
+            speed (int, float):
+        """
+        if current is not None:
+            if count is not None:
+                # set both
+                self._start = time() - current
+                self._access = count
+            else:
+                # set current only, calculate count
+                count = int(current / speed)
+                self._start = time() - current
+                self._access = count
+        else:
+            if count is not None:
+                # set count only
+                self._access = count
+            else:
+                # nothing to set
+                pass
+        return self
+
     def add_count(self):
         self._access += 1
         return self
