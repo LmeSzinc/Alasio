@@ -347,6 +347,7 @@ def cvt_color_encode(image):
 def image_encode(image, ext='png', encode=None):
     """
     Encode image
+    Note that if you need bytes output, do "data.tobytes()"
 
     Args:
         image (np.ndarray):
@@ -399,7 +400,7 @@ def image_save(file, image, encode=None, skip_same=False):
         bool: if write
     """
     _, _, ext = file.rpartition('.')
-    data = image_encode(image, ext=ext, encode=encode)
+    data = image_encode(image, ext=ext, encode=encode).tobytes()
     if skip_same:
         try:
             old = atomic_read_bytes(file)
