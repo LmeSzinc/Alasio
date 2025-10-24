@@ -1,14 +1,17 @@
+from alasio.assets.model.name import to_asset_name
 from alasio.assets.model.parser import AssetParser, MetaAsset, MetaTemplate
 from alasio.assets.template import Template
-from alasio.base.image.imfile import ImageBroken, image_load, image_save
-from alasio.base.op import Area
+from alasio.base.image.color import get_color
+from alasio.base.image.draw import get_bbox
+from alasio.base.image.imfile import ImageBroken, crop, image_load, image_save, image_size
+from alasio.base.op import Area, RGB, random_id
 from alasio.config.entry.const import DICT_MOD_ENTRY, ModEntryInfo
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen, ReprWrapper
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_remove
-from alasio.ext.path.calc import to_posix
+from alasio.ext.path.calc import get_name, get_rootstem, to_posix
 from alasio.logger import logger
 
 
@@ -102,21 +105,27 @@ class AssetGenerator:
         file = self.root / template.file
         atomic_remove(file)
 
-    def _template_generate(self, template: MetaTemplate):
+    def _template_generate(self, template: MetaTemplate, image=None):
         """
+        Args:
+            template:
+            image: A cropped image
+
         Returns:
             bool: If success
         """
-        logger.info(f'Template generate: {template}')
-        file = self.root / template.file
+        file = self.root / get_name(template.file)
         source = self.root / template.meta_source
-        try:
-            image = image_load(source, area=template.area)
-        except FileNotFoundError:
-            return False
-        except ImageBroken as e:
-            logger.error(e)
-            return False
+        logger.info(f'Template generate: {file}')
+
+        if image is None:
+            try:
+                image = image_load(source, area=template.area)
+            except FileNotFoundError:
+                return False
+            except ImageBroken as e:
+                logger.error(e)
+                return False
 
         image_save(file, image, skip_same=True)
         if self.gitadd:
@@ -195,14 +204,24 @@ class AssetGenerator:
         return a
 
     @cached_property
-    def assets(self) -> "list[MetaAsset]":
+    def assets(self) -> "dict[str, MetaAsset]":
         """
         Read asset.py, parse and validate into a list of MetaAsset
+
+        Returns:
+            dict[str, MetaAsset]: key: asset name
         """
-        code = self.file.atomic_read_text()
+        try:
+            code = self.file.atomic_read_text()
+        except FileNotFoundError:
+            return {}
         assets = AssetParser(code).parse_assets()
-        assets = [self._validate_asset(a) for a in assets]
-        return assets
+        out = {}
+        for a in assets:
+            a = self._validate_asset(a)
+            if a is not None:
+                out[a.name] = a
+        return out
 
     def _template_codegen(self, gen: CodeGen, template: MetaTemplate):
         with gen.Object('Template'):
@@ -236,6 +255,10 @@ class AssetGenerator:
         """
         Re-generate asset.py
         """
+        if not self.assets:
+            self.file.atomic_remove()
+            return
+
         gen = CodeGen()
         gen.RawImport("""
         from alasio.assets.template import Asset, Template
@@ -244,7 +267,7 @@ class AssetGenerator:
         gen.Var(name='_path_', value=self.path)
         gen.Empty()
 
-        for asset in self.assets:
+        for asset in self.assets.values():
             if asset.meta_asset_doc:
                 for line in asset.meta_asset_doc.split('\n'):
                     gen.Comment(line)
@@ -278,9 +301,50 @@ class AssetGenerator:
 
         gen.write(self.file, gitadd=self.gitadd)
 
+    def add_source_as_asset(self, source, override=False):
+        """
+        Args:
+            source (str): Source filename, e.g. "~BATTLE_PREPARATION.png"
+            override (bool): True to override existing asset, false to create with random suffix
+        """
+        if not source.startswith('~'):
+            raise ValueError(f'Source file should startswith "~", got "{source}"')
+        source_file = self.root / source
+        image = image_load(source_file)
+        area = get_bbox(image)
+        color = RGB(get_color(image, area)).as_uint8()
+
+        # get name
+        name = to_asset_name(get_rootstem(source))
+        assets = self.assets
+        if not override and name in assets:
+            name = f'{name}_{random_id()}'
+        # create info
+        template = MetaTemplate(area=area, color=color)
+        template.meta_source = source
+        asset = MetaAsset(path=self.path, name=name, template=(template,))
+        asset.meta_templates = [template]
+        asset.meta_asset_name = name
+        self._validate_asset(asset)
+        logger.info(f'New asset: {asset}')
+
+        # create template file
+        if Area.from_size(image_size(image)) == area:
+            # not a mask image
+            self._template_generate(template, image=image)
+        else:
+            # save cropped mask image
+            im = crop(image, area, copy=False)
+            self._template_generate(template, image=im)
+
+        assets[asset.name] = asset
+        return True
+
 
 if __name__ == '__main__':
     _entry = DICT_MOD_ENTRY['example_mod'].copy()
-    _entry.root = env.PROJECT_ROOT.joinpath('tests')
-    self = AssetGenerator(_entry, 'assets/model')
+    _entry.root = env.PROJECT_ROOT.joinpath('ExampleMod')
+    self = AssetGenerator(_entry, 'assets/combat')
+    self.asset_codegen()
+    self.add_source_as_asset('~map prepare cn hard.png')
     self.asset_codegen()

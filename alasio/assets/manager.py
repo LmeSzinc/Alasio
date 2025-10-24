@@ -45,4 +45,5 @@ class AssetsManager:
 
 if __name__ == '__main__':
     self = AssetsManager()
-    print(self.get_folder_manager('example_mod', 'assets').data)
+    folder = self.get_folder_manager('example_mod', 'assets/combat')
+    folder.asset_from_resource('~map prepare cn hard.png')

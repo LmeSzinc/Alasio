@@ -4,7 +4,7 @@ from alasio.base.image.color import color_similarity, get_color, rgb2luma
 from alasio.base.image.imfile import crop, image_channel, image_load, image_shape, image_size
 from alasio.base.op import Area, Point, RGB
 from alasio.ext import env
-from alasio.ext.cache import cached_property, del_cached_property
+from alasio.ext.cache import cached_property, del_cached_property, get_cached_property, set_cached_property
 from alasio.logger import logger
 
 
@@ -83,7 +83,7 @@ class Template:
             match: "Callable[..., MatchResult] | None" = None,
             similarity: "float | None" = None,
             colordiff: "int | None" = None,
-            # from assets folder to template file
+            # from mod root to template file
             file: str = '',
     ):
         self.area: Area = Area(area)
@@ -102,6 +102,7 @@ class Template:
         self.colordiff = colordiff
 
         # will be set at runtime
+        # from mod root to template file
         self.file = file
 
     def __str__(self):
@@ -120,7 +121,22 @@ class Template:
         return True
 
     @classmethod
-    def construct_filename(cls, path, name, lang='', frame=1, ext='.png'):
+    def from_file(cls, file: str, area: "tuple[int, int, int, int]") -> "Template":
+        """
+        Create template from a file directly
+
+        Args:
+            file: Absolute filepath
+            area:
+        """
+        image = image_load(file)
+        color = RGB(get_color(image)).as_uint8()
+        template = cls(area=area, color=color, file=file)
+        set_cached_property(template, 'image', image)
+        return template
+
+    @classmethod
+    def construct_filename(cls, path, name, lang='', frame=1, ext='.webp'):
         if lang:
             if frame > 1:
                 return f'{path}/{name}.{lang}.{frame}{ext}'
@@ -163,13 +179,35 @@ class Template:
             raise ValueError(f'Template has empty file: '
                              f'area={self.area}, color={self.color}, lang="{self.lang}", frame={self.frame}')
         file = env.PROJECT_ROOT / self.file
-        return image_load(file)
+        image = image_load(file)
+        return image
+
+    @cached_property
+    def image_luma(self):
+        """
+        Lazy loaded template image in luma
+        """
+        image = get_cached_property(self, 'image')
+        if image is not None:
+            # already has image
+            image = rgb2luma(image)
+            return image
+
+        if not self.file:
+            # this shouldn't happen, "file" is dynamically set at runtime
+            raise ValueError(f'Template has empty file: '
+                             f'area={self.area}, color={self.color}, lang="{self.lang}", frame={self.frame}')
+        file = env.PROJECT_ROOT / self.file
+        image = image_load(file)
+        image = rgb2luma(image)
+        return image
 
     def release(self):
         """
         Release cached resources
         """
         del_cached_property(self, 'image')
+        del_cached_property(self, 'image_luma')
 
     def get_similarity(self, similarity=None) -> float:
         """
@@ -374,7 +412,7 @@ class Template:
             return MatchResult(match=False, area=self.area, error=error)
 
         # match template
-        res = cv2.matchTemplate(self.image, image, cv2.TM_CCOEFF_NORMED)
+        res = cv2.matchTemplate(self.image_luma, image, cv2.TM_CCOEFF_NORMED)
         _, sim, _, point = cv2.minMaxLoc(res)
         if sim < similarity:
             return MatchResult(match=False, area=self.area, similarity=sim)
@@ -404,7 +442,7 @@ class Template:
             return MatchResult(match=False, area=self.area, error=error)
 
         # match template
-        res = cv2.matchTemplate(self.image, image, cv2.TM_CCOEFF_NORMED)
+        res = cv2.matchTemplate(self.image_luma, image, cv2.TM_CCOEFF_NORMED)
         _, sim, _, point = cv2.minMaxLoc(res)
         if sim < similarity:
             return MatchResult(match=False, area=self.area, similarity=sim)
