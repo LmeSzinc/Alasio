@@ -366,9 +366,9 @@ def image_encode(image, ext='png', encode=None):
         elif ext == 'jpg' or ext == 'jpeg':
             # Best quality
             encode = [cv2.IMWRITE_JPEG_QUALITY, 100]
-        elif ext.lower() == '.webp':
-            # Best quality
-            encode = [cv2.IMWRITE_WEBP_QUALITY, 100]
+        elif ext.lower() == 'webp':
+            # 0~100 is lossy, >100 is lossless
+            encode = [cv2.IMWRITE_WEBP_QUALITY, 101]
         elif ext == 'tiff' or ext == 'tif':
             # LZW compression in TIFF
             encode = [cv2.IMWRITE_TIFF_COMPRESSION, 5]
