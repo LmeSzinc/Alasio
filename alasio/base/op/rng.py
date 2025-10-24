@@ -40,7 +40,7 @@ def random_rectangle_point(area, n=3):
     return x, y
 
 
-def random_id(length=8):
+def random_id(length=6):
     """
     Generate a base62 random id
 
