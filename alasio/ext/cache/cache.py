@@ -193,6 +193,22 @@ def has_cached_property(instance, attrname):
         return False
 
 
+def get_cached_property(instance, attrname, default=None):
+    """
+    Get a potential cached property with calculating it.
+
+    Args:
+        instance:
+        attrname (str):
+        default:
+    """
+    try:
+        return instance.__dict__.get(attrname, default)
+    except AttributeError:
+        # No __dict__, just not exists
+        return False
+
+
 def set_cached_property(instance, attrname, value):
     """
     Set a cached property.
