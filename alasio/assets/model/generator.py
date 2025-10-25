@@ -97,11 +97,11 @@ class AssetGenerator:
         self.entry = entry
         self.path = to_posix(path)
         self.gitadd = gitadd
-        self.root = PathStr.new(entry.root) / path
-        self.file = self.root / 'asset.py'
+        self.root = PathStr.new(entry.root)
+        self.file = self.root / path / 'asset.py'
 
     def _template_remove(self, template: Template):
-        logger.info(f'Template remove: {template}')
+        logger.info(f'Delete template: {template}')
         file = self.root / template.file
         atomic_remove(file)
 
@@ -114,9 +114,9 @@ class AssetGenerator:
         Returns:
             bool: If success
         """
-        file = self.root / get_name(template.file)
-        source = self.root / template.meta_source
-        logger.info(f'Template generate: {file}')
+        file = self.root / template.file
+        source = self.root / self.path / template.meta_source
+        logger.info(f'Generate template: {file}')
 
         if image is None:
             try:
@@ -299,7 +299,9 @@ class AssetGenerator:
                     for ref in asset.meta_ref:
                         gen.Comment(f"ref='{ref}'")
 
-        gen.write(self.file, gitadd=self.gitadd)
+        op = gen.write(self.file, gitadd=self.gitadd)
+        if op:
+            logger.info(f'Write assets code: {self.file}')
 
     def add_source_as_asset(self, source, override=False):
         """
@@ -309,7 +311,7 @@ class AssetGenerator:
         """
         if not source.startswith('~'):
             raise ValueError(f'Source file should startswith "~", got "{source}"')
-        source_file = self.root / source
+        source_file = self.root / self.path / source
         image = image_load(source_file)
         area = get_bbox(image)
         color = RGB(get_color(image, area)).as_uint8()
@@ -338,6 +340,29 @@ class AssetGenerator:
             self._template_generate(template, image=im)
 
         assets[asset.name] = asset
+        return True
+
+    def del_asset(self, asset_name):
+        """
+        Delete an asset and all its templates
+
+        Args:
+            asset_name (str): Name of the asset to delete
+
+        Returns:
+            bool: True if asset was deleted
+        """
+        assets = self.assets
+        if asset_name not in assets:
+            return False
+
+        logger.info(f'Deleted asset: {asset_name}')
+        asset = assets.pop(asset_name, None)
+        # Remove all template files
+        if asset:
+            for t in asset.meta_templates:
+                self._template_remove(t)
+
         return True
 
 
