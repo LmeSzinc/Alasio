@@ -1,37 +1,77 @@
 import ast
-from typing import List, Optional, Iterator
+from typing import Iterator, List, Optional, Tuple, Union
 
-from alasio.assets.template import Asset, Template
+from msgspec import Struct
+
+from alasio.assets.template import Template
+from alasio.base.op import Area, RGB
 
 
-class MetaTemplate(Template):
+class MetaTemplate(Struct):
     """Template with metadata"""
+    area: Area
+    color: RGB
 
-    def __init__(self, **kwargs):
-        # Call parent constructor, will raise TypeError if required params missing
-        super().__init__(**kwargs)
+    lang: str = ''
+    frame: int = 1
+    search: Optional[Area] = None
+    button: Optional[Area] = None
+    match: Optional[str] = None
+    similarity: Optional[float] = None
+    colordiff: Optional[int] = None
+    file: str = ''
 
-        # Initialize metadata
-        self.meta_source: Optional[str] = None
+    # meta attributes
+    source: Optional[str] = None
 
     def __repr__(self):
-        return f"MetaTemplate(area={self.area}, lang='{self.lang}', frame={self.frame})"
+        return f'MetaTemplate(file="{self.file}", area={self.area}, color={self.color})'
+
+    def __post_init__(self):
+        # Convert to Area objects
+        self.area = Area(self.area)
+        self.color = RGB(self.color)
+        if self.search:
+            self.search = Area(self.search)
+        if self.button:
+            self.button = Area(self.button)
+
+    def set_file(self, path, name):
+        """
+        Args:
+            path:
+            name:
+        """
+        self.file = Template.construct_filename(path, name, lang=self.lang, frame=self.frame)
 
 
-class MetaAsset(Asset):
+class MetaAsset(Struct):
     """Asset with metadata"""
 
-    def __init__(self, path, name, **kwargs):
-        # Call parent constructor, will raise TypeError if required params missing
-        super().__init__(path=path, name=name, **kwargs)
+    path: str
+    name: str
 
-        # Initialize metadata
-        self.meta_asset_doc: str = ''
-        self.meta_ref: List[str] = []
-        self.meta_templates: List[MetaTemplate] = []
+    search: Optional[Area] = None
+    button: Optional[Area] = None
+    match: Optional[str] = None
+    interval: Optional[Union[int, float]] = None
+    similarity: Optional[float] = None
+    colordiff: Optional[int] = None
+
+    # meta attributes
+    doc: str = ''
+    ref: Tuple[str] = ()
+    templates: Tuple[MetaTemplate] = ()
 
     def __repr__(self):
-        return f"MetaAsset(name='{self.name}')"
+        return f'MetaAsset(name="{self.name}")'
+
+    def __post_init__(self):
+        # Convert to Area objects
+        if self.search:
+            self.search = Area(self.search)
+        if self.button:
+            self.button = Area(self.button)
 
 
 class AssetParser:
@@ -185,19 +225,19 @@ class AssetParser:
         start_line = template_call.lineno
         end_line = template_call.end_lineno
 
+        # Find commented source attribute within Template's bracket range, take only first one
+        commented_attrs = self.find_commented_attributes_in_range(
+            start_line, end_line, 'source'
+        )
+        if commented_attrs['source']:
+            kwargs['source'] = commented_attrs['source'][0]
+
         try:
             template = MetaTemplate(**kwargs)
         except TypeError as e:
             raise TypeError(
                 f"Template at line {start_line}: {e}"
             ) from e
-
-        # Find commented source attribute within Template's bracket range, take only first one
-        commented_attrs = self.find_commented_attributes_in_range(
-            start_line, end_line, 'source'
-        )
-        if commented_attrs['source']:
-            template.meta_source = commented_attrs['source'][0]
 
         return template
 
@@ -289,18 +329,10 @@ class AssetParser:
                     f"Asset '{asset_name}' at line {start_line}: missing required argument 'name'"
                 )
 
-            # Build MetaAsset
-            try:
-                asset = MetaAsset(**kwargs)
-            except TypeError as e:
-                raise TypeError(
-                    f"Asset '{asset_name}' at line {start_line}: {e}"
-                ) from e
-
             # Set metadata
-            asset.name = asset_name
-            asset.meta_asset_doc = self.find_preceding_comments(node.lineno)
-            asset.meta_templates = meta_templates
+            kwargs['name'] = asset_name
+            kwargs['doc'] = self.find_preceding_comments(node.lineno)
+            kwargs['templates'] = tuple(meta_templates)
 
             # Find commented ref attribute within Asset's bracket range
             commented_attrs = self.find_commented_attributes_in_range(
@@ -308,8 +340,15 @@ class AssetParser:
                 node.value.end_lineno,
                 'ref'
             )
-            asset.meta_ref = commented_attrs['ref']
+            kwargs['ref'] = tuple(commented_attrs['ref'])
 
+            # Build MetaAsset
+            try:
+                asset = MetaAsset(**kwargs)
+            except TypeError as e:
+                raise TypeError(
+                    f"Asset '{asset_name}' at line {start_line}: {e}"
+                ) from e
             assets.append(asset)
 
         return assets

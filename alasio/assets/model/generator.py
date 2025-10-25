@@ -69,7 +69,7 @@ def normalize_match(v: "str | None | callable") -> "str | None":
     return None
 
 
-def normalize_search(t: Template, v: Area) -> "Area | None":
+def normalize_search(t: MetaTemplate, v: Area) -> "Area | None":
     if v is None:
         return None
     search = t.area.outset(Template.DEFAULT_SEARCH_OUTSET)
@@ -78,7 +78,7 @@ def normalize_search(t: Template, v: Area) -> "Area | None":
     return v.as_int()
 
 
-def normalize_button(t: Template, v: Area) -> "Area | None":
+def normalize_button(t: MetaTemplate, v: Area) -> "Area | None":
     if v is None:
         return None
     if t.area == v:
@@ -100,7 +100,7 @@ class AssetGenerator:
         self.root = PathStr.new(entry.root)
         self.file = self.root / path / 'asset.py'
 
-    def _template_remove(self, template: Template):
+    def _template_remove(self, template: MetaTemplate):
         logger.info(f'Delete template: {template}')
         file = self.root / template.file
         atomic_remove(file)
@@ -115,7 +115,7 @@ class AssetGenerator:
             bool: If success
         """
         file = self.root / template.file
-        source = self.root / self.path / template.meta_source
+        source = self.root / self.path / template.source
         logger.info(f'Generate template: {file}')
 
         if image is None:
@@ -137,7 +137,7 @@ class AssetGenerator:
         Normalize template object
         """
         # template must have source
-        if not t.meta_source:
+        if not t.source:
             return None
 
         t.area = t.area.as_int()
@@ -171,7 +171,7 @@ class AssetGenerator:
         # filter templates
         templates = []
         dict_count = {lang: 0 for lang in self.entry.iter_asset_lang()}
-        for t in a.meta_templates:
+        for t in a.templates:
             # inject path name
             t.set_file(path=self.path, name=a.name)
             # check lang
@@ -181,7 +181,7 @@ class AssetGenerator:
                 self._template_remove(t)
                 continue
             # check source
-            if not t.meta_source:
+            if not t.source:
                 logger.warning(f'Template does not have source: {t}')
                 continue
             # check frame
@@ -199,7 +199,7 @@ class AssetGenerator:
             if t:
                 templates.append(t)
 
-        a.meta_templates = templates
+        a.templates = templates
         return a
 
     @cached_property
@@ -247,8 +247,8 @@ class AssetGenerator:
                 gen.Var(name='similarity', value=template.similarity)
             if template.colordiff is not None:
                 gen.Var(name='colordiff', value=template.colordiff)
-            if template.meta_source:
-                gen.Comment(f"source='{template.meta_source}'")
+            if template.source:
+                gen.Comment(f"source='{template.source}'")
 
     def asset_codegen(self):
         """
@@ -267,8 +267,8 @@ class AssetGenerator:
         gen.Empty()
 
         for asset in self.assets.values():
-            if asset.meta_asset_doc:
-                for line in asset.meta_asset_doc.split('\n'):
+            if asset.doc:
+                for line in asset.doc.split('\n'):
                     gen.Comment(line)
             with gen.Object(name=asset.name, cls='Asset'):
                 gen.add(f'path=_path_, name={repr(asset.name)}')
@@ -286,16 +286,16 @@ class AssetGenerator:
                     gen.Var(name='colordiff', value=asset.colordiff)
 
                 # template=lambda: (
-                if asset.meta_templates:
+                if asset.templates:
                     with gen.tab(prefix='template=lambda: (', suffix=')', line_ending=','):
-                        for t in asset.meta_templates:
+                        for t in asset.templates:
                             self._template_codegen(gen, t)
                 else:
                     gen.Var(name='template', value=())
 
                 # ref
-                if asset.meta_ref:
-                    for ref in asset.meta_ref:
+                if asset.ref:
+                    for ref in asset.ref:
                         gen.Comment(f"ref='{ref}'")
 
         op = gen.write(self.file, gitadd=self.gitadd)
@@ -321,10 +321,8 @@ class AssetGenerator:
         if not override and name in assets:
             name = f'{name}_{random_id()}'
         # create info
-        template = MetaTemplate(area=area, color=color)
-        template.meta_source = source
-        asset = MetaAsset(path=self.path, name=name, template=(template,))
-        asset.meta_templates = [template]
+        template = MetaTemplate(area=area, color=color, source=source)
+        asset = MetaAsset(path=self.path, name=name, templates=(template,))
         self._validate_asset(asset)
         logger.info(f'New asset: {asset}')
 
@@ -358,7 +356,7 @@ class AssetGenerator:
         asset = assets.pop(asset_name, None)
         # Remove all template files
         if asset:
-            for t in asset.meta_templates:
+            for t in asset.templates:
                 self._template_remove(t)
 
         return True

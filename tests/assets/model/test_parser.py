@@ -1,7 +1,7 @@
 import pytest
 
 from alasio.assets.model.parser import AssetParser, MetaAsset, MetaTemplate
-from alasio.assets.template import Asset, Template
+from alasio.base.op import Area, RGB
 from alasio.ext.path import PathStr
 
 
@@ -22,7 +22,6 @@ SIMPLE_ASSET = Asset(
         assert len(assets) == 1
         asset = assets[0]
         assert isinstance(asset, MetaAsset)
-        assert isinstance(asset, Asset)
         assert asset.path == 'assets/test'
         assert asset.name == 'SIMPLE_ASSET'
 
@@ -44,7 +43,9 @@ FULL_ASSET = Asset(
 
         assert len(assets) == 1
         asset = assets[0]
+        assert isinstance(asset.search, Area)
         assert asset.search == (100, 200, 300, 400)
+        assert isinstance(asset.button, Area)
         assert asset.button == (150, 250, 350, 450)
         assert asset.interval == 5
         assert asset.similarity == 0.85
@@ -87,12 +88,13 @@ TEST_ASSET = Asset(
         assets = parser.parse_assets()
 
         assert len(assets) == 1
-        assert len(assets[0].meta_templates) == 1
+        assert len(assets[0].templates) == 1
 
-        template = assets[0].meta_templates[0]
+        template = assets[0].templates[0]
         assert isinstance(template, MetaTemplate)
-        assert isinstance(template, Template)
+        assert isinstance(template.area, Area)
         assert template.area == (10, 20, 30, 40)
+        assert isinstance(template.color, RGB)
         assert template.color == (255, 128, 64)
 
     def test_parse_multiple_templates(self):
@@ -111,12 +113,15 @@ MULTI_TEMPLATE = Asset(
         parser = AssetParser(code)
         assets = parser.parse_assets()
 
-        templates = assets[0].meta_templates
+        templates = assets[0].templates
         assert len(templates) == 3
 
+        assert isinstance(templates[0].area, Area)
         assert templates[0].area == (1, 2, 3, 4)
+        assert isinstance(templates[1].area, Area)
         assert templates[1].area == (5, 6, 7, 8)
         assert templates[1].lang == 'en'
+        assert isinstance(templates[2].area, Area)
         assert templates[2].area == (9, 10, 11, 12)
         assert templates[2].lang == 'zh'
         assert templates[2].frame == 2
@@ -136,11 +141,14 @@ DIRECT_TUPLE = Asset(
         parser = AssetParser(code)
         assets = parser.parse_assets()
 
-        templates = assets[0].meta_templates
+        templates = assets[0].templates
         assert len(templates) == 2
 
+        assert isinstance(templates[0].area, Area)
         assert templates[0].area == (10, 20, 30, 40)
+        assert isinstance(templates[0].color, RGB)
         assert templates[0].color == (255, 128, 64)
+        assert isinstance(templates[1].area, Area)
         assert templates[1].area == (50, 60, 70, 80)
         assert templates[1].lang == 'en'
 
@@ -158,8 +166,9 @@ SINGLE_DIRECT = Asset(
         parser = AssetParser(code)
         assets = parser.parse_assets()
 
-        assert len(assets[0].meta_templates) == 1
-        template = assets[0].meta_templates[0]
+        assert len(assets[0].templates) == 1
+        template = assets[0].templates[0]
+        assert isinstance(template.area, Area)
         assert template.area == (10, 20, 30, 40)
 
 
@@ -180,7 +189,7 @@ TEST_ASSET = Asset(
         parser = AssetParser(code)
         assets = parser.parse_assets()
 
-        comments = assets[0].meta_asset_doc
+        comments = assets[0].doc
         assert comments == "This is the first comment\nThis is the second comment\nThis is the third comment"
 
     def test_parse_commented_ref_with_space(self):
@@ -196,7 +205,7 @@ TEST_ASSET = Asset(
         parser = AssetParser(code)
         assets = parser.parse_assets()
 
-        refs = assets[0].meta_ref
+        refs = assets[0].ref
         assert len(refs) == 2
         assert refs[0] == "~Screenshot_1.png"
         assert refs[1] == "~Screenshot_2.png"
@@ -214,7 +223,7 @@ TEST_ASSET = Asset(
         parser = AssetParser(code)
         assets = parser.parse_assets()
 
-        refs = assets[0].meta_ref
+        refs = assets[0].ref
         assert len(refs) == 2
         assert refs[0] == "~Screenshot_1.png"
         assert refs[1] == "~Screenshot_2.png"
@@ -232,7 +241,7 @@ TEST_ASSET = Asset(
         parser = AssetParser(code)
         assets = parser.parse_assets()
 
-        refs = assets[0].meta_ref
+        refs = assets[0].ref
         assert len(refs) == 2
         assert refs[0] == "~Screenshot_1.png"
         assert refs[1] == "~Screenshot_2.png"
@@ -260,9 +269,9 @@ TEST_ASSET = Asset(
         parser = AssetParser(code)
         assets = parser.parse_assets()
 
-        templates = assets[0].meta_templates
-        assert templates[0].meta_source == "~template_1.png"
-        assert templates[1].meta_source == "~template_2.png"
+        templates = assets[0].templates
+        assert templates[0].source == "~template_1.png"
+        assert templates[1].source == "~template_2.png"
 
     def test_parse_commented_source_only_first(self):
         """Test that only first commented source is captured"""
@@ -283,8 +292,8 @@ TEST_ASSET = Asset(
         parser = AssetParser(code)
         assets = parser.parse_assets()
 
-        template = assets[0].meta_templates[0]
-        assert template.meta_source == "~first.png"
+        template = assets[0].templates[0]
+        assert template.source == "~first.png"
 
 
 class TestErrorHandling:
@@ -369,30 +378,39 @@ class TestComplexScenarios:
         # Check basic properties
         assert asset.path == '_path_'
         assert asset.name == 'BATTLE_PREPARATION'
+        assert isinstance(asset.search, Area)
+        assert asset.search == (100, 100, 200, 200)
+        assert isinstance(asset.button, Area)
+        assert asset.button == (100, 100, 200, 200)
         assert asset.interval == 2
         assert asset.similarity == 0.75
         assert asset.colordiff == 10
         assert asset.match == 'Template.match_template'
 
         # Check comments
-        assert 'This is a battle preparation button' in asset.meta_asset_doc
-        assert 'Used in the main menu' in asset.meta_asset_doc
+        assert 'This is a battle preparation button' in asset.doc
+        assert 'Used in the main menu' in asset.doc
 
         # Check commented refs (quotes should be stripped)
-        assert len(asset.meta_ref) == 2
-        assert "~Screenshot_123.png" in asset.meta_ref
-        assert "~Screenshot_456.png" in asset.meta_ref
+        assert len(asset.ref) == 2
+        assert "~Screenshot_123.png" in asset.ref
+        assert "~Screenshot_456.png" in asset.ref
 
         # Check templates
-        assert len(asset.meta_templates) == 3
+        assert len(asset.templates) == 3
+        template1 = asset.templates[0]
+        assert isinstance(template1.area, Area)
+        assert template1.area == (100, 100, 200, 200)
+        assert isinstance(template1.color, RGB)
+        assert template1.color == (234, 245, 248)
 
         # First template with single quotes
-        assert asset.meta_templates[0].meta_source == "~BATTLE_PREPARATION.png"
+        assert asset.templates[0].source == "~BATTLE_PREPARATION.png"
 
         # Second template with double quotes
-        assert asset.meta_templates[1].lang == 'en'
-        assert asset.meta_templates[1].meta_source == "~BATTLE_PREPARATION.png"
+        assert asset.templates[1].lang == 'en'
+        assert asset.templates[1].source == "~BATTLE_PREPARATION.png"
 
         # Third template
-        assert asset.meta_templates[2].frame == 2
-        assert asset.meta_templates[2].meta_source == "~BATTLE_PREPARATION.png"
+        assert asset.templates[2].frame == 2
+        assert asset.templates[2].source == "~BATTLE_PREPARATION.png"
