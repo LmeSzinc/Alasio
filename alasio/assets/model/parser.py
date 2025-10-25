@@ -13,12 +13,9 @@ class MetaTemplate(Template):
 
         # Initialize metadata
         self.meta_source: Optional[str] = None
-        self.meta_start_line: Optional[int] = None
-        self.meta_end_line: Optional[int] = None
 
     def __repr__(self):
-        return (f"MetaTemplate(area={self.area}, lang='{self.lang}', frame={self.frame}, "
-                f"lines={self.meta_start_line}-{self.meta_end_line})")
+        return f"MetaTemplate(area={self.area}, lang='{self.lang}', frame={self.frame})"
 
 
 class MetaAsset(Asset):
@@ -29,16 +26,12 @@ class MetaAsset(Asset):
         super().__init__(path=path, name=name, **kwargs)
 
         # Initialize metadata
-        self.meta_asset_name: Optional[str] = None
         self.meta_asset_doc: str = ''
         self.meta_ref: List[str] = []
-        self.meta_start_line: Optional[int] = None
-        self.meta_end_line: Optional[int] = None
         self.meta_templates: List[MetaTemplate] = []
 
     def __repr__(self):
-        return (f"MetaAsset(name='{self.name}', var='{self.meta_asset_name}', "
-                f"lines={self.meta_start_line}-{self.meta_end_line})")
+        return f"MetaAsset(name='{self.name}')"
 
 
 class AssetParser:
@@ -199,10 +192,6 @@ class AssetParser:
                 f"Template at line {start_line}: {e}"
             ) from e
 
-        # Set metadata
-        template.meta_start_line = start_line
-        template.meta_end_line = end_line
-
         # Find commented source attribute within Template's bracket range, take only first one
         commented_attrs = self.find_commented_attributes_in_range(
             start_line, end_line, 'source'
@@ -274,7 +263,7 @@ class AssetParser:
 
             # Record line number range
             start_line = node.lineno
-            end_line = node.end_lineno
+            # end_line = node.end_lineno
 
             # Extract keyword arguments
             for keyword in node.value.keywords:
@@ -309,9 +298,7 @@ class AssetParser:
                 ) from e
 
             # Set metadata
-            asset.meta_asset_name = asset_name
-            asset.meta_start_line = start_line
-            asset.meta_end_line = end_line
+            asset.name = asset_name
             asset.meta_asset_doc = self.find_preceding_comments(node.lineno)
             asset.meta_templates = meta_templates
 

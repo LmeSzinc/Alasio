@@ -23,7 +23,6 @@ SIMPLE_ASSET = Asset(
         asset = assets[0]
         assert isinstance(asset, MetaAsset)
         assert isinstance(asset, Asset)
-        assert asset.meta_asset_name == 'SIMPLE_ASSET'
         assert asset.path == 'assets/test'
         assert asset.name == 'SIMPLE_ASSET'
 
@@ -62,9 +61,9 @@ ASSET_THREE = Asset(path='assets/c', name='ASSET_THREE')
         assets = parser.parse_assets()
 
         assert len(assets) == 3
-        assert assets[0].meta_asset_name == 'ASSET_ONE'
-        assert assets[1].meta_asset_name == 'ASSET_TWO'
-        assert assets[2].meta_asset_name == 'ASSET_THREE'
+        assert assets[0].name == 'ASSET_ONE'
+        assert assets[1].name == 'ASSET_TWO'
+        assert assets[2].name == 'ASSET_THREE'
 
 
 class TestTemplatesParsing:
@@ -288,48 +287,6 @@ TEST_ASSET = Asset(
         assert template.meta_source == "~first.png"
 
 
-class TestMetadata:
-    """Test metadata attributes"""
-
-    def test_asset_line_numbers(self):
-        """Test Asset line number metadata"""
-        code = """
-# Line 2
-# Line 3
-ASSET_ONE = Asset(  # Line 4
-    path='assets/test',  # Line 5
-    name='ASSET_ONE',  # Line 6
-)  # Line 7
-"""
-        parser = AssetParser(code)
-        assets = parser.parse_assets()
-
-        asset = assets[0]
-        assert asset.meta_start_line == 4
-        assert asset.meta_end_line == 7
-
-    def test_template_line_numbers(self):
-        """Test Template line number metadata"""
-        code = """
-TEST_ASSET = Asset(
-    path='assets/test',
-    name='TEST_ASSET',
-    template=lambda: (
-        Template(  # Line 5
-            area=(10, 20, 30, 40),
-            color=(255, 128, 64),
-        ),  # Line 8
-    ),
-)
-"""
-        parser = AssetParser(code)
-        assets = parser.parse_assets()
-
-        template = assets[0].meta_templates[0]
-        assert template.meta_start_line == 6  # Template( line
-        assert template.meta_end_line == 9  # ), line
-
-
 class TestErrorHandling:
     """Test error handling for invalid inputs"""
 
@@ -410,7 +367,6 @@ class TestComplexScenarios:
         asset = assets[0]
 
         # Check basic properties
-        assert asset.meta_asset_name == 'BATTLE_PREPARATION'
         assert asset.path == '_path_'
         assert asset.name == 'BATTLE_PREPARATION'
         assert asset.interval == 2

@@ -11,7 +11,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen, ReprWrapper
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_remove
-from alasio.ext.path.calc import get_name, get_rootstem, to_posix
+from alasio.ext.path.calc import get_rootstem, to_posix
 from alasio.logger import logger
 
 
@@ -159,7 +159,6 @@ class AssetGenerator:
         """
         # inject path name
         a.path = self.path
-        a.name = a.meta_asset_name
 
         if a.search:
             a.search = a.search.as_int()
@@ -326,7 +325,6 @@ class AssetGenerator:
         template.meta_source = source
         asset = MetaAsset(path=self.path, name=name, template=(template,))
         asset.meta_templates = [template]
-        asset.meta_asset_name = name
         self._validate_asset(asset)
         logger.info(f'New asset: {asset}')
 
