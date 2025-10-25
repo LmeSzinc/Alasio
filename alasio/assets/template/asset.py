@@ -6,6 +6,8 @@ from alasio.ext.cache import cached_property, del_cached_property, has_cached_pr
 
 
 class Asset:
+    DEFAULT_INTERVAL = 3
+
     def __init__(
             self,
             *,
@@ -14,6 +16,7 @@ class Asset:
             search: "tuple[int, int, int, int] | None" = None,
             button: "tuple[int, int, int, int] | None" = None,
             match: "Callable[..., MatchResult] | None" = None,
+            interval: "float | int | None" = None,
             similarity: "float | None" = None,
             colordiff: "int | None" = None,
             # lambda function to return tuple of templates or just tuple of templates
@@ -26,6 +29,7 @@ class Asset:
         self.search: "Area | None" = Area(search) if search is not None else None
         self.button: "Area | None" = Area(button) if button is not None else None
         self.match = match
+        self.interval = interval
         self.similarity = similarity
         self.colordiff = colordiff
         self._template_lambda = template

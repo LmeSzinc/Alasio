@@ -35,6 +35,7 @@ FULL_ASSET = Asset(
     name='FULL_ASSET',
     search=(100, 200, 300, 400),
     button=(150, 250, 350, 450),
+    interval=5,
     similarity=0.85,
     colordiff=15,
 )
@@ -46,6 +47,7 @@ FULL_ASSET = Asset(
         asset = assets[0]
         assert asset.search == (100, 200, 300, 400)
         assert asset.button == (150, 250, 350, 450)
+        assert asset.interval == 5
         assert asset.similarity == 0.85
         assert asset.colordiff == 15
 
@@ -411,6 +413,7 @@ class TestComplexScenarios:
         assert asset.meta_asset_name == 'BATTLE_PREPARATION'
         assert asset.path == '_path_'
         assert asset.name == 'BATTLE_PREPARATION'
+        assert asset.interval == 2
         assert asset.similarity == 0.75
         assert asset.colordiff == 10
         assert asset.match == 'Template.match_template'

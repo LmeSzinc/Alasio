@@ -12,6 +12,7 @@ BATTLE_PREPARATION = Asset(
     search=(100, 100, 200, 200),
     button=(100, 100, 200, 200),
     match=Template.match_template,
+    interval=2,
     similarity=0.75,
     colordiff=10,
     template=lambda: (
