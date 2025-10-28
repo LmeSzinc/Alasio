@@ -4,7 +4,7 @@ from alasio.base.image.color import color_similarity, get_color, rgb2luma
 from alasio.base.image.imfile import crop, image_channel, image_load, image_shape, image_size
 from alasio.base.op import Area, Point, RGB
 from alasio.ext import env
-from alasio.ext.cache import cached_property, del_cached_property, get_cached_property, set_cached_property
+from alasio.ext.cache import cached_property
 from alasio.logger import logger
 
 
@@ -132,7 +132,7 @@ class Template:
         image = image_load(file)
         color = RGB(get_color(image)).as_uint8()
         template = cls(area=area, color=color, file=file)
-        set_cached_property(template, 'image', image)
+        cached_property.set(template, 'image', image)
         return template
 
     @classmethod
@@ -187,7 +187,7 @@ class Template:
         """
         Lazy loaded template image in luma
         """
-        image = get_cached_property(self, 'image')
+        image = cached_property.get(self, 'image')
         if image is not None:
             # already has image
             image = rgb2luma(image)
@@ -206,8 +206,8 @@ class Template:
         """
         Release cached resources
         """
-        del_cached_property(self, 'image')
-        del_cached_property(self, 'image_luma')
+        cached_property.pop(self, 'image')
+        cached_property.pop(self, 'image_luma')
 
     def get_similarity(self, similarity=None) -> float:
         """

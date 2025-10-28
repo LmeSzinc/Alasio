@@ -5,7 +5,7 @@ from zlib import crc32, decompressobj
 
 from msgspec import Struct
 
-from alasio.ext.cache import set_cached_property
+from alasio.ext.cache import cached_property
 from alasio.git.file.exception import ObjectBroken, PackBroken
 from alasio.git.file.gitobject import GitObjectManager
 from alasio.git.obj.obj import GitObject, OBJTYPE_BASIC, parse_objdata_return_info
@@ -155,7 +155,7 @@ def read_first_obj(data) -> "tuple[GitObject, int]":
     # create git object
     # set result_size and decoded
     obj = GitObject(type=objtype, size=result_size, data=content)
-    set_cached_property(obj, 'decoded', decoded)
+    cached_property.set(obj, 'decoded', decoded)
     return obj, consumed
 
 

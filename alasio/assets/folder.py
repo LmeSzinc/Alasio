@@ -6,7 +6,7 @@ from msgspec.structs import asdict
 from alasio.assets.model import AssetData, DECODER_CACHE, ResourceData
 from alasio.config.entry.const import ModEntryInfo
 from alasio.ext.backport import removeprefix
-from alasio.ext.cache import cached_property, set_cached_property
+from alasio.ext.cache import cached_property
 from alasio.ext.file.jsonfile import NoIndentNoSpace, write_json_custom_indent
 from alasio.ext.msgspec_error import load_json_with_default
 from alasio.ext.path import PathStr
@@ -148,7 +148,7 @@ class AssetFolder:
             data: new data to write, or None to write current data
         """
         if data is not None and data != self.resource_data:
-            set_cached_property(self, 'resource_data', data)
+            cached_property.set(self, 'resource_data', data)
 
         file = self.folder.joinpath('resource.json')
         logger.info(f'Write resource data: {file}')
@@ -190,7 +190,7 @@ class AssetFolder:
             data: new data to write, or None to write current data
         """
         if data is not None and data != self.asset_data:
-            set_cached_property(self, 'asset_data', data)
+            cached_property.set(self, 'asset_data', data)
 
         file = self.folder.joinpath('asset.json')
         logger.info(f'Write asset data: {file}')

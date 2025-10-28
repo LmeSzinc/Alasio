@@ -1,5 +1,5 @@
 from alasio.config.const import Const
-from alasio.ext.cache import cached_property, del_cached_property
+from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_iter_depth1, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
@@ -259,7 +259,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
                 # {group}.{arg}
                 row = self._update_arg_i18n(group_name, arg_name, arg)
                 deep_set(new, [group_name, arg_name], row)
-        del_cached_property(self, '_i18n_old')
+        cached_property.pop(self, '_i18n_old')
         return new
 
     """

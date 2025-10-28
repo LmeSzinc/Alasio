@@ -3,7 +3,7 @@ import re
 from alasio.assets_dev.parse import AssetAll, AssetImage, AssetModule, AssetMultilang
 from alasio.base.image.imfile import image_fixup
 from alasio.config.const import Const
-from alasio.ext.cache import cached_property, del_cached_property
+from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.file.watchdog import PathEvent, Watchdog
 from alasio.ext.path import PathStr
@@ -218,7 +218,7 @@ class AssetsExtractor:
             logger.info(f'Assets generate, modules={modules}')
 
         # build assets structure
-        del_cached_property(self, 'assets')
+        cached_property.pop(self, 'assets')
         _ = self.assets
         # read all images
         self.assets.load(modules)
@@ -271,7 +271,7 @@ class AssetsExtractor:
                 folder.folder_rmtree()
 
         # cleanup
-        del_cached_property(self, 'assets')
+        cached_property.pop(self, 'assets')
 
     def file_to_module(self, file):
         # /assets/combat/interact/xxx.png -> combat/interact

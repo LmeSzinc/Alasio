@@ -3,7 +3,7 @@ from zlib import decompress, decompressobj, error as zlib_error
 
 import msgspec
 
-from alasio.ext.cache import cached_property, set_cached_property
+from alasio.ext.cache import cached_property
 from alasio.git.file.exception import ObjectBroken
 from alasio.git.obj.objcommit import parse_commit
 from alasio.git.obj.objdelta import apply_delta, parse_ofs_delta, parse_ref_delta
@@ -132,7 +132,7 @@ class GitObject(msgspec.Struct, dict=True):
             self.data = memoryview(data)
         else:
             raise ObjectBroken(f'Unexpected source type: {objtype}, source={source}')
-        set_cached_property(self, 'decoded', decoded)
+        cached_property.set(self, 'decoded', decoded)
 
     def sha1(self):
         """

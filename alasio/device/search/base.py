@@ -2,7 +2,7 @@ import os
 import re
 from dataclasses import dataclass
 
-from alasio.ext.cache import cached_property, del_cached_property
+from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_text
 from alasio.ext.path.calc import joinpath
@@ -329,7 +329,7 @@ class EmulatorSearchBase:
         return []
 
     def clear_emulator_cache(self):
-        del_cached_property(self, 'all_emulators')
-        del_cached_property(self, 'all_emulator_instances')
-        del_cached_property(self, 'all_emulator_serials')
-        del_cached_property(self, 'all_adb_binaries')
+        cached_property.pop(self, 'all_emulators')
+        cached_property.pop(self, 'all_emulator_instances')
+        cached_property.pop(self, 'all_emulator_serials')
+        cached_property.pop(self, 'all_adb_binaries')

@@ -2,7 +2,7 @@ from typing import Callable
 
 from alasio.assets.template.template import MatchResult, Template
 from alasio.base.op import Area
-from alasio.ext.cache import cached_property, del_cached_property, has_cached_property
+from alasio.ext.cache import cached_property
 
 
 class Asset:
@@ -103,11 +103,11 @@ class Asset:
         Release cached resources
         """
         # check cache first, avoid create and instant release
-        if has_cached_property(self, 'templates'):
+        if cached_property.has(self, 'templates'):
             # release template level first
             for t in self.templates:
                 t.release()
-            del_cached_property(self, 'templates')
+            cached_property.pop(self, 'templates')
 
     def match(self, image, search=None) -> MatchResult:
         """

@@ -4,7 +4,7 @@ from typing import Type, TypeVar
 import msgspec
 
 from alasio.config.table.base import AlasioConfigDB
-from alasio.ext.cache import cached_property, del_cached_property
+from alasio.ext.cache import cached_property
 from alasio.logger import logger
 
 T_model = TypeVar('T_model', bound=msgspec.Struct)
@@ -163,4 +163,4 @@ class AlasioKeyTable(AlasioConfigDB):
         """
         value = value.encode()
         self.set_value('Mod', value)
-        del_cached_property(self, 'mod')
+        cached_property.pop(self, 'mod')

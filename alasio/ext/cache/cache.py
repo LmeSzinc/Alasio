@@ -27,7 +27,104 @@ from typing import Any, Callable, TypeVar
 T = TypeVar("T")
 
 
-class cached_property:
+class CacheOperation:
+    """
+    Helper functions to manage cached property.
+    So you can use `cached_property.del(obj, attr)` without importing each individual function
+    """
+    @staticmethod
+    def pop(instance, attrname, default=None):
+        """
+        Delete a cached property safely.
+
+        Args:
+            instance:
+            attrname (str):
+            default: Default to return if property never cached
+        """
+        try:
+            return instance.__dict__.pop(attrname, default)
+        except KeyError:
+            # never cached or already deleted
+            pass
+        except AttributeError:
+            # No __dict__, just no need to delete
+            pass
+
+    @staticmethod
+    def has(instance, attrname):
+        """
+        Check if a property is cached.
+
+        Args:
+            instance:
+            attrname (str):
+        """
+        try:
+            return attrname in instance.__dict__
+        except AttributeError:
+            # No __dict__, just not exists
+            return False
+
+    @staticmethod
+    def get(instance, attrname, default=None):
+        """
+        Get a potential cached property without calculating it.
+
+        Args:
+            instance:
+            attrname (str):
+            default: Default to return if property never cached
+        """
+        try:
+            return instance.__dict__.get(attrname, default)
+        except AttributeError:
+            # No __dict__, just not exists
+            return False
+
+    @staticmethod
+    def set(instance, attrname, value):
+        """
+        Set a cached property.
+
+        Args:
+            instance:
+            attrname (str):
+            value:
+        """
+        try:
+            instance.__dict__[attrname] = value
+        except AttributeError:
+            # not all objects have __dict__ (e.g. class defines slots)
+            msg = (
+                f"No '__dict__' attribute on {type(instance).__name__!r} "
+                f"instance to cache {attrname!r} property."
+            )
+            raise TypeError(msg) from None
+        except TypeError:
+            msg = (
+                f"The '__dict__' attribute on {type(instance).__name__!r} instance "
+                f"does not support item assignment for caching {attrname!r} property."
+            )
+            raise TypeError(msg) from None
+
+    @staticmethod
+    def warm(instance, attrname):
+        """
+        Warmup a cached property.
+        Return None to avoid passing big cached objects across threads.
+
+        Args:
+            instance:
+            attrname (str):
+        """
+        try:
+            getattr(instance, attrname)
+        except AttributeError:
+            pass
+
+
+class cached_property(CacheOperation):
     """
     A high-performance, non-thread-safe cached property
     """
@@ -64,7 +161,7 @@ class cached_property:
         return value
 
 
-class threaded_cached_property:
+class threaded_cached_property(CacheOperation):
     """
     A thread-safe cached property
     """
@@ -158,93 +255,3 @@ class threaded_cached_property:
                 # this shouldn't happen
                 pass
             return value
-
-
-def del_cached_property(instance, attrname):
-    """
-    Delete a cached property safely.
-
-    Args:
-        instance:
-        attrname (str):
-    """
-    try:
-        del instance.__dict__[attrname]
-    except KeyError:
-        # never cached or already deleted
-        pass
-    except AttributeError:
-        # No __dict__, just no need to delete
-        pass
-
-
-def has_cached_property(instance, attrname):
-    """
-    Check if a property is cached.
-
-    Args:
-        instance:
-        attrname (str):
-    """
-    try:
-        return attrname in instance.__dict__
-    except AttributeError:
-        # No __dict__, just not exists
-        return False
-
-
-def get_cached_property(instance, attrname, default=None):
-    """
-    Get a potential cached property with calculating it.
-
-    Args:
-        instance:
-        attrname (str):
-        default:
-    """
-    try:
-        return instance.__dict__.get(attrname, default)
-    except AttributeError:
-        # No __dict__, just not exists
-        return False
-
-
-def set_cached_property(instance, attrname, value):
-    """
-    Set a cached property.
-
-    Args:
-        instance:
-        attrname (str):
-        value:
-    """
-    try:
-        instance.__dict__[attrname] = value
-    except AttributeError:
-        # not all objects have __dict__ (e.g. class defines slots)
-        msg = (
-            f"No '__dict__' attribute on {type(instance).__name__!r} "
-            f"instance to cache {attrname!r} property."
-        )
-        raise TypeError(msg) from None
-    except TypeError:
-        msg = (
-            f"The '__dict__' attribute on {type(instance).__name__!r} instance "
-            f"does not support item assignment for caching {attrname!r} property."
-        )
-        raise TypeError(msg) from None
-
-
-def warm_cached_property(instance, attrname):
-    """
-    Warmup a cached property.
-    Return None to avoid passing big cached objects across threads.
-
-    Args:
-        instance:
-        attrname (str):
-    """
-    try:
-        getattr(instance, attrname)
-    except AttributeError:
-        pass
