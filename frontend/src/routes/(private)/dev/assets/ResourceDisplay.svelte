@@ -95,8 +95,7 @@
     <p
       class={cn(
         "text-card-foreground font-consolas text-center text-xs",
-        "line-clamp-2 break-all transition-colors",
-        "group-hover:text-primary",
+        "line-clamp-2 break-all transition-colors group-hover:text-primary",
       )}
     >
       {name}

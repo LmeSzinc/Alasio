@@ -2,8 +2,10 @@
   import ModSelector from "$lib/components/arginput/ModSelector.svelte";
   import { UploadState } from "$lib/components/upload";
   import { useTopic, type Rpc } from "$lib/ws";
+  import AssetManager from "./AssetManager.svelte";
   import PathBreadcrumb from "./PathBreadcrumb.svelte";
   import ResourceManager from "./ResourceManager.svelte";
+  import StatusBar from "./StatusBar.svelte";
   import type { FolderResponse } from "./types";
 
   const topicClient = useTopic<FolderResponse>("DevAssetsManager");
@@ -57,10 +59,10 @@
 </script>
 
 <div class="bg-background flex h-full w-full min-w-220 flex-col">
-  <div class="bg-card border-border border-b px-4 pt-4 pb-3 shadow-sm">
+  <div class="bg-card border-border border-b px-4 pt-3 pb-2 shadow-sm">
     <div class="flex items-center gap-4">
       <div>
-        <h1 class="text-foreground text-2xl font-bold">Asset Browser</h1>
+        <h1 class="text-foreground text-xl font-bold">Asset Browser</h1>
       </div>
       <div class="w-64">
         <ModSelector {mod_name} handleEdit={handleModChange} />
@@ -70,12 +72,8 @@
   <!-- Breadcrumb Navigation -->
   <PathBreadcrumb class="bg-card w-1/2" {mod_path_assets} {path} onNavigate={handleNavigate} />
   <div class="h-full min-h-160 w-1/2 flex-1 overflow-hidden">
-    <ResourceManager
-      class="h-1/2"
-      {mod_name}
-      {path}
-      {topicClient}
-      {uploadState}
-    />
+    <ResourceManager class="h-9/20" {mod_name} {path} {topicClient} {uploadState} />
+    <StatusBar data={topicClient.data} class="bg-card"/>
+    <AssetManager class="h-11/20" {mod_name} {path} {topicClient} />
   </div>
 </div>

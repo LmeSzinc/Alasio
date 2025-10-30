@@ -1,100 +1,88 @@
-type SelectedItem = { type: "folder"; name: string } | { type: "resource"; name: string };
+/**
+ * A generic, reusable class for managing selection state in a list.
+ * It can handle any type of item, as long as a unique key can be extracted from it.
+ * @template T The type of the items in the selection.
+ */
+export class SelectionState<T> {
+  selectedItems = $state<T[]>([]);
+  lastSelected = $state<T | null>(null);
 
-class SelectionState {
-  selectedItems = $state<SelectedItem[]>([]);
-  lastSelected = $state<SelectedItem | null>(null);
+  private getKey: (item: T) => string | number;
 
   /**
-   * Toggle selection of an item
+   * @param getKey A function that returns a unique identifier for an item of type T.
    */
-  toggle(item: SelectedItem): void {
+  constructor(getKey: (item: T) => string | number) {
+    this.getKey = getKey;
+  }
+
+  /**
+   * Checks if two items are the same based on their unique key.
+   */
+  private isSameItem(a: T, b: T): boolean {
+    if (!a || !b) return false;
+    return this.getKey(a) === this.getKey(b);
+  }
+
+  /**
+   * Toggles the selection of a single item.
+   */
+  toggle(item: T): void {
     const index = this.selectedItems.findIndex((selected) => this.isSameItem(selected, item));
 
     if (index >= 0) {
-      // Item is already selected, remove it
       this.selectedItems.splice(index, 1);
     } else {
-      // Item is not selected, add it
       this.selectedItems.push(item);
     }
     this.lastSelected = item;
   }
 
   /**
-   * Select an item (replacing current selection)
+   * Selects a single item, replacing any previous selection.
    */
-  select(item: SelectedItem): void {
+  select(item: T): void {
     this.selectedItems = [item];
     this.lastSelected = item;
   }
 
   /**
-   * Add an item to selection without replacing
+   * Selects a range of items between the last selected item and the target item (for Shift+Click).
    */
-  add(item: SelectedItem): void {
-    if (!this.isSelected(item)) {
-      this.selectedItems.push(item);
-    }
-    this.lastSelected = item;
-  }
-
-  /**
-   * Select a range of items (for Shift+Click)
-   */
-  selectRange(items: SelectedItem[], targetItem: SelectedItem): void {
+  selectRange(items: T[], targetItem: T): void {
     if (!this.lastSelected) {
-      // No previous selection, just select the target
       this.select(targetItem);
       return;
     }
-
     const lastIndex = items.findIndex((item) => this.isSameItem(item, this.lastSelected!));
     const targetIndex = items.findIndex((item) => this.isSameItem(item, targetItem));
 
     if (lastIndex === -1 || targetIndex === -1) {
-      // Can't find indices, just select the target
       this.select(targetItem);
       return;
     }
 
-    // Select all items between lastIndex and targetIndex (inclusive)
     const start = Math.min(lastIndex, targetIndex);
     const end = Math.max(lastIndex, targetIndex);
     const rangeItems = items.slice(start, end + 1);
 
-    // Add all items in range to selection
-    this.selectedItems = [...this.selectedItems];
-    for (const item of rangeItems) {
-      if (!this.isSelected(item)) {
-        this.selectedItems.push(item);
-      }
-    }
+    // Keep existing selections made with Ctrl/Cmd key, and add the new range.
+    const currentSelection = this.selectedItems.filter(
+      (sel) => !rangeItems.some((rangeItem) => this.isSameItem(sel, rangeItem)),
+    );
+    this.selectedItems = [...currentSelection, ...rangeItems];
     this.lastSelected = targetItem;
   }
 
   /**
-   * Check if an item is selected
+   * Checks if a specific item is currently selected.
    */
-  isSelected(item: SelectedItem): boolean {
+  isSelected(item: T): boolean {
     return this.selectedItems.some((selected) => this.isSameItem(selected, item));
   }
 
   /**
-   * Check if a folder is selected
-   */
-  isFolderSelected(folderName: string): boolean {
-    return this.isSelected({ type: "folder", name: folderName });
-  }
-
-  /**
-   * Check if a resource is selected
-   */
-  isResourceSelected(resourceName: string): boolean {
-    return this.isSelected({ type: "resource", name: resourceName });
-  }
-
-  /**
-   * Clear all selections
+   * Clears all selections.
    */
   clear(): void {
     this.selectedItems = [];
@@ -102,27 +90,9 @@ class SelectionState {
   }
 
   /**
-   * Get all selected items
-   */
-  getSelected(): SelectedItem[] {
-    return this.selectedItems;
-  }
-
-  /**
-   * Get count of selected items
+   * Returns the count of selected items.
    */
   get count(): number {
     return this.selectedItems.length;
   }
-
-  /**
-   * Check if two items are the same
-   */
-  private isSameItem(a: SelectedItem, b: SelectedItem): boolean {
-    if (a.type !== b.type) return false;
-    return a.name === b.name;
-  }
 }
-
-// Export a singleton instance
-export const selectionState = new SelectionState();

@@ -5,7 +5,7 @@
   import type { TopicLifespan } from "$lib/ws";
   import ResourceFile from "./ResourceFile.svelte";
   import ResourceFolder from "./ResourceFolder.svelte";
-  import { selectionState } from "./selectionState.svelte";
+  import { resourceSelection, type ResourceSelectionItem } from "./selected.svelte";
   import type { FolderResponse, ResourceItem } from "./types";
 
   let {
@@ -37,24 +37,25 @@
     })),
   );
 
-  // Create a flat list of all items (folders + resources) for range selection
-  const allItems = $derived([
+  // Create a flat list of all items (folders + resources) for range selection.
+  // The type of this list now matches ResourceSelectionItem.
+  const allItems = $derived<ResourceSelectionItem[]>([
     ...folders.map((name) => ({ type: "folder" as const, name })),
     ...resourceList.map((r) => ({ type: "resource" as const, name: r.name })),
   ]);
 
+  /**
+   * Handles folder selection logic using the global resourceSelection state.
+   */
   function handleFolderSelect(folderName: string, event: MouseEvent): void {
-    const item = { type: "folder" as const, name: folderName };
+    const item: ResourceSelectionItem = { type: "folder" as const, name: folderName };
 
     if (event.shiftKey) {
-      // Shift + Click: range selection
-      selectionState.selectRange(allItems, item);
+      resourceSelection.selectRange(allItems, item);
     } else if (event.ctrlKey || event.metaKey) {
-      // Ctrl/Cmd + Click: toggle selection
-      selectionState.toggle(item);
+      resourceSelection.toggle(item);
     } else {
-      // Regular click: replace selection
-      selectionState.select(item);
+      resourceSelection.select(item);
     }
   }
 
@@ -63,18 +64,18 @@
     onNavigate?.(newPath);
   }
 
+  /**
+   * Handles resource file selection logic using the global resourceSelection state.
+   */
   function handleResourceSelect(resource: ResourceItem, event: MouseEvent): void {
-    const item = { type: "resource" as const, name: resource.name };
+    const item: ResourceSelectionItem = { type: "resource" as const, name: resource.name };
 
     if (event.shiftKey) {
-      // Shift + Click: range selection
-      selectionState.selectRange(allItems, item);
+      resourceSelection.selectRange(allItems, item);
     } else if (event.ctrlKey || event.metaKey) {
-      // Ctrl/Cmd + Click: toggle selection
-      selectionState.toggle(item);
+      resourceSelection.toggle(item);
     } else {
-      // Regular click: replace selection
-      selectionState.select(item);
+      resourceSelection.select(item);
     }
   }
 
@@ -87,28 +88,28 @@
   function handleBackgroundClick(event: MouseEvent): void {
     // Only clear if clicking directly on the container, not on children
     if (event.target === containerRef) {
-      selectionState.clear();
+      resourceSelection.clear();
     }
   }
 
   function handleBackgroundKeyDown(event: KeyboardEvent): void {
     // Handle keyboard interaction for the background area
     if (event.key === "Enter" || event.key === " ") {
-      selectionState.clear();
+      resourceSelection.clear();
     }
   }
 
   function handleKeyDown(event: KeyboardEvent): void {
     if (event.key === "Escape") {
       event.preventDefault();
-      selectionState.clear();
+      resourceSelection.clear();
     }
   }
 
-  // Clear selection when path changes
+  // Effect to clear selection when the folder path changes.
   $effect(() => {
     path;
-    selectionState.clear();
+    resourceSelection.clear();
   });
 
   // Upload functionality
@@ -130,7 +131,7 @@
           </div>
         {:else}
           <div
-            class="flex h-full w-full flex-1 flex-wrap gap-1 p-4 outline-none"
+            class="flex h-full w-full flex-1 flex-wrap gap-1 px-4 py-2 outline-none"
             bind:this={containerRef}
             role="button"
             tabindex="0"
@@ -141,7 +142,7 @@
             {#each folders as folderName}
               <ResourceFolder
                 name={folderName}
-                selected={selectionState.isFolderSelected(folderName)}
+                selected={resourceSelection.isSelected({ type: "folder", name: folderName })}
                 handleSelect={(e) => handleFolderSelect(folderName, e)}
                 handleOpen={() => handleFolderOpen(folderName)}
               />
@@ -152,7 +153,7 @@
                 {mod_name}
                 {resource}
                 currentPath={path}
-                selected={selectionState.isResourceSelected(resource.name)}
+                selected={resourceSelection.isSelected({ type: "resource", name: resource.name })}
                 handleSelect={(e) => handleResourceSelect(resource, e)}
                 handleOpen={() => handleResourceOpen(resource)}
               />
@@ -166,15 +167,4 @@
       {/if}
     </FileZone>
   {/if}
-
-  <!-- Status bar -->
-  <div class="bg-card border-border text-muted-foreground border-t px-4 py-2 text-xs">
-    {folders.length} folder{folders.length !== 1 ? "s" : ""},
-    {resourceList.length} resource{resourceList.length !== 1 ? "s" : ""}
-    {#if selectionState.count > 0}
-      <span class="ml-2">
-        | {selectionState.count} selected
-      </span>
-    {/if}
-  </div>
 </div>
