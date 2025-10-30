@@ -268,7 +268,7 @@ class async_reactive_nocache(async_reactive):
         # Get observers copy under lock, then notify outside lock
         async with self.lock:
             if new is _NOT_FOUND:
-                new = getattr(obj, self.cache_attr, _NOT_FOUND)
+                new = await self.compute(obj)
             observer_items = list(self.observers.items())
 
         # Check if value changed
