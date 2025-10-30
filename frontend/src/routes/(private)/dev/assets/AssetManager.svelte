@@ -4,7 +4,7 @@
   import AssetList from "./AssetList.svelte";
   import { assetSelection, templateSelection } from "./selected.svelte";
   import TemplateList from "./TemplateList.svelte";
-  import type { FolderResponse, MetaAsset } from "./types";
+  import { createMetaAssetWithDefaults, type FolderResponse, type MetaAsset } from "./types";
 
   let {
     topicClient,
@@ -18,7 +18,16 @@
     class?: string;
   } = $props();
 
-  const assets = $derived(topicClient.data?.assets || {});
+  // Create assets data with defaults
+  const assets = $derived.by(() => {
+    const rawAssets = topicClient.data?.assets;
+    if (!rawAssets) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(rawAssets).map(([key, asset]) => [key, createMetaAssetWithDefaults(asset)]),
+    );
+  });
   const assetList = $derived<MetaAsset[]>(Object.values(assets));
 
   /**

@@ -66,6 +66,9 @@ class AssetFolder(AssetGenerator, ResourceManager):
             for template in asset.templates:
                 known_asset_file.add(get_name(template.file))
 
+        local_resource_files = set()
+        local_template_files = set()
+
         # iter local folder
         for entry in iter_entry(self.folder, follow_symlinks=False):
             # add folder
@@ -82,9 +85,11 @@ class AssetFolder(AssetGenerator, ResourceManager):
                 continue
             # known asset
             if name in known_asset_file:
+                local_template_files.add(name)
                 continue
             # add resource
             if name.startswith('~'):
+                local_resource_files.add(name)
                 if name in resource_data:
                     # known resource
                     n = removeprefix(name, '~')
@@ -105,6 +110,7 @@ class AssetFolder(AssetGenerator, ResourceManager):
                 except Exception as e:
                     logger.error(e)
                     continue
+                local_resource_files.add(new)
                 resources[name] = ResourceRow(name=new, status='not_tracked')
                 continue
 
@@ -113,6 +119,15 @@ class AssetFolder(AssetGenerator, ResourceManager):
             n = removeprefix(name, '~')
             if n not in resources:
                 resources[n] = ResourceRow(name=name, status='not_downloaded')
+
+        # update MetaTemplate.source_exist
+        for asset in self.assets.values():
+            for template in asset.templates:
+                if template.source:
+                    template.source_exist = template.source in local_resource_files
+                else:
+                    template.source_exist = False
+                template.file_exist = get_name(template.file) in local_template_files
 
         # sort
         folders = sorted(folders)

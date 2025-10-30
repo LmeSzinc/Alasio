@@ -23,6 +23,8 @@ class MetaTemplate(Struct, omit_defaults=True):
 
     # meta attributes
     source: Optional[str] = None
+    # whether template file exists, default to True and will be set in AssetFolder
+    file_exist: bool = True
     # whether resource file exists, default to True and will be set in AssetFolder
     source_exist: bool = True
 

@@ -49,8 +49,24 @@ export interface MetaTemplate {
 
   // --- meta attributes ---
   source?: string;
+  // whether template file exists, default to True and will be set in AssetFolder
+  file_exist: boolean;
   // whether resource file exists, default to True and will be set in AssetFolder
   source_exist: boolean;
+}
+
+const META_TEMPLATE_DEFAULTS = {
+  lang: "",
+  frame: 1,
+  file: "",
+  file_exist: true,
+  source_exist: true,
+};
+export function createMetaTemplateWithDefaults(apiTemplate: Partial<MetaTemplate>): MetaTemplate {
+  return {
+    ...META_TEMPLATE_DEFAULTS,
+    ...apiTemplate,
+  } as MetaTemplate;
 }
 
 // Asset with metadata.
@@ -77,6 +93,20 @@ export interface MetaAsset {
   // additional resource images for reference
   ref: string[];
   templates: MetaTemplate[];
+}
+
+const META_ASSET_DEFAULTS = {
+  doc: "",
+  ref: [],
+  templates: [],
+};
+export function createMetaAssetWithDefaults(apiAsset: Partial<MetaAsset>): MetaAsset {
+  const hydratedAsset = {
+    ...META_ASSET_DEFAULTS,
+    ...apiAsset,
+  };
+  hydratedAsset.templates = (apiAsset.templates || []).map(createMetaTemplateWithDefaults);
+  return hydratedAsset as MetaAsset;
 }
 
 // Represents metadata about a single resource file.
