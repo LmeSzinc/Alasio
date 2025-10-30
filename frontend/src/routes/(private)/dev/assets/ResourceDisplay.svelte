@@ -20,11 +20,15 @@
     class?: string;
   } = $props();
 
+  function handleMouseDown(event: MouseEvent) {
+    event.preventDefault();
+  }
   function handleClick(event: MouseEvent) {
     event.preventDefault();
     handleSelect?.(event);
   }
-  function handleDoubleClick() {
+  function handleDoubleClick(event: MouseEvent) {
+    event.preventDefault();
     handleOpen?.();
   }
 
@@ -55,6 +59,7 @@
   onclick={handleClick}
   ondblclick={handleDoubleClick}
   onkeydown={handleKeyDown}
+  onmousedown={handleMouseDown}
   aria-label={name}
   class={cn(
     "group relative aspect-square h-32 w-32",
