@@ -2,6 +2,7 @@
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { FileZone, UploadProgress, UploadState } from "$lib/components/upload";
   import { cn } from "$lib/utils";
+  import type { TopicLifespan } from "$lib/ws";
   import ResourceFile from "./ResourceFile.svelte";
   import ResourceFolder from "./ResourceFolder.svelte";
   import { selectionState } from "./selectionState.svelte";
@@ -10,21 +11,24 @@
   let {
     mod_name,
     path,
-    folderData,
-    onNavigate,
+    topicClient,
     uploadState,
     class: className,
   }: {
     mod_name: string;
     path: string;
-    folderData?: FolderResponse;
-    onNavigate?: (newPath: string) => void;
+    topicClient: TopicLifespan<FolderResponse>;
     uploadState?: UploadState;
     class?: string;
   } = $props();
 
-  const folders = $derived(folderData?.folders || []);
-  const resources = $derived(folderData?.resources || {});
+  const pathRpc = topicClient.rpc();
+  function onNavigate(path: string) {
+    pathRpc.call("set_path", { path: path });
+  }
+
+  const folders = $derived(topicClient.data?.folders || []);
+  const resources = $derived(topicClient.data?.resources || {});
 
   const resourceList = $derived<ResourceItem[]>(
     Object.entries(resources).map(([displayName, resourceRow]) => ({

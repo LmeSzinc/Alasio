@@ -1,7 +1,7 @@
 <script lang="ts">
   import ModSelector from "$lib/components/arginput/ModSelector.svelte";
+  import { UploadState } from "$lib/components/upload";
   import { useTopic, type Rpc } from "$lib/ws";
-  import { FileZone, UploadProgress, UploadState } from "$lib/components/upload";
   import PathBreadcrumb from "./PathBreadcrumb.svelte";
   import ResourceManager from "./ResourceManager.svelte";
   import type { FolderResponse } from "./types";
@@ -73,9 +73,8 @@
     <ResourceManager
       class="h-1/2"
       {mod_name}
-      folderData={topicClient.data}
       {path}
-      onNavigate={handleNavigate}
+      {topicClient}
       {uploadState}
     />
   </div>
