@@ -124,7 +124,7 @@
 
   function handleTrack(): void {
     if (selectedResources.length > 0) {
-      trackRpc.call("track_resource", { names: selectedResources });
+      trackRpc.call("resource_track", { names: selectedResources });
       resourceSelection.clear();
     }
     contextMenuOpen = false;
@@ -132,7 +132,7 @@
 
   function handleUntrack(): void {
     if (selectedResources.length > 0) {
-      untrackRpc.call("untrack_resource", { names: selectedResources });
+      untrackRpc.call("resource_untrack", { names: selectedResources });
       resourceSelection.clear();
     }
     contextMenuOpen = false;

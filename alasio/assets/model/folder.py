@@ -138,6 +138,9 @@ class AssetFolder(AssetGenerator, ResourceManager):
             folders=folders, resources=resources, assets=self.assets
         )
 
+    def getdata(self):
+        return self.data
+
     def resource_add_base64(self, file, data):
         """
         Add resource file from base64 data
@@ -175,6 +178,7 @@ class AssetFolder(AssetGenerator, ResourceManager):
         name = self.resource_add_bytes(source, content)
         if source != name:
             source_file.atomic_remove()
+        cached_property.pop(self, 'data')
         return name
 
     def resource_untrack_force(self, source):
@@ -183,10 +187,11 @@ class AssetFolder(AssetGenerator, ResourceManager):
             source (str): Source filename, e.g. "~BATTLE_PREPARATION.png"
         """
         validate_resource_name(source)
-        row = self.resources.pop(source)
+        row = self.resources.pop(source, None)
         if row is None:
             return
         self.resources_write()
+        cached_property.pop(self, 'data')
 
     def resource_to_asset(self, source, override=False):
         """
@@ -227,6 +232,7 @@ class AssetFolder(AssetGenerator, ResourceManager):
 
         assets[asset.name] = asset
         self.asset_codegen()
+        cached_property.pop(self, 'data')
         return True
 
     def asset_del(self, asset_name):
@@ -251,6 +257,7 @@ class AssetFolder(AssetGenerator, ResourceManager):
                 self._template_remove(t)
 
         self.asset_codegen()
+        cached_property.pop(self, 'data')
         return True
 
 
