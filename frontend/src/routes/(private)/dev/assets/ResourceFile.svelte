@@ -37,7 +37,7 @@
 <ResourceDisplay name={resource.displayName} {selected} {handleSelect} {handleOpen} class={className}>
   {#snippet content()}
     {#if resource.status !== "not_downloaded" && imageUrl}
-      <Image src={imageUrl} alt={resource.displayName} />
+      <Image src={imageUrl} alt={resource.displayName} rootMargin="0px" />
     {:else}
       <div class="absolute inset-0 flex flex-col items-center justify-center">
         <CloudOff class="text-muted-foreground h-1/3 w-1/3" />
