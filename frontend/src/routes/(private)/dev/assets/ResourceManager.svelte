@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { Input } from "$lib/components/ui/input";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { FileZone, UploadProgress, UploadState } from "$lib/components/upload";
   import { cn } from "$lib/utils";
   import type { TopicLifespan } from "$lib/ws";
   import ResourceFile from "./ResourceFile.svelte";
   import ResourceFolder from "./ResourceFolder.svelte";
+  import ResourceContextMenu from "./ResourceContextMenu.svelte";
   import { resourceSelection, type ResourceSelectionItem } from "./selected.svelte";
   import type { FolderResponse, ResourceItem } from "./types";
 
@@ -38,7 +40,6 @@
   );
 
   // Create a flat list of all items (folders + resources) for range selection.
-  // The type of this list now matches ResourceSelectionItem.
   const allItems = $derived<ResourceSelectionItem[]>([
     ...folders.map((name) => ({ type: "folder" as const, name })),
     ...resourceList.map((r) => ({ type: "resource" as const, name: r.name })),
@@ -86,7 +87,12 @@
 
   let containerRef: HTMLDivElement | null = $state(null);
   function handleBackgroundClick(event: MouseEvent): void {
-    // Only clear if clicking directly on the container, not on children
+    if (event.target === containerRef) {
+      resourceSelection.clear();
+    }
+  }
+
+  function handleBackgroundContextMenu(event: MouseEvent): void {
     if (event.target === containerRef) {
       resourceSelection.clear();
     }
@@ -106,61 +112,108 @@
     }
   }
 
+  /**
+   * Handles context menu (right-click) on items.
+   * If the right-clicked item is not in the current selection, select only that item.
+   * This mimics standard file explorer behavior.
+   */
+  function handleContextMenu(item: ResourceSelectionItem, event: MouseEvent): void {
+    // Check if the right-clicked item is already selected
+    if (!resourceSelection.isSelected(item)) {
+      // If not selected, select only this item (replace current selection)
+      resourceSelection.select(item);
+    }
+    // If already selected, keep the current selection (allow multi-item context menu)
+  }
+
   // Effect to clear selection when the folder path changes.
   $effect(() => {
     path;
     resourceSelection.clear();
   });
 
+  let fileInput: HTMLInputElement | null = $state(null);
+
   // Upload functionality
   function handleFileDrop(files: FileList): void {
     uploadState?.addFiles(files);
+  }
+
+  function handleFileChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (input.files) {
+      uploadState?.addFiles(input.files);
+    }
+  }
+
+  function onUploadClick(): void {
+    fileInput?.click();
   }
 </script>
 
 <svelte:window onkeydown={handleKeyDown} />
 
+<Input type="file" multiple accept="image/*" class="hidden" bind:ref={fileInput} onchange={handleFileChange} />
+
 <div class={cn("bg-background flex flex-col border", className)}>
   <!-- Main content area -->
   {#if mod_name}
     <FileZone onDrop={handleFileDrop} disabled={!uploadState} accept="image/*">
-      <ScrollArea class="h-full w-full flex-1">
-        {#if folders.length === 0 && resourceList.length === 0}
-          <div class="text-muted-foreground flex h-full items-center justify-center">
-            <p>This folder is empty</p>
-          </div>
-        {:else}
-          <div
-            class="flex h-full w-full flex-1 flex-wrap gap-1 px-4 py-2 outline-none"
-            bind:this={containerRef}
-            role="button"
-            tabindex="0"
-            onclick={handleBackgroundClick}
-            onkeydown={handleBackgroundKeyDown}
-            aria-label="Clear selection"
-          >
-            {#each folders as folderName}
-              <ResourceFolder
-                name={folderName}
-                selected={resourceSelection.isSelected({ type: "folder", name: folderName })}
-                handleSelect={(e) => handleFolderSelect(folderName, e)}
-                handleOpen={() => handleFolderOpen(folderName)}
-              />
-            {/each}
+      <!-- Wrap content with ResourceContextMenu -->
+      <ResourceContextMenu {topicClient} {onUploadClick}>
+        {#snippet children()}
+          <ScrollArea class="h-full w-full flex-1">
+            {#if folders.length === 0 && resourceList.length === 0}
+              <div class="text-muted-foreground flex h-full items-center justify-center">
+                <p>This folder is empty</p>
+              </div>
+            {:else}
+              <div
+                class="flex h-full w-full flex-1 flex-wrap gap-1 px-4 py-2 outline-none"
+                bind:this={containerRef}
+                role="grid"
+                tabindex="0"
+                onclick={handleBackgroundClick}
+                oncontextmenu={handleBackgroundContextMenu}
+                onkeydown={handleBackgroundKeyDown}
+                aria-label="Resource list"
+              >
+                {#each folders as folderName}
+                  <div
+                    role="gridcell"
+                    tabindex="0"
+                    oncontextmenu={(e) => handleContextMenu({ type: "folder", name: folderName }, e)}
+                  >
+                    <ResourceFolder
+                      name={folderName}
+                      selected={resourceSelection.isSelected({ type: "folder", name: folderName })}
+                      handleSelect={(e) => handleFolderSelect(folderName, e)}
+                      handleOpen={() => handleFolderOpen(folderName)}
+                    />
+                  </div>
+                {/each}
 
-            {#each resourceList as resource}
-              <ResourceFile
-                {mod_name}
-                {resource}
-                currentPath={path}
-                selected={resourceSelection.isSelected({ type: "resource", name: resource.name })}
-                handleSelect={(e) => handleResourceSelect(resource, e)}
-                handleOpen={() => handleResourceOpen(resource)}
-              />
-            {/each}
-          </div>
-        {/if}
-      </ScrollArea>
+                {#each resourceList as resource}
+                  <div
+                    role="gridcell"
+                    tabindex="0"
+                    oncontextmenu={(e) => handleContextMenu({ type: "resource", name: resource.name }, e)}
+                  >
+                    <ResourceFile
+                      {mod_name}
+                      {resource}
+                      currentPath={path}
+                      selected={resourceSelection.isSelected({ type: "resource", name: resource.name })}
+                      handleSelect={(e) => handleResourceSelect(resource, e)}
+                      handleOpen={() => handleResourceOpen(resource)}
+                    />
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </ScrollArea>
+        {/snippet}
+      </ResourceContextMenu>
       <!-- Upload progress component -->
       {#if uploadState}
         <UploadProgress {uploadState} />
