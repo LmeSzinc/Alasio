@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Image } from "$lib/components/ui/image";
+  import * as Tooltip from "$lib/components/ui/tooltip";
   import { CircleHelp, CloudOff, Unlink } from "@lucide/svelte";
   import ResourceDisplay from "./ResourceDisplay.svelte";
   import type { ResourceItem } from "./types";
@@ -46,19 +47,46 @@
 
   {#snippet badge()}
     {#if resource.status === "not_downloaded"}
-      <div class="rounded bg-yellow-500/90 p-1 text-white shadow-sm">
-        <CloudOff class="h-4 w-4" />
-      </div>
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <div class="cursor-help rounded bg-yellow-500/90 p-1 text-white shadow-sm">
+              <CloudOff class="h-4 w-4" />
+            </div>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>Not Downloaed</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     {:else if resource.status === "not_tracked"}
-      <div class="rounded bg-orange-500/90 p-1 text-white shadow-sm">
-        <Unlink class="h-4 w-4" />
-      </div>
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <div class="cursor-help rounded bg-orange-500/90 p-1 text-white shadow-sm">
+              <Unlink class="h-4 w-4" />
+            </div>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>No Tracked</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     {:else if resource.status === "tracked"}
       <!-- No badge for tracked files -->
     {:else}
-      <div class="rounded bg-gray-500/90 p-1 text-white shadow-sm">
-        <CircleHelp class="h-4 w-4" />
-      </div>
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <div class="cursor-help rounded bg-gray-500/90 p-1 text-white shadow-sm">
+              <CircleHelp class="h-4 w-4" />
+            </div>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>Unknown</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     {/if}
   {/snippet}
 </ResourceDisplay>
