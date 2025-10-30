@@ -1,8 +1,9 @@
-import re
-import keyword
 import builtins
+import keyword
+import re
 
 from alasio.base.op import random_id
+from alasio.ext.path.validate import validate_filename
 
 
 def validate_asset_name(s):
@@ -22,8 +23,7 @@ def validate_asset_name(s):
     Raises:
         ValueError: If the string is not a valid asset name, with detailed reason
     """
-    if not s:
-        raise ValueError('Asset name cannot be empty')
+    validate_filename(s)
 
     if s.startswith('~'):
         raise ValueError(f'Asset name cannot start with "~", otherwise being considered as source file')
@@ -51,6 +51,25 @@ def validate_asset_name(s):
         raise ValueError(f'Asset name "{s}" is a Python builtin name and cannot be used')
 
     return True
+
+
+def validate_resource_name(s):
+    """
+    Validate if a string is a valid resource name.
+
+    A valid asset name must:
+    - Be non-empty
+    - Startswith "~"
+
+    Args:
+        s (str): String to validate
+
+    Raises:
+        ValueError: If the string is not a valid resource name, with detailed reason
+    """
+    validate_filename(s)
+    if not s.startswith('~'):
+        raise ValueError(f'Source file must start with "~", got "{s}"')
 
 
 def to_asset_name(s):
