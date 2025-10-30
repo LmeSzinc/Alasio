@@ -11,14 +11,16 @@ class Asset:
     def __init__(
             self,
             *,
+            # asset folder from mod root, e.g. "asset/combat"
             path: str,
+            # asset name, e.g. "BATTLE_PREPARATION"
             name: str,
             search: "tuple[int, int, int, int] | None" = None,
             button: "tuple[int, int, int, int] | None" = None,
             match: "Callable[..., MatchResult] | None" = None,
-            interval: "float | int | None" = None,
             similarity: "float | None" = None,
             colordiff: "int | None" = None,
+            interval: "float | int | None" = None,
             # lambda function to return tuple of templates or just tuple of templates
             template: "Callable[[], tuple[Template, ...]] | tuple[Template, ...]" = (),
     ):
@@ -29,9 +31,12 @@ class Asset:
         self.search: "Area | None" = Area(search) if search is not None else None
         self.button: "Area | None" = Area(button) if button is not None else None
         self.match = match
-        self.interval = interval
         self.similarity = similarity
         self.colordiff = colordiff
+        # Ban current button after clicking
+        # Example: interval=3 means directly return no match within 3 seconds and 6 screenshots
+        # This is useful to avoid double-clicking as game client can't respond that fast
+        self.interval = interval
         self._template_lambda = template
 
     def __str__(self):

@@ -1,4 +1,4 @@
-from alasio.assets.folder import AssetFolder, FolderResponse
+from alasio.assets.model.folder import AssetFolder
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.ext.path.validate import validate_resolve_filepath
 

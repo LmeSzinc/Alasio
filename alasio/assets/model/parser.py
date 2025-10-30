@@ -7,7 +7,7 @@ from alasio.assets.template import Template
 from alasio.base.op import Area, RGB
 
 
-class MetaTemplate(Struct):
+class MetaTemplate(Struct, omit_defaults=True):
     """Template with metadata"""
     area: Area
     color: RGB
@@ -23,6 +23,8 @@ class MetaTemplate(Struct):
 
     # meta attributes
     source: Optional[str] = None
+    # whether resource file exists, default to True and will be set in AssetFolder
+    source_exist: bool = True
 
     def __repr__(self):
         return f'MetaTemplate(file="{self.file}", area={self.area}, color={self.color})'
@@ -45,7 +47,7 @@ class MetaTemplate(Struct):
         self.file = Template.construct_filename(path, name, lang=self.lang, frame=self.frame)
 
 
-class MetaAsset(Struct):
+class MetaAsset(Struct, omit_defaults=True):
     """Asset with metadata"""
 
     path: str
@@ -54,12 +56,14 @@ class MetaAsset(Struct):
     search: Optional[Area] = None
     button: Optional[Area] = None
     match: Optional[str] = None
-    interval: Optional[Union[int, float]] = None
     similarity: Optional[float] = None
     colordiff: Optional[int] = None
+    interval: Optional[Union[int, float]] = None
 
     # meta attributes
+    # Asset-level docstring
     doc: str = ''
+    # additional resource images for reference
     ref: Tuple[str] = ()
     templates: Tuple[MetaTemplate] = ()
 

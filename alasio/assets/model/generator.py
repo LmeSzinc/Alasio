@@ -1,17 +1,14 @@
-from alasio.assets.model.name import to_asset_name
 from alasio.assets.model.parser import AssetParser, MetaAsset, MetaTemplate
 from alasio.assets.template import Template
-from alasio.base.image.color import get_color
-from alasio.base.image.draw import get_bbox
-from alasio.base.image.imfile import ImageBroken, crop, image_load, image_save, image_size
-from alasio.base.op import Area, RGB, random_id
+from alasio.base.image.imfile import ImageBroken, image_load, image_save
+from alasio.base.op import Area
 from alasio.config.entry.const import DICT_MOD_ENTRY, ModEntryInfo
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen, ReprWrapper
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_remove
-from alasio.ext.path.calc import get_rootstem, to_posix
+from alasio.ext.path.calc import to_posix
 from alasio.logger import logger
 
 
@@ -86,7 +83,7 @@ def normalize_button(t: MetaTemplate, v: Area) -> "Area | None":
     return v.as_int()
 
 
-class AssetGenerator:
+class AssetFolderBase:
     def __init__(self, entry: ModEntryInfo, path: str, gitadd=None):
         """
         Args:
@@ -98,9 +95,28 @@ class AssetGenerator:
         self.path = to_posix(path)
         self.gitadd = gitadd
         self.root = PathStr.new(entry.root)
-        self.file = self.root / path / 'asset.py'
+        self.folder = self.root / path
+        self.asset_file = self.folder / 'asset.py'
+        self.resource_file = self.folder / 'resource.json'
+
+    def __str__(self):
+        return f'AssetFolder(root="{self.root.to_posix()}", path="{self.path}")'
+
+    __repr__ = __str__
+
+    def __hash__(self):
+        return hash(self.folder.to_posix())
+
+
+class AssetGenerator(AssetFolderBase):
 
     def _template_remove(self, template: MetaTemplate):
+        """
+        Remove a template file
+
+        Args:
+            template:
+        """
         logger.info(f'Delete template: {template}')
         file = self.root / template.file
         atomic_remove(file)
@@ -115,7 +131,7 @@ class AssetGenerator:
             bool: If success
         """
         file = self.root / template.file
-        source = self.root / self.path / template.source
+        source = self.folder / template.source
         logger.info(f'Generate template: {file}')
 
         if image is None:
@@ -208,10 +224,11 @@ class AssetGenerator:
         Read asset.py, parse and validate into a list of MetaAsset
 
         Returns:
-            dict[str, MetaAsset]: key: asset name
+            dict[str, MetaAsset]:
+                key: asset name (no "~", no file extension), e.g. BATTLE_PREPARATION
         """
         try:
-            code = self.file.atomic_read_text()
+            code = self.asset_file.atomic_read_text()
         except FileNotFoundError:
             return {}
         assets = AssetParser(code).parse_assets()
@@ -255,7 +272,7 @@ class AssetGenerator:
         Re-generate asset.py
         """
         if not self.assets:
-            self.file.atomic_remove()
+            self.asset_file.atomic_remove()
             return
 
         gen = CodeGen()
@@ -284,6 +301,8 @@ class AssetGenerator:
                     gen.Var(name='similarity', value=asset.similarity)
                 if asset.colordiff is not None:
                     gen.Var(name='colordiff', value=asset.colordiff)
+                if asset.interval is not None:
+                    gen.Var(name='interval', value=asset.interval)
 
                 # template=lambda: (
                 if asset.templates:
@@ -298,74 +317,13 @@ class AssetGenerator:
                     for ref in asset.ref:
                         gen.Comment(f"ref='{ref}'")
 
-        op = gen.write(self.file, gitadd=self.gitadd)
+        op = gen.write(self.asset_file, gitadd=self.gitadd)
         if op:
-            logger.info(f'Write assets code: {self.file}')
-
-    def add_source_as_asset(self, source, override=False):
-        """
-        Args:
-            source (str): Source filename, e.g. "~BATTLE_PREPARATION.png"
-            override (bool): True to override existing asset, false to create with random suffix
-        """
-        if not source.startswith('~'):
-            raise ValueError(f'Source file should startswith "~", got "{source}"')
-        source_file = self.root / self.path / source
-        image = image_load(source_file)
-        area = get_bbox(image)
-        color = RGB(get_color(image, area)).as_uint8()
-
-        # get name
-        name = to_asset_name(get_rootstem(source))
-        assets = self.assets
-        if not override and name in assets:
-            name = f'{name}_{random_id()}'
-        # create info
-        template = MetaTemplate(area=area, color=color, source=source)
-        asset = MetaAsset(path=self.path, name=name, templates=(template,))
-        self._validate_asset(asset)
-        logger.info(f'New asset: {asset}')
-
-        # create template file
-        if Area.from_size(image_size(image)) == area:
-            # not a mask image
-            self._template_generate(template, image=image)
-        else:
-            # save cropped mask image
-            im = crop(image, area, copy=False)
-            self._template_generate(template, image=im)
-
-        assets[asset.name] = asset
-        return True
-
-    def del_asset(self, asset_name):
-        """
-        Delete an asset and all its templates
-
-        Args:
-            asset_name (str): Name of the asset to delete
-
-        Returns:
-            bool: True if asset was deleted
-        """
-        assets = self.assets
-        if asset_name not in assets:
-            return False
-
-        logger.info(f'Deleted asset: {asset_name}')
-        asset = assets.pop(asset_name, None)
-        # Remove all template files
-        if asset:
-            for t in asset.templates:
-                self._template_remove(t)
-
-        return True
+            logger.info(f'Write assets code: {self.asset_file}')
 
 
 if __name__ == '__main__':
     _entry = DICT_MOD_ENTRY['example_mod'].copy()
     _entry.root = env.PROJECT_ROOT.joinpath('ExampleMod')
     self = AssetGenerator(_entry, 'assets/combat')
-    self.asset_codegen()
-    self.add_source_as_asset('~map prepare cn hard.png')
     self.asset_codegen()

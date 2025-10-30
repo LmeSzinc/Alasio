@@ -77,32 +77,49 @@ class Template:
             frame: int = 1,
             search: "tuple[int, int, int, int] | None" = None,
             button: "tuple[int, int, int, int] | None" = None,
-            # A match function that receives image and returns MatchResult
-            # function will be patched onto match()
-            # default to Template.match_template_luma_color
             match: "Callable[..., MatchResult] | None" = None,
             similarity: "float | None" = None,
             colordiff: "int | None" = None,
-            # from mod root to template file
             file: str = '',
     ):
+        # Area to crop from resource image
+        # (upper_left_x, upper_left_y, bottom_right_x, bottom_right_y)
         self.area: Area = Area(area)
+        # Average color of cropped image, (r, g, b)
         self.color: RGB = RGB(color)
 
-        # with defaults
-        self.search: "Area | None" = Area(search) if search is not None else None
-        self.button: Area = Area(button) if button is not None else area
+        # Mark assets as server specific, empty string '' for shared assets
+        # Example, assets with lang=='cn' and server=='' will be loaded on CN, assets from other lang won't.
         self.lang = lang
+        # Frame index.
+        # If any frame matched, considered as template matched.
+        # This is useful to do appear(...) on multiple images
+        # to handle dynamic contents or contents with minor difference
         self.frame = frame
+
+        # Area to search from screenshot, `search` is 20px outer pad of `area` by default
+        # values in `search` can be negative meaning right aligned, this is useful for dynamic resolution ratio
+        self.search: "Area | None" = Area(search) if search is not None else None
+        # Area to click if template is match exactly on `area`
+        # If matched result moves, `button` moves accordingly.
+        # This is useful when you do appear_then_click(...) on an movable content, click area is auto moved.
+        self.button: Area = Area(button) if button is not None else area
+
+        # A match function that receives image and returns MatchResult
+        # function will be patched onto match(), default to Template.match_template_luma_color
         if match is None:
             self.match = self.DEFAULT_MATCH
         else:
             self.match = match
+
+        # Template matching similarity, 0 to 1, bigger for more similar
+        # result similarity > 0.85 is considered matched
         self.similarity = similarity
+        # Average color matching threshold, 0 to 255, smaller for more similar
+        # Average color difference < 30 considered matched
         self.colordiff = colordiff
 
-        # will be set at runtime
-        # from mod root to template file
+        # from mod root to template file, will be set at runtime
         self.file = file
 
     def __str__(self):
