@@ -32,6 +32,7 @@
 
   let editValue = $state(name);
   let textareaElement: HTMLTextAreaElement | null = $state(null);
+  let gridcellElement: HTMLDivElement | null = $state(null);
   let isComposing = $state(false);
 
   // Focus and select text when entering rename mode
@@ -213,6 +214,7 @@
       handleRename?.(name, trimmedValue);
     }
     resourceSelection.stopRenaming();
+    gridcellElement?.focus();
   }
 
   /**
@@ -221,6 +223,7 @@
   function cancelRename() {
     editValue = name;
     resourceSelection.stopRenaming();
+    gridcellElement?.focus();
   }
 
   /**
@@ -234,6 +237,7 @@
 <div
   role="gridcell"
   tabindex="-1"
+  bind:this={gridcellElement}
   onclick={mergedOnClick}
   ondblclick={mergedOnDoubleClick}
   onmousedown={mergedOnMouseDown}
