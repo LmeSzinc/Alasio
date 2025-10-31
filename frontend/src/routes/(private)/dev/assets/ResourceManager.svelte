@@ -25,6 +25,8 @@
   } = $props();
 
   const pathRpc = topicClient.rpc();
+  const renameRpc = topicClient.rpc();
+
   function onNavigate(path: string) {
     pathRpc.call("set_path", { path: path });
   }
@@ -66,10 +68,20 @@
   }
 
   /**
+   * Handle folder rename
+   */
+  function handleFolderRename(oldName: string, newName: string): void {
+    renameRpc.call("rename_folder", {
+      old_name: oldName,
+      new_name: newName,
+    });
+  }
+
+  /**
    * Handles resource file selection logic using the global resourceSelection state.
    */
   function handleResourceSelect(resource: ResourceItem, event: MouseEvent): void {
-    const item: ResourceSelectionItem = { type: "resource" as const, name: resource.name };
+    const item: ResourceSelectionItem = { type: "resource" as const, name: resource.displayName };
 
     if (event.shiftKey) {
       resourceSelection.selectRange(allItems, item);
@@ -82,7 +94,17 @@
 
   function handleResourceOpen(resource: ResourceItem): void {
     // TODO: Implement resource open logic
-    console.log("Open resource:", resource.name);
+    console.log("Open resource:", resource.displayName);
+  }
+
+  /**
+   * Handle resource rename
+   */
+  function handleResourceRename(oldName: string, newName: string): void {
+    renameRpc.call("rename_resource", {
+      old_name: oldName,
+      new_name: newName,
+    });
   }
 
   let containerRef: HTMLDivElement | null = $state(null);
@@ -109,6 +131,37 @@
     if (event.key === "Escape") {
       event.preventDefault();
       resourceSelection.clear();
+    }
+  }
+
+  function handleItemKeyDown(item: ResourceSelectionItem, event: KeyboardEvent): void {
+    console.log("Item keydown:", event.key, item);
+    // Don't handle if we're currently renaming
+    if (resourceSelection.renamingItem) {
+      return;
+    }
+    // F2: Start renaming if this item is selected
+    if (event.key === "F2") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (resourceSelection.isSelected(item)) {
+        resourceSelection.startRenaming(item);
+      }
+      return;
+    }
+    // Enter: Open the item
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (item.type === "folder") {
+        handleFolderOpen(item.name);
+      } else {
+        const resource = resourceList.find((r) => r.displayName === item.name);
+        if (resource) {
+          handleResourceOpen(resource);
+        }
+      }
+      return;
     }
   }
 
@@ -179,33 +232,39 @@
                 aria-label="Resource list"
               >
                 {#each folders as folderName}
+                  {@const item = { type: "folder" as const, name: folderName }}
                   <div
                     role="gridcell"
                     tabindex="0"
-                    oncontextmenu={(e) => handleContextMenu({ type: "folder", name: folderName }, e)}
+                    oncontextmenu={(e) => handleContextMenu(item, e)}
+                    onkeydown={(e) => handleItemKeyDown(item, e)}
                   >
                     <ResourceFolder
                       name={folderName}
                       selected={resourceSelection.isSelected({ type: "folder", name: folderName })}
                       handleSelect={(e) => handleFolderSelect(folderName, e)}
                       handleOpen={() => handleFolderOpen(folderName)}
+                      handleRename={handleFolderRename}
                     />
                   </div>
                 {/each}
 
                 {#each resourceList as resource}
+                  {@const item = { type: "resource" as const, name: resource.displayName }}
                   <div
                     role="gridcell"
                     tabindex="0"
-                    oncontextmenu={(e) => handleContextMenu({ type: "resource", name: resource.name }, e)}
+                    oncontextmenu={(e) => handleContextMenu(item, e)}
+                    onkeydown={(e) => handleItemKeyDown(item, e)}
                   >
                     <ResourceFile
                       {mod_name}
                       {resource}
                       currentPath={path}
-                      selected={resourceSelection.isSelected({ type: "resource", name: resource.name })}
+                      selected={resourceSelection.isSelected({ type: "resource", name: resource.displayName })}
                       handleSelect={(e) => handleResourceSelect(resource, e)}
                       handleOpen={() => handleResourceOpen(resource)}
+                      handleRename={handleResourceRename}
                     />
                   </div>
                 {/each}

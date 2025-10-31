@@ -11,7 +11,6 @@
   const topicClient = useTopic<FolderResponse>("DevAssetsManager");
   const modRpc = topicClient.rpc();
   const pathRpc = topicClient.rpc();
-  $inspect(topicClient.data)
 
   const mod_name = $derived(topicClient.data?.mod_name || "");
   const path = $derived(topicClient.data?.path || "");

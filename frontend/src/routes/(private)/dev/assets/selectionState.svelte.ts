@@ -6,6 +6,8 @@
 export class SelectionState<T> {
   selectedItems = $state<T[]>([]);
   lastSelected = $state<T | null>(null);
+  renamingItem = $state<T | null>(null);
+  private renamingStartTime = 0;
 
   private getKey: (item: T) => string | number;
 
@@ -36,6 +38,7 @@ export class SelectionState<T> {
       this.selectedItems.push(item);
     }
     this.lastSelected = item;
+    this.renamingItem = null; // Clear renaming when selection changes
   }
 
   /**
@@ -44,6 +47,7 @@ export class SelectionState<T> {
   select(item: T): void {
     this.selectedItems = [item];
     this.lastSelected = item;
+    this.renamingItem = null; // Clear renaming when selection changes
   }
 
   /**
@@ -72,6 +76,7 @@ export class SelectionState<T> {
     );
     this.selectedItems = [...currentSelection, ...rangeItems];
     this.lastSelected = targetItem;
+    this.renamingItem = null; // Clear renaming when selection changes
   }
 
   /**
@@ -82,11 +87,47 @@ export class SelectionState<T> {
   }
 
   /**
+   * Checks if a specific item is currently being renamed.
+   */
+  isRenaming(item: T): boolean {
+    if (!this.renamingItem) return false;
+    return this.isSameItem(this.renamingItem, item);
+  }
+
+  /**
    * Clears all selections.
    */
   clear(): void {
     this.selectedItems = [];
     this.lastSelected = null;
+    this.renamingItem = null;
+  }
+
+  /**
+   * Start renaming a specific item (only if exactly one item is selected).
+   */
+  startRenaming(item: T): void {
+    if (this.count === 1 && this.isSelected(item)) {
+      this.renamingItem = item;
+      this.renamingStartTime = Date.now();
+    }
+  }
+
+  /**
+   * Check if we're in the initialization period (just started renaming).
+   * Used to ignore blur events that happen immediately after starting rename.
+   */
+  isRenamingInitializing(): boolean {
+    if (!this.renamingItem) return false;
+    return Date.now() - this.renamingStartTime < 200; // 200ms grace period
+  }
+
+  /**
+   * Stop renaming mode.
+   */
+  stopRenaming(): void {
+    this.renamingItem = null;
+    this.renamingStartTime = 0;
   }
 
   /**

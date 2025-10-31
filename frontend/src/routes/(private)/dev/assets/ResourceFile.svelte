@@ -12,6 +12,7 @@
     selected,
     handleSelect,
     handleOpen,
+    handleRename,
     class: className,
   }: {
     resource: ResourceItem;
@@ -20,6 +21,7 @@
     selected?: boolean;
     handleSelect?: (event: MouseEvent) => void;
     handleOpen?: () => void;
+    handleRename?: (oldName: string, newName: string) => void;
     class?: string;
   } = $props();
 
@@ -34,7 +36,15 @@
   });
 </script>
 
-<ResourceDisplay name={resource.displayName} {selected} {handleSelect} {handleOpen} class={className}>
+<ResourceDisplay
+  name={resource.displayName}
+  itemType="resource"
+  {selected}
+  {handleSelect}
+  {handleOpen}
+  {handleRename}
+  class={className}
+>
   {#snippet content()}
     {#if resource.status !== "not_downloaded" && imageUrl}
       <Image src={imageUrl} alt={resource.displayName} rootMargin="0px" />

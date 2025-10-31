@@ -8,17 +8,19 @@
     selected,
     handleSelect,
     handleOpen,
+    handleRename,
     class: className,
   }: {
     name: string;
     selected?: boolean;
     handleSelect?: (event: MouseEvent) => void;
     handleOpen?: () => void;
+    handleRename?: (oldName: string, newName: string) => void;
     class?: string;
   } = $props();
 </script>
 
-<ResourceDisplay {name} {selected} {handleSelect} {handleOpen} class={className}>
+<ResourceDisplay {name} itemType="folder" {selected} {handleSelect} {handleOpen} {handleRename} class={className}>
   {#snippet content()}
     <div class="absolute inset-0 flex flex-col items-center justify-center">
       <Folder

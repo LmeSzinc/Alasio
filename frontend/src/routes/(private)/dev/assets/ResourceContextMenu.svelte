@@ -1,13 +1,13 @@
 <script lang="ts">
   import {
-      AlertDialog,
-      AlertDialogAction,
-      AlertDialogCancel,
-      AlertDialogContent,
-      AlertDialogDescription,
-      AlertDialogFooter,
-      AlertDialogHeader,
-      AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
   } from "$lib/components/ui/alert-dialog";
   import * as ContextMenuPrimitive from "$lib/components/ui/context-menu";
   import { Input } from "$lib/components/ui/input";
@@ -31,7 +31,6 @@
   } = $props();
 
   const deleteRpc = topicClient.rpc();
-  const renameRpc = topicClient.rpc();
   const trackRpc = topicClient.rpc();
   const untrackRpc = topicClient.rpc();
   const resourceToAssetRpc = topicClient.rpc();
@@ -41,9 +40,7 @@
   const isSingleSelection = $derived(resourceSelection.count === 1);
 
   let showDeleteDialog = $state(false);
-  let showRenameDialog = $state(false);
   let showCreateFolderDialog = $state(false);
-  let newName = $state("");
   let folderName = $state("");
   let contextMenuOpen = $state(false);
 
@@ -80,30 +77,15 @@
     }
   }
 
-  function openRenameDialog(): void {
+  /**
+   * Start inline renaming instead of showing a dialog
+   */
+  function startRename(): void {
     if (isSingleSelection) {
-      newName = resourceSelection.selectedItems[0].name;
-      showRenameDialog = true;
+      const item = resourceSelection.selectedItems[0];
+      resourceSelection.startRenaming(item);
     }
     contextMenuOpen = false;
-  }
-
-  function handleRename(): void {
-    if (!isSingleSelection || !newName.trim()) return;
-
-    const item = resourceSelection.selectedItems[0];
-    if (item.type === "resource") {
-      renameRpc.call("rename_resource", {
-        old_name: item.name,
-        new_name: newName.trim(),
-      });
-    } else {
-      renameRpc.call("rename_folder", {
-        old_name: item.name,
-        new_name: newName.trim(),
-      });
-    }
-    showRenameDialog = false;
   }
 
   function openDeleteDialog(): void {
@@ -167,7 +149,7 @@
     <Separator class="my-1" />
 
     <!-- Rename - only enabled for single selection -->
-    <ContextMenuPrimitive.Item disabled={!isSingleSelection} onclick={openRenameDialog}>
+    <ContextMenuPrimitive.Item disabled={!isSingleSelection} onclick={startRename}>
       <Edit class="mr-2 h-4 w-4" />
       <span>Rename</span>
     </ContextMenuPrimitive.Item>
@@ -251,35 +233,6 @@
         Delete {resourceSelection.count}
         {resourceSelection.count === 1 ? "item" : "items"}
       </AlertDialogAction>
-    </AlertDialogFooter>
-  </AlertDialogContent>
-</AlertDialog>
-
-<!-- Rename Dialog -->
-<AlertDialog bind:open={showRenameDialog}>
-  <AlertDialogContent>
-    <AlertDialogHeader>
-      <AlertDialogTitle>Rename</AlertDialogTitle>
-      <AlertDialogDescription>
-        Enter a new name for {isSingleSelection ? resourceSelection.selectedItems[0]?.name : ""}
-      </AlertDialogDescription>
-    </AlertDialogHeader>
-    <div class="grid gap-4 py-4">
-      <div class="grid gap-2">
-        <Label for="rename-input">Name</Label>
-        <Input
-          id="rename-input"
-          bind:value={newName}
-          placeholder="Enter new name"
-          onkeydown={(e) => {
-            if (e.key === "Enter") handleRename();
-          }}
-        />
-      </div>
-    </div>
-    <AlertDialogFooter>
-      <AlertDialogCancel>Cancel</AlertDialogCancel>
-      <AlertDialogAction onclick={handleRename} disabled={!newName.trim()}>Rename</AlertDialogAction>
     </AlertDialogFooter>
   </AlertDialogContent>
 </AlertDialog>
