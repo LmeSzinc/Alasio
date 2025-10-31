@@ -52,7 +52,7 @@
    */
   function handleFolderSelect(folderName: string, event: MouseEvent): void {
     const item: ResourceSelectionItem = { type: "folder" as const, name: folderName };
-
+    handleItemClick(event);
     if (event.shiftKey) {
       resourceSelection.selectRange(allItems, item);
     } else if (event.ctrlKey || event.metaKey) {
@@ -82,7 +82,7 @@
    */
   function handleResourceSelect(resource: ResourceItem, event: MouseEvent): void {
     const item: ResourceSelectionItem = { type: "resource" as const, name: resource.displayName };
-
+    handleItemClick(event);
     if (event.shiftKey) {
       resourceSelection.selectRange(allItems, item);
     } else if (event.ctrlKey || event.metaKey) {
@@ -185,7 +185,7 @@
    * Handle click on gridcell to ensure it gets focus
    * This is critical for keyboard events to work properly
    */
-  function handleItemClick(item: ResourceSelectionItem, event: MouseEvent): void {
+  function handleItemClick(event: MouseEvent): void {
     // Make sure the gridcell gets focus when clicked
     // Without this, focus might go to inner elements (like images) and keyboard events won't work
     const gridcell = event.currentTarget as HTMLElement;
@@ -271,7 +271,7 @@
                     handleRename={handleFolderRename}
                     oncontextmenu={(e) => handleContextMenu(item, e)}
                     onkeydown={(e) => handleItemKeyDown(item, e)}
-                    onclick={(e) => handleItemClick(item, e)}
+                    onclick={handleItemClick}
                   />
                 {/each}
 
@@ -287,7 +287,7 @@
                     handleRename={handleResourceRename}
                     oncontextmenu={(e) => handleContextMenu(item, e)}
                     onkeydown={(e) => handleItemKeyDown(item, e)}
-                    onclick={(e) => handleItemClick(item, e)}
+                    onclick={handleItemClick}
                   />
                 {/each}
               </div>

@@ -121,7 +121,13 @@
       restProps.onclick(event);
     }
     // Then call internal click handler
-    if (!isRenaming) {
+    if (isRenaming) {
+      // If we are renaming, a click on the component (but not the textarea itself,
+      // because its own click handler stops propagation) should exit rename mode.
+      // We do this by blurring the textarea, which triggers our existing onblur logic.
+      submitRename();
+    } else {
+      // If not renaming, perform the standard selection click.
       handleClick(event);
     }
   };
@@ -188,7 +194,7 @@
       return;
     }
     // If textarea regained focus, ignore this blur
-    if (document.activeElement === textareaElement) {
+    if (event.relatedTarget === textareaElement || event.relatedTarget === gridcellElement) {
       return;
     }
     // Focus has truly left the textarea, submit the rename
@@ -216,10 +222,6 @@
     resourceSelection.stopRenaming();
     gridcellElement?.focus();
   }
-
-  /**
-   * Cancel the rename
-   */
   function cancelRename() {
     editValue = name;
     resourceSelection.stopRenaming();
@@ -227,9 +229,13 @@
   }
 
   /**
-   * Prevent mousedown on textarea from triggering selection
+   * Prevent mousedown on textarea to trigger parent-level handlers
+   * So text can be selected
    */
   function handleTextareaMouseDown(event: MouseEvent) {
+    event.stopPropagation();
+  }
+  function handleTextareaClick(event: MouseEvent) {
     event.stopPropagation();
   }
 </script>
@@ -284,6 +290,7 @@
         oninput={handleTextareaInput}
         onblur={handleTextareaBlur}
         onmousedown={handleTextareaMouseDown}
+        onclick={handleTextareaClick}
         oncompositionstart={handleCompositionStart}
         oncompositionend={handleCompositionEnd}
         class={cn(
