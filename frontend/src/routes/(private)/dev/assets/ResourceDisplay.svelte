@@ -1,36 +1,33 @@
 <script lang="ts">
-  import { cn } from "$lib/utils.js";
   import { Textarea } from "$lib/components/ui/textarea";
-  import { untrack } from "svelte";
+  import { cn } from "$lib/utils.js";
   import type { Snippet } from "svelte";
-  import { resourceSelection } from "./selected.svelte";
+  import { untrack } from "svelte";
+  import type { HTMLAttributes, MouseEventHandler } from "svelte/elements";
+  import { resourceSelection, type ResourceSelectionItem } from "./selected.svelte";
 
   let {
     name,
-    itemType,
+    item,
     content,
     badge,
-    selected,
     handleSelect,
     handleOpen,
     handleRename,
     class: className,
+    ...restProps
   }: {
     name: string;
-    itemType: "resource" | "folder";
+    item: ResourceSelectionItem;
     content?: Snippet;
     badge?: Snippet;
-    selected?: boolean;
     handleSelect?: (event: MouseEvent) => void;
     handleOpen?: () => void;
     handleRename?: (oldName: string, newName: string) => void;
     class?: string;
-  } = $props();
+  } & HTMLAttributes<HTMLDivElement> = $props();
 
-  // Create item object for comparison
-  const item = $derived({ type: itemType, name });
-
-  // Check if this specific item is being renamed
+  const selected = $derived(resourceSelection.isSelected(item));
   const isRenaming = $derived(resourceSelection.isRenaming(item));
 
   let editValue = $state(name);
@@ -48,6 +45,11 @@
       // This prevents the selection from being immediately cleared
       setTimeout(() => {
         if (!textareaElement) return;
+
+        // Auto-resize textarea to fit FULL content before focusing
+        // This ensures the entire text is visible from the start
+        adjustTextareaHeight();
+
         textareaElement.focus();
         // Select filename without extension
         const lastDotIndex = currentValue.lastIndexOf(".");
@@ -57,9 +59,6 @@
           textareaElement.select();
         }
       }, 0);
-
-      // Auto-resize textarea to fit content
-      adjustTextareaHeight();
     } else if (!isRenaming) {
       // Reset when exiting rename mode
       editValue = name;
@@ -70,7 +69,6 @@
   $effect(() => {
     // Track name changes
     name;
-
     // Use untrack to read isRenaming without subscribing
     untrack(() => {
       if (!isRenaming) {
@@ -86,13 +84,11 @@
    */
   function adjustTextareaHeight() {
     if (!textareaElement) return;
-
     // Reset height to auto to get the true scrollHeight
     textareaElement.style.height = "auto";
     // Calculate the proper height based on scrollHeight
     // This ensures all content is visible, not just what fits in the current viewport
     const newHeight = textareaElement.scrollHeight;
-
     // Set the height to show all content
     textareaElement.style.height = newHeight + "px";
   }
@@ -102,7 +98,6 @@
       event.preventDefault();
     }
   }
-
   function handleClick(event: MouseEvent) {
     if (isRenaming) {
       return;
@@ -110,7 +105,6 @@
     event.preventDefault();
     handleSelect?.(event);
   }
-
   function handleDoubleClick(event: MouseEvent) {
     if (isRenaming) {
       return;
@@ -119,13 +113,35 @@
     handleOpen?.();
   }
 
-  /**
-   * Handle keyboard interaction for accessibility.
-   */
-  function handleKeyDown(event: KeyboardEvent) {
-    console.log("Item keydown:", event.key, item);
-    return;
-  }
+  // Merge restProps' onclick with internal handleClick
+  const mergedOnClick: MouseEventHandler<HTMLDivElement> = (event) => {
+    // First call external onclick if exists (e.g., handleItemClick for focus)
+    if (restProps.onclick) {
+      restProps.onclick(event);
+    }
+    // Then call internal click handler
+    if (!isRenaming) {
+      handleClick(event);
+    }
+  };
+  // Merge restProps' ondblclick with internal handleDoubleClick
+  const mergedOnDoubleClick: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (restProps.ondblclick) {
+      restProps.ondblclick(event);
+    }
+    if (!isRenaming) {
+      handleDoubleClick(event);
+    }
+  };
+  // Merge restProps' onmousedown with internal handleMouseDown
+  const mergedOnMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (restProps.onmousedown) {
+      restProps.onmousedown(event);
+    }
+    handleMouseDown(event);
+  };
+  // Extract event handlers from restProps to prevent duplication
+  const { onclick, ondblclick, onmousedown, onkeydown, ...otherRestProps } = restProps;
 
   /**
    * Handle textarea keyboard events
@@ -150,6 +166,7 @@
 
   /**
    * Handle textarea input to auto-resize
+   * This is called on every input event to adjust height as user types
    */
   function handleTextareaInput() {
     adjustTextareaHeight();
@@ -183,7 +200,6 @@
   function handleCompositionStart() {
     isComposing = true;
   }
-
   function handleCompositionEnd() {
     isComposing = false;
   }
@@ -216,12 +232,12 @@
 </script>
 
 <div
-  role="button"
-  tabindex="0"
-  onclick={handleClick}
-  ondblclick={handleDoubleClick}
-  onkeydown={handleKeyDown}
-  onmousedown={handleMouseDown}
+  role="gridcell"
+  tabindex="-1"
+  onclick={mergedOnClick}
+  ondblclick={mergedOnDoubleClick}
+  onmousedown={mergedOnMouseDown}
+  {onkeydown}
   aria-label={name}
   class={cn(
     "group relative aspect-square h-32 w-32",
@@ -231,6 +247,7 @@
     selected ? "border-primary" : "border-transparent",
     className,
   )}
+  {...otherRestProps}
 >
   <!-- Content Area -->
   <div class="relative w-full" style="height: 75%;">
@@ -269,9 +286,10 @@
           "w-full resize-none overflow-hidden",
           // match fontsize of normal display, no transition for faster focus
           "text-card-foreground !font-consolas text-center !text-xs break-all transition-none",
-          "border-primary bg-background border-1",
+          "border-primary bg-background border-2",
           "min-h-0 p-0.5 leading-tight",
         )}
+        style="overflow-wrap: break-word; word-break: break-all;"
       />
     {:else}
       <!-- Normal display -->

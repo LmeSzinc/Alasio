@@ -44,7 +44,7 @@
   // Create a flat list of all items (folders + resources) for range selection.
   const allItems = $derived<ResourceSelectionItem[]>([
     ...folders.map((name) => ({ type: "folder" as const, name })),
-    ...resourceList.map((r) => ({ type: "resource" as const, name: r.name })),
+    ...resourceList.map((r) => ({ type: "resource" as const, name: r.displayName })),
   ]);
 
   /**
@@ -127,15 +127,31 @@
     }
   }
 
-  function handleKeyDown(event: KeyboardEvent): void {
+  /**
+   * Handle keyboard events on the container level (not window level)
+   * This prevents conflicts with other components on the same page
+   */
+  function handleContainerKeyDown(event: KeyboardEvent): void {
+    // Only handle if the container or its children have focus
+    // and we're not currently renaming
+    if (resourceSelection.renamingItem) {
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
+      if (resourceSelection.renamingItem) {
+        resourceSelection.stopRenaming();
+        return;
+      }
       resourceSelection.clear();
     }
   }
 
+  /**
+   * Handle keyboard events for individual items (folders/resources)
+   * This is called from the gridcell div that wraps each item
+   */
   function handleItemKeyDown(item: ResourceSelectionItem, event: KeyboardEvent): void {
-    console.log("Item keydown:", event.key, item);
     // Don't handle if we're currently renaming
     if (resourceSelection.renamingItem) {
       return;
@@ -162,6 +178,19 @@
         }
       }
       return;
+    }
+  }
+
+  /**
+   * Handle click on gridcell to ensure it gets focus
+   * This is critical for keyboard events to work properly
+   */
+  function handleItemClick(item: ResourceSelectionItem, event: MouseEvent): void {
+    // Make sure the gridcell gets focus when clicked
+    // Without this, focus might go to inner elements (like images) and keyboard events won't work
+    const gridcell = event.currentTarget as HTMLElement;
+    if (gridcell && document.activeElement !== gridcell) {
+      gridcell.focus();
     }
   }
 
@@ -204,8 +233,6 @@
   }
 </script>
 
-<svelte:window onkeydown={handleKeyDown} />
-
 <Input type="file" multiple accept="image/*" class="hidden" bind:ref={fileInput} onchange={handleFileChange} />
 
 <div class={cn("bg-background flex flex-col border", className)}>
@@ -228,45 +255,40 @@
                 tabindex="0"
                 onclick={handleBackgroundClick}
                 oncontextmenu={handleBackgroundContextMenu}
-                onkeydown={handleBackgroundKeyDown}
+                onkeydown={(e) => {
+                  handleBackgroundKeyDown(e);
+                  handleContainerKeyDown(e);
+                }}
                 aria-label="Resource list"
               >
                 {#each folders as folderName}
                   {@const item = { type: "folder" as const, name: folderName }}
-                  <div
-                    role="gridcell"
-                    tabindex="0"
+                  <ResourceFolder
+                    name={folderName}
+                    {item}
+                    handleSelect={(e) => handleFolderSelect(folderName, e)}
+                    handleOpen={() => handleFolderOpen(folderName)}
+                    handleRename={handleFolderRename}
                     oncontextmenu={(e) => handleContextMenu(item, e)}
                     onkeydown={(e) => handleItemKeyDown(item, e)}
-                  >
-                    <ResourceFolder
-                      name={folderName}
-                      selected={resourceSelection.isSelected({ type: "folder", name: folderName })}
-                      handleSelect={(e) => handleFolderSelect(folderName, e)}
-                      handleOpen={() => handleFolderOpen(folderName)}
-                      handleRename={handleFolderRename}
-                    />
-                  </div>
+                    onclick={(e) => handleItemClick(item, e)}
+                  />
                 {/each}
 
                 {#each resourceList as resource}
                   {@const item = { type: "resource" as const, name: resource.displayName }}
-                  <div
-                    role="gridcell"
-                    tabindex="0"
+                  <ResourceFile
+                    {mod_name}
+                    resourceItem={resource}
+                    {item}
+                    currentPath={path}
+                    handleSelect={(e) => handleResourceSelect(resource, e)}
+                    handleOpen={() => handleResourceOpen(resource)}
+                    handleRename={handleResourceRename}
                     oncontextmenu={(e) => handleContextMenu(item, e)}
                     onkeydown={(e) => handleItemKeyDown(item, e)}
-                  >
-                    <ResourceFile
-                      {mod_name}
-                      {resource}
-                      currentPath={path}
-                      selected={resourceSelection.isSelected({ type: "resource", name: resource.displayName })}
-                      handleSelect={(e) => handleResourceSelect(resource, e)}
-                      handleOpen={() => handleResourceOpen(resource)}
-                      handleRename={handleResourceRename}
-                    />
-                  </div>
+                    onclick={(e) => handleItemClick(item, e)}
+                  />
                 {/each}
               </div>
             {/if}

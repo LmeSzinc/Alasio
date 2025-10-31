@@ -2,6 +2,7 @@ import { SelectionState } from "./selectionState.svelte";
 
 // --- Type definitions for selection items ---
 
+// Note that in { type: "resource"; name: string } name is resource.displayName
 export type ResourceSelectionItem = { type: "folder"; name: string } | { type: "resource"; name: string };
 
 export type AssetSelectionItem = { type: "asset"; name: string };
