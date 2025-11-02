@@ -44,7 +44,7 @@
   // Create a flat list of all items (folders + resources) for range selection.
   const allItems = $derived<ResourceSelectionItem[]>([
     ...folders.map((name) => ({ type: "folder" as const, name })),
-    ...resourceList.map((r) => ({ type: "resource" as const, name: r.displayName })),
+    ...resourceList.map((r) => ({ type: "resource" as const, name: r.name })),
   ]);
 
   /**
@@ -81,7 +81,7 @@
    * Handles resource file selection logic using the global resourceSelection state.
    */
   function handleResourceSelect(resource: ResourceItem, event: MouseEvent): void {
-    const item: ResourceSelectionItem = { type: "resource" as const, name: resource.displayName };
+    const item: ResourceSelectionItem = { type: "resource" as const, name: resource.name };
     handleItemClick(event);
     if (event.shiftKey) {
       resourceSelection.selectRange(allItems, item);
@@ -249,7 +249,7 @@
               </div>
             {:else}
               <div
-                class="flex h-full w-full flex-1 flex-wrap gap-1 px-4 py-2 outline-none"
+                class="flex h-full w-full flex-1 flex-wrap gap-1 p-1 outline-none"
                 bind:this={containerRef}
                 role="grid"
                 tabindex="0"
@@ -276,7 +276,7 @@
                 {/each}
 
                 {#each resourceList as resource}
-                  {@const item = { type: "resource" as const, name: resource.displayName }}
+                  {@const item = { type: "resource" as const, name: resource.name }}
                   <ResourceFile
                     {mod_name}
                     resourceItem={resource}

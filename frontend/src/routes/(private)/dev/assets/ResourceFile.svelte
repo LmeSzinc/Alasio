@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Image } from "$lib/components/ui/image";
   import * as Tooltip from "$lib/components/ui/tooltip";
-  import { CircleHelp, CloudOff, Unlink } from "@lucide/svelte";
+  import { CircleHelp, CloudOff, Link, Unlink } from "@lucide/svelte";
   import type { HTMLAttributes } from "svelte/elements";
   import ResourceDisplay from "./ResourceDisplay.svelte";
   import type { ResourceItem } from "./types";
@@ -63,8 +63,8 @@
       <Tooltip.Provider>
         <Tooltip.Root>
           <Tooltip.Trigger>
-            <div class="cursor-help rounded bg-yellow-500/90 p-1 text-white shadow-sm">
-              <CloudOff class="h-4 w-4" />
+            <div class="bg-card cursor-help rounded p-1 shadow-sm">
+              <CloudOff class="h-3 w-3 text-yellow-500" />
             </div>
           </Tooltip.Trigger>
           <Tooltip.Content>
@@ -76,8 +76,8 @@
       <Tooltip.Provider>
         <Tooltip.Root>
           <Tooltip.Trigger>
-            <div class="cursor-help rounded bg-orange-500/90 p-1 text-white shadow-sm">
-              <Unlink class="h-4 w-4" />
+            <div class="bg-card cursor-help rounded p-1 shadow-sm">
+              <Unlink class="h-3 w-3 text-orange-500" />
             </div>
           </Tooltip.Trigger>
           <Tooltip.Content>
@@ -86,13 +86,24 @@
         </Tooltip.Root>
       </Tooltip.Provider>
     {:else if resourceItem.status === "tracked"}
-      <!-- No badge for tracked files -->
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <div class="bg-card cursor-help rounded p-1 shadow-sm">
+              <Link class="h-3 w-3 text-green-500" />
+            </div>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>Tracked</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     {:else}
       <Tooltip.Provider>
         <Tooltip.Root>
           <Tooltip.Trigger>
-            <div class="cursor-help rounded bg-gray-500/90 p-1 text-white shadow-sm">
-              <CircleHelp class="h-4 w-4" />
+            <div class="bg-card cursor-help rounded p-1 shadow-sm">
+              <CircleHelp class="h-3 w-3 text-gray-500" />
             </div>
           </Tooltip.Trigger>
           <Tooltip.Content>

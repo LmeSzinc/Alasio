@@ -250,7 +250,7 @@
   {onkeydown}
   aria-label={name}
   class={cn(
-    "group relative aspect-square h-32 w-32",
+    "group relative aspect-square h-27 w-27",
     "cursor-pointer overflow-hidden outline-none",
     "hover:bg-card rounded-md hover:shadow-md",
     "flex flex-col border-2",
@@ -273,7 +273,7 @@
 
     <!-- Badge Area (top-right) -->
     {#if badge}
-      <div class="absolute top-2 right-2">
+      <div class="absolute top-1 right-1">
         {@render badge()}
       </div>
     {/if}

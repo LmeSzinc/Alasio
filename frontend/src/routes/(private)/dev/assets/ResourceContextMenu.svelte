@@ -15,7 +15,7 @@
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { Separator } from "$lib/components/ui/separator";
   import type { TopicLifespan } from "$lib/ws";
-  import { Edit, File, FileCheck, FileSymlink, FileX, Folder, FolderPlus, Trash2, Upload } from "@lucide/svelte";
+  import { Edit, File, FileSymlink, Folder, FolderPlus, Link, Trash2, Unlink, Upload } from "@lucide/svelte";
   import type { Snippet } from "svelte";
   import { resourceSelection } from "./selected.svelte";
   import type { FolderResponse } from "./types";
@@ -156,30 +156,26 @@
 
     <!-- Track/Untrack - only for resources, disabled for folders or mixed selection -->
     <ContextMenuPrimitive.Item disabled={!hasResources || hasFolders} onclick={handleTrack}>
-      <FileCheck class="mr-2 h-4 w-4" />
+      <Link class="mr-2 h-4 w-4 text-green-500" />
       <span>Track Resource</span>
     </ContextMenuPrimitive.Item>
 
     <ContextMenuPrimitive.Item disabled={!hasResources || hasFolders} onclick={handleUntrack}>
-      <FileX class="mr-2 h-4 w-4" />
+      <Unlink class="mr-2 h-4 w-4 text-orange-500" />
       <span>Untrack Resource</span>
     </ContextMenuPrimitive.Item>
 
     <!-- Resource to Asset - only for resources -->
     <ContextMenuPrimitive.Item disabled={!hasResources || hasFolders} onclick={handleResourceToAsset}>
-      <FileSymlink class="mr-2 h-4 w-4" />
+      <FileSymlink class="mr-2 h-4 w-4 text-primary" />
       <span>Resource to Asset</span>
     </ContextMenuPrimitive.Item>
 
     <Separator class="my-1" />
 
     <!-- Delete -->
-    <ContextMenuPrimitive.Item
-      disabled={!hasSelection}
-      onclick={openDeleteDialog}
-      class="text-destructive focus:text-destructive"
-    >
-      <Trash2 class="mr-2 h-4 w-4" />
+    <ContextMenuPrimitive.Item disabled={!hasSelection} onclick={openDeleteDialog}>
+      <Trash2 class="text-destructive mr-2 h-4 w-4" />
       <span>Delete</span>
     </ContextMenuPrimitive.Item>
   </ContextMenuPrimitive.Content>

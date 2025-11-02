@@ -44,7 +44,7 @@
         <button
           onclick={(e) => handleAssetSelect(asset.name, e)}
           class={cn(
-            "group flex w-full cursor-pointer items-center justify-between rounded-md p-1.5",
+            "group flex w-full cursor-pointer items-center justify-between rounded-md p-1",
             "cursor-pointer overflow-hidden rounded-md outline-none shadow-sm",
             "text-card-foreground font-consolas text-xs",
             selected ? "bg-primary text-white" : "bg-card",
@@ -52,7 +52,7 @@
         >
           <span
             class={cn(
-              "line-clamp-2 flex-1 px-2 text-left break-all",
+              "flex-1 px-2 text-left break-all",
               selected ? "text-white" : "group-hover:text-primary",
             )}
             >{asset.name}
