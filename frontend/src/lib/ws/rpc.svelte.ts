@@ -1,4 +1,5 @@
 import { untrack } from "svelte";
+import { toast } from "svelte-sonner";
 import { websocketClient } from "./client.svelte";
 import type { RequestEvent } from "./event";
 
@@ -117,6 +118,7 @@ export function createRpc(
       onError: (errMessage: string) => {
         cleanupAndReset();
         errorMsg = errMessage;
+        toast.error(`RPC call error on topic="${topic}", func="${func}"`, { description: errorMsg });
       },
     });
 
@@ -125,6 +127,7 @@ export function createRpc(
       if (context.hasRpcCall(id)) {
         cleanupAndReset();
         errorMsg = "RPC call timeout";
+        toast.error(`RPC call timeout on topic="${topic}", func="${func}"`, { description: errorMsg });
       }
     }, TIMEOUT);
 
