@@ -518,21 +518,40 @@ class PathStr(str):
         """
         return atomic_rmtree_empty(self)
 
-    def atomic_replace(self, replace_to):
+    def atomic_replace(self, path_to):
         """
         Replace file or directory
 
         Args:
-            replace_to (str): Target path
+            path_to (str): Target path
 
         Returns:
-            PathStr: Self
+            PathStr: target PathStr
 
         Raises:
             PermissionError: (Windows only) If another process is still reading the file and all retries failed
+            FileNotFoundError:
         """
-        atomic_replace(self, replace_to)
-        return self
+        atomic_replace(self, path_to)
+        return PathStr.new(path_to)
+
+    def atomic_rename(self, path_to):
+        """
+        Rename file or directory
+
+        Args:
+            path_to (str): Target path
+
+        Returns:
+            PathStr: target PathStr
+
+        Raises:
+            PermissionError: (Windows only) If another process is still reading the file and all retries failed
+            FileNotFoundError:
+            FileExistError:
+        """
+        atomic_rename(self, path_to)
+        return PathStr.new(path_to)
 
     def atomic_failure_cleanup(self, recursive=False):
         """

@@ -5,7 +5,7 @@ import time
 
 IS_WINDOWS = os.name == 'nt'
 # Max attempt if another process is reading/writing, effective only on Windows
-WINDOWS_MAX_ATTEMPT = 5
+WINDOWS_MAX_ATTEMPT = 8
 # Base time to wait between retries (seconds)
 WINDOWS_RETRY_DELAY = 0.05
 # Default chunk size to 256KB
@@ -84,7 +84,14 @@ def windows_attempt_delay(attempt):
     Returns:
         float: Seconds to wait
     """
-    return 2 ** attempt * WINDOWS_RETRY_DELAY
+    # large attempt causes heavy power calculation
+    if attempt > 10:
+        attempt = 10
+    delay = 2 ** attempt * WINDOWS_RETRY_DELAY
+    # wait 1s at max
+    if delay > 1:
+        delay = 1
+    return delay
 
 
 def replace_tmp(tmp, file):
@@ -143,17 +150,17 @@ def replace_tmp(tmp, file):
         raise last_error from None
 
 
-def atomic_replace(replace_from, replace_to):
+def atomic_replace(path_from, path_to):
     """
     Replace file or directory
 
     Args:
-        replace_from (str): Source file/directory path
-        replace_to (str): Target file/directory path
+        path_from (str): Source file/directory path
+        path_to (str): Target file/directory path
 
     Raises:
         PermissionError: (Windows only) If another process is still reading the file and all retries failed
-        FileNotFoundError: If source file doesn't exist
+        FileNotFoundError:
     """
     if IS_WINDOWS:
         # PermissionError on Windows if another process is reading
@@ -161,7 +168,7 @@ def atomic_replace(replace_from, replace_to):
         for attempt in range(WINDOWS_MAX_ATTEMPT):
             try:
                 # Atomic operation
-                os.replace(replace_from, replace_to)
+                os.replace(path_from, path_to)
                 # success
                 return
             except PermissionError as e:
@@ -178,7 +185,46 @@ def atomic_replace(replace_from, replace_to):
             raise last_error from None
     else:
         # Linux and Mac
-        os.replace(replace_from, replace_to)
+        os.replace(path_from, path_to)
+
+
+def atomic_rename(path_from, path_to):
+    """
+    Replace file or directory
+
+    Args:
+        path_from (str): Source file/directory path
+        path_to (str): Target file/directory path
+
+    Raises:
+        PermissionError: (Windows only) If another process is still reading the file and all retries failed
+        FileNotFoundError:
+        FileExistError:
+    """
+    if IS_WINDOWS:
+        # PermissionError on Windows if another process is reading
+        last_error = None
+        for attempt in range(WINDOWS_MAX_ATTEMPT):
+            try:
+                # Atomic operation
+                os.rename(path_from, path_to)
+                # success
+                return
+            except PermissionError as e:
+                last_error = e
+                delay = windows_attempt_delay(attempt)
+                time.sleep(delay)
+                continue
+            except (FileNotFoundError, FileExistsError):
+                raise
+            except Exception as e:
+                last_error = e
+                break
+        if last_error is not None:
+            raise last_error from None
+    else:
+        # Linux and Mac
+        os.rename(path_from, path_to)
 
 
 def file_write(file, data):
