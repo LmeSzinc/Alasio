@@ -38,9 +38,9 @@
       const base64Content = base64Data.split(",")[1] || base64Data;
 
       // Call RPC with file data
-      rpc.call("add_resource", {
-        filename: file.name,
-        content: base64Content,
+      rpc.call("resource_add_base64", {
+        source: file.name,
+        data: base64Content,
       });
     };
 

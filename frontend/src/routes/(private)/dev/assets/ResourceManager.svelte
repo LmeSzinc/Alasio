@@ -4,9 +4,9 @@
   import { FileZone, UploadProgress, UploadState } from "$lib/components/upload";
   import { cn } from "$lib/utils";
   import type { TopicLifespan } from "$lib/ws";
+  import ResourceContextMenu from "./ResourceContextMenu.svelte";
   import ResourceFile from "./ResourceFile.svelte";
   import ResourceFolder from "./ResourceFolder.svelte";
-  import ResourceContextMenu from "./ResourceContextMenu.svelte";
   import { resourceSelection, type ResourceSelectionItem } from "./selected.svelte";
   import type { FolderResponse, ResourceItem } from "./types";
 
@@ -52,7 +52,6 @@
    */
   function handleFolderSelect(folderName: string, event: MouseEvent): void {
     const item: ResourceSelectionItem = { type: "folder" as const, name: folderName };
-    handleItemClick(event);
     if (event.shiftKey) {
       resourceSelection.selectRange(allItems, item);
     } else if (event.ctrlKey || event.metaKey) {
@@ -82,7 +81,6 @@
    */
   function handleResourceSelect(resource: ResourceItem, event: MouseEvent): void {
     const item: ResourceSelectionItem = { type: "resource" as const, name: resource.name };
-    handleItemClick(event);
     if (event.shiftKey) {
       resourceSelection.selectRange(allItems, item);
     } else if (event.ctrlKey || event.metaKey) {
@@ -182,19 +180,6 @@
   }
 
   /**
-   * Handle click on gridcell to ensure it gets focus
-   * This is critical for keyboard events to work properly
-   */
-  function handleItemClick(event: MouseEvent): void {
-    // Make sure the gridcell gets focus when clicked
-    // Without this, focus might go to inner elements (like images) and keyboard events won't work
-    const gridcell = event.currentTarget as HTMLElement;
-    if (gridcell && document.activeElement !== gridcell) {
-      gridcell.focus();
-    }
-  }
-
-  /**
    * Handles context menu (right-click) on items.
    * If the right-clicked item is not in the current selection, select only that item.
    * This mimics standard file explorer behavior.
@@ -271,7 +256,6 @@
                     handleRename={handleFolderRename}
                     oncontextmenu={(e) => handleContextMenu(item, e)}
                     onkeydown={(e) => handleItemKeyDown(item, e)}
-                    onclick={handleItemClick}
                   />
                 {/each}
 
@@ -287,7 +271,6 @@
                     handleRename={handleResourceRename}
                     oncontextmenu={(e) => handleContextMenu(item, e)}
                     onkeydown={(e) => handleItemKeyDown(item, e)}
-                    onclick={handleItemClick}
                   />
                 {/each}
               </div>

@@ -55,7 +55,6 @@
   // Determine what types are selected
   const hasResources = $derived(selectedResources.length > 0);
   const hasFolders = $derived(selectedFolders.length > 0);
-  const hasMixedSelection = $derived(hasResources && hasFolders);
 
   function handleUpload(): void {
     contextMenuOpen = false;
@@ -72,7 +71,7 @@
 
   function handleCreateFolder(): void {
     if (folderName.trim()) {
-      createFolderRpc.call("create_folder", { name: folderName.trim() });
+      createFolderRpc.call("folder_add", { name: folderName.trim() });
       showCreateFolderDialog = false;
     }
   }
@@ -95,10 +94,10 @@
 
   function handleDelete(): void {
     if (selectedResources.length > 0) {
-      deleteRpc.call("delete_resource", { names: selectedResources });
+      deleteRpc.call("resource_del", { names: selectedResources });
     }
     if (selectedFolders.length > 0) {
-      deleteRpc.call("delete_folder", { names: selectedFolders });
+      deleteRpc.call("folder_del", { names: selectedFolders });
     }
     resourceSelection.clear();
     showDeleteDialog = false;

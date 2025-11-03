@@ -72,9 +72,9 @@
 </script>
 
 <div class={cn("flex h-full w-full flex-row border-t", className)}>
-  <!-- Left Column: Asset List -->
+  <!-- Left Column: Asset List with Grid View -->
   <div class="w-1/3 border-r">
-    <AssetList {assetList} {mod_name} />
+    <AssetList {assetList} {mod_name} {topicClient} />
   </div>
 
   <!-- Right Column: Template List -->
