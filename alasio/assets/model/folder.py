@@ -1,9 +1,10 @@
+import base64
 from typing import Dict, List, Literal
 
 from msgspec import Struct, field
 
 from alasio.assets.model.generator import AssetGenerator
-from alasio.assets.model.name import to_asset_name, validate_resource_name
+from alasio.assets.model.name import to_asset_name, validate_asset_name, validate_resource_name
 from alasio.assets.model.parser import MetaAsset, MetaTemplate
 from alasio.assets.model.resource import ResourceManager
 from alasio.base.image.color import get_color
@@ -17,6 +18,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_replace
 from alasio.ext.path.calc import get_name, get_rootstem, get_suffix
 from alasio.ext.path.iter import iter_entry
+from alasio.ext.path.validate import validate_filename
 from alasio.logger import logger
 
 
@@ -141,124 +143,195 @@ class AssetFolder(AssetGenerator, ResourceManager):
     def getdata(self):
         return self.data
 
-    def resource_add_base64(self, file, data):
+    def resource_add_base64(self, source, data):
         """
         Add resource file from base64 data
 
         Args:
-            file (str): Resource file, with "~" and file extension, e.g. ~BATTLE_PREPARATION.webp
+            source (str): Resource file, with file extension, e.g. ~BATTLE_PREPARATION.webp
+                Accept filename with and without "~", as "~" prefix will be added
             data (str): png/jpg/webp/gif file data in base64
-        """
-        pass
 
-    def resource_del_force(self, file):
+        Raises:
+            ValueError: If source invalid or data invalid
+        """
+        validate_filename(source)
+        source = f'~{source.lstrip("~")}'
+
+        source_file = self.folder / source
+        logger.info(f'Resource track: {source_file}')
+
+        try:
+            # Decode the base64 string to bytes
+            content = base64.b64decode(data)
+        except (ValueError, TypeError) as e:
+            raise ValueError(f'Invalid base64 data for {source}, {e}')
+
+        # add resource does not mean track it
+        name = self.resource_add_bytes(source, content, track=False)
+        cached_property.pop(self, 'data')
+        return name
+
+    def resource_del_force(self, source):
         """
         Delete a resource without tracking its usage
 
         Args:
-            file (str): Resource file, with "~" and file extension, e.g. ~BATTLE_PREPARATION.webp
+            source (str | list[str]): Resource file(s), with "~" and file extension, e.g. ~BATTLE_PREPARATION.webp
         """
-        pass
+        sources = source if isinstance(source, list) else [source]
+
+        for src in sources:
+            validate_resource_name(src)
+
+            source_file = self.folder / src
+            logger.info(f'Resource del force: {source_file}')
+
+            # resource_untrack_force will write resources and cleanup cache
+            self.resource_untrack_force(src)
+            source_file.atomic_remove()
+
+        cached_property.pop(self, 'data')
 
     def resource_track(self, source):
         """
         Args:
-            source (str): Source filename, e.g. "~BATTLE_PREPARATION.png"
+            source (str | list[str]): Source filename(s) with "~" and file extension, e.g. "~BATTLE_PREPARATION.png"
 
         Returns:
-            str: Resource name added, e.g. ~BATTLE_PREPARATION.webp
+            str | list[str]: Resource name(s) added, e.g. ~BATTLE_PREPARATION.webp
         """
-        validate_resource_name(source)
+        sources = source if isinstance(source, list) else [source]
+        is_list = isinstance(source, list)
+        result = []
 
-        source_file = self.folder / source
-        try:
-            content = atomic_read_bytes(source_file)
-        except FileNotFoundError as e:
-            raise ValueError(f'No such resource {source}, {e}')
-        name = self.resource_add_bytes(source, content)
-        if source != name:
-            source_file.atomic_remove()
+        for src in sources:
+            validate_resource_name(src)
+
+            source_file = self.folder / src
+            logger.info(f'Resource track: {source_file}')
+            try:
+                content = atomic_read_bytes(source_file)
+            except FileNotFoundError as e:
+                raise ValueError(f'No such resource {src}, {e}')
+            name = self.resource_add_bytes(src, content)
+            if src != name:
+                source_file.atomic_remove()
+            result.append(name)
+
         cached_property.pop(self, 'data')
-        return name
+        return result if is_list else result[0]
 
     def resource_untrack_force(self, source):
         """
         Args:
-            source (str): Source filename, e.g. "~BATTLE_PREPARATION.png"
+            source (str | list[str]): Source filename(s) with "~" and file extension, e.g. "~BATTLE_PREPARATION.png"
         """
-        validate_resource_name(source)
-        row = self.resources.pop(source, None)
-        if row is None:
-            return
+        sources = source if isinstance(source, list) else [source]
+
+        for src in sources:
+            validate_resource_name(src)
+            row = self.resources.pop(src, None)
+            if row is None:
+                continue
+            logger.info(f'Resource track force: {self.folder / row.name}')
+
         self.resources_write()
         cached_property.pop(self, 'data')
 
     def resource_to_asset(self, source, override=False):
         """
         Args:
-            source (str): Source filename, e.g. "~BATTLE_PREPARATION.png"
+            source (str | list[str]): Source filename(s) with "~" and file extension, e.g. "~BATTLE_PREPARATION.png"
             override (bool): True to override existing asset, false to create with random suffix
         """
-        source = self.resource_track(source)
-        source_file = self.folder / source
-        try:
-            image = image_load(source_file)
-        except FileNotFoundError as e:
-            raise ValueError(f'No such resource {source}, {e}')
-        except ImageBroken as e:
-            raise ValueError(f'Resource file broken {source}, {e}')
-        area = get_bbox(image)
-        color = RGB(get_color(image, area)).as_uint8()
+        sources = source if isinstance(source, list) else [source]
 
-        # get name
-        name = to_asset_name(get_rootstem(source))
-        assets = self.assets
-        if not override and name in assets:
-            name = f'{name}_{random_id()}'
-        # create info
-        template = MetaTemplate(area=area, color=color, source=source)
-        asset = MetaAsset(path=self.path, name=name, templates=(template,))
-        self._validate_asset(asset)
-        logger.info(f'New asset: {asset}')
+        # resource_track already validates source
+        for src in sources:
+            src = self.resource_track(src)
+            source_file = self.folder / src
+            logger.info(f'Resource to asset: {source_file}')
+            try:
+                image = image_load(source_file)
+            except FileNotFoundError as e:
+                raise ValueError(f'No such resource {src}, {e}')
+            except ImageBroken as e:
+                raise ValueError(f'Resource file broken {src}, {e}')
+            area = get_bbox(image)
+            color = RGB(get_color(image, area)).as_uint8()
 
-        # create template file
-        if Area.from_size(image_size(image)) == area:
-            # not a mask image
-            self._template_generate(template, image=image)
-        else:
-            # save cropped mask image
-            im = crop(image, area, copy=False)
-            self._template_generate(template, image=im)
+            # get name
+            name = to_asset_name(get_rootstem(src))
+            assets = self.assets
+            if not override and name in assets:
+                name = f'{name}_{random_id()}'
+            # create info
+            template = MetaTemplate(area=area, color=color, source=src)
+            asset = MetaAsset(path=self.path, name=name, templates=(template,))
+            self._validate_asset(asset)
+            logger.info(f'New asset: {asset}')
 
-        assets[asset.name] = asset
+            # create template file
+            if Area.from_size(image_size(image)) == area:
+                # not a mask image
+                self._template_generate(template, image=image)
+            else:
+                # save cropped mask image
+                im = crop(image, area, copy=False)
+                self._template_generate(template, image=im)
+
+            assets[asset.name] = asset
+
         self.asset_codegen()
         cached_property.pop(self, 'data')
         return True
+
+    def asset_add(self, asset_name):
+        """
+        Create an empty asset without templates
+        """
+        validate_asset_name(asset_name)
+        logger.info(f'Asset add: {asset_name}')
+
+        asset = MetaAsset(path=self.path, name=asset_name, templates=())
+        self._validate_asset(asset)
+        logger.info(f'New asset: {asset}')
+
+        self.assets[asset.name] = asset
+        self.asset_codegen()
+        cached_property.pop(self, 'data')
 
     def asset_del(self, asset_name):
         """
         Delete an asset and all its templates
 
         Args:
-            asset_name (str): Name of the asset to delete
+            asset_name (str | list[str]): Name(s) of the asset(s) to delete
 
         Returns:
-            bool: True if asset was deleted
+            bool: True if asset(s) were deleted
         """
+        asset_names = asset_name if isinstance(asset_name, list) else [asset_name]
         assets = self.assets
-        if asset_name not in assets:
-            return False
+        deleted_any = False
 
-        logger.info(f'Deleted asset: {asset_name}')
-        asset = assets.pop(asset_name, None)
-        # Remove all template files
-        if asset:
+        for name in asset_names:
+            validate_asset_name(name)
+            asset = assets.pop(name, None)
+            if not asset:
+                continue
+
+            logger.info(f'Asset del: {name}')
+            # Remove all template files
             for t in asset.templates:
                 self._template_remove(t)
+            deleted_any = True
 
-        self.asset_codegen()
-        cached_property.pop(self, 'data')
-        return True
+        if deleted_any:
+            self.asset_codegen()
+            cached_property.pop(self, 'data')
+        return deleted_any
 
 
 if __name__ == '__main__':

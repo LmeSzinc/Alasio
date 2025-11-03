@@ -89,13 +89,14 @@ class ResourceManager(AssetFolderBase):
         else:
             atomic_remove(file)
 
-    def resource_add_bytes(self, filename: str, data: bytes):
+    def resource_add_bytes(self, filename: str, data: bytes, track=True):
         """
         Add resource from bytes data
 
         Args:
             filename: e.g. ~BATTLE_PREPARATION.png
             data: png/jpg/webp/gif file in bytes
+            track (bool): True to track resource
 
         Returns:
             str: Resource name added, e.g. ~BATTLE_PREPARATION.webp
@@ -122,8 +123,9 @@ class ResourceManager(AssetFolderBase):
         file = self.folder / name
         logger.info(f'Resource add {file}')
         atomic_write(file, data)
-        self.resources[name] = resource
-        self.resources_write()
+        if track:
+            self.resources[name] = resource
+            self.resources_write()
         return name
 
     def resource_add_file(self, file):
