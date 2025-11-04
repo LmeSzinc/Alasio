@@ -1,15 +1,17 @@
 <script lang="ts">
-  import { Input } from "$lib/components/ui/input";
   import { cn } from "$lib/utils";
   import type { Snippet } from "svelte";
   import DropOverlay from "./DropOverlay.svelte";
+  import FilePaste from "./FilePaste.svelte";
   import UploadProgress from "./UploadProgress.svelte";
   import { UploadState, type OnUploadFunction } from "./uploadState.svelte";
+  import { filterFilesByAccept } from "./utils";
 
   let {
     onUpload,
     disabled = false,
     accept,
+    paste = null,
     overlayText = "Drop files to upload",
     class: className,
     children,
@@ -18,6 +20,7 @@
     onUpload: OnUploadFunction;
     disabled?: boolean;
     accept?: string;
+    paste?: "global" | "focus" | null;
     overlayText?: string;
     class?: string;
     children: Snippet;
@@ -27,8 +30,8 @@
   // Create upload state instance
   const uploadState = new UploadState(onUpload);
 
-  // File input reference
-  let fileInput: HTMLInputElement | null = $state(null);
+  // File input reference (no $state needed for bind:ref)
+  let fileInput: HTMLInputElement;
 
   let isDragging = $state(false);
   let dragCounter = $state(0);
@@ -43,6 +46,13 @@
       // Reset input so the same file can be selected again
       input.value = "";
     }
+  }
+
+  /**
+   * Handle pasted files
+   */
+  function handleFilesPaste(files: File[]): void {
+    uploadState.addFiles(files);
   }
 
   /**
@@ -127,42 +137,12 @@
       if (accept) {
         const acceptedFiles = filterFilesByAccept(files, accept);
         if (acceptedFiles.length > 0) {
-          // Create a new FileList-like object
-          const dataTransfer = new DataTransfer();
-          acceptedFiles.forEach((file) => dataTransfer.items.add(file));
-          uploadState.addFiles(dataTransfer.files);
+          uploadState.addFiles(acceptedFiles);
         }
       } else {
         uploadState.addFiles(files);
       }
     }
-  }
-
-  /**
-   * Filter files based on accept attribute
-   */
-  function filterFilesByAccept(files: FileList, accept: string): File[] {
-    const acceptTypes = accept.split(",").map((type) => type.trim());
-
-    return Array.from(files).filter((file) => {
-      return acceptTypes.some((acceptType) => {
-        // Handle MIME types (e.g., "image/*", "image/png")
-        if (acceptType.includes("/")) {
-          if (acceptType.endsWith("/*")) {
-            const category = acceptType.split("/")[0];
-            return file.type.startsWith(category + "/");
-          }
-          return file.type === acceptType;
-        }
-
-        // Handle file extensions (e.g., ".png", ".jpg")
-        if (acceptType.startsWith(".")) {
-          return file.name.toLowerCase().endsWith(acceptType.toLowerCase());
-        }
-
-        return false;
-      });
-    });
   }
 </script>
 
@@ -176,8 +156,11 @@
   ondragleave={handleDragLeave}
   ondrop={handleDrop}
 >
-  <!-- Main content -->
-  {@render children()}
+  <!-- Paste file handler -->
+  <FilePaste {disabled} {accept} mode={paste} onFilesPaste={handleFilesPaste}>
+    <!-- Main content -->
+    {@render children()}
+  </FilePaste>
 
   <!-- Drag overlay -->
   {#if isDragging && !disabled}
@@ -192,5 +175,5 @@
   <UploadProgress {uploadState} />
 
   <!-- Hidden file input -->
-  <Input type="file" multiple {accept} class="hidden" bind:ref={fileInput} onchange={handleFileChange} />
+  <input bind:this={fileInput} type="file" multiple {accept} class="hidden" onchange={handleFileChange} />
 </div>

@@ -253,7 +253,7 @@
 <div class={cn("bg-background flex flex-col border", className)}>
   <!-- Main content area -->
   {#if mod_name}
-    <FileZone bind:this={fileZone} onUpload={handleUpload} accept="image/*">
+    <FileZone bind:this={fileZone} accept="image/*" paste="global" onUpload={handleUpload}>
       <!-- Wrap content with ResourceContextMenu -->
       <ResourceContextMenu {topicClient} {onUploadClick}>
         <ScrollArea class="h-full w-full flex-1">
