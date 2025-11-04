@@ -1,28 +1,56 @@
 <script lang="ts">
-  import { Upload } from "@lucide/svelte";
+  import { Input } from "$lib/components/ui/input";
   import { cn } from "$lib/utils";
   import type { Snippet } from "svelte";
+  import DropOverlay from "./DropOverlay.svelte";
+  import UploadProgress from "./UploadProgress.svelte";
+  import { UploadState, type OnUploadFunction } from "./uploadState.svelte";
 
   let {
-    onDrop,
+    onUpload,
     disabled = false,
     accept,
-    showOverlay = true,
     overlayText = "Drop files to upload",
     class: className,
     children,
+    overlay,
   }: {
-    onDrop?: (files: FileList) => void;
+    onUpload: OnUploadFunction;
     disabled?: boolean;
     accept?: string;
-    showOverlay?: boolean;
     overlayText?: string;
     class?: string;
     children: Snippet;
+    overlay?: Snippet;
   } = $props();
+
+  // Create upload state instance
+  const uploadState = new UploadState(onUpload);
+
+  // File input reference
+  let fileInput: HTMLInputElement | null = $state(null);
 
   let isDragging = $state(false);
   let dragCounter = $state(0);
+
+  /**
+   * Handle file input change
+   */
+  function handleFileChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      uploadState.addFiles(input.files);
+      // Reset input so the same file can be selected again
+      input.value = "";
+    }
+  }
+
+  /**
+   * Open file picker dialog
+   */
+  export function openFilePicker(): void {
+    fileInput?.click();
+  }
 
   /**
    * Handle drag over event
@@ -102,10 +130,10 @@
           // Create a new FileList-like object
           const dataTransfer = new DataTransfer();
           acceptedFiles.forEach((file) => dataTransfer.items.add(file));
-          onDrop?.(dataTransfer.files);
+          uploadState.addFiles(dataTransfer.files);
         }
       } else {
-        onDrop?.(files);
+        uploadState.addFiles(files);
       }
     }
   }
@@ -152,16 +180,17 @@
   {@render children()}
 
   <!-- Drag overlay -->
-  {#if showOverlay && isDragging && !disabled}
-    <div
-      role="status"
-      aria-live="polite"
-      class="bg-primary/10 border-primary pointer-events-none absolute inset-0 flex items-center justify-center border-2 border-dashed transition-all"
-    >
-      <div class="bg-background rounded-lg p-6 shadow-lg">
-        <Upload class="text-primary mx-auto mb-2 h-12 w-12" />
-        <p class="text-primary text-lg font-medium">{overlayText}</p>
-      </div>
-    </div>
+  {#if isDragging && !disabled}
+    {#if overlay}
+      {@render overlay()}
+    {:else}
+      <DropOverlay>{overlayText}</DropOverlay>
+    {/if}
   {/if}
+
+  <!-- Upload progress component -->
+  <UploadProgress {uploadState} />
+
+  <!-- Hidden file input -->
+  <Input type="file" multiple {accept} class="hidden" bind:ref={fileInput} onchange={handleFileChange} />
 </div>

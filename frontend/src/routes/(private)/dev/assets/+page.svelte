@@ -1,7 +1,6 @@
 <script lang="ts">
   import ModSelector from "$lib/components/arginput/ModSelector.svelte";
-  import { UploadState } from "$lib/components/upload";
-  import { useTopic, type Rpc } from "$lib/ws";
+  import { useTopic } from "$lib/ws";
   import AssetManager from "./AssetManager.svelte";
   import PathBreadcrumb from "./PathBreadcrumb.svelte";
   import ResourceManager from "./ResourceManager.svelte";
@@ -22,40 +21,6 @@
   function handleNavigate(path: string) {
     pathRpc.call("set_path", { path: path });
   }
-  /**
-   * Create upload state with upload handler
-   * The handler receives a file and returns an RPC instance
-   */
-  function handleUpload(file: File): Rpc {
-    // Create a dedicated RPC instance for this upload
-    const rpc = topicClient.rpc();
-
-    // Read file and convert to base64
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      const base64Data = reader.result as string;
-      const base64Content = base64Data.split(",")[1] || base64Data;
-
-      // Call RPC with file data
-      rpc.call("resource_add_base64", {
-        source: file.name,
-        data: base64Content,
-      });
-    };
-
-    reader.onerror = () => {
-      // If file reading fails, we still return the RPC but it will error
-      console.error(`Failed to read file: ${file.name}`);
-    };
-
-    reader.readAsDataURL(file);
-
-    // Return the RPC instance immediately
-    // uploadState will track its state reactively
-    return rpc;
-  }
-  const uploadState = new UploadState(handleUpload);
 </script>
 
 <div class="bg-background flex h-full w-full min-w-220 flex-col">
@@ -72,8 +37,8 @@
   <!-- Breadcrumb Navigation -->
   <PathBreadcrumb class="bg-card w-1/2" {mod_path_assets} {path} onNavigate={handleNavigate} />
   <div class="h-full min-h-160 w-1/2 flex-1 overflow-hidden">
-    <ResourceManager class="h-9/20" {mod_name} {path} {topicClient} {uploadState} />
-    <StatusBar data={topicClient.data} class="bg-card"/>
+    <ResourceManager class="h-9/20" {mod_name} {path} {topicClient} />
+    <StatusBar data={topicClient.data} class="bg-card" />
     <AssetManager class="h-11/20" {mod_name} {path} {topicClient} />
   </div>
 </div>

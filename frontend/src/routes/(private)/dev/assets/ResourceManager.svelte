@@ -1,9 +1,8 @@
 <script lang="ts">
-  import { Input } from "$lib/components/ui/input";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
-  import { FileZone, UploadProgress, UploadState } from "$lib/components/upload";
+  import { FileZone } from "$lib/components/upload";
   import { cn } from "$lib/utils";
-  import type { TopicLifespan } from "$lib/ws";
+  import type { Rpc, TopicLifespan } from "$lib/ws";
   import ResourceContextMenu from "./ResourceContextMenu.svelte";
   import ResourceFile from "./ResourceFile.svelte";
   import ResourceFolder from "./ResourceFolder.svelte";
@@ -14,18 +13,19 @@
     mod_name,
     path,
     topicClient,
-    uploadState,
     class: className,
   }: {
     mod_name: string;
     path: string;
     topicClient: TopicLifespan<FolderResponse>;
-    uploadState?: UploadState;
     class?: string;
   } = $props();
 
   const pathRpc = topicClient.rpc();
   const renameRpc = topicClient.rpc();
+
+  // FileZone reference for opening file picker
+  let fileZone: FileZone | null = $state(null);
 
   function onNavigate(path: string) {
     pathRpc.call("set_path", { path: path });
@@ -46,6 +46,40 @@
     ...folders.map((name) => ({ type: "folder" as const, name })),
     ...resourceList.map((r) => ({ type: "resource" as const, name: r.name })),
   ]);
+
+  /**
+   * Handle file upload
+   * This is called by FileZone's UploadState for each file
+   */
+  function handleUpload(file: File): Rpc {
+    // Create a dedicated RPC instance for this upload
+    const rpc = topicClient.rpc();
+
+    // Read file and convert to base64
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const base64Data = reader.result as string;
+      const base64Content = base64Data.split(",")[1] || base64Data;
+
+      // Call RPC with file data
+      rpc.call("resource_add_base64", {
+        source: file.name,
+        data: base64Content,
+      });
+    };
+
+    reader.onerror = () => {
+      // If file reading fails, we still return the RPC but it will error
+      console.error(`Failed to read file: ${file.name}`);
+    };
+
+    reader.readAsDataURL(file);
+
+    // Return the RPC instance immediately
+    // UploadState will track its state reactively
+    return rpc;
+  }
 
   /**
    * Handles folder selection logic using the global resourceSelection state.
@@ -202,95 +236,76 @@
     // If already selected, keep the current selection (allow multi-item context menu)
   }
 
+  /**
+   * Open file picker when upload is clicked
+   */
+  function onUploadClick(): void {
+    fileZone?.openFilePicker();
+  }
+
   // Effect to clear selection when the folder path changes.
   $effect(() => {
     path;
     resourceSelection.clear();
   });
-
-  let fileInput: HTMLInputElement | null = $state(null);
-
-  // Upload functionality
-  function handleFileDrop(files: FileList): void {
-    uploadState?.addFiles(files);
-  }
-
-  function handleFileChange(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    if (input.files) {
-      uploadState?.addFiles(input.files);
-    }
-  }
-
-  function onUploadClick(): void {
-    fileInput?.click();
-  }
 </script>
-
-<Input type="file" multiple accept="image/*" class="hidden" bind:ref={fileInput} onchange={handleFileChange} />
 
 <div class={cn("bg-background flex flex-col border", className)}>
   <!-- Main content area -->
   {#if mod_name}
-    <FileZone onDrop={handleFileDrop} disabled={!uploadState} accept="image/*">
+    <FileZone bind:this={fileZone} onUpload={handleUpload} accept="image/*">
       <!-- Wrap content with ResourceContextMenu -->
       <ResourceContextMenu {topicClient} {onUploadClick}>
-        {#snippet children()}
-          <ScrollArea class="h-full w-full flex-1">
-            {#if folders.length === 0 && resourceList.length === 0}
-              <div class="text-muted-foreground flex h-full items-center justify-center">
-                <p>This folder is empty</p>
-              </div>
-            {:else}
-              <div
-                class="flex h-full w-full flex-1 flex-wrap gap-1 p-1 outline-none"
-                bind:this={containerRef}
-                role="grid"
-                tabindex="0"
-                onclick={handleBackgroundClick}
-                oncontextmenu={handleBackgroundContextMenu}
-                onkeydown={(e) => {
-                  handleBackgroundKeyDown(e);
-                  handleContainerKeyDown(e);
-                }}
-                aria-label="Resource list"
-              >
-                {#each folders as folderName}
-                  {@const item = { type: "folder" as const, name: folderName }}
-                  <ResourceFolder
-                    name={folderName}
-                    {item}
-                    handleSelect={(e) => handleFolderSelect(folderName, e)}
-                    handleOpen={() => handleFolderOpen(folderName)}
-                    handleRename={handleFolderRename}
-                    oncontextmenu={(e) => handleContextMenu(item, e)}
-                    onkeydown={(e) => handleItemKeyDown(item, e)}
-                  />
-                {/each}
+        <ScrollArea class="h-full w-full flex-1">
+          {#if folders.length === 0 && resourceList.length === 0}
+            <div class="text-muted-foreground flex h-full items-center justify-center">
+              <p>This folder is empty</p>
+            </div>
+          {:else}
+            <div
+              class="flex h-full w-full flex-1 flex-wrap gap-1 p-1 outline-none"
+              bind:this={containerRef}
+              role="grid"
+              tabindex="0"
+              onclick={handleBackgroundClick}
+              oncontextmenu={handleBackgroundContextMenu}
+              onkeydown={(e) => {
+                handleBackgroundKeyDown(e);
+                handleContainerKeyDown(e);
+              }}
+              aria-label="Resource list"
+            >
+              {#each folders as folderName}
+                {@const item = { type: "folder" as const, name: folderName }}
+                <ResourceFolder
+                  name={folderName}
+                  {item}
+                  handleSelect={(e) => handleFolderSelect(folderName, e)}
+                  handleOpen={() => handleFolderOpen(folderName)}
+                  handleRename={handleFolderRename}
+                  oncontextmenu={(e) => handleContextMenu(item, e)}
+                  onkeydown={(e) => handleItemKeyDown(item, e)}
+                />
+              {/each}
 
-                {#each resourceList as resource}
-                  {@const item = { type: "resource" as const, name: resource.name }}
-                  <ResourceFile
-                    {mod_name}
-                    resourceItem={resource}
-                    {item}
-                    currentPath={path}
-                    handleSelect={(e) => handleResourceSelect(resource, e)}
-                    handleOpen={() => handleResourceOpen(resource)}
-                    handleRename={handleResourceRename}
-                    oncontextmenu={(e) => handleContextMenu(item, e)}
-                    onkeydown={(e) => handleItemKeyDown(item, e)}
-                  />
-                {/each}
-              </div>
-            {/if}
-          </ScrollArea>
-        {/snippet}
+              {#each resourceList as resource}
+                {@const item = { type: "resource" as const, name: resource.name }}
+                <ResourceFile
+                  {mod_name}
+                  resourceItem={resource}
+                  {item}
+                  currentPath={path}
+                  handleSelect={(e) => handleResourceSelect(resource, e)}
+                  handleOpen={() => handleResourceOpen(resource)}
+                  handleRename={handleResourceRename}
+                  oncontextmenu={(e) => handleContextMenu(item, e)}
+                  onkeydown={(e) => handleItemKeyDown(item, e)}
+                />
+              {/each}
+            </div>
+          {/if}
+        </ScrollArea>
       </ResourceContextMenu>
-      <!-- Upload progress component -->
-      {#if uploadState}
-        <UploadProgress {uploadState} />
-      {/if}
     </FileZone>
   {/if}
 </div>
