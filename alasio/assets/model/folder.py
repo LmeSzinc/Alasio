@@ -4,7 +4,7 @@ from typing import Dict, List, Literal
 from msgspec import Struct, field
 
 from alasio.assets.model.generator import AssetGenerator
-from alasio.assets.model.name import to_asset_name, validate_asset_name, validate_resource_name
+from alasio.assets.model.name import to_asset_name, to_resource_name, validate_asset_name, validate_resource_name
 from alasio.assets.model.parser import MetaAsset, MetaTemplate
 from alasio.assets.model.resource import ResourceManager
 from alasio.base.image.color import get_color
@@ -16,7 +16,7 @@ from alasio.ext import env
 from alasio.ext.backport import removeprefix
 from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_replace
-from alasio.ext.path.calc import get_name, get_rootstem, get_suffix
+from alasio.ext.path.calc import get_name, get_rootstem, get_suffix, uppath
 from alasio.ext.path.iter import iter_entry
 from alasio.ext.path.validate import validate_filename
 from alasio.logger import logger
@@ -156,10 +156,7 @@ class AssetFolder(AssetGenerator, ResourceManager):
             ValueError: If source invalid or data invalid
         """
         validate_filename(source)
-        source = f'~{source.lstrip("~")}'
-
-        source_file = self.folder / source
-        logger.info(f'Resource track: {source_file}')
+        source = to_resource_name(source)
 
         try:
             # Decode the base64 string to bytes
@@ -292,11 +289,13 @@ class AssetFolder(AssetGenerator, ResourceManager):
         Create an empty asset without templates
         """
         validate_asset_name(asset_name)
-        logger.info(f'Asset add: {asset_name}')
+        asset_name = to_asset_name(asset_name)
+        if asset_name in self.assets:
+            raise ValueError(f'Asset name already exists: {asset_name}')
 
+        logger.info(f'Asset add: {asset_name}')
         asset = MetaAsset(path=self.path, name=asset_name, templates=())
         self._validate_asset(asset)
-        logger.info(f'New asset: {asset}')
 
         self.assets[asset.name] = asset
         self.asset_codegen()
@@ -332,6 +331,95 @@ class AssetFolder(AssetGenerator, ResourceManager):
             self.asset_codegen()
             cached_property.pop(self, 'data')
         return deleted_any
+
+    def resource_rename(self, old, new):
+        """
+        Args:
+            old (str): Old filename, with file extension, e.g. ~BATTLE_PREPARATION.webp
+                Accept filename with and without "~", as "~" prefix will be added
+            new (str): New filename, with file extension, e.g. ~BATTLE_PREPARATION.webp
+                Accept filename with and without "~", as "~" prefix will be added
+        """
+        validate_filename(old)
+        old = to_resource_name(old)
+        validate_filename(new)
+        new = to_resource_name(new)
+        if old == new:
+            raise ValueError(f'Resource name not changed: {old}')
+
+        if new in self.resources:
+            raise ValueError(f'Target resource already exists: {new}')
+
+        # rename local file
+        old_file = self.folder / old
+        new_file = self.folder / new
+        logger.info(f'Resource rename: {old_file} -> {new_file}')
+        try:
+            old_file.atomic_rename(new_file)
+        except FileNotFoundError:
+            # ignore FileNotFoundError as resource might not be downloaded yet
+            pass
+        except FileExistsError as e:
+            raise ValueError(e)
+
+        resource = self.resources.get(old, None)
+        if resource is not None:
+            if self.gitadd:
+                self.gitadd.stage_add(new_file)
+            resource.name = new
+            # re-generate self.resources with resource.name
+            data = {v.name: v for v in self.resources.values()}
+            cached_property.set(self, 'resources', data)
+            self.resources_write()
+        else:
+            # rename untracked resource
+            pass
+
+        # rename usages in asset
+        modified = True
+        for asset in self.assets.values():
+            if old in asset.ref:
+                asset.ref = tuple(new if ref == old else ref for ref in asset.ref)
+                modified = True
+            for template in asset.templates:
+                if template.source == old:
+                    template.source = new
+                    modified = True
+        if modified:
+            self.asset_codegen()
+        cached_property.pop(self, 'data')
+
+    def asset_rename(self, old, new):
+        """
+        Args:
+            old (str):
+            new (str):
+        """
+        validate_asset_name(old)
+        validate_asset_name(new)
+        new = to_asset_name(new)
+        if old == new:
+            raise ValueError(f'Asset name not changed: {old}')
+
+        asset = self.assets.get(old, None)
+        if asset is None:
+            raise ValueError(f'No such asset {old}')
+        if new in self.assets:
+            raise ValueError(f'Target asset already exists: {new}')
+
+        logger.info(f'Asset rename: {old} -> {new}')
+        asset.name = new
+        for template in asset.templates:
+            try:
+                self._template_rename(template, name=new)
+            except FileExistsError as e:
+                raise ValueError(e)
+
+        # re-generate self.resources with resource.name
+        data = {v.name: v for v in self.assets.values()}
+        cached_property.set(self, 'assets', data)
+        self.asset_codegen()
+        cached_property.pop(self, 'data')
 
 
 if __name__ == '__main__':

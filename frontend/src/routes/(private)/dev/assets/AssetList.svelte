@@ -41,7 +41,16 @@
    * Handle renaming an asset
    */
   function handleAssetRename(oldName: string, newName: string): void {
-    renameAssetRpc.call("asset_rename", { old_name: oldName, new_name: newName });
+    renameAssetRpc.call(
+      "asset_rename",
+      { old_name: oldName, new_name: newName },
+      {
+        // Select new name on RPC success
+        onSuccess: () => {
+          assetSelection.select({ type: "asset", name: newName });
+        },
+      },
+    );
   }
 
   /**
@@ -113,7 +122,7 @@
           No assets in this folder.
         </div>
       {:else}
-        {#each assetList as asset (asset.name)}
+        {#each assetList as asset}
           {@const item: AssetSelectionItem = { type: "asset", name: asset.name }}
           <AssetDisplay
             name={asset.name}

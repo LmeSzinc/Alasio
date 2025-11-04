@@ -79,7 +79,7 @@ class ResourceManager(AssetFolderBase):
         if data is None:
             data = self.resources
 
-        rows = list(data.values())
+        rows = [v for _, v in sorted(data.items())]
         encoder = DecoderCache().ENCODER
         content = encoder.encode_lines(rows)
 

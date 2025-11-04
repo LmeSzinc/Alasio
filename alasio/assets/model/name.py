@@ -106,3 +106,16 @@ def to_asset_name(s):
         return f'ASSET_{s}'
 
     return s
+
+
+def to_resource_name(s):
+    """
+    Ensure name startswith "~"
+
+    Args:
+        s (str):
+
+    Returns:
+        str:
+    """
+    return f'~{s.lstrip("~")}'

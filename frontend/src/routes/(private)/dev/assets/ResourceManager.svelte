@@ -99,10 +99,19 @@
    * Handle resource rename
    */
   function handleResourceRename(oldName: string, newName: string): void {
-    renameRpc.call("rename_resource", {
-      old_name: oldName,
-      new_name: newName,
-    });
+    renameRpc.call(
+      "resource_rename",
+      {
+        old_name: oldName,
+        new_name: newName,
+      },
+      {
+        onSuccess: () => {
+          // Select new name on RPC success
+          resourceSelection.select({ type: "resource" as const, name: `~${newName}` });
+        },
+      },
+    );
   }
 
   let containerRef: HTMLDivElement | null = $state(null);

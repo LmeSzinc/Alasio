@@ -142,7 +142,7 @@ class DevAssetsManager(BaseTopic):
         await self.__class__.data.mutate(self)
 
     @rpc
-    async def resource_to_asset(self, source: List[str], override: bool = False):
+    async def resource_to_asset(self, names: List[str]):
         """
         Convert a resource file to a new asset.
         """
@@ -151,14 +151,14 @@ class DevAssetsManager(BaseTopic):
             raise RpcValueError('Folder not initialized')
 
         try:
-            await trio.to_thread.run_sync(folder.resource_to_asset, source, override)
+            await trio.to_thread.run_sync(folder.resource_to_asset, names)
         except ValueError as e:
             raise RpcValueError(str(e))
 
         await self.__class__.data.mutate(self)
 
     @rpc
-    async def asset_add(self, asset: str):
+    async def asset_add(self, name: str):
         """
         Create a new empty asset.
         """
@@ -167,14 +167,14 @@ class DevAssetsManager(BaseTopic):
             raise RpcValueError('Folder not initialized')
 
         try:
-            await trio.to_thread.run_sync(folder.asset_add, asset)
+            await trio.to_thread.run_sync(folder.asset_add, name)
         except ValueError as e:
             raise RpcValueError(str(e))
 
         await self.__class__.data.mutate(self)
 
     @rpc
-    async def asset_del(self, asset: List[str]):
+    async def asset_del(self, names: List[str]):
         """
         Delete an asset and its associated template files.
         """
@@ -183,7 +183,32 @@ class DevAssetsManager(BaseTopic):
             raise RpcValueError('Folder not initialized')
 
         try:
-            await trio.to_thread.run_sync(folder.asset_del, asset)
+            await trio.to_thread.run_sync(folder.asset_del, names)
+        except ValueError as e:
+            raise RpcValueError(str(e))
+
+        await self.__class__.data.mutate(self)
+
+    @rpc
+    async def resource_rename(self, old_name: str, new_name: str):
+        folder: "AssetFolder | None" = await self.asset_folder
+        if folder is None:
+            raise RpcValueError('Folder not initialized')
+
+        try:
+            await trio.to_thread.run_sync(folder.resource_rename, old_name, new_name)
+        except ValueError as e:
+            raise RpcValueError(str(e))
+        await self.__class__.data.mutate(self)
+
+    @rpc
+    async def asset_rename(self, old_name: str, new_name: str):
+        folder: "AssetFolder | None" = await self.asset_folder
+        if folder is None:
+            raise RpcValueError('Folder not initialized')
+
+        try:
+            await trio.to_thread.run_sync(folder.asset_rename, old_name, new_name)
         except ValueError as e:
             raise RpcValueError(str(e))
 

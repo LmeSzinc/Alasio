@@ -8,7 +8,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen, ReprWrapper
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_remove
-from alasio.ext.path.calc import to_posix
+from alasio.ext.path.calc import to_posix, uppath
 from alasio.logger import logger
 
 
@@ -147,6 +147,29 @@ class AssetGenerator(AssetFolderBase):
         if self.gitadd:
             self.gitadd.stage_add(file)
         return True
+
+    def _template_rename(self, template: MetaTemplate, name):
+        """
+        Args:
+            template:
+            name (str): new asset name
+
+        Raises:
+            FileExistsError:
+        """
+        path = PathStr.new(template.file).uppath()
+        old_file = self.root / template.file
+        new = Template.construct_filename(path, name, lang=template.lang, frame=template.frame)
+        new_file = self.root / new
+        try:
+            old_file.atomic_rename(new_file)
+        except FileNotFoundError:
+            # ignore, asset might not generated
+            pass
+
+        if self.gitadd:
+            self.gitadd.stage_add(new_file)
+        template.file = new
 
     def _validate_template(self, t: MetaTemplate) -> "MetaTemplate | None":
         """

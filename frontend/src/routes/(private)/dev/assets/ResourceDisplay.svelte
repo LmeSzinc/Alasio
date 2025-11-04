@@ -31,28 +31,37 @@
 
   let gridcellElement: HTMLDivElement | null = $state(null);
 
-  function handleClick(event: MouseEvent) {
-    // Ensure gridcell gets focus
-    if (gridcellElement && document.activeElement !== gridcellElement) {
-      gridcellElement.focus();
-    }
-
+  function onclick(event: MouseEvent) {
     if (isRenaming) {
-      // Submit rename on click outside textarea
-      handleRenameSubmit(name, name);
+      // Exit rename mode without calling onSubmit (no change)
+      // letting RenameTextarea blur event to handle it
       return;
     }
+    // Handle selection first
     handleSelect?.(event);
+    // Ensure gridcell gets focus after selection
+    setTimeout(() => {
+      if (gridcellElement && document.activeElement !== gridcellElement) {
+        gridcellElement.focus();
+      }
+    }, 0);
   }
 
-  function handleDoubleClick(event: MouseEvent) {
+  function ondblclick() {
     if (isRenaming) {
       return;
     }
     handleOpen?.();
   }
+  // Prevent name selected on double-click open
+  function onmousedown(event: MouseEvent) {
+    if (resourceSelection.renamingItem) {
+      return;
+    }
+    event.preventDefault();
+  }
 
-  function handleRenameSubmit(oldName: string, newName: string) {
+  function onSubmit(oldName: string, newName: string) {
     handleRename?.(oldName, newName);
   }
 </script>
@@ -61,8 +70,9 @@
   role="gridcell"
   tabindex="-1"
   bind:this={gridcellElement}
-  onclick={handleClick}
-  ondblclick={handleDoubleClick}
+  {onclick}
+  {ondblclick}
+  {onmousedown}
   aria-label={name}
   class={cn(
     "group relative aspect-square h-27 w-27",
@@ -96,13 +106,7 @@
 
   <!-- Name Label (bottom) -->
   <div class="items-top flex flex-1 justify-center px-1">
-    <RenameTextarea
-      {name}
-      {isRenaming}
-      selectionState={resourceSelection}
-      {gridcellElement}
-      onSubmit={handleRenameSubmit}
-    >
+    <RenameTextarea {name} {isRenaming} selectionState={resourceSelection} {gridcellElement} {onSubmit}>
       <p
         class={cn(
           "text-card-foreground font-consolas text-center text-xs",

@@ -27,40 +27,50 @@
   const selected = $derived(assetSelection.isSelected(item));
   const isRenaming = $derived(assetSelection.isRenaming(item));
 
-  let containerElement: HTMLDivElement | null = $state(null);
+  let gridcellElement: HTMLDivElement | null = $state(null);
 
-  function handleClick(event: MouseEvent) {
-    // Ensure container gets focus
-    if (containerElement && document.activeElement !== containerElement) {
-      containerElement.focus();
-    }
-
+  function onclick(event: MouseEvent) {
     if (isRenaming) {
-      // Submit rename on click outside textarea
-      handleRenameSubmit(name, name);
+      // Exit rename mode without calling onSubmit (no change)
+      // letting RenameTextarea blur event to handle it
       return;
     }
+    // Handle selection first
     handleSelect?.(event);
+    // Ensure gridcell gets focus after selection
+    setTimeout(() => {
+      if (gridcellElement && document.activeElement !== gridcellElement) {
+        gridcellElement.focus();
+      }
+    }, 0);
   }
 
-  function handleDoubleClick(event: MouseEvent) {
+  function ondblclick() {
     if (isRenaming) {
       return;
     }
     handleOpen?.();
   }
+  // Prevent name selected on double-click open
+  function onmousedown(event: MouseEvent) {
+    if (assetSelection.renamingItem) {
+      return;
+    }
+    event.preventDefault();
+  }
 
-  function handleRenameSubmit(oldName: string, newName: string) {
+  function onSubmit(oldName: string, newName: string) {
     handleRename?.(oldName, newName);
   }
 </script>
 
 <div
-  role="button"
+  role="gridcell"
   tabindex="-1"
-  bind:this={containerElement}
-  onclick={handleClick}
-  ondblclick={handleDoubleClick}
+  bind:this={gridcellElement}
+  {onclick}
+  {ondblclick}
+  {onmousedown}
   aria-label={name}
   class={cn(
     "group flex w-full cursor-pointer items-center justify-between rounded-md p-1",
@@ -73,14 +83,7 @@
 >
   <!-- Left: Asset Name (full display, no truncation) -->
   <div class="min-w-0 flex-1 px-2">
-    <RenameTextarea
-      {name}
-      {isRenaming}
-      selectionState={assetSelection}
-      gridcellElement={containerElement}
-      onSubmit={handleRenameSubmit}
-      class="!text-left"
-    >
+    <RenameTextarea {name} {isRenaming} selectionState={assetSelection} {gridcellElement} {onSubmit} class="!text-left">
       <span class={cn("break-all", selected ? "text-white" : "group-hover:text-primary transition-colors")}>
         {name}
       </span>

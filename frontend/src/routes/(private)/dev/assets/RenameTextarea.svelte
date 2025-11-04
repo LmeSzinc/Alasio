@@ -119,7 +119,7 @@
       return;
     }
     // If textarea or gridcell regained focus, ignore this blur
-    if (event.relatedTarget === textareaElement || event.relatedTarget === gridcellElement) {
+    if (event.relatedTarget === textareaElement) {
       return;
     }
     // Focus has truly left the textarea, submit the rename
@@ -184,8 +184,8 @@
     class={cn(
       "w-full resize-none overflow-hidden",
       "text-card-foreground !font-consolas text-center !text-xs break-all transition-none",
-      "border-primary bg-background border-2",
-      "min-h-0 p-0.5 leading-tight",
+      "!border-none px-0 py-0.5 rounded-xs bg-background",
+      "min-h-0 leading-tight",
       className,
     )}
     style="overflow-wrap: break-word; word-break: break-all;"

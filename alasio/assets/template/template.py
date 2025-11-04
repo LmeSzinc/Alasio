@@ -156,14 +156,17 @@ class Template:
     def construct_filename(cls, path, name, lang='', frame=1, ext='.webp'):
         if lang:
             if frame > 1:
-                return f'{path}/{name}.{lang}.{frame}{ext}'
+                file = f'{name}.{lang}.{frame}{ext}'
             else:
-                return f'{path}/{name}.{lang}{ext}'
+                file = f'{name}.{lang}{ext}'
         else:
             if frame > 1:
-                return f'{path}/{name}.{frame}{ext}'
+                file = f'{name}.{frame}{ext}'
             else:
-                return f'{path}/{name}{ext}'
+                file = f'{name}{ext}'
+        if path:
+            file = f'{path}/{file}'
+        return file
 
     def set_file(self, path, name):
         """

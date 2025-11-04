@@ -346,7 +346,8 @@ class AssetParser:
                 node.value.end_lineno,
                 'ref'
             )
-            kwargs['ref'] = tuple(commented_attrs['ref'])
+            ref = commented_attrs['ref']
+            kwargs['ref'] = tuple(dict.fromkeys(ref))  # de-redundancy and keep order
 
             # Build MetaAsset
             try:
