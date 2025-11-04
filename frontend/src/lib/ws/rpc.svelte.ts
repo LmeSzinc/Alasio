@@ -12,6 +12,26 @@ export interface RpcCallbacks {
 }
 
 /**
+ * Optional callbacks that can be passed to the `call` method.
+ */
+export interface CallCallbacks {
+  /**
+   * A callback function that is executed when the RPC call succeeds.
+   * @param response The success message or data returned from the server.
+   *                 You can omit this parameter in your function if you don't need it.
+   *                 Example: `onSuccess: () => console.log('Success!')`
+   */
+  onSuccess?: (response: string) => void;
+  /**
+   * A callback function that is executed when the RPC call fails.
+   * @param errorMessage The error message describing what went wrong.
+   *                     You can omit this parameter in your function if you don't need it.
+   *                     Example: `onError: () => console.error('It failed!')`
+   */
+  onError?: (errorMessage: string) => void;
+}
+
+/**
  * The context object passed from WebsocketManager to createOperation, breaking the import cycle.
  * It provides a minimal, stable interface for the operation logic to interact with the client.
  */
@@ -47,7 +67,7 @@ export interface Rpc {
   /**
    * Sends the operation command to the server with a type-safe payload.
    */
-  call(func: string, args: any): void;
+  call(func: string, args: any, callbacks?: CallCallbacks): void;
   /** Manually resets the operation's state. */
   reset(): void;
   /** A helper method to reset state and open a bound dialog. */
@@ -90,8 +110,8 @@ export function createRpc(
     isOpen = true;
   };
 
-  // This function is fully type-safe thanks to the `SendArgs` discriminated union.
-  const call = (func: string, args: any = {}) => {
+  // Perform an RPC call
+  const call = (func: string, args: any = {}, callbacks?: CallCallbacks) => {
     errorMsg = null;
     successMsg = null;
 
@@ -114,20 +134,24 @@ export function createRpc(
         cleanupAndReset();
         successMsg = response; // Typically the correlation ID.
         isOpen = false; // Automatically close the bound dialog on success.
+        callbacks?.onSuccess?.(response);
       },
       onError: (errMessage: string) => {
         cleanupAndReset();
         errorMsg = errMessage;
         toast.error(`RPC call error on topic="${topic}", func="${func}"`, { description: errorMsg });
+        callbacks?.onError?.(errMessage);
       },
     });
 
     // Set a timeout for the entire operation.
     operationTimeoutId = setTimeout(() => {
+      const customTimeoutError = "RPC call timeout";
       if (context.hasRpcCall(id)) {
         cleanupAndReset();
-        errorMsg = "RPC call timeout";
+        errorMsg = customTimeoutError;
         toast.error(`RPC call timeout on topic="${topic}", func="${func}"`, { description: errorMsg });
+        callbacks?.onError?.(customTimeoutError);
       }
     }, TIMEOUT);
 
@@ -181,7 +205,7 @@ export function createRpc(
 export function createResilientRpc(topic: string, context: RpcContext, options: RpcOptions = {}): Rpc {
   const rpc = createRpc(topic, context, options);
 
-  let lastCall: { func: string; args: any } | null = $state(null);
+  let lastCall: { func: string; args: any; callbacks?: CallCallbacks } | null = $state(null);
   let dataGeneration = $state(-1);
 
   $effect(() => {
@@ -211,15 +235,15 @@ export function createResilientRpc(topic: string, context: RpcContext, options: 
       // console.log(
       //   `[Resilient RPC] Topic '${topic}' is ready, re-calling '${last.func}' for connection generation ${currentGeneration}`,
       // );
-      rpc.call(last.func, last.args);
+      rpc.call(last.func, last.args, last.callbacks);
     }
   });
 
-  // Wrap the `call` method to store the arguments for later.
-  const call = (func: string, args: any = {}) => {
-    lastCall = { func, args };
+  // MODIFIED: Wrap the `call` method to store the arguments and callbacks for later.
+  const call = (func: string, args: any = {}, callbacks?: CallCallbacks) => {
+    lastCall = { func, args, callbacks };
     dataGeneration = untrack(() => websocketClient.connectionGeneration);
-    rpc.call(func, args);
+    rpc.call(func, args, callbacks);
   };
 
   // Return an object that conforms to the Rpc interface, but with our enhanced `call` method.
