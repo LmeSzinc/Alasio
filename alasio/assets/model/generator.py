@@ -306,7 +306,7 @@ class AssetGenerator(AssetFolderBase):
         gen.Var(name='_path_', value=self.path)
         gen.Empty()
 
-        for asset in self.assets.values():
+        for _, asset in sorted(self.assets.items()):
             if asset.doc:
                 for line in asset.doc.split('\n'):
                     gen.Comment(line)

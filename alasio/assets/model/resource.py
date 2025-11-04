@@ -1,7 +1,7 @@
 from typing import Tuple
 
 import numpy as np
-from msgspec import Struct
+from msgspec import Struct, field
 from msgspec.json import Decoder, Encoder
 
 from alasio.assets.model.generator import AssetFolderBase
@@ -17,13 +17,13 @@ from alasio.logger import logger
 class ResourceData(Struct):
     # filename, resource filename always startswith "~"
     # e.g. ~BATTLE_PREPARATION.png, ~Screenshot_xxx.png
-    name: str
+    name: str = field(name='n')
     # file sha1
-    sha1: str
+    sha1: str = field(name='h')
     # file size
-    size: int
+    size: int = field(name='s')
     # image shape, (width, height, channel)
-    shape: Tuple[int, int, int]
+    shape: Tuple[int, int, int] = field(name='p')
 
 
 class DecoderCache(metaclass=Singleton):
