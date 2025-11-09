@@ -231,7 +231,7 @@ def create_app():
     from alasio.ext.path import PathStr
     # for frontend local builds
     root = PathStr(__file__).uppath(3).joinpath('frontend/build')
-    static_app = assets.NoCacheStaticFiles(directory=root, html=True)
+    static_app = assets.SPANoCacheStaticFiles(directory=root)
     app.mount('/', static_app, name='static')
     # since static files mounted at "/", any route after it won't work
 

@@ -44,16 +44,9 @@ const config = {
       assets: "build",
 
       /**
-       * `fallback`: This is a key option for handling 404 pages in SSG mode.
-       * We set it to '404.html'. When SvelteKit builds, it will automatically
-       * compile your `src/routes/+error.svelte` file into `build/404.html`.
-       * This config tells the static host (like Vercel, Netlify): "If you can't
-       * find a file for the requested path, serve `404.html` instead."
-       * This allows the SvelteKit client-side router to take over and display
-       * the correct error page (global or route-specific), providing a much
-       * richer experience than a traditional static 404 page.
+       * `fallback`: Fallback to index.html for SPA
        */
-      fallback: "404.html",
+      fallback: "index.html",
 
       // `precompress`: If `true`, SvelteKit will create Brotli (.br) and Gzip (.gz)
       // compressed versions of your assets alongside the original files. If your

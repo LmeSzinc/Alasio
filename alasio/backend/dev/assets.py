@@ -1,3 +1,4 @@
+from starlette.exceptions import HTTPException
 from starlette.middleware.gzip import GZipResponder
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
@@ -25,6 +26,29 @@ class NoCacheStaticFiles(StaticFiles):
         resp = GZipResponder(resp, minimum_size=500, compresslevel=9)
 
         return resp
+
+
+class SPAStaticFiles(StaticFiles):
+    """
+    Subclass StaticFiles to serve index.html for any path that doesn't match a file.
+    This is the key to letting a client-side router handle routes.
+    """
+
+    async def get_response(self, path, scope):
+        try:
+            # Try to get the file from the parent class
+            return await super().get_response(path, scope)
+        except HTTPException as e:
+            # If the file is not found (404), serve index.html
+            if e.status_code == 404:
+                # Important: we need to serve index.html from the root path
+                return await super().get_response('index.html', scope)
+            # Re-raise any other exceptions
+            raise e
+
+
+class SPANoCacheStaticFiles(SPAStaticFiles, NoCacheStaticFiles):
+    pass
 
 
 router = APIRouter('/dev_assets')

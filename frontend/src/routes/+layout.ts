@@ -8,4 +8,4 @@ export const ssr = false;
 // It's acceptable compares to the benifit. Alasio is just a local service with remote assess,
 // not a high level security thingy. Backend will reject unauthorized access anyway,
 // so no actual data will be transfered.
-export const prerender = true;
+export const prerender = false;
