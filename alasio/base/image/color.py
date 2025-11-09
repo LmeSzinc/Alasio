@@ -79,9 +79,7 @@ def rgb2gray(image):
     cv2.max(maximum, b, dst=maximum)
     cv2.min(r, b, dst=r)
     # minimum = r
-    cv2.convertScaleAbs(maximum, alpha=0.5, dst=maximum)
-    cv2.convertScaleAbs(r, alpha=0.5, dst=r)
-    cv2.add(maximum, r, dst=maximum)
+    cv2.addWeighted(maximum, 0.5, r, 0.5, 0, dst=maximum)
     return maximum
 
 
