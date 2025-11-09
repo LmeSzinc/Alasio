@@ -1,8 +1,7 @@
 import numpy as np
 import pytest
 
-from alasio.assets_dev.bench.bench_luma import rgb2luma
-from alasio.base.image.color import rgb2luma_standard
+from alasio.base.image.color import rgb2luma, rgb2luma_standard
 from alasio.base.image.testing import create_rgb888
 
 

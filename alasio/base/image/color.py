@@ -102,7 +102,7 @@ def rgb2hsv(image):
 def rgb2luma(image):
     """
     Convert RGB to the Y channel (Luminance) in YUV color space.
-    A faster implement that costs 12.624us on 1280x720 image instead of 20.445us
+    A faster implement that costs 12.624us on 1280x720 image instead of 15.084us
 
     Note that due to float calculation, this method has +- 1 color difference compares to standard opencv,
     which should be acceptable in template matching.
@@ -134,7 +134,7 @@ def rgb2luma_standard(image):
     Returns:
         np.ndarray: Shape (height, width)
     """
-    return cv2.split(cv2.cvtColor(image, cv2.COLOR_RGB2YUV))[0]
+    return cv2.extractChannel(cv2.cvtColor(image, cv2.COLOR_RGB2YUV), 0)
 
 
 def get_color(image, area=None):
