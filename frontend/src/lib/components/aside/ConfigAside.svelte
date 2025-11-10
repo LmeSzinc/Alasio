@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { page } from "$app/state"
+  import { page } from "$app/state";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { cn } from "$lib/utils.js";
   import { useTopic } from "$lib/ws";
@@ -56,9 +56,7 @@
   });
 
   // Get current config_name from URL
-  const activeConfigName = $derived(
-    page.params.config_name ? decodeURIComponent(page.params.config_name) : undefined
-  );
+  const activeConfigName = $derived(page.params.config_name ? decodeURIComponent(page.params.config_name) : undefined);
 
   // Handle config item click
   async function handleConfigClick(config: ConfigLike) {
@@ -95,7 +93,7 @@
           <div
             role="group"
             aria-label="Configuration group {group.gid}"
-            class="border-border relative rounded-lg border border-dashed p-1"
+            class="border-foreground/20 relative rounded-lg border border-dashed p-1"
           >
             {#each group.items as item (item.id)}
               <!-- Items in vertical layout -->
@@ -113,11 +111,12 @@
   <!-- Settings button at the bottom -->
   <div class="border-border border-t p-2">
     <button
-      class="hover:bg-accent/50 focus:ring-ring flex w-full cursor-pointer items-center justify-center rounded-md p-3 transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none"
+      class="hover:bg-accent/50 focus:ring-ring flex w-full cursor-pointer flex-col items-center justify-center rounded-md p-1 transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none"
       onclick={handleSettings}
       aria-label="Open configuration settings"
     >
-      <Settings class="text-muted-foreground h-5 w-5" aria-hidden="true" />
+      <Settings class="h-6 w-6" strokeWidth="1.5" aria-hidden="true" />
+      <span class="mt-1 line-clamp-2 text-center text-xs break-all" aria-hidden="true"> Tools </span>
     </button>
   </div>
 </aside>

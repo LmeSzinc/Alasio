@@ -28,6 +28,7 @@
       configRpc.call("set_config", { name: config_name });
       nav_name = "";
       card_name = "";
+      opened_nav = "";
     }
   });
   // Clear nav state on page leave

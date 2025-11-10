@@ -5,8 +5,8 @@
     base: "focus:ring-ring flex w-full cursor-pointer flex-col items-center py-1.5 rounded-md transition-colors",
     variants: {
       variant: {
-        default: "hover:bg-accent/50 text-primary ",
-        active: "bg-primary hover:bg-primary/90 text-primary-foreground/85",
+        default: "hover:bg-accent hover:text-primary text-foreground/70",
+        active: "bg-primary hover:bg-primary text-primary-foreground/85",
       },
     },
     defaultVariants: {
@@ -62,7 +62,7 @@
       onerror={handleIconError}
     />
   {:else}
-    <Play class="h-8 w-8" aria-hidden="true" />
+    <Play class="h-8 w-8" strokeWidth="1.5" aria-hidden="true" />
   {/if}
   <span class="line-clamp-2 text-center text-xs break-all" aria-hidden="true">
     {config.name}
