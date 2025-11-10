@@ -1,11 +1,48 @@
-import type { ArgData, InputProps } from "$lib/components/arg/types";
+import type { Component } from "svelte";
+
+export type ArgData = {
+  task: string;
+  group: string;
+  arg: string;
+  dt: string;
+  value: any;
+  name?: string;
+  help?: string;
+  layout?: string;
+  [key: string]: any;
+};
+
+export type InputProps = {
+  data: ArgData;
+  class?: string;
+  handleEdit?: (data: ArgData) => void;
+  handleReset?: (data: ArgData) => void;
+};
+
+export type LayoutProps = InputProps & {
+  parentWidth?: number;
+  InputComponent: Component<InputProps>;
+};
+
+export type ArgProps = InputProps & {
+  parentWidth?: number;
+};
+
+export function getArgName(arg: ArgData) {
+  // Show name if available
+  if (arg.name) {
+    return arg.name;
+  }
+  // Othersize show as {group_name}.{arg_name}
+  return `${arg.group || "<UnknownGroup>"}.${arg.arg || "<UnknownArg>"}`;
+}
 
 /**
  * A Svelte 5 composable function (hook) to manage the state of an argument input.
  * It handles local state, synchronization with parent props, optimistic updates,
  * and conditional submission.
- * 
- * Note that you should always deco with $derived because this is an enclosure 
+ *
+ * Note that you should always deco with $derived because this is an enclosure
  * function that arg won't get update if the entire data changed.
  * Usage:
  *    const arg = $derived(useArgValue<boolean>(data));

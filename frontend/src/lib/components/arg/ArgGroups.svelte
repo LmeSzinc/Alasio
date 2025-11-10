@@ -3,7 +3,7 @@
   import { sizeObserver } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
   import Arg from "./Arg.svelte";
-  import type { ArgData, InputProps } from "./types";
+  import type { ArgData, InputProps } from "./utils.svelte";
 
   type ArgGroupsProps = {
     data: Record<string, Record<string, ArgData>>;

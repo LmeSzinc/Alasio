@@ -3,7 +3,7 @@
   import Checkbox from "../arginput/Checkbox.svelte";
   import Input from "../arginput/Input.svelte";
   import HorizontalLayout from "./HorizontalLayout.svelte";
-  import type { ArgProps, InputProps, LayoutProps } from "./types";
+  import type { ArgProps, InputProps, LayoutProps } from "./utils.svelte";
 
   let { data = $bindable(), ...restProps }: ArgProps = $props();
 

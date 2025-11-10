@@ -1,6 +1,6 @@
 <script lang="ts">
   import ArgGroups from "$lib/components/arg/ArgGroups.svelte";
-  import type { ArgData } from "$lib/components/arg/types";
+  import type { ArgData } from "$lib/components/arg/utils.svelte";
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
 
