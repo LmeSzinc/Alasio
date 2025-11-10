@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { useNavContext } from "$lib/navcontext.svelte";
   import { useTopic } from "$lib/ws";
   import { onDestroy } from "svelte";
   import ConfigArg from "./ConfigArg.svelte";
   import ConfigNav from "./ConfigNav.svelte";
+  import { NavContext } from "$lib/slotcontext.svelte";
 
   // nav context
-  useNavContext(nav);
+  NavContext.use(nav);
 
   let { data } = $props();
   const config_name = $derived(data.config_name);

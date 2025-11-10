@@ -7,13 +7,13 @@
   import * as Card from "$lib/components/ui/card";
   import * as Sheet from "$lib/components/ui/sheet";
   import { ThemeToggle } from "$lib/components/ui/theme/index.js";
-  import { initNavContext } from "$lib/navcontext.svelte";
+  import { NavContext } from "$lib/slotcontext.svelte.js";
   import { cn } from "$lib/utils.js";
   // props
   let { data, children } = $props();
 
   // nav context
-  const slots = initNavContext();
+  NavContext.init();
 
   // error page
   let isRetrying = $state<boolean>(false);
@@ -62,9 +62,9 @@
           <div class={cn("aside-item bg-card border-border border-r", isXlScreen && "neushadow")}>
             <ConfigAside class="pt-1 xl:pt-0" />
           </div>
-          {#if slots.nav}
+          {#if NavContext.snippet}
             <div class={cn("aside-item bg-card w-60 pt-1 xl:pt-0", isXlScreen && "neushadow")}>
-              {@render slots.nav()}
+              {@render NavContext.snippet()}
             </div>
           {/if}
         </div>
@@ -74,9 +74,7 @@
             <div class="flex h-full">
               <ConfigAside onNavigate={closeSheet} class="border-border border-r" />
               <div class="flex-1">
-                {#if slots.nav}
-                  {@render slots.nav()}
-                {/if}
+                {@render NavContext.snippet?.()}
               </div>
             </div>
           </Sheet.Content>

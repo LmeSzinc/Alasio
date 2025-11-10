@@ -1,11 +1,11 @@
 <script lang="ts">
+  import { NavContext } from "$lib/slotcontext.svelte";
   import DevNav from "./DevNav.svelte";
-  import { useNavContext } from "$lib/navcontext.svelte";
 
   let { children } = $props();
 
   // nav context
-  useNavContext(nav);
+  NavContext.use(nav);
 </script>
 
 {#snippet nav()}
