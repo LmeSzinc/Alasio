@@ -2,8 +2,10 @@
   import type { Component } from "svelte";
   import Checkbox from "../arginput/Checkbox.svelte";
   import Input from "../arginput/Input.svelte";
+  import Textarea from "../arginput/Textarea.svelte";
   import HorizontalLayout from "./HorizontalLayout.svelte";
   import type { ArgProps, InputProps, LayoutProps } from "./utils.svelte";
+  import VerticalLayout from "./VerticalLayout.svelte";
 
   let { data = $bindable(), ...restProps }: ArgProps = $props();
 
@@ -12,11 +14,10 @@
     input: Input,
     checkbox: Checkbox,
     dropdown: Input,
+    filter: Textarea,
   };
   const layoutMap: Record<string, Component<LayoutProps>> = {
-    input: HorizontalLayout,
-    // checkbox: InlineLayout,
-    // textarea: VerticalLayout,
+    filter: VerticalLayout,
   };
   const layoutAliasMap: Record<string, Component<LayoutProps>> = {
     horizontal: HorizontalLayout,
@@ -39,4 +40,4 @@
 </script>
 
 <!-- Pass all props, including parentWidth, down to the chosen layout -->
-<LayoutComponent bind:data={data} {InputComponent} {...restProps} />
+<LayoutComponent bind:data {InputComponent} {...restProps} />
