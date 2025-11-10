@@ -8,14 +8,14 @@
   // --- Props Definition (Svelte 5 Runes) ---
   type $$props = {
     class?: string;
-    onNavigate?: () => void;
   };
 
-  let { class: className, onNavigate }: $$props = $props();
+  let { class: className }: $$props = $props();
 
   // --- Navigation Items ---
-  const navItems = [
-    { path: "/dev/tools", name: "Tools" },
+  const alasioNavItems = [{ path: "/dev/config", name: "Config Manager" }];
+  const devNavItems = [
+    { path: "/dev/tools", name: "System Tools" },
     { path: "/dev/assets", name: "Assets Manager" },
     { path: "/dev/ws", name: "WebSocket Test" },
   ];
@@ -27,29 +27,29 @@
   // --- Event Handlers ---
   async function handleNavClick(path: string) {
     await goto(path);
-    onNavigate?.();
   }
 </script>
 
-<aside
-  class={cn("shadow-custom-complex w-full space-y-2 p-4", className)}
-  role="navigation"
-  aria-label="Main navigation"
->
-  <h2 class="px-3 text-lg font-semibold">Dev tools</h2>
-  <div class="border-t border-border"></div>
-  <ScrollArea class="h-full w-full">
-    <div class="flex flex-col space-y-1">
-      {#each navItems as item (item.path)}
-        {@const isActive = currentPath.startsWith(item.path)}
-        <Button
-          variant={isActive ? "default" : "ghost"}
-          class="h-9 w-full justify-start px-3"
-          onclick={() => handleNavClick(item.path)}
-        >
-          {item.name}
-        </Button>
-      {/each}
-    </div>
-  </ScrollArea>
-</aside>
+{#snippet navSection(title: string, items: typeof devNavItems)}
+  <div class="flex flex-col space-y-1">
+    <h2 class="px-3 text-lg font-semibold">{title}</h2>
+    <div class="border-border border-t"></div>
+    {#each items as item (item.path)}
+      {@const isActive = currentPath.startsWith(item.path)}
+      <Button
+        variant={isActive ? "default" : "ghost"}
+        class="h-9 w-full justify-start px-3"
+        onclick={() => handleNavClick(item.path)}
+      >
+        {item.name}
+      </Button>
+    {/each}
+  </div>
+{/snippet}
+
+<ScrollArea class="h-full w-full">
+  <aside class={cn("w-full space-y-4 p-4", className)} role="navigation" aria-label="Main navigation">
+    {@render navSection("Alasio tools", alasioNavItems)}
+    {@render navSection("Dev tools", devNavItems)}
+  </aside>
+</ScrollArea>

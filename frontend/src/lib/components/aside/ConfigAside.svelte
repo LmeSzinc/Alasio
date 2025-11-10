@@ -71,7 +71,7 @@
 
   // Navigate to settings
   function handleSettings() {
-    goto("/main/config");
+    goto("/dev/config");
   }
 </script>
 
