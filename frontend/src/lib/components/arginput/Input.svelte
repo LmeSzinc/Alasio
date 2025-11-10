@@ -1,19 +1,26 @@
 <script lang="ts">
   import { useArgValue, type InputProps } from "$lib/components/arg/utils.svelte";
-  import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { cn } from "$lib/utils";
-  import { RotateCcw } from "@lucide/svelte";
+  import Reset from "./_Reset.svelte";
 
   let { data = $bindable(), class: className, handleEdit, handleReset }: InputProps = $props();
   const arg = $derived(useArgValue<string>(data));
+
+  let inputEl: HTMLInputElement | null = $state(null);
 
   let debounceTimer: ReturnType<typeof setTimeout>;
   function onInput(event: Event) {
     // Clear the previous timer on each keystroke
     clearTimeout(debounceTimer);
     // Set a new timer to trigger the edit callback after a delay
-    debounceTimer = setTimeout(() => arg.submit(handleEdit), 3000);
+    debounceTimer = setTimeout(() => {
+      arg.submit(handleEdit);
+      // Remove focus after submission to prevent focus ring from persisting
+      setTimeout(() => {
+        inputEl?.blur();
+      }, 0);
+    }, 3000);
   }
   function onBlur() {
     // To prevent double-firing, clear any pending timer
@@ -39,6 +46,7 @@
       "transition-shadow duration-200",
     )}
     bind:value={arg.value}
+    bind:ref={inputEl}
     oninput={onInput}
     onblur={onBlur}
   />
@@ -49,7 +57,5 @@
   ></div>
 
   <!-- Reset button is always visible to allow resetting to a default value -->
-  <Button variant="ghost" size="icon" class="absolute right-0 h-6 w-6" onclick={onReset} aria-label="Reset value">
-    <RotateCcw class="text-muted-foreground opacity-50 size-3" />
-  </Button>
+  <Reset {onReset} class="absolute right-0" />
 </div>
