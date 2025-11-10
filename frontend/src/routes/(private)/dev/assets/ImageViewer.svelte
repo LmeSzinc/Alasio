@@ -14,7 +14,7 @@
     zoomFactor = 1.2,
     pixelGridThreshold = 6,
   } = $props<{
-    src: string;
+    src?: string | null;
     class?: string;
     initScale?: number;
     minScale?: number;
@@ -226,6 +226,23 @@
 
   // Effect to load the image when `src` changes
   $effect(() => {
+    // Check if src is null or undefined
+    if (!src) {
+      image = null;
+      // Reset view state
+      scale = initScale;
+      translateX = 0;
+      translateY = 0;
+      // Clear canvases when no image
+      if (ctxImage && imageCanvasEl) {
+        ctxImage.clearRect(0, 0, imageCanvasEl.width, imageCanvasEl.height);
+      }
+      if (ctxGrid && gridCanvasEl) {
+        ctxGrid.clearRect(0, 0, gridCanvasEl.width, gridCanvasEl.height);
+      }
+      return;
+    }
+
     const img = new Image();
     img.onload = () => {
       image = img;
@@ -263,6 +280,9 @@
     }
   }
   function handleWheel(event: WheelEvent) {
+    // Disable zoom when no image
+    if (!image) return;
+
     // Allow zoom with Alt key or without any modifier
     if (event.altKey) {
       event.preventDefault(); // Prevent Alt+Wheel from triggering browser navigation
@@ -304,6 +324,9 @@
     translateY -= newCenterOffset.y;
   }
   function handleMouseDown(event: MouseEvent) {
+    // Disable dragging when no image
+    if (!image) return;
+
     containerEl?.focus();
     if (!isSpacePressed || event.button !== 0) return;
     isDragging = true;
@@ -351,14 +374,23 @@
   <canvas bind:this={imageCanvasEl} class="absolute top-0 left-0"></canvas>
   <canvas bind:this={gridCanvasEl} class="absolute top-0 left-0"></canvas>
 
+  <!-- No Image Placeholder -->
+  {#if !src}
+    <div class="absolute inset-0 flex items-center justify-center">
+      <div class="text-muted-foreground text-lg">No Image</div>
+    </div>
+  {/if}
+
   <!-- Virtual object to show ring after canvas -->
   <div
     class="group-focus-within:ring-ring pointer-events-none absolute inset-0 rounded-md group-focus-within:ring-1 group-focus-within:ring-inset"
   ></div>
 
-  <div class="absolute top-2 right-2 z-10">
-    <Button variant="outline" size="icon" onclick={resetView} title="Reset View">
-      <RefreshCcw class="h-4 w-4" />
-    </Button>
-  </div>
+  {#if image}
+    <div class="absolute top-2 right-2 z-10">
+      <Button variant="outline" size="icon" onclick={resetView} title="Reset View">
+        <RefreshCcw class="h-4 w-4" />
+      </Button>
+    </div>
+  {/if}
 </div>
