@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any, Union
+from typing import Any, Literal, Union
 
 import msgspec
 from msgspec import Struct, UNSET, UnsetType
@@ -136,10 +136,33 @@ MSGSPEC_CONSTRAINT = [
 
 
 class ArgData(Struct, omit_defaults=True):
+    # data type
     dt: to_literal(TYPE_DT_TO_PYTHON.keys())
+    # default value
     value: Any
     option: Union[list, UnsetType] = UNSET
+
+    # Data topics events will have `option_i18n` for option translations
+    # key is option, value is translation
+    # option_i18n: Union[Dict[any, str], UnsetType] = UNSET
+
     advanced: bool = False
+    # Layout style, layout is determined according to `dt` by frontend (see $lib/component/arg/Arg.svelte)
+    # Most `dt` are show as horizontal, some are special e.g. dt=textarea is vertical
+    # If you need custom layout, set this value
+    # 1. "hori" for horizontal layout
+    # - {name} {input}
+    # - {help} (placeholder)
+    # placeholder disappear when component in compact mode
+    # 2. "vert" for vertical layout with 3 rows:
+    # - {name}
+    # - {help}
+    # - {input}
+    # 3. "vert-rev" for reversed vertical layout with 3 rows:
+    # - {name}
+    # - {input}
+    # - {help}
+    layout: Literal['hori', 'vert', 'vert-rev'] = UNSET
 
     # Msgspec constraints
     # https://jcristharif.com/msgspec/constraints.html

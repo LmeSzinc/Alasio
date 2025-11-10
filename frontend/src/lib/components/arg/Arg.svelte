@@ -2,10 +2,12 @@
   import type { Component } from "svelte";
   import Checkbox from "../arginput/Checkbox.svelte";
   import Input from "../arginput/Input.svelte";
+  import Select from "../arginput/Select.svelte";
   import Textarea from "../arginput/Textarea.svelte";
   import HorizontalLayout from "./HorizontalLayout.svelte";
   import type { ArgProps, InputProps, LayoutProps } from "./utils.svelte";
   import VerticalLayout from "./VerticalLayout.svelte";
+  import VerticalReverseLayout from "./VerticalReverseLayout.svelte";
 
   let { data = $bindable(), ...restProps }: ArgProps = $props();
 
@@ -13,14 +15,16 @@
   const componentMap: Record<string, Component<InputProps>> = {
     input: Input,
     checkbox: Checkbox,
-    dropdown: Input,
+    select: Select,
     filter: Textarea,
   };
   const layoutMap: Record<string, Component<LayoutProps>> = {
     filter: VerticalLayout,
   };
   const layoutAliasMap: Record<string, Component<LayoutProps>> = {
-    horizontal: HorizontalLayout,
+    hori: HorizontalLayout,
+    vert: VerticalLayout,
+    "vert-rev": VerticalReverseLayout,
   };
 
   // --- COMPONENT RESOLUTION ---

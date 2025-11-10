@@ -8,8 +8,50 @@ export type ArgData = {
   value: any;
   name?: string;
   help?: string;
-  layout?: string;
-  [key: string]: any;
+
+  advanced?: boolean;
+  /**
+   * Layout style, layout is determined according to `dt` by frontend (see $lib/component/arg/Arg.svelte)
+   * Most `dt` are show as horizontal, some are special e.g. dt=textarea is vertical
+   * If you need custom layout, set this value
+   * 1. "hori" for horizontal layout
+   *    - {name} {input}
+   *    - {help} (placeholder)
+   *    placeholder disappear when component in compact mode
+   * 2. "vert" for vertical layout with 3 rows:
+   *    - {name}
+   *    - {help}
+   *    - {input}
+   * 3. "vert-rev" for reversed vertical layout with 3 rows:
+   *    - {name}
+   *    - {input}
+   *    - {help}
+   */
+  layout?: "hori" | "vert" | "vert-rev";
+
+  option?: any[];
+  option_i18n?: Record<any, string>;
+  // Msgspec constraints
+  // https://jcristharif.com/msgspec/constraints.html
+
+  // The annotated value must be greater than gt.
+  gt?: number;
+  // The annotated value must be greater than or equal to ge.
+  ge?: number;
+  // The annotated value must be less than lt.
+  lt?: number;
+  // The annotated value must be less than or equal to le.
+  le?: number;
+  // The annotated value must be a multiple of multiple_of.
+  multiple_of?: number;
+  // A regex pattern that the annotated value must match against.
+  pattern?: string;
+  // The annotated value must have a length greater than or equal to min_length.
+  min_length?: number;
+  // The annotated value must have a length less than or equal to max_length.
+  max_length?: number;
+  // Configures the timezone-requirements for annotated datetime/time types.
+  tz?: boolean;
 };
 
 export type InputProps = {

@@ -50,6 +50,6 @@
 
   <!-- Reset button is always visible to allow resetting to a default value -->
   <Button variant="ghost" size="icon" class="absolute right-0 h-6 w-6" onclick={onReset} aria-label="Reset value">
-    <RotateCcw class="text-foreground/35 size-3" />
+    <RotateCcw class="text-muted-foreground opacity-50 size-3" />
   </Button>
 </div>
