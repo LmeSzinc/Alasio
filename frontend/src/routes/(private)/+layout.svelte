@@ -6,14 +6,15 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import * as Sheet from "$lib/components/ui/sheet";
-  import { ThemeToggle } from "$lib/components/ui/theme/index.js";
-  import { NavContext } from "$lib/slotcontext.svelte.js";
+  import { HeaderContext, NavContext } from "$lib/slotcontext.svelte.js";
   import { cn } from "$lib/utils.js";
   // props
   let { data, children } = $props();
 
   // nav context
   NavContext.init();
+  // header context
+  HeaderContext.init();
 
   // error page
   let isRetrying = $state<boolean>(false);
@@ -44,14 +45,11 @@
 </script>
 
 <svelte:window bind:innerWidth />
-<ThemeToggle class="absolute right-5 bottom-5 z-50"></ThemeToggle>
 {#if data.success}
   <!-- 1. Main layout -->
   <div class="app-container flex h-screen w-full flex-col">
     <!-- 1.1 Header -->
-    <div class="app-header header-shadow relative z-40">
-      <Header onMenuClick={openSheet} />
-    </div>
+    <Header onMenuClick={openSheet} />
     <!-- 1.2 Layout body -->
     <div class="app-layout-body flex-1 overflow-hidden">
       <div class="mx-auto flex h-full xl:ml-4">
@@ -117,9 +115,6 @@
 {/if}
 
 <style>
-  .header-shadow {
-    box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
-  }
   .aside-container {
     box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
     background-color: (--background);

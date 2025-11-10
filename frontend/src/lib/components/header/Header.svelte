@@ -3,15 +3,18 @@
   import { cn } from "$lib/utils.js";
   import { Menu } from "@lucide/svelte";
   import type { HTMLAttributes } from "svelte/elements";
+  import AppHeader from "./AppHeader.svelte";
+  import { HeaderContext } from "$lib/slotcontext.svelte";
 
   // props
   type $$props = {
+    class?: string;
     onMenuClick: () => void;
   };
   let { class: className, onMenuClick }: HTMLAttributes<HTMLHeadElement> & $$props = $props();
 </script>
 
-<header class={cn("bg-card flex h-12.5 w-full items-center gap-4 px-4 pr-13", className)}>
+<AppHeader class={cn("", className)}>
   <!-- Mobile menu button, hidden on medium screens and up -->
   <Button variant="ghost" size="icon" class="shrink-0 md:hidden" onclick={onMenuClick}>
     <Menu class="h-5 w-5" />
@@ -19,5 +22,9 @@
   </Button>
 
   <!-- Other header content -->
-  <div class="w-full flex-1 text-center">Header</div>
-</header>
+  {#if HeaderContext.snippet}
+    {@render HeaderContext.snippet()}
+  {:else}
+    <h1 class="w-full flex-1 text-center text-lg">Header</h1>
+  {/if}
+</AppHeader>
