@@ -1,4 +1,3 @@
-<!-- src/routes/config/[config_name]/ConfigNav.svelte -->
 <script lang="ts">
   import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "$lib/components/ui/accordion";
   import { Button } from "$lib/components/ui/button";
@@ -8,10 +7,9 @@
 
   // --- Props Definition (Svelte 5 Runes) ---
   type $$props = {
-    // Input: The name of the main configuration.
-    config_name: string;
-    // Callback: Fires when a navigation accordion is opened.
-    onNavClick?: (nav_name: string) => void;
+    nav_name: string;
+    card_name: string;
+    opened_nav: string;
     // Callback: Fires when a card is clicked.
     onCardClick?: (nav_name: string, card_name: string) => void;
     // Optional class for custom styling.
@@ -19,33 +17,16 @@
   };
 
   // Assign props to reactive variables, providing default empty functions for callbacks.
-  let { config_name, onNavClick, onCardClick, class: className }: $$props = $props();
-
-  // --- Internal UI State (Svelte 5 Runes) ---
-  let nav_name = $state<string>("");
-  let opened_nav = $state<string>("");
-  let card_name = $state<string>("");
+  let { nav_name, card_name, opened_nav = $bindable(), onCardClick, class: className }: $$props = $props();
 
   // --- WebSocket & RPC Setup ---
   const topicClient = useTopic("ConfigNav");
-  const stateClient = useTopic("ConnState");
-  const configRpc = stateClient.resilientRpc();
-  const navRpc = stateClient.resilientRpc()
 
   // --- Data Types ---
   type CardItem = { key: string; name: string };
   type NavItem = { key: string; name: string; cards: CardItem[] };
 
   // --- Reactive Logic (Svelte 5 Runes) ---
-
-  // Effect to call RPC when config_name changes.
-  $effect(() => {
-    if (config_name) {
-      configRpc.call("set_config", { name: config_name });
-      nav_name = "";
-      card_name = "";
-    }
-  });
 
   // Derived state to transform raw topic data into a structured array for the UI.
   const navItems = $derived.by(() => {
@@ -62,14 +43,6 @@
     }));
   });
 
-  // Effect to run the onNavClick callback when the user opens a new accordion.
-  $effect(() => {
-    if (nav_name) {
-      navRpc.call("set_nav", { name: nav_name });
-      onNavClick?.(nav_name);
-    }
-  });
-
   // --- Event Handlers ---
   function handleCardClick(clickedNavKey: string, clickedCardKey: string) {
     // Update internal state to reflect the last click.
@@ -81,11 +54,9 @@
   }
 </script>
 
-<nav class={cn("w-full space-y-2 p-4 shadow-custom-complex", className)} aria-label="Configuration Navigation">
+<nav class={cn("shadow-custom-complex w-full space-y-2 p-4", className)} aria-label="Configuration Navigation">
   <ScrollArea class="h-full w-full">
-    {#if configRpc.errorMsg}
-      <p class="text-muted-foreground p-4 text-center text-sm">{configRpc.errorMsg}</p>
-    {:else if navItems.length}
+    {#if navItems.length}
       <!-- 
           Accordion's value is bound to our internal `nav_name` state.
           When a user clicks a trigger, `nav_name` is updated.
@@ -112,6 +83,8 @@
           </AccordionItem>
         {/each}
       </Accordion>
+    {:else}
+      <p>No data</p>
     {/if}
   </ScrollArea>
 </nav>

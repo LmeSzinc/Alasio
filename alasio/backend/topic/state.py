@@ -24,6 +24,11 @@ class NavState(Struct):
     mod_name: str = ''
     nav_name: str = ''
 
+    def clear(self):
+        self.config_name = ''
+        self.mod_name = ''
+        self.nav_name = ''
+
 
 class ConnState(BaseTopic):
     @async_reactive_source
@@ -86,6 +91,14 @@ class ConnState(BaseTopic):
         """
         Set config name, and change nav_state accordingly
         """
+        # allow set empty config to clear state on page leave
+        if not name:
+            state: NavState = await self.nav_state
+            state.clear()
+            # broadcast
+            await self.__class__.nav_state.mutate(self, state)
+            return
+
         # check if name is a validate filename
         error = validate_config_name(name)
         if error:
