@@ -2,8 +2,9 @@
   import { Button } from "$lib/components/ui/button";
   import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "$lib/components/ui/card";
   import { useTopic } from "$lib/ws";
-  import { Power } from "@lucide/svelte";
-  import Restart from "./Restart.svelte";
+  import { Power, LogOut } from "@lucide/svelte";
+  import { goto } from "$app/navigation";
+  import RestartDialog from "./RestartDialog.svelte";
 
   // Connect to backend topic
   const topicClient = useTopic("ConnState");
@@ -33,6 +34,22 @@
       </CardContent>
     </Card>
 
+    <!-- Return to Login Card -->
+    <Card class="neushadow w-64 border-0">
+      <CardHeader>
+        <CardTitle class="flex items-center gap-2">
+          <LogOut class="h-5 w-5" />
+          Return to Login
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Button onclick={() => goto("/auth")} variant="outline" class="w-full">
+          <LogOut class="mr-2 h-4 w-4" />
+          Return to Login
+        </Button>
+      </CardContent>
+    </Card>
+
     <!-- Placeholder for future tools -->
     <Card class="neushadow w-64 border-0">
       <CardHeader>
@@ -47,4 +64,4 @@
 </div>
 
 <!-- Dialog -->
-<Restart rpc={restartRpc} />
+<RestartDialog rpc={restartRpc} />
