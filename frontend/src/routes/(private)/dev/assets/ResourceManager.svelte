@@ -263,7 +263,7 @@
             </div>
           {:else}
             <div
-              class="flex h-full w-full flex-1 flex-wrap gap-1 p-1 outline-none"
+              class="flex w-full flex-1 flex-wrap content-start gap-1 p-1 outline-none"
               bind:this={containerRef}
               role="grid"
               tabindex="0"

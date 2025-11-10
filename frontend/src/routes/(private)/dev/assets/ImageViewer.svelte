@@ -331,7 +331,7 @@
 <div
   bind:this={containerEl}
   class={cn(
-    "focus:ring-ring relative h-full w-full overflow-hidden rounded-lg border select-none focus:ring-2 focus:ring-offset-2 focus:outline-none",
+    "group relative h-full w-full overflow-hidden select-none focus:outline-none",
     isSpacePressed && !isDragging && "cursor-grab",
     isDragging && "cursor-grabbing",
     className,
@@ -350,6 +350,11 @@
   <!-- Canvas layers for drawing -->
   <canvas bind:this={imageCanvasEl} class="absolute top-0 left-0"></canvas>
   <canvas bind:this={gridCanvasEl} class="absolute top-0 left-0"></canvas>
+
+  <!-- Virtual object to show ring after canvas -->
+  <div
+    class="group-focus-within:ring-ring pointer-events-none absolute inset-0 rounded-md group-focus-within:ring-1 group-focus-within:ring-inset"
+  ></div>
 
   <div class="absolute top-2 right-2 z-10">
     <Button variant="outline" size="icon" onclick={resetView} title="Reset View">
