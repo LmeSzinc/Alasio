@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from alasio.base.image.color import rgb2luma, rgb2luma_standard
+from alasio.base.image.color import rgb2luma
 from alasio.base.image.testing import create_rgb888
 
 
@@ -22,7 +22,7 @@ class TestColor:
         This is useful if exact equality fails due to floating point precision.
         """
         result1 = rgb2luma(rgb888_image)
-        result2 = rgb2luma_standard(rgb888_image)
+        result2 = rgb2luma(rgb888_image, fast=False)
 
         # Test that both functions return the same output shape
         assert result1.shape == result2.shape, \

@@ -99,42 +99,30 @@ def rgb2hsv(image):
     return image
 
 
-def rgb2luma(image):
+def rgb2luma(image, fast=True):
     """
     Convert RGB to the Y channel (Luminance) in YUV color space.
-    A faster implement that costs 12.624us on 1280x720 image instead of 15.084us
-
-    Note that due to float calculation, this method has +- 1 color difference compares to standard opencv,
-    which should be acceptable in template matching.
-    If you do need a precise result, use rgb2luma_standard() instead
 
     OpenCV calculates using:
         Y = (R * 4899 + G * 9617 + B * 1868 + 8192) >> 14
 
     Args:
         image (np.ndarray): Shape (height, width, channel)
+        fast (bool): True to use faster implement that costs 12.624us on 1280x720 image instead of 15.084us
+                Note that due to float calculation, this method has +- 1 color difference compares to standard opencv,
+                which should be acceptable in template matching.
+                If you do need a precise result, use `fast=False` instead
 
     Returns:
         np.ndarray: Shape (height, width)
     """
-    r, g, b = cv2.split(image)
-    luma = cv2.addWeighted(r, 0.299, g, 0.587, 0)
-    cv2.addWeighted(luma, 1.0, b, 0.114, 0, dst=luma)
-    return luma
-
-
-def rgb2luma_standard(image):
-    """
-    Convert RGB to the Y channel (Luminance) in YUV color space.
-    The standard opencv implementation
-
-    Args:
-        image (np.ndarray): Shape (height, width, channel)
-
-    Returns:
-        np.ndarray: Shape (height, width)
-    """
-    return cv2.extractChannel(cv2.cvtColor(image, cv2.COLOR_RGB2YUV), 0)
+    if fast:
+        r, g, b = cv2.split(image)
+        luma = cv2.addWeighted(r, 0.299, g, 0.587, 0)
+        cv2.addWeighted(luma, 1.0, b, 0.114, 0, dst=luma)
+        return luma
+    else:
+        return cv2.extractChannel(cv2.cvtColor(image, cv2.COLOR_RGB2YUV), 0)
 
 
 def get_color(image, area=None):
