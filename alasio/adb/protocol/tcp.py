@@ -1,5 +1,8 @@
 from alasio.adb.protocol.const import ShellResult
+from alasio.adb.protocol.props import Props
 from alasio.adb.protocol.tcp_protocol import AdbProtocolTCP
+from alasio.ext.cache import cached_property
+from alasio.logger import logger
 
 
 class AdbTCP(AdbProtocolTCP):
@@ -19,6 +22,30 @@ class AdbTCP(AdbProtocolTCP):
             with self.open_stream(f'shell:{cmd}') as stream:
                 data = stream.recv_until_close(timeout=timeout)
             return ShellResult.from_shell_v1(data)
+
+    @cached_property
+    def props(self) -> Props:
+        """
+        We cache `getprop` results instead of doing individual `getprop xxx`,
+        because `getprop xxx` costs about 3ms and `getprop` costs about 7ms.
+        If we need more than 2 keys (which is usually true), caching is faster.
+        """
+        data = self.shell('getprop', shell_v2=False)
+        props = Props.from_getprop(data.stdout)
+        return props
+
+    @cached_property
+    def sdk_ver(self) -> int:
+        """
+        Android SDK/API levels, see https://apilevels.com/
+        """
+        sdk = self.props.get_int('ro.build.version.sdk')
+        if sdk:
+            logger.info(f'[sdk_ver]: {sdk}')
+        else:
+            logger.error(f'SDK version invalid: {sdk}')
+            sdk = 0
+        return sdk
 
 
 if __name__ == '__main__':
