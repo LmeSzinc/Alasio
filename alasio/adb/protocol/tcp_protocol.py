@@ -194,6 +194,7 @@ class AdbProtocolTCP:
             AdbConnectionClosed:
             AdbConnectionTimeout:
         """
+        # print('send', command, arg0, arg1, data)
         data_length = len(data)
         data_check = sum(data) & 0xFFFFFFFF
         command = int.from_bytes(command, 'little')
@@ -213,7 +214,8 @@ class AdbProtocolTCP:
         except socket.timeout as e:
             raise AdbConnectionTimeout(f'{e.__class__.__name__} while sending: {e}')
 
-    def recv_exact(self, sock: socket.socket, length: int, header_timeout=True) -> bytes:
+    @staticmethod
+    def recv_exact(sock: socket.socket, length: int, header_timeout=True) -> bytes:
         """
         Raises:
             AdbConnectionClosed:
@@ -248,9 +250,10 @@ class AdbProtocolTCP:
 
         # receive more
         data = deque([data])
+        remain = length - total
         while 1:
             try:
-                chunk = sock.recv(length)
+                chunk = sock.recv(remain)
             except (ConnectionError, OSError) as e:
                 raise AdbConnectionClosed(f'{e.__class__.__name__} when receiving chunk: {e}')
             except socket.timeout as e:
@@ -258,9 +261,9 @@ class AdbProtocolTCP:
             if not chunk:
                 raise AdbConnectionClosed('No data when receiving chunk')
 
-            total += len(chunk)
             data.append(chunk)
-            if total >= length:
+            remain -= len(chunk)
+            if remain <= 0:
                 break
 
         return b''.join(data)
@@ -325,7 +328,6 @@ class AdbProtocolTCP:
                     raise AdbConnectionTimeout(f'Timeout when opening stream {stream}')
                 start = time()
                 if stream.send_event.acquire(timeout=timeout):
-                    print(stream)
                     if stream.state == 'opened':
                         break
                     if stream.state == 'closed':
@@ -369,9 +371,9 @@ class AdbProtocolTCP:
             logger.warning(f'Cannot sendto stream without remote_id: {stream}')
             return
 
-        self.message_send(self._sock, WRTE, stream.local_id, remote_id, data)
         # just info that any message is sent, no need to wait
         stream.send_event.acquire(blocking=False)
+        self.message_send(self._sock, WRTE, stream.local_id, remote_id, data)
 
         # wait OKAY
         # use connection-level timeout as this should be fast and not related to stream
@@ -442,7 +444,11 @@ class AdbProtocolTCP:
                 break
             try:
                 msg = self.message_recv(sock, header_timeout=False)
-            except (AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid):
+            except (AdbConnectionClosed, AdbConnectionTimeout):
                 break
-            print(msg)
+            except AdbMessageInvalid as e:
+                logger.warning(f'Invalid message to dispatch: {e}')
+                continue
             self._dispatch_message(*msg)
+
+        # logger.info('_task_dispatch_message end')
