@@ -1,5 +1,6 @@
 <script lang="ts">
   import ThemeToggle from "$lib/components/ui/theme/theme-toggle.svelte";
+  import LangSelector from "$lib/i18n/LangSelector.svelte";
   import { cn } from "$lib/utils.js";
   import type { Snippet } from "svelte";
   import type { HTMLAttributes } from "svelte/elements";
@@ -23,6 +24,7 @@
   <!-- header content -->
   {@render children?.()}
 
+  <LangSelector></LangSelector>
   <ThemeToggle variant="ghost"></ThemeToggle>
 </header>
 

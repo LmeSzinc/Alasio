@@ -4,7 +4,6 @@ import { browser } from "$app/environment";
 import { DEFAULT_LANG, SUPPORTED_LANGS } from "../../i18ngen/constants";
 import { matchLanguage } from "./negotiate";
 
-
 export type Lang = (typeof SUPPORTED_LANGS)[number];
 
 // === DIRECT EXPORT OF RUNE ===
