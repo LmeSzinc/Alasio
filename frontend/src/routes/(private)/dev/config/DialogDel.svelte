@@ -2,6 +2,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "$lib/components/ui/dialog";
   import { Help } from "$lib/components/ui/help";
+  import { t } from "$lib/i18n";
   import type { Rpc } from "$lib/ws";
   import { AlertTriangle } from "@lucide/svelte";
   import type { Config } from "./ConfigItem.svelte";
@@ -35,17 +36,17 @@
   <DialogContent class="sm:max-w-md">
     <DialogHeader>
       <DialogTitle class="flex items-center gap-2">
-        <AlertTriangle class="text-destructive h-5 w-5" />
-        Delete Configuration
+        <AlertTriangle class="text-destructive h-4 w-4" />
+        {t.ConfigScan.DeleteConfig()}
       </DialogTitle>
     </DialogHeader>
 
     <div class="space-y-4">
       <div class="text-sm">
-        <p class="mb-2">Are you sure you want to delete this configuration?</p>
+        <p class="mb-2">{t.ConfigScan.DeleteConfirmation()}</p>
         <div class="bg-card text-card-foreground flex h-12 items-center rounded-md border p-2 shadow-sm">
           <div class="ml-2 flex-grow font-mono text-sm">
-            {targetConfig?.name || "Unknown"}
+            {targetConfig?.name || t.ConfigScan.Unknown()}
           </div>
           {#if targetConfig?.mod}
             <div class="bg-secondary text-secondary-foreground ml-4 rounded px-2 py-1 text-xs">
@@ -54,7 +55,7 @@
           {/if}
         </div>
         <p class="text-destructive mt-2 text-xs">
-          This action cannot be undone. The configuration file will be permanently deleted.
+          {t.ConfigScan.DeleteWarning()}
         </p>
       </div>
 
@@ -64,9 +65,11 @@
     </div>
 
     <DialogFooter>
-      <Button variant="outline" onclick={() => (rpc.isOpen = false)} disabled={rpc.isPending}>Cancel</Button>
+      <Button variant="outline" onclick={() => (rpc.isOpen = false)} disabled={rpc.isPending}>
+        {t.ConfigScan.Cancel()}
+      </Button>
       <Button variant="destructive" onclick={handleSubmit} disabled={rpc.isPending || !targetConfig}>
-        Delete Configuration
+        {t.ConfigScan.DeleteConfig()}
       </Button>
     </DialogFooter>
   </DialogContent>

@@ -2,6 +2,7 @@
   import { DndProvider, applyDnd, type DndEndCallbackDetail } from "$lib/components/dnd";
   import { Button } from "$lib/components/ui/button";
   import { Help } from "$lib/components/ui/help";
+  import { t } from "$lib/i18n";
   import { useTopic } from "$lib/ws";
   import { Loader2, Plus } from "@lucide/svelte";
   import type { ConfigGroupData } from "./ConfigGroup.svelte";
@@ -188,8 +189,8 @@
     }
 
     if (changes.length > 0) {
-      console.log("Sending RPC with changes:", changes);
-      dndRpc.call("config_dnd", {"configs": changes});
+      // console.log("Sending RPC with changes:", changes);
+      dndRpc.call("config_dnd", { configs: changes });
     }
   }
 
@@ -296,11 +297,11 @@
 </script>
 
 <div class={className}>
-  <header class="my-6 mx-4 flex items-center justify-between">
-    <h1 class="text-3xl font-bold tracking-tight">Configuration Manager</h1>
+  <header class="mx-4 my-6 flex items-center justify-between">
+    <h1 class="text-3xl font-bold tracking-tight">{t.ConfigScan.ConfigManager()}</h1>
     <Button onclick={handleAddConfig} class="flex items-center gap-2">
       <Plus class="h-4 w-4" />
-      Add Configuration
+      {t.ConfigScan.AddConfig()}
     </Button>
   </header>
 

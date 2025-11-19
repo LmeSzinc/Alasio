@@ -4,6 +4,7 @@
   import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
   import { GripVertical } from "@lucide/svelte";
   import ConfigItem, { type Config } from "./ConfigItem.svelte";
+  import { t } from "$lib/i18n";
 
   export type ConfigGroupData = {
     id: string;
@@ -34,17 +35,19 @@
   <div class="group-container relative rounded-lg p-3 pt-4">
     <div class="absolute -top-2 left-6 z-2 flex items-center">
       <!-- icon and text cover the border -->
-      <span class="text-muted-foreground bg-sidebar pl-2 text-xs">Group {group.gid}</span>
+      <span class="text-muted-foreground bg-background pl-2 text-xs">
+        {t.ConfigScan.SchedulerGroup({ n: group.gid })}
+      </span>
       <div
         {...listeners.current}
         {...attributes.current}
-        class="text-muted-foreground bg-sidebar cursor-grab px-2 py-1 active:cursor-grabbing"
+        class="text-muted-foreground bg-background cursor-grab px-2 py-1 active:cursor-grabbing"
       >
         <GripVertical class="h-3 w-3" />
       </div>
     </div>
 
-    <div class={cn("transition-colors space-y-1", { "bg-accent/30 rounded-md": isOver.current })}>
+    <div class={cn("space-y-1 transition-colors", { "bg-accent/30 rounded-md": isOver.current })}>
       {#if group.items.length > 0}
         {#each group.items as item (item.id)}
           <ConfigItem config={item} {dropIndicator} {onCopy} {onDelete} />
@@ -73,7 +76,7 @@
     content: "";
     position: absolute;
     inset: 0;
-    border: 1px dashed var(--border);
+    border: 2px dashed var(--border);
     border-radius: 0.625rem;
     pointer-events: none;
   }

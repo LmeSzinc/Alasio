@@ -5,7 +5,9 @@
   import { Help } from "$lib/components/ui/help";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
+  import { t } from "$lib/i18n";
   import type { Rpc } from "$lib/ws";
+  import { Plus } from "@lucide/svelte";
 
   type Props = {
     rpc: Rpc;
@@ -43,18 +45,27 @@
 <Dialog bind:open={rpc.isOpen}>
   <DialogContent class="sm:max-w-md">
     <DialogHeader>
-      <DialogTitle>Add Configuration</DialogTitle>
+      <DialogTitle class="flex items-center gap-2">
+        <Plus class="h-4 w-4" />
+        {t.ConfigScan.AddConfig()}
+      </DialogTitle>
     </DialogHeader>
 
     <form onsubmit={handleSubmit} class="space-y-4">
       <div class="space-y-2">
-        <Label for="config-name">Configuration Name</Label>
-        <Input id="config-name" bind:value={name} placeholder="Enter configuration name" disabled={rpc.isPending} />
+        <Label for="config-name">{t.ConfigScan.ConfigName()}</Label>
+        <Input
+          id="config-name"
+          class="bg-card"
+          bind:value={name}
+          placeholder={t.ConfigScan.EnterConfigName()}
+          disabled={rpc.isPending}
+        />
       </div>
 
       <div class="space-y-2">
-        <Label for="config-mod">Module</Label>
-        <ModSelector bind:mod_name={mod} disabled={rpc.isPending} />
+        <Label for="config-mod">{t.Mod.ModName()}</Label>
+        <ModSelector bind:mod_name={mod} disabled={rpc.isPending} class="bg-card" />
       </div>
 
       {#if rpc.errorMsg}
@@ -63,8 +74,12 @@
     </form>
 
     <DialogFooter>
-      <Button variant="outline" onclick={() => (rpc.isOpen = false)} disabled={rpc.isPending}>Cancel</Button>
-      <Button onclick={handleSubmit} disabled={rpc.isPending || !isFormValid}>Add Configuration</Button>
+      <Button variant="outline" onclick={() => (rpc.isOpen = false)} disabled={rpc.isPending}>
+        {t.ConfigScan.Cancel()}
+      </Button>
+      <Button onclick={handleSubmit} disabled={rpc.isPending || !isFormValid}>
+        {t.ConfigScan.AddConfig()}
+      </Button>
     </DialogFooter>
   </DialogContent>
 </Dialog>

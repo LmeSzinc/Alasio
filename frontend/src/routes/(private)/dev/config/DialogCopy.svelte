@@ -4,7 +4,9 @@
   import { Help } from "$lib/components/ui/help";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
+  import { t } from "$lib/i18n";
   import type { Rpc } from "$lib/ws";
+  import { Copy } from "@lucide/svelte";
   import type { Config } from "./ConfigItem.svelte";
 
   type Props = {
@@ -45,15 +47,18 @@
 <Dialog bind:open={rpc.isOpen}>
   <DialogContent class="sm:max-w-md">
     <DialogHeader>
-      <DialogTitle>Copy Configuration</DialogTitle>
+      <DialogTitle class="flex items-center gap-2">
+        <Copy class="h-4 w-4" />
+        {t.ConfigScan.CopyConfig()}
+      </DialogTitle>
     </DialogHeader>
 
     <form onsubmit={handleSubmit} class="space-y-4">
       <div class="space-y-2">
-        <Label>Copy from</Label>
+        <Label>{t.ConfigScan.CopyFrom()}</Label>
         <div class="bg-card text-card-foreground flex h-12 items-center rounded-md border p-2 shadow-sm">
           <div class="ml-2 flex-grow font-mono text-sm">
-            {sourceConfig?.name || "No source selected"}
+            {sourceConfig?.name || t.ConfigScan.Unknown()}
           </div>
           {#if sourceConfig?.mod}
             <div class="bg-secondary text-secondary-foreground ml-4 rounded px-2 py-1 text-xs">
@@ -64,11 +69,12 @@
       </div>
 
       <div class="space-y-2">
-        <Label for="new-config-name">Copy to</Label>
+        <Label for="new-config-name">{t.ConfigScan.CopyTo()}</Label>
         <Input
           id="new-config-name"
+          class="bg-card"
           bind:value={newName}
-          placeholder="Enter new configuration name"
+          placeholder={t.ConfigScan.EnterNewConfigName()}
           disabled={rpc.isPending}
         />
       </div>
@@ -79,8 +85,12 @@
     </form>
 
     <DialogFooter>
-      <Button variant="outline" onclick={() => (rpc.isOpen = false)} disabled={rpc.isPending}>Cancel</Button>
-      <Button onclick={handleSubmit} disabled={rpc.isPending || !isFormValid}>Copy Configuration</Button>
+      <Button variant="outline" onclick={() => (rpc.isOpen = false)} disabled={rpc.isPending}>
+        {t.ConfigScan.Cancel()}
+      </Button>
+      <Button onclick={handleSubmit} disabled={rpc.isPending || !isFormValid}>
+        {t.ConfigScan.CopyConfig()}
+      </Button>
     </DialogFooter>
   </DialogContent>
 </Dialog>

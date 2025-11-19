@@ -1,0 +1,100 @@
+{
+  "ConfigManager": {
+    "en-US": "Config Manager",
+    "zh-CN": "配置文件管理器",
+    "ja-JP": "設定マネージャー",
+    "zh-TW": "配置檔案管理器",
+    "es-ES": "Administrador de Configuración"
+  },
+  "AddConfig": {
+    "en-US": "Add Config",
+    "zh-CN": "添加配置",
+    "ja-JP": "設定を追加",
+    "zh-TW": "新增配置",
+    "es-ES": "Agregar Configuración"
+  },
+  "ConfigName": {
+    "en-US": "Config Name",
+    "zh-CN": "配置文件名称",
+    "ja-JP": "設定名",
+    "zh-TW": "配置檔案名稱",
+    "es-ES": "Nombre de Configuración"
+  },
+  "EnterConfigName": {
+    "en-US": "Enter config name",
+    "zh-CN": "输入配置文件名称",
+    "ja-JP": "設定名を入力",
+    "zh-TW": "輸入配置檔案名稱",
+    "es-ES": "Ingrese nombre de configuración"
+  },
+  "Cancel": {
+    "en-US": "Cancel",
+    "zh-CN": "取消",
+    "ja-JP": "キャンセル",
+    "zh-TW": "取消",
+    "es-ES": "Cancelar"
+  },
+  "SchedulerGroup": {
+    "en-US": "Scheduler group #{n}",
+    "zh-CN": "调度器组 #{n}",
+    "ja-JP": "スケジューラグループ #{n}",
+    "zh-TW": "調度器組 #{n}",
+    "es-ES": "Grupo de programador #{n}"
+  },
+  "CopyConfig": {
+    "en-US": "Copy Config",
+    "zh-CN": "复制配置",
+    "ja-JP": "設定をコピー",
+    "zh-TW": "複製配置",
+    "es-ES": "Copiar Configuración"
+  },
+  "CopyFrom": {
+    "en-US": "Copy from",
+    "zh-CN": "从以下复制",
+    "ja-JP": "コピー元",
+    "zh-TW": "從以下複製",
+    "es-ES": "Copiar desde"
+  },
+  "Unknown": {
+    "en-US": "Unknown",
+    "zh-CN": "未知",
+    "ja-JP": "不明",
+    "zh-TW": "未知",
+    "es-ES": "Desconocido"
+  },
+  "CopyTo": {
+    "en-US": "Copy to",
+    "zh-CN": "复制到",
+    "ja-JP": "コピー先",
+    "zh-TW": "複製到",
+    "es-ES": "Copiar a"
+  },
+  "EnterNewConfigName": {
+    "en-US": "Enter new config name",
+    "zh-CN": "输入新配置名称",
+    "ja-JP": "新しい設定名を入力",
+    "zh-TW": "輸入新配置名稱",
+    "es-ES": "Ingrese nuevo nombre de configuración"
+  },
+  "DeleteConfig": {
+    "en-US": "Delete Config",
+    "zh-CN": "删除配置",
+    "ja-JP": "設定を削除",
+    "zh-TW": "刪除配置",
+    "es-ES": "Eliminar Configuración"
+  },
+  "DeleteConfirmation": {
+    "en-US": "Are you sure you want to delete this config?",
+    "zh-CN": "确定要删除此配置吗？",
+    "ja-JP": "この設定を削除してもよろしいですか？",
+    "zh-TW": "確定要刪除此配置嗎？",
+    "es-ES": "¿Está seguro de que desea eliminar esta configuración?"
+  },
+  "DeleteWarning": {
+    "en-US": "This action cannot be undone. The config file will be permanently deleted.",
+    "zh-CN": "此操作无法撤消。配置文件将被永久删除。",
+    "ja-JP": "この操作は元に戻せません。設定ファイルは完全に削除されます。",
+    "zh-TW": "此操作無法撤銷。配置檔案將被永久刪除。",
+    "es-ES": "Esta acción no se puede deshacer. El archivo de configuración se eliminará permanentemente."
+  }
+}

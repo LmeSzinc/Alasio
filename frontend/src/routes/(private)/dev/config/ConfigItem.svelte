@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Indicator, type DropIndicatorState } from "$lib/components/dnd";
   import { Button } from "$lib/components/ui/button";
+  import { t } from "$lib/i18n";
   import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
   import { Copy, GripVertical, Trash2 } from "@lucide/svelte";
 
@@ -65,7 +66,7 @@
 
     <!-- Action buttons - visible on hover -->
     <div class="ml-2 flex items-center gap-1">
-      <Button variant="ghost" size="sm" class="h-8 w-8 p-0" onclick={handleCopy} title="Copy configuration">
+      <Button variant="ghost" size="sm" class="h-8 w-8 p-0" onclick={handleCopy} title={t.ConfigScan.CopyConfig()}>
         <Copy class="h-4 w-4" />
       </Button>
       <Button
@@ -73,7 +74,7 @@
         size="sm"
         class="text-destructive hover:text-destructive h-8 w-8 p-0"
         onclick={handleDelete}
-        title="Delete configuration"
+        title={t.ConfigScan.DeleteConfig()}
       >
         <Trash2 class="h-4 w-4" />
       </Button>

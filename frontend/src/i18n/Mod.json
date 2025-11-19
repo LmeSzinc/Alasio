@@ -1,0 +1,23 @@
+{
+  "ModName": {
+    "en-US": "Mod Name",
+    "zh-CN": "插件名称",
+    "ja-JP": "Mod名",
+    "zh-TW": "插件名稱",
+    "es-ES": "Nombre del Mod"
+  },
+  "SelectMod": {
+    "en-US": "Select a mod",
+    "zh-CN": "选择一个插件",
+    "ja-JP": "Modを選択",
+    "zh-TW": "選擇一個插件",
+    "es-ES": "Seleccionar un mod"
+  },
+  "NoAvailableMod": {
+    "en-US": "No available mod",
+    "zh-CN": "没有可用插件",
+    "ja-JP": "利用可能なModがありません",
+    "zh-TW": "沒有可用插件",
+    "es-ES": "No hay mod disponible"
+  }
+}
