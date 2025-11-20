@@ -1,0 +1,37 @@
+{
+  "SystemTool": {
+    "en-US": "System Tools",
+    "zh-CN": "系统工具",
+    "ja-JP": "システムツール",
+    "zh-TW": "系統工具",
+    "es-ES": "Herramientas del Sistema"
+  },
+  "AlasioTool": {
+    "en-US": "Alasio Tools",
+    "zh-CN": "Alasio 工具",
+    "ja-JP": "Alasio ツール",
+    "zh-TW": "Alasio 工具",
+    "es-ES": "Herramientas Alasio"
+  },
+  "DevTool": {
+    "en-US": "Development Tools",
+    "zh-CN": "开发工具",
+    "ja-JP": "開発ツール",
+    "zh-TW": "開發工具",
+    "es-ES": "Herramientas de Desarrollo"
+  },
+  "RestartBackend": {
+    "en-US": "Restart Backend",
+    "zh-CN": "重启后端",
+    "ja-JP": "バックエンドを再起動",
+    "zh-TW": "重啟後端",
+    "es-ES": "Reiniciar Backend"
+  },
+  "ReturnToLogin": {
+    "en-US": "Return to Login",
+    "zh-CN": "返回登录",
+    "ja-JP": "ログインに戻る",
+    "zh-TW": "返回登入",
+    "es-ES": "Volver al Inicio de Sesión"
+  }
+}

@@ -1,0 +1,163 @@
+{
+  "Title": {
+    "en-US": "WebSocket Test",
+    "zh-CN": "WebSocket 测试",
+    "ja-JP": "WebSocket テスト",
+    "zh-TW": "WebSocket 測試",
+    "es-ES": "Prueba de WebSocket"
+  },
+  "TopicRequired": {
+    "en-US": "Topic is required.",
+    "zh-CN": "主题为必填项。",
+    "ja-JP": "トピックは必須です。",
+    "zh-TW": "主題為必填項目。",
+    "es-ES": "El tema es obligatorio."
+  },
+  "FunctionRequired": {
+    "en-US": "Function name is required for RPC.",
+    "zh-CN": "RPC 需要函数名称。",
+    "ja-JP": "RPCには関数名が必要です。",
+    "zh-TW": "RPC 需要函數名稱。",
+    "es-ES": "Se requiere el nombre de la función para RPC."
+  },
+  "InvalidJson": {
+    "en-US": "Invalid JSON in arguments field.",
+    "zh-CN": "参数字段中的 JSON 格式无效。",
+    "ja-JP": "引数フィールドのJSONが無効です。",
+    "zh-TW": "參數欄位中的 JSON 格式無效。",
+    "es-ES": "JSON inválido en el campo de argumentos."
+  },
+  "SendCommand": {
+    "en-US": "Send Command",
+    "zh-CN": "发送命令",
+    "ja-JP": "コマンド送信",
+    "zh-TW": "發送命令",
+    "es-ES": "Enviar Comando"
+  },
+  "SendCommandDesc": {
+    "en-US": "Manage topic subscriptions and send RPC calls.",
+    "zh-CN": "管理主题订阅并发送 RPC 调用。",
+    "ja-JP": "トピックのサブスクリプションを管理し、RPC呼び出しを送信します。",
+    "zh-TW": "管理主題訂閱並發送 RPC 呼叫。",
+    "es-ES": "Gestiona suscripciones de temas y envía llamadas RPC."
+  },
+  "Topic": {
+    "en-US": "Topic",
+    "zh-CN": "主题",
+    "ja-JP": "トピック",
+    "zh-TW": "主題",
+    "es-ES": "Tema"
+  },
+  "TopicPlaceholder": {
+    "en-US": "e.g., ConfigScan",
+    "zh-CN": "例如：ConfigScan",
+    "ja-JP": "例: ConfigScan",
+    "zh-TW": "例如：ConfigScan",
+    "es-ES": "ej., ConfigScan"
+  },
+  "Subscribe": {
+    "en-US": "Sub",
+    "zh-CN": "订阅",
+    "ja-JP": "購読",
+    "zh-TW": "訂閱",
+    "es-ES": "Suscribir"
+  },
+  "Unsubscribe": {
+    "en-US": "Unsub",
+    "zh-CN": "取消订阅",
+    "ja-JP": "購読解除",
+    "zh-TW": "取消訂閱",
+    "es-ES": "Cancelar"
+  },
+  "RpcFunction": {
+    "en-US": "RPC Function",
+    "zh-CN": "RPC 函数",
+    "ja-JP": "RPC関数",
+    "zh-TW": "RPC 函數",
+    "es-ES": "Función RPC"
+  },
+  "RpcFunctionPlaceholder": {
+    "en-US": "e.g., get_config",
+    "zh-CN": "例如：get_config",
+    "ja-JP": "例: get_config",
+    "zh-TW": "例如：get_config",
+    "es-ES": "ej., get_config"
+  },
+  "RpcArguments": {
+    "en-US": "RPC Arguments (JSON format)",
+    "zh-CN": "RPC 参数（JSON 格式）",
+    "ja-JP": "RPC引数（JSON形式）",
+    "zh-TW": "RPC 參數（JSON 格式）",
+    "es-ES": "Argumentos RPC (formato JSON)"
+  },
+  "RpcArgumentsPlaceholder": {
+    "en-US": "{\"key\": \"value\"}",
+    "zh-CN": "{\"键\": \"值\"}",
+    "ja-JP": "{\"key\": \"value\"}",
+    "zh-TW": "{\"鍵\": \"值\"}",
+    "es-ES": "{\"clave\": \"valor\"}"
+  },
+  "Sending": {
+    "en-US": "Sending...",
+    "zh-CN": "发送中...",
+    "ja-JP": "送信中...",
+    "zh-TW": "發送中...",
+    "es-ES": "Enviando..."
+  },
+  "CallSucceeded": {
+    "en-US": "Call succeeded. ID",
+    "zh-CN": "调用成功。ID",
+    "ja-JP": "呼び出しに成功しました。ID",
+    "zh-TW": "呼叫成功。ID",
+    "es-ES": "Llamada exitosa. ID"
+  },
+  "RpcCall": {
+    "en-US": "RPC Call",
+    "zh-CN": "RPC 调用",
+    "ja-JP": "RPC呼び出し",
+    "zh-TW": "RPC 呼叫",
+    "es-ES": "Llamada RPC"
+  },
+  "SubscribedTopicsData": {
+    "en-US": "Subscribed Topics Data",
+    "zh-CN": "已订阅主题数据",
+    "ja-JP": "購読中のトピックデータ",
+    "zh-TW": "已訂閱主題數據",
+    "es-ES": "Datos de Temas Suscritos"
+  },
+  "NoDataReceived": {
+    "en-US": "No data received yet.",
+    "zh-CN": "尚未接收到数据。",
+    "ja-JP": "まだデータを受信していません。",
+    "zh-TW": "尚未接收到數據。",
+    "es-ES": "Aún no se han recibido datos."
+  },
+  "SubscribeToSeeData": {
+    "en-US": "Subscribe to a topic to see its data here.",
+    "zh-CN": "订阅一个主题以在此处查看其数据。",
+    "ja-JP": "トピックを購読すると、ここにデータが表示されます。",
+    "zh-TW": "訂閱一個主題以在此處查看其數據。",
+    "es-ES": "Suscríbete a un tema para ver sus datos aquí."
+  },
+  "Subscribed": {
+    "en-US": "Subscribed",
+    "zh-CN": "已订阅",
+    "ja-JP": "購読中",
+    "zh-TW": "已訂閱",
+    "es-ES": "Suscrito"
+  },
+  "This": {
+    "en-US": "This",
+    "zh-CN": "本组件",
+    "ja-JP": "このコンポーネント",
+    "zh-TW": "本組件",
+    "es-ES": "Este"
+  },
+  "Count": {
+    "en-US": "Count",
+    "zh-CN": "计数",
+    "ja-JP": "カウント",
+    "zh-TW": "計數",
+    "es-ES": "Recuento"
+  }
+}

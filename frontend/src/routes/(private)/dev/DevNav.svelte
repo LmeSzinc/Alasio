@@ -3,6 +3,7 @@
   import { page } from "$app/state";
   import { Button } from "$lib/components/ui/button";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
+  import { t } from "$lib/i18n";
   import { cn } from "$lib/utils.js";
 
   // --- Props Definition (Svelte 5 Runes) ---
@@ -13,12 +14,12 @@
   let { class: className }: $$props = $props();
 
   // --- Navigation Items ---
-  const alasioNavItems = [{ path: "/dev/config", name: "Config Manager" }];
-  const devNavItems = [
-    { path: "/dev/tools", name: "System Tools" },
-    { path: "/dev/assets", name: "Assets Manager" },
-    { path: "/dev/ws", name: "WebSocket Test" },
-  ];
+  const alasioNavItems = $derived([{ path: "/dev/config", name: t.ConfigScan.ConfigManager() }]);
+  const devNavItems = $derived([
+    { path: "/dev/tools", name: t.DevTool.SystemTool() },
+    { path: "/dev/assets", name: t.AssetManager.AssetManager() },
+    { path: "/dev/ws", name: t.WebsocketTest.Title() },
+  ]);
 
   // --- Derived State ---
   // Get current pathname to determine active item
@@ -49,7 +50,7 @@
 
 <ScrollArea class="h-full w-full">
   <aside class={cn("w-full space-y-4 p-4", className)} role="navigation" aria-label="Main navigation">
-    {@render navSection("Alasio tools", alasioNavItems)}
-    {@render navSection("Dev tools", devNavItems)}
+    {@render navSection(t.DevTool.AlasioTool(), alasioNavItems)}
+    {@render navSection(t.DevTool.DevTool(), devNavItems)}
   </aside>
 </ScrollArea>

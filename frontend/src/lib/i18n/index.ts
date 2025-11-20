@@ -1,5 +1,3 @@
-import { browser } from "$app/environment";
-
 // Import the generated entry point.
 // NOTE: This file might be empty or missing on the very first run before script initialization.
 // The build script's `createEmptyEntry` ensures it exists to prevent build errors.
@@ -68,4 +66,5 @@ const realT = Generated?.t || {};
 export const t = new Proxy(realT, proxyHandler) as typeof Generated.t;
 
 // Export state management
-export { setLang, i18nState } from "./state.svelte";
+export { i18nState, setLang } from "./state.svelte";
+

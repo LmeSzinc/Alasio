@@ -5,6 +5,7 @@
   import Help from "$lib/components/ui/help/help.svelte";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
+  import { t } from "$lib/i18n";
   import { websocketClient } from "$lib/ws";
   import { createRpc } from "$lib/ws/rpc.svelte";
   import { Loader2 } from "@lucide/svelte";
@@ -65,18 +66,18 @@
 
   function handleRpcSubmit() {
     if (!topic) {
-      alert("Topic is required.");
+      alert(t.WebsocketTest.TopicRequired());
       return;
     }
     if (!func) {
-      alert("Function name is required for RPC.");
+      alert(t.WebsocketTest.FunctionRequired());
       return;
     }
     try {
       const parsedArgs = args ? JSON.parse(args) : {};
       rpc.call(func, parsedArgs);
     } catch (e) {
-      alert("Invalid JSON in arguments field.");
+      alert(t.WebsocketTest.InvalidJson());
       console.error(e);
     }
   }
@@ -113,7 +114,7 @@
 
 <div class="mx-auto p-2">
   <header class="mb-8 flex items-center justify-between">
-    <h1 class="text-3xl font-bold tracking-tight">WebSocket Test Client</h1>
+    <h1 class="text-3xl font-bold tracking-tight">{t.WebsocketTest.Title()}</h1>
   </header>
 
   <div class="grid grid-cols-1 gap-8 lg:grid-cols-2">
@@ -124,32 +125,42 @@
           {websocketClient.connectionState}
         </Badge>
         <Card.Header>
-          <Card.Title>Send Command</Card.Title>
-          <Card.Description>Manage topic subscriptions and send RPC calls.</Card.Description>
+          <Card.Title>{t.WebsocketTest.SendCommand()}</Card.Title>
+          <Card.Description>{t.WebsocketTest.SendCommandDesc()}</Card.Description>
         </Card.Header>
         <Card.Content class="space-y-6">
           <!-- Topic Management -->
           <div class="grid gap-2">
-            <Label for="topic">Topic</Label>
+            <Label for="topic">{t.WebsocketTest.Topic()}</Label>
             <div class="flex items-center gap-2">
-              <Input id="topic" class="flex-grow font-mono" bind:value={topic} placeholder="e.g., ConfigScan" />
-              <Button variant="outline" onclick={handleSubscribe}>Sub</Button>
-              <Button variant="outline" onclick={handleUnsubscribe}>Unsub</Button>
+              <Input
+                id="topic"
+                class="flex-grow font-mono"
+                bind:value={topic}
+                placeholder={t.WebsocketTest.TopicPlaceholder()}
+              />
+              <Button variant="outline" onclick={handleSubscribe}>{t.WebsocketTest.Subscribe()}</Button>
+              <Button variant="outline" onclick={handleUnsubscribe}>{t.WebsocketTest.Unsubscribe()}</Button>
             </div>
           </div>
 
           <!-- RPC Inputs -->
           <div class="grid gap-2">
-            <Label for="func">RPC Function</Label>
-            <Input id="func" class="font-mono" bind:value={func} placeholder="e.g., get_config" />
+            <Label for="func">{t.WebsocketTest.RpcFunction()}</Label>
+            <Input
+              id="func"
+              class="font-mono"
+              bind:value={func}
+              placeholder={t.WebsocketTest.RpcFunctionPlaceholder()}
+            />
           </div>
           <div class="grid gap-2">
-            <Label for="args">RPC Arguments (JSON format)</Label>
+            <Label for="args">{t.WebsocketTest.RpcArguments()}</Label>
             <textarea
               id="args"
               bind:value={args}
               class="border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-[80px] w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
-              placeholder={'{"key": "value"}'}
+              placeholder={t.WebsocketTest.RpcArgumentsPlaceholder()}
             ></textarea>
           </div>
         </Card.Content>
@@ -158,16 +169,16 @@
             {#if rpc.isPending}
               <div class="text-muted-foreground flex items-center gap-2 text-sm">
                 <Loader2 class="h-4 w-4 animate-spin" />
-                <span>Sending...</span>
+                <span>{t.WebsocketTest.Sending()}</span>
               </div>
             {/if}
             {#if rpc.errorMsg}
               <Help variant="error">{rpc.errorMsg}</Help>
             {/if}
             {#if rpc.successMsg}
-              <Help variant="default">Call succeeded. ID: {rpc.successMsg}</Help>
+              <Help variant="default">{t.WebsocketTest.CallSucceeded()}: {rpc.successMsg}</Help>
             {/if}
-            <Button onclick={handleRpcSubmit}>RPC Call</Button>
+            <Button onclick={handleRpcSubmit}>{t.WebsocketTest.RpcCall()}</Button>
           </div>
         </Card.Footer>
       </Card.Root>
@@ -175,11 +186,11 @@
 
     <!-- Right Column: Subscriptions -->
     <div class="space-y-4">
-      <h2 class="text-2xl font-semibold tracking-tight">Subscribed Topics Data</h2>
+      <h2 class="text-2xl font-semibold tracking-tight">{t.WebsocketTest.SubscribedTopicsData()}</h2>
       {#if sortedTopicsData.length === 0}
         <div class="rounded-lg border-2 border-dashed py-10 text-center">
-          <p class="text-muted-foreground">No data received yet.</p>
-          <p class="text-muted-foreground text-sm">Subscribe to a topic to see its data here.</p>
+          <p class="text-muted-foreground">{t.WebsocketTest.NoDataReceived()}</p>
+          <p class="text-muted-foreground text-sm">{t.WebsocketTest.SubscribeToSeeData()}</p>
         </div>
       {:else}
         <!-- This container arranges the cards -->
@@ -190,16 +201,18 @@
                 <Card.Title>{topicName}</Card.Title>
                 <div class="flex items-center gap-2">
                   {#if topicsData[topicName]}
-                    <Badge variant="outline">Subscribed</Badge>
+                    <Badge variant="outline">{t.WebsocketTest.Subscribed()}</Badge>
                   {/if}
                   {#if componentSubscriptions.includes(topicName)}
                     {@const componentCount = componentSubscriptions.filter((t) => t === topicName).length}
                     <Badge variant="secondary">
-                      This ({componentCount})
+                      {t.WebsocketTest.This()} ({componentCount})
                     </Badge>
                   {/if}
                   {#if websocketClient.subscriptions[topicName]}
-                    <Badge variant="default">Count: {websocketClient.subscriptions[topicName]}</Badge>
+                    <Badge variant="default"
+                      >{t.WebsocketTest.Count()}: {websocketClient.subscriptions[topicName]}</Badge
+                    >
                   {/if}
                 </div>
               </Card.Header>

@@ -41,7 +41,7 @@
       "disabled:pointer-events-none disabled:opacity-50",
       className,
     )}
-    aria-label={t.Lang.SelectLanguage()}
+    aria-label={t.Language.SelectLanguage()}
     {disabled}
   >
     <Languages class="h-4 w-4" strokeWidth={1.5} />

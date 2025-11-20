@@ -50,8 +50,6 @@ export class I18nGenerator {
       ignore: [
         // Ignore generated files
         this.config.genPath,
-        // Ignore i18n framework internals
-        "src/lib/i18n/**",
         // Optional: Ignore tests
         "**/*.test.ts",
         "**/*.test.js",
