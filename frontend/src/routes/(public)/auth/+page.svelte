@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { goto } from "$app/navigation";
+  import { authApi, type jwtError } from "$lib/api/auth";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Label } from "$lib/components/ui/label/index.js";
-  import { Input } from "$lib/components/ui/input/index.js";
   import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "$lib/components/ui/card/index.js";
   import { Help } from "$lib/components/ui/help/index.js";
-  import { authApi, type jwtError } from "$lib/api/auth";
-  import { goto } from "$app/navigation";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Label } from "$lib/components/ui/label/index.js";
+  import { t } from "$lib/i18n";
 
   let showTip = $state(false);
   let error = $state<jwtError | null>(null);
@@ -30,7 +31,7 @@
     } catch (err) {
       // Handle network errors or other exceptions
       error = {
-        message: "Network error, please check your connection",
+        message: t.Auth.NetworkError(),
         remain: 0,
         after: 600,
       };
@@ -46,34 +47,34 @@
 
 <Card class="mx-auto mt-6 w-full max-w-sm gap-4">
   <CardHeader>
-    <CardTitle class="mx-auto text-xl">Login to Alasio</CardTitle>
+    <CardTitle class="mx-auto text-xl">{t.Auth.LoginToAlasio()}</CardTitle>
   </CardHeader>
   <CardContent>
     <form onsubmit={handleSubmit}>
       <div class="flex flex-col">
         <div class="grid gap-2">
           <div class="flex items-center">
-            <Label for="password" class="text-sm">Password</Label>
+            <Label for="password" class="text-sm">{t.Auth.Password()}</Label>
             <Button
               variant="link"
               class="text-muted-foreground ml-auto h-auto p-0 text-xs"
               onclick={() => (showTip = !showTip)}
             >
-              Forgot password?
+              {t.Auth.ForgotPassword()}
             </Button>
           </div>
           <Input id="password" type="password" bind:value={password} />
           {#if showTip}
-            <Help>If you forgot your password, you can always peep in file "/config/deploy.yaml" key "Password"</Help>
+            <Help>{t.Auth.PasswordTip()}</Help>
           {/if}
           {#if error}
             <Help variant="error">
               {#if error.message === "failure"}
-                Login failed, incorrect password.<br />
-                Remaining attempts: {error.remain}
+                {t.Auth.LoginFailed()}<br />
+                {t.Auth.RemainingAttempts()}: {error.remain}
               {:else if error.message === "banned"}
-                IP temporarily banned.<br />
-                please try again in {Math.ceil(error.after / 60)} minutes
+                {t.Auth.IpBanned()}<br />
+                {t.Auth.TryAgainIn({ minutes: Math.ceil(error.after / 60) })}
               {:else}
                 {error.message}
               {/if}
@@ -84,6 +85,6 @@
     </form>
   </CardContent>
   <CardFooter class="flex-col gap-2">
-    <Button type="submit" class="w-full" onclick={login}>Login</Button>
+    <Button type="submit" class="w-full" onclick={login}>{t.Auth.Login()}</Button>
   </CardFooter>
 </Card>
