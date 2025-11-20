@@ -45,7 +45,7 @@
   }
 </script>
 
-<Card class="mx-auto mt-6 w-full max-w-sm gap-4">
+<Card class="neushadow mx-auto mt-6 w-full max-w-sm gap-4 border-none">
   <CardHeader>
     <CardTitle class="mx-auto text-xl">{t.Auth.LoginToAlasio()}</CardTitle>
   </CardHeader>
