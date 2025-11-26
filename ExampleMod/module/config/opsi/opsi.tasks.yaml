@@ -27,3 +27,9 @@ OpsiDaily:
 OpsiGeneral:
   group:
     - OpsiGeneral
+
+OpsiAshAssist:
+  group:
+    - Scheduler
+    - OpsiAshAssist
+  display: flat

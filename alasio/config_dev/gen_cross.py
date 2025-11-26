@@ -61,7 +61,7 @@ class CrossNavGenerator:
         out = {}
         for config in self.dict_nav_config.values():
             # calculate module file
-            file = config.model_file.subpath_to(self.root)
+            file = config.model_file.subpath_to(self.path_config)
             if file == config.model_file:
                 raise DefinitionError(
                     f'model_file is not a subpath of root, model_file={config.model_file}, root={self.root}')
@@ -154,7 +154,7 @@ class CrossNavGenerator:
         out = {}
         for config in self.dict_nav_config.values():
             # calculate module file
-            file = config.i18n_file.subpath_to(self.root)
+            file = config.i18n_file.subpath_to(self.path_config)
             if file == config.model_file:
                 raise DefinitionError(
                     f'gui_file is not a subpath of root, model_file={config.i18n_file}, root={self.root}')

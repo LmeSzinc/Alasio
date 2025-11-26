@@ -3,13 +3,19 @@
     "_info": {
       "zh-CN": {"name": "META支援", "help": ""},
       "zh-TW": {"name": "OpsiAshAssist", "help": ""},
-      "en-US": {"name": "OpsiAshAssist", "help": ""},
+      "en-US": {
+        "name": "Opsi AshAssist",
+        "help": "This is meta assist and a very long help text.This is meta assist and a very long help text.This is meta assist and a very long help text."
+      },
       "ja-JP": {"name": "OpsiAshAssist", "help": ""}
     },
     "Tier": {
       "zh-CN": {"name": "OpsiAshAssist.Tier", "help": ""},
       "zh-TW": {"name": "OpsiAshAssist.Tier", "help": ""},
-      "en-US": {"name": "OpsiAshAssist.Tier", "help": ""},
+      "en-US": {
+        "name": "OpsiAshAssist.Tier",
+        "help": "This is meta assist and a very long help text.This is meta assist and a very long help text.This is meta assist and a very long help text."
+      },
       "ja-JP": {"name": "OpsiAshAssist.Tier", "help": ""}
     }
   },
@@ -20,13 +26,22 @@
         "help": "fn43iogh nf9340gh0934 v43pg934 fn34igh34 n4h03j34"
       },
       "zh-TW": {"name": "OpsiGeneral", "help": ""},
-      "en-US": {"name": "OpsiGeneral", "help": ""},
+      "en-US": {
+        "name": "OpsiGeneral",
+        "help": "This is meta assist and a very long help text."
+      },
       "ja-JP": {"name": "OpsiGeneral", "help": ""}
     },
     "UseLogger": {
-      "zh-CN": {"name": "OpsiGeneral.UseLogger", "help": ""},
+      "zh-CN": {
+        "name": "OpsiGeneral.UseLogger",
+        "help": "fn43iogh nf9340gh0934 v43pg934 fn34igh34 n4h03j34 g3084h0 g305hg05"
+      },
       "zh-TW": {"name": "OpsiGeneral.UseLogger", "help": ""},
-      "en-US": {"name": "OpsiGeneral.UseLogger", "help": ""},
+      "en-US": {
+        "name": "OpsiGeneral.UseLogger",
+        "help": "fn43iogh nf9340gh0934 v43pg934 fn34igh34 n4h03j34 g3084h0 g305hg05"
+      },
       "ja-JP": {"name": "OpsiGeneral.UseLogger", "help": ""}
     },
     "BuyActionPointLimit": {
@@ -42,7 +57,7 @@
       },
       "en-US": {
         "name": "OpsiGeneral.BuyActionPointLimit",
-        "help": "",
+        "help": "fn43iogh nf9340gh0934 v43pg934 fn34igh34 n4h03j34 g3084h0 g305hg05",
         "option_i18n": {"0": "0", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5"}
       },
       "ja-JP": {

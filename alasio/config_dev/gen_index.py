@@ -221,7 +221,7 @@ class IndexGenerator(CrossNavGenerator):
         for nav_name, config in self.dict_nav_config.items():
             if not config.config_data:
                 continue
-            file = config.config_file.subpath_to(self.root)
+            file = config.config_file.subpath_to(self.path_config)
             file = to_posix(file)
             i18n = self._get_nav_config_i18n(config)
             config = self._get_nav_config_task(config)

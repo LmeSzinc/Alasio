@@ -128,5 +128,38 @@
       "dt": "filter",
       "value": ["ActionPoint", "PurpleCoins"]
     }
+  },
+  "card-OpsiAshAssist": {
+    "_info": {"group": "OpsiAshAssist", "arg": "_info"},
+    "Scheduler_Enable": {
+      "task": "OpsiAshAssist",
+      "group": "Scheduler",
+      "arg": "Enable",
+      "dt": "checkbox",
+      "value": true
+    },
+    "Scheduler_NextRun": {
+      "task": "OpsiAshAssist",
+      "group": "Scheduler",
+      "arg": "NextRun",
+      "dt": "datetime",
+      "value": "2020-01-01T00:00:00Z"
+    },
+    "Scheduler_ServerUpdate": {
+      "task": "OpsiAshAssist",
+      "group": "Scheduler",
+      "arg": "ServerUpdate",
+      "dt": "input",
+      "value": "00:00"
+    },
+    "OpsiAshAssist_Tier": {
+      "task": "OpsiAshAssist",
+      "group": "OpsiAshAssist",
+      "arg": "Tier",
+      "dt": "input-int",
+      "value": 15,
+      "ge": 1,
+      "le": 15
+    }
   }
 }

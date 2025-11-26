@@ -88,7 +88,7 @@ class Mod:
                     {"task": task, "group": group, "arg": arg, **ArgData.to_dict()} for normal args
                         which is arg path appended with ArgData
         """
-        file = self.root / file
+        file = self.path_config / file
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 
@@ -103,16 +103,16 @@ class Mod:
                     where field is "name", "help", "option_i18n", etc.
                 value: translation
         """
-        file = self.root / file
+        file = self.path_config / file
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 
     def task_model_py(self, file):
         """
         Args:
-            file (str): relative path to {nav}_model.json
+            file (str): relative path to {nav}_model.py
         """
-        file = self.root / file
+        file = self.path_config / file
         return LOADPY_CACHE.get(file)
 
     def _get_task_model(self, model_ref: ModelGroupRef):

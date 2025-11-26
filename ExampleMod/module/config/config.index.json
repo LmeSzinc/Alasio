@@ -1,10 +1,10 @@
 {
   "main": {
-    "file": "module/config/main/main_config.json",
+    "file": "main/main_config.json",
     "i18n": [
-      "module/config/scheduler/scheduler_i18n.json",
-      "module/config/main/main_i18n.json",
-      "module/config/opsi/opsi_i18n.json"
+      "scheduler/scheduler_i18n.json",
+      "main/main_i18n.json",
+      "opsi/opsi_i18n.json"
     ],
     "config": {
       "task": ["Main", "Main2", "OpsiGeneral"],
@@ -12,13 +12,13 @@
     }
   },
   "opsi": {
-    "file": "module/config/opsi/opsi_config.json",
+    "file": "opsi/opsi_config.json",
     "i18n": [
-      "module/config/opsi/opsi_i18n.json",
-      "module/config/scheduler/scheduler_i18n.json"
+      "opsi/opsi_i18n.json",
+      "scheduler/scheduler_i18n.json"
     ],
     "config": {
-      "task": ["OpsiExplore", "OpsiDaily", "OpsiGeneral"],
+      "task": ["OpsiExplore", "OpsiDaily", "OpsiGeneral", "OpsiAshAssist"],
       "group": []
     }
   }

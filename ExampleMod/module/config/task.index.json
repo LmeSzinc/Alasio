@@ -1,10 +1,10 @@
 {
   "Main": {
     "group": {
-      "Scheduler": {"file": "module/config/scheduler/scheduler_model.py", "cls": "Scheduler", "task": "Main"},
-      "Campaign": {"file": "module/config/main/main_model.py", "cls": "Campaign", "task": "Main"},
-      "Fleet1": {"file": "module/config/main/main_model.py", "cls": "Fleet1", "task": "Main"},
-      "Fleet2": {"file": "module/config/main/main_model.py", "cls": "Fleet2", "task": "Main"}
+      "Scheduler": {"file": "scheduler/scheduler_model.py", "cls": "Scheduler", "task": "Main"},
+      "Campaign": {"file": "main/main_model.py", "cls": "Campaign", "task": "Main"},
+      "Fleet1": {"file": "main/main_model.py", "cls": "Fleet1", "task": "Main"},
+      "Fleet2": {"file": "main/main_model.py", "cls": "Fleet2", "task": "Main"}
     },
     "config": {
       "task": ["Main"],
@@ -13,10 +13,10 @@
   },
   "Main2": {
     "group": {
-      "Scheduler": {"file": "module/config/scheduler/scheduler_model.py", "cls": "Scheduler", "task": "Main2"},
-      "Campaign": {"file": "module/config/main/main_model.py", "cls": "Campaign", "task": "Main2"},
-      "Fleet1": {"file": "module/config/main/main_model.py", "cls": "Fleet1", "task": "Main2"},
-      "Fleet2": {"file": "module/config/main/main_model.py", "cls": "Fleet2", "task": "Main2"}
+      "Scheduler": {"file": "scheduler/scheduler_model.py", "cls": "Scheduler", "task": "Main2"},
+      "Campaign": {"file": "main/main_model.py", "cls": "Campaign", "task": "Main2"},
+      "Fleet1": {"file": "main/main_model.py", "cls": "Fleet1", "task": "Main2"},
+      "Fleet2": {"file": "main/main_model.py", "cls": "Fleet2", "task": "Main2"}
     },
     "config": {
       "task": ["Main2"],
@@ -25,8 +25,8 @@
   },
   "OpsiExplore": {
     "group": {
-      "Scheduler": {"file": "module/config/scheduler/scheduler_model.py", "cls": "Scheduler", "task": "OpsiExplore"},
-      "OpsiExplore": {"file": "module/config/opsi/opsi_model.py", "cls": "OpsiExplore", "task": "OpsiExplore"}
+      "Scheduler": {"file": "scheduler/scheduler_model.py", "cls": "Scheduler", "task": "OpsiExplore"},
+      "OpsiExplore": {"file": "opsi/opsi_model.py", "cls": "OpsiExplore", "task": "OpsiExplore"}
     },
     "config": {
       "task": ["OpsiExplore"],
@@ -35,9 +35,9 @@
   },
   "OpsiDaily": {
     "group": {
-      "Scheduler": {"file": "module/config/scheduler/scheduler_model.py", "cls": "Scheduler", "task": "OpsiDaily"},
-      "OpsiDaily": {"file": "module/config/opsi/opsi_model.py", "cls": "OpsiDaily", "task": "OpsiDaily"},
-      "OpsiGeneral": {"file": "module/config/opsi/opsi_model.py", "cls": "OpsiGeneral", "task": "OpsiGeneral"}
+      "Scheduler": {"file": "scheduler/scheduler_model.py", "cls": "Scheduler", "task": "OpsiDaily"},
+      "OpsiDaily": {"file": "opsi/opsi_model.py", "cls": "OpsiDaily", "task": "OpsiDaily"},
+      "OpsiGeneral": {"file": "opsi/opsi_model.py", "cls": "OpsiGeneral", "task": "OpsiGeneral"}
     },
     "config": {
       "task": ["OpsiDaily", "OpsiGeneral"],
@@ -46,10 +46,20 @@
   },
   "OpsiGeneral": {
     "group": {
-      "OpsiGeneral": {"file": "module/config/opsi/opsi_model.py", "cls": "OpsiGeneral", "task": "OpsiGeneral"}
+      "OpsiGeneral": {"file": "opsi/opsi_model.py", "cls": "OpsiGeneral", "task": "OpsiGeneral"}
     },
     "config": {
       "task": ["OpsiGeneral"],
+      "group": []
+    }
+  },
+  "OpsiAshAssist": {
+    "group": {
+      "Scheduler": {"file": "scheduler/scheduler_model.py", "cls": "Scheduler", "task": "OpsiAshAssist"},
+      "OpsiAshAssist": {"file": "opsi/opsi_model.py", "cls": "OpsiAshAssist", "task": "OpsiAshAssist"}
+    },
+    "config": {
+      "task": ["OpsiAshAssist"],
       "group": []
     }
   }

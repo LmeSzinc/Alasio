@@ -28,5 +28,11 @@
     "zh-TW": "OpsiGeneral",
     "en-US": "OpsiGeneral",
     "ja-JP": "OpsiGeneral"
+  },
+  "OpsiAshAssist": {
+    "zh-CN": "OpsiAshAssist",
+    "zh-TW": "OpsiAshAssist",
+    "en-US": "OpsiAshAssist",
+    "ja-JP": "OpsiAshAssist"
   }
 }

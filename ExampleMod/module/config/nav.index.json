@@ -73,6 +73,12 @@
       "zh-TW": "OpsiDaily",
       "en-US": "OpsiDaily",
       "ja-JP": "OpsiDaily"
+    },
+    "card-OpsiAshAssist": {
+      "zh-CN": "META支援",
+      "zh-TW": "OpsiAshAssist",
+      "en-US": "Opsi AshAssist",
+      "ja-JP": "OpsiAshAssist"
     }
   }
 }
