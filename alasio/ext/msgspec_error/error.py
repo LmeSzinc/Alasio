@@ -314,8 +314,12 @@ def get_error_type(error) -> "tuple[ErrorType, ErrorCtx | Type[NODEFAULT]]":
 
 def parse_msgspec_error(error):
     """
+    Parse plain text error message like "Expected `int`, got `str` - at `$.user.profile.age`"
+    into structured MsgspecError object.
+    This makes msgspec more pydantic.
+
     Args:
-        error (msgspec.ValidationError):
+        error (str | msgspec.ValidationError):
 
     Returns:
         MsgspecError:
