@@ -6,7 +6,7 @@ from msgspec.structs import asdict
 
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
-from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX, MODEL_TASK_INDEX, ModelConfigRef, ModelGroupRef
+from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX, MODEL_TASK_INDEX, ModelConfigRef
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.deep import deep_set, dict_update
 from alasio.ext.file.loadpy import LOADPY_CACHE
@@ -107,33 +107,30 @@ class Mod:
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 
-    def task_model_py(self, file):
+    def get_group_model(self, file, cls):
         """
-        Args:
-            file (str): relative path to {nav}_model.py
-        """
-        file = self.path_config / file
-        return LOADPY_CACHE.get(file)
+        Get msgspec validation model
 
-    def _get_task_model(self, model_ref: ModelGroupRef):
-        """
-        Get msgspec validation model from model_ref
+        Args:
+            file (str): relative path to {nav}_model.py from path_config
+            cls (str): class name
 
         Returns:
             Type[msgspec.Struct] | None:
         """
+        file = self.path_config / file
         try:
-            module = self.task_model_py(model_ref.file)
+            module = LOADPY_CACHE.get(file)
         except ImportError as e:
             # DataInconsistent error.
             # We just log warnings to reduce runtime crash, missing config will fall back to default
             logger.warning(
-                f'DataInconsistent: failed to import model.py "{model_ref.file}": {e}')
+                f'DataInconsistent: failed to import model.py "{file}": {e}')
             return None
-        model = getattr(module, model_ref.cls, None)
+        model = getattr(module, cls, None)
         if model is None:
             logger.warning(
-                f'DataInconsistent: Missing class "{model_ref.cls}" in "{model_ref.file}"')
+                f'DataInconsistent: Missing class "{cls}" in "{file}"')
             return None
         return model
 
@@ -166,7 +163,7 @@ class Mod:
 
                 key = (task_name, group_name)
                 # get model
-                model = self._get_task_model(model_ref)
+                model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
                 if model is None:
                     continue
                 # construct a default value from model
@@ -247,7 +244,7 @@ class Mod:
                 logger.warning(f'Cannot set non-exist group {event.task}.{event.group}')
                 continue
             # get model
-            model = self._get_task_model(model_ref)
+            model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
             if model is None:
                 continue
             dict_model[key] = model
