@@ -153,7 +153,7 @@ class CodeGen:
         Add empty line
         """
         for _ in range(lines):
-            self.add('')
+            self.lines.append('\n')
 
     def Pass(self):
         """
