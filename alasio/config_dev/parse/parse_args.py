@@ -48,13 +48,13 @@ TYPE_DT_TO_PYTHON = {
     # select
     'select': 'str',
     'radio': 'str',
-    'multi-select': 't.Tuple[str]',
-    'multi-radio': 't.Tuple[str]',
+    'multi-select': 't.Tuple[str, ...]',
+    'multi-radio': 't.Tuple[str, ...]',
     # datatime
     'datetime': 'e.Annotated[d.datetime, m.Meta(tz=True)]',
     # filter
-    'filter': 't.Tuple[str]',
-    'filter-order': 't.Tuple[str]',
+    'filter': 't.Tuple[str, ...]',
+    'filter-order': 't.Tuple[str, ...]',
 }
 # Define which "dt" is literal type
 # Example:

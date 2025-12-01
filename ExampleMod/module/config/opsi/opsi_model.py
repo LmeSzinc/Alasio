@@ -18,7 +18,7 @@ class OpsiGeneral(m.Struct, omit_defaults=True):
     OilLimit: e.Annotated[int, m.Meta(ge=500, le=20000)] = 1000
     RepairThreshold: e.Annotated[float, m.Meta(ge=0.0, le=1.0)] = 0.4
     DoRandomMapEvent: bool = True
-    AkashiShopFilter: t.Tuple[str] = ('ActionPoint', 'PurpleCoins')
+    AkashiShopFilter: t.Tuple[str, ...] = ('ActionPoint', 'PurpleCoins')
 
 
 class OpsiAshBeacon(m.Struct, omit_defaults=True):
@@ -30,7 +30,7 @@ class OpsiAshBeacon(m.Struct, omit_defaults=True):
 
 
 class OpsiFleetFilter(m.Struct, omit_defaults=True):
-    Filter: t.Tuple[str] = ('Fleet-4', 'CallSubmarine', 'Fleet-2', 'Fleet-3', 'Fleet-1')
+    Filter: t.Tuple[str, ...] = ('Fleet-4', 'CallSubmarine', 'Fleet-2', 'Fleet-3', 'Fleet-1')
 
 
 class OpsiFleet(m.Struct, omit_defaults=True):
@@ -52,7 +52,7 @@ class OpsiShop(m.Struct, omit_defaults=True):
         'all',
         'custom',
     ] = 'max_benefit_meta'
-    CustomFilter: t.Tuple[str] = (
+    CustomFilter: t.Tuple[str, ...] = (
         'LoggerAbyssalT6', 'LoggerAbyssalT5', 'LoggerObscure', 'LoggerAbyssalT4', 'ActionPoint', 'PurpleCoins',
         'GearDesignPlanT3', 'PlateRandomT4', 'DevelopmentMaterialT3', 'GearDesignPlanT2', 'GearPart',
         'OrdnanceTestingReportT3', 'OrdnanceTestingReportT2', 'DevelopmentMaterialT2', 'OrdnanceTestingReportT1',
@@ -62,7 +62,7 @@ class OpsiShop(m.Struct, omit_defaults=True):
 
 
 class OpsiVoucher(m.Struct, omit_defaults=True):
-    Filter: t.Tuple[str] = ('LoggerAbyssal', 'LoggerObscure', 'Book', 'Coin', 'Fragment')
+    Filter: t.Tuple[str, ...] = ('LoggerAbyssal', 'LoggerObscure', 'Book', 'Coin', 'Fragment')
 
 
 class OpsiDaily(m.Struct, omit_defaults=True):
