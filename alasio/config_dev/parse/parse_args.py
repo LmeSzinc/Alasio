@@ -311,6 +311,9 @@ class ParseArgs(ParseBase):
                     'Group name must be capitalized',
                     file=self.file, keys=[], value=group_name
                 )
+            # allow empty group to be an inforef group
+            # if not group_value:
+            #     pass
             # Keep empty group in args, so they can be empty group to display on GUI
             output[group_name] = {}
             for arg_name, value in deep_iter_depth1(group_value):

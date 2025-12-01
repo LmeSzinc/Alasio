@@ -64,7 +64,12 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         """
         super().__init__(file)
         # real data will be set in _generate_nav_config_json()
-        self.config_data = {}
+        # key: {card_name}.{arg_name}
+        # value:
+        #     {"group": group, "arg": "_info"} for _info
+        #     {"task": task, "group": group, "arg": arg, **ArgData.to_dict()} for normal args
+        #         which is arg path appended with ArgData
+        self.config_data: "dict[str, dict[str, dict]]" = {}
 
     """
     Generate model

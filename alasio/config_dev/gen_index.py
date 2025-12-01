@@ -7,6 +7,7 @@ from alasio.config_dev.gen_cross import CrossNavGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext import env
 from alasio.ext.cache import cached_property
+from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
@@ -330,6 +331,74 @@ class IndexGenerator(CrossNavGenerator):
         return out
 
     """
+    Generate config_generated.py
+    """
+
+    def generate_config_generated_file(self):
+        """
+        Generate config_generated.py file with type hints for IDE auto-completion
+
+        This method directly uses dict_nav_config without extra data preparation layer.
+        It leverages the fixed file structure {nav}/{nav}_model.py to simplify
+        import path generation.
+        """
+        # Check if we have any configs
+        if not self.dict_nav_config:
+            logger.warning('No navigation configs found for config_generated.py')
+            return
+
+        # Generate code using CodeGen
+        gen = CodeGen()
+
+        # Basic imports
+        gen.Import('typing')
+        gen.Empty()
+        gen.FromImport('alasio.config.base', 'AlasioConfigBase')
+        gen.FromImport('const', 'entry')
+        gen.Empty(2)
+
+        # TYPE_CHECKING block - imports only used for type hints
+        gen.add('if typing.TYPE_CHECKING:')
+        with gen.tab():
+            # Sort nav names for stable output
+            for nav_name in self.dict_nav_config.keys():
+                # from .{nav} import {nav}_model as {nav}
+                gen.add(f'from .{nav_name} import {nav_name}_model as {nav_name}')
+
+        gen.Empty(2)
+
+        # Class definition
+        with gen.Class('ConfigGenerated', inherit='AlasioConfigBase'):
+            gen.Comment('A generated config struct to fool IDE\'s type-predict and auto-complete')
+            gen.add('entry = entry')
+            gen.Empty()
+
+            # Generate group attributes organized by nav
+            # Sort nav names for stable output, but keep group order as defined
+            for nav_name, config in self.dict_nav_config.items():
+                # groups defined but not used in task, they should be generated
+                # if not config.config_data:
+                #     continue
+
+                # Nav comment
+                gen.Comment(nav_name)
+
+                # Generate type hints for each group (keep definition order)
+                for group_name, group_data in config.args_data.items():
+                    # skip groups without args (inforef groups)
+                    if not group_data:
+                        continue
+                    gen.Anno(group_name, anno=f'"{nav_name}.{group_name}"')
+
+                gen.Empty()
+
+        # Write to file
+        output_file = self.path_config.joinpath('config_generated.py')
+        op = gen.write(output_file, skip_same=True)
+        if op:
+            logger.info(f'Write file {output_file}')
+
+    """
     Generate all
     """
 
@@ -371,6 +440,9 @@ class IndexGenerator(CrossNavGenerator):
         op = write_json_custom_indent(self.queue_index_file, self.queue_index_data, skip_same=True)
         if op:
             logger.info(f'Write file {self.queue_index_file}')
+
+        # config_generated.py
+        self.generate_config_generated_file()
 
 
 if __name__ == '__main__':
