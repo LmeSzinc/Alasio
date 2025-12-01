@@ -1,6 +1,6 @@
 from datetime import datetime
 from functools import wraps
-from time import sleep, time
+from time import perf_counter, sleep, time
 
 
 def timer(function):
@@ -10,9 +10,9 @@ def timer(function):
 
     @wraps(function)
     def function_timer(*args, **kwargs):
-        start = time()
+        start = perf_counter()
         result = function(*args, **kwargs)
-        cost = time() - start
+        cost = perf_counter() - start
         print(f'{function.__name__}: {cost:.10f} s')
         return result
 
