@@ -65,6 +65,8 @@ class LazyCursor:
                     cursor.executescript(sql)
             cursor.commit()
 
+        self.query.clear()
+
 
 class AlasioTable:
     # Tables should override these
@@ -229,6 +231,8 @@ class AlasioTable:
         Returns:
             str: ` GROUP BY "field1","field2" ORDER BY "field1","field2" LIMIT 3 OFFSET 3`
         """
+        if not sql:
+            sql = f'SELECT "{self.TABLE_NAME}"'
         if _groupby_:
             sql += self.sql_expr_groupby(_groupby_)
         if _orderby_:
@@ -443,9 +447,10 @@ class AlasioTable:
         """
         fields = self.field_names
         # get non auto increment fields
-        if not self.AUTO_INCREMENT:
-            raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no AUTO_INCREMENT defined')
-        columns = [name for name in fields if name != self.AUTO_INCREMENT]
+        if self.AUTO_INCREMENT:
+            columns = [name for name in fields if name != self.AUTO_INCREMENT]
+        else:
+            columns = fields
         # :task,:group,...
         placeholders = ','.join([f':{k}' for k in columns])
         # "task","group",...
@@ -519,7 +524,7 @@ class AlasioTable:
         Whether row with PRIMARY_KEY value > 0
         """
         try:
-            return getattr(row, self.PRIMARY_KEY) > 0
+            return bool(getattr(row, self.PRIMARY_KEY))
         except AttributeError:
             # Row does not have PRIMARY_KEY
             return False
@@ -547,7 +552,7 @@ class AlasioTable:
         if not updates:
             updates = [name for name in self.field_names if name != self.PRIMARY_KEY]
         elif isinstance(updates, str):
-            updates = [updates]
+            updates = [updates] if updates != self.PRIMARY_KEY else []
         else:
             updates = [name for name in updates if name != self.PRIMARY_KEY]
         if not updates:
@@ -598,15 +603,15 @@ class AlasioTable:
 
         # format updates
         if not updates:
-            updates = [name for name in self.field_names if name != self.PRIMARY_KEY and not name not in conflicts]
+            updates = [name for name in self.field_names if name != self.PRIMARY_KEY and name not in conflicts]
         elif isinstance(updates, str):
             if updates in conflicts:
                 # update the conflicted field?
                 raise AlasioTableError(f'Trying to do upsert_row() but updates==conflicts'
                                        f'conflicts={conflicts}, updates={updates}')
-            updates = [updates]
+            updates = [updates] if updates != self.PRIMARY_KEY else []
         else:
-            updates = [name for name in updates if name != self.PRIMARY_KEY and not name not in conflicts]
+            updates = [name for name in updates if name != self.PRIMARY_KEY and name not in conflicts]
         if not updates:
             # no update fields?
             raise AlasioTableError(f'Trying to do upsert_row() but no update fields, '
