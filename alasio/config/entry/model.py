@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Tuple
 
 from msgspec import Struct
 from msgspec.json import Decoder as JsonDecoder
-from msgspec.msgpack import Decoder as MsgpackDecoder, Encoder as MsgpackEncoder
 
 from alasio.ext.cache import cached_property
 from alasio.ext.singleton import Singleton
@@ -71,14 +70,6 @@ MODEL_DICT_DEPTH3_ANY = Dict[str, Dict[str, Dict[str, Any]]]
 
 
 class DecoderCache(metaclass=Singleton):
-    @cached_property
-    def MSGPACK_DECODER(self):
-        return MsgpackDecoder()
-
-    @cached_property
-    def MSGPACK_ENCODER(self):
-        return MsgpackEncoder()
-
     @cached_property
     def MODEL_CONFIG_INDEX(self):
         return JsonDecoder(MODEL_CONFIG_INDEX)

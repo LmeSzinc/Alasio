@@ -2,6 +2,7 @@ from collections import defaultdict
 from typing import Any, Optional
 
 from msgspec import NODEFAULT, Struct, ValidationError, convert
+from msgspec.msgpack import encode
 from msgspec.structs import asdict
 
 from alasio.config.const import DataInconsistent
@@ -294,14 +295,11 @@ class Mod:
         # if any event failed to validate, entire config_set is consider failed
         if rollback:
             return False, rollback
-        del dict_model
 
         # init table
         show = [f'{e.task}.{e.group}.{e.arg}={e.value}' for e in events]
         logger.info(f'config_set "{config_name}": {", ".join(show)}')
         table = AlasioConfigTable(config_name)
-        decode = DECODER_CACHE.MSGPACK_DECODER.decode
-        encode = DECODER_CACHE.MSGPACK_ENCODER.encode
 
         # write after validation
         # so invalid value won't lock up the entire database
@@ -310,14 +308,28 @@ class Mod:
             dict_old = {}
             rows = table.read_rows(events, _cursor_=c)
             for row in rows:
-                dict_old[(row.task, row.group)] = decode(row.value)
+                key = (row.task, row.group)
+                # validate existing row
+                try:
+                    model = dict_model[key]
+                except KeyError:
+                    # this shouldn't happen
+                    continue
+                data, errors = load_msgpack_with_default(row.value, model=model)
+                # for error in errors:
+                #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+                if data is NODEFAULT:
+                    # Failed to convert
+                    continue
+                dict_old[key] = asdict(data)
             # update
+            # note that we merge modification dict onto existing value dict
+            # meaning that model-level post init validation won't work and each args are separately validated
             rows = []
-            for key, value in dict_value.items():
+            for key, new in dict_value.items():
                 # update new value onto old value
-                # note that extra fields on old value will be kept, we will need cleanup in another way
-                old = dict_old.get(key, {})
-                value = dict_update(old, value)
+                value = dict_old.get(key, {})
+                dict_update(value, new)
                 value = encode(value)
                 task, group = key
                 rows.append(ConfigRow(task=task, group=group, value=value))
