@@ -5,7 +5,6 @@ Coverage: connection creation, cursor operations, auto-create table, pool manage
 """
 import os
 import sqlite3
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
