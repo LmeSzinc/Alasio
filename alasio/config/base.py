@@ -1,8 +1,10 @@
+from contextlib import contextmanager
+
 import msgspec
 
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
-from alasio.config.entry.mod import Mod
+from alasio.config.entry.mod import ConfigSetEvent, Mod
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.logger import logger
@@ -64,17 +66,19 @@ class AlasioConfigBase:
         # We don't update config realtime, otherwise things will get really complex if user modify configs
         # when task is running.
         self.dict_value: "dict[tuple[str, str], bytes]" = {}
-        # Modified configs. Key: (task, group, arg). Value: Modified value.
+        # Modified configs. Key: (task, group, arg). Value: ConfigSetEvent.
         # All variable modifications will be record here and saved in method `save()`.
-        self.modified = {}
+        self.modified: "dict[tuple[str, str, str], ConfigSetEvent]" = {}
         # If write after every variable modification.
-        self.auto_update = True
+        self.auto_save = True
+        # Batch depth counter. 0 means immediate save mode.
+        self._batch_depth = 0
         # Template config is used for dev tools
         self.is_template_config = config_name.startswith("template")
         if self.is_template_config:
             # For dev tools
             logger.info("Using template config, which is read only")
-            self.auto_update = False
+            self.auto_save = False
 
         self.init_task()
 
@@ -83,7 +87,8 @@ class AlasioConfigBase:
         for key in self.__class__.__annotations__:
             if key in self.__dict__:
                 self.__dict__.pop(key, None)
-        self.dict_value = {}
+        self.dict_value.clear()
+        self.modified.clear()
 
         if not self.task:
             return
@@ -155,13 +160,19 @@ class AlasioConfigBase:
 
     def register_modify(self, task, group, arg, value):
         """
+        Callback function when arg gets modified
+
         Args:
             task (str):
             group (str):
             arg (str):
             value:
         """
-        print('register_modify', task, group, arg, value)
+        event = ConfigSetEvent(task=task, group=group, arg=arg, value=value)
+        self.modified[(task, group, arg)] = event
+
+        if self.auto_save and self._batch_depth == 0:
+            self.save()
 
     def __getattr__(self, item):
         """
@@ -180,3 +191,42 @@ class AlasioConfigBase:
         # no proxy on unbound groups
         setattr(self, item, obj)
         return obj
+
+    def save(self):
+        """
+        Save modifications, No need to call this method manually.
+        Modifications are auto saved when you do:
+            config.OpsiFleet.Fleet = 1
+        """
+        if not self.modified:
+            return False
+
+        events = list(self.modified.values())
+        self.modified.clear()
+        if len(events) == 1:
+            # single set event
+            self.mod.config_set(self.config_name, events[0])
+        else:
+            # batch set
+            self.mod.config_batch_set(self.config_name, events)
+
+    @contextmanager
+    def batch_set(self):
+        """
+        Context manager to suppress auto-save for batch modifications.
+        Saves are triggered only when the outermost context exits.
+
+        Usage:
+            with config.batch_set():
+                config.Group.Arg1 = 1
+                config.Group.Arg2 = 2
+            # Saved here
+        """
+        self._batch_depth += 1
+        try:
+            yield
+        finally:
+            self._batch_depth -= 1
+            # Only save if we are back at the top level and auto_save is enabled
+            if self._batch_depth == 0 and self.auto_save:
+                self.save()
