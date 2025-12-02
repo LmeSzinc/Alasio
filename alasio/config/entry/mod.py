@@ -9,7 +9,7 @@ from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX, MODEL_TASK_INDEX, ModelConfigRef
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
-from alasio.ext.deep import deep_set, dict_update
+from alasio.ext.deep import deep_set
 from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.ext.file.msgspecfile import JsonCacheTTL
 from alasio.ext.msgspec_error import MsgspecError, load_msgpack_with_default
@@ -258,7 +258,7 @@ class Mod:
             try:
                 model = dict_model[key]
             except KeyError:
-                # this shouldn't happen
+                # this shouldn't happen, as dict_model is paired with dict_value
                 continue
             task, group = key
             try:
@@ -309,30 +309,35 @@ class Mod:
             rows = table.read_rows(events, _cursor_=c)
             for row in rows:
                 key = (row.task, row.group)
-                # validate existing row
+                dict_old[key] = row.value
+            # update
+            rows = []
+            for key, new in dict_value.items():
+                # parse existing value
+                old = dict_old.get(key, b'\x80')
                 try:
                     model = dict_model[key]
                 except KeyError:
-                    # this shouldn't happen
+                    # this shouldn't happen, as dict_model is paired with dict_value
                     continue
-                data, errors = load_msgpack_with_default(row.value, model=model)
+                data, errors = load_msgpack_with_default(old, model=model)
                 # for error in errors:
                 #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
                 if data is NODEFAULT:
                     # Failed to convert
                     continue
-                dict_old[key] = asdict(data)
-            # update
-            # note that we merge modification dict onto existing value dict
-            # meaning that model-level post init validation won't work and each args are separately validated
-            rows = []
-            for key, new in dict_value.items():
                 # update new value onto old value
-                value = dict_old.get(key, {})
-                dict_update(value, new)
-                value = encode(value)
+                # note that we merge modification onto existing value
+                # meaning that model-level post init validation won't work and each args are separately validated
+                for arg, value in new.items():
+                    try:
+                        setattr(data, arg, value)
+                    except AttributeError:
+                        # this shouldn't happen, as arg is validated
+                        continue
                 task, group = key
-                rows.append(ConfigRow(task=task, group=group, value=value))
+                data = encode(data)
+                rows.append(ConfigRow(task=task, group=group, value=data))
             # write
             table.upsert_row(rows, conflicts=('task', 'group'), updates='value', _cursor_=c)
 
