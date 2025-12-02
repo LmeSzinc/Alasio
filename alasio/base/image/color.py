@@ -125,6 +125,44 @@ def rgb2luma(image, fast=True):
         return cv2.extractChannel(cv2.cvtColor(image, cv2.COLOR_RGB2YUV), 0)
 
 
+def rgb565_to_rgb888(image):
+    """
+    Args:
+        image (np.ndarray): uint16 image in (height, width)
+            Bit Layout: [ RRRRR (5) | GGGGGG (6) | BBBBB (5) ]
+
+    Returns:
+        np.ndarray: (height, width, 3)
+    """
+    # Convert RGB565 to RGB888
+    # https://blog.csdn.net/happy08god/article/details/10516871
+
+    # r = (arr & 0b1111100000000000) >> (11 - 3)
+    # g = (arr & 0b0000011111100000) >> (5 - 2)
+    # b = (arr & 0b0000000000011111) << 3
+    # r |= (r & 0b11100000) >> 5
+    # g |= (g & 0b11000000) >> 6
+    # b |= (b & 0b11100000) >> 5
+    # r = r.astype(np.uint8)
+    # g = g.astype(np.uint8)
+    # b = b.astype(np.uint8)
+    # image = cv2.merge([r, g, b])
+
+    # The same as the code above but costs about 2.7ms instead of 16ms.
+    # Note that cv2.convertScaleAbs is 5x fast as cv2.multiply, cv2.add is 8x fast as cv2.convertScaleAbs
+    # Note that cv2.convertScaleAbs includes rounding
+    tmp = np.empty_like(image)
+    cv2.bitwise_and(image, 0b1111100000000000, dst=tmp)
+    r = cv2.convertScaleAbs(tmp, alpha=0.0040283203125)  # 0.00390625 * 1.03125
+    cv2.bitwise_and(image, 0b0000011111100000, dst=tmp)
+    g = cv2.convertScaleAbs(tmp, alpha=0.126953125)  # 0.125 * 1.015625
+    cv2.bitwise_and(image, 0b0000000000011111, dst=tmp)
+    b = cv2.convertScaleAbs(tmp, alpha=8.25)  # 8 * 1.03125
+
+    image = cv2.merge([r, g, b])
+    return image
+
+
 def get_color(image, area=None):
     """Calculate the average color of a particular area of the image.
 
