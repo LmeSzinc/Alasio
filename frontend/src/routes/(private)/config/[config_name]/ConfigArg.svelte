@@ -29,7 +29,7 @@
   }
 
   function handleReset(data: ArgData) {
-    rpc.call("set", {
+    rpc.call("reset", {
       task: data.task,
       group: data.group,
       arg: data.arg,

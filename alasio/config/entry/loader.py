@@ -6,7 +6,7 @@ import alasio.config.entry.const as const
 from alasio.config.entry.mod import ConfigSetEvent, Mod
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_get, deep_get_with_error, deep_iter, deep_iter_depth2, deep_values_depth2
+from alasio.ext.deep import deep_get, deep_get_with_error, deep_iter_depth2, deep_values_depth2
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import is_abspath, joinnormpath
@@ -197,6 +197,32 @@ class ModLoader:
         event = ConfigSetEvent(task=task_name, group=group_name, arg=arg_name, value=value)
         success, responses = mod.config_set(config_name, events=[event])
         return success, responses[0]
+
+    def gui_config_reset(self, mod_name, config_name, task_name, group_name, arg_name):
+        """
+        Reset config arg to default value.
+        See Mod.config_reset()
+
+        Args:
+            mod_name (str):
+            config_name (str):
+            task_name (str):
+            group_name (str):
+            arg_name (str):
+
+        Returns:
+            list[ConfigSetEvent]:
+                Empty list if failed, otherwise a list with single reset event
+        """
+        try:
+            mod = self.dict_mod[mod_name]
+        except KeyError:
+            logger.warning(f'No such mod: "{mod_name}"')
+            return []
+
+        event = ConfigSetEvent(task=task_name, group=group_name, arg=arg_name, value=None)
+        responses = mod.config_reset(config_name, events=[event])
+        return responses
 
 
 MOD_LOADER = ModLoader(env.PROJECT_ROOT)

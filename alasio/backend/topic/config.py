@@ -143,3 +143,33 @@ class ConfigArg(BaseTopic):
             else:
                 msg = 'Unknown validation error'
             raise ValidationError(msg)
+
+    @rpc
+    async def reset(self, task: str, group: str, arg: str):
+        if not task or not group or not arg:
+            return
+        # get config_name
+        state = ConnState(self.conn_id, self.server)
+        nav: NavState = await state.nav_state
+        mod_name = nav.mod_name
+        config_name = nav.config_name
+        if not config_name:
+            return
+
+        # call
+        resp_list = await trio.to_thread.run_sync(
+            MOD_LOADER.gui_config_reset,
+            mod_name, config_name, task, group, arg
+        )
+        # resp_list: list[ConfigSetEvent]
+        if not resp_list:
+            # reset failed, do nothing
+            return
+
+        # get first response
+        resp = resp_list[0]
+        event = ConfigEvent(
+            t=self.topic_name(), c=config_name,
+            k=(resp.task, resp.group, resp.arg), v=resp.value)
+        # broadcast to all connections
+        await self.server.send_config_event(event)

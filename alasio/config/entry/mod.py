@@ -342,3 +342,113 @@ class Mod:
             table.upsert_row(rows, conflicts=('task', 'group'), updates='value', _cursor_=c)
 
         return True, success
+
+    def config_reset(self, config_name, events):
+        """
+        Batch reset config args.
+        Reset by deleting corresponding keys from messagepack data,
+        so they will be filled with default values when reading.
+
+        Args:
+            config_name (str):
+            events (list[ConfigSetEvent]):
+
+        Returns:
+            list[ConfigSetEvent]:
+                If success, returns a list of reset events with default values.
+                    - event.error is None
+                If failed, returns an empty list.
+        """
+        # prepare model
+        task_index_data = self.task_index_data()
+
+        dict_model = {}
+        dict_args = defaultdict(list)
+        for event in events:
+            key = (event.task, event.group)
+            if key not in dict_model:
+                try:
+                    model_ref = task_index_data[event.task].group[event.group]
+                except KeyError:
+                    logger.warning(f'Cannot reset non-exist group {event.task}.{event.group}')
+                    continue
+                # get model
+                model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
+                if model is None:
+                    continue
+                dict_model[key] = model
+            dict_args[key].append(event.arg)
+
+        # init table
+        show = [f'{e.task}.{e.group}.{e.arg}' for e in events]
+        logger.info(f'config_reset "{config_name}": {", ".join(show)}')
+        table = AlasioConfigTable(config_name)
+
+        # write
+        success = []
+        with table.exclusive_transaction() as c:
+            # read
+            dict_old = {}
+            rows = table.read_rows(events, _cursor_=c)
+            for row in rows:
+                key = (row.task, row.group)
+                dict_old[key] = row.value
+
+            # update
+            rows = []
+            for key, args in dict_args.items():
+                # parse existing value
+                old = dict_old.get(key, b'\x80')
+                try:
+                    model = dict_model[key]
+                except KeyError:
+                    # this shouldn't happen, as dict_model is paired with dict_args
+                    continue
+                data, errors = load_msgpack_with_default(old, model=model)
+                if data is NODEFAULT:
+                    # Failed to convert, skip this group
+                    continue
+
+                # delete args from data
+                # construct default model to get default values
+                try:
+                    default_model = model()
+                except (TypeError, Exception) as e:
+                    logger.warning(
+                        f'Cannot construct default model for {key}: {e}')
+                    continue
+
+                # get dict from msgpack struct
+                data_dict = asdict(data)
+                for arg in args:
+                    # delete key from dict
+                    try:
+                        del data_dict[arg]
+                    except KeyError:
+                        # arg not in data, already at default
+                        pass
+                    # get default value for success event
+                    default_value = getattr(default_model, arg, NODEFAULT)
+                    if default_value is NODEFAULT:
+                        logger.warning(
+                            f'Cannot get default value for {key}.{arg}')
+                        continue
+                    task, group = key
+                    success.append(ConfigSetEvent(task=task, group=group, arg=arg, value=default_value))
+
+                # convert back to struct and encode
+                try:
+                    data = convert(data_dict, model)
+                except ValidationError as e:
+                    logger.warning(
+                        f'Failed to convert after reset for {key}: {e}')
+                    return []
+
+                task, group = key
+                data = encode(data)
+                rows.append(ConfigRow(task=task, group=group, value=data))
+
+            # write
+            table.upsert_row(rows, conflicts=('task', 'group'), updates='value', _cursor_=c)
+
+        return success
