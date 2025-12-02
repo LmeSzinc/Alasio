@@ -1,22 +1,25 @@
+from collections import defaultdict
 from contextlib import contextmanager
+from typing import Any
 
-import msgspec
+from msgspec import NODEFAULT, Struct
 
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.mod import ConfigSetEvent, Mod
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
+from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.logger import logger
 
 
-class ModelProxy(msgspec.Struct):
+class ModelProxy(Struct):
     """
     A proxy object upon group model to capture property set event
     So you can set property directly and trigger auto save:
         config.Campaign.Name = "12-4"
     """
-    _obj: msgspec.Struct
+    _obj: Struct
     _config: "AlasioConfigBase"
     _task: str
     _group: str
@@ -69,6 +72,12 @@ class AlasioConfigBase:
         # Modified configs. Key: (task, group, arg). Value: ConfigSetEvent.
         # All variable modifications will be record here and saved in method `save()`.
         self.modified: "dict[tuple[str, str, str], ConfigSetEvent]" = {}
+        # Memory-only overrides. Key: Group.Arg. Value: value
+        # These override DB values but are not saved to DB.
+        self._override_config: "dict[str, dict[str, Any]]" = defaultdict(dict)
+        # Const overrides, consts are in uppercase like "USE_DATA_KEY"
+        self._override_const: "dict[str, Any]" = {}
+
         # If write after every variable modification.
         self.auto_save = True
         # Batch depth counter. 0 means immediate save mode.
@@ -84,6 +93,7 @@ class AlasioConfigBase:
 
     def init_task(self):
         # clear existing cache
+        # Note: self._overrides is persisted across init_task
         for key in self.__class__.__annotations__:
             if key in self.__dict__:
                 self.__dict__.pop(key, None)
@@ -122,15 +132,20 @@ class AlasioConfigBase:
             obj, errors = load_msgpack_with_default(value, model=model)
             # for error in errors:
             #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
-            if obj is msgspec.NODEFAULT:
+            if obj is NODEFAULT:
                 # Failed to convert
                 continue
 
             # create proxy on groups, so we can catch arg set
             obj = ModelProxy(_obj=obj, _config=self, _task=group_ref.task, _group=group)
             setattr(self, group, obj)
+        # Apply config overrides
+        for key, value in self._override_const.items():
+            self._apply_override_const(key, value)
+        for group, arg, value in deep_iter_depth2(self._override_config):
+            self._apply_override_config(group, arg, value)
 
-    def _group_construct(self, group) -> "msgspec.Struct":
+    def _group_construct(self, group) -> "Struct":
         """
         Convert group annotation like "opsi.OpsiGeneral", convert to msgspec validation model
 
@@ -182,14 +197,17 @@ class AlasioConfigBase:
         try:
             if not item[0].isupper():
                 # not a group access
-                raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
+                raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'") from None
         except IndexError:
             # this shouldn't happen
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'") from None
 
         obj = self._group_construct(item)
         # no proxy on unbound groups
         setattr(self, item, obj)
+        # Apply config overrides
+        for group, arg, value in deep_iter_depth2(self._override_config):
+            self._apply_overide_config(group, arg, value)
         return obj
 
     def save(self):
@@ -230,3 +248,116 @@ class AlasioConfigBase:
             # Only save if we are back at the top level and auto_save is enabled
             if self._batch_depth == 0 and self.auto_save:
                 self.save()
+
+    def _apply_override_config(self, group, arg, value):
+        """
+        Returns:
+            Any: prev value, or NODEFAULT if failed
+        """
+        # get group object, might get a proxy object or init an unbound group
+        try:
+            obj = getattr(self, group)
+        except AttributeError:
+            logger.warning(f'Trying to override {group}.{arg}={value} but no such group')
+            return NODEFAULT
+        # unwrap proxy
+        if type(obj) is ModelProxy:
+            obj = obj._obj
+        # set arg
+        try:
+            prev = getattr(obj, arg)
+        except AttributeError:
+            logger.warning(f'Trying to override {group}.{arg}={value} but no such group.arg')
+            return NODEFAULT
+        try:
+            setattr(obj, arg, value)
+        except TypeError:
+            logger.warning(f'Trying to override {group}.{arg}={value} but no such group.arg')
+            return NODEFAULT
+        return prev
+
+    def _apply_override_const(self, key, value):
+        """
+        Returns:
+            Any: prev value, or NODEFAULT if failed
+        """
+        try:
+            prev = getattr(self, key)
+        except AttributeError:
+            logger.warning(f'Trying to override {key}={value} but const not exist')
+            return NODEFAULT
+        # set key
+        setattr(self, key, value)
+        return prev
+
+    def override(self, **kwargs) -> "tuple[dict[str, dict[str, Any]], dict[str, Any]]":
+        """
+        Permanently override config values in memory.
+        These overrides persist across init_task() calls but are not saved to file.
+
+        Args:
+            **kwargs: Key format is Group_Arg=Value, or CONST_NAME=Value
+
+        Returns:
+            prev_config, prev_const
+
+        Usage:
+            config.override(
+                OpsiGeneral_DoRandomMapEvent=False,
+                HOMO_EDGE_DETECT=False,
+                STORY_OPTION=0
+            )
+            # override persists
+        """
+        prev_config = defaultdict(dict)
+        prev_const = {}
+        for key, value in kwargs.items():
+            if key.isupper():
+                # const override
+                prev = self._apply_override_const(key, value)
+                if prev is NODEFAULT:
+                    continue
+                self._override_const[key] = value
+                prev_const[key] = prev
+            else:
+                # config override
+                group, sep, arg = key.partition('_')
+                if not sep:
+                    logger.warning(f'Trying to override {key}={value} but format invalid')
+                    continue
+                prev = self._apply_override_config(group, arg, value)
+                if prev is NODEFAULT:
+                    continue
+                self._override_config[group][arg] = value
+                prev_config[group][arg] = prev
+
+        return prev_config, prev_const
+
+    @contextmanager
+    def temporary(self, **kwargs):
+        """
+        Temporarily override config values in memory within a context.
+        Restores previous values (from DB or previous overrides) upon exit.
+
+        Args:
+            Key format is Group_Arg=Value
+
+        Usage:
+            with config.temporary(
+                OpsiGeneral_DoRandomMapEvent=False,
+                HOMO_EDGE_DETECT=False,
+                STORY_OPTION=0
+            ):
+                # override persists
+            # override rollback
+        """
+        prev_config, prev_const = self.override(**kwargs)
+
+        try:
+            yield
+        finally:
+            # rollback
+            for key, value in prev_const.items():
+                self._apply_override_const(key, value)
+            for group, arg, value in deep_iter_depth2(prev_config):
+                self._apply_override_config(group, arg, value)
