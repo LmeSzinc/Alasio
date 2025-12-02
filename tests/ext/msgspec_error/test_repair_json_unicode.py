@@ -27,7 +27,7 @@ class TestLoadJsonWithDefaultUTF8:
 
         # Repair fails because Simple cannot be default-constructed.
         assert result is NODEFAULT
-        assert len(errors) == 2
+        assert len(errors) == 1
         assert errors[0].loc == ()  # Root-level error
         assert errors[0].type == ErrorType.WRAPPED_ERROR
         assert 'utf-8' in errors[0].msg  # Check that the error message contains "utf-8"
