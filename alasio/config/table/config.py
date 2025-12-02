@@ -14,8 +14,6 @@ class ConfigRow(Struct):
 
 class AlasioConfigTable(AlasioConfigDB):
     TABLE_NAME = 'config'
-    PRIMARY_KEY = 'id'
-    AUTO_INCREMENT = 'id'
     CREATE_TABLE = """
         CREATE TABLE "{TABLE_NAME}" (
         "id" INTEGER NOT NULL,

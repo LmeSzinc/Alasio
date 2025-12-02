@@ -2,7 +2,7 @@
 Test INSERT operations: insert_row with single and multiple rows
 """
 import pytest
-from conftest import User, Product, Task
+from conftest import User, Product
 
 
 def test_insert_single_row(user_table):
@@ -66,31 +66,6 @@ def test_insert_empty_list(user_table):
 
     count = user_table.select_count()
     assert count == 0
-
-
-def test_insert_without_auto_increment(task_table, sample_tasks):
-    """Test inserting rows in table without auto-increment"""
-    task_table.insert_row(sample_tasks)
-
-    results = task_table.select()
-    assert len(results) == 3
-
-    # Verify task IDs are as we set them
-    result = task_table.select_one(task_id='TASK-001')
-    assert result is not None
-    assert result.title == 'Write tests'
-
-
-def test_insert_duplicate_primary_key(task_table):
-    """Test that duplicate primary key raises error"""
-    task = Task(task_id='TASK-001', title='First', status='pending', priority=1)
-    task_table.insert_row(task)
-
-    # Try to insert with same primary key
-    duplicate = Task(task_id='TASK-001', title='Duplicate', status='pending', priority=1)
-
-    with pytest.raises(Exception):  # sqlite3.IntegrityError
-        task_table.insert_row(duplicate)
 
 
 def test_insert_with_unique_constraint(product_table):
@@ -246,23 +221,6 @@ def test_insert_in_new_table(temp_db):
 
     result = table.select_one(name='First User')
     assert result is not None
-
-
-def test_insert_with_all_fields_except_pk(task_table):
-    """Test insert with all fields specified except primary key"""
-    task = Task(
-        task_id='TASK-999',
-        title='Complete task',
-        status='in_progress',
-        priority=5
-    )
-    task_table.insert_row(task)
-
-    result = task_table.select_by_pk('TASK-999')
-    assert result is not None
-    assert result.title == 'Complete task'
-    assert result.status == 'in_progress'
-    assert result.priority == 5
 
 
 def test_insert_respects_column_order(user_table):

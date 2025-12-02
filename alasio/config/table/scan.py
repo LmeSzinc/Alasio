@@ -90,8 +90,6 @@ class ConfigExtra(msgspec.Struct):
 
 class ScanTable(AlasioGuiDB):
     TABLE_NAME = 'scan'
-    PRIMARY_KEY = 'id'
-    AUTO_INCREMENT = 'id'
     CREATE_TABLE = """
         CREATE TABLE "{TABLE_NAME}" (
         "id" INTEGER NOT NULL,

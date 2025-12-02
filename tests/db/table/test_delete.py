@@ -218,35 +218,6 @@ def test_delete_with_unicode(user_table):
     assert result is None
 
 
-def test_delete_without_auto_increment(task_table, sample_tasks):
-    """Test delete on table without auto-increment"""
-    task_table.insert_row(sample_tasks)
-
-    # Delete by kwargs
-    task_table.delete(status='pending')
-
-    count = task_table.select_count()
-    assert count == 2
-
-    result = task_table.select_one(status='pending')
-    assert result is None
-
-
-def test_delete_row_without_auto_increment(task_table, sample_tasks):
-    """Test delete_row on table without auto-increment"""
-    task_table.insert_row(sample_tasks)
-
-    task = task_table.select_one(task_id='TASK-001')
-    task_table.delete_row(task)
-    print(task_table.select())
-
-    result = task_table.select_by_pk('TASK-001')
-    assert result is None
-
-    count = task_table.select_count()
-    assert count == 2
-
-
 def test_delete_in_transaction(user_table, sample_users):
     """Test multiple deletes in a transaction"""
     user_table.insert_row(sample_users)

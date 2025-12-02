@@ -56,14 +56,6 @@ class Product(msgspec.Struct):
     stock: int = 0
 
 
-class Task(msgspec.Struct):
-    """Task model without auto increment for testing"""
-    task_id: str = ''
-    title: str = ''
-    status: str = 'pending'
-    priority: int = 0
-
-
 # ============================================================================
 # Test Table Classes
 # ============================================================================
@@ -103,34 +95,11 @@ class ProductTable(AlasioTable):
             "sku" TEXT NOT NULL UNIQUE,
             "name" TEXT NOT NULL,
             "price" REAL NOT NULL,
-            "stock" INTEGER NOT NULL
+            "stock" INTEGER NOT NULL,
+            UNIQUE ("sku", "name")
         )
     '''
     MODEL = Product
-
-    def select_count(self, **kwargs):
-        """Count rows matching the condition"""
-        return len(self.select(**kwargs))
-
-    def select_by_pk(self, pk_value):
-        """Select row by primary key"""
-        return self.select_one(**{self.PRIMARY_KEY: pk_value})
-
-
-class TaskTable(AlasioTable):
-    """Task table without auto increment for testing"""
-    TABLE_NAME = 'tasks'
-    PRIMARY_KEY = 'task_id'
-    AUTO_INCREMENT = ''
-    CREATE_TABLE = '''
-        CREATE TABLE "{TABLE_NAME}" (
-            "task_id" TEXT PRIMARY KEY,
-            "title" TEXT NOT NULL,
-            "status" TEXT NOT NULL,
-            "priority" INTEGER NOT NULL
-        )
-    '''
-    MODEL = Task
 
     def select_count(self, **kwargs):
         """Count rows matching the condition"""
@@ -198,14 +167,6 @@ def product_table(temp_db):
 
 
 @pytest.fixture
-def task_table(temp_db):
-    """Create a TaskTable instance with temp database"""
-    table = TaskTable(temp_db)
-    table.create_table()
-    yield table
-
-
-@pytest.fixture
 def user_table_memory(memory_db):
     """Create a UserTable instance with memory database"""
     table = UserTable(memory_db)
@@ -233,14 +194,4 @@ def sample_products():
         Product(id=0, sku='SKU002', name='Mouse', price=29.99, stock=50),
         Product(id=0, sku='SKU003', name='Keyboard', price=79.99, stock=30),
         Product(id=0, sku='SKU004', name='Monitor', price=299.99, stock=15),
-    ]
-
-
-@pytest.fixture
-def sample_tasks():
-    """Sample task data for testing"""
-    return [
-        Task(task_id='TASK-001', title='Write tests', status='in_progress', priority=1),
-        Task(task_id='TASK-002', title='Fix bug', status='pending', priority=2),
-        Task(task_id='TASK-003', title='Review PR', status='done', priority=3),
     ]

@@ -2,8 +2,9 @@
 Test UPSERT operations: insert or update on conflict
 """
 import pytest
-from conftest import User, Product, Task
+
 from alasio.db.table import AlasioTableError
+from conftest import Product, User
 
 
 def test_upsert_insert_new_row(user_table):
@@ -103,12 +104,14 @@ def test_upsert_with_multiple_conflict_fields(product_table):
     product_table.insert_row(product)
 
     # Upsert with conflicts on multiple fields
-    updated = Product(id=0, sku='SKU001', name='Updated', price=20.0, stock=10)
-    product_table.upsert_row(updated, conflicts=['sku', 'name'])
+    updated = Product(id=0, sku='SKU001', name='Product', price=20.0, stock=10)
+    product_table.upsert_row(updated, conflicts=['sku', 'name'], updates='price')
 
     # Note: This might insert or update depending on whether both fields match
-    result = product_table.select_one(sku='SKU001')
+    result = product_table.select_one(sku='SKU001', name='Product')
     assert result is not None
+    assert result.price == 20.0  # Should update
+    assert result.stock == 5  # Should not change
 
 
 def test_upsert_with_multiple_update_fields(user_table, sample_users):
@@ -188,34 +191,6 @@ def test_upsert_conflict_update_error_conditions(user_table):
         user_table.upsert_row(user, conflicts='id', updates='id')
 
 
-def test_upsert_no_update_fields_error(user_table):
-    """Test error when no update fields specified"""
-    user = User(id=0, name='Alice', age=25, email='alice@example.com')
-
-    # If all fields are in conflicts or PK, there's nothing to update
-    # This should raise an error
-    with pytest.raises(AlasioTableError):
-        user_table.upsert_row(user, conflicts='id', updates=[])
-
-
-def test_upsert_without_auto_increment(task_table, sample_tasks):
-    """Test upsert on table without auto-increment"""
-    task_table.insert_row(sample_tasks[:1])
-
-    # Update existing task
-    updated_task = Task(
-        task_id='TASK-001',
-        title='Updated Title',
-        status='done',
-        priority=5
-    )
-    task_table.upsert_row(updated_task)
-
-    result = task_table.select_by_pk('TASK-001')
-    assert result.title == 'Updated Title'
-    assert result.status == 'done'
-
-
 def test_upsert_insert_multiple_then_update(user_table):
     """Test inserting multiple rows then updating them via upsert"""
     users = [
@@ -273,27 +248,44 @@ def test_upsert_with_unicode(user_table):
 
 
 def test_upsert_large_batch(user_table):
-    """Test upserting a large batch"""
-    users = [
+    """Test upserting a large batch with mixed operations (insert + update)"""
+    # Step 1: Insert 100 initial records
+    initial_users = [
         User(id=0, name=f'User{i}', age=20, email=f'user{i}@example.com')
         for i in range(100)
     ]
-
-    # First upsert (insert)
-    user_table.upsert_row(users)
+    user_table.upsert_row(initial_users)
     assert user_table.select_count() == 100
 
-    # Get IDs and upsert again (update)
-    inserted = user_table.select()
+    # Step 2: Mixed upsert - update first 50, insert 50 new
+    inserted = user_table.select(_orderby_='id')
+
+    # Update first 50 (change age to 30)
     updates = [
-        User(id=u.id, name=u.name, age=30, email=u.email)
-        for u in inserted
+        User(id=inserted[i].id, name=inserted[i].name, age=30, email=inserted[i].email)
+        for i in range(50)
     ]
-    user_table.upsert_row(updates)
 
-    # Should still have 100 rows
-    assert user_table.select_count() == 100
-    assert user_table.select_count(age=30) == 100
+    # Insert 50 new (age 25)
+    new_inserts = [
+        User(id=0, name=f'NewUser{i}', age=25, email=f'newuser{i}@example.com')
+        for i in range(50)
+    ]
+
+    # Mixed upsert: 50 updates + 50 inserts
+    mixed_batch = updates + new_inserts
+    user_table.upsert_row(mixed_batch)
+
+    # Verify results
+    assert user_table.select_count() == 150  # 100 original + 50 new
+    assert user_table.select_count(age=30) == 50  # Updated records
+    assert user_table.select_count(age=25) == 50  # New records
+    assert user_table.select_count(age=20) == 50  # Unchanged records
+
+    # Verify updates worked correctly
+    for i in range(50):
+        user = user_table.select_by_pk(inserted[i].id)
+        assert user.age == 30  # Should be updated
 
 
 def test_upsert_conflict_on_non_pk_field(product_table):

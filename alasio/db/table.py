@@ -17,6 +17,26 @@ class AlasioTableError(Exception):
     pass
 
 
+def row_has_pk(row: T_model):
+    """
+    Whether row with PRIMARY_KEY value > 0
+    """
+    try:
+        return row.id > 0
+    except AttributeError:
+        # Row does not have PRIMARY_KEY
+        return False
+
+
+def row_drop_zero_pk(row: dict):
+    try:
+        if row['id'] <= 0:
+            row['id'] = None
+    except KeyError:
+        pass
+    return row
+
+
 class LazyCursor:
     def __init__(self, table):
         """
@@ -71,11 +91,6 @@ class LazyCursor:
 class AlasioTable:
     # Tables should override these
     TABLE_NAME = ''
-    # Name of PRIMARY_KEY field
-    PRIMARY_KEY = ''
-    # Name of AUTO_INCREMENT field
-    # In most databases you can only have one AUTO_INCREMENT field
-    AUTO_INCREMENT = ''
     # SQL to create the table
     # when executing any sql, table will be auto created
     # Example:
@@ -90,6 +105,7 @@ class AlasioTable:
     # If CREATE_TABLE is f-string, CREATE_TABLE is a static SQL
     # If CREATE_TABLE is normal string, CREATE_TABLE will fill in {TABLE_NAME} dynamically,
     #   so you can operate multiple tables that have the same schema
+    # Note that table must have "id" in INTEGER and as PRIMARY_KEY and AUTO_INCREMENT
     CREATE_TABLE = ''
     # msgspec model of the table row
     # You need to ensure MODEL matches the schema in CREATE_TABLE
@@ -446,11 +462,8 @@ class AlasioTable:
             str: "task","group",...
         """
         fields = self.field_names
-        # get non auto increment fields
-        if self.AUTO_INCREMENT:
-            columns = [name for name in fields if name != self.AUTO_INCREMENT]
-        else:
-            columns = fields
+        # get non auto increment fields (id is implicitly auto increment)
+        columns = [name for name in fields if name != 'id']
         # :task,:group,...
         placeholders = ','.join([f':{k}' for k in columns])
         # "task","group",...
@@ -481,21 +494,28 @@ class AlasioTable:
             sql: str,
             rows: "T_model | list[T_model]",
             _cursor_: "SqlitePoolCursor | None" = None,
-            has_pk=False,
+            drop_no_pk=False,
+            drop_zero_pk=False,
     ):
         """
         Args:
             sql:
             rows:
             _cursor_:
-            has_pk: True to drop rows without PRIMARY_KEY
+            drop_no_pk: True to drop rows without PRIMARY_KEY
+            drop_zero_pk: True to set row.id == 0 to None,
         """
         if isinstance(rows, list):
-            if has_pk:
-                # filter rows with PRIMARY_KEY
-                rows = [asdict(row) for row in rows if self._row_has_pk(row)]
+            if drop_no_pk:
+                if drop_zero_pk:
+                    rows = [row_drop_zero_pk(asdict(row)) for row in rows if row_has_pk(row)]
+                else:
+                    rows = [asdict(row) for row in rows if row_has_pk(row)]
             else:
-                rows = [asdict(row) for row in rows]
+                if drop_zero_pk:
+                    rows = [row_drop_zero_pk(asdict(row)) for row in rows]
+                else:
+                    rows = [asdict(row) for row in rows]
             if not rows:
                 return
             # execute
@@ -506,11 +526,13 @@ class AlasioTable:
             else:
                 _cursor_.executemany(sql, rows)
         else:
-            if has_pk:
+            if drop_no_pk:
                 # filter rows with PRIMARY_KEY
-                if not self._row_has_pk(rows):
+                if not row_has_pk(rows):
                     return
             rows = asdict(rows)
+            if drop_zero_pk:
+                rows = row_drop_zero_pk(rows)
             # execute
             if _cursor_ is None:
                 with self.cursor() as c:
@@ -518,16 +540,6 @@ class AlasioTable:
                     c.commit()
             else:
                 _cursor_.execute(sql, rows)
-
-    def _row_has_pk(self, row: T_model) -> bool:
-        """
-        Whether row with PRIMARY_KEY value > 0
-        """
-        try:
-            return bool(getattr(row, self.PRIMARY_KEY))
-        except AttributeError:
-            # Row does not have PRIMARY_KEY
-            return False
 
     def update_row(
             self,
@@ -545,25 +557,22 @@ class AlasioTable:
                 default to empty string meaning all fields except PRIMARY_KEY will be updated
             _cursor_:
         """
-        if not self.PRIMARY_KEY:
-            raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no PRIMARY_KEY defined')
-
         # format updates
         if not updates:
-            updates = [name for name in self.field_names if name != self.PRIMARY_KEY]
+            updates = [name for name in self.field_names if name != 'id']
         elif isinstance(updates, str):
-            updates = [updates] if updates != self.PRIMARY_KEY else []
+            updates = [updates] if updates != 'id' else []
         else:
-            updates = [name for name in updates if name != self.PRIMARY_KEY]
+            updates = [name for name in updates if name != 'id']
         if not updates:
             # no update fields?
             raise AlasioTableError(f'Trying to do update_row() but no update fields, updates={updates}')
 
         # "task"=:task,"group"=:group,...
         set_clause = ','.join([f'"{field}"=:{field}' for field in updates])
-        sql = f'UPDATE "{self.TABLE_NAME}" SET {set_clause} WHERE "{self.PRIMARY_KEY}"=:{self.PRIMARY_KEY}'
+        sql = f'UPDATE "{self.TABLE_NAME}" SET {set_clause} WHERE "id"=:id'
 
-        self.execute_one_or_many(sql, rows, _cursor_=_cursor_, has_pk=True)
+        self.execute_one_or_many(sql, rows, _cursor_=_cursor_, drop_no_pk=True)
 
     def upsert_row(
             self,
@@ -585,12 +594,9 @@ class AlasioTable:
 
             _cursor_:
         """
-        if not self.PRIMARY_KEY:
-            raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no PRIMARY_KEY defined')
-
         # format conflicts
         if not conflicts:
-            conflicts = [self.PRIMARY_KEY]
+            conflicts = ['id']
         else:
             if isinstance(conflicts, str):
                 conflicts = [conflicts]
@@ -603,22 +609,25 @@ class AlasioTable:
 
         # format updates
         if not updates:
-            updates = [name for name in self.field_names if name != self.PRIMARY_KEY and name not in conflicts]
+            updates = [name for name in self.field_names if name != 'id' and name not in conflicts]
         elif isinstance(updates, str):
             if updates in conflicts:
                 # update the conflicted field?
                 raise AlasioTableError(f'Trying to do upsert_row() but updates==conflicts'
                                        f'conflicts={conflicts}, updates={updates}')
-            updates = [updates] if updates != self.PRIMARY_KEY else []
+            updates = [updates] if updates != 'id' else []
         else:
-            updates = [name for name in updates if name != self.PRIMARY_KEY and name not in conflicts]
+            updates = [name for name in updates if name != 'id' and name not in conflicts]
         if not updates:
             # no update fields?
             raise AlasioTableError(f'Trying to do upsert_row() but no update fields, '
                                    f'conflicts={conflicts}, updates={updates}')
 
         # build sql
-        columns, placeholders = self.sql_insert_columns_placeholders
+        # insert all columns including PRIMARY KEY but PK=None to have an auto increment PK
+        fields = self.field_names
+        columns = ",".join([f'"{k}"' for k in fields])
+        placeholders = ','.join([f':{k}' for k in fields])
         # "task","group",...
         conflict_clause = ','.join([f'"{field}"' for field in conflicts])
         # "task"=excluded."task","group"=excluded."group",...
@@ -626,7 +635,7 @@ class AlasioTable:
         sql = f'INSERT INTO "{self.TABLE_NAME}" ({columns}) VALUES ({placeholders}) ' \
               f'ON CONFLICT ({conflict_clause}) DO UPDATE SET {update_clause}'
 
-        self.execute_one_or_many(sql, rows, _cursor_=_cursor_)
+        self.execute_one_or_many(sql, rows, _cursor_=_cursor_, drop_zero_pk=True)
 
     def delete(self, _cursor_: "SqlitePoolCursor | None" = None, **kwargs):
         """
@@ -665,9 +674,6 @@ class AlasioTable:
         Delete rows by PRIMARY_KEY.
         Rows with PRIMARY_KEY value <= 0 won't be deleted.
         """
-        if not self.PRIMARY_KEY:
-            raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no PRIMARY_KEY defined')
+        sql = f'DELETE FROM "{self.TABLE_NAME}" WHERE "id"=:id'
 
-        sql = f'DELETE FROM "{self.TABLE_NAME}" WHERE "{self.PRIMARY_KEY}"=:{self.PRIMARY_KEY}'
-
-        self.execute_one_or_many(sql, rows, _cursor_=_cursor_, has_pk=True)
+        self.execute_one_or_many(sql, rows, _cursor_=_cursor_, drop_no_pk=True)

@@ -1,8 +1,7 @@
 """
 Test SELECT operations: select, select_one, select_by_sql, select_one_by_sql
 """
-import pytest
-from conftest import User, Task
+from conftest import User
 
 
 def test_select_all(user_table, sample_users):
@@ -142,18 +141,6 @@ def test_select_one_with_offset(user_table, sample_users):
     result = user_table.select_one(_orderby_='age', _offset_=1)
     assert result is not None
     assert result.age == 28  # Second youngest
-
-
-def test_select_without_auto_increment_field(task_table, sample_tasks):
-    """Test select on table without auto increment"""
-    task_table.insert_row(sample_tasks)
-
-    results = task_table.select()
-    assert len(results) == 3
-
-    result = task_table.select_one(status='pending')
-    assert result is not None
-    assert result.status == 'pending'
 
 
 def test_select_with_custom_cursor(user_table, sample_users):

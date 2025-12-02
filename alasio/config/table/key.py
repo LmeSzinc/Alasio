@@ -42,8 +42,6 @@ class JwtSecret(msgspec.Struct):
 
 class AlasioKeyTable(AlasioConfigDB):
     TABLE_NAME = 'alasio'
-    PRIMARY_KEY = 'id'
-    AUTO_INCREMENT = 'id'
     CREATE_TABLE = """
         CREATE TABLE "{TABLE_NAME}" (
         "id" INTEGER NOT NULL,

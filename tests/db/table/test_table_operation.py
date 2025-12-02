@@ -1,9 +1,8 @@
 """
 Test basic table operations: create_table, drop_table, field_names, etc.
 """
-import pytest
 
-from alasio.db.table import AlasioTable, AlasioTableError
+from alasio.db.table import AlasioTable, row_has_pk
 
 
 def test_create_table(user_table, temp_db):
@@ -79,12 +78,6 @@ def test_sql_insert_columns_placeholders(user_table):
     assert ':name' in placeholders
     assert ':age' in placeholders
     assert ':email' in placeholders
-
-
-def test_sql_insert_columns_placeholders_no_auto_increment(task_table):
-    """Test SQL insert with table that has no AUTO_INCREMENT"""
-    with pytest.raises(AlasioTableError):
-        _ = task_table.sql_insert_columns_placeholders
 
 
 def test_sql_select_kwargs_to_condition():
@@ -182,15 +175,15 @@ def test_row_has_pk(user_table):
 
     # User with valid PK
     user_with_pk = User(id=5, name='Test', age=25, email='test@example.com')
-    assert user_table._row_has_pk(user_with_pk) is True
+    assert row_has_pk(user_with_pk) is True
 
     # User without PK (id=0)
     user_without_pk = User(id=0, name='Test', age=25, email='test@example.com')
-    assert user_table._row_has_pk(user_without_pk) is False
+    assert row_has_pk(user_without_pk) is False
 
     # User with negative PK
     user_negative_pk = User(id=-1, name='Test', age=25, email='test@example.com')
-    assert user_table._row_has_pk(user_negative_pk) is False
+    assert row_has_pk(user_negative_pk) is False
 
 
 def test_sql_select_expr_basic(user_table):
