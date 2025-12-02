@@ -6,7 +6,7 @@
       "group": "Scheduler",
       "arg": "Enable",
       "dt": "checkbox",
-      "value": true
+      "value": false
     },
     "Scheduler_NextRun": {
       "task": "Main",
@@ -158,7 +158,7 @@
       "group": "Scheduler",
       "arg": "Enable",
       "dt": "checkbox",
-      "value": true
+      "value": false
     },
     "Scheduler_NextRun": {
       "task": "Main2",

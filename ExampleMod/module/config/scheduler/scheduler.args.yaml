@@ -1,4 +1,4 @@
 Scheduler:
-  Enable: true
-  NextRun: 2020-01-01T00:00:00
+  Enable: false
+  NextRun: 2020-01-01T00:00:00Z
   ServerUpdate: 00:00

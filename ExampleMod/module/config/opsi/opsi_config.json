@@ -6,7 +6,7 @@
       "group": "Scheduler",
       "arg": "Enable",
       "dt": "checkbox",
-      "value": true
+      "value": false
     },
     "Scheduler_NextRun": {
       "task": "OpsiExplore",
@@ -51,7 +51,7 @@
       "group": "Scheduler",
       "arg": "Enable",
       "dt": "checkbox",
-      "value": true
+      "value": false
     },
     "Scheduler_NextRun": {
       "task": "OpsiDaily",
@@ -136,7 +136,7 @@
       "group": "Scheduler",
       "arg": "Enable",
       "dt": "checkbox",
-      "value": true
+      "value": false
     },
     "Scheduler_NextRun": {
       "task": "OpsiAshAssist",
