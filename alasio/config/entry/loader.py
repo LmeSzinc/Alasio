@@ -195,8 +195,8 @@ class ModLoader:
             raise ValidationError(f'No such mod: "{mod_name}"') from None
 
         event = ConfigSetEvent(task=task_name, group=group_name, arg=arg_name, value=value)
-        success, responses = mod.config_set(config_name, events=[event])
-        return success, responses[0]
+        success, response = mod.config_set(config_name, event)
+        return success, response
 
     def gui_config_reset(self, mod_name, config_name, task_name, group_name, arg_name):
         """
@@ -211,18 +211,17 @@ class ModLoader:
             arg_name (str):
 
         Returns:
-            list[ConfigSetEvent]:
-                Empty list if failed, otherwise a list with single reset event
+            ConfigSetEvent | None:
         """
         try:
             mod = self.dict_mod[mod_name]
         except KeyError:
             logger.warning(f'No such mod: "{mod_name}"')
-            return []
+            return None
 
         event = ConfigSetEvent(task=task_name, group=group_name, arg=arg_name, value=None)
-        responses = mod.config_reset(config_name, events=[event])
-        return responses
+        response = mod.config_reset(config_name, event)
+        return response
 
 
 MOD_LOADER = ModLoader(env.PROJECT_ROOT)

@@ -157,17 +157,15 @@ class ConfigArg(BaseTopic):
             return
 
         # call
-        resp_list = await trio.to_thread.run_sync(
+        resp = await trio.to_thread.run_sync(
             MOD_LOADER.gui_config_reset,
             mod_name, config_name, task, group, arg
         )
-        # resp_list: list[ConfigSetEvent]
-        if not resp_list:
+        # resp: ConfigSetEvent | None
+        if resp is None:
             # reset failed, do nothing
             return
 
-        # get first response
-        resp = resp_list[0]
         event = ConfigEvent(
             t=self.topic_name(), c=config_name,
             k=(resp.task, resp.group, resp.arg), v=resp.value)

@@ -170,11 +170,6 @@ class Mod:
                 # construct a default value from model
                 try:
                     default = model()
-                except TypeError:
-                    logger.warning(
-                        f'DataInconsistent: Class "{model_ref.cls}" in "{model_ref.file}" '
-                        f'cannot be default constructed')
-                    continue
                 except Exception as e:
                     logger.warning(
                         f'DataInconsistent: Class "{model_ref.cls}" in "{model_ref.file}" '
@@ -209,7 +204,7 @@ class Mod:
 
         return out
 
-    def config_set(self, config_name, events):
+    def config_batch_set(self, config_name, events):
         """
         Batch set config.
         If any event failed to validate, entire config_set is consider failed.
@@ -237,18 +232,17 @@ class Mod:
         dict_value = defaultdict(dict)
         for event in events:
             key = (event.task, event.group)
-            if key in dict_model:
-                continue
-            try:
-                model_ref = task_index_data[event.task].group[event.group]
-            except KeyError:
-                logger.warning(f'Cannot set non-exist group {event.task}.{event.group}')
-                continue
-            # get model
-            model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
-            if model is None:
-                continue
-            dict_model[key] = model
+            if key not in dict_model:
+                try:
+                    model_ref = task_index_data[event.task].group[event.group]
+                except KeyError:
+                    logger.warning(f'Cannot set non-exist group {event.task}.{event.group}')
+                    continue
+                # get model
+                model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
+                if model is None:
+                    continue
+                dict_model[key] = model
             dict_value[key][event.arg] = event.value
 
         # validate
@@ -343,7 +337,93 @@ class Mod:
 
         return True, success
 
-    def config_reset(self, config_name, events):
+    def config_set(self, config_name, event):
+        """
+        Set a single config value.
+        Optimized for single event without batch overhead.
+
+        Args:
+            config_name (str):
+            event (ConfigSetEvent): Single event to set
+
+        Returns:
+            tuple[bool, ConfigSetEvent]:
+                If success, returns (True, event) where event.error is None
+                If failed, returns (False, rollback_event) where rollback_event.error contains error message
+
+        Raises:
+            DataInconsistent:
+        """
+        # get model
+        task_index_data = self.task_index_data()
+        try:
+            model_ref = task_index_data[event.task].group[event.group]
+        except KeyError:
+            logger.warning(f'Cannot set non-exist group {event.task}.{event.group}')
+            raise DataInconsistent(f'Group {event.task}.{event.group} does not exist')
+        
+        model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
+        if model is None:
+            raise DataInconsistent(f'Cannot load model for {event.task}.{event.group}')
+
+        # validate
+        value = {event.arg: event.value}
+        try:
+            value_obj = convert(value, model)
+        except ValidationError as e:
+            error = parse_msgspec_error(e)
+            try:
+                arg = error.loc[0]
+            except IndexError:
+                raise DataInconsistent(f'Failed to parse error.loc from "{e}"') from None
+            try:
+                default = get_field_default(model, arg)
+            except AttributeError:
+                default = NODEFAULT
+            if default == NODEFAULT:
+                raise DataInconsistent(f'Failed to default from {model} field "{arg}"')
+            rollback = ConfigSetEvent(task=event.task, group=event.group, arg=arg, value=default, error=error)
+            return False, rollback
+
+        # get validated value
+        arg_value = getattr(value_obj, event.arg, NODEFAULT)
+        if arg_value is NODEFAULT:
+            raise DataInconsistent(
+                f'Missing arg "{event.arg}" after converting value, value={value}, value_obj={value_obj}')
+        
+        # init table
+        logger.info(f'config_set "{config_name}": {event.task}.{event.group}.{event.arg}={event.value}')
+        table = AlasioConfigTable(config_name)
+
+        # write after validation
+        with table.exclusive_transaction() as c:
+            # read existing data
+            rows = table.read_rows([event], _cursor_=c)
+            old = b'\x80'  # empty msgpack dict
+            for row in rows:
+                old = row.value
+                break
+
+            # parse existing value
+            data, errors = load_msgpack_with_default(old, model=model)
+            if data is NODEFAULT:
+                raise DataInconsistent(f'Failed to load existing config for {event.task}.{event.group}')
+
+            # update value
+            try:
+                setattr(data, event.arg, arg_value)
+            except AttributeError:
+                raise DataInconsistent(f'Cannot set attribute {event.arg} on {model}')
+
+            # encode and write
+            data = encode(data)
+            row = ConfigRow(task=event.task, group=event.group, value=data)
+            table.upsert_row([row], conflicts=('task', 'group'), updates='value', _cursor_=c)
+
+        success_event = ConfigSetEvent(task=event.task, group=event.group, arg=event.arg, value=arg_value)
+        return True, success_event
+
+    def config_batch_reset(self, config_name, events):
         """
         Batch reset config args.
         Reset by deleting corresponding keys from messagepack data,
@@ -452,3 +532,86 @@ class Mod:
             table.upsert_row(rows, conflicts=('task', 'group'), updates='value', _cursor_=c)
 
         return success
+
+    def config_reset(self, config_name, event):
+        """
+        Reset a single config value to default.
+        Optimized for single event without batch overhead.
+
+        Args:
+            config_name (str):
+            event (ConfigSetEvent): Single event to reset
+
+        Returns:
+            ConfigSetEvent | None:
+                If success, returns reset event with default value where event.error is None
+                If failed, returns None
+        """
+        # get model
+        task_index_data = self.task_index_data()
+        try:
+            model_ref = task_index_data[event.task].group[event.group]
+        except KeyError:
+            logger.warning(f'Cannot reset non-exist group {event.task}.{event.group}')
+            return None
+        
+        model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
+        if model is None:
+            return None
+
+        # init table
+        logger.info(f'config_reset "{config_name}": {event.task}.{event.group}.{event.arg}')
+        table = AlasioConfigTable(config_name)
+
+        # write
+        with table.exclusive_transaction() as c:
+            # read existing data
+            rows = table.read_rows([event], _cursor_=c)
+            old = b'\x80'  # empty msgpack dict
+            for row in rows:
+                old = row.value
+                break
+
+            # parse existing value
+            data, errors = load_msgpack_with_default(old, model=model)
+            if data is NODEFAULT:
+                # Failed to convert, skip
+                return None
+
+            # construct default model to get default value
+            try:
+                default_model = model()
+            except (TypeError, Exception) as e:
+                logger.warning(
+                    f'Cannot construct default model for {event.task}.{event.group}: {e}')
+                return None
+
+            # get default value
+            default_value = getattr(default_model, event.arg, NODEFAULT)
+            if default_value is NODEFAULT:
+                logger.warning(
+                    f'Cannot get default value for {event.task}.{event.group}.{event.arg}')
+                return None
+
+            # delete arg from data
+            data_dict = asdict(data)
+            try:
+                del data_dict[event.arg]
+            except KeyError:
+                # arg not in data, already at default
+                pass
+
+            # convert back to struct and encode
+            try:
+                data = convert(data_dict, model)
+            except ValidationError as e:
+                logger.warning(
+                    f'Failed to convert after reset for {event.task}.{event.group}: {e}')
+                return None
+
+            # encode and write
+            data = encode(data)
+            row = ConfigRow(task=event.task, group=event.group, value=data)
+            table.upsert_row([row], conflicts=('task', 'group'), updates='value', _cursor_=c)
+
+        return ConfigSetEvent(task=event.task, group=event.group, arg=event.arg, value=default_value)
