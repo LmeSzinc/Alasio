@@ -1,3 +1,4 @@
+import { t } from "$lib/i18n";
 import type { Component } from "svelte";
 
 export type ArgData = {
@@ -134,4 +135,118 @@ export function useArgValue<T>(data: ArgData) {
     },
     submit,
   };
+}
+
+/**
+ * Validate input value based on data type (dt field)
+ *
+ * @param value The input value to validate
+ * @param dt Data type from ArgData (e.g., "input", "input-int", "input-float")
+ * @returns Error message string if validation fails, null if valid
+ */
+export function validateByDataType(value: string, dt: string): string | null {
+  // For input-int, validate integer format
+  if (dt === "input-int") {
+    // Check if value is a valid integer
+    // Allow optional leading +/- sign, followed by digits
+    const intRegex = /^[+-]?\d+$/;
+    if (!intRegex.test(value.trim())) {
+      return t.Input.InvalidInteger();
+    }
+  }
+
+  // For input-float, validate float format
+  if (dt === "input-float") {
+    // Check if value is a valid float
+    // Allow optional leading +/- sign, digits, optional decimal point and more digits
+    // Also allow scientific notation (e.g., 1.5e10, 1E-5)
+    const floatRegex = /^[+-]?(\d+\.?\d*|\d*\.\d+)([eE][+-]?\d+)?$/;
+    if (!floatRegex.test(value.trim())) {
+      return t.Input.InvalidFloat();
+    }
+  }
+
+  // For regular input, no specific format validation
+  return null;
+}
+
+/**
+ * Validate input value based on constraints from ArgData
+ *
+ * @param value The input value to validate
+ * @param data ArgData object containing constraint fields
+ * @returns Error message string if validation fails, null if valid
+ */
+export function validateByConstraints(value: string, data: ArgData): string | null {
+  // Convert value to number for numeric constraints
+  const numValue = parseFloat(value);
+  const isNumeric = !isNaN(numValue);
+
+  // Check gt (greater than) constraint
+  if (data.gt !== undefined && isNumeric) {
+    if (numValue <= data.gt) {
+      return t.Input.GreaterThan({ value: data.gt });
+    }
+  }
+
+  // Check ge (greater than or equal) constraint
+  if (data.ge !== undefined && isNumeric) {
+    if (numValue < data.ge) {
+      return t.Input.GreaterThanOrEqual({ value: data.ge });
+    }
+  }
+
+  // Check lt (less than) constraint
+  if (data.lt !== undefined && isNumeric) {
+    if (numValue >= data.lt) {
+      return t.Input.LessThan({ value: data.lt });
+    }
+  }
+
+  // Check le (less than or equal) constraint
+  if (data.le !== undefined && isNumeric) {
+    if (numValue > data.le) {
+      return t.Input.LessThanOrEqual({ value: data.le });
+    }
+  }
+
+  // Check multiple_of constraint
+  if (data.multiple_of !== undefined && isNumeric) {
+    // Use modulo to check if value is a multiple
+    // Handle floating point precision issues
+    const remainder = numValue % data.multiple_of;
+    if (Math.abs(remainder) > 1e-10 && Math.abs(remainder - data.multiple_of) > 1e-10) {
+      return t.Input.MultipleOf({ value: data.multiple_of });
+    }
+  }
+
+  // Check pattern constraint (regex)
+  if (data.pattern !== undefined) {
+    try {
+      const regex = new RegExp(data.pattern);
+      if (!regex.test(value)) {
+        return t.Input.PatternMismatch();
+      }
+    } catch (e) {
+      // Invalid regex pattern, skip validation
+      console.warn(`Invalid regex pattern: ${data.pattern}`, e);
+    }
+  }
+
+  // Check min_length constraint
+  if (data.min_length !== undefined) {
+    if (value.length < data.min_length) {
+      return t.Input.MinLength({ value: data.min_length });
+    }
+  }
+
+  // Check max_length constraint
+  if (data.max_length !== undefined) {
+    if (value.length > data.max_length) {
+      return t.Input.MaxLength({ value: data.max_length });
+    }
+  }
+
+  // All validations passed
+  return null;
 }

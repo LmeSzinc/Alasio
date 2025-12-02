@@ -1,0 +1,72 @@
+{
+  "InvalidInteger": {
+    "en-US": "Please enter a valid integer",
+    "zh-CN": "请输入有效的整数",
+    "ja-JP": "有効な整数を入力してください",
+    "zh-TW": "請輸入有效的整數",
+    "es-ES": "Por favor ingrese un número entero válido"
+  },
+  "InvalidFloat": {
+    "en-US": "Please enter a valid number",
+    "zh-CN": "请输入有效的数字",
+    "ja-JP": "有効な数値を入力してください",
+    "zh-TW": "請輸入有效的數字",
+    "es-ES": "Por favor ingrese un número válido"
+  },
+  "GreaterThan": {
+    "en-US": "Value must be greater than {value}",
+    "zh-CN": "值必须大于 {value}",
+    "ja-JP": "値は {value} より大きい必要があります",
+    "zh-TW": "值必須大於 {value}",
+    "es-ES": "El valor debe ser mayor que {value}"
+  },
+  "GreaterThanOrEqual": {
+    "en-US": "Value must be greater than or equal to {value}",
+    "zh-CN": "值必须大于或等于 {value}",
+    "ja-JP": "値は {value} 以上である必要があります",
+    "zh-TW": "值必須大於或等於 {value}",
+    "es-ES": "El valor debe ser mayor o igual a {value}"
+  },
+  "LessThan": {
+    "en-US": "Value must be less than {value}",
+    "zh-CN": "值必须小于 {value}",
+    "ja-JP": "値は {value} より小さい必要があります",
+    "zh-TW": "值必須小於 {value}",
+    "es-ES": "El valor debe ser menor que {value}"
+  },
+  "LessThanOrEqual": {
+    "en-US": "Value must be less than or equal to {value}",
+    "zh-CN": "值必须小于或等于 {value}",
+    "ja-JP": "値は {value} 以下である必要があります",
+    "zh-TW": "值必須小於或等於 {value}",
+    "es-ES": "El valor debe ser menor o igual a {value}"
+  },
+  "MultipleOf": {
+    "en-US": "Value must be a multiple of {value}",
+    "zh-CN": "值必须是 {value} 的倍数",
+    "ja-JP": "値は {value} の倍数である必要があります",
+    "zh-TW": "值必須是 {value} 的倍數",
+    "es-ES": "El valor debe ser múltiplo de {value}"
+  },
+  "PatternMismatch": {
+    "en-US": "Input does not match the required pattern",
+    "zh-CN": "输入不符合要求的格式",
+    "ja-JP": "入力が必要なパターンと一致しません",
+    "zh-TW": "輸入不符合要求的格式",
+    "es-ES": "La entrada no coincide con el patrón requerido"
+  },
+  "MinLength": {
+    "en-US": "Length must be at least {value}",
+    "zh-CN": "长度必须至少为 {value}",
+    "ja-JP": "長さは少なくとも {value} である必要があります",
+    "zh-TW": "長度必須至少為 {value}",
+    "es-ES": "La longitud debe ser al menos {value}"
+  },
+  "MaxLength": {
+    "en-US": "Length must be at most {value}",
+    "zh-CN": "长度必须最多为 {value}",
+    "ja-JP": "長さは最大 {value} である必要があります",
+    "zh-TW": "長度必須最多為 {value}",
+    "es-ES": "La longitud debe ser como máximo {value}"
+  }
+}
