@@ -1,0 +1,23 @@
+appId: com.alasio.app
+productName: Alasio
+directories:
+  output: release
+  buildResources: resources
+files:
+  - dist/**/*
+  - resources/**/*
+  - package.json
+electronLanguages:
+  - en-US
+win:
+  target:
+    - dir
+  icon: resources/icon.png
+mac:
+  target:
+    - dmg
+  icon: resources/icon.png
+linux:
+  target:
+    - AppImage
+  icon: resources/icon.png
