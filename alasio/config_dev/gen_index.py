@@ -12,6 +12,7 @@ from alasio.ext.deep import deep_get, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path.calc import to_posix
+from alasio.git.stage.gitadd import GitAdd
 from alasio.logger import logger
 
 
@@ -334,7 +335,7 @@ class IndexGenerator(CrossNavGenerator):
     Generate config_generated.py
     """
 
-    def generate_config_generated_file(self):
+    def generate_config_generated_file(self, gitadd=None):
         """
         Generate config_generated.py file with type hints for IDE auto-completion
 
@@ -393,16 +394,18 @@ class IndexGenerator(CrossNavGenerator):
                 gen.Empty()
 
         # Write to file
-        output_file = self.path_config.joinpath('config_generated.py')
-        op = gen.write(output_file, skip_same=True)
+        file = self.path_config.joinpath('config_generated.py')
+        op = gen.write(file, skip_same=True)
         if op:
-            logger.info(f'Write file {output_file}')
+            logger.info(f'Write file {file}')
+            if gitadd:
+                gitadd.stage_add(file)
 
     """
     Generate all
     """
 
-    def generate(self):
+    def _generate(self, gitadd=None):
         # check path
         if not self.root.exists():
             logger.warning(f'ConfigGen root not exist: {self.root}')
@@ -411,7 +414,7 @@ class IndexGenerator(CrossNavGenerator):
 
         # update nav configs
         for nav in self.dict_nav_config.values():
-            nav.generate()
+            nav.generate(gitadd=gitadd)
 
         # model.index.json
         _ = self.model_data
@@ -419,30 +422,33 @@ class IndexGenerator(CrossNavGenerator):
             return
 
         # {nav}_config.json
-        self.generate_config_json()
+        self.generate_config_json(gitadd=gitadd)
+
+        def write(f, d):
+            op = write_json_custom_indent(f, d, skip_same=True)
+            if op:
+                logger.info(f'Write file {f}')
+                if gitadd:
+                    gitadd.stage_add(f)
 
         # task.index.json
-        op = write_json_custom_indent(self.task_index_file, self.task_index_data, skip_same=True)
-        if op:
-            logger.info(f'Write file {self.task_index_file}')
+        write(self.task_index_file, self.task_index_data)
 
         # config.index.json
-        op = write_json_custom_indent(self.config_index_file, self.config_index_data, skip_same=True)
-        if op:
-            logger.info(f'Write file {self.config_index_file}')
+        write(self.config_index_file, self.config_index_data)
 
         # nav.index.json
-        op = write_json_custom_indent(self.nav_index_file, self.nav_index_data, skip_same=True)
-        if op:
-            logger.info(f'Write file {self.nav_index_file}')
+        write(self.nav_index_file, self.nav_index_data)
 
         # queue.index.json
-        op = write_json_custom_indent(self.queue_index_file, self.queue_index_data, skip_same=True)
-        if op:
-            logger.info(f'Write file {self.queue_index_file}')
+        write(self.queue_index_file, self.queue_index_data)
 
         # config_generated.py
         self.generate_config_generated_file()
+
+    def generate(self):
+        with GitAdd(env.PROJECT_ROOT) as gitadd:
+            self._generate(gitadd)
 
 
 if __name__ == '__main__':

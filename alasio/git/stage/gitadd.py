@@ -1,11 +1,11 @@
 import os
 import stat
 
+from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.ext.path.calc import is_abspath, subpath_to, to_posix
 from alasio.git.eol import eol_crlf_remove
-from alasio.git.stage.gitreset import GitReset
 from alasio.git.stage.hashobj import blob_hash, encode_loosedata
 from alasio.git.stage.index import GitIndex, GitIndexEntry
 from alasio.logger import logger
@@ -42,6 +42,13 @@ class GitAdd(GitIndex):
         # track if entry modified
         self.entry_modified = False
         super().__init__(file)
+
+    @cached_property
+    def exists(self):
+        exists = os.path.exists(self.file)
+        if not exists:
+            logger.info(f'GitAdd skipped, not a git repo: {self.path}')
+        return exists
 
     def filepath_loose(self, sha1):
         """
@@ -166,6 +173,9 @@ class GitAdd(GitIndex):
         Returns:
             bool: If added
         """
+        if not self.exists:
+            return False
+
         path = subpath_to(file, self.path)
         if path == file:
             if is_abspath(file):
@@ -182,12 +192,13 @@ class GitAdd(GitIndex):
         return self._stage_add(path)
 
     def __enter__(self):
-        self.index_read()
+        if self.exists:
+            self.index_read()
         self.entry_modified = False
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.entry_modified:
+        if self.exists and self.entry_modified:
             logger.info(f'stage_add write file: {self.file}')
             self.index_write()
         self.entry_modified = False

@@ -271,32 +271,44 @@ class ConfigGenerator(ParseArgs, ParseTasks):
     Generate all
     """
 
-    def generate(self):
+    def generate(self, gitadd=None):
         """
         Generate configs and msgspec models
         """
         # Auto create {nav}.tasks.yaml
         if self.file.exists():
-            op = self.tasks_file.ensure_exist()
-            if op:
-                logger.info(f'Write file {self.tasks_file}')
+            file = self.tasks_file
+            if file.ensure_exist():
+                logger.info(f'Write file {file}')
+                if gitadd:
+                    gitadd.stage_add(file)
 
         # {nav}_model.py
         if self.model_gen:
-            op = self.model_gen.write(self.model_file, skip_same=True)
+            file = self.model_file
+            op = self.model_gen.write(file, skip_same=True)
             if op:
-                logger.info(f'Write file {self.model_file}')
+                logger.info(f'Write file {file}')
+                if gitadd:
+                    gitadd.stage_add(file)
 
         # {nav}_i18n.json
         if self.i18n_data:
-            op = write_json_custom_indent(self.i18n_file, self.i18n_data, skip_same=True)
+            file = self.i18n_file
+            op = write_json_custom_indent(file, self.i18n_data, skip_same=True)
             if op:
-                logger.info(f'Write file {self.i18n_file}')
+                logger.info(f'Write file {file}')
+                if gitadd:
+                    gitadd.stage_add(file)
 
         # format yaml
         op = format_yaml(self.file, yaml_formatter)
         if op:
             logger.info(f'Write file {self.file}')
+            if gitadd:
+                gitadd.stage_add(self.file)
         op = format_yaml(self.tasks_file, yaml_formatter)
         if op:
             logger.info(f'Write file {self.tasks_file}')
+            if gitadd:
+                gitadd.stage_add(self.tasks_file)

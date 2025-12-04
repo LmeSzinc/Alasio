@@ -332,17 +332,20 @@ class CrossNavGenerator:
         config.config_data = out
         return out
 
-    def generate_config_json(self):
+    def generate_config_json(self, gitadd=None):
         """
         Generate {nav}_config.json for all nav
         """
         for config in self.dict_nav_config.values():
             data = self._generate_nav_config_json(config)
             # {nav}_i18n.json
+            file = config.config_file
             if data:
-                op = write_json_custom_indent(config.config_file, data, skip_same=True)
+                op = write_json_custom_indent(file, data, skip_same=True)
                 if op:
-                    logger.info(f'Write file {config.config_file}')
+                    logger.info(f'Write file {file}')
+                    if gitadd:
+                        gitadd.stage_add(file)
             else:
                 if config.config_file.atomic_remove():
-                    logger.info(f'Delete file {config.config_file}')
+                    logger.info(f'Delete file {file}')
