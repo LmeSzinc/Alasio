@@ -65,23 +65,23 @@ class DefinitionError(Exception):
 
         # Add any location information that's available
         if self.file:
-            parts.append(f'file={self.file}')
+            parts.append(f'file={repr(self.file)}')
             has_location_info = True
 
         if self.keys:
-            parts.append(f'keys={self.keys}')
+            parts.append(f'keys={repr(self.keys)}')
             has_location_info = True
 
         if self.value is not _EMPTY:
-            parts.append(f'value={self.value}')
+            parts.append(f'value={repr(self.value)}')
             has_location_info = True
 
         # Add a separator only if we have location info
         if has_location_info:
-            parts.append(f'error={self.msg}')
+            parts.append(f'error={repr(self.msg)}')
             return ',\n    '.join(parts)
         else:
-            return f'{self.__class__.__name__},\n    error={self.msg}'
+            return f'{self.__class__.__name__},\n    error={repr(self.msg)}'
 
 
 def iscapitalized(s):
