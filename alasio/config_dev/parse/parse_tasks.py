@@ -64,23 +64,24 @@ def populate_task(value: dict) -> dict:
     value['group'] = group
 
     # display
-    display = value.get('display', [])
+    # default to display all groups
+    display = value.get('display', 'group')
     # convert display="flat" and display="group"
     if display == 'group':
         display = [[g] for g in group]
     elif display == 'flat':
         display = [group]
+    elif not display or display in ['none', 'None']:
+        # empty display probably an internal task
+        display = []
     elif type(display) is list:
         # populate simple list to nested list
-        if display:
-            display = [
-                TaskGroup.from_liststr(d, ref=True) if type(d) is list
-                else TaskGroup.from_liststr([str(d)], ref=True) for d in display]
-        else:
-            # Allow empty display, probably an internal task
-            pass
+        display = [
+            TaskGroup.from_liststr(d, ref=True) if type(d) is list
+            else TaskGroup.from_liststr([str(d)], ref=True)
+            for d in display]
     else:
-        raise DefinitionError('display should be "flat" or "group" or a list of groups')
+        raise DefinitionError('display should be "flat" or "group" or "null" or a list of groups')
     value['display'] = display
 
     return value
