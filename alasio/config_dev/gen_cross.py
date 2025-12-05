@@ -96,14 +96,15 @@ class CrossNavGenerator:
                     - {task_name}_{group_name} that inherits from class {group_name}, for override task group
         """
         out = {}
+        global_bind = {}
+        all_groups = set()
         for config in self.dict_nav_config.values():
             for task_name, task_data in config.tasks_data.items():
                 # task name must be unique
                 if task_name in out:
                     raise DefinitionError(
                         f'Duplicate task name: {task_name}',
-                        file=config.tasks_file,
-                        keys=task_name,
+                        file=config.tasks_file, keys=task_name,
                     )
                 # generate groups
                 for group in task_data.group:
@@ -119,13 +120,33 @@ class CrossNavGenerator:
                     except KeyError:
                         raise DefinitionError(
                             f'Group ref "{group.group}" of task "{ref_task}" does not exist',
-                            file=config.tasks_file,
-                            keys=[task_name, 'group']
+                            file=config.tasks_file, keys=[task_name, 'group']
                         )
                     # copy ref, set ref_task
                     ref = {k: v for k, v in ref.items()}
                     ref['task'] = ref_task
-                    deep_set(out, [task_name, group.group], NoIndent(ref))
+                    ref = NoIndent(ref)
+                    deep_set(out, [task_name, group.group], ref)
+                    # add global bind
+                    if task_data.global_bind:
+                        if group.group in global_bind:
+                            raise DefinitionError(
+                                f'Duplicate global bind group: {group.group}',
+                                file=config.tasks_file, keys=[task_name, 'group']
+                            )
+                        if group.group in all_groups:
+                            raise DefinitionError(
+                                f'Global bind group "{group.group}" is already used by non global bind, '
+                                f'maybe remove the use of non global bind?'
+                            )
+                        global_bind[group.group] = ref
+                    else:
+                        if group.group in global_bind:
+                            raise DefinitionError(
+                                f'Group "{group.group}" is already global bind, '
+                                f'maybe remove the use of non global bind?'
+                            )
+                        all_groups.add(group.group)
 
         # check if {ref_task_name}.{group_name} reference has corresponding value
         for _, group, ref in deep_iter_depth2(out):
@@ -134,6 +155,8 @@ class CrossNavGenerator:
                 raise DefinitionError(
                     f'Cross-task group ref does not exist: {ref_task}.{group}',
                 )
+
+        out['_global_bind'] = global_bind
 
         return out
 

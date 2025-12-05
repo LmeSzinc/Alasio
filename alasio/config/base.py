@@ -100,16 +100,8 @@ class AlasioConfigBase:
         self.dict_value.clear()
         self.modified.clear()
 
-        if not self.task:
-            return
         if self.is_template_config:
             return
-
-        index = self.mod.task_index_data()
-        try:
-            task_ref = index[self.task]
-        except KeyError:
-            raise KeyError(f'No such task "{self.task}"')
 
         table = AlasioConfigTable(self.config_name)
         rows: "list[ConfigRow]" = table.select()
@@ -120,7 +112,7 @@ class AlasioConfigBase:
             dict_value[key] = row.value
         self.dict_value = dict_value
 
-        for group, group_ref in task_ref.group.items():
+        for group, group_ref in self._iter_task_groups(self.task):
             key = (group_ref.task, group)
             model = self.mod.get_group_model(file=group_ref.file, cls=group_ref.cls)
             if model is None:
@@ -144,6 +136,31 @@ class AlasioConfigBase:
             self._apply_override_const(key, value)
         for group, arg, value in deep_iter_depth2(self._override_config):
             self._apply_override_config(group, arg, value)
+
+    def _iter_task_groups(self, task):
+        """
+        Args:
+            task (str):
+
+        Yields:
+            tuple[str, ModelGroupRef]:
+        """
+        index = self.mod.task_index_data()
+
+        # iter global bind groups first
+        global_bind = index.get('_global_bind', None)
+        if global_bind is not None:
+            for group, group_ref in global_bind.group.items():
+                yield group, group_ref
+
+        # then task groups
+        if task:
+            try:
+                task_ref = index[task]
+            except KeyError:
+                raise KeyError(f'No such task "{task}"')
+            for group, group_ref in task_ref.group.items():
+                yield group, group_ref
 
     def _group_construct(self, group) -> "Struct":
         """

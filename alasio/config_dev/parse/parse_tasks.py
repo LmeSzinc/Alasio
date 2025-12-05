@@ -94,6 +94,8 @@ class TaskData(Struct):
     # Groups in the outer list will be displayed as standalone groups.
     # Groups in the inner list will be flattened into one group.
     display: List[List[TaskGroup]] = field(default_factory=list)
+    # whether to globally bind all groups
+    global_bind: bool = False
 
 
 class ParseTasks(ParseBase):
@@ -134,6 +136,19 @@ class ParseTasks(ParseBase):
             except msgspec.ValidationError as e:
                 ne = DefinitionError(e, file=self.tasks_file, keys=[task_name], value=value)
                 raise ne
+            # validate task with scheduler
+            for group in task.group:
+                if group.group == 'Scheduler':
+                    if group.task:
+                        raise DefinitionError(
+                            'Task should not reference scheduler of another task',
+                            file=self.tasks_file, keys=[task_name, 'group'], value='Scheduler'
+                        )
+                    if task.global_bind:
+                        raise DefinitionError(
+                            'Global bind task should not have group "Scheduler"',
+                            file=self.tasks_file, keys=[task_name, 'group'], value='Scheduler'
+                        )
             # Set
             deep_set(output, keys=[task_name], value=task)
             # print(msgspec.json.encode(arg))

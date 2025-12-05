@@ -144,6 +144,7 @@ class IndexGenerator(CrossNavGenerator):
                     which indicates to read task and taskgroups in user config
         """
         out = {}
+
         for task_name, group_data in self.model_data.items():
             all_task_groups = []
             for group_name, ref in group_data.items():
@@ -274,7 +275,12 @@ class IndexGenerator(CrossNavGenerator):
         out = {}
         for nav_name, config in self.dict_nav_config.items():
             # nav name, which must not empty
-            if config.tasks_data:
+            empty = True
+            for group in config.tasks_data.values():
+                if group.display:
+                    empty = False
+                    break
+            if config.tasks_data and not empty:
                 for lang in Const.GUI_LANGUAGE:
                     key = [nav_name, '_info', lang]
                     value = deep_get(old, key, default='')
