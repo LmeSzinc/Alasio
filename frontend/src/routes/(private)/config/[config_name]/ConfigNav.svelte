@@ -54,7 +54,7 @@
   }
 </script>
 
-<nav class={cn("shadow-custom-complex w-full space-y-2 p-4", className)} aria-label="Configuration Navigation">
+<nav class={cn("shadow-custom-complex w-full space-y-2 p-3", className)} aria-label="Configuration Navigation">
   <ScrollArea class="h-full w-full">
     {#if navItems.length}
       <!-- 

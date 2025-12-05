@@ -22,7 +22,7 @@
   const validationError = $derived.by(() => {
     const value = arg.value;
     // Skip validation for empty values
-    if (!value || value.trim() === "") return null;
+    if (!value) return null;
 
     // Validate by data type
     const typeError = validateByDataType(value, data.dt);
@@ -40,7 +40,7 @@
 
   // Helper to check validity for submission (non-reactive)
   function isValid(value: string) {
-    if (!value || value.trim() === "") return true;
+    if (!value) return true;
     return !validateByDataType(value, data.dt) && !validateByConstraints(value, data);
   }
 
@@ -85,7 +85,7 @@
     // Hide error on reset
     showError = false;
     // Trigger the provided reset callback
-    handleReset?.(data);
+    arg.reset(handleReset);
   }
 </script>
 

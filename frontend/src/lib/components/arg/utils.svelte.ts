@@ -100,6 +100,10 @@ export function useArgValue<T>(data: ArgData) {
   //    This `currentValue` is what the UI component will bind to (e.g., `bind:value`).
   //    It's initialized from the `data` prop.
   let currentValue = $state(data.value as T);
+  $effect(() => {
+    // reset current value if remote changed
+    currentValue = data.value;
+  });
 
   /**
    * Submits the current value if it has changed.
@@ -124,6 +128,12 @@ export function useArgValue<T>(data: ArgData) {
     }
   }
 
+  function reset(handleReset?: InputProps["handleReset"]) {
+    // Set data.value, so we can rollback current value later
+    data.value = currentValue;
+    handleReset?.(data);
+  }
+
   // 3. RETURN API: Expose the local value and the submit function to the component.
   //    The getter/setter pair allows the component to use `bind:value={arg.value}`.
   return {
@@ -134,6 +144,7 @@ export function useArgValue<T>(data: ArgData) {
       currentValue = newValue;
     },
     submit,
+    reset,
   };
 }
 
@@ -150,7 +161,7 @@ export function validateByDataType(value: string, dt: string): string | null {
     // Check if value is a valid integer
     // Allow optional leading +/- sign, followed by digits
     const intRegex = /^[+-]?\d+$/;
-    if (!intRegex.test(value.trim())) {
+    if (!intRegex.test(value)) {
       return t.Input.InvalidInteger();
     }
   }
@@ -161,7 +172,7 @@ export function validateByDataType(value: string, dt: string): string | null {
     // Allow optional leading +/- sign, digits, optional decimal point and more digits
     // Also allow scientific notation (e.g., 1.5e10, 1E-5)
     const floatRegex = /^[+-]?(\d+\.?\d*|\d*\.\d+)([eE][+-]?\d+)?$/;
-    if (!floatRegex.test(value.trim())) {
+    if (!floatRegex.test(value)) {
       return t.Input.InvalidFloat();
     }
   }
