@@ -4,6 +4,7 @@ from msgspec import ValidationError
 
 import alasio.config.entry.const as const
 from alasio.config.entry.mod import ConfigSetEvent, Mod
+from alasio.config.entry.utils import validate_nav_name
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_get, deep_get_with_error, deep_iter_depth2, deep_values_depth2
@@ -125,6 +126,9 @@ class ModLoader:
             mod = self.dict_mod[mod_name]
         except KeyError:
             # raise KeyError(f'No such mod: "{mod_name}"') from None
+            return {}
+        if not validate_nav_name(nav_name):
+            # raise KeyError(f'Nav name format invalid: "{nav_name}"')
             return {}
 
         # prepare output dict

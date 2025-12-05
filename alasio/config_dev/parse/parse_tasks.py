@@ -6,8 +6,9 @@ from msgspec import Struct, field
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.file.yamlfile import read_yaml
-from .base import ParseBase, iscapitalized
-from .parse_args import DefinitionError
+from alasio.config_dev.parse.base import ParseBase
+from alasio.config_dev.parse.parse_args import DefinitionError
+from alasio.config.entry.utils import validate_task_name
 
 
 class TaskGroup(msgspec.Struct):
@@ -113,14 +114,9 @@ class ParseTasks(ParseBase):
         data = read_yaml(self.tasks_file)
         for task_name, value in deep_iter_depth1(data):
             # check task_name
-            if not task_name.isalnum():
+            if not validate_task_name(task_name):
                 raise DefinitionError(
-                    'Task name must be alphanumeric',
-                    file=self.tasks_file, keys=[], value=task_name
-                )
-            if not iscapitalized(task_name):
-                raise DefinitionError(
-                    'Task name must be capitalized',
+                    f'Task name format invalid: "{task_name}"',
                     file=self.tasks_file, keys=[], value=task_name
                 )
             # Create TaskData object from manual arg definition

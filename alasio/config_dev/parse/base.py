@@ -82,19 +82,3 @@ class DefinitionError(Exception):
             return ',\n    '.join(parts)
         else:
             return f'{self.__class__.__name__},\n    error={repr(self.msg)}'
-
-
-def iscapitalized(s):
-    """
-    Check if a string is capitalized
-
-    Args:
-        s (str):
-
-    Returns:
-        bool:
-    """
-    if s:
-        return s[0].isupper()
-    else:
-        return False

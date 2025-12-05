@@ -4,13 +4,14 @@ from typing import Any, Literal, Union
 import msgspec
 from msgspec import Struct, UNSET, UnsetType
 
+from alasio.config.entry.utils import validate_task_name
+from alasio.config_dev.parse.base import DefinitionError, ParseBase
+from alasio.config_dev.parse.parse_range import parse_range
 from alasio.ext.backport import to_literal
 from alasio.ext.cache import cached_property
 from alasio.ext.codegen import ReprWrapper
 from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.file.yamlfile import read_yaml
-from .base import DefinitionError, ParseBase, iscapitalized
-from .parse_range import parse_range
 
 """
 The following dicts require manual maintain
@@ -301,14 +302,9 @@ class ParseArgs(ParseBase):
         data = read_yaml(self.file)
         for group_name, group_value in deep_iter_depth1(data):
             # check group_name
-            if not group_name.isalnum():
+            if not validate_task_name(group_name):
                 raise DefinitionError(
-                    'Group name must be alphanumeric',
-                    file=self.file, keys=[], value=group_name
-                )
-            if not iscapitalized(group_name):
-                raise DefinitionError(
-                    'Group name must be capitalized',
+                    f'Group name format invalid: "{group_name}"',
                     file=self.file, keys=[], value=group_name
                 )
             # allow empty group to be an inforef group
@@ -318,14 +314,9 @@ class ParseArgs(ParseBase):
             output[group_name] = {}
             for arg_name, value in deep_iter_depth1(group_value):
                 # check arg_name
-                if not arg_name.isalnum():
+                if not validate_task_name(arg_name):
                     raise DefinitionError(
-                        'Arg name must be alphanumeric',
-                        file=self.file, keys=[group_name], value=arg_name
-                    )
-                if not iscapitalized(arg_name):
-                    raise DefinitionError(
-                        'Arg name must be capitalized',
+                        f'Arg name format invalid: "{arg_name}"',
                         file=self.file, keys=[group_name], value=arg_name
                     )
                 # Create ArgData object from manual arg definition

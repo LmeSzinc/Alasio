@@ -7,6 +7,7 @@ from msgspec import NODEFAULT, Struct
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.mod import ConfigSetEvent, Mod
+from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
@@ -155,6 +156,8 @@ class AlasioConfigBase:
 
         # then task groups
         if task:
+            if not validate_task_name(task):
+                raise KeyError(f'Task name format invalid: "{task}"')
             try:
                 task_ref = index[task]
             except KeyError:
