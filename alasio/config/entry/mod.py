@@ -1,14 +1,17 @@
 from collections import defaultdict
+from datetime import datetime
 from typing import Any, Optional
 
 from msgspec import NODEFAULT, Struct, ValidationError, convert
 from msgspec.msgpack import encode
 from msgspec.structs import asdict
 
+from alasio.base.filter import parse_filter
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX, MODEL_TASK_INDEX, ModelConfigRef
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
+from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_set
 from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.ext.file.msgspecfile import JsonCacheTTL
@@ -27,6 +30,11 @@ class ConfigSetEvent(Struct):
     arg: str
     value: Any
     error: Optional[MsgspecError] = None
+
+
+class Task(Struct):
+    task: str
+    NextRun: datetime
 
 
 class Mod:
@@ -361,7 +369,7 @@ class Mod:
         except KeyError:
             logger.warning(f'Cannot set non-exist group {event.task}.{event.group}')
             raise DataInconsistent(f'Group {event.task}.{event.group} does not exist')
-        
+
         model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
         if model is None:
             raise DataInconsistent(f'Cannot load model for {event.task}.{event.group}')
@@ -390,7 +398,7 @@ class Mod:
         if arg_value is NODEFAULT:
             raise DataInconsistent(
                 f'Missing arg "{event.arg}" after converting value, value={value}, value_obj={value_obj}')
-        
+
         # init table
         logger.info(f'config_set "{config_name}": {event.task}.{event.group}.{event.arg}={event.value}')
         table = AlasioConfigTable(config_name)
@@ -554,7 +562,7 @@ class Mod:
         except KeyError:
             logger.warning(f'Cannot reset non-exist group {event.task}.{event.group}')
             return None
-        
+
         model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
         if model is None:
             return None
@@ -615,3 +623,120 @@ class Mod:
             table.upsert_row([row], conflicts=('task', 'group'), updates='value', _cursor_=c)
 
         return ConfigSetEvent(task=event.task, group=event.group, arg=event.arg, value=default_value)
+
+    """
+    Scheduler
+    """
+
+    @cached_property
+    def _dict_task_priority(self) -> "dict[str, int]":
+        """
+        Returns:
+            key: task_name, value: priority, starting from 1, smaller for higher priority
+        """
+        file = self.path_config / 'const.py'
+        try:
+            # one-time load, use load_resource instead
+            module = LOADPY_CACHE.load_resource(file)
+        except ImportError as e:
+            # DataInconsistent error.
+            # We just log warnings to reduce runtime crash, fallback to no task priority
+            logger.warning(
+                f'DataInconsistent: failed to import model.py "{file}": {e}')
+            return {}
+        try:
+            priority = module.ConfigConst.SCHEDULER_PRIORITY
+        except AttributeError:
+            logger.warning(
+                f'DataInconsistent: Missing ConfigConst.SCHEDULER_PRIORITY in "{file}"')
+            return {}
+        return self.parse_scheduler_priority(priority)
+
+    @staticmethod
+    def parse_scheduler_priority(priority: str) -> "dict[str, int]":
+        priority = parse_filter(priority)
+        dict_priority = {}
+        for i, task in enumerate(priority, start=1):
+            dict_priority[task] = i
+        return dict_priority
+
+    def get_task_schedule(
+            self,
+            config_name,
+            dict_row: "dict[tuple[str, str], bytes]" = None,
+            dict_task_priority: "dict[str, int]" = None,
+
+    ) -> "tuple[list[Task], list[Task]]":
+        """
+        Args:
+            config_name:
+            dict_row:
+            dict_task_priority:
+
+        Returns:
+            list_pending, list_waiting
+        """
+        if not dict_row:
+            table = AlasioConfigTable(config_name)
+            rows: "list[ConfigRow]" = table.select(group='Scheduler')
+            dict_row = {}
+            for row in rows:
+                dict_row[(row.task, row.group)] = row.value
+
+        list_pending = []
+        list_waiting = []
+        group_name = 'Scheduler'
+        if not dict_task_priority:
+            dict_task_priority = self._dict_task_priority
+        now = datetime.now().astimezone()
+        for task_name, task_data in self.task_index_data().items():
+            model_ref = task_data.group.get(group_name, None)
+            if not model_ref:
+                continue
+            # skip cross-task ref
+            if model_ref.task != task_name:
+                continue
+            if task_name not in dict_task_priority:
+                continue
+
+            model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
+            if model is None:
+                continue
+
+            value = dict_row.get((task_name, group_name), NODEFAULT)
+            if value is NODEFAULT:
+                # construct a default value from model
+                try:
+                    data = model()
+                except Exception as e:
+                    logger.warning(
+                        f'DataInconsistent: Class "{model_ref.cls}" in "{model_ref.file}" '
+                        f'failed to construct: {e}')
+                    continue
+            else:
+                # validate value
+                data, errors = load_msgpack_with_default(value, model=model)
+                # for error in errors:
+                #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+                if data is NODEFAULT:
+                    # Failed to convert
+                    continue
+            # set
+            try:
+                if not data.Enable:
+                    continue
+                is_waiting = data.NextRun > now
+            except AttributeError:
+                # this shouldn't happen, unless Scheduler is not properly defined
+                continue
+            except TypeError:
+                # TypeError: can't compare offset-naive and offset-aware datetimes
+                continue
+            if is_waiting:
+                list_waiting.append(Task(task=task_name, NextRun=data.NextRun))
+            else:
+                list_pending.append(Task(task=task_name, NextRun=data.NextRun))
+
+        list_waiting.sort(key=lambda x: (x.NextRun, dict_task_priority.get(x.task, 0)))
+        list_pending.sort(key=lambda x: dict_task_priority.get(x.task, 0))
+        return list_pending, list_waiting

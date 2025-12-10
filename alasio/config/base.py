@@ -6,8 +6,9 @@ from msgspec import NODEFAULT, Struct
 
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
-from alasio.config.entry.mod import ConfigSetEvent, Mod
+from alasio.config.entry.mod import ConfigSetEvent, Mod, Task
 from alasio.config.entry.utils import validate_task_name
+from alasio.config.exception import RequestHumanTakeover, TaskEnd
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
@@ -164,6 +165,54 @@ class AlasioConfigBase:
                 raise KeyError(f'No such task "{task}"')
             for group, group_ref in task_ref.group.items():
                 yield group, group_ref
+
+    @staticmethod
+    def task_stop(message=''):
+        """
+        Helper method to stop current task.
+        """
+        raise TaskEnd(message)
+
+    def get_next_task(self) -> Task:
+        pending_task, waiting_task = self.mod.get_task_schedule(self.config_name)
+        if pending_task:
+            logger.info(f'Pending tasks: {[f.task for f in pending_task]}')
+            task = pending_task[0]
+            logger.attr('Task', task)
+            return task
+        if waiting_task:
+            logger.info('No task pending')
+            task = waiting_task[0]
+            logger.attr('Task', task)
+            return task
+        raise RequestHumanTakeover('No task waiting or pending, please enable at least on task')
+
+    def task_switched(self):
+        """
+        Check if scheduler needs to switch task.
+
+        Raises:
+            bool: If task switched
+
+        Examples:
+            if self.config.task_switched():
+                # do task specific cleanup
+                self.campaign.ensure_auto_search_exit()
+                self.config.task_stop()
+        """
+        # Update event
+        # if self.stop_event is not None:
+        #     if self.stop_event.is_set():
+        #         return True
+        prev = self.task
+        self.load()
+        new = self.get_next_task().task
+        if prev == new:
+            logger.info(f'Continue task `{new}`')
+            return False
+        else:
+            logger.info(f'Switch task `{prev}` to `{new}`')
+            return True
 
     def _group_construct(self, group) -> "Struct":
         """

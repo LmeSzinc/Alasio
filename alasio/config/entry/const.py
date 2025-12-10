@@ -56,6 +56,12 @@ class ModEntryInfo(Struct):
         yield from self.asset_lang
 
 
+class ConfigConst:
+    SCHEDULER_PRIORITY = """
+    RestartDevice > RestartGame
+    """
+
+
 # default mod entry
 # key: mod name, value: ModEntryInfo
 DICT_MOD_ENTRY = {m.name: m for m in [
