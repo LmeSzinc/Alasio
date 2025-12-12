@@ -1,3 +1,4 @@
+from alasio.config.entry.utils import validate_nav_name
 from alasio.ext.backport import removesuffix
 from alasio.ext.path import PathStr
 
@@ -15,8 +16,8 @@ class ParseBase:
 
         # nav name
         nav = removesuffix(file.name, '.args.yaml')
-        if not nav.isalnum():
-            raise DefinitionError(f'Nav name must be alphanumeric, but got "{nav}"', file=file)
+        if not validate_nav_name(nav):
+            raise DefinitionError(f'Invalid nav name: "{nav}"', file=file)
         self.nav_name = nav
 
         # {nav}.tasks.yaml
