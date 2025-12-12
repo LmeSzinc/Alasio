@@ -157,13 +157,15 @@ class Mod:
             dict[str, dict[str, dict[str, Any]]]:
                 key: task.group.arg, value: arg value
         """
+        dict_row = {}
         table = AlasioConfigTable(config_name)
-        rows = table.read_task_rows(tasks=ref.task, groups=ref.group)
+        for row in table.read_task_rows(tasks=ref.task, groups=ref.group):
+            dict_row[(row.task, row.group)] = row.value
 
         # prepare model and default
         task_index_data = self.task_index_data()
         # key: (task_name, group_name), value: Any
-        dict_value = {}
+        out = {}
         for task_name, task_info in task_index_data.items():
             for group_name, model_ref in task_info.group.items():
                 # skip cross-task ref
@@ -175,40 +177,26 @@ class Mod:
                 model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
                 if model is None:
                     continue
-                # construct a default value from model
-                try:
-                    default = model()
-                except Exception as e:
-                    logger.warning(
-                        f'DataInconsistent: Class "{model_ref.cls}" in "{model_ref.file}" '
-                        f'failed to construct: {e}')
-                    continue
-                # insert default value
-                dict_value[key] = default
-
-        # load config
-        for row in rows:
-            key = (row.task, row.group)
-            default = dict_value.get(key, NODEFAULT)
-            if default == NODEFAULT:
-                # old group in config db that not being used anymore
-                continue
-            model = default.__class__
-            # validate value
-            data, errors = load_msgpack_with_default(row.value, model=model)
-            # for error in errors:
-            #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
-            if data is NODEFAULT:
-                # Failed to convert
-                continue
-            # set
-            dict_value[key] = data
-
-        # construct output
-        out = {}
-        for key, value in dict_value.items():
-            value = asdict(value)
-            deep_set(out, keys=key, value=value)
+                value = dict_row.get(key, NODEFAULT)
+                if value is NODEFAULT:
+                    # construct a default value from model
+                    try:
+                        data = model()
+                    except Exception as e:
+                        logger.warning(
+                            f'DataInconsistent: Class "{model_ref.cls}" in "{model_ref.file}" '
+                            f'failed to construct: {e}')
+                        continue
+                else:
+                    # validate value
+                    data, errors = load_msgpack_with_default(value, model=model)
+                    # for error in errors:
+                    #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+                    if data is NODEFAULT:
+                        # Failed to convert
+                        continue
+                # set
+                deep_set(out, keys=key, value=asdict(data))
 
         return out
 
