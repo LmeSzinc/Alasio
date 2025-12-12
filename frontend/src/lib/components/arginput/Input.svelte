@@ -8,6 +8,7 @@
   import { Help } from "$lib/components/ui/help";
   import { Input } from "$lib/components/ui/input";
   import { cn } from "$lib/utils";
+  import { untrack } from "svelte";
   import Reset from "./_Reset.svelte";
 
   let { data = $bindable(), class: className, handleEdit, handleReset }: InputProps = $props();
@@ -20,29 +21,29 @@
 
   // Derived validation error that reacts to language changes (t) and value changes
   const validationError = $derived.by(() => {
-    const value = arg.value;
+    let value = arg.value;
     // Skip validation for empty values
     if (!value) return null;
 
-    // Validate by data type
-    const typeError = validateByDataType(value, data.dt);
-    if (typeError) return typeError;
+    // Validate by data type and get converted value
+    const typeValidation = validateByDataType(value, data.dt);
+    if (typeValidation.error) return typeValidation.error;
+    value = typeValidation.value;
 
-    // Validate by constraints
+    // Validate by constraints (use converted value for numeric types)
     const constraintError = validateByConstraints(value, data);
     if (constraintError) return constraintError;
 
-    return null;
+    // Update arg.value if validation passed
+    if (!typeValidation.error) {
+      untrack(() => {
+        arg.value = value;
+      });
+    }
   });
 
   // The actual error message to display
   const errorMessage = $derived(showError ? validationError : null);
-
-  // Helper to check validity for submission (non-reactive)
-  function isValid(value: string) {
-    if (!value) return true;
-    return !validateByDataType(value, data.dt) && !validateByConstraints(value, data);
-  }
 
   let debounceTimer: ReturnType<typeof setTimeout>;
   function onInput(event: Event) {
@@ -57,7 +58,7 @@
       showError = true;
 
       // Validate before submitting
-      if (isValid(arg.value)) {
+      if (!errorMessage) {
         arg.submit(handleEdit);
         // Remove focus after submission to prevent focus ring from persisting
         setTimeout(() => {
@@ -75,7 +76,7 @@
     showError = true;
 
     // Validate before submitting
-    if (isValid(arg.value)) {
+    if (!errorMessage) {
       // Immediately trigger the edit callback when the user leaves the input
       arg.submit(handleEdit);
     }
@@ -96,11 +97,11 @@
     <Input
       type="text"
       class={cn(
-        "bg-card dark:bg-card peer border-0 p-1 pr-7 pl-2 shadow-none",
+        "bg-card dark:bg-card peer border-0 p-1 pl-2 pr-7 shadow-none",
         "focus-visible:shadow-none",
-        "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-5",
+        "focus-visible:ring-ring focus-visible:ring-offset-5 focus-visible:ring-2",
         "transition-shadow duration-200",
-        errorMessage && "ring-destructive ring-2 ring-offset-5",
+        errorMessage && "ring-destructive ring-offset-5 ring-2",
       )}
       bind:value={arg.value}
       bind:ref={inputEl}
@@ -110,7 +111,7 @@
 
     <!-- Draw bottom border with peer -->
     <div
-      class="border-primary peer-focus-visible:border-foreground/35 absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200"
+      class="border-primary peer-focus-visible:border-foreground/35 absolute bottom-0 left-0 right-0 border-b-2 transition-colors duration-200"
     ></div>
 
     <!-- Reset button is always visible to allow resetting to a default value -->

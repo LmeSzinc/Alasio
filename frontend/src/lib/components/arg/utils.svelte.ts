@@ -149,48 +149,69 @@ export function useArgValue<T>(data: ArgData) {
 }
 
 /**
- * Validate input value based on data type (dt field)
+ * Validate input value based on data type (dt field) and convert to appropriate type
  *
  * @param value The input value to validate
  * @param dt Data type from ArgData (e.g., "input", "input-int", "input-float")
- * @returns Error message string if validation fails, null if valid
+ * @returns Object containing the validated/converted value and error message (if any)
  */
-export function validateByDataType(value: string, dt: string): string | null {
-  // For input-int, validate integer format
+export function validateByDataType(
+  value: string,
+  dt: string
+): { value: any; error: string | null } {
+  // For input-int, parse and validate integer
   if (dt === "input-int") {
-    // Check if value is a valid integer
-    // Allow optional leading +/- sign, followed by digits
-    const intRegex = /^[+-]?\d+$/;
-    if (!intRegex.test(value)) {
-      return t.Input.InvalidInteger();
+    // If already a number, check if it's an integer
+    if (typeof value === "number") {
+      if (Number.isInteger(value)) {
+        return { value, error: null };
+      } else {
+        return { value, error: t.Input.InvalidInteger() };
+      }
     }
+    
+    // Convert to string if needed and parse
+    const stringValue = String(value);
+    const parsedValue = parseInt(stringValue, 10);
+    // Check if parsing resulted in NaN or if the string representation doesn't match
+    // This catches cases like "123abc" where parseInt would return 123
+    if (isNaN(parsedValue) || parsedValue.toString() !== stringValue.trim()) {
+      return { value, error: t.Input.InvalidInteger() };
+    }
+    return { value: parsedValue, error: null };
   }
 
-  // For input-float, validate float format
+  // For input-float, parse and validate float
   if (dt === "input-float") {
-    // Check if value is a valid float
-    // Allow optional leading +/- sign, digits, optional decimal point and more digits
-    // Also allow scientific notation (e.g., 1.5e10, 1E-5)
-    const floatRegex = /^[+-]?(\d+\.?\d*|\d*\.\d+)([eE][+-]?\d+)?$/;
-    if (!floatRegex.test(value)) {
-      return t.Input.InvalidFloat();
+    // If already a number, return it
+    if (typeof value === "number" && !isNaN(value)) {
+      return { value, error: null };
     }
+    
+    // Convert to string if needed and parse
+    const stringValue = String(value);
+    const parsedValue = parseFloat(stringValue);
+    // Check if parsing resulted in NaN
+    if (isNaN(parsedValue)) {
+      return { value, error: t.Input.InvalidFloat() };
+    }
+    return { value: parsedValue, error: null };
   }
 
-  // For regular input, no specific format validation
-  return null;
+  // For regular input, return as-is
+  return { value, error: null };
 }
 
 /**
  * Validate input value based on constraints from ArgData
  *
- * @param value The input value to validate
+ * @param value The input value to validate (can be string, number, etc.)
  * @param data ArgData object containing constraint fields
  * @returns Error message string if validation fails, null if valid
  */
-export function validateByConstraints(value: string, data: ArgData): string | null {
-  // Convert value to number for numeric constraints
-  const numValue = parseFloat(value);
+export function validateByConstraints(value: any, data: ArgData): string | null {
+  // Convert value to number for numeric constraints (if not already a number)
+  const numValue = typeof value === "number" ? value : parseFloat(value);
   const isNumeric = !isNaN(numValue);
 
   // Check gt (greater than) constraint
@@ -235,7 +256,8 @@ export function validateByConstraints(value: string, data: ArgData): string | nu
   if (data.pattern !== undefined) {
     try {
       const regex = new RegExp(data.pattern);
-      if (!regex.test(value)) {
+      const stringValue = typeof value === "string" ? value : String(value);
+      if (!regex.test(stringValue)) {
         return t.Input.PatternMismatch();
       }
     } catch (e) {
@@ -246,14 +268,16 @@ export function validateByConstraints(value: string, data: ArgData): string | nu
 
   // Check min_length constraint
   if (data.min_length !== undefined) {
-    if (value.length < data.min_length) {
+    const stringValue = typeof value === "string" ? value : String(value);
+    if (stringValue.length < data.min_length) {
       return t.Input.MinLength({ value: data.min_length });
     }
   }
 
   // Check max_length constraint
   if (data.max_length !== undefined) {
-    if (value.length > data.max_length) {
+    const stringValue = typeof value === "string" ? value : String(value);
+    if (stringValue.length > data.max_length) {
       return t.Input.MaxLength({ value: data.max_length });
     }
   }
