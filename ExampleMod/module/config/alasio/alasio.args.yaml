@@ -1,0 +1,28 @@
+Scheduler:
+  args:
+    Enable: false
+    NextRun: 2020-01-01T00:00:00Z
+    ServerUpdate: 00:00
+
+SchedulerStatic:
+  base: Scheduler
+  args:
+    Enable:
+      value: true
+      option: [true,]
+
+#设备设置
+#Alas设置
+#
+#主线图
+#活动
+#紧急委托
+#退役设置
+#
+#收获，委托技能科研后宅
+#每日任务，每日困难演习
+#商店，商店商店船坞
+#白嫖，白嫖抽卡小游戏
+#
+#大世界每日
+#大世界高难

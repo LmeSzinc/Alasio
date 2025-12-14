@@ -1,102 +1,117 @@
 OpsiAshAssist:
-  Tier:
-    value: 15
-    range: 1~15
+  args:
+    Tier:
+      value: 15
+      range: 1~15
 
 OpsiGeneral:
-  UseLogger: true
-  BuyActionPointLimit:
-    value: 0
-    option: [ 0, 1, 2, 3, 4, 5 ]
-  OilLimit:
-    value: 1000
-    range: 500~20000
-  RepairThreshold:
-    value: 0.4
-    range: 0.0~1.0
-  DoRandomMapEvent: true
-  AkashiShopFilter:
-    dt: filter
-    value: |-
-      ActionPoint > PurpleCoins
+  args:
+    UseLogger: true
+    BuyActionPointLimit:
+      value: 0
+      option: [ 0, 1, 2, 3, 4, 5 ]
+    OilLimit:
+      value: 1000
+      range: 500~20000
+    RepairThreshold:
+      value: 0.4
+      range: 0.0~1.0
+    DoRandomMapEvent: true
+    AkashiShopFilter:
+      dt: filter
+      value: |-
+        ActionPoint > PurpleCoins
 
 OpsiAshBeacon:
-  AttackMode:
-    value: current
-    option: [ current, current_dossier ]
-  OneHitMode: true
-  DossierAutoAttackMode: false
-  RequestAssist: true
-  EnsureFullyCollected: true
+  args:
+    AttackMode:
+      value: current
+      option: [ current, current_dossier ]
+    OneHitMode: true
+    DossierAutoAttackMode: false
+    RequestAssist: true
+    EnsureFullyCollected: true
 
 OpsiFleetFilter:
-  Filter:
-    dt: filter
-    value: |-
-      Fleet-4 > CallSubmarine > Fleet-2 > Fleet-3 > Fleet-1
+  args:
+    Filter:
+      dt: filter
+      value: |-
+        Fleet-4 > CallSubmarine > Fleet-2 > Fleet-3 > Fleet-1
 
 OpsiFleet:
-  Fleet:
-    value: 1
-    option: [ 1, 2, 3, 4 ]
-  Submarine: false
+  args:
+    Fleet:
+      value: 1
+      option: [ 1, 2, 3, 4 ]
+    Submarine: false
 
 OpsiExplore:
-  SpecialRadar: false
-  ForceRun: false
-  LastZone: 0
+  args:
+    SpecialRadar: false
+    ForceRun: false
+    LastZone: 0
 
 OpsiShop:
-  PresetFilter:
-    value: max_benefit_meta
-    option:
-      - max_benefit
-      - max_benefit_meta
-      - no_meta
-      - all
-      - custom
-  CustomFilter:
-    dt: filter
-    value: |-
-      LoggerAbyssalT6 > LoggerAbyssalT5 > LoggerObscure > LoggerAbyssalT4 > ActionPoint > PurpleCoins
-      > GearDesignPlanT3 > PlateRandomT4 > DevelopmentMaterialT3 > GearDesignPlanT2 > GearPart
-      > OrdnanceTestingReportT3 > OrdnanceTestingReportT2 > DevelopmentMaterialT2 > OrdnanceTestingReportT1
-      > METARedBook > CrystallizedHeatResistantSteel > NanoceramicAlloy > NeuroplasticProstheticArm > SupercavitationGenerator
+  args:
+    PresetFilter:
+      value: max_benefit_meta
+      option:
+        - max_benefit
+        - max_benefit_meta
+        - no_meta
+        - all
+        - custom
+    CustomFilter:
+      dt: filter
+      value: |-
+        LoggerAbyssalT6 > LoggerAbyssalT5 > LoggerObscure > LoggerAbyssalT4 > ActionPoint > PurpleCoins
+        > GearDesignPlanT3 > PlateRandomT4 > DevelopmentMaterialT3 > GearDesignPlanT2 > GearPart
+        > OrdnanceTestingReportT3 > OrdnanceTestingReportT2 > DevelopmentMaterialT2 > OrdnanceTestingReportT1
+        > METARedBook > CrystallizedHeatResistantSteel > NanoceramicAlloy > NeuroplasticProstheticArm > SupercavitationGenerator
 
 OpsiVoucher:
-  Filter:
-    dt: filter
-    value: |-
-     LoggerAbyssal > LoggerObscure > Book > Coin > Fragment
+  args:
+    Filter:
+      dt: filter
+      value: |-
+       LoggerAbyssal > LoggerObscure > Book > Coin > Fragment
 
 OpsiDaily:
-  DoMission: true
-  UseTuningSample: true
+  args:
+    DoMission: true
+    UseTuningSample: true
 
 OpsiObscure:
-  ForceRun: false
+  args:
+    ForceRun: false
 
 OpsiAbyssal:
-  ForceRun: false
+  args:
+    ForceRun: false
 
 OpsiStronghold:
-  ForceRun: false
+  args:
+    ForceRun: false
 
 OpsiMonthBoss:
-  Mode:
-    value: normal
-    option: [ normal, normal_hard ]
-  CheckAdaptability: true
-  ForceRun: false
+  args:
+    Mode:
+      value: normal
+      option: [ normal, normal_hard ]
+    CheckAdaptability: true
+    ForceRun: false
 
 OpsiMeowfficerFarming:
-  ActionPointPreserve: 1000
-  HazardLevel:
-    value: 5
-    option: [ 3, 4, 5, 6, 10 ]
+  args:
+    ActionPointPreserve: 1000
+    HazardLevel:
+      value: 5
+      option: [ 3, 4, 5, 6, 10 ]
 
 OpsiHazard1Leveling:
-  TargetZone:
-    value: 0
-    option: [ 0, 44, 22 ]
-    advanced: true
+  args:
+    TargetZone:
+      value: 0
+      option: [ 0, 44, 22 ]
+      advanced: true

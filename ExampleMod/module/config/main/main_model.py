@@ -56,3 +56,86 @@ class Fleet2(m.Struct, omit_defaults=True):
         'hide_in_bottom_left',
     ] = 'combat_auto'
     FleetStep: t.Literal[2, 3, 4, 5] = 3
+
+
+class Submarine(m.Struct, omit_defaults=True):
+    Fleet: t.Literal[0, 1, 2] = 0
+    Mode: t.Literal[
+        'do_not_use',
+        'hunt_only',
+        'boss_only',
+        'hunt_and_boss',
+        'every_combat',
+    ] = 'do_not_use'
+    AutoSearchMode: t.Literal['sub_standby', 'sub_auto_call'] = 'sub_standby'
+    DistanceToBoss: t.Literal[
+        'to_boss_position',
+        '1_grid_to_boss',
+        '2_grid_to_boss',
+        'use_open_ocean_support',
+    ] = '2_grid_to_boss'
+
+
+class Emotion(m.Struct, omit_defaults=True):
+    Mode: t.Literal['calculate', 'ignore', 'calculate_ignore'] = 'calculate'
+    Fleet1Value: int = 119
+    Fleet1Record: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    Fleet1Control: t.Literal[
+        'keep_exp_bonus',
+        'prevent_green_face',
+        'prevent_yellow_face',
+        'prevent_red_face',
+    ] = 'prevent_yellow_face'
+    Fleet1Recover: t.Literal[
+        'not_in_dormitory',
+        'dormitory_floor_1',
+        'dormitory_floor_2',
+    ] = 'not_in_dormitory'
+    Fleet1Oath: bool = False
+    Fleet2Value: int = 119
+    Fleet2Record: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    Fleet2Control: t.Literal[
+        'keep_exp_bonus',
+        'prevent_green_face',
+        'prevent_yellow_face',
+        'prevent_red_face',
+    ] = 'prevent_yellow_face'
+    Fleet2Recover: t.Literal[
+        'not_in_dormitory',
+        'dormitory_floor_1',
+        'dormitory_floor_2',
+    ] = 'not_in_dormitory'
+    Fleet2Oath: bool = False
+
+
+class HpControl(m.Struct, omit_defaults=True):
+    UseHpBalance: bool = False
+    UseEmergencyRepair: bool = False
+    UseLowHpRetreat: bool = False
+    HpBalanceThreshold: float = 0.2
+    HpBalanceWeight: str = '1000, 1000, 1000'
+    RepairUseSingleThreshold: float = 0.3
+    RepairUseMultiThreshold: float = 0.6
+    LowHpRetreatThreshold: float = 0.3
+
+
+class EnemyPriority(m.Struct, omit_defaults=True):
+    EnemyScaleBalanceWeight: t.Literal[
+        'default_mode',
+        'S3_enemy_first',
+        'S1_enemy_first',
+    ] = 'default_mode'
+
+
+class GemsFarming(m.Struct, omit_defaults=True):
+    ChangeFlagship: t.Literal['ship', 'ship_equip'] = 'ship'
+    CommonCV: t.Literal['any', 'langley', 'bogue', 'ranger', 'hermes'] = 'any'
+    ChangeVanguard: t.Literal['disabled', 'ship', 'ship_equip'] = 'ship'
+    CommonDD: t.Literal[
+        'any',
+        'favourite',
+        'aulick_or_foote',
+        'cassin_or_downes',
+        'z20_or_z21',
+    ] = 'any'
+    CommissionLimit: bool = True

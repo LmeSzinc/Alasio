@@ -3,22 +3,44 @@ import typing
 from alasio.config.base import AlasioConfigBase
 from const import entry
 
-
 if typing.TYPE_CHECKING:
+    from .alas import alas_model as alas
+    from .alasio import alasio_model as alasio
+    from .alasio import device_model as device
     from .main import main_model as main
     from .opsi import opsi_model as opsi
-    from .scheduler import scheduler_model as scheduler
 
 
 class ConfigGenerated(AlasioConfigBase):
     # A generated config struct to fool IDE's type-predict and auto-complete
     entry = entry
 
+    # alas
+    DropRecord: "alas.DropRecord"
+    Retirement: "alas.Retirement"
+    OneClickRetire: "alas.OneClickRetire"
+    Enhance: "alas.Enhance"
+    OldRetire: "alas.OldRetire"
+
+    # alasio
+    Scheduler: "alasio.Scheduler"
+
+    # device
+    Emulator: "device.Emulator"
+    EmulatorInfo: "device.EmulatorInfo"
+    Error: "device.Error"
+    Optimization: "device.Optimization"
+
     # main
     Campaign: "main.Campaign"
     StopCondition: "main.StopCondition"
     Fleet1: "main.Fleet1"
     Fleet2: "main.Fleet2"
+    Submarine: "main.Submarine"
+    Emotion: "main.Emotion"
+    HpControl: "main.HpControl"
+    EnemyPriority: "main.EnemyPriority"
+    GemsFarming: "main.GemsFarming"
 
     # opsi
     OpsiAshAssist: "opsi.OpsiAshAssist"
@@ -36,6 +58,3 @@ class ConfigGenerated(AlasioConfigBase):
     OpsiMonthBoss: "opsi.OpsiMonthBoss"
     OpsiMeowfficerFarming: "opsi.OpsiMeowfficerFarming"
     OpsiHazard1Leveling: "opsi.OpsiHazard1Leveling"
-
-    # scheduler
-    Scheduler: "scheduler.Scheduler"

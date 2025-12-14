@@ -129,6 +129,56 @@
       "value": ["ActionPoint", "PurpleCoins"]
     }
   },
+  "card-OpsiGeneral": {
+    "_info": {"group": "OpsiGeneral", "arg": "_info"},
+    "OpsiGeneral_UseLogger": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "UseLogger",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OpsiGeneral_BuyActionPointLimit": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "BuyActionPointLimit",
+      "dt": "select",
+      "value": 0,
+      "option": [0, 1, 2, 3, 4, 5]
+    },
+    "OpsiGeneral_OilLimit": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "OilLimit",
+      "dt": "input-int",
+      "value": 1000,
+      "ge": 500,
+      "le": 20000
+    },
+    "OpsiGeneral_RepairThreshold": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "RepairThreshold",
+      "dt": "input-float",
+      "value": 0.4,
+      "ge": 0.0,
+      "le": 1.0
+    },
+    "OpsiGeneral_DoRandomMapEvent": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "DoRandomMapEvent",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OpsiGeneral_AkashiShopFilter": {
+      "task": "OpsiGeneral",
+      "group": "OpsiGeneral",
+      "arg": "AkashiShopFilter",
+      "dt": "filter",
+      "value": ["ActionPoint", "PurpleCoins"]
+    }
+  },
   "card-OpsiAshAssist": {
     "_info": {"group": "OpsiAshAssist", "arg": "_info"},
     "Scheduler_Enable": {

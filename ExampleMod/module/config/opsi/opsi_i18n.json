@@ -12,10 +12,7 @@
     "Tier": {
       "zh-CN": {"name": "OpsiAshAssist.Tier", "help": ""},
       "zh-TW": {"name": "OpsiAshAssist.Tier", "help": ""},
-      "en-US": {
-        "name": "OpsiAshAssist.Tier",
-        "help": "This is meta assist and a very long help text.This is meta assist and a very long help text.This is meta assist and a very long help text."
-      },
+      "en-US": {"name": "OpsiAshAssist.Tier", "help": ""},
       "ja-JP": {"name": "OpsiAshAssist.Tier", "help": ""}
     }
   },
@@ -33,21 +30,15 @@
       "ja-JP": {"name": "OpsiGeneral", "help": ""}
     },
     "UseLogger": {
-      "zh-CN": {
-        "name": "OpsiGeneral.UseLogger",
-        "help": "fn43iogh nf9340gh0934 v43pg934 fn34igh34 n4h03j34 g3084h0 g305hg05"
-      },
+      "zh-CN": {"name": "OpsiGeneral.UseLogger", "help": ""},
       "zh-TW": {"name": "OpsiGeneral.UseLogger", "help": ""},
-      "en-US": {
-        "name": "OpsiGeneral.UseLogger",
-        "help": "fn43iogh nf9340gh0934 v43pg934 fn34igh34 n4h03j34 g3084h0 g305hg05"
-      },
+      "en-US": {"name": "OpsiGeneral.UseLogger", "help": ""},
       "ja-JP": {"name": "OpsiGeneral.UseLogger", "help": ""}
     },
     "BuyActionPointLimit": {
       "zh-CN": {
         "name": "OpsiGeneral.BuyActionPointLimit",
-        "help": "fn43iogh nf9340gh0934 v43pg934 fn34igh34 n4h03j34 g3084h0 g305hg05",
+        "help": "",
         "option_i18n": {"0": "0", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5"}
       },
       "zh-TW": {
@@ -57,7 +48,7 @@
       },
       "en-US": {
         "name": "OpsiGeneral.BuyActionPointLimit",
-        "help": "fn43iogh nf9340gh0934 v43pg934 fn34igh34 n4h03j34 g3084h0 g305hg05",
+        "help": "",
         "option_i18n": {"0": "0", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5"}
       },
       "ja-JP": {

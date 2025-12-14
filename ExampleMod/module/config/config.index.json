@@ -1,13 +1,33 @@
 {
+  "alas": {
+    "file": "alas/alas_config.json",
+    "i18n": [
+      "alas/alas_i18n.json"
+    ],
+    "config": {
+      "task": ["Alas"],
+      "group": []
+    }
+  },
+  "device": {
+    "file": "alasio/device_config.json",
+    "i18n": [
+      "alasio/device_i18n.json",
+      "alasio/alasio_i18n.json"
+    ],
+    "config": {
+      "task": ["Device", "RestartDevice", "RestartGame"],
+      "group": []
+    }
+  },
   "main": {
     "file": "main/main_config.json",
     "i18n": [
-      "scheduler/scheduler_i18n.json",
-      "main/main_i18n.json",
-      "opsi/opsi_i18n.json"
+      "alasio/alasio_i18n.json",
+      "main/main_i18n.json"
     ],
     "config": {
-      "task": ["Main", "Main2", "OpsiGeneral"],
+      "task": ["Main"],
       "group": []
     }
   },
@@ -15,7 +35,7 @@
     "file": "opsi/opsi_config.json",
     "i18n": [
       "opsi/opsi_i18n.json",
-      "scheduler/scheduler_i18n.json"
+      "alasio/alasio_i18n.json"
     ],
     "config": {
       "task": ["OpsiExplore", "OpsiDaily", "OpsiGeneral", "OpsiAshAssist"],

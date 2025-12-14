@@ -1,0 +1,414 @@
+{
+  "Emulator": {
+    "_info": {
+      "zh-CN": {"name": "Emulator", "help": ""},
+      "zh-TW": {"name": "Emulator", "help": ""},
+      "en-US": {"name": "Emulator", "help": ""},
+      "ja-JP": {"name": "Emulator", "help": ""}
+    },
+    "Serial": {
+      "zh-CN": {"name": "Emulator.Serial", "help": ""},
+      "zh-TW": {"name": "Emulator.Serial", "help": ""},
+      "en-US": {"name": "Emulator.Serial", "help": ""},
+      "ja-JP": {"name": "Emulator.Serial", "help": ""}
+    },
+    "PackageName": {
+      "zh-CN": {
+        "name": "Emulator.PackageName",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto"
+        }
+      },
+      "zh-TW": {
+        "name": "Emulator.PackageName",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto"
+        }
+      },
+      "en-US": {
+        "name": "Emulator.PackageName",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto"
+        }
+      },
+      "ja-JP": {
+        "name": "Emulator.PackageName",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto"
+        }
+      }
+    },
+    "ServerName": {
+      "zh-CN": {
+        "name": "Emulator.ServerName",
+        "help": "",
+        "option_i18n": {
+          "disabled": "disabled"
+        }
+      },
+      "zh-TW": {
+        "name": "Emulator.ServerName",
+        "help": "",
+        "option_i18n": {
+          "disabled": "disabled"
+        }
+      },
+      "en-US": {
+        "name": "Emulator.ServerName",
+        "help": "",
+        "option_i18n": {
+          "disabled": "disabled"
+        }
+      },
+      "ja-JP": {
+        "name": "Emulator.ServerName",
+        "help": "",
+        "option_i18n": {
+          "disabled": "disabled"
+        }
+      }
+    },
+    "ScreenshotMethod": {
+      "zh-CN": {
+        "name": "Emulator.ScreenshotMethod",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto",
+          "ADB": "ADB",
+          "ADB_nc": "ADB_nc",
+          "uiautomator2": "uiautomator2",
+          "aScreenCap": "aScreenCap",
+          "aScreenCap_nc": "aScreenCap_nc",
+          "DroidCast": "DroidCast",
+          "DroidCast_raw": "DroidCast_raw",
+          "nemu_ipc": "nemu_ipc",
+          "ldopengl": "ldopengl"
+        }
+      },
+      "zh-TW": {
+        "name": "Emulator.ScreenshotMethod",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto",
+          "ADB": "ADB",
+          "ADB_nc": "ADB_nc",
+          "uiautomator2": "uiautomator2",
+          "aScreenCap": "aScreenCap",
+          "aScreenCap_nc": "aScreenCap_nc",
+          "DroidCast": "DroidCast",
+          "DroidCast_raw": "DroidCast_raw",
+          "nemu_ipc": "nemu_ipc",
+          "ldopengl": "ldopengl"
+        }
+      },
+      "en-US": {
+        "name": "Emulator.ScreenshotMethod",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto",
+          "ADB": "ADB",
+          "ADB_nc": "ADB_nc",
+          "uiautomator2": "uiautomator2",
+          "aScreenCap": "aScreenCap",
+          "aScreenCap_nc": "aScreenCap_nc",
+          "DroidCast": "DroidCast",
+          "DroidCast_raw": "DroidCast_raw",
+          "nemu_ipc": "nemu_ipc",
+          "ldopengl": "ldopengl"
+        }
+      },
+      "ja-JP": {
+        "name": "Emulator.ScreenshotMethod",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto",
+          "ADB": "ADB",
+          "ADB_nc": "ADB_nc",
+          "uiautomator2": "uiautomator2",
+          "aScreenCap": "aScreenCap",
+          "aScreenCap_nc": "aScreenCap_nc",
+          "DroidCast": "DroidCast",
+          "DroidCast_raw": "DroidCast_raw",
+          "nemu_ipc": "nemu_ipc",
+          "ldopengl": "ldopengl"
+        }
+      }
+    },
+    "ControlMethod": {
+      "zh-CN": {
+        "name": "Emulator.ControlMethod",
+        "help": "",
+        "option_i18n": {
+          "ADB": "ADB",
+          "uiautomator2": "uiautomator2",
+          "minitouch": "minitouch",
+          "Hermit": "Hermit",
+          "MaaTouch": "MaaTouch"
+        }
+      },
+      "zh-TW": {
+        "name": "Emulator.ControlMethod",
+        "help": "",
+        "option_i18n": {
+          "ADB": "ADB",
+          "uiautomator2": "uiautomator2",
+          "minitouch": "minitouch",
+          "Hermit": "Hermit",
+          "MaaTouch": "MaaTouch"
+        }
+      },
+      "en-US": {
+        "name": "Emulator.ControlMethod",
+        "help": "",
+        "option_i18n": {
+          "ADB": "ADB",
+          "uiautomator2": "uiautomator2",
+          "minitouch": "minitouch",
+          "Hermit": "Hermit",
+          "MaaTouch": "MaaTouch"
+        }
+      },
+      "ja-JP": {
+        "name": "Emulator.ControlMethod",
+        "help": "",
+        "option_i18n": {
+          "ADB": "ADB",
+          "uiautomator2": "uiautomator2",
+          "minitouch": "minitouch",
+          "Hermit": "Hermit",
+          "MaaTouch": "MaaTouch"
+        }
+      }
+    },
+    "ScreenshotDedithering": {
+      "zh-CN": {"name": "Emulator.ScreenshotDedithering", "help": ""},
+      "zh-TW": {"name": "Emulator.ScreenshotDedithering", "help": ""},
+      "en-US": {"name": "Emulator.ScreenshotDedithering", "help": ""},
+      "ja-JP": {"name": "Emulator.ScreenshotDedithering", "help": ""}
+    },
+    "AdbRestart": {
+      "zh-CN": {"name": "Emulator.AdbRestart", "help": ""},
+      "zh-TW": {"name": "Emulator.AdbRestart", "help": ""},
+      "en-US": {"name": "Emulator.AdbRestart", "help": ""},
+      "ja-JP": {"name": "Emulator.AdbRestart", "help": ""}
+    }
+  },
+  "EmulatorInfo": {
+    "_info": {
+      "zh-CN": {"name": "EmulatorInfo", "help": ""},
+      "zh-TW": {"name": "EmulatorInfo", "help": ""},
+      "en-US": {"name": "EmulatorInfo", "help": ""},
+      "ja-JP": {"name": "EmulatorInfo", "help": ""}
+    },
+    "Emulator": {
+      "zh-CN": {
+        "name": "EmulatorInfo.Emulator",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto",
+          "NoxPlayer": "NoxPlayer",
+          "NoxPlayer64": "NoxPlayer64",
+          "BlueStacks4": "BlueStacks4",
+          "BlueStacks5": "BlueStacks5",
+          "BlueStacks4HyperV": "BlueStacks4HyperV",
+          "BlueStacks5HyperV": "BlueStacks5HyperV",
+          "LDPlayer3": "LDPlayer3",
+          "LDPlayer4": "LDPlayer4",
+          "LDPlayer9": "LDPlayer9",
+          "MuMuPlayer": "MuMuPlayer",
+          "MuMuPlayerX": "MuMuPlayerX",
+          "MuMuPlayer12": "MuMuPlayer12",
+          "MEmuPlayer": "MEmuPlayer"
+        }
+      },
+      "zh-TW": {
+        "name": "EmulatorInfo.Emulator",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto",
+          "NoxPlayer": "NoxPlayer",
+          "NoxPlayer64": "NoxPlayer64",
+          "BlueStacks4": "BlueStacks4",
+          "BlueStacks5": "BlueStacks5",
+          "BlueStacks4HyperV": "BlueStacks4HyperV",
+          "BlueStacks5HyperV": "BlueStacks5HyperV",
+          "LDPlayer3": "LDPlayer3",
+          "LDPlayer4": "LDPlayer4",
+          "LDPlayer9": "LDPlayer9",
+          "MuMuPlayer": "MuMuPlayer",
+          "MuMuPlayerX": "MuMuPlayerX",
+          "MuMuPlayer12": "MuMuPlayer12",
+          "MEmuPlayer": "MEmuPlayer"
+        }
+      },
+      "en-US": {
+        "name": "EmulatorInfo.Emulator",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto",
+          "NoxPlayer": "NoxPlayer",
+          "NoxPlayer64": "NoxPlayer64",
+          "BlueStacks4": "BlueStacks4",
+          "BlueStacks5": "BlueStacks5",
+          "BlueStacks4HyperV": "BlueStacks4HyperV",
+          "BlueStacks5HyperV": "BlueStacks5HyperV",
+          "LDPlayer3": "LDPlayer3",
+          "LDPlayer4": "LDPlayer4",
+          "LDPlayer9": "LDPlayer9",
+          "MuMuPlayer": "MuMuPlayer",
+          "MuMuPlayerX": "MuMuPlayerX",
+          "MuMuPlayer12": "MuMuPlayer12",
+          "MEmuPlayer": "MEmuPlayer"
+        }
+      },
+      "ja-JP": {
+        "name": "EmulatorInfo.Emulator",
+        "help": "",
+        "option_i18n": {
+          "auto": "auto",
+          "NoxPlayer": "NoxPlayer",
+          "NoxPlayer64": "NoxPlayer64",
+          "BlueStacks4": "BlueStacks4",
+          "BlueStacks5": "BlueStacks5",
+          "BlueStacks4HyperV": "BlueStacks4HyperV",
+          "BlueStacks5HyperV": "BlueStacks5HyperV",
+          "LDPlayer3": "LDPlayer3",
+          "LDPlayer4": "LDPlayer4",
+          "LDPlayer9": "LDPlayer9",
+          "MuMuPlayer": "MuMuPlayer",
+          "MuMuPlayerX": "MuMuPlayerX",
+          "MuMuPlayer12": "MuMuPlayer12",
+          "MEmuPlayer": "MEmuPlayer"
+        }
+      }
+    },
+    "Name": {
+      "zh-CN": {"name": "EmulatorInfo.Name", "help": ""},
+      "zh-TW": {"name": "EmulatorInfo.Name", "help": ""},
+      "en-US": {"name": "EmulatorInfo.Name", "help": ""},
+      "ja-JP": {"name": "EmulatorInfo.Name", "help": ""}
+    },
+    "Path": {
+      "zh-CN": {"name": "EmulatorInfo.Path", "help": ""},
+      "zh-TW": {"name": "EmulatorInfo.Path", "help": ""},
+      "en-US": {"name": "EmulatorInfo.Path", "help": ""},
+      "ja-JP": {"name": "EmulatorInfo.Path", "help": ""}
+    }
+  },
+  "Error": {
+    "_info": {
+      "zh-CN": {"name": "Error", "help": ""},
+      "zh-TW": {"name": "Error", "help": ""},
+      "en-US": {"name": "Error", "help": ""},
+      "ja-JP": {"name": "Error", "help": ""}
+    },
+    "HandleError": {
+      "zh-CN": {"name": "Error.HandleError", "help": ""},
+      "zh-TW": {"name": "Error.HandleError", "help": ""},
+      "en-US": {"name": "Error.HandleError", "help": ""},
+      "ja-JP": {"name": "Error.HandleError", "help": ""}
+    },
+    "SaveError": {
+      "zh-CN": {"name": "Error.SaveError", "help": ""},
+      "zh-TW": {"name": "Error.SaveError", "help": ""},
+      "en-US": {"name": "Error.SaveError", "help": ""},
+      "ja-JP": {"name": "Error.SaveError", "help": ""}
+    },
+    "OnePushConfig": {
+      "zh-CN": {"name": "Error.OnePushConfig", "help": ""},
+      "zh-TW": {"name": "Error.OnePushConfig", "help": ""},
+      "en-US": {"name": "Error.OnePushConfig", "help": ""},
+      "ja-JP": {"name": "Error.OnePushConfig", "help": ""}
+    },
+    "ScreenshotLength": {
+      "zh-CN": {"name": "Error.ScreenshotLength", "help": ""},
+      "zh-TW": {"name": "Error.ScreenshotLength", "help": ""},
+      "en-US": {"name": "Error.ScreenshotLength", "help": ""},
+      "ja-JP": {"name": "Error.ScreenshotLength", "help": ""}
+    }
+  },
+  "Optimization": {
+    "_info": {
+      "zh-CN": {"name": "Optimization", "help": ""},
+      "zh-TW": {"name": "Optimization", "help": ""},
+      "en-US": {"name": "Optimization", "help": ""},
+      "ja-JP": {"name": "Optimization", "help": ""}
+    },
+    "ScreenshotInterval": {
+      "zh-CN": {"name": "Optimization.ScreenshotInterval", "help": ""},
+      "zh-TW": {"name": "Optimization.ScreenshotInterval", "help": ""},
+      "en-US": {"name": "Optimization.ScreenshotInterval", "help": ""},
+      "ja-JP": {"name": "Optimization.ScreenshotInterval", "help": ""}
+    },
+    "CombatScreenshotInterval": {
+      "zh-CN": {"name": "Optimization.CombatScreenshotInterval", "help": ""},
+      "zh-TW": {"name": "Optimization.CombatScreenshotInterval", "help": ""},
+      "en-US": {"name": "Optimization.CombatScreenshotInterval", "help": ""},
+      "ja-JP": {"name": "Optimization.CombatScreenshotInterval", "help": ""}
+    },
+    "TaskHoardingDuration": {
+      "zh-CN": {"name": "Optimization.TaskHoardingDuration", "help": ""},
+      "zh-TW": {"name": "Optimization.TaskHoardingDuration", "help": ""},
+      "en-US": {"name": "Optimization.TaskHoardingDuration", "help": ""},
+      "ja-JP": {"name": "Optimization.TaskHoardingDuration", "help": ""}
+    },
+    "WhenTaskQueueEmpty": {
+      "zh-CN": {
+        "name": "Optimization.WhenTaskQueueEmpty",
+        "help": "",
+        "option_i18n": {
+          "stay_there": "stay_there",
+          "goto_main": "goto_main",
+          "close_game": "close_game"
+        }
+      },
+      "zh-TW": {
+        "name": "Optimization.WhenTaskQueueEmpty",
+        "help": "",
+        "option_i18n": {
+          "stay_there": "stay_there",
+          "goto_main": "goto_main",
+          "close_game": "close_game"
+        }
+      },
+      "en-US": {
+        "name": "Optimization.WhenTaskQueueEmpty",
+        "help": "",
+        "option_i18n": {
+          "stay_there": "stay_there",
+          "goto_main": "goto_main",
+          "close_game": "close_game"
+        }
+      },
+      "ja-JP": {
+        "name": "Optimization.WhenTaskQueueEmpty",
+        "help": "",
+        "option_i18n": {
+          "stay_there": "stay_there",
+          "goto_main": "goto_main",
+          "close_game": "close_game"
+        }
+      }
+    }
+  },
+  "RestartDevice": {
+    "_info": {
+      "zh-CN": {"name": "RestartDevice", "help": ""},
+      "zh-TW": {"name": "RestartDevice", "help": ""},
+      "en-US": {"name": "RestartDevice", "help": ""},
+      "ja-JP": {"name": "RestartDevice", "help": ""}
+    }
+  },
+  "RestartGame": {
+    "_info": {
+      "zh-CN": {"name": "RestartGame", "help": ""},
+      "zh-TW": {"name": "RestartGame", "help": ""},
+      "en-US": {"name": "RestartGame", "help": ""},
+      "ja-JP": {"name": "RestartGame", "help": ""}
+    }
+  }
+}

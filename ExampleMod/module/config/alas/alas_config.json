@@ -1,0 +1,161 @@
+{
+  "card-Retirement": {
+    "_info": {"group": "Retirement", "arg": "_info"},
+    "Retirement_RetireMode": {
+      "task": "Alas",
+      "group": "Retirement",
+      "arg": "RetireMode",
+      "dt": "select",
+      "value": "one_click_retire",
+      "option": ["one_click_retire", "enhance", "old_retire"]
+    }
+  },
+  "card-OneClickRetire": {
+    "_info": {"group": "OneClickRetire", "arg": "_info"},
+    "OneClickRetire_KeepLimitBreak": {
+      "task": "Alas",
+      "group": "OneClickRetire",
+      "arg": "KeepLimitBreak",
+      "dt": "select",
+      "value": "keep_limit_break",
+      "option": ["keep_limit_break", "do_not_keep"]
+    }
+  },
+  "card-Enhance": {
+    "_info": {"group": "Enhance", "arg": "_info"},
+    "Enhance_ShipToEnhance": {
+      "task": "Alas",
+      "group": "Enhance",
+      "arg": "ShipToEnhance",
+      "dt": "select",
+      "value": "all",
+      "option": ["all", "favourite"]
+    },
+    "Enhance_Filter": {
+      "task": "Alas",
+      "group": "Enhance",
+      "arg": "Filter",
+      "dt": "input",
+      "value": ""
+    },
+    "Enhance_CheckPerCategory": {
+      "task": "Alas",
+      "group": "Enhance",
+      "arg": "CheckPerCategory",
+      "dt": "input-int",
+      "value": 5
+    }
+  },
+  "card-OldRetire": {
+    "_info": {"group": "OldRetire", "arg": "_info"},
+    "OldRetire_N": {
+      "task": "Alas",
+      "group": "OldRetire",
+      "arg": "N",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OldRetire_R": {
+      "task": "Alas",
+      "group": "OldRetire",
+      "arg": "R",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OldRetire_SR": {
+      "task": "Alas",
+      "group": "OldRetire",
+      "arg": "SR",
+      "dt": "checkbox",
+      "value": false
+    },
+    "OldRetire_SSR": {
+      "task": "Alas",
+      "group": "OldRetire",
+      "arg": "SSR",
+      "dt": "checkbox",
+      "value": false
+    },
+    "OldRetire_RetireAmount": {
+      "task": "Alas",
+      "group": "OldRetire",
+      "arg": "RetireAmount",
+      "dt": "select",
+      "value": "retire_all",
+      "option": ["retire_all", "retire_10"]
+    }
+  },
+  "card-DropRecord": {
+    "_info": {"group": "DropRecord", "arg": "_info"},
+    "DropRecord_SaveFolder": {
+      "task": "Alas",
+      "group": "DropRecord",
+      "arg": "SaveFolder",
+      "dt": "input",
+      "value": "./screenshots"
+    },
+    "DropRecord_AzurStatsID": {
+      "task": "Alas",
+      "group": "DropRecord",
+      "arg": "AzurStatsID",
+      "dt": "input",
+      "value": ""
+    },
+    "DropRecord_API": {
+      "task": "Alas",
+      "group": "DropRecord",
+      "arg": "API",
+      "dt": "select",
+      "value": "default",
+      "option": ["default", "cn_gz_reverse_proxy"]
+    },
+    "DropRecord_ResearchRecord": {
+      "task": "Alas",
+      "group": "DropRecord",
+      "arg": "ResearchRecord",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save", "upload", "save_and_upload"]
+    },
+    "DropRecord_CommissionRecord": {
+      "task": "Alas",
+      "group": "DropRecord",
+      "arg": "CommissionRecord",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save", "upload", "save_and_upload"]
+    },
+    "DropRecord_CombatRecord": {
+      "task": "Alas",
+      "group": "DropRecord",
+      "arg": "CombatRecord",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save"]
+    },
+    "DropRecord_OpsiRecord": {
+      "task": "Alas",
+      "group": "DropRecord",
+      "arg": "OpsiRecord",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save", "upload", "save_and_upload"]
+    },
+    "DropRecord_MeowfficerBuy": {
+      "task": "Alas",
+      "group": "DropRecord",
+      "arg": "MeowfficerBuy",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save"]
+    },
+    "DropRecord_MeowfficerTalent": {
+      "task": "Alas",
+      "group": "DropRecord",
+      "arg": "MeowfficerTalent",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save", "upload", "save_and_upload"]
+    }
+  }
+}

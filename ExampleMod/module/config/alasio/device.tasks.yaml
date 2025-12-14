@@ -1,0 +1,21 @@
+Device:
+  global_bind: true
+  groups:
+    - Emulator
+    - EmulatorInfo
+    - Error
+    - Optimization
+
+RestartDevice:
+  groups:
+    - SchedulerStatic
+  displays:
+    - info: RestartDevice
+      groups: [ SchedulerStatic ]
+
+RestartGame:
+  groups:
+    - SchedulerStatic
+  displays:
+    - info: RestartGame
+      groups: [ SchedulerStatic ]

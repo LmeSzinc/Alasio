@@ -1,53 +1,133 @@
 Campaign:
-  Name: 12-4
-  Event:
-    value: campaign_main
-    option: [ campaign_main ]
-  Mode:
-    value: normal
-    option: [ normal, hard ]
-  UseClearMode: true
-  UseFleetLock: true
-  UseAutoSearch: true
-  Use2xBook: false
-  AmbushEvade: true
+  args:
+    Name: 12-4
+    Event:
+      value: campaign_main
+      option: [ campaign_main ]
+    Mode:
+      value: normal
+      option: [ normal, hard ]
+    UseClearMode: true
+    UseFleetLock: true
+    UseAutoSearch: true
+    Use2xBook: false
+    AmbushEvade: true
 
 StopCondition:
-  OilLimit: 1000
-  RunCount: 0
-  MapAchievement:
-    value: non_stop
-    option: [ non_stop, 100_percent_clear, map_3_stars, threat_safe, threat_safe_without_3_stars ]
-  StageIncrease: false
-  GetNewShip: false
-  ReachLevel: 0
+  args:
+    OilLimit: 1000
+    RunCount: 0
+    MapAchievement:
+      value: non_stop
+      option: [ non_stop, 100_percent_clear, map_3_stars, threat_safe, threat_safe_without_3_stars ]
+    StageIncrease: false
+    GetNewShip: false
+    ReachLevel: 0
 
 Fleet:
 
 Fleet1:
-  Fleet:
-    value: 1
-    option: [ 1, 2, 3, 4, 5, 6 ]
-  Formation:
-    value: double_line
-    option: [ line_ahead, double_line, diamond ]
-  FleetMode:
-    value: combat_auto
-    option: [ combat_auto, combat_manual, stand_still_in_the_middle, hide_in_bottom_left ]
-  FleetStep:
-    value: 3
-    option: [ 2, 3, 4, 5 ]
+  args:
+    Fleet:
+      value: 1
+      option: [ 1, 2, 3, 4, 5, 6 ]
+    Formation:
+      value: double_line
+      option: [ line_ahead, double_line, diamond ]
+    FleetMode:
+      value: combat_auto
+      option: [ combat_auto, combat_manual, stand_still_in_the_middle, hide_in_bottom_left ]
+    FleetStep:
+      value: 3
+      option: [ 2, 3, 4, 5 ]
 
 Fleet2:
-  Fleet:
-    value: 1
-    option: [ 1, 2, 3, 4, 5, 6 ]
-  Formation:
-    value: double_line
-    option: [ line_ahead, double_line, diamond ]
-  FleetMode:
-    value: combat_auto
-    option: [ combat_auto, combat_manual, stand_still_in_the_middle, hide_in_bottom_left ]
-  FleetStep:
-    value: 3
-    option: [ 2, 3, 4, 5 ]
+  args:
+    Fleet:
+      value: 1
+      option: [ 1, 2, 3, 4, 5, 6 ]
+    Formation:
+      value: double_line
+      option: [ line_ahead, double_line, diamond ]
+    FleetMode:
+      value: combat_auto
+      option: [ combat_auto, combat_manual, stand_still_in_the_middle, hide_in_bottom_left ]
+    FleetStep:
+      value: 3
+      option: [ 2, 3, 4, 5 ]
+
+Submarine:
+  args:
+    Fleet:
+      value: 0
+      option: [ 0, 1, 2 ]
+    Mode:
+      value: do_not_use
+      option: [ do_not_use, hunt_only, boss_only, hunt_and_boss, every_combat ]
+    AutoSearchMode:
+      value: sub_standby
+      option: [ sub_standby, sub_auto_call ]
+    DistanceToBoss:
+      value: '2_grid_to_boss'
+      option: [ to_boss_position, 1_grid_to_boss, 2_grid_to_boss, use_open_ocean_support ]
+
+Emotion:
+  args:
+    Mode:
+      value: calculate
+      option: [ calculate, ignore, calculate_ignore ]
+    Fleet1Value: 119
+    Fleet1Record:
+      value: 2020-01-01 00:00:00
+      display: disabled
+    Fleet1Control:
+      value: prevent_yellow_face
+      option: [ keep_exp_bonus, prevent_green_face, prevent_yellow_face, prevent_red_face ]
+    Fleet1Recover:
+      value: not_in_dormitory
+      option: [ not_in_dormitory, dormitory_floor_1, dormitory_floor_2 ]
+    Fleet1Oath: false
+    Fleet2Value: 119
+    Fleet2Record:
+      value: 2020-01-01 00:00:00
+      display: disabled
+    Fleet2Control:
+      value: prevent_yellow_face
+      option: [ keep_exp_bonus, prevent_green_face, prevent_yellow_face, prevent_red_face ]
+    Fleet2Recover:
+      value: not_in_dormitory
+      option: [ not_in_dormitory, dormitory_floor_1, dormitory_floor_2 ]
+    Fleet2Oath: false
+
+HpControl:
+  args:
+    UseHpBalance: false
+    UseEmergencyRepair: false
+    UseLowHpRetreat: false
+    HpBalanceThreshold: 0.2
+    HpBalanceWeight: 1000, 1000, 1000
+    RepairUseSingleThreshold: 0.3
+    RepairUseMultiThreshold: 0.6
+    LowHpRetreatThreshold: 0.3
+
+EnemyPriority:
+  args:
+    EnemyScaleBalanceWeight:
+      value: default_mode
+      option: [ default_mode, S3_enemy_first, S1_enemy_first ]
+
+GemsFarming:
+  args:
+    ChangeFlagship:
+      value: ship
+      option: [ ship, ship_equip ]
+    CommonCV:
+      value: any
+      option: [ any, langley, bogue, ranger, hermes ]
+    ChangeVanguard:
+      value: ship
+      option: [ disabled, ship, ship_equip ]
+    CommonDD:
+      value: any
+      option: [ any, favourite, aulick_or_foote , cassin_or_downes, z20_or_z21 ]
+    CommissionLimit: true

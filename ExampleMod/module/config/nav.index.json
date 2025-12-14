@@ -1,4 +1,86 @@
 {
+  "alas": {
+    "_info": {
+      "zh-CN": "alas",
+      "zh-TW": "alas",
+      "en-US": "alas",
+      "ja-JP": "alas"
+    },
+    "card-Retirement": {
+      "zh-CN": "Retirement",
+      "zh-TW": "Retirement",
+      "en-US": "Retirement",
+      "ja-JP": "Retirement"
+    },
+    "card-OneClickRetire": {
+      "zh-CN": "OneClickRetire",
+      "zh-TW": "OneClickRetire",
+      "en-US": "OneClickRetire",
+      "ja-JP": "OneClickRetire"
+    },
+    "card-Enhance": {
+      "zh-CN": "Enhance",
+      "zh-TW": "Enhance",
+      "en-US": "Enhance",
+      "ja-JP": "Enhance"
+    },
+    "card-OldRetire": {
+      "zh-CN": "OldRetire",
+      "zh-TW": "OldRetire",
+      "en-US": "OldRetire",
+      "ja-JP": "OldRetire"
+    },
+    "card-DropRecord": {
+      "zh-CN": "DropRecord",
+      "zh-TW": "DropRecord",
+      "en-US": "DropRecord",
+      "ja-JP": "DropRecord"
+    }
+  },
+  "device": {
+    "_info": {
+      "zh-CN": "device",
+      "zh-TW": "device",
+      "en-US": "device",
+      "ja-JP": "device"
+    },
+    "card-Emulator": {
+      "zh-CN": "Emulator",
+      "zh-TW": "Emulator",
+      "en-US": "Emulator",
+      "ja-JP": "Emulator"
+    },
+    "card-EmulatorInfo": {
+      "zh-CN": "EmulatorInfo",
+      "zh-TW": "EmulatorInfo",
+      "en-US": "EmulatorInfo",
+      "ja-JP": "EmulatorInfo"
+    },
+    "card-Error": {
+      "zh-CN": "Error",
+      "zh-TW": "Error",
+      "en-US": "Error",
+      "ja-JP": "Error"
+    },
+    "card-Optimization": {
+      "zh-CN": "Optimization",
+      "zh-TW": "Optimization",
+      "en-US": "Optimization",
+      "ja-JP": "Optimization"
+    },
+    "card-RestartDevice": {
+      "zh-CN": "RestartDevice",
+      "zh-TW": "RestartDevice",
+      "en-US": "RestartDevice",
+      "ja-JP": "RestartDevice"
+    },
+    "card-RestartGame": {
+      "zh-CN": "RestartGame",
+      "zh-TW": "RestartGame",
+      "en-US": "RestartGame",
+      "ja-JP": "RestartGame"
+    }
+  },
   "main": {
     "_info": {
       "zh-CN": "main",
@@ -6,53 +88,53 @@
       "en-US": "main",
       "ja-JP": "main"
     },
-    "card-Main-Scheduler": {
+    "card-Scheduler": {
       "zh-CN": "Scheduler",
       "zh-TW": "Scheduler",
       "en-US": "Scheduler",
       "ja-JP": "Scheduler"
     },
-    "card-Main-Campaign": {
+    "card-Campaign": {
       "zh-CN": "Campaign",
       "zh-TW": "Campaign",
       "en-US": "Campaign",
       "ja-JP": "Campaign"
     },
-    "card-Main-Fleet1_Fleet2": {
+    "card-StopCondition": {
+      "zh-CN": "StopCondition",
+      "zh-TW": "StopCondition",
+      "en-US": "StopCondition",
+      "ja-JP": "StopCondition"
+    },
+    "card-Fleet": {
       "zh-CN": "Fleet",
       "zh-TW": "Fleet",
       "en-US": "Fleet",
       "ja-JP": "Fleet"
     },
-    "card-Main2-Scheduler": {
-      "zh-CN": "Scheduler",
-      "zh-TW": "Scheduler",
-      "en-US": "Scheduler",
-      "ja-JP": "Scheduler"
+    "card-Submarine": {
+      "zh-CN": "Submarine",
+      "zh-TW": "Submarine",
+      "en-US": "Submarine",
+      "ja-JP": "Submarine"
     },
-    "card-Main2-Campaign": {
-      "zh-CN": "Campaign",
-      "zh-TW": "Campaign",
-      "en-US": "Campaign",
-      "ja-JP": "Campaign"
+    "card-Emotion": {
+      "zh-CN": "Emotion",
+      "zh-TW": "Emotion",
+      "en-US": "Emotion",
+      "ja-JP": "Emotion"
     },
-    "card-Main2-Fleet1": {
-      "zh-CN": "Fleet1",
-      "zh-TW": "Fleet1",
-      "en-US": "Fleet1",
-      "ja-JP": "Fleet1"
+    "card-HpControl": {
+      "zh-CN": "HpControl",
+      "zh-TW": "HpControl",
+      "en-US": "HpControl",
+      "ja-JP": "HpControl"
     },
-    "card-Main2-Fleet2": {
-      "zh-CN": "Fleet2",
-      "zh-TW": "Fleet2",
-      "en-US": "Fleet2",
-      "ja-JP": "Fleet2"
-    },
-    "card-DisplayOpsiGeneral": {
-      "zh-CN": "大世界通用设置",
-      "zh-TW": "OpsiGeneral",
-      "en-US": "OpsiGeneral",
-      "ja-JP": "OpsiGeneral"
+    "card-EnemyPriority": {
+      "zh-CN": "EnemyPriority",
+      "zh-TW": "EnemyPriority",
+      "en-US": "EnemyPriority",
+      "ja-JP": "EnemyPriority"
     }
   },
   "opsi": {
@@ -73,6 +155,12 @@
       "zh-TW": "OpsiDaily",
       "en-US": "OpsiDaily",
       "ja-JP": "OpsiDaily"
+    },
+    "card-OpsiGeneral": {
+      "zh-CN": "大世界通用设置",
+      "zh-TW": "OpsiGeneral",
+      "en-US": "OpsiGeneral",
+      "ja-JP": "OpsiGeneral"
     },
     "card-OpsiAshAssist": {
       "zh-CN": "META支援",

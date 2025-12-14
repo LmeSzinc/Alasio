@@ -1,5 +1,5 @@
 {
-  "card-Main-Scheduler": {
+  "card-Scheduler": {
     "_info": {"group": "Scheduler", "arg": "_info"},
     "Scheduler_Enable": {
       "task": "Main",
@@ -23,7 +23,7 @@
       "value": "00:00"
     }
   },
-  "card-Main-Campaign": {
+  "card-Campaign": {
     "_info": {"group": "Campaign", "arg": "_info"},
     "Campaign_Name": {
       "task": "Main",
@@ -84,7 +84,53 @@
       "value": true
     }
   },
-  "card-Main-Fleet1_Fleet2": {
+  "card-StopCondition": {
+    "_info": {"group": "StopCondition", "arg": "_info"},
+    "StopCondition_OilLimit": {
+      "task": "Main",
+      "group": "StopCondition",
+      "arg": "OilLimit",
+      "dt": "input-int",
+      "value": 1000
+    },
+    "StopCondition_RunCount": {
+      "task": "Main",
+      "group": "StopCondition",
+      "arg": "RunCount",
+      "dt": "input-int",
+      "value": 0
+    },
+    "StopCondition_MapAchievement": {
+      "task": "Main",
+      "group": "StopCondition",
+      "arg": "MapAchievement",
+      "dt": "select",
+      "value": "non_stop",
+      "option": ["non_stop", "100_percent_clear", "map_3_stars", "threat_safe", "threat_safe_without_3_stars"]
+    },
+    "StopCondition_StageIncrease": {
+      "task": "Main",
+      "group": "StopCondition",
+      "arg": "StageIncrease",
+      "dt": "checkbox",
+      "value": false
+    },
+    "StopCondition_GetNewShip": {
+      "task": "Main",
+      "group": "StopCondition",
+      "arg": "GetNewShip",
+      "dt": "checkbox",
+      "value": false
+    },
+    "StopCondition_ReachLevel": {
+      "task": "Main",
+      "group": "StopCondition",
+      "arg": "ReachLevel",
+      "dt": "input-int",
+      "value": 0
+    }
+  },
+  "card-Fleet": {
     "_info": {"group": "Fleet", "arg": "_info"},
     "Fleet1_Fleet": {
       "task": "Main",
@@ -151,209 +197,194 @@
       "option": [2, 3, 4, 5]
     }
   },
-  "card-Main2-Scheduler": {
-    "_info": {"group": "Scheduler", "arg": "_info"},
-    "Scheduler_Enable": {
-      "task": "Main2",
-      "group": "Scheduler",
-      "arg": "Enable",
-      "dt": "checkbox",
-      "value": false
+  "card-Submarine": {
+    "_info": {"group": "Submarine", "arg": "_info"},
+    "Submarine_Fleet": {
+      "task": "Main",
+      "group": "Submarine",
+      "arg": "Fleet",
+      "dt": "select",
+      "value": 0,
+      "option": [0, 1, 2]
     },
-    "Scheduler_NextRun": {
-      "task": "Main2",
-      "group": "Scheduler",
-      "arg": "NextRun",
+    "Submarine_Mode": {
+      "task": "Main",
+      "group": "Submarine",
+      "arg": "Mode",
+      "dt": "select",
+      "value": "do_not_use",
+      "option": ["do_not_use", "hunt_only", "boss_only", "hunt_and_boss", "every_combat"]
+    },
+    "Submarine_AutoSearchMode": {
+      "task": "Main",
+      "group": "Submarine",
+      "arg": "AutoSearchMode",
+      "dt": "select",
+      "value": "sub_standby",
+      "option": ["sub_standby", "sub_auto_call"]
+    },
+    "Submarine_DistanceToBoss": {
+      "task": "Main",
+      "group": "Submarine",
+      "arg": "DistanceToBoss",
+      "dt": "select",
+      "value": "2_grid_to_boss",
+      "option": ["to_boss_position", "1_grid_to_boss", "2_grid_to_boss", "use_open_ocean_support"]
+    }
+  },
+  "card-Emotion": {
+    "_info": {"group": "Emotion", "arg": "_info"},
+    "Emotion_Mode": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Mode",
+      "dt": "select",
+      "value": "calculate",
+      "option": ["calculate", "ignore", "calculate_ignore"]
+    },
+    "Emotion_Fleet1Value": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Fleet1Value",
+      "dt": "input-int",
+      "value": 119
+    },
+    "Emotion_Fleet1Record": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Fleet1Record",
       "dt": "datetime",
       "value": "2020-01-01T00:00:00Z"
     },
-    "Scheduler_ServerUpdate": {
-      "task": "Main2",
-      "group": "Scheduler",
-      "arg": "ServerUpdate",
-      "dt": "input",
-      "value": "00:00"
-    }
-  },
-  "card-Main2-Campaign": {
-    "_info": {"group": "Campaign", "arg": "_info"},
-    "Campaign_Name": {
-      "task": "Main2",
-      "group": "Campaign",
-      "arg": "Name",
-      "dt": "input",
-      "value": "12-4"
-    },
-    "Campaign_Event": {
-      "task": "Main2",
-      "group": "Campaign",
-      "arg": "Event",
+    "Emotion_Fleet1Control": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Fleet1Control",
       "dt": "select",
-      "value": "campaign_main",
-      "option": ["campaign_main"]
+      "value": "prevent_yellow_face",
+      "option": ["keep_exp_bonus", "prevent_green_face", "prevent_yellow_face", "prevent_red_face"]
     },
-    "Campaign_Mode": {
-      "task": "Main2",
-      "group": "Campaign",
-      "arg": "Mode",
+    "Emotion_Fleet1Recover": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Fleet1Recover",
       "dt": "select",
-      "value": "normal",
-      "option": ["normal", "hard"]
+      "value": "not_in_dormitory",
+      "option": ["not_in_dormitory", "dormitory_floor_1", "dormitory_floor_2"]
     },
-    "Campaign_UseClearMode": {
-      "task": "Main2",
-      "group": "Campaign",
-      "arg": "UseClearMode",
-      "dt": "checkbox",
-      "value": true
-    },
-    "Campaign_UseFleetLock": {
-      "task": "Main2",
-      "group": "Campaign",
-      "arg": "UseFleetLock",
-      "dt": "checkbox",
-      "value": true
-    },
-    "Campaign_UseAutoSearch": {
-      "task": "Main2",
-      "group": "Campaign",
-      "arg": "UseAutoSearch",
-      "dt": "checkbox",
-      "value": true
-    },
-    "Campaign_Use2xBook": {
-      "task": "Main2",
-      "group": "Campaign",
-      "arg": "Use2xBook",
+    "Emotion_Fleet1Oath": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Fleet1Oath",
       "dt": "checkbox",
       "value": false
     },
-    "Campaign_AmbushEvade": {
-      "task": "Main2",
-      "group": "Campaign",
-      "arg": "AmbushEvade",
-      "dt": "checkbox",
-      "value": true
-    }
-  },
-  "card-Main2-Fleet1": {
-    "_info": {"group": "Fleet1", "arg": "_info"},
-    "Fleet1_Fleet": {
-      "task": "Main2",
-      "group": "Fleet1",
-      "arg": "Fleet",
-      "dt": "select",
-      "value": 1,
-      "option": [1, 2, 3, 4, 5, 6]
-    },
-    "Fleet1_Formation": {
-      "task": "Main2",
-      "group": "Fleet1",
-      "arg": "Formation",
-      "dt": "select",
-      "value": "double_line",
-      "option": ["line_ahead", "double_line", "diamond"]
-    },
-    "Fleet1_FleetMode": {
-      "task": "Main2",
-      "group": "Fleet1",
-      "arg": "FleetMode",
-      "dt": "select",
-      "value": "combat_auto",
-      "option": ["combat_auto", "combat_manual", "stand_still_in_the_middle", "hide_in_bottom_left"]
-    },
-    "Fleet1_FleetStep": {
-      "task": "Main2",
-      "group": "Fleet1",
-      "arg": "FleetStep",
-      "dt": "select",
-      "value": 3,
-      "option": [2, 3, 4, 5]
-    }
-  },
-  "card-Main2-Fleet2": {
-    "_info": {"group": "Fleet2", "arg": "_info"},
-    "Fleet2_Fleet": {
-      "task": "Main2",
-      "group": "Fleet2",
-      "arg": "Fleet",
-      "dt": "select",
-      "value": 1,
-      "option": [1, 2, 3, 4, 5, 6]
-    },
-    "Fleet2_Formation": {
-      "task": "Main2",
-      "group": "Fleet2",
-      "arg": "Formation",
-      "dt": "select",
-      "value": "double_line",
-      "option": ["line_ahead", "double_line", "diamond"]
-    },
-    "Fleet2_FleetMode": {
-      "task": "Main2",
-      "group": "Fleet2",
-      "arg": "FleetMode",
-      "dt": "select",
-      "value": "combat_auto",
-      "option": ["combat_auto", "combat_manual", "stand_still_in_the_middle", "hide_in_bottom_left"]
-    },
-    "Fleet2_FleetStep": {
-      "task": "Main2",
-      "group": "Fleet2",
-      "arg": "FleetStep",
-      "dt": "select",
-      "value": 3,
-      "option": [2, 3, 4, 5]
-    }
-  },
-  "card-DisplayOpsiGeneral": {
-    "_info": {"group": "OpsiGeneral", "arg": "_info"},
-    "OpsiGeneral_UseLogger": {
-      "task": "OpsiGeneral",
-      "group": "OpsiGeneral",
-      "arg": "UseLogger",
-      "dt": "checkbox",
-      "value": true
-    },
-    "OpsiGeneral_BuyActionPointLimit": {
-      "task": "OpsiGeneral",
-      "group": "OpsiGeneral",
-      "arg": "BuyActionPointLimit",
-      "dt": "select",
-      "value": 0,
-      "option": [0, 1, 2, 3, 4, 5]
-    },
-    "OpsiGeneral_OilLimit": {
-      "task": "OpsiGeneral",
-      "group": "OpsiGeneral",
-      "arg": "OilLimit",
+    "Emotion_Fleet2Value": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Fleet2Value",
       "dt": "input-int",
-      "value": 1000,
-      "ge": 500,
-      "le": 20000
+      "value": 119
     },
-    "OpsiGeneral_RepairThreshold": {
-      "task": "OpsiGeneral",
-      "group": "OpsiGeneral",
-      "arg": "RepairThreshold",
-      "dt": "input-float",
-      "value": 0.4,
-      "ge": 0.0,
-      "le": 1.0
+    "Emotion_Fleet2Record": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Fleet2Record",
+      "dt": "datetime",
+      "value": "2020-01-01T00:00:00Z"
     },
-    "OpsiGeneral_DoRandomMapEvent": {
-      "task": "OpsiGeneral",
-      "group": "OpsiGeneral",
-      "arg": "DoRandomMapEvent",
+    "Emotion_Fleet2Control": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Fleet2Control",
+      "dt": "select",
+      "value": "prevent_yellow_face",
+      "option": ["keep_exp_bonus", "prevent_green_face", "prevent_yellow_face", "prevent_red_face"]
+    },
+    "Emotion_Fleet2Recover": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Fleet2Recover",
+      "dt": "select",
+      "value": "not_in_dormitory",
+      "option": ["not_in_dormitory", "dormitory_floor_1", "dormitory_floor_2"]
+    },
+    "Emotion_Fleet2Oath": {
+      "task": "Main",
+      "group": "Emotion",
+      "arg": "Fleet2Oath",
       "dt": "checkbox",
-      "value": true
+      "value": false
+    }
+  },
+  "card-HpControl": {
+    "_info": {"group": "HpControl", "arg": "_info"},
+    "HpControl_UseHpBalance": {
+      "task": "Main",
+      "group": "HpControl",
+      "arg": "UseHpBalance",
+      "dt": "checkbox",
+      "value": false
     },
-    "OpsiGeneral_AkashiShopFilter": {
-      "task": "OpsiGeneral",
-      "group": "OpsiGeneral",
-      "arg": "AkashiShopFilter",
-      "dt": "filter",
-      "value": ["ActionPoint", "PurpleCoins"]
+    "HpControl_UseEmergencyRepair": {
+      "task": "Main",
+      "group": "HpControl",
+      "arg": "UseEmergencyRepair",
+      "dt": "checkbox",
+      "value": false
+    },
+    "HpControl_UseLowHpRetreat": {
+      "task": "Main",
+      "group": "HpControl",
+      "arg": "UseLowHpRetreat",
+      "dt": "checkbox",
+      "value": false
+    },
+    "HpControl_HpBalanceThreshold": {
+      "task": "Main",
+      "group": "HpControl",
+      "arg": "HpBalanceThreshold",
+      "dt": "input-float",
+      "value": 0.2
+    },
+    "HpControl_HpBalanceWeight": {
+      "task": "Main",
+      "group": "HpControl",
+      "arg": "HpBalanceWeight",
+      "dt": "input",
+      "value": "1000, 1000, 1000"
+    },
+    "HpControl_RepairUseSingleThreshold": {
+      "task": "Main",
+      "group": "HpControl",
+      "arg": "RepairUseSingleThreshold",
+      "dt": "input-float",
+      "value": 0.3
+    },
+    "HpControl_RepairUseMultiThreshold": {
+      "task": "Main",
+      "group": "HpControl",
+      "arg": "RepairUseMultiThreshold",
+      "dt": "input-float",
+      "value": 0.6
+    },
+    "HpControl_LowHpRetreatThreshold": {
+      "task": "Main",
+      "group": "HpControl",
+      "arg": "LowHpRetreatThreshold",
+      "dt": "input-float",
+      "value": 0.3
+    }
+  },
+  "card-EnemyPriority": {
+    "_info": {"group": "EnemyPriority", "arg": "_info"},
+    "EnemyPriority_EnemyScaleBalanceWeight": {
+      "task": "Main",
+      "group": "EnemyPriority",
+      "arg": "EnemyScaleBalanceWeight",
+      "dt": "select",
+      "value": "default_mode",
+      "option": ["default_mode", "S3_enemy_first", "S1_enemy_first"]
     }
   }
 }

@@ -1,9 +1,8 @@
 OpsiExplore:
-  group:
+  groups:
     - Scheduler
     - OpsiExplore
-  # "flatten" or "group"
-  display: flat
+  displays: flat
 
 #  default:
 #    Scheduler:
@@ -18,18 +17,19 @@ OpsiExplore:
 #  trigger_show: OpsiExplore.OpsiExplore.SpecialRadar == true
 
 OpsiDaily:
-  group:
+  groups:
     - Scheduler
     - OpsiDaily
-    - OpsiGeneral.OpsiGeneral
-  display: flat
+    - task: OpsiGeneral
+      group: OpsiGeneral
+  displays: flat
 
 OpsiGeneral:
-  group:
+  groups:
     - OpsiGeneral
 
 OpsiAshAssist:
-  group:
+  groups:
     - Scheduler
     - OpsiAshAssist
-  display: flat
+  displays: flat

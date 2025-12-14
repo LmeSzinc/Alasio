@@ -462,5 +462,679 @@
         "option_i18n": {"2": "2", "3": "3", "4": "4", "5": "5"}
       }
     }
+  },
+  "Submarine": {
+    "_info": {
+      "zh-CN": {"name": "Submarine", "help": ""},
+      "zh-TW": {"name": "Submarine", "help": ""},
+      "en-US": {"name": "Submarine", "help": ""},
+      "ja-JP": {"name": "Submarine", "help": ""}
+    },
+    "Fleet": {
+      "zh-CN": {
+        "name": "Submarine.Fleet",
+        "help": "",
+        "option_i18n": {"0": "0", "1": "1", "2": "2"}
+      },
+      "zh-TW": {
+        "name": "Submarine.Fleet",
+        "help": "",
+        "option_i18n": {"0": "0", "1": "1", "2": "2"}
+      },
+      "en-US": {
+        "name": "Submarine.Fleet",
+        "help": "",
+        "option_i18n": {"0": "0", "1": "1", "2": "2"}
+      },
+      "ja-JP": {
+        "name": "Submarine.Fleet",
+        "help": "",
+        "option_i18n": {"0": "0", "1": "1", "2": "2"}
+      }
+    },
+    "Mode": {
+      "zh-CN": {
+        "name": "Submarine.Mode",
+        "help": "",
+        "option_i18n": {
+          "do_not_use": "do_not_use",
+          "hunt_only": "hunt_only",
+          "boss_only": "boss_only",
+          "hunt_and_boss": "hunt_and_boss",
+          "every_combat": "every_combat"
+        }
+      },
+      "zh-TW": {
+        "name": "Submarine.Mode",
+        "help": "",
+        "option_i18n": {
+          "do_not_use": "do_not_use",
+          "hunt_only": "hunt_only",
+          "boss_only": "boss_only",
+          "hunt_and_boss": "hunt_and_boss",
+          "every_combat": "every_combat"
+        }
+      },
+      "en-US": {
+        "name": "Submarine.Mode",
+        "help": "",
+        "option_i18n": {
+          "do_not_use": "do_not_use",
+          "hunt_only": "hunt_only",
+          "boss_only": "boss_only",
+          "hunt_and_boss": "hunt_and_boss",
+          "every_combat": "every_combat"
+        }
+      },
+      "ja-JP": {
+        "name": "Submarine.Mode",
+        "help": "",
+        "option_i18n": {
+          "do_not_use": "do_not_use",
+          "hunt_only": "hunt_only",
+          "boss_only": "boss_only",
+          "hunt_and_boss": "hunt_and_boss",
+          "every_combat": "every_combat"
+        }
+      }
+    },
+    "AutoSearchMode": {
+      "zh-CN": {
+        "name": "Submarine.AutoSearchMode",
+        "help": "",
+        "option_i18n": {
+          "sub_standby": "sub_standby",
+          "sub_auto_call": "sub_auto_call"
+        }
+      },
+      "zh-TW": {
+        "name": "Submarine.AutoSearchMode",
+        "help": "",
+        "option_i18n": {
+          "sub_standby": "sub_standby",
+          "sub_auto_call": "sub_auto_call"
+        }
+      },
+      "en-US": {
+        "name": "Submarine.AutoSearchMode",
+        "help": "",
+        "option_i18n": {
+          "sub_standby": "sub_standby",
+          "sub_auto_call": "sub_auto_call"
+        }
+      },
+      "ja-JP": {
+        "name": "Submarine.AutoSearchMode",
+        "help": "",
+        "option_i18n": {
+          "sub_standby": "sub_standby",
+          "sub_auto_call": "sub_auto_call"
+        }
+      }
+    },
+    "DistanceToBoss": {
+      "zh-CN": {
+        "name": "Submarine.DistanceToBoss",
+        "help": "",
+        "option_i18n": {
+          "to_boss_position": "to_boss_position",
+          "1_grid_to_boss": "1_grid_to_boss",
+          "2_grid_to_boss": "2_grid_to_boss",
+          "use_open_ocean_support": "use_open_ocean_support"
+        }
+      },
+      "zh-TW": {
+        "name": "Submarine.DistanceToBoss",
+        "help": "",
+        "option_i18n": {
+          "to_boss_position": "to_boss_position",
+          "1_grid_to_boss": "1_grid_to_boss",
+          "2_grid_to_boss": "2_grid_to_boss",
+          "use_open_ocean_support": "use_open_ocean_support"
+        }
+      },
+      "en-US": {
+        "name": "Submarine.DistanceToBoss",
+        "help": "",
+        "option_i18n": {
+          "to_boss_position": "to_boss_position",
+          "1_grid_to_boss": "1_grid_to_boss",
+          "2_grid_to_boss": "2_grid_to_boss",
+          "use_open_ocean_support": "use_open_ocean_support"
+        }
+      },
+      "ja-JP": {
+        "name": "Submarine.DistanceToBoss",
+        "help": "",
+        "option_i18n": {
+          "to_boss_position": "to_boss_position",
+          "1_grid_to_boss": "1_grid_to_boss",
+          "2_grid_to_boss": "2_grid_to_boss",
+          "use_open_ocean_support": "use_open_ocean_support"
+        }
+      }
+    }
+  },
+  "Emotion": {
+    "_info": {
+      "zh-CN": {"name": "Emotion", "help": ""},
+      "zh-TW": {"name": "Emotion", "help": ""},
+      "en-US": {"name": "Emotion", "help": ""},
+      "ja-JP": {"name": "Emotion", "help": ""}
+    },
+    "Mode": {
+      "zh-CN": {
+        "name": "Emotion.Mode",
+        "help": "",
+        "option_i18n": {
+          "calculate": "calculate",
+          "ignore": "ignore",
+          "calculate_ignore": "calculate_ignore"
+        }
+      },
+      "zh-TW": {
+        "name": "Emotion.Mode",
+        "help": "",
+        "option_i18n": {
+          "calculate": "calculate",
+          "ignore": "ignore",
+          "calculate_ignore": "calculate_ignore"
+        }
+      },
+      "en-US": {
+        "name": "Emotion.Mode",
+        "help": "",
+        "option_i18n": {
+          "calculate": "calculate",
+          "ignore": "ignore",
+          "calculate_ignore": "calculate_ignore"
+        }
+      },
+      "ja-JP": {
+        "name": "Emotion.Mode",
+        "help": "",
+        "option_i18n": {
+          "calculate": "calculate",
+          "ignore": "ignore",
+          "calculate_ignore": "calculate_ignore"
+        }
+      }
+    },
+    "Fleet1Value": {
+      "zh-CN": {"name": "Emotion.Fleet1Value", "help": ""},
+      "zh-TW": {"name": "Emotion.Fleet1Value", "help": ""},
+      "en-US": {"name": "Emotion.Fleet1Value", "help": ""},
+      "ja-JP": {"name": "Emotion.Fleet1Value", "help": ""}
+    },
+    "Fleet1Record": {
+      "zh-CN": {"name": "Emotion.Fleet1Record", "help": ""},
+      "zh-TW": {"name": "Emotion.Fleet1Record", "help": ""},
+      "en-US": {"name": "Emotion.Fleet1Record", "help": ""},
+      "ja-JP": {"name": "Emotion.Fleet1Record", "help": ""}
+    },
+    "Fleet1Control": {
+      "zh-CN": {
+        "name": "Emotion.Fleet1Control",
+        "help": "",
+        "option_i18n": {
+          "keep_exp_bonus": "keep_exp_bonus",
+          "prevent_green_face": "prevent_green_face",
+          "prevent_yellow_face": "prevent_yellow_face",
+          "prevent_red_face": "prevent_red_face"
+        }
+      },
+      "zh-TW": {
+        "name": "Emotion.Fleet1Control",
+        "help": "",
+        "option_i18n": {
+          "keep_exp_bonus": "keep_exp_bonus",
+          "prevent_green_face": "prevent_green_face",
+          "prevent_yellow_face": "prevent_yellow_face",
+          "prevent_red_face": "prevent_red_face"
+        }
+      },
+      "en-US": {
+        "name": "Emotion.Fleet1Control",
+        "help": "",
+        "option_i18n": {
+          "keep_exp_bonus": "keep_exp_bonus",
+          "prevent_green_face": "prevent_green_face",
+          "prevent_yellow_face": "prevent_yellow_face",
+          "prevent_red_face": "prevent_red_face"
+        }
+      },
+      "ja-JP": {
+        "name": "Emotion.Fleet1Control",
+        "help": "",
+        "option_i18n": {
+          "keep_exp_bonus": "keep_exp_bonus",
+          "prevent_green_face": "prevent_green_face",
+          "prevent_yellow_face": "prevent_yellow_face",
+          "prevent_red_face": "prevent_red_face"
+        }
+      }
+    },
+    "Fleet1Recover": {
+      "zh-CN": {
+        "name": "Emotion.Fleet1Recover",
+        "help": "",
+        "option_i18n": {
+          "not_in_dormitory": "not_in_dormitory",
+          "dormitory_floor_1": "dormitory_floor_1",
+          "dormitory_floor_2": "dormitory_floor_2"
+        }
+      },
+      "zh-TW": {
+        "name": "Emotion.Fleet1Recover",
+        "help": "",
+        "option_i18n": {
+          "not_in_dormitory": "not_in_dormitory",
+          "dormitory_floor_1": "dormitory_floor_1",
+          "dormitory_floor_2": "dormitory_floor_2"
+        }
+      },
+      "en-US": {
+        "name": "Emotion.Fleet1Recover",
+        "help": "",
+        "option_i18n": {
+          "not_in_dormitory": "not_in_dormitory",
+          "dormitory_floor_1": "dormitory_floor_1",
+          "dormitory_floor_2": "dormitory_floor_2"
+        }
+      },
+      "ja-JP": {
+        "name": "Emotion.Fleet1Recover",
+        "help": "",
+        "option_i18n": {
+          "not_in_dormitory": "not_in_dormitory",
+          "dormitory_floor_1": "dormitory_floor_1",
+          "dormitory_floor_2": "dormitory_floor_2"
+        }
+      }
+    },
+    "Fleet1Oath": {
+      "zh-CN": {"name": "Emotion.Fleet1Oath", "help": ""},
+      "zh-TW": {"name": "Emotion.Fleet1Oath", "help": ""},
+      "en-US": {"name": "Emotion.Fleet1Oath", "help": ""},
+      "ja-JP": {"name": "Emotion.Fleet1Oath", "help": ""}
+    },
+    "Fleet2Value": {
+      "zh-CN": {"name": "Emotion.Fleet2Value", "help": ""},
+      "zh-TW": {"name": "Emotion.Fleet2Value", "help": ""},
+      "en-US": {"name": "Emotion.Fleet2Value", "help": ""},
+      "ja-JP": {"name": "Emotion.Fleet2Value", "help": ""}
+    },
+    "Fleet2Record": {
+      "zh-CN": {"name": "Emotion.Fleet2Record", "help": ""},
+      "zh-TW": {"name": "Emotion.Fleet2Record", "help": ""},
+      "en-US": {"name": "Emotion.Fleet2Record", "help": ""},
+      "ja-JP": {"name": "Emotion.Fleet2Record", "help": ""}
+    },
+    "Fleet2Control": {
+      "zh-CN": {
+        "name": "Emotion.Fleet2Control",
+        "help": "",
+        "option_i18n": {
+          "keep_exp_bonus": "keep_exp_bonus",
+          "prevent_green_face": "prevent_green_face",
+          "prevent_yellow_face": "prevent_yellow_face",
+          "prevent_red_face": "prevent_red_face"
+        }
+      },
+      "zh-TW": {
+        "name": "Emotion.Fleet2Control",
+        "help": "",
+        "option_i18n": {
+          "keep_exp_bonus": "keep_exp_bonus",
+          "prevent_green_face": "prevent_green_face",
+          "prevent_yellow_face": "prevent_yellow_face",
+          "prevent_red_face": "prevent_red_face"
+        }
+      },
+      "en-US": {
+        "name": "Emotion.Fleet2Control",
+        "help": "",
+        "option_i18n": {
+          "keep_exp_bonus": "keep_exp_bonus",
+          "prevent_green_face": "prevent_green_face",
+          "prevent_yellow_face": "prevent_yellow_face",
+          "prevent_red_face": "prevent_red_face"
+        }
+      },
+      "ja-JP": {
+        "name": "Emotion.Fleet2Control",
+        "help": "",
+        "option_i18n": {
+          "keep_exp_bonus": "keep_exp_bonus",
+          "prevent_green_face": "prevent_green_face",
+          "prevent_yellow_face": "prevent_yellow_face",
+          "prevent_red_face": "prevent_red_face"
+        }
+      }
+    },
+    "Fleet2Recover": {
+      "zh-CN": {
+        "name": "Emotion.Fleet2Recover",
+        "help": "",
+        "option_i18n": {
+          "not_in_dormitory": "not_in_dormitory",
+          "dormitory_floor_1": "dormitory_floor_1",
+          "dormitory_floor_2": "dormitory_floor_2"
+        }
+      },
+      "zh-TW": {
+        "name": "Emotion.Fleet2Recover",
+        "help": "",
+        "option_i18n": {
+          "not_in_dormitory": "not_in_dormitory",
+          "dormitory_floor_1": "dormitory_floor_1",
+          "dormitory_floor_2": "dormitory_floor_2"
+        }
+      },
+      "en-US": {
+        "name": "Emotion.Fleet2Recover",
+        "help": "",
+        "option_i18n": {
+          "not_in_dormitory": "not_in_dormitory",
+          "dormitory_floor_1": "dormitory_floor_1",
+          "dormitory_floor_2": "dormitory_floor_2"
+        }
+      },
+      "ja-JP": {
+        "name": "Emotion.Fleet2Recover",
+        "help": "",
+        "option_i18n": {
+          "not_in_dormitory": "not_in_dormitory",
+          "dormitory_floor_1": "dormitory_floor_1",
+          "dormitory_floor_2": "dormitory_floor_2"
+        }
+      }
+    },
+    "Fleet2Oath": {
+      "zh-CN": {"name": "Emotion.Fleet2Oath", "help": ""},
+      "zh-TW": {"name": "Emotion.Fleet2Oath", "help": ""},
+      "en-US": {"name": "Emotion.Fleet2Oath", "help": ""},
+      "ja-JP": {"name": "Emotion.Fleet2Oath", "help": ""}
+    }
+  },
+  "HpControl": {
+    "_info": {
+      "zh-CN": {"name": "HpControl", "help": ""},
+      "zh-TW": {"name": "HpControl", "help": ""},
+      "en-US": {"name": "HpControl", "help": ""},
+      "ja-JP": {"name": "HpControl", "help": ""}
+    },
+    "UseHpBalance": {
+      "zh-CN": {"name": "HpControl.UseHpBalance", "help": ""},
+      "zh-TW": {"name": "HpControl.UseHpBalance", "help": ""},
+      "en-US": {"name": "HpControl.UseHpBalance", "help": ""},
+      "ja-JP": {"name": "HpControl.UseHpBalance", "help": ""}
+    },
+    "UseEmergencyRepair": {
+      "zh-CN": {"name": "HpControl.UseEmergencyRepair", "help": ""},
+      "zh-TW": {"name": "HpControl.UseEmergencyRepair", "help": ""},
+      "en-US": {"name": "HpControl.UseEmergencyRepair", "help": ""},
+      "ja-JP": {"name": "HpControl.UseEmergencyRepair", "help": ""}
+    },
+    "UseLowHpRetreat": {
+      "zh-CN": {"name": "HpControl.UseLowHpRetreat", "help": ""},
+      "zh-TW": {"name": "HpControl.UseLowHpRetreat", "help": ""},
+      "en-US": {"name": "HpControl.UseLowHpRetreat", "help": ""},
+      "ja-JP": {"name": "HpControl.UseLowHpRetreat", "help": ""}
+    },
+    "HpBalanceThreshold": {
+      "zh-CN": {"name": "HpControl.HpBalanceThreshold", "help": ""},
+      "zh-TW": {"name": "HpControl.HpBalanceThreshold", "help": ""},
+      "en-US": {"name": "HpControl.HpBalanceThreshold", "help": ""},
+      "ja-JP": {"name": "HpControl.HpBalanceThreshold", "help": ""}
+    },
+    "HpBalanceWeight": {
+      "zh-CN": {"name": "HpControl.HpBalanceWeight", "help": ""},
+      "zh-TW": {"name": "HpControl.HpBalanceWeight", "help": ""},
+      "en-US": {"name": "HpControl.HpBalanceWeight", "help": ""},
+      "ja-JP": {"name": "HpControl.HpBalanceWeight", "help": ""}
+    },
+    "RepairUseSingleThreshold": {
+      "zh-CN": {"name": "HpControl.RepairUseSingleThreshold", "help": ""},
+      "zh-TW": {"name": "HpControl.RepairUseSingleThreshold", "help": ""},
+      "en-US": {"name": "HpControl.RepairUseSingleThreshold", "help": ""},
+      "ja-JP": {"name": "HpControl.RepairUseSingleThreshold", "help": ""}
+    },
+    "RepairUseMultiThreshold": {
+      "zh-CN": {"name": "HpControl.RepairUseMultiThreshold", "help": ""},
+      "zh-TW": {"name": "HpControl.RepairUseMultiThreshold", "help": ""},
+      "en-US": {"name": "HpControl.RepairUseMultiThreshold", "help": ""},
+      "ja-JP": {"name": "HpControl.RepairUseMultiThreshold", "help": ""}
+    },
+    "LowHpRetreatThreshold": {
+      "zh-CN": {"name": "HpControl.LowHpRetreatThreshold", "help": ""},
+      "zh-TW": {"name": "HpControl.LowHpRetreatThreshold", "help": ""},
+      "en-US": {"name": "HpControl.LowHpRetreatThreshold", "help": ""},
+      "ja-JP": {"name": "HpControl.LowHpRetreatThreshold", "help": ""}
+    }
+  },
+  "EnemyPriority": {
+    "_info": {
+      "zh-CN": {"name": "EnemyPriority", "help": ""},
+      "zh-TW": {"name": "EnemyPriority", "help": ""},
+      "en-US": {"name": "EnemyPriority", "help": ""},
+      "ja-JP": {"name": "EnemyPriority", "help": ""}
+    },
+    "EnemyScaleBalanceWeight": {
+      "zh-CN": {
+        "name": "EnemyPriority.EnemyScaleBalanceWeight",
+        "help": "",
+        "option_i18n": {
+          "default_mode": "default_mode",
+          "S3_enemy_first": "S3_enemy_first",
+          "S1_enemy_first": "S1_enemy_first"
+        }
+      },
+      "zh-TW": {
+        "name": "EnemyPriority.EnemyScaleBalanceWeight",
+        "help": "",
+        "option_i18n": {
+          "default_mode": "default_mode",
+          "S3_enemy_first": "S3_enemy_first",
+          "S1_enemy_first": "S1_enemy_first"
+        }
+      },
+      "en-US": {
+        "name": "EnemyPriority.EnemyScaleBalanceWeight",
+        "help": "",
+        "option_i18n": {
+          "default_mode": "default_mode",
+          "S3_enemy_first": "S3_enemy_first",
+          "S1_enemy_first": "S1_enemy_first"
+        }
+      },
+      "ja-JP": {
+        "name": "EnemyPriority.EnemyScaleBalanceWeight",
+        "help": "",
+        "option_i18n": {
+          "default_mode": "default_mode",
+          "S3_enemy_first": "S3_enemy_first",
+          "S1_enemy_first": "S1_enemy_first"
+        }
+      }
+    }
+  },
+  "GemsFarming": {
+    "_info": {
+      "zh-CN": {"name": "GemsFarming", "help": ""},
+      "zh-TW": {"name": "GemsFarming", "help": ""},
+      "en-US": {"name": "GemsFarming", "help": ""},
+      "ja-JP": {"name": "GemsFarming", "help": ""}
+    },
+    "ChangeFlagship": {
+      "zh-CN": {
+        "name": "GemsFarming.ChangeFlagship",
+        "help": "",
+        "option_i18n": {
+          "ship": "ship",
+          "ship_equip": "ship_equip"
+        }
+      },
+      "zh-TW": {
+        "name": "GemsFarming.ChangeFlagship",
+        "help": "",
+        "option_i18n": {
+          "ship": "ship",
+          "ship_equip": "ship_equip"
+        }
+      },
+      "en-US": {
+        "name": "GemsFarming.ChangeFlagship",
+        "help": "",
+        "option_i18n": {
+          "ship": "ship",
+          "ship_equip": "ship_equip"
+        }
+      },
+      "ja-JP": {
+        "name": "GemsFarming.ChangeFlagship",
+        "help": "",
+        "option_i18n": {
+          "ship": "ship",
+          "ship_equip": "ship_equip"
+        }
+      }
+    },
+    "CommonCV": {
+      "zh-CN": {
+        "name": "GemsFarming.CommonCV",
+        "help": "",
+        "option_i18n": {
+          "any": "any",
+          "langley": "langley",
+          "bogue": "bogue",
+          "ranger": "ranger",
+          "hermes": "hermes"
+        }
+      },
+      "zh-TW": {
+        "name": "GemsFarming.CommonCV",
+        "help": "",
+        "option_i18n": {
+          "any": "any",
+          "langley": "langley",
+          "bogue": "bogue",
+          "ranger": "ranger",
+          "hermes": "hermes"
+        }
+      },
+      "en-US": {
+        "name": "GemsFarming.CommonCV",
+        "help": "",
+        "option_i18n": {
+          "any": "any",
+          "langley": "langley",
+          "bogue": "bogue",
+          "ranger": "ranger",
+          "hermes": "hermes"
+        }
+      },
+      "ja-JP": {
+        "name": "GemsFarming.CommonCV",
+        "help": "",
+        "option_i18n": {
+          "any": "any",
+          "langley": "langley",
+          "bogue": "bogue",
+          "ranger": "ranger",
+          "hermes": "hermes"
+        }
+      }
+    },
+    "ChangeVanguard": {
+      "zh-CN": {
+        "name": "GemsFarming.ChangeVanguard",
+        "help": "",
+        "option_i18n": {
+          "disabled": "disabled",
+          "ship": "ship",
+          "ship_equip": "ship_equip"
+        }
+      },
+      "zh-TW": {
+        "name": "GemsFarming.ChangeVanguard",
+        "help": "",
+        "option_i18n": {
+          "disabled": "disabled",
+          "ship": "ship",
+          "ship_equip": "ship_equip"
+        }
+      },
+      "en-US": {
+        "name": "GemsFarming.ChangeVanguard",
+        "help": "",
+        "option_i18n": {
+          "disabled": "disabled",
+          "ship": "ship",
+          "ship_equip": "ship_equip"
+        }
+      },
+      "ja-JP": {
+        "name": "GemsFarming.ChangeVanguard",
+        "help": "",
+        "option_i18n": {
+          "disabled": "disabled",
+          "ship": "ship",
+          "ship_equip": "ship_equip"
+        }
+      }
+    },
+    "CommonDD": {
+      "zh-CN": {
+        "name": "GemsFarming.CommonDD",
+        "help": "",
+        "option_i18n": {
+          "any": "any",
+          "favourite": "favourite",
+          "aulick_or_foote": "aulick_or_foote",
+          "cassin_or_downes": "cassin_or_downes",
+          "z20_or_z21": "z20_or_z21"
+        }
+      },
+      "zh-TW": {
+        "name": "GemsFarming.CommonDD",
+        "help": "",
+        "option_i18n": {
+          "any": "any",
+          "favourite": "favourite",
+          "aulick_or_foote": "aulick_or_foote",
+          "cassin_or_downes": "cassin_or_downes",
+          "z20_or_z21": "z20_or_z21"
+        }
+      },
+      "en-US": {
+        "name": "GemsFarming.CommonDD",
+        "help": "",
+        "option_i18n": {
+          "any": "any",
+          "favourite": "favourite",
+          "aulick_or_foote": "aulick_or_foote",
+          "cassin_or_downes": "cassin_or_downes",
+          "z20_or_z21": "z20_or_z21"
+        }
+      },
+      "ja-JP": {
+        "name": "GemsFarming.CommonDD",
+        "help": "",
+        "option_i18n": {
+          "any": "any",
+          "favourite": "favourite",
+          "aulick_or_foote": "aulick_or_foote",
+          "cassin_or_downes": "cassin_or_downes",
+          "z20_or_z21": "z20_or_z21"
+        }
+      }
+    },
+    "CommissionLimit": {
+      "zh-CN": {"name": "GemsFarming.CommissionLimit", "help": ""},
+      "zh-TW": {"name": "GemsFarming.CommissionLimit", "help": ""},
+      "en-US": {"name": "GemsFarming.CommissionLimit", "help": ""},
+      "ja-JP": {"name": "GemsFarming.CommissionLimit", "help": ""}
+    }
   }
 }

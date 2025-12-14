@@ -1,66 +1,89 @@
 {
+  "Alas": {
+    "group": {
+      "Retirement": {"file": "alas/alas_model.py", "cls": "Retirement", "task": "Alas"},
+      "OneClickRetire": {"file": "alas/alas_model.py", "cls": "OneClickRetire", "task": "Alas"},
+      "Enhance": {"file": "alas/alas_model.py", "cls": "Enhance", "task": "Alas"},
+      "OldRetire": {"file": "alas/alas_model.py", "cls": "OldRetire", "task": "Alas"},
+      "DropRecord": {"file": "alas/alas_model.py", "cls": "DropRecord", "task": "Alas"}
+    },
+    "config": {"task": ["Alas"], "group": []}
+  },
+  "Device": {
+    "group": {
+      "Emulator": {"file": "alasio/device_model.py", "cls": "Emulator", "task": "Device"},
+      "EmulatorInfo": {"file": "alasio/device_model.py", "cls": "EmulatorInfo", "task": "Device"},
+      "Error": {"file": "alasio/device_model.py", "cls": "Error", "task": "Device"},
+      "Optimization": {"file": "alasio/device_model.py", "cls": "Optimization", "task": "Device"}
+    },
+    "config": {"task": ["Device"], "group": []}
+  },
+  "RestartDevice": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerStatic", "task": "RestartDevice"}
+    },
+    "config": {"task": ["RestartDevice"], "group": []}
+  },
+  "RestartGame": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerStatic", "task": "RestartGame"}
+    },
+    "config": {"task": ["RestartGame"], "group": []}
+  },
   "Main": {
     "group": {
-      "Scheduler": {"file": "scheduler/scheduler_model.py", "cls": "Scheduler", "task": "Main"},
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "Scheduler", "task": "Main"},
       "Campaign": {"file": "main/main_model.py", "cls": "Campaign", "task": "Main"},
+      "StopCondition": {"file": "main/main_model.py", "cls": "StopCondition", "task": "Main"},
       "Fleet1": {"file": "main/main_model.py", "cls": "Fleet1", "task": "Main"},
-      "Fleet2": {"file": "main/main_model.py", "cls": "Fleet2", "task": "Main"}
+      "Fleet2": {"file": "main/main_model.py", "cls": "Fleet2", "task": "Main"},
+      "Submarine": {"file": "main/main_model.py", "cls": "Submarine", "task": "Main"},
+      "Emotion": {"file": "main/main_model.py", "cls": "Emotion", "task": "Main"},
+      "HpControl": {"file": "main/main_model.py", "cls": "HpControl", "task": "Main"},
+      "EnemyPriority": {"file": "main/main_model.py", "cls": "EnemyPriority", "task": "Main"}
     },
-    "config": {
-      "task": ["Main"],
-      "group": []
-    }
-  },
-  "Main2": {
-    "group": {
-      "Scheduler": {"file": "scheduler/scheduler_model.py", "cls": "Scheduler", "task": "Main2"},
-      "Campaign": {"file": "main/main_model.py", "cls": "Campaign", "task": "Main2"},
-      "Fleet1": {"file": "main/main_model.py", "cls": "Fleet1", "task": "Main2"},
-      "Fleet2": {"file": "main/main_model.py", "cls": "Fleet2", "task": "Main2"}
-    },
-    "config": {
-      "task": ["Main2"],
-      "group": []
-    }
+    "config": {"task": ["Main"], "group": []}
   },
   "OpsiExplore": {
     "group": {
-      "Scheduler": {"file": "scheduler/scheduler_model.py", "cls": "Scheduler", "task": "OpsiExplore"},
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "Scheduler", "task": "OpsiExplore"},
       "OpsiExplore": {"file": "opsi/opsi_model.py", "cls": "OpsiExplore", "task": "OpsiExplore"}
     },
-    "config": {
-      "task": ["OpsiExplore"],
-      "group": []
-    }
+    "config": {"task": ["OpsiExplore"], "group": []}
   },
   "OpsiDaily": {
     "group": {
-      "Scheduler": {"file": "scheduler/scheduler_model.py", "cls": "Scheduler", "task": "OpsiDaily"},
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "Scheduler", "task": "OpsiDaily"},
       "OpsiDaily": {"file": "opsi/opsi_model.py", "cls": "OpsiDaily", "task": "OpsiDaily"},
       "OpsiGeneral": {"file": "opsi/opsi_model.py", "cls": "OpsiGeneral", "task": "OpsiGeneral"}
     },
-    "config": {
-      "task": ["OpsiDaily", "OpsiGeneral"],
-      "group": []
-    }
+    "config": {"task": ["OpsiDaily", "OpsiGeneral"], "group": []}
   },
   "OpsiGeneral": {
     "group": {
       "OpsiGeneral": {"file": "opsi/opsi_model.py", "cls": "OpsiGeneral", "task": "OpsiGeneral"}
     },
-    "config": {
-      "task": ["OpsiGeneral"],
-      "group": []
-    }
+    "config": {"task": ["OpsiGeneral"], "group": []}
   },
   "OpsiAshAssist": {
     "group": {
-      "Scheduler": {"file": "scheduler/scheduler_model.py", "cls": "Scheduler", "task": "OpsiAshAssist"},
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "Scheduler", "task": "OpsiAshAssist"},
       "OpsiAshAssist": {"file": "opsi/opsi_model.py", "cls": "OpsiAshAssist", "task": "OpsiAshAssist"}
     },
-    "config": {
-      "task": ["OpsiAshAssist"],
-      "group": []
-    }
+    "config": {"task": ["OpsiAshAssist"], "group": []}
+  },
+  "_global_bind": {
+    "group": {
+      "Retirement": {"file": "alas/alas_model.py", "cls": "Retirement", "task": "Alas"},
+      "OneClickRetire": {"file": "alas/alas_model.py", "cls": "OneClickRetire", "task": "Alas"},
+      "Enhance": {"file": "alas/alas_model.py", "cls": "Enhance", "task": "Alas"},
+      "OldRetire": {"file": "alas/alas_model.py", "cls": "OldRetire", "task": "Alas"},
+      "DropRecord": {"file": "alas/alas_model.py", "cls": "DropRecord", "task": "Alas"},
+      "Emulator": {"file": "alasio/device_model.py", "cls": "Emulator", "task": "Device"},
+      "EmulatorInfo": {"file": "alasio/device_model.py", "cls": "EmulatorInfo", "task": "Device"},
+      "Error": {"file": "alasio/device_model.py", "cls": "Error", "task": "Device"},
+      "Optimization": {"file": "alasio/device_model.py", "cls": "Optimization", "task": "Device"}
+    },
+    "config": {"task": ["Alas", "Device"], "group": []}
   }
 }

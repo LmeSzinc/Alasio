@@ -1,0 +1,85 @@
+Emulator:
+  args:
+    Serial: auto
+    PackageName:
+      value: auto
+      option: [ auto, ]
+    ServerName:
+      value: disabled
+      option: [ disabled, ]
+    ScreenshotMethod:
+      value: auto
+      option: [
+        auto,
+        ADB,
+        ADB_nc,
+        uiautomator2,
+        aScreenCap,
+        aScreenCap_nc,
+        DroidCast,
+        DroidCast_raw,
+        nemu_ipc,
+        ldopengl,
+      ]
+    ControlMethod:
+      value: MaaTouch
+      option: [
+        ADB,
+        uiautomator2,
+        minitouch,
+        Hermit,
+        MaaTouch,
+      ]
+    ScreenshotDedithering: false
+    AdbRestart: false
+
+EmulatorInfo:
+  args:
+    Emulator:
+      value: auto
+      option: [
+        auto,
+        NoxPlayer,
+        NoxPlayer64,
+        BlueStacks4,
+        BlueStacks5,
+        BlueStacks4HyperV,
+        BlueStacks5HyperV,
+        LDPlayer3,
+        LDPlayer4,
+        LDPlayer9,
+        MuMuPlayer,
+        MuMuPlayerX,
+        MuMuPlayer12,
+        MEmuPlayer,
+      ]
+    Name:
+      value: ""
+      dt: textarea
+    Path:
+      value: ""
+      dt: textarea
+
+Error:
+  args:
+    HandleError: true
+    SaveError: true
+    OnePushConfig:
+      dt: textarea
+      mode: yaml
+      value: 'provider: null'
+    ScreenshotLength: 1
+
+Optimization:
+  args:
+    ScreenshotInterval: 0.3
+    CombatScreenshotInterval: 1.0
+    TaskHoardingDuration: 0
+    WhenTaskQueueEmpty:
+      value: goto_main
+      option: [ stay_there, goto_main, close_game ]
+
+# Empty group to create group._info
+RestartDevice:
+
+RestartGame:

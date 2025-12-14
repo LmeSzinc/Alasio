@@ -1,22 +1,21 @@
 Main:
-  group:
+  groups:
     - Scheduler
     - Campaign
+    - StopCondition
     - Fleet1
     - Fleet2
-  display:
+    - Submarine
+    - Emotion
+    - HpControl
+    - EnemyPriority
+  displays:
     - Scheduler
     - Campaign
-    - [ inforef:Fleet, Fleet1, Fleet2 ]
-
-Main2:
-  group:
-    - Scheduler
-    - Campaign
-    - Fleet1
-    - Fleet2
-  display: group
-
-DisplayOpsiGeneral:
-  display:
-    - OpsiGeneral.OpsiGeneral
+    - StopCondition
+    - info: Fleet
+      groups: [ Fleet1, Fleet2 ]
+    - Submarine
+    - Emotion
+    - HpControl
+    - EnemyPriority

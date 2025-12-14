@@ -1,0 +1,500 @@
+{
+  "DropRecord": {
+    "_info": {
+      "zh-CN": {"name": "DropRecord", "help": ""},
+      "zh-TW": {"name": "DropRecord", "help": ""},
+      "en-US": {"name": "DropRecord", "help": ""},
+      "ja-JP": {"name": "DropRecord", "help": ""}
+    },
+    "SaveFolder": {
+      "zh-CN": {"name": "DropRecord.SaveFolder", "help": ""},
+      "zh-TW": {"name": "DropRecord.SaveFolder", "help": ""},
+      "en-US": {"name": "DropRecord.SaveFolder", "help": ""},
+      "ja-JP": {"name": "DropRecord.SaveFolder", "help": ""}
+    },
+    "AzurStatsID": {
+      "zh-CN": {"name": "DropRecord.AzurStatsID", "help": ""},
+      "zh-TW": {"name": "DropRecord.AzurStatsID", "help": ""},
+      "en-US": {"name": "DropRecord.AzurStatsID", "help": ""},
+      "ja-JP": {"name": "DropRecord.AzurStatsID", "help": ""}
+    },
+    "API": {
+      "zh-CN": {
+        "name": "DropRecord.API",
+        "help": "",
+        "option_i18n": {
+          "default": "default",
+          "cn_gz_reverse_proxy": "cn_gz_reverse_proxy"
+        }
+      },
+      "zh-TW": {
+        "name": "DropRecord.API",
+        "help": "",
+        "option_i18n": {
+          "default": "default",
+          "cn_gz_reverse_proxy": "cn_gz_reverse_proxy"
+        }
+      },
+      "en-US": {
+        "name": "DropRecord.API",
+        "help": "",
+        "option_i18n": {
+          "default": "default",
+          "cn_gz_reverse_proxy": "cn_gz_reverse_proxy"
+        }
+      },
+      "ja-JP": {
+        "name": "DropRecord.API",
+        "help": "",
+        "option_i18n": {
+          "default": "default",
+          "cn_gz_reverse_proxy": "cn_gz_reverse_proxy"
+        }
+      }
+    },
+    "ResearchRecord": {
+      "zh-CN": {
+        "name": "DropRecord.ResearchRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "zh-TW": {
+        "name": "DropRecord.ResearchRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "en-US": {
+        "name": "DropRecord.ResearchRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "ja-JP": {
+        "name": "DropRecord.ResearchRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      }
+    },
+    "CommissionRecord": {
+      "zh-CN": {
+        "name": "DropRecord.CommissionRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "zh-TW": {
+        "name": "DropRecord.CommissionRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "en-US": {
+        "name": "DropRecord.CommissionRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "ja-JP": {
+        "name": "DropRecord.CommissionRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      }
+    },
+    "CombatRecord": {
+      "zh-CN": {
+        "name": "DropRecord.CombatRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save"
+        }
+      },
+      "zh-TW": {
+        "name": "DropRecord.CombatRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save"
+        }
+      },
+      "en-US": {
+        "name": "DropRecord.CombatRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save"
+        }
+      },
+      "ja-JP": {
+        "name": "DropRecord.CombatRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save"
+        }
+      }
+    },
+    "OpsiRecord": {
+      "zh-CN": {
+        "name": "DropRecord.OpsiRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "zh-TW": {
+        "name": "DropRecord.OpsiRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "en-US": {
+        "name": "DropRecord.OpsiRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "ja-JP": {
+        "name": "DropRecord.OpsiRecord",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      }
+    },
+    "MeowfficerBuy": {
+      "zh-CN": {
+        "name": "DropRecord.MeowfficerBuy",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save"
+        }
+      },
+      "zh-TW": {
+        "name": "DropRecord.MeowfficerBuy",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save"
+        }
+      },
+      "en-US": {
+        "name": "DropRecord.MeowfficerBuy",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save"
+        }
+      },
+      "ja-JP": {
+        "name": "DropRecord.MeowfficerBuy",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save"
+        }
+      }
+    },
+    "MeowfficerTalent": {
+      "zh-CN": {
+        "name": "DropRecord.MeowfficerTalent",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "zh-TW": {
+        "name": "DropRecord.MeowfficerTalent",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "en-US": {
+        "name": "DropRecord.MeowfficerTalent",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      },
+      "ja-JP": {
+        "name": "DropRecord.MeowfficerTalent",
+        "help": "",
+        "option_i18n": {
+          "do_not": "do_not",
+          "save": "save",
+          "upload": "upload",
+          "save_and_upload": "save_and_upload"
+        }
+      }
+    }
+  },
+  "Retirement": {
+    "_info": {
+      "zh-CN": {"name": "Retirement", "help": ""},
+      "zh-TW": {"name": "Retirement", "help": ""},
+      "en-US": {"name": "Retirement", "help": ""},
+      "ja-JP": {"name": "Retirement", "help": ""}
+    },
+    "RetireMode": {
+      "zh-CN": {
+        "name": "Retirement.RetireMode",
+        "help": "",
+        "option_i18n": {
+          "one_click_retire": "one_click_retire",
+          "enhance": "enhance",
+          "old_retire": "old_retire"
+        }
+      },
+      "zh-TW": {
+        "name": "Retirement.RetireMode",
+        "help": "",
+        "option_i18n": {
+          "one_click_retire": "one_click_retire",
+          "enhance": "enhance",
+          "old_retire": "old_retire"
+        }
+      },
+      "en-US": {
+        "name": "Retirement.RetireMode",
+        "help": "",
+        "option_i18n": {
+          "one_click_retire": "one_click_retire",
+          "enhance": "enhance",
+          "old_retire": "old_retire"
+        }
+      },
+      "ja-JP": {
+        "name": "Retirement.RetireMode",
+        "help": "",
+        "option_i18n": {
+          "one_click_retire": "one_click_retire",
+          "enhance": "enhance",
+          "old_retire": "old_retire"
+        }
+      }
+    }
+  },
+  "OneClickRetire": {
+    "_info": {
+      "zh-CN": {"name": "OneClickRetire", "help": ""},
+      "zh-TW": {"name": "OneClickRetire", "help": ""},
+      "en-US": {"name": "OneClickRetire", "help": ""},
+      "ja-JP": {"name": "OneClickRetire", "help": ""}
+    },
+    "KeepLimitBreak": {
+      "zh-CN": {
+        "name": "OneClickRetire.KeepLimitBreak",
+        "help": "",
+        "option_i18n": {
+          "keep_limit_break": "keep_limit_break",
+          "do_not_keep": "do_not_keep"
+        }
+      },
+      "zh-TW": {
+        "name": "OneClickRetire.KeepLimitBreak",
+        "help": "",
+        "option_i18n": {
+          "keep_limit_break": "keep_limit_break",
+          "do_not_keep": "do_not_keep"
+        }
+      },
+      "en-US": {
+        "name": "OneClickRetire.KeepLimitBreak",
+        "help": "",
+        "option_i18n": {
+          "keep_limit_break": "keep_limit_break",
+          "do_not_keep": "do_not_keep"
+        }
+      },
+      "ja-JP": {
+        "name": "OneClickRetire.KeepLimitBreak",
+        "help": "",
+        "option_i18n": {
+          "keep_limit_break": "keep_limit_break",
+          "do_not_keep": "do_not_keep"
+        }
+      }
+    }
+  },
+  "Enhance": {
+    "_info": {
+      "zh-CN": {"name": "Enhance", "help": ""},
+      "zh-TW": {"name": "Enhance", "help": ""},
+      "en-US": {"name": "Enhance", "help": ""},
+      "ja-JP": {"name": "Enhance", "help": ""}
+    },
+    "ShipToEnhance": {
+      "zh-CN": {
+        "name": "Enhance.ShipToEnhance",
+        "help": "",
+        "option_i18n": {
+          "all": "all",
+          "favourite": "favourite"
+        }
+      },
+      "zh-TW": {
+        "name": "Enhance.ShipToEnhance",
+        "help": "",
+        "option_i18n": {
+          "all": "all",
+          "favourite": "favourite"
+        }
+      },
+      "en-US": {
+        "name": "Enhance.ShipToEnhance",
+        "help": "",
+        "option_i18n": {
+          "all": "all",
+          "favourite": "favourite"
+        }
+      },
+      "ja-JP": {
+        "name": "Enhance.ShipToEnhance",
+        "help": "",
+        "option_i18n": {
+          "all": "all",
+          "favourite": "favourite"
+        }
+      }
+    },
+    "Filter": {
+      "zh-CN": {"name": "Enhance.Filter", "help": ""},
+      "zh-TW": {"name": "Enhance.Filter", "help": ""},
+      "en-US": {"name": "Enhance.Filter", "help": ""},
+      "ja-JP": {"name": "Enhance.Filter", "help": ""}
+    },
+    "CheckPerCategory": {
+      "zh-CN": {"name": "Enhance.CheckPerCategory", "help": ""},
+      "zh-TW": {"name": "Enhance.CheckPerCategory", "help": ""},
+      "en-US": {"name": "Enhance.CheckPerCategory", "help": ""},
+      "ja-JP": {"name": "Enhance.CheckPerCategory", "help": ""}
+    }
+  },
+  "OldRetire": {
+    "_info": {
+      "zh-CN": {"name": "OldRetire", "help": ""},
+      "zh-TW": {"name": "OldRetire", "help": ""},
+      "en-US": {"name": "OldRetire", "help": ""},
+      "ja-JP": {"name": "OldRetire", "help": ""}
+    },
+    "N": {
+      "zh-CN": {"name": "OldRetire.N", "help": ""},
+      "zh-TW": {"name": "OldRetire.N", "help": ""},
+      "en-US": {"name": "OldRetire.N", "help": ""},
+      "ja-JP": {"name": "OldRetire.N", "help": ""}
+    },
+    "R": {
+      "zh-CN": {"name": "OldRetire.R", "help": ""},
+      "zh-TW": {"name": "OldRetire.R", "help": ""},
+      "en-US": {"name": "OldRetire.R", "help": ""},
+      "ja-JP": {"name": "OldRetire.R", "help": ""}
+    },
+    "SR": {
+      "zh-CN": {"name": "OldRetire.SR", "help": ""},
+      "zh-TW": {"name": "OldRetire.SR", "help": ""},
+      "en-US": {"name": "OldRetire.SR", "help": ""},
+      "ja-JP": {"name": "OldRetire.SR", "help": ""}
+    },
+    "SSR": {
+      "zh-CN": {"name": "OldRetire.SSR", "help": ""},
+      "zh-TW": {"name": "OldRetire.SSR", "help": ""},
+      "en-US": {"name": "OldRetire.SSR", "help": ""},
+      "ja-JP": {"name": "OldRetire.SSR", "help": ""}
+    },
+    "RetireAmount": {
+      "zh-CN": {
+        "name": "OldRetire.RetireAmount",
+        "help": "",
+        "option_i18n": {
+          "retire_all": "retire_all",
+          "retire_10": "retire_10"
+        }
+      },
+      "zh-TW": {
+        "name": "OldRetire.RetireAmount",
+        "help": "",
+        "option_i18n": {
+          "retire_all": "retire_all",
+          "retire_10": "retire_10"
+        }
+      },
+      "en-US": {
+        "name": "OldRetire.RetireAmount",
+        "help": "",
+        "option_i18n": {
+          "retire_all": "retire_all",
+          "retire_10": "retire_10"
+        }
+      },
+      "ja-JP": {
+        "name": "OldRetire.RetireAmount",
+        "help": "",
+        "option_i18n": {
+          "retire_all": "retire_all",
+          "retire_10": "retire_10"
+        }
+      }
+    }
+  }
+}

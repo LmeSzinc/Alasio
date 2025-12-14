@@ -24,5 +24,37 @@
       "en-US": {"name": "Scheduler.ServerUpdate", "help": ""},
       "ja-JP": {"name": "Scheduler.ServerUpdate", "help": ""}
     }
+  },
+  "SchedulerStatic": {
+    "Enable": {
+      "zh-CN": {
+        "name": "SchedulerStatic.Enable",
+        "help": "",
+        "option_i18n": {
+          "True": "[zh-CN]True"
+        }
+      },
+      "zh-TW": {
+        "name": "SchedulerStatic.Enable",
+        "help": "",
+        "option_i18n": {
+          "True": "[zh-TW]True"
+        }
+      },
+      "en-US": {
+        "name": "SchedulerStatic.Enable",
+        "help": "",
+        "option_i18n": {
+          "True": "[en-US]True"
+        }
+      },
+      "ja-JP": {
+        "name": "SchedulerStatic.Enable",
+        "help": "",
+        "option_i18n": {
+          "True": "[ja-JP]True"
+        }
+      }
+    }
   }
 }
