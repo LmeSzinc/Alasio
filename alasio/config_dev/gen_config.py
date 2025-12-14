@@ -76,20 +76,6 @@ class ConfigGenerator(ParseArgs, ParseTasks):
     """
 
     @cached_property
-    def dict_group2class(self):
-        """
-        A dict that convert group name to class name of msgspec model.
-        class name is default to group name but may vary when having "override", "default", etc
-
-        Returns:
-            dict[str, str]:
-        """
-        data = {}
-        for group_name, _ in deep_iter_depth1(self.args_data):
-            data[group_name] = group_name
-        return data
-
-    @cached_property
     def model_gen(self):
         """
         Generate msgspec models
@@ -108,15 +94,13 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         gen.Empty()
         gen.CommentCodeGen('alasio.config.dev.configgen')
         has_content = False
-        for group_name, arg_data in deep_iter_depth1(self.args_data):
+        for group, arg_data in self.args_data.items():
             # Skip empty group
             if not arg_data:
                 continue
             has_content = True
-            # args_data and dict_group2class should have the same keys
-            class_name = self.dict_group2class[group_name]
             # Define model class
-            with gen.Class(class_name, inherit='m.Struct, omit_defaults=True'):
+            with gen.Class(group.class_name, inherit='m.Struct, omit_defaults=True'):
                 for arg_name, arg in deep_iter_depth1(arg_data):
                     arg: ArgData
                     # Expand list
@@ -256,7 +240,8 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         """
         _ = self._i18n_old
         new = {}
-        for group_name, arg_data in deep_iter_depth1(self.args_data):
+        for group, arg_data in self.args_data.items():
+            group_name = group.name
             # {group}._info
             row = self._update_info_i18n(group_name, '_info')
             deep_set(new, [group_name, '_info'], row)

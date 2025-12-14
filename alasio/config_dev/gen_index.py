@@ -362,7 +362,7 @@ class IndexGenerator(CrossNavGenerator):
         gen.Empty()
         gen.FromImport('alasio.config.base', 'AlasioConfigBase')
         gen.FromImport('const', 'entry')
-        gen.Empty(2)
+        gen.Empty(1)
 
         # TYPE_CHECKING block - imports only used for type hints
         gen.add('if typing.TYPE_CHECKING:')
@@ -391,11 +391,14 @@ class IndexGenerator(CrossNavGenerator):
                 gen.Comment(nav_name)
 
                 # Generate type hints for each group (keep definition order)
-                for group_name, group_data in config.args_data.items():
+                for group, group_data in config.args_data.items():
                     # skip groups without args (inforef groups)
                     if not group_data:
                         continue
-                    gen.Anno(group_name, anno=f'"{nav_name}.{group_name}"')
+                    # skip variants
+                    if group.variant:
+                        continue
+                    gen.Anno(group.name, anno=f'"{nav_name}.{group.name}"')
 
                 gen.Empty()
 

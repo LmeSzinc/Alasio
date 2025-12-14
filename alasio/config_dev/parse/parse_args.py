@@ -287,31 +287,56 @@ class ArgData(Struct, omit_defaults=True):
         return self.value
 
 
+class GroupName(Struct, frozen=True):
+    name: str
+    variant: str
+
+    @property
+    def full_name(self):
+        if self.variant:
+            return f'{self.name}.{self.variant}'
+        return self.name
+
+    @property
+    def class_name(self):
+        if self.variant:
+            return f'{self.name}_{self.variant}'
+        return self.name
+
+
 class ParseArgs(ParseBase):
     @cached_property
-    def args_data(self):
+    def args_data(self) -> "dict[GroupName, dict[str, ArgData]]":
         """
         Structured data of {nav}.tasks.yaml
 
         Returns:
-            dict[str, dict[str, ArgData]]:
-                key: {group_name}.{arg_name}
-                value: ArgsData
+            key: {GroupName}.{arg_name}
+            value: ArgsData
         """
         output = {}
         data = read_yaml(self.file)
         for group_name, group_value in deep_iter_depth1(data):
             # check group_name
-            if not validate_task_name(group_name):
+            # group_name might be {name} or {name}.{variant}
+            name, dot, variant = group_name.partition('.')
+            if dot:
+                if not validate_task_name(variant):
+                    raise DefinitionError(
+                        f'Group variant name format invalid: "{group_name}"',
+                        file=self.file, keys=[], value=group_name
+                    )
+            if not validate_task_name(name):
                 raise DefinitionError(
                     f'Group name format invalid: "{group_name}"',
                     file=self.file, keys=[], value=group_name
                 )
+            group = GroupName(name=name, variant=variant)
             # allow empty group to be an inforef group
             # if not group_value:
             #     pass
             # Keep empty group in args, so they can be empty group to display on GUI
-            output[group_name] = {}
+            output[group] = {}
             for arg_name, value in deep_iter_depth1(group_value):
                 # check arg_name
                 if not validate_task_name(arg_name):
@@ -333,7 +358,16 @@ class ParseArgs(ParseBase):
                     ne = DefinitionError(e, file=self.file, keys=[group_name, arg_name], value=value)
                     raise ne
                 # Set
-                deep_set(output, keys=[group_name, arg_name], value=arg)
+                deep_set(output, keys=[group, arg_name], value=arg)
                 # print(msgspec.json.encode(arg))
 
         return output
+
+    @cached_property
+    def group_data(self) -> "dict[str, dict[str, ArgData]]":
+        out = {}
+        for group, group_data in self.args_data.items():
+            if group.variant:
+                continue
+            out[group.name] = group_data
+        return out

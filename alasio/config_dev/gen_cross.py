@@ -67,17 +67,18 @@ class CrossNavGenerator:
                     f'model_file is not a subpath of root, model_file={config.model_file}, root={self.root}')
             file = to_posix(file)
             # iter group models
-            for group_name, class_name in config.dict_group2class.items():
+            for group, class_name in config.args_data.items():
                 # group must be unique
-                if group_name in out:
+                full_name = group.full_name
+                if full_name in out:
                     raise DefinitionError(
-                        f'Duplicate group name: {group_name}',
+                        f'Duplicate group name: {full_name}',
                         file=config.file,
-                        keys=group_name,
+                        keys=full_name,
                     )
                 # build model reference
-                ref = {'file': file, 'cls': class_name}
-                out[group_name] = ref
+                ref = {'file': file, 'cls': group.class_name}
+                out[group.class_name] = ref
 
         return out
 
@@ -205,7 +206,7 @@ class CrossNavGenerator:
         """
         out = {}
         for config in self.dict_nav_config.values():
-            for group_name in config.args_data.keys():
+            for group_name in config.group_data.keys():
                 out[group_name] = config
         return out
 
@@ -218,7 +219,7 @@ class CrossNavGenerator:
         except KeyError:
             raise DefinitionError(f'Group name is not defined: {group_name}')
         try:
-            data = config.args_data[group_name]
+            data = config.group_data[group_name]
         except KeyError:
             # this shouldn't happen, because dict_group2configgen is build from config.args_data
             raise DefinitionError(f'Nav args "{config.file}" has no group_name={group_name}')
