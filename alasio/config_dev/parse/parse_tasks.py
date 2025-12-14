@@ -1,102 +1,137 @@
 from typing import List
 
 import msgspec
-from msgspec import Struct, field
+from msgspec import field
 
+from alasio.config.entry.utils import validate_task_name
+from alasio.config_dev.parse.base import ParseBase
+from alasio.config_dev.parse.parse_args import DefinitionError
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
 from alasio.ext.file.yamlfile import read_yaml
-from alasio.config_dev.parse.base import ParseBase
-from alasio.config_dev.parse.parse_args import DefinitionError
-from alasio.config.entry.utils import validate_task_name
 
 
 class TaskGroup(msgspec.Struct):
-    # A wrapper for group reference "{group}" and "{task_ref}.{group}"
+    # A wrapper for group reference
     task: str
     group: str
 
-    # TaskGroup can also reference "{group}._info" as "_info"
-    inforef: str = ''
+    @classmethod
+    def from_row(cls, task: str, row: "dict | str | TaskGroup") -> "TaskGroup":
+        """
+        Populate group reference to TaskGroup object
+        Example input:
+            "Scheduler"
+            {"task": "Commission", "group": "Preset"}
+        """
+        if type(row) is cls:
+            return row
+        if type(row) is dict:
+            task = row.get('task', task)
+            group = row.get('group', '')
+            if not group:
+                raise DefinitionError('Missing key "group" in group reference', keys=[task], value=row)
+            return cls(task=task, group=str(group))
+        else:
+            # others treat as str
+            return cls(task=task, group=str(row))
+
+
+class DisplayCard(msgspec.Struct, dict=True):
+    task: str
+    # display {group_name}._info as card info
+    info: str
+    groups: List[TaskGroup]
 
     @classmethod
-    def from_str(cls, task_group: str, ref=False) -> "TaskGroup":
+    def from_card(cls, task: str, row: "dict | str | list | TaskGroup"):
         """
-        Convert "{group}" and "{task_ref}.{group}" to TaskGroup object
+        Populate card definition to DisplayCard object
+        Example input:
+            "Scheduler"
+            {"info": "Fleet", "groups": "Fleet1"}
+            {"info": "Fleet", "groups": ["Fleet1", "Fleet2"]}
+            ["Fleet1", "Fleet2"]
+            [{"task": "Commission", "group": "Preset"}, "Custom"]
+            {"info": "Commission", "groups": [{"task": "Commission", "group": "Preset"}, "Custom"]
         """
-        # info reference
-        if ref and ':' in task_group:
-            ref, _, name = task_group.partition(':')
-            if ref == 'inforef':
-                return TaskGroup(task='', group='', inforef=name)
-            raise DefinitionError(f'Info reference tag can only be "inforef", got "{task_group}"')
-        # reference a cross-task group
-        if '.' in task_group:
-            task, _, group = task_group.rpartition('.')
-            return TaskGroup(task=task, group=group)
-        # reference an in-task group
-        return TaskGroup(task='', group=task_group)
+        if type(row) is dict:
+            info = row.get('info', '')
+            groups = row.get('groups', [])
+        else:
+            info = ''
+            groups = row
+        if type(groups) is list:
+            groups = [TaskGroup.from_row(task, r) for r in groups]
+        else:
+            # others treat as str
+            groups = [TaskGroup.from_row(task, str(groups))]
+        # use the first group that is not Scheduler
+        if not info:
+            for group in groups:
+                if group.group == 'Scheduler':
+                    continue
+                info = group.group
+                break
+        # no luck, just use the first group
+        if not info:
+            for group in groups:
+                info = group.group
+                break
+        return cls(task=task, info=info, groups=groups)
 
-    @classmethod
-    def from_liststr(cls, list_groups: "list[str]", ref=False) -> "list[TaskGroup]":
-        return [cls.from_str(str(g), ref=ref) for g in list_groups]
-
-
-def populate_task(value: dict) -> dict:
-    """
-    Populate shortened task definition
-    """
-    if type(value) is not dict:
-        raise DefinitionError('Not a dict')
-
-    # group
-    group = value.get('group', [])
-    if type(group) is list:
-        # yaml has dynamic type, we need all in string
-        group = TaskGroup.from_liststr(group)
-        # check if group is unique
-        visited = set()
-        for g in group:
-            if g.group in visited:
-                raise DefinitionError(f'Duplicate group at "{g}"')
-            visited.add(g.group)
-    else:
-        raise DefinitionError('Not a list')
-    value['group'] = group
-
-    # display
-    # default to display all groups
-    display = value.get('display', 'group')
-    # convert display="flat" and display="group"
-    if display == 'group':
-        display = [[g] for g in group]
-    elif display == 'flat':
-        display = [group]
-    elif not display or display in ['none', 'None']:
-        # empty display probably an internal task
-        display = []
-    elif type(display) is list:
-        # populate simple list to nested list
-        display = [
-            TaskGroup.from_liststr(d, ref=True) if type(d) is list
-            else TaskGroup.from_liststr([str(d)], ref=True)
-            for d in display]
-    else:
-        raise DefinitionError('display should be "flat" or "group" or "null" or a list of groups')
-    value['display'] = display
-
-    return value
+    @cached_property
+    def card_name(self):
+        if self.info:
+            return f'card-{self.info}'
+        else:
+            card_name = '_'.join([d.group for d in self.groups])
+            return f'card-{card_name}'
 
 
-class TaskData(Struct):
-    # List of arg groups in this task
-    group: List[TaskGroup] = field(default_factory=list)
-    # Groups to display on GUI
-    # Groups in the outer list will be displayed as standalone groups.
-    # Groups in the inner list will be flattened into one group.
-    display: List[List[TaskGroup]] = field(default_factory=list)
+class TaskData(msgspec.Struct):
+    task: str
+    # groups to bind at runtime
+    groups: List[TaskGroup] = field(default_factory=list)
+    # cards to display on frontend
+    displays: List[DisplayCard] = field(default_factory=list)
     # whether to globally bind all groups
     global_bind: bool = False
+
+    @classmethod
+    def from_task_data(cls, task: str, data: dict):
+        if type(data) is not dict:
+            raise DefinitionError('Task data must be a dict', keys=[task], value=data)
+        task = str(task)
+        # Example groups:
+        # - A list of values that satisfy TaskGroup.from_row()
+        groups = data.get('groups', [])
+        if type(groups) is not list:
+            raise DefinitionError('Task groups must be a list', keys=[task, 'groups'], value=data)
+        groups = [TaskGroup.from_row(task, r) for r in groups]
+        # Example displays:
+        # - "group" to show each group as standalone card
+        # - "flat" to show all groups in one card
+        # - A list of values that satisfy DisplayCard.from_card()
+        displays = data.get('displays', 'group')
+        if type(displays) is list:
+            displays = [DisplayCard.from_card(task, r) for r in displays]
+        else:
+            # treat as shorten instruction
+            if displays == 'group':
+                displays = [DisplayCard.from_card(task, [r]) for r in groups]
+            elif displays == 'flat':
+                displays = [DisplayCard.from_card(task, groups)]
+            elif not displays or displays in ['none', 'None']:
+                # empty display probably an internal task
+                displays = []
+            else:
+                raise DefinitionError('display should be "flat" or "group" or "null" or a list of groups',
+                                      keys=[task, 'displays'], value=displays)
+        # others
+        global_bind = bool(data.get('global_bind', False))
+        # build object
+        return cls(task=task, groups=groups, displays=displays, global_bind=global_bind)
 
 
 class ParseTasks(ParseBase):
@@ -112,7 +147,7 @@ class ParseTasks(ParseBase):
         """
         output = {}
         data = read_yaml(self.tasks_file)
-        for task_name, value in deep_iter_depth1(data):
+        for task_name, data in deep_iter_depth1(data):
             # check task_name
             if not validate_task_name(task_name):
                 raise DefinitionError(
@@ -121,32 +156,24 @@ class ParseTasks(ParseBase):
                 )
             # Create TaskData object from manual arg definition
             try:
-                value = populate_task(value)
+                task = TaskData.from_task_data(task=task_name, data=data)
             except DefinitionError as e:
                 e.file = self.tasks_file
-                e.keys = [task_name]
-                e.value = value
                 raise
-            try:
-                task = msgspec.convert(value, TaskData)
-            except msgspec.ValidationError as e:
-                ne = DefinitionError(e, file=self.tasks_file, keys=[task_name], value=value)
-                raise ne
             # validate task with scheduler
-            for group in task.group:
-                if group.group == 'Scheduler':
+            for group in task.groups:
+                if task.task != group.task and group.group == 'Scheduler':
                     if group.task:
                         raise DefinitionError(
                             'Task should not reference scheduler of another task',
-                            file=self.tasks_file, keys=[task_name, 'group'], value='Scheduler'
+                            file=self.tasks_file, keys=[task_name, 'groups'], value='Scheduler'
                         )
                     if task.global_bind:
                         raise DefinitionError(
                             'Global bind task should not have group "Scheduler"',
-                            file=self.tasks_file, keys=[task_name, 'group'], value='Scheduler'
+                            file=self.tasks_file, keys=[task_name, 'groups'], value='Scheduler'
                         )
             # Set
             deep_set(output, keys=[task_name], value=task)
-            # print(msgspec.json.encode(arg))
 
         return output

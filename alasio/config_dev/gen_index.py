@@ -277,7 +277,7 @@ class IndexGenerator(CrossNavGenerator):
             # nav name, which must not empty
             empty = True
             for group in config.tasks_data.values():
-                if group.display:
+                if group.displays:
                     empty = False
                     break
             if config.tasks_data and not empty:
@@ -327,7 +327,7 @@ class IndexGenerator(CrossNavGenerator):
         for nav_name, config in self.dict_nav_config.items():
             # task name, which must not empty
             for task_name, task_data in config.tasks_data.items():
-                if not task_data.group:
+                if not task_data.groups:
                     continue
                 for lang in Const.GUI_LANGUAGE:
                     key = [task_name, lang]

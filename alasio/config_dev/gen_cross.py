@@ -2,7 +2,6 @@ from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.parse_args import ArgData
-from alasio.config_dev.parse.parse_tasks import TaskGroup
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
@@ -105,7 +104,7 @@ class CrossNavGenerator:
         global_bind = {}
         all_groups = set()
         for config in self.dict_nav_config.values():
-            for task_name, task_data in config.tasks_data.items():
+            for task_name, task in config.tasks_data.items():
                 # task name must be unique
                 if task_name in out:
                     raise DefinitionError(
@@ -113,7 +112,7 @@ class CrossNavGenerator:
                         file=config.tasks_file, keys=task_name,
                     )
                 # generate groups
-                for group in task_data.group:
+                for group in task.groups:
                     if group.task:
                         # reference {ref_task_name}.{group_name}
                         ref_task = group.task
@@ -125,8 +124,8 @@ class CrossNavGenerator:
                         ref = self.dict_group_ref[group.group]
                     except KeyError:
                         raise DefinitionError(
-                            f'Group ref "{group.group}" of task "{ref_task}" does not exist',
-                            file=config.tasks_file, keys=[task_name, 'group']
+                            f'No such group "{group.group}"',
+                            file=config.tasks_file, keys=[task_name, 'group'], value=group.group
                         )
                     # copy ref, set ref_task
                     ref = {k: v for k, v in ref.items()}
@@ -134,7 +133,7 @@ class CrossNavGenerator:
                     ref = NoIndent(ref)
                     deep_set(out, [task_name, group.group], ref)
                     # add global bind
-                    if task_data.global_bind:
+                    if task.global_bind:
                         if group.group in global_bind:
                             raise DefinitionError(
                                 f'Duplicate global bind group: {group.group}',
@@ -222,99 +221,13 @@ class CrossNavGenerator:
         try:
             config = self.dict_group2configgen[group_name]
         except KeyError:
-            raise DefinitionError(f'Group name is not defined: {group_name}')
+            raise DefinitionError(f'No such group to display: {group_name}')
         try:
             data = config.group_data[group_name]
         except KeyError:
             # this shouldn't happen, because dict_group2configgen is build from config.args_data
             raise DefinitionError(f'Nav args "{config.file}" has no group_name={group_name}')
         return data
-
-    def _get_display_info(
-            self, config: ConfigGenerator, task_name: str, display_flat: "list[TaskGroup]"
-    ) -> TaskGroup:
-        """
-        Predict info reference from a list of display_flat
-        """
-        try:
-            first = display_flat[0]
-        except IndexError:
-            raise DefinitionError(
-                f'Empty display_flat: {display_flat}',
-                file=config.tasks_file, keys=[task_name, 'display']
-            )
-        # use info ref first
-        if first.inforef:
-            try:
-                _ = self.dict_group2file[first.inforef]
-            except KeyError:
-                raise DefinitionError(
-                    f'inforef "{first.inforef}" does not exists',
-                    file=config.tasks_file, keys=[task_name, 'display']
-                )
-            return TaskGroup(task='', group=first.inforef)
-
-        # no info ref, use the first group that is not Scheduler
-        for group in display_flat:
-            group_name = group.group
-            if group_name == 'Scheduler':
-                continue
-            try:
-                _ = self.dict_group2file[group_name]
-            except KeyError:
-                raise DefinitionError(
-                    f'Display group "{group_name}" does not exists',
-                    file=config.tasks_file, keys=[task_name, 'display']
-                )
-            return TaskGroup(task='', group=group_name)
-
-        # no luck, just use the first group
-        try:
-            _ = self.dict_group2file[first.group]
-        except KeyError:
-            raise DefinitionError(
-                f'Display group "{first.group}" does not exists',
-                file=config.tasks_file, keys=[task_name, 'display']
-            )
-        return TaskGroup(task='', group=first.group)
-
-    def _iter_display(
-            self, config: ConfigGenerator, task_name: str, display_flat: "list[TaskGroup]",
-    ):
-        """
-        Iter display reference from a list of display_flat
-
-        Yields:
-            TaskGroup:
-        """
-        for display in display_flat:
-            # skip info ref
-            if display.inforef:
-                continue
-            # display group must be defined
-            try:
-                _ = self.dict_group2file[display.group]
-            except KeyError:
-                raise DefinitionError(
-                    f'Display ref "{display.group}" of task "{task_name}" does not exist',
-                    file=config.tasks_file, keys=[task_name, 'display']
-                )
-            if display.task:
-                # If display a cross-task group, group must exist
-                if not deep_exist(self.model_data, keys=[display.task, display.group]):
-                    raise DefinitionError(
-                        f'Cross-task display ref "{display.task}.{display.group}" does not exist',
-                        file=config.tasks_file, keys=[task_name, 'display']
-                    )
-                yield TaskGroup(task=display.task, group=display.group)
-            else:
-                # If display an in-task group, group must within this task
-                if not deep_exist(self.model_data, keys=[task_name, display.group]):
-                    raise DefinitionError(
-                        f'In-task display ref "{display.group}" is not in task "{task_name}"',
-                        file=config.tasks_file, keys=[task_name, 'display']
-                    )
-                yield TaskGroup(task=task_name, group=display.group)
 
     def _generate_nav_config_json(self, config: ConfigGenerator):
         """
@@ -330,28 +243,19 @@ class CrossNavGenerator:
         """
         out = {}
         for task_name, task in config.tasks_data.items():
-            is_flat = len(task.display) == 1
-            for display_flat in task.display:
-                # get display
-                display = list(self._iter_display(config, task_name, display_flat))
-                if is_flat:
-                    card_name = f'card-{task_name}'
-                else:
-                    card_name = '_'.join([d.group for d in display])
-                    card_name = f'card-{task_name}-{card_name}'
-                # get _info
-                info_group = self._get_display_info(config, task_name, display_flat)
+            for card in task.displays:
                 # gen _info
-                row = {'group': info_group.group, 'arg': '_info'}
-                deep_set(out, keys=[card_name, '_info'], value=NoIndent(row))
+                row = {'group': card.info, 'arg': '_info'}
+                _ = self._group_name_to_data(card.info)  # check if card.info valid
+                deep_set(out, keys=[card.card_name, '_info'], value=NoIndent(row))
                 # gen args
-                for display_group in display:
+                for display_group in card.groups:
                     group_data = self._group_name_to_data(display_group.group)
                     for arg_name, arg_data in group_data.items():
                         row = {'task': display_group.task, 'group': display_group.group, 'arg': arg_name}
                         row.update(arg_data.to_dict())
                         arg_name = f'{display_group.group}_{arg_name}'
-                        deep_set(out, keys=[card_name, arg_name], value=row)
+                        deep_set(out, keys=[card.card_name, arg_name], value=row)
                         # arg data post-process
                         for key in ['value', 'option']:
                             if key in row:
