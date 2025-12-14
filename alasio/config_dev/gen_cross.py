@@ -32,16 +32,21 @@ class CrossNavGenerator:
                 value: generator
         """
         out = {}
-        for file in self.path_config.iter_files(ext='.args.yaml', recursive=True):
-            parser = ConfigGenerator(file)
-            # nav
-            nav = parser.nav_name
-            if nav in out:
-                raise DefinitionError(
-                    f'Duplicate nav name: {nav}',
-                    file=file,
-                )
-            out[nav] = parser
+        for folder in self.path_config.iter_folders():
+            # skip hidden folder
+            if folder.name.startswith('_'):
+                continue
+            for file in folder.iter_files(ext='.args.yaml'):
+                parser = ConfigGenerator(file)
+                parser.folder = folder.name
+                # nav
+                nav = parser.nav_name
+                if nav in out:
+                    raise DefinitionError(
+                        f'Duplicate nav name: {nav}',
+                        file=file,
+                    )
+                out[nav] = parser
         return out
 
     """

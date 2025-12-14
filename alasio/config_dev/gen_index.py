@@ -368,9 +368,9 @@ class IndexGenerator(CrossNavGenerator):
         gen.add('if typing.TYPE_CHECKING:')
         with gen.tab():
             # Sort nav names for stable output
-            for nav_name in self.dict_nav_config.keys():
+            for nav_name, config in self.dict_nav_config.items():
                 # from .{nav} import {nav}_model as {nav}
-                gen.add(f'from .{nav_name} import {nav_name}_model as {nav_name}')
+                gen.add(f'from .{config.folder} import {nav_name}_model as {nav_name}')
 
         gen.Empty(2)
 

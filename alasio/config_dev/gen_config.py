@@ -17,7 +17,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         """
         维护一个nav下所有文件的数据一致性，一个nav对应前端导航组件中的一个组。
         数据文件夹的目录结构应该像这样：
-        <nav>
+        <folder>
             - <nav>.args.yaml
             - <nav>.tasks.yaml
             - <nav>_config.json
@@ -63,6 +63,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
             file (PathStr): Absolute filepath to {nav}.args.yaml
         """
         super().__init__(file)
+        self.folder = ''
         # real data will be set in _generate_nav_config_json()
         # key: {card_name}.{arg_name}
         # value:
