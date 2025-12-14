@@ -13,7 +13,8 @@ let currentLang = $state<Lang>(DEFAULT_LANG);
 
 // === Initialization ===
 if (browser) {
-  const saved = localStorage.getItem("lang");
+  const match = document.cookie.match(new RegExp('(^| )alasio_lang=([^;]+)'));
+  const saved = match ? match[2] : null;
 
   if (saved && (SUPPORTED_LANGS as readonly string[]).includes(saved)) {
     // Use saved preference
@@ -28,13 +29,13 @@ if (browser) {
 // === Public API ===
 
 /**
- * Switch language. Updates localStorage and reloads page data.
+ * Switch language. Updates cookie and reloads page data.
  */
 export function setLang(l: Lang) {
   if (l === currentLang) return;
   currentLang = l;
   if (browser) {
-    localStorage.setItem("lang", l);
+    document.cookie = `alasio_lang=${l}; path=/; max-age=31536000`;
   }
 }
 

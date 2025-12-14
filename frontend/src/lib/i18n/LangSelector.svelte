@@ -4,6 +4,7 @@
   import { i18nState, setLang, t } from "$lib/i18n";
   import type { Lang } from "$lib/i18n/state.svelte";
   import { cn } from "$lib/utils";
+  import { useTopic } from "$lib/ws";
   import { CircleCheck, Languages } from "@lucide/svelte";
   import { SUPPORTED_LANGS } from "../../i18ngen/constants";
 
@@ -15,6 +16,8 @@
   };
   let { disabled = false, class: className, handleEdit }: Props = $props();
 
+  const topicClient = useTopic("ConnState");
+  const rpc = topicClient.resilientRpc();
   const languageNames: Record<string, string> = {
     "en-US": "English",
     "zh-CN": "简体中文",
@@ -24,7 +27,9 @@
   };
 
   let open = $state(false);
-
+  $effect(() => {
+    rpc.call("set_lang", { lang: i18nState.l });
+  });
   function selectLanguage(lang: Lang) {
     if (lang === i18nState.l) return;
     setLang(lang);
@@ -36,7 +41,7 @@
 <Popover.Root bind:open>
   <Popover.Trigger
     class={cn(
-      "focus-visible:ring-ring ring-offset-background hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
+      "focus-visible:ring-ring ring-offset-background hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
       "inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium transition-colors",
       "disabled:pointer-events-none disabled:opacity-50",
       className,
