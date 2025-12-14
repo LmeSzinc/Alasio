@@ -14,6 +14,14 @@
     "lint": "prettier --check .",
     "i18ngen": "tsx scripts/i18n/cli.ts"
   },
+  "browserslist": [
+    "Chrome >= 80",
+    "Safari >= 14",
+    "iOS >= 14",
+    "Firefox >= 80",
+    "Edge >= 80",
+    "not ie 11"
+  ],
   "devDependencies": {
     "@dnd-kit-svelte/core": "0.0.8",
     "@internationalized/date": "^3.10.0",
