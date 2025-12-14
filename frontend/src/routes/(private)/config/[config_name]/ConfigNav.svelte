@@ -52,6 +52,24 @@
     // Call the external callback with details.
     onCardClick?.(clickedNavKey, clickedCardKey);
   }
+
+  // Auto-select the first card when a nav is opened
+  $effect(() => {
+    if (opened_nav) {
+      // Find the nav that was just opened
+      const openedNavItem = navItems.find((item) => item.key === opened_nav);
+
+      // If the nav has cards and the current card_name is not in this nav, select the first card
+      if (openedNavItem && openedNavItem.cards.length > 0) {
+        const currentCardInNav = openedNavItem.cards.some((card) => card.key === card_name);
+
+        // Only auto-select if the current card doesn't belong to this nav
+        if (!currentCardInNav) {
+          handleCardClick(openedNavItem.key, openedNavItem.cards[0].key);
+        }
+      }
+    }
+  });
 </script>
 
 <nav class={cn("shadow-custom-complex w-full space-y-2 p-3", className)} aria-label="Configuration Navigation">
