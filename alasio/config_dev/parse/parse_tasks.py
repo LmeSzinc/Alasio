@@ -80,14 +80,6 @@ class DisplayCard(msgspec.Struct, dict=True):
                 break
         return cls(task=task, info=info, groups=groups)
 
-    @cached_property
-    def card_name(self):
-        if self.info:
-            return f'card-{self.info}'
-        else:
-            card_name = '_'.join([d.group for d in self.groups])
-            return f'card-{card_name}'
-
 
 class TaskData(msgspec.Struct):
     task: str

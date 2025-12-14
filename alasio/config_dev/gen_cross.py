@@ -1,7 +1,8 @@
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
-from alasio.config_dev.parse.parse_args import ArgData
+from alasio.config_dev.parse.parse_args import GroupData
+from alasio.config_dev.parse.parse_tasks import DisplayCard
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
@@ -48,6 +49,19 @@ class CrossNavGenerator:
                 out[nav] = parser
         return out
 
+    @cached_property
+    def dict_group_variant2base(self) -> "dict[str, str]":
+        """
+        Convert variant name to base name
+        """
+        out = {}
+        for config in self.dict_nav_config.values():
+            for group in config.groups_data.values():
+                if not group.base:
+                    continue
+                out[group.name] = group.base
+        return out
+
     """
     Generate model.index.json
     """
@@ -71,18 +85,17 @@ class CrossNavGenerator:
                     f'model_file is not a subpath of root, model_file={config.model_file}, root={self.root}')
             file = to_posix(file)
             # iter group models
-            for group, class_name in config.args_data.items():
+            for group_name in config.groups_data:
                 # group must be unique
-                full_name = group.full_name
-                if full_name in out:
+                if group_name in out:
                     raise DefinitionError(
-                        f'Duplicate group name: {full_name}',
+                        f'Duplicate group name: {group_name}',
                         file=config.file,
-                        keys=full_name,
+                        keys=group_name,
                     )
                 # build model reference
-                ref = {'file': file, 'cls': group.class_name}
-                out[group.class_name] = ref
+                ref = {'file': file, 'cls': group_name}
+                out[group_name] = ref
 
         return out
 
@@ -131,27 +144,28 @@ class CrossNavGenerator:
                     ref = {k: v for k, v in ref.items()}
                     ref['task'] = ref_task
                     ref = NoIndent(ref)
-                    deep_set(out, [task_name, group.group], ref)
+                    base_name = self.dict_group_variant2base.get(group.group, group.group)
+                    deep_set(out, [task_name, base_name], ref)
                     # add global bind
                     if task.global_bind:
-                        if group.group in global_bind:
+                        if base_name in global_bind:
                             raise DefinitionError(
                                 f'Duplicate global bind group: {group.group}',
                                 file=config.tasks_file, keys=[task_name, 'group']
                             )
-                        if group.group in all_groups:
+                        if base_name in all_groups:
                             raise DefinitionError(
                                 f'Global bind group "{group.group}" is already used by non global bind, '
                                 f'maybe remove the use of non global bind?'
                             )
-                        global_bind[group.group] = ref
+                        global_bind[base_name] = ref
                     else:
-                        if group.group in global_bind:
+                        if base_name in global_bind:
                             raise DefinitionError(
                                 f'Group "{group.group}" is already global bind, '
                                 f'maybe remove the use of non global bind?'
                             )
-                        all_groups.add(group.group)
+                        all_groups.add(base_name)
 
         # check if {ref_task_name}.{group_name} reference has corresponding value
         for _, group, ref in deep_iter_depth2(out):
@@ -210,11 +224,11 @@ class CrossNavGenerator:
         """
         out = {}
         for config in self.dict_nav_config.values():
-            for group_name in config.group_data.keys():
+            for group_name in config.groups_data.keys():
                 out[group_name] = config
         return out
 
-    def _group_name_to_data(self, group_name: str) -> "dict[str, ArgData]":
+    def _group_name_to_data(self, group_name: str) -> GroupData:
         """
         Convert group_name to group data
         """
@@ -223,11 +237,19 @@ class CrossNavGenerator:
         except KeyError:
             raise DefinitionError(f'No such group to display: {group_name}')
         try:
-            data = config.group_data[group_name]
+            group = config.groups_data[group_name]
         except KeyError:
             # this shouldn't happen, because dict_group2configgen is build from config.args_data
             raise DefinitionError(f'Nav args "{config.file}" has no group_name={group_name}')
-        return data
+        return group
+
+    def _get_card_name(self, card: DisplayCard):
+        if card.info:
+            info = self.dict_group_variant2base.get(card.info, card.info)
+            return f'card-{info}'
+        else:
+            card_name = '_'.join([self.dict_group_variant2base.get(d.group, d.group) for d in card.groups])
+            return f'card-{card_name}'
 
     def _generate_nav_config_json(self, config: ConfigGenerator):
         """
@@ -247,15 +269,33 @@ class CrossNavGenerator:
                 # gen _info
                 row = {'group': card.info, 'arg': '_info'}
                 _ = self._group_name_to_data(card.info)  # check if card.info valid
-                deep_set(out, keys=[card.card_name, '_info'], value=NoIndent(row))
+                card_name = self._get_card_name(card)
+                deep_set(out, keys=[card_name, '_info'], value=NoIndent(row))
                 # gen args
-                for display_group in card.groups:
-                    group_data = self._group_name_to_data(display_group.group)
-                    for arg_name, arg_data in group_data.items():
-                        row = {'task': display_group.task, 'group': display_group.group, 'arg': arg_name}
+                for group in card.groups:
+                    # validate if display_group refs an task group
+                    base_name = self.dict_group_variant2base.get(group.group, group.group)
+                    try:
+                        cls = self.model_data[task_name][base_name]['cls']
+                    except KeyError:
+                        raise DefinitionError(
+                            f'Display group has no corresponding task group: "{task_name}"."{group.group}"',
+                            file=config.tasks_file, keys=[task_name, 'displays'], value=group.group)
+                    group_data = self._group_name_to_data(cls)
+
+                    is_variant = base_name != group.group
+                    for arg_name, arg_data in group_data.args.items():
+                        row = {
+                            'task': group.task,
+                            'group': base_name,
+                            'arg': arg_name,
+                        }
+                        # set cls on variant override
+                        if is_variant and arg_name in group_data.override_args:
+                            row['cls'] = group.group
                         row.update(arg_data.to_dict())
-                        arg_name = f'{display_group.group}_{arg_name}'
-                        deep_set(out, keys=[card.card_name, arg_name], value=row)
+                        arg_name = f'{base_name}_{arg_name}'
+                        deep_set(out, keys=[card_name, arg_name], value=row)
                         # arg data post-process
                         for key in ['value', 'option']:
                             if key in row:

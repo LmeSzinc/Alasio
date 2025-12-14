@@ -1,10 +1,11 @@
 from alasio.config.const import Const
 from alasio.config_dev.format.format_yaml import yaml_formatter
+from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.parse_args import ArgData, ParseArgs, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
 from alasio.config_dev.parse.parse_tasks import ParseTasks
 from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen
-from alasio.ext.deep import deep_get, deep_iter_depth1, deep_set
+from alasio.ext.deep import deep_get, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.file.yamlfile import format_yaml
@@ -95,14 +96,14 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         gen.Empty()
         gen.CommentCodeGen('alasio.config.dev.configgen')
         has_content = False
-        for group, arg_data in self.args_data.items():
+        for group_name, group in self.groups_data.items():
             # Skip empty group
-            if not arg_data:
+            if not group.args:
                 continue
             has_content = True
             # Define model class
-            with gen.Class(group.class_name, inherit='m.Struct, omit_defaults=True'):
-                for arg_name, arg in deep_iter_depth1(arg_data):
+            with gen.Class(group_name, inherit='m.Struct, omit_defaults=True'):
+                for arg_name, arg in group.args.items():
                     arg: ArgData
                     # Expand list
                     if arg.dt in TYPE_ARG_TUPLE:
@@ -241,13 +242,28 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         """
         _ = self._i18n_old
         new = {}
-        for group, arg_data in self.args_data.items():
-            group_name = group.name
+        for group_name, group in self.groups_data.items():
             # {group}._info
-            row = self._update_info_i18n(group_name, '_info')
-            deep_set(new, [group_name, '_info'], row)
-            for arg_name, arg in deep_iter_depth1(arg_data):
-                # {group}.{arg}
+            # no _info for variant group
+            if not group.base:
+                row = self._update_info_i18n(group_name, '_info')
+                deep_set(new, [group_name, '_info'], row)
+            # prepare base args
+            if group.base:
+                try:
+                    base = self.groups_data[group.base].args
+                except KeyError:
+                    # this shouldn't happen as variant base is already validated
+                    raise DefinitionError(
+                        f'No such base group: "{group.base}"',
+                        file=self.file, keys=[group_name, 'base'], value=group.base)
+            else:
+                base = None
+            # {group}.{arg}
+            for arg_name, arg in group.args.items():
+                # skip the same args
+                if base and base.get(arg_name) == arg:
+                    continue
                 row = self._update_arg_i18n(group_name, arg_name, arg)
                 deep_set(new, [group_name, arg_name], row)
         cached_property.pop(self, '_i18n_old')

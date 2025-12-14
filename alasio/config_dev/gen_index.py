@@ -155,9 +155,12 @@ class IndexGenerator(CrossNavGenerator):
                     raise DefinitionError(f'Group ref does not have "task": {ref}')
                 all_task_groups.append((task, group_name))
             tasks, groups = self._regroup_intask_group(all_task_groups, current_task=task_name)
+            config = {'task': NoIndent(tasks), 'group': NoIndent(groups)}
+            if not groups or not tasks:
+                config = NoIndent(config)
             out[task_name] = {
                 'group': group_data,
-                'config': {'task': NoIndent(tasks), 'group': NoIndent(groups)},
+                'config': config,
             }
         return out
 
@@ -250,6 +253,7 @@ class IndexGenerator(CrossNavGenerator):
         out = {}
         for config in self.dict_nav_config.values():
             for group_name, group_data in config.i18n_data.items():
+                group_name = self.dict_group_variant2base.get(group_name, group_name)
                 i18n = deep_get(group_data, ['_info'], default={})
                 # get "name" from a nested i18n dict
                 for lang, field_data in i18n.items():
@@ -299,6 +303,7 @@ class IndexGenerator(CrossNavGenerator):
                     group_name = info['group']
                 except KeyError:
                     raise DefinitionError(f'Card "{nav_name}.{card_name}._info" has no "group"')
+                group_name = self.dict_group_variant2base.get(group_name, group_name)
                 try:
                     name = self.dict_group_name_i18n[group_name]
                 except KeyError:
@@ -391,12 +396,12 @@ class IndexGenerator(CrossNavGenerator):
                 gen.Comment(nav_name)
 
                 # Generate type hints for each group (keep definition order)
-                for group, group_data in config.args_data.items():
+                for group_name, group in config.groups_data.items():
                     # skip groups without args (inforef groups)
-                    if not group_data:
+                    if not group.args:
                         continue
                     # skip variants
-                    if group.variant:
+                    if group.base:
                         continue
                     gen.Anno(group.name, anno=f'"{nav_name}.{group.name}"')
 
