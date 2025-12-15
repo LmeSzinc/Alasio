@@ -18,11 +18,13 @@
     "not ie 11"
   ],
   "devDependencies": {
+    "@internationalized/date": "^3.10.0",
     "@lucide/svelte": "^0.561.0",
     "@sveltejs/vite-plugin-svelte": "^5.1.1",
     "@tailwindcss/vite": "^4.1.17",
     "@types/node": "^22.19.1",
     "autoprefixer": "^10.4.22",
+    "bits-ui": "^2.14.4",
     "clsx": "^2.1.1",
     "concurrently": "^9.2.1",
     "electron": "22.3.27",
