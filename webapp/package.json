@@ -9,14 +9,6 @@
     "package": "vite build && electron-builder",
     "preview": "vite preview"
   },
-  "browserslist": [
-    "Chrome >= 80",
-    "Safari >= 14",
-    "iOS >= 14",
-    "Firefox >= 80",
-    "Edge >= 80",
-    "not ie 11"
-  ],
   "devDependencies": {
     "@internationalized/date": "^3.10.0",
     "@lucide/svelte": "^0.561.0",

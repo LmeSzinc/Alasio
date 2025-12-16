@@ -14,15 +14,9 @@
     "lint": "prettier --check .",
     "i18ngen": "tsx scripts/i18n/cli.ts"
   },
-  "browserslist": [
-    "Chrome >= 80",
-    "Safari >= 14",
-    "iOS >= 14",
-    "Firefox >= 80",
-    "Edge >= 80",
-    "not ie 11"
-  ],
   "devDependencies": {
+    "@csstools/postcss-color-mix-function": "^3.0.12",
+    "@csstools/postcss-oklab-function": "^4.0.12",
     "@dnd-kit-svelte/core": "0.0.8",
     "@internationalized/date": "^3.10.0",
     "@lucide/svelte": "^0.544.0",
@@ -37,9 +31,13 @@
     "bits-ui": "^2.11.4",
     "chokidar": "^4.0.3",
     "clsx": "^2.1.1",
+    "culori": "^4.0.2",
     "fast-glob": "^3.3.3",
     "fs-extra": "^11.3.2",
     "mode-watcher": "^1.1.0",
+    "postcss-media-minmax": "^5.0.0",
+    "postcss-nesting": "^13.0.2",
+    "postcss-value-parser": "^4.2.0",
     "prettier": "^3.6.2",
     "prettier-plugin-svelte": "^3.4.0",
     "prettier-plugin-tailwindcss": "^0.6.14",

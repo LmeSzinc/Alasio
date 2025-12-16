@@ -19,6 +19,7 @@
     { path: "/dev/tools", name: t.DevTool.SystemTool() },
     { path: "/dev/assets", name: t.AssetManager.AssetManager() },
     { path: "/dev/ws", name: t.WebsocketTest.Title() },
+    { path: "/dev/compat", name: "Browser Compatibility" },
   ]);
 
   // --- Derived State ---
