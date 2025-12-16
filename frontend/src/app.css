@@ -1,6 +1,12 @@
 @import "tailwindcss";
-
 @import "tw-animate-css";
+
+/* 
+  If your project still needs a traditional config file, don't worry.
+  Tailwind hasn't removed support for it entirely. You can manually create tailwind.config.js and link it in your CSS file like this:
+
+  @config "./tailwind.config.js";
+*/
 
 @custom-variant dark (&:is(.dark *));
 
@@ -114,6 +120,10 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+@theme font {
+  --font-consolas: Consolas, "Courier New", monospace;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -132,6 +142,6 @@
       inset -8px -8px 32px #ffffff;
   }
   .dark .neushadow {
-    box-shadow: none
+    box-shadow: none;
   }
 }
