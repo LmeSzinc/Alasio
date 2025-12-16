@@ -1,6 +1,12 @@
 @import "tailwindcss";
-
 @import "tw-animate-css";
+
+/* 
+  If your project still needs a traditional config file, don't worry.
+  Tailwind hasn't removed support for it entirely. You can manually create tailwind.config.js and link it in your CSS file like this:
+
+  @config "./tailwind.config.js";
+*/
 
 @custom-variant dark (&:is(.dark *));
 

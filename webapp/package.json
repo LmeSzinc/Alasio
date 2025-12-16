@@ -10,10 +10,13 @@
     "preview": "vite preview"
   },
   "devDependencies": {
+    "@csstools/postcss-color-mix-function": "^3.0.12",
+    "@csstools/postcss-oklab-function": "^4.0.12",
     "@internationalized/date": "^3.10.0",
     "@lucide/svelte": "^0.561.0",
     "@sveltejs/vite-plugin-svelte": "^5.1.1",
     "@tailwindcss/vite": "^4.1.17",
+    "@types/culori": "^4.0.1",
     "@types/node": "^22.19.1",
     "autoprefixer": "^10.4.22",
     "bits-ui": "^2.14.4",
@@ -22,6 +25,8 @@
     "electron": "22.3.27",
     "electron-builder": "^25.1.8",
     "js-yaml": "^4.1.1",
+    "postcss-media-minmax": "^5.0.0",
+    "postcss-nesting": "^13.0.2",
     "prettier": "^3.7.4",
     "svelte": "^5.45.5",
     "tailwind-merge": "^3.4.0",
