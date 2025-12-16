@@ -1,8 +1,21 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
 /** @type {import('postcss-load-config').Config} */
-const postcss = require("postcss");
-const valueParser = require("postcss-value-parser");
-const culori = require("culori");
+import postcssColorMixFunction from "@csstools/postcss-color-mix-function";
+import postcssOklabFunction from "@csstools/postcss-oklab-function";
+import * as culori from "culori";
+import postcss, { type AtRule, type Declaration, type Root, type Rule } from "postcss";
+import valueParser from "postcss-value-parser";
+// @ts-ignore, no @types/postcss-media-minmax so we just ignore
+import postcssMediaMinmax from "postcss-media-minmax";
+import postcssNesting from "postcss-nesting";
+
+/*
+  Required Dependencies:
+  pnpm add -D culori postcss postcss-nesting postcss-value-parser postcss-media-minmax \
+    @csstools/postcss-oklab-function @csstools/postcss-color-mix-function
+
+  Types:
+  pnpm add -D @types/culori
+*/
 
 /*
     This plugin polyfills @property definitions with regular CSS variables
@@ -10,15 +23,15 @@ const culori = require("culori");
 */
 const propertyInjectPlugin = () => {
   return {
-    Once(root) {
-      const fallbackRules = [];
+    Once(root: Root) {
+      const fallbackRules: string[] = [];
 
       // 1. Collect initial-value props from @property at-rules
-      root.walkAtRules("property", (rule) => {
-        const declarations = {};
-        let varName = null;
+      root.walkAtRules("property", (rule: AtRule) => {
+        const declarations: Record<string, string> = {};
+        let varName: string | null = null;
 
-        rule.walkDecls((decl) => {
+        rule.walkDecls((decl: Declaration) => {
           if (decl.prop === "initial-value") {
             varName = rule.params.trim();
             declarations[varName] = decl.value;
@@ -54,7 +67,7 @@ const propertyInjectPlugin = () => {
       }
 
       // 3. Remove `in <colorspace>` for gradients
-      root.walkDecls((decl) => {
+      root.walkDecls((decl: Declaration) => {
         if (!decl.value) return;
         decl.value = decl.value.replaceAll(/\bto\s+(left|right)\s+in\s+[\w-]+/g, (_, direction) => {
           return `to ${direction}`;
@@ -68,8 +81,8 @@ const propertyInjectPlugin = () => {
 propertyInjectPlugin.postcss = true;
 
 /* 
-   核心状态共享：存储所有带有 alpha 通道的变量名 
-   例如：Set { '--border', '--backdrop' }
+   Core state sharing: Store all variable names with alpha channel 
+   Example: Set { '--border', '--backdrop' }
 */
 const alphaVariables = new Set();
 /*
@@ -82,8 +95,8 @@ const alphaVariables = new Set();
 */
 const oklchToRgbDoubleDefPlugin = () => {
   return {
-    Once(root) {
-      root.walkDecls((decl) => {
+    Once(root: Root) {
+      root.walkDecls((decl: Declaration) => {
         // Only process CSS custom properties
         if (!decl.prop.startsWith("--")) return;
         // Check if value contains oklch
@@ -100,7 +113,7 @@ const oklchToRgbDoubleDefPlugin = () => {
           // 2. Convert to RGB and map to sRGB Gamut
           // 'toGamut' ensures that colors outside sRGB (which oklch allows)
           // are clamped correctly to the nearest visible RGB color.
-          const toRgb = culori.toGamut("rgb");
+          const toRgb = culori.toGamut("rgb", "oklch");
           const rgbColor = toRgb(parsed);
 
           // 3. Extract channels (0-255 range)
@@ -114,7 +127,7 @@ const oklchToRgbDoubleDefPlugin = () => {
 
           // 5. Insert the NEW *-rgb variable AFTER the current one
           // This allows Tailwind to find --var-rgb
-          decl.parent.insertAfter(decl, {
+          decl.parent!.insertAfter(decl, {
             prop: `${decl.prop}-rgb`,
             value: channelString,
           });
@@ -125,7 +138,7 @@ const oklchToRgbDoubleDefPlugin = () => {
           if (alpha < 1) {
             alphaVariables.add(decl.prop);
             decl.value = culori.formatHex8(rgbColor);
-            decl.parent.insertAfter(decl, {
+            decl.parent!.insertAfter(decl, {
               prop: `${decl.prop}-a`,
               value: alpha.toString(),
             });
@@ -151,8 +164,8 @@ oklchToRgbDoubleDefPlugin.postcss = true;
 */
 const colorMixToAlphaPlugin = () => {
   return {
-    Once(root) {
-      root.walkDecls((decl) => {
+    Once(root: Root) {
+      root.walkDecls((decl: Declaration) => {
         const originalValue = decl.value;
         if (!originalValue || !originalValue.includes("color-mix(")) return;
 
@@ -173,21 +186,20 @@ const colorMixToAlphaPlugin = () => {
 
               let newValue;
 
-              // 核心判断：这个变量是否有原始透明度？
+              // Core logic: Does this variable have original transparency?
               if (alphaVariables.has(varName)) {
-                // 有！生成乘法逻辑
-                // 结果: rgb(var(--border-rgb) / calc(var(--border-a) * 0.5))
+                // Yes! Generate multiplication logic
+                // Result: rgb(var(--border-rgb) / calc(var(--border-a) * 0.5))
                 newValue = `rgb(var(${varName}-rgb) / calc(var(${varName}-a, 1) * ${opacityMod}))`;
               } else {
-                // 没有！生成普通逻辑
-                // 结果: rgb(var(--border-rgb) / 0.5)
+                // No! Generate normal logic
+                // Result: rgb(var(--border-rgb) / 0.5)
                 newValue = `rgb(var(${varName}-rgb) / ${opacityMod})`;
               }
 
-              node.type = "word";
+              (node as any).type = "word";
               node.value = newValue;
-              delete node.nodes;
-
+              delete (node as any).nodes;
               modified = true;
             }
           }
@@ -210,8 +222,8 @@ colorMixToAlphaPlugin.postcss = true;
 */
 const transformShortcutPlugin = () => {
   return {
-    Once(root) {
-      const defaults = {
+    Once(root: Root) {
+      const defaults: Record<string, any[]> = {
         rotate: [0, 0, 1, "0deg"],
         scale: [1, 1, 1],
         translate: [0, 0, 0],
@@ -223,11 +235,11 @@ const transformShortcutPlugin = () => {
         source: root.source,
       });
 
-      root.walkRules((rule) => {
+      root.walkRules((rule: Rule) => {
         let hasTransformShorthand = false;
-        const transformFunctions = [];
+        const transformFunctions: string[] = [];
 
-        rule.walkDecls((decl) => {
+        rule.walkDecls((decl: Declaration) => {
           if (/^(rotate|scale|translate)$/.test(decl.prop)) {
             hasTransformShorthand = true;
             const newValues = [...defaults[decl.prop]];
@@ -273,8 +285,8 @@ transformShortcutPlugin.postcss = true;
  */
 const addSpaceForEmptyVarFallback = () => {
   return {
-    OnceExit(root) {
-      root.walkDecls((decl) => {
+    OnceExit(root: Root) {
+      root.walkDecls((decl: Declaration) => {
         if (!decl.value || !decl.value.includes("var(")) return;
 
         const parsed = valueParser(decl.value);
@@ -313,13 +325,13 @@ const addSpaceForEmptyVarFallback = () => {
 addSpaceForEmptyVarFallback.postcss = true;
 
 /*
-    Promote Plugin (鸠占鹊巢插件)
-    作用：
-    1. 找到被 @supports 包裹的 "rgb(...)" 定义。
-    2. 找到它外面对应的 "纯色回退" 定义。
-    3. 用里面的新定义覆盖外面的旧定义，并移除 @supports。
+    Promote Plugin (Take-over Plugin)
+    Purpose:
+    1. Find "rgb(...)" definitions wrapped in @supports.
+    2. Find the corresponding "solid color fallback" definition outside.
+    3. Override the old definition outside with the new definition inside, and remove @supports.
     
-    结果：
+    Result:
     Input:
       .bg-primary/20 { background: var(--primary); }
       @supports (color: color-mix(...)) {
@@ -332,52 +344,52 @@ addSpaceForEmptyVarFallback.postcss = true;
 const promoteColorMixPlugin = () => {
   return {
     postcssPlugin: "postcss-promote-color-mix",
-    OnceExit(root) {
-      // 1. 遍历所有 @supports
-      root.walkAtRules("supports", (atRule) => {
-        // 只处理针对 color-mix 的检查
+    OnceExit(root: Root) {
+      // 1. Iterate through all @supports
+      root.walkAtRules("supports", (atRule: AtRule) => {
+        // Only process checks for color-mix
         if (!atRule.params.includes("color-mix")) return;
 
-        // 2. 遍历 @supports 内部的规则
-        atRule.walkRules((innerRule) => {
-          // 3. 在根节点寻找与内部规则选择器相同的 "外部规则"
-          // 我们往上看 (prev)，通常紧挨着的就是外部规则
+        // 2. Iterate through rules inside @supports
+        atRule.walkRules((innerRule: Rule) => {
+          // 3. Find the "outer rule" in the root node with the same selector as the inner rule
+          // We look upward (prev), usually the adjacent one is the outer rule
           let outerRule = atRule.prev();
 
-          // 如果前一个不是规则（可能是注释或其他），继续往前找一点
-          while (outerRule && outerRule.type !== "rule" && outerRule !== root) {
+          // If the previous one is not a rule (might be a comment or other), continue searching upward
+          while (outerRule && outerRule.type !== "rule") {
             outerRule = outerRule.prev();
           }
 
-          // 匹配到了外部规则，且选择器一致
+          // Matched the outer rule, and the selector is consistent
           if (outerRule && outerRule.type === "rule" && outerRule.selector === innerRule.selector) {
-            // 4. 将内部的声明 (declarations) 搬运到外部
-            innerRule.walkDecls((innerDecl) => {
-              // 在外部规则中查找同名属性 (如 border-color)
+            // 4. Move the inner declarations to the outer rule
+            innerRule.walkDecls((innerDecl: Declaration) => {
+              // Find the property with the same name in the outer rule (e.g. border-color)
               let replaced = false;
-              outerRule.walkDecls(innerDecl.prop, (outerDecl) => {
-                // 覆盖它！
+              (outerRule as Rule).walkDecls(innerDecl.prop, (outerDecl: Declaration) => {
+                // Override it!
                 outerDecl.value = innerDecl.value;
-                // 如果有 !important 等标记，也可以在这里同步
+                // If there are !important or other flags, they can also be synchronized here
                 outerDecl.important = innerDecl.important;
                 replaced = true;
               });
 
-              // 如果外部规则里居然没这个属性（少见），则直接追加
+              // If the outer rule doesn't have this property (rare), append it directly
               if (!replaced) {
                 outerRule.append(innerDecl.clone());
               }
             });
 
-            // 标记内部规则已处理（可选，稍后删除 atRule 会统一清理）
+            // Mark the inner rule as processed (optional, will be cleaned up when @supports is deleted)
           } else {
-            // 如果没找到外部规则（比如这是个全新的定义），直接把规则提出来
-            // 插入到 @supports 之前
-            atRule.parent.insertBefore(atRule, innerRule);
+            // If the outer rule is not found (e.g. this is a brand new definition), extract the rule directly
+            // Insert it before @supports
+            atRule.parent!.insertBefore(atRule, innerRule);
           }
         });
 
-        // 5. 榨干价值后，删除这个 @supports 块
+        // 5. After extracting the value, delete this @supports block
         atRule.remove();
       });
     },
@@ -392,13 +404,13 @@ const config = {
     colorMixToAlphaPlugin(),
     transformShortcutPlugin(),
     addSpaceForEmptyVarFallback(),
-    require("postcss-media-minmax"),
-    require("@csstools/postcss-oklab-function"),
-    require("postcss-nesting"),
-    require("@csstools/postcss-color-mix-function"),
+    postcssMediaMinmax,
+    postcssOklabFunction,
+    postcssNesting,
+    postcssColorMixFunction,
     // Must be the last plugin
     promoteColorMixPlugin(),
   ],
 };
 
-module.exports = config;
+export default config;
