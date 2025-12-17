@@ -22,11 +22,13 @@
   };
   let { config, dropIndicator = null, onCopy, onDelete }: Props = $props();
 
-  const dndData = {
+  const dndData = $derived({
     id: config.id,
     data: { type: "item", config: config },
-  };
+  });
+  // svelte-ignore state_referenced_locally
   const { attributes, listeners, isDragging, setNodeRef: setDraggableNode } = useDraggable(dndData);
+  // svelte-ignore state_referenced_locally
   const { setNodeRef: setDroppableNode } = useDroppable(dndData);
 
   // Compute the indicator specifically for this item.

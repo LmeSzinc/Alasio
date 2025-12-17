@@ -26,7 +26,6 @@
   export type DropIndicatorState = {
     targetId: string | number | null;
     position: "top" | "bottom" | "left" | "right";
-    orientation: "horizontal" | "vertical";
   };
 
   export type DndEndCallbackDetail = {
@@ -62,12 +61,11 @@
   let dropIndicator = $state<DropIndicatorState>({
     targetId: null,
     position: "top", // Default position
-    orientation,
   });
   // Reset indicator state at the start of a drag.
   function clearIndicator() {
     lastOver = null;
-    dropIndicator = { targetId: null, position: "top", orientation };
+    dropIndicator = { targetId: null, position: "top" };
   }
 
   // --- Collision Algorithm Creation ---
@@ -102,7 +100,6 @@
         dropIndicator = {
           targetId: firstCollision.id,
           position: firstEdge,
-          orientation,
         };
         lastOver = over;
         return;
@@ -137,7 +134,6 @@
     dropIndicator = {
       targetId: over.id,
       position: edge,
-      orientation,
     };
     lastOver = over;
   }

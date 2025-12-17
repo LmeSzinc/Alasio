@@ -20,11 +20,13 @@
   };
   let { group, dropIndicator = null, onCopy, onDelete }: Props = $props();
 
-  const dndData = {
+  const dndData = $derived({
     id: group.id,
     data: { type: "group", group: group },
-  };
+  });
+  // svelte-ignore state_referenced_locally
   const { isOver, setNodeRef: setDroppableNode } = useDroppable(dndData);
+  // svelte-ignore state_referenced_locally
   const { attributes, listeners, isDragging, setNodeRef: setDraggableNode } = useDraggable(dndData);
 
   // Compute the indicator specifically for this group.
@@ -33,7 +35,7 @@
 
 <div use:setDraggableNode use:setDroppableNode data-dragging={isDragging.current} class="drag-placeholder relative">
   <div class="group-container relative rounded-lg p-3 pt-4">
-    <div class="absolute -top-2 left-6 z-2 flex items-center">
+    <div class="z-2 absolute -top-2 left-6 flex items-center">
       <!-- icon and text cover the border -->
       <span class="text-muted-foreground bg-background pl-2 text-xs">
         {t.ConfigScan.SchedulerGroup({ n: group.gid })}
