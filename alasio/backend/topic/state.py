@@ -3,7 +3,7 @@ from collections import defaultdict
 import trio
 from msgspec import Struct
 
-from alasio.backend.topic.scan import ConfigScan
+from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
 from alasio.config.table.scan import validate_config_name
@@ -110,7 +110,7 @@ class ConnState(BaseTopic):
             return
 
         # get current configs
-        data = await ConfigScan(self.conn_id).data
+        data = ConfigScanSource().data
         if name not in data:
             raise RpcValueError(f'No such config: "{name}"')
 

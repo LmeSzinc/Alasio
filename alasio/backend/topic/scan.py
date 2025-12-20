@@ -5,15 +5,16 @@ import trio
 
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.table.scan import ConfigInfo, DndRequest, ScanTable
-from alasio.ext.file.msgspecfile import deepcopy_msgpack
+from alasio.ext.reactive.base_msgbus import on_msgbus_global_event
 from alasio.ext.reactive.base_rpc import rpc
-from alasio.ext.reactive.rx_trio import async_reactive, async_reactive_source
+from alasio.ext.reactive.event import ResponseEvent
 from alasio.ext.singleton import Singleton
 
 
 class ConfigScanSource(metaclass=Singleton):
     def __init__(self):
         self.lastrun = 0
+        self.data = {}
         self.lock = trio.Lock()
 
     async def scan(self, force=False):
@@ -38,33 +39,27 @@ class ConfigScanSource(metaclass=Singleton):
             # call
             table = ScanTable()
             data = await trio.to_thread.run_sync(table.scan)
-            # run_sync
-            await ConfigScanSource.data.mutate(self, data)
+            # broadcast
+            topic = 'ConfigScan'
+            if self.data and data != self.data:
+                # send on updates only, because full event is already send on topic subscription
+                # send full event to avoid data bouncing after drag and drop
+                event = ResponseEvent(t=topic, o='full', v=data)
+                await BaseTopic.msgbus_global_asend(topic, event)
             # record time after all awaits
+            self.data = data
             self.lastrun = time.time()
             return data
 
-    @async_reactive_source
-    async def data(self):
-        return {}
-
 
 class ConfigScan(BaseTopic):
-    @async_reactive
-    async def data(self):
-        """
-        Returns:
-            dict[str, dict[str, Any]]:
-                key: config_name
-                value: ConfigInfo in dict
-        """
-        data = await ConfigScanSource().data
-        return deepcopy_msgpack(data)
-
     async def getdata(self):
         # re-scan before getting data
-        await ConfigScanSource().scan()
-        return await self.data
+        return await ConfigScanSource().scan()
+
+    @on_msgbus_global_event('ConfigScan')
+    async def on_scan_diff(self, value: ResponseEvent):
+        await self.server.send(value)
 
     @rpc
     async def config_add(self, name: str, mod: str):
