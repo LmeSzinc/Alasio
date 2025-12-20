@@ -122,11 +122,13 @@
     let changes: { name: string; gid: number; iid: number }[] = [];
 
     if (activeType === "item") {
-      const activeConfig = active.data.config as Config;
+      const activeConfig = itemMap.get(active.id) as Config;
+      if (!activeConfig) return;
 
       if (overType === "item") {
         // Item dropped on another item
-        const overConfig = over.data.config as Config;
+        const overConfig = itemMap.get(over.id) as Config;
+        if (!overConfig) return;
 
         if (position === "top") {
           // Insert before the target item
@@ -145,7 +147,8 @@
         }
       } else if (overType === "group") {
         // Item dropped on a group (creating new group)
-        const overGroup = over.data.group as ConfigGroupData;
+        const overGroup = itemMap.get(over.id) as ConfigGroupData;
+        if (!overGroup) return;
 
         if (position === "top") {
           // Create new group before the target group
@@ -273,7 +276,8 @@
     }
 
     // Re-index the UI to have clean, sequential gid/iid values
-    reindex();
+    // reindex();
+    // forceRefresh++;
   }
 
   // Dialog handlers
