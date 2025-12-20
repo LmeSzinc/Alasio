@@ -17,7 +17,7 @@
   "devDependencies": {
     "@csstools/postcss-color-mix-function": "^3.0.12",
     "@csstools/postcss-oklab-function": "^4.0.12",
-    "@dnd-kit-svelte/core": "0.0.8",
+    "@dnd-kit-svelte/core": "^0.0.11",
     "@internationalized/date": "^3.10.1",
     "@lucide/svelte": "^0.544.0",
     "@sveltejs/adapter-static": "^3.0.10",

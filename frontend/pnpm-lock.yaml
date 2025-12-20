@@ -15,8 +15,8 @@ importers:
         specifier: ^4.0.12
         version: 4.0.12(postcss@8.5.6)
       '@dnd-kit-svelte/core':
-        specifier: 0.0.8
-        version: 0.0.8(svelte@5.46.0)
+        specifier: ^0.0.11
+        version: 0.0.11(svelte@5.46.0)
       '@internationalized/date':
         specifier: ^3.10.1
         version: 3.10.1
@@ -197,8 +197,8 @@ packages:
     peerDependencies:
       svelte: ^5.0.0
 
-  '@dnd-kit-svelte/core@0.0.8':
-    resolution: {integrity: sha512-c77kG70L2DX+af9NW7EbbByKXcHF4y+8sqbZjj81N6QnAtdqrfZdQug/39qSMC3hxLkiS1UowVhSQRJgpdFWGA==}
+  '@dnd-kit-svelte/core@0.0.11':
+    resolution: {integrity: sha512-bVqutZhSOk3nQsjwJ0SveUrPeBgUO/wajfon1AiKA8mxfQhaUG97CfoQLs7tLW3YxSkHkLPhYRw9WQat7OMB7g==}
     peerDependencies:
       svelte: ^5.0.0
 
@@ -1511,7 +1511,7 @@ snapshots:
       runed: 0.23.4(svelte@5.46.0)
       svelte: 5.46.0
 
-  '@dnd-kit-svelte/core@0.0.8(svelte@5.46.0)':
+  '@dnd-kit-svelte/core@0.0.11(svelte@5.46.0)':
     dependencies:
       '@dnd-kit-svelte/accessibility': 0.0.11(svelte@5.46.0)
       '@dnd-kit-svelte/utilities': 0.0.11(svelte@5.46.0)
