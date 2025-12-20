@@ -135,7 +135,7 @@
             <div class="flex items-center gap-2">
               <Input
                 id="topic"
-                class="flex-grow font-mono"
+                class="grow font-mono"
                 bind:value={topic}
                 placeholder={t.WebsocketTest.TopicPlaceholder()}
               />
@@ -196,7 +196,7 @@
         <!-- This container arranges the cards -->
         <div class="space-y-4">
           {#each sortedTopicsData as [topicName, data]}
-            <Card.Root class="flex max-h-[32rem] w-full flex-col">
+            <Card.Root class="flex max-h-128 w-full flex-col">
               <Card.Header class="flex flex-row items-center justify-between">
                 <Card.Title>{topicName}</Card.Title>
                 <div class="flex items-center gap-2">
@@ -216,7 +216,7 @@
                   {/if}
                 </div>
               </Card.Header>
-              <Card.Content class="flex-grow overflow-auto">
+              <Card.Content class="grow overflow-auto">
                 {#if typeof data === "object" && data !== null}
                   <pre class="h-full font-mono text-sm whitespace-pre-wrap select-text"><code
                       >{JSON.stringify(data, null, 2)}</code

@@ -61,7 +61,7 @@
     >
       <GripVertical class="h-5 w-5" />
     </div>
-    <div class="flex-grow font-mono text-sm">{config.name}</div>
+    <div class="grow font-mono text-sm">{config.name}</div>
     <div class="bg-secondary text-secondary-foreground ml-4 rounded px-2 py-1 text-xs">
       {config.mod}
     </div>

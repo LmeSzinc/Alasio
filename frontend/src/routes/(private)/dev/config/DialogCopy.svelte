@@ -57,7 +57,7 @@
       <div class="space-y-2">
         <Label>{t.ConfigScan.CopyFrom()}</Label>
         <div class="bg-card text-card-foreground flex h-12 items-center rounded-md border p-2 shadow-sm">
-          <div class="ml-2 flex-grow font-mono text-sm">
+          <div class="ml-2 grow font-mono text-sm">
             {sourceConfig?.name || t.ConfigScan.Unknown()}
           </div>
           {#if sourceConfig?.mod}
