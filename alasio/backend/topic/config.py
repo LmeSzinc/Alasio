@@ -3,11 +3,12 @@ from typing import Any
 import trio.to_thread
 from msgspec import ValidationError
 
-from alasio.backend.msgbus.share import ConfigEvent
 from alasio.backend.topic.state import ConnState, NavState
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
+from alasio.config.entry.mod import ConfigSetEvent
 from alasio.ext.deep import deep_iter_depth2, deep_set
+from alasio.ext.reactive.base_msgbus import on_msgbus_config_event
 from alasio.ext.reactive.base_rpc import rpc
 from alasio.ext.reactive.event import ResponseEvent
 from alasio.ext.reactive.rx_trio import async_reactive_nocache
@@ -87,20 +88,21 @@ class ConfigArg(BaseTopic):
 
         return data
 
-    async def on_config_event(self, event: ConfigEvent):
+    @on_msgbus_config_event('ConfigArg')
+    async def on_config_event(self, event: ConfigSetEvent):
         """
-        Handle config event from msg bus
+        Handle config event from msgbus
         """
-        key = self.dict_config_to_topic.get(event.k)
+        key = self.dict_config_to_topic.get((event.task, event.group, event.arg))
         if key is None:
             # not displaying this key
             return None
         key = (*key, 'value')
         data = await self.data
         # set to topic data
-        deep_set(data, keys=key, value=event.v)
+        deep_set(data, keys=key, value=event.value)
         # send to frontend
-        event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=event.v)
+        event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=event.value)
         await self.server.send(event)
 
     @rpc
@@ -120,22 +122,19 @@ class ConfigArg(BaseTopic):
             MOD_LOADER.gui_config_set,
             mod_name, config_name, task, group, arg, value
         )
-        # resp: ConfigSetEvent
+        resp: ConfigSetEvent
         # logger.info([success, resp])
-        event = ConfigEvent(
-            t=self.topic_name(), c=config_name,
-            k=(resp.task, resp.group, resp.arg), v=resp.value)
         if success:
             # broadcast to all connections
-            await self.server.send_config_event(event)
+            await self.msgbus_config_asend(self.topic_name(), config_name, resp)
         else:
             # rollback self
-            key = self.dict_config_to_topic.get(event.k)
+            key = self.dict_config_to_topic.get((resp.task, resp.group, resp.arg))
             if key is None:
                 # not displaying this key
                 return
             key = (*key, 'value')
-            event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=event.v)
+            event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=resp.value)
             await self.server.send(event)
             # re-raise error, so server will treat as RPC call failed
             if resp.error is not None:
@@ -166,8 +165,5 @@ class ConfigArg(BaseTopic):
             # reset failed, do nothing
             return
 
-        event = ConfigEvent(
-            t=self.topic_name(), c=config_name,
-            k=(resp.task, resp.group, resp.arg), v=resp.value)
         # broadcast to all connections
-        await self.server.send_config_event(event)
+        await self.msgbus_config_asend(self.topic_name(), config_name, resp)

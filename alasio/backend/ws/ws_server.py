@@ -5,7 +5,6 @@ import trio
 from msgspec import DecodeError, EncodeError, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from alasio.backend.msgbus.share import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
 from alasio.ext.locale.accept_language import negotiate_accept_language
@@ -20,7 +19,6 @@ ENCODE_ERRORS = (EncodeError, UnicodeEncodeError)
 REQUEST_EVENT_DECODER = msgspec.json.Decoder(RequestEvent)
 RESPONSE_EVENT_ENCODER = msgspec.json.Encoder()
 CONN_ID_GENERATOR = SafeIDGenerator(prefix='conn')
-MSGBUS_SEND, MSGBUS_RECV = trio.open_memory_channel(128)
 
 
 class WebsocketTopicServer:
@@ -535,41 +533,3 @@ class WebsocketTopicServer:
             return
 
         raise AccessDenied(f'Operation not allowed: {op}')
-
-    """
-    Message bus
-    """
-
-    @classmethod
-    async def task_msgbus(
-            cls,
-            recv_buffer: "trio.MemoryReceiveChannel[ConfigEvent]" = MSGBUS_RECV
-    ):
-        """
-        Coroutine task that handles config events on msg bus
-        """
-        while 1:
-            # receive then do, msg order matters
-            event = await recv_buffer.receive()
-            try:
-                await cls.handle_config_event(event)
-            except Exception as e:
-                logger.exception(e)
-
-    @classmethod
-    async def handle_config_event(cls, event: ConfigEvent):
-        """
-        This is a placeholder method for override,
-        because the real send_config_event needs topic lookup
-        """
-        pass
-
-    async def send_config_event(
-            self,
-            event: ConfigEvent,
-            send_buffer: "trio.MemorySendChannel[ConfigEvent]" = MSGBUS_SEND,
-    ):
-        """
-        Broadcast config events to all connections that subscribed this config
-        """
-        await send_buffer.send(event)

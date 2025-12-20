@@ -132,7 +132,8 @@ async def lifespan(app):
         nursery.start_soon(task_gc)
         # start message bus task
         from alasio.backend.ws.topic import WebsocketServer
-        nursery.start_soon(WebsocketServer.task_msgbus)
+        nursery.start_soon(WebsocketServer.task_msgbus_global)
+        nursery.start_soon(WebsocketServer.task_msgbus_config)
 
         # actual backend runs here
         yield

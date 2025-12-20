@@ -1,6 +1,6 @@
 import contextvars
 import weakref
-from typing import Callable, Generic, TypeVar
+from typing import Any, Callable, Generator, Generic, TypeVar
 import trio
 
 T = TypeVar('T')
@@ -40,7 +40,7 @@ class AwaitableProperty(Generic[T]):
         self.reactive_deco = reactive_deco
         self.obj = obj
 
-    def __await__(self) -> T:
+    def __await__(self) -> Generator[Any, Any, T]:
         return self.reactive_deco.get_value(self.obj).__await__()
 
 

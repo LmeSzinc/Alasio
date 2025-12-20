@@ -147,12 +147,3 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         event = ResponseEvent(t=self.topic_name(), i=rpc_id)
         await self.server.send(event)
         return
-
-    async def on_config_event(self, event: ConfigEvent):
-        """
-        Handle config event from msg bus
-        If a topic reads from config, it needs to implement this
-
-        When on_config_event is called, do_config_event() guarantees event.t is current topic
-        """
-        pass

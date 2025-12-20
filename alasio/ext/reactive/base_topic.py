@@ -1,4 +1,21 @@
+from typing import Any, TYPE_CHECKING
+
+import trio
+
+from alasio.logger import logger
 from .base_rpc import RPCMethod
+
+if TYPE_CHECKING:
+    MSGBUS_GLOBAL_SEND: "trio.MemorySendChannel[tuple[str, Any]]"
+    MSGBUS_GLOBAL_RECV: "trio.MemoryReceiveChannel[tuple[str, Any]]"
+    MSGBUS_CONFIG_SEND: "trio.MemorySendChannel[tuple[str, str, Any]]"
+    MSGBUS_CONFIG_RECV: "trio.MemoryReceiveChannel[tuple[str, str, Any]]"
+MSGBUS_GLOBAL_SEND, MSGBUS_GLOBAL_RECV = trio.open_memory_channel(64)
+MSGBUS_CONFIG_SEND, MSGBUS_CONFIG_RECV = trio.open_memory_channel(1024)
+
+# A collection of msgbus handlers
+MSGBUS_GLOBAL_HANDLERS: "dict[str, list[callable]]" = {}
+MSGBUS_CONFIG_HANDLERS: "dict[str, list[callable]]" = {}
 
 
 class BaseTopic:
@@ -31,12 +48,72 @@ class BaseTopic:
         # Create a new registry for this specific subclass, inheriting from parent
         # This prevents child classes from modifying the parent's registry.
         cls.rpc_methods = {}
+        cls.msgbus_global_handlers = {}
+        cls.msgbus_config_handlers = {}
 
         for base in cls.__mro__:
             # stop at self
             if base is BaseTopic:
                 break
             for name, member in base.__dict__.items():
-                if callable(member) and hasattr(member, '_rpc_method_instance'):
+                if not callable(member):
+                    continue
+                if hasattr(member, '_rpc_method_instance'):
                     # The decorator has already done the heavy lifting. We just collect the result.
                     cls.rpc_methods[name] = member._rpc_method_instance
+                    continue
+                # collect msgbus handlers
+                topic = getattr(member, '_msgbus_global_topic', None)
+                if topic:
+                    MSGBUS_GLOBAL_HANDLERS.setdefault(topic, [])
+                    handlers = MSGBUS_GLOBAL_HANDLERS[topic]
+                    handlers.append((base, member))
+                    continue
+                topic = getattr(member, '_msgbus_config_topic', None)
+                if topic:
+                    MSGBUS_CONFIG_HANDLERS.setdefault(topic, [])
+                    handlers = MSGBUS_CONFIG_HANDLERS[topic]
+                    handlers.append((base, member))
+                    continue
+
+    @staticmethod
+    def msgbus_global_send(topic: str, value):
+        """
+        Send an event to global msgbus, sync method
+        """
+        event = (topic, value)
+        try:
+            MSGBUS_GLOBAL_SEND.send_nowait(event)
+            return True
+        except trio.WouldBlock:
+            logger.warning(f'msgbus_global buffer full, event dropped: {event}')
+            return False
+
+    @staticmethod
+    async def msgbus_global_asend(topic: str, value):
+        """
+        Send an event to global msgbus, async method
+        """
+        event = (topic, value)
+        await MSGBUS_GLOBAL_SEND.send(event)
+
+    @staticmethod
+    def msgbus_config_send(topic: str, config: str, value):
+        """
+        Send an event to config msgbus, sync method
+        """
+        event = (topic, config, value)
+        try:
+            MSGBUS_CONFIG_SEND.send_nowait(event)
+            return True
+        except trio.WouldBlock:
+            logger.warning(f'msgbus_config buffer full, event dropped: {event}')
+            return False
+
+    @staticmethod
+    async def msgbus_config_asend(topic: str, config: str, value):
+        """
+        Send an event to config msgbus, async method
+        """
+        event = (topic, config, value)
+        await MSGBUS_CONFIG_SEND.send(event)
