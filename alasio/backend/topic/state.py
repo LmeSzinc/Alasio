@@ -7,7 +7,6 @@ from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
 from alasio.config.table.scan import validate_config_name
-from alasio.ext.deep import deep_get
 from alasio.ext.locale.accept_language import negotiate_accept_language
 from alasio.ext.reactive.base_rpc import rpc
 from alasio.ext.reactive.event import RpcValueError
@@ -111,7 +110,9 @@ class ConnState(BaseTopic):
 
         # get current configs
         data = ConfigScanSource().data
-        if name not in data:
+        try:
+            config = data[name]
+        except KeyError:
             raise RpcValueError(f'No such config: "{name}"')
 
         # maintain DICT_CONFIG_TO_CONN
@@ -122,9 +123,8 @@ class ConnState(BaseTopic):
 
         # set
         # note that mod_name is calculated in backend to ensure consistency of mod_name and config_name
-        mod_name = deep_get(data, keys=[name, 'mod'], default='')
         state.config_name = name
-        state.mod_name = mod_name
+        state.mod_name = config.mod
         # reset nav when switching to new config
         state.nav_name = ''
 

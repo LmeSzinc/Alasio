@@ -14,7 +14,7 @@ from alasio.ext.singleton import Singleton
 class ConfigScanSource(metaclass=Singleton):
     def __init__(self):
         self.lastrun = 0
-        self.data = {}
+        self.data: "dict[str, ConfigInfo]" = {}
         self.lock = trio.Lock()
 
     async def scan(self, force=False):
