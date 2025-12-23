@@ -49,12 +49,19 @@ class WorkerState(msgspec.Struct):
             conn._check_closed()
             conn._check_writable()
             conn._send_bytes(data)
+            return True
         except AttributeError:
             # this shouldn't happen
             logger.warning(f'[WorkerManager] Failed to send command to "{self.config}": '
                            f'pipe connection not initialized')
+            return False
         except Exception as e:
             logger.warning(f'[WorkerManager] Failed to send command to "{self.config}": {e}')
+            return False
+
+    def send_test_continue(self):
+        event = CommandEvent(c='test-continue')
+        return self.send_command(event)
 
     def conn_close(self):
         """
@@ -269,6 +276,11 @@ class WorkerManager(metaclass=Singleton):
                     if worker.status in allows:
                         # allow worker switching its status among allows
                         worker.set_status(event.v)
+                        return
+                    if worker.status == 'starting':
+                        # allow worker switching to allows from "starting"
+                        worker.set_status(event.v)
+                        return
             return
 
         self.handle_config_event(event)
@@ -385,8 +397,8 @@ class WorkerManager(metaclass=Singleton):
         with self._lock:
             state.process = process
             state.conn = parent_conn
-            state.set_status('running')
             self._notify_update()
+            # status will become "running" when worker process initialize BackendBridge
 
         return True, 'Success'
 

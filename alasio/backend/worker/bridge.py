@@ -9,30 +9,27 @@ from alasio.ext.singleton import Singleton
 
 def worker_test_infinite():
     # A worker that runs infinitely
-    import time
     backend = BackendBridge()
     n = 0
     while 1:
         backend.send_log(str(n))
         n += 1
-        time.sleep(0.5)
+        backend.test_wait.wait(timeout=0.05)
 
 
 def worker_test_run5():
     # A worker that runs only 5 times
-    import time
     backend = BackendBridge()
     for n in range(5):
         backend.send_log(str(n))
-        time.sleep(0.5)
+        backend.test_wait.wait(timeout=0.05)
 
 
 def worker_test_error():
     # A worker that will raise error
-    import time
     backend = BackendBridge()
     backend.send_log('1')
-    time.sleep(0.5)
+    backend.test_wait.wait(timeout=0.05)
     raise Exception
 
 
@@ -40,7 +37,6 @@ def worker_test_scheduler():
     # A worker that simulates scheduler
     # - emits scheduler-waiting
     # - exits on scheduler_stopping after 0.5s
-    import time
     backend = BackendBridge()
     backend.send_log('1')
     n = 0
@@ -50,11 +46,43 @@ def worker_test_scheduler():
         else:
             backend.send_worker_state('running')
         n += 1
-        if backend.scheduler_stopping.wait(0.5):
-            time.sleep(0.5)
+        if backend.scheduler_stopping.wait(0.05):
+            backend.test_wait.wait(timeout=0.05)
             break
         else:
+            backend.test_wait.wait(timeout=0.05)
             continue
+
+
+def worker_test_send_events():
+    # A worker that sends various config events for testing
+    backend = BackendBridge()
+
+    # Send log event
+    backend.send_log('worker started')
+    backend.test_wait.wait(timeout=0.05)
+
+    # Send custom config events
+    backend.send(ConfigEvent(t='CustomEvent', v='test_value_1'))
+    backend.test_wait.wait(timeout=0.05)
+
+    backend.send(ConfigEvent(t='CustomEvent', v='test_value_2'))
+    backend.test_wait.wait(timeout=0.05)
+
+    backend.send(ConfigEvent(t='DataUpdate', k=('task', 'group', 'arg'), v={'data': 123}))
+    backend.test_wait.wait(timeout=0.05)
+
+    # Send worker state
+    backend.send_worker_state('scheduler-waiting')
+    backend.test_wait.wait(timeout=0.05)
+
+    backend.send_worker_state('running')
+    backend.test_wait.wait(timeout=0.05)
+
+    # Wait for stop signal
+    while not backend.scheduler_stopping.wait(0.05):
+        backend.send_log('still running')
+        backend.test_wait.wait(timeout=0.05)
 
 
 def mod_entry(mod, config, child_conn):
@@ -75,10 +103,13 @@ def mod_entry(mod, config, child_conn):
         worker_test_run5()
         return
     if mod == 'WorkerTestError':
-        worker_test_run5()
+        worker_test_error()
         return
     if mod == 'WorkerTestScheduler':
         worker_test_scheduler()
+        return
+    if mod == 'WorkerTestSendEvents':
+        worker_test_send_events()
         return
 
 
@@ -113,6 +144,8 @@ class BackendBridge(metaclass=Singleton):
         self.main_tid = 0
         self._io_thread = None
         self.scheduler_stopping = threading.Event()
+        # For test control
+        self.test_wait = threading.Event()
 
     def init(self, child_conn):
         """
@@ -122,6 +155,7 @@ class BackendBridge(metaclass=Singleton):
         self.main_tid = threading.get_ident()
         self._io_thread = threading.Thread(target=self._io_loop, daemon=True)
         self._io_thread.start()
+        self.send_worker_state('running')
 
     def send(self, event: ConfigEvent):
         conn = self.conn
@@ -151,6 +185,11 @@ class BackendBridge(metaclass=Singleton):
             return
         if command in ['killing', 'force-killing']:
             _async_raise(self.main_tid)
+            return
+        if command == 'test-continue':
+            # Signal test_wait to continue immediately
+            self.test_wait.set()
+            self.test_wait.clear()
             return
         # ignore unknown events
         return
