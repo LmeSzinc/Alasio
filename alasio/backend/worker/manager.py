@@ -27,6 +27,12 @@ WORKER_STATUS = Literal[
     'scheduler-stopping', 'scheduler-waiting',
     'killing', 'force-killing', 'error'
 ]
+# Allow worker set its status to one of the allows
+WORKER_STATUS_ALLOWS = ['running', 'scheduler-waiting']
+# Worker is considered running if status in the followings
+WORKER_RUNNING_STATUS = ['running', 'scheduler-stopping', 'scheduler-waiting']
+# Worker is considered stopped if status in the followings
+WORKER_STOPPED_STATUS = ['idle', 'error']
 
 
 class WorkerState(msgspec.Struct):
@@ -36,10 +42,21 @@ class WorkerState(msgspec.Struct):
     update: float = 0.
     process: Optional[multiprocessing.Process] = None
     conn: Optional[Connection] = None
+    running_event: threading.Event = msgspec.field(default_factory=threading.Event)
+    stopped_event: threading.Event = msgspec.field(default_factory=threading.Event)
 
     def set_status(self, status: WORKER_STATUS):
         self.status = status
         self.update = time.time()
+        if status in WORKER_RUNNING_STATUS:
+            self.running_event.set()
+            self.stopped_event.clear()
+        elif status in WORKER_STOPPED_STATUS:
+            self.running_event.clear()
+            self.stopped_event.set()
+        else:
+            self.running_event.clear()
+            self.stopped_event.clear()
 
     def send_command(self, command: CommandEvent):
         data = encode(command)
@@ -62,6 +79,12 @@ class WorkerState(msgspec.Struct):
     def send_test_continue(self):
         event = CommandEvent(c='test-continue')
         return self.send_command(event)
+
+    def wait_running(self, timeout: "float | None" = None):
+        return self.running_event.wait(timeout)
+
+    def wait_stopped(self, timeout: "float | None" = None):
+        return self.stopped_event.wait(timeout)
 
     def conn_close(self):
         """
@@ -270,10 +293,9 @@ class WorkerManager(metaclass=Singleton):
 
         # handle "WorkerState" events
         if event.t == 'WorkerState':
-            allows = ['running', 'scheduler-waiting']
-            if event.v in allows:
+            if event.v in WORKER_STATUS_ALLOWS:
                 with self._lock:
-                    if worker.status in allows:
+                    if worker.status in WORKER_STATUS_ALLOWS:
                         # allow worker switching its status among allows
                         worker.set_status(event.v)
                         return
@@ -402,6 +424,34 @@ class WorkerManager(metaclass=Singleton):
 
         return True, 'Success'
 
+    def worker_wait_running(self, config: str, timeout: "float | None" = None) -> bool:
+        """
+        Wait until worker running
+
+        Returns:
+            If waited
+        """
+        # dict access is thread safe, so no lock needed
+        try:
+            state = self.state[config]
+        except KeyError:
+            raise KeyError(f'No such worker: {config}') from None
+        return state.wait_running(timeout)
+
+    def worker_wait_stopped(self, config: str, timeout: "float | None" = None) -> bool:
+        """
+        Wait until worker stopped
+
+        Returns:
+            If waited
+        """
+        try:
+            state = self.state[config]
+        except KeyError:
+            # No such worker means not yet running or stopped
+            return True
+        return state.wait_stopped(timeout)
+
     def worker_scheduler_stop(self, config: str) -> "tuple[bool, str]":
         """
         Send "scheduler-stopping" to worker
@@ -417,7 +467,7 @@ class WorkerManager(metaclass=Singleton):
             # check if worker is running
             if state.status in ['idle', 'error']:
                 return False, f'Worker not running: "{config}", state="{state.status}"'
-            if state.status in ['scheduler-stopping', 'scheduler-waiting', 'killing', 'force-killing']:
+            if state.status in ['scheduler-stopping', 'killing', 'force-killing']:
                 return False, f'Worker is already stopping: "{config}", state="{state.status}"'
             # mark immediately
             state.set_status('scheduler-stopping')

@@ -10,12 +10,7 @@ import pytest
 
 from alasio.backend.worker.manager import WorkerManager
 from alasio.testing.timeout import AssertTimeout
-
-# 全局超时配置
-WORKER_STARTUP_TIMEOUT = 2.0      # worker 启动超时
-WORKER_STOP_TIMEOUT = 3.0         # worker 停止超时
-WORKER_COMPLETION_TIMEOUT = 3.0   # worker 完成超时
-STATE_TRANSITION_TIMEOUT = 5.0    # 状态转换超时
+from tests.backend.worker.const import *
 
 
 # ============================================================================
@@ -74,13 +69,12 @@ class TestWorkerStart:
         assert state.mod == 'WorkerTestRun5'
         assert state.config == 'test_start'
 
-        # 使用 AssertTimeout 等待启动完成
-        for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-            with _:
-                assert state.status == 'running'
-                assert state.process is not None
-                assert state.conn is not None
-                assert state.process.is_alive()
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+
+        assert state.status == 'running'
+        assert state.process is not None
+        assert state.conn is not None
+        assert state.process.is_alive()
 
     def test_start_duplicate_rejected(self, manager):
         """测试重复启动被拒绝"""
@@ -89,9 +83,7 @@ class TestWorkerStart:
 
         # 等待启动完成
         state = manager.state['test_dup']
-        for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-            with _:
-                assert state.status == 'running'
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         success2, msg = manager.worker_start('WorkerTestRun5', 'test_dup')
         assert not success2
@@ -106,12 +98,9 @@ class TestWorkerStart:
             assert success, f"Failed to start {config}: {msg}"
 
         # 等待所有 workers 启动
-        for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-            with _:
-                for config in configs:
-                    state = manager.state[config]
-                    assert state.status == 'running'
-                    assert state.process.is_alive()
+        for config in configs:
+            state = manager.state[config]
+            state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # Cleanup
         for config in configs:
@@ -124,6 +113,7 @@ class TestWorkerStart:
         assert success
 
         state = manager.state['test_restart']
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # 等待完成
         for _ in AssertTimeout(WORKER_COMPLETION_TIMEOUT):
@@ -155,6 +145,7 @@ class TestWorkerState:
         assert success
 
         state = manager.state['test_complete']
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # 等待完成
         for _ in AssertTimeout(WORKER_COMPLETION_TIMEOUT):
@@ -185,6 +176,7 @@ class TestWorkerState:
         assert success
 
         state = manager.state['test_error']
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # 快速推进到错误发生
         state.send_test_continue()
@@ -209,11 +201,7 @@ class TestWorkerStop:
         assert success
 
         state = manager.state['test_sched_stop']
-
-        # 等待运行
-        for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-            with _:
-                assert state.status in ['running', 'scheduler-waiting']
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # Request scheduler stop
         success, msg = manager.worker_scheduler_stop('test_sched_stop')
@@ -235,11 +223,7 @@ class TestWorkerStop:
         assert success
 
         state = manager.state['test_sched_resp']
-
-        # 等待运行
-        for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-            with _:
-                assert state.status in ['running', 'scheduler-waiting']
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # Request stop
         manager.worker_scheduler_stop('test_sched_resp')
@@ -259,11 +243,7 @@ class TestWorkerStop:
         assert success
 
         state = manager.state['test_kill']
-
-        # 等待运行
-        for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-            with _:
-                assert state.status == 'running'
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # Kill worker
         success, msg = manager.worker_kill('test_kill')
@@ -282,11 +262,7 @@ class TestWorkerStop:
         assert success
 
         state = manager.state['test_force']
-
-        # 等待运行
-        for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-            with _:
-                assert state.status == 'running'
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # Force kill
         success, msg = manager.worker_force_kill('test_force')
@@ -319,6 +295,7 @@ class TestWorkerStop:
         assert success
 
         state = manager.state['test_idle_stop']
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # 等待完成
         for _ in AssertTimeout(WORKER_COMPLETION_TIMEOUT):
@@ -341,11 +318,7 @@ class TestWorkerStop:
         assert success
 
         state = manager.state['test_seq']
-
-        # 等待运行
-        for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-            with _:
-                assert state.status == 'running'
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # Request scheduler stop
         success1, _ = manager.worker_scheduler_stop('test_seq')
@@ -378,6 +351,7 @@ class TestResourceManagement:
             assert success
 
             state = manager.state[f'test_leak_{i}']
+            state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
             # 快速推进到完成
             for _ in range(5):
@@ -405,9 +379,7 @@ class TestResourceManagement:
         # 等待所有启动
         for i in range(3):
             state = manager.state[f'test_state_{i}']
-            for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-                with _:
-                    assert state.status == 'running'
+            state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         workers = list(manager.state.values())
 
@@ -431,11 +403,7 @@ class TestResourceManagement:
             assert success, f"Failed at cycle {cycle}"
 
             state = manager.state['test_cycle']
-
-            # 等待启动
-            for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-                with _:
-                    assert state.status == 'running'
+            state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
             if cycle % 2 == 0:
                 manager.worker_force_kill('test_cycle')
@@ -474,9 +442,7 @@ class TestManagerLifecycle:
         # 等待所有启动
         for i in range(3):
             state = manager.state[f'test_close_{i}']
-            for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-                with _:
-                    assert state.status == 'running'
+            state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         workers = list(manager.state.values())
 
@@ -502,9 +468,7 @@ class TestManagerLifecycle:
         assert success
 
         state = manager.state['test_idempotent']
-        for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-            with _:
-                assert state.status == 'running'
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         # Close multiple times should not error
         manager.close()
@@ -517,9 +481,7 @@ class TestManagerLifecycle:
         manager1.worker_start('WorkerTestRun5', 'test_1')
 
         state = manager1.state['test_1']
-        for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
-            with _:
-                assert state.status == 'running'
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         manager1.close()
         time.sleep(0.3)
