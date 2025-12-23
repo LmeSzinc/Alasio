@@ -212,6 +212,8 @@ class WorkerManager(metaclass=Singleton):
         with self._lock:
             to_remove = []
             for state in self.state.values():
+                if not state.conn:
+                    continue
                 try:
                     # test if pipe valid
                     state.conn.fileno()
