@@ -140,9 +140,16 @@ async def lifespan(app):
         # cancel nursery to stop task_gc()
         nursery.cancel_scope.cancel()
 
-    # cleanup
+    # cleanup before exit
+    # release db connections
     from alasio.db.conn import SQLITE_POOL
     SQLITE_POOL.release_all()
+    # Terminate all workers
+    from alasio.backend.worker.manager import WorkerManager
+    manager: WorkerManager = WorkerManager.singleton_instance()
+    if manager is not None:
+        manager.close()
+
     logger.info('Lifespan end')
 
 

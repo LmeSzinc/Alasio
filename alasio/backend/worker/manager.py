@@ -575,7 +575,6 @@ class WorkerManager(metaclass=Singleton):
         """
         Terminate all workers and release resources
         """
-        logger.info('[WorkerManager] Closing...')
         # Remove self from singleton cache, so the next access will have a new manager
         self.__class__.singleton_clear()
 
@@ -585,6 +584,7 @@ class WorkerManager(metaclass=Singleton):
                 if not states:
                     break
                 self.state.clear()
+                logger.info(f'[WorkerManager] Closing manager, remaining {len(states)} workers')
                 for state in states:
                     self._set_status(state, 'killing')
 
