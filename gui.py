@@ -1,3 +1,7 @@
+from alasio.ext.patch import patch_startup
+
+patch_startup()
+
 if __name__ == '__main__':
     # For multiprocessing to work correctly on all platforms
     import multiprocessing
@@ -5,7 +9,7 @@ if __name__ == '__main__':
     multiprocessing.freeze_support()
 
     # run
-    from alasio.backend.main import Backendsupervisor
+    from alasio.backend.backend import BackendSupervisor
 
-    supervisor = Backendsupervisor()
+    supervisor = BackendSupervisor()
     supervisor.run()

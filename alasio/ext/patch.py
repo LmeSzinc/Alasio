@@ -35,9 +35,9 @@ def patch_std():
     # note that reconfigure() requires python>=3.7
     import sys
     try:
-        sys.stdin.reconfigure(encoding='utf-8')
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
+        sys.stdin.reconfigure(encoding='utf-8', errors='replace')
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
         return True
     except (AttributeError, TypeError):
         # std may get replaced by user's TextIO
@@ -76,7 +76,7 @@ def patch_environ():
         "PYTHONMALLOC",
         "PYTHONMALLOCSTATS",
         "PYTHONNODEBUGRANGES",
-        "PYTHONNOUSERSITE",
+        # "PYTHONNOUSERSITE",
         "PYTHONOPTIMIZE",
         "PYTHONPATH",
         "PYTHONPERFSUPPORT",
@@ -88,7 +88,7 @@ def patch_environ():
         "PYTHONTRACEMALLOC",
         "PYTHONUNBUFFERED",
         "PYTHONUSERBASE",
-        "PYTHONUTF8",
+        # "PYTHONUTF8",
         "PYTHONVERBOSE",
         "PYTHONWARNDEFAULTENCODING",
         "PYTHONWARNINGS",
@@ -126,11 +126,21 @@ def patch_environ():
         if upper in removes:
             os.environ.pop(key, None)
 
+    # set PYTHONUTF8 so child process will use UTF8
+    os.environ["PYTHONUTF8"] = "1"
+    # set PYTHONNOUSERSITE so child process will ignore user site-packages
+    os.environ["PYTHONNOUSERSITE"] = "1"
+
 
 def patch_startup():
     """
     A collection of patches on process startup
     This function is supposed to be called in entry file (outside of `if __name__ == "__main__":`)
+
+    It's also recommended to launch with
+        python -s -OO gui.py
+    "-s" to ignore user site-packages
+    "-OO" to drop assert and docstring at runtime
     """
     patch_environ()
     patch_std()

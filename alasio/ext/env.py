@@ -2,7 +2,6 @@ import os
 import sys
 
 from alasio.ext.path import PathStr
-from .patch_runtime import patch_mimetype
 
 # Operating System
 POSIX = os.name == "posix"
