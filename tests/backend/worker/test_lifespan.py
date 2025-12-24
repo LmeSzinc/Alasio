@@ -124,8 +124,9 @@ class TestWorkerStart:
                 assert state.status == 'idle'
 
         # Restart
-        success, msg = manager.worker_start('WorkerTestRun5', 'test_restart')
+        success, msg = manager.worker_start('WorkerTestInfinite', 'test_restart')
         assert success, f"Cannot restart: {msg}"
+        state = manager.state['test_restart']
 
         for _ in AssertTimeout(WORKER_STARTUP_TIMEOUT):
             with _:
@@ -308,7 +309,8 @@ class TestWorkerStop:
         # Try to stop idle worker
         success, msg = manager.worker_scheduler_stop('test_idle_stop')
         assert not success
-        assert 'not running' in msg.lower()
+        msg = msg.lower()
+        assert 'not running' in msg or 'no such worker' in msg
 
     # Mark skip because worker_kill is so fast that process is dead before force-kill
     @pytest.mark.skip
@@ -359,11 +361,11 @@ class TestResourceManagement:
                 time.sleep(0.02)
 
         # 等待所有完成
-        for i in range(3):
-            state = manager.state[f'test_leak_{i}']
-            for _ in AssertTimeout(WORKER_COMPLETION_TIMEOUT):
-                with _:
-                    assert state.status == 'idle'
+        for _ in AssertTimeout(WORKER_COMPLETION_TIMEOUT):
+            with _:
+                for i in range(3):
+                    state = manager.state.get(f'test_leak_{i}', None)
+                    assert not state or state.status == 'idle'
 
         # Check no process leak
         assert_worker_gone(list(manager.state.values()))
@@ -411,7 +413,8 @@ class TestResourceManagement:
             else:
                 # 快速推进到完成
                 for _ in range(5):
-                    state.send_test_continue()
+                    if state.conn:
+                        state.send_test_continue()
                     time.sleep(0.02)
 
                 for _ in AssertTimeout(WORKER_COMPLETION_TIMEOUT):

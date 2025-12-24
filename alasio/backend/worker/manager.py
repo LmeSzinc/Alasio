@@ -72,11 +72,11 @@ class WorkerState(WorkerStateInfo):
             return True
         except AttributeError:
             # this shouldn't happen
-            logger.warning(f'[WorkerManager] Failed to send command to "{self.config}": '
+            logger.warning(f'[WorkerManager] Failed to send command config="{self.config}", command={command}: '
                            f'pipe connection not initialized')
             return False
         except Exception as e:
-            logger.warning(f'[WorkerManager] Failed to send command to "{self.config}": {e}')
+            logger.warning(f'[WorkerManager] Failed to send command config="{self.config}", command={command}: {e}')
             return False
 
     def send_test_continue(self):

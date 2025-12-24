@@ -18,9 +18,9 @@ def worker_test_infinite():
 
 
 def worker_test_run5():
-    # A worker that runs only 5 times
+    # A worker that runs only 3 times
     backend = BackendBridge()
-    for n in range(5):
+    for n in range(3):
         backend.send_log(str(n))
         backend.test_wait.wait(timeout=0.05)
 
@@ -112,6 +112,8 @@ def mod_entry(mod, config, child_conn):
         worker_test_send_events()
         return
 
+    raise KeyError(f'No such mod to run {mod}')
+
 
 def _async_raise(tid):
     if tid <= 0:
@@ -159,6 +161,10 @@ class BackendBridge(metaclass=Singleton):
 
     def send(self, event: ConfigEvent):
         conn = self.conn
+        if not conn:
+            # allow worker running without backend
+            return
+
         data = encode(event)
 
         try:
