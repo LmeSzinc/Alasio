@@ -34,7 +34,7 @@ class TestWorkerIPC:
             received_events.append(event)
 
         # 替换实例方法
-        manager.handle_config_event = mock_handler
+        manager.on_config_event = mock_handler
 
         # 启动 worker
         success, msg = manager.worker_start('WorkerTestSendEvents', 'test_events')

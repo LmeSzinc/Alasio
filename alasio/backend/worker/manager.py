@@ -35,11 +35,14 @@ WORKER_RUNNING_STATUS = ['running', 'scheduler-stopping', 'scheduler-waiting']
 WORKER_STOPPED_STATUS = ['idle', 'error']
 
 
-class WorkerState(msgspec.Struct):
+class WorkerStateInfo(msgspec.Struct):
     mod: str
     config: str
     status: WORKER_STATUS
     update: float = 0.
+
+
+class WorkerState(WorkerStateInfo):
     process: Optional[multiprocessing.Process] = None
     conn: Optional[Connection] = None
     running_event: threading.Event = msgspec.field(default_factory=threading.Event)
@@ -174,6 +177,19 @@ class WorkerManager(metaclass=Singleton):
         self._io_thread = threading.Thread(target=self._io_loop_wrapper, daemon=True)
         self._io_thread.start()
 
+    def get_state_info(self) -> "dict[str, WorkerStateInfo]":
+        """
+        Returns:
+            key: config name,
+            value: worker state
+        """
+        out = {}
+        with self._lock:
+            for w in self.state.values():
+                info = WorkerStateInfo(mod=w.mod, config=w.config, status=w.status, update=w.update)
+                out[w.config] = info
+        return out
+
     def _rebuild_notify_pipe(self):
         with self._lock:
             try:
@@ -251,7 +267,7 @@ class WorkerManager(metaclass=Singleton):
         """
         with self._lock:
             status_before = state.status
-            state.set_status('force-killing')
+            self._set_status(state, 'force-killing')
 
         process = state.process
         if process:
@@ -267,17 +283,15 @@ class WorkerManager(metaclass=Singleton):
             state.conn = None
             state.process = None
             if exitcode == 0:
-                state.set_status('idle')
+                self._set_status(state, 'idle')
             else:
                 if status_before in ['killing', 'force-killing']:
                     # already killing, ignore exitcode because worker will exit with error
-                    state.set_status('idle')
-                    # remove worker state
-                    self.state.pop(state.config, None)
+                    self._set_status(state, 'idle')
                 else:
-                    state.set_status('error')
+                    self._set_status(state, 'error')
 
-    def handle_config_event(self, event: ConfigEvent):
+    def on_config_event(self, event: ConfigEvent):
         """
         Callback when received config event from worker
         """
@@ -299,15 +313,33 @@ class WorkerManager(metaclass=Singleton):
                 with self._lock:
                     if worker.status in WORKER_STATUS_ALLOWS:
                         # allow worker switching its status among allows
-                        worker.set_status(event.v)
+                        self._set_status(worker, event.v)
                         return
                     if worker.status == 'starting':
                         # allow worker switching to allows from "starting"
-                        worker.set_status(event.v)
+                        self._set_status(worker, event.v)
                         return
             return
 
-        self.handle_config_event(event)
+        # broadcast
+        self.on_config_event(event)
+
+    def on_worker_status(self, config: str, status: WORKER_STATUS):
+        """
+        Callback when worker state changed
+        """
+        print(f'Worker status "{config}": {status}')
+
+    def _set_status(self, worker: WorkerState, status: WORKER_STATUS):
+        """
+        Internal method to set worker status, lock required
+        """
+        worker.set_status(status)
+        if status == 'idle':
+            # remove worker state
+            self.state.pop(worker.config, None)
+        # broadcast
+        self.on_worker_status(worker.config, status)
 
     def _io_loop(self):
         """
@@ -403,7 +435,7 @@ class WorkerManager(metaclass=Singleton):
             if state.status not in ['idle', 'error']:
                 return False, f'Worker is already running: "{config}", state="{state.status}"'
             # mark immediately
-            state.set_status('starting')
+            self._set_status(state, 'starting')
 
         logger.info(f'[WorkerManager] Starting worker {config}')
         # start process without lock
@@ -472,7 +504,7 @@ class WorkerManager(metaclass=Singleton):
             if state.status in ['scheduler-stopping', 'killing', 'force-killing']:
                 return False, f'Worker is already stopping: "{config}", state="{state.status}"'
             # mark immediately
-            state.set_status('scheduler-stopping')
+            self._set_status(state, 'scheduler-stopping')
 
         logger.info(f'[WorkerManager] Requesting scheduler stop: {config}')
         # send command without lock
@@ -499,7 +531,7 @@ class WorkerManager(metaclass=Singleton):
             if state.status in ['killing', 'force-killing']:
                 return False, f'Worker is already killing: "{config}", state="{state.status}"'
             # mark immediately
-            state.set_status('killing')
+            self._set_status(state, 'killing')
 
         logger.info(f'[WorkerManager] Requesting worker kill: {config}')
         # send command without lock
@@ -526,7 +558,7 @@ class WorkerManager(metaclass=Singleton):
             if state.status in ['force-killing']:
                 return False, f'Worker is already force-killing: "{config}", state="{state.status}"'
             # mark immediately
-            state.set_status('force-killing')
+            self._set_status(state, 'force-killing')
 
         # cleanup
         state.process_graceful_kill()
@@ -535,9 +567,7 @@ class WorkerManager(metaclass=Singleton):
         with self._lock:
             state.process = None
             state.conn = None
-            state.set_status('idle')
-            # remove worker state
-            self.state.pop(state.config, None)
+            self._set_status(state, 'idle')
 
         return True, 'Success'
 
@@ -556,7 +586,7 @@ class WorkerManager(metaclass=Singleton):
                     break
                 self.state.clear()
                 for state in states:
-                    state.set_status('killing')
+                    self._set_status(state, 'killing')
 
             # Terminate processes
             for state in states:
@@ -574,7 +604,7 @@ class WorkerManager(metaclass=Singleton):
             with self._lock:
                 for state in states:
                     state.process = None
-                    state.set_status('idle')
+                    self._set_status(state, 'idle')
             # maybe new worker started while we are killing existing workers
 
         # Finally close _io_loop
