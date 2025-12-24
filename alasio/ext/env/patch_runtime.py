@@ -48,6 +48,7 @@ def patch_std():
 def patch_environ():
     """
     Remove all python related environs, updated to python 3.15
+    Note that some environs effects python interpreter startup, removing them at runtime won't work.
 
     You can AI to extract the list from https://docs.python.org/3/using/cmdline.html
     """
@@ -118,7 +119,18 @@ def patch_environ():
     removes = set(python_environment_variables + proxy_environment_variables)
 
     import os
-    environs = [key.upper() for key in os.environ]
+    # listify to safely iterate
+    environs = [key for key in os.environ]
     for key in environs:
-        if key in removes:
+        upper = key.upper()
+        if upper in removes:
             os.environ.pop(key, None)
+
+
+def patch_startup():
+    """
+    A collection of patches on process startup
+    This function is supposed to be called in entry file (outside of `if __name__ == "__main__":`)
+    """
+    patch_environ()
+    patch_std()
