@@ -17,7 +17,7 @@ def worker_test_infinite():
         backend.test_wait.wait(timeout=0.05)
 
 
-def worker_test_run5():
+def worker_test_run3():
     # A worker that runs only 3 times
     backend = BackendBridge()
     for n in range(3):
@@ -99,8 +99,8 @@ def mod_entry(mod, config, child_conn):
     if mod == 'WorkerTestInfinite':
         worker_test_infinite()
         return
-    if mod == 'WorkerTestRun5':
-        worker_test_run5()
+    if mod == 'WorkerTestRun3':
+        worker_test_run3()
         return
     if mod == 'WorkerTestError':
         worker_test_error()

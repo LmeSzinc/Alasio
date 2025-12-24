@@ -75,7 +75,7 @@ class TestWorkerResilience:
         manager._notify_r.close()
 
         # Start worker should trigger rebuild
-        success, _ = manager.worker_start('WorkerTestRun5', 'test_notify_r_before')
+        success, _ = manager.worker_start('WorkerTestRun3', 'test_notify_r_before')
         assert success
 
         # Verify rebuild
@@ -101,7 +101,7 @@ class TestWorkerResilience:
         manager._notify_r.close()
 
         # Start another worker to trigger activity
-        success, _ = manager.worker_start('WorkerTestRun5', 'test_notify_r_after_2')
+        success, _ = manager.worker_start('WorkerTestRun3', 'test_notify_r_after_2')
         assert success
 
         # Verify rebuild
@@ -125,7 +125,7 @@ class TestWorkerResilience:
         manager._notify_w.close()
 
         # Start worker should trigger rebuild
-        success, _ = manager.worker_start('WorkerTestRun5', 'test_notify_w_before')
+        success, _ = manager.worker_start('WorkerTestRun3', 'test_notify_w_before')
         assert success
 
         # Verify rebuild
@@ -151,7 +151,7 @@ class TestWorkerResilience:
         manager._notify_w.close()
 
         # Start another worker to trigger activity
-        success, _ = manager.worker_start('WorkerTestRun5', 'test_notify_w_after_2')
+        success, _ = manager.worker_start('WorkerTestRun3', 'test_notify_w_after_2')
         assert success
 
         # Verify rebuild

@@ -60,13 +60,13 @@ class TestWorkerStart:
 
     def test_start_success(self, manager):
         """测试成功启动 worker"""
-        success, msg = manager.worker_start('WorkerTestRun5', 'test_start')
+        success, msg = manager.worker_start('WorkerTestRun3', 'test_start')
 
         assert success, f"Failed to start worker: {msg}"
         assert 'test_start' in manager.state
 
         state = manager.state['test_start']
-        assert state.mod == 'WorkerTestRun5'
+        assert state.mod == 'WorkerTestRun3'
         assert state.config == 'test_start'
 
         state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
@@ -78,14 +78,14 @@ class TestWorkerStart:
 
     def test_start_duplicate_rejected(self, manager):
         """测试重复启动被拒绝"""
-        success1, _ = manager.worker_start('WorkerTestRun5', 'test_dup')
+        success1, _ = manager.worker_start('WorkerTestRun3', 'test_dup')
         assert success1
 
         # 等待启动完成
         state = manager.state['test_dup']
         state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
-        success2, msg = manager.worker_start('WorkerTestRun5', 'test_dup')
+        success2, msg = manager.worker_start('WorkerTestRun3', 'test_dup')
         assert not success2
         assert 'already running' in msg.lower()
 
@@ -109,7 +109,7 @@ class TestWorkerStart:
     def test_restart_after_completion(self, manager):
         """测试 worker 完成后可以重新启动"""
         # Start and let it complete
-        success, _ = manager.worker_start('WorkerTestRun5', 'test_restart')
+        success, _ = manager.worker_start('WorkerTestRun3', 'test_restart')
         assert success
 
         state = manager.state['test_restart']
@@ -142,7 +142,7 @@ class TestWorkerState:
 
     def test_worker_run_to_completion(self, manager):
         """测试 worker 正常完成"""
-        success, _ = manager.worker_start('WorkerTestRun5', 'test_complete')
+        success, _ = manager.worker_start('WorkerTestRun3', 'test_complete')
         assert success
 
         state = manager.state['test_complete']
@@ -292,7 +292,7 @@ class TestWorkerStop:
     def test_stop_idle_worker(self, manager):
         """测试停止已经空闲的 worker"""
         # Start and let it complete
-        success, _ = manager.worker_start('WorkerTestRun5', 'test_idle_stop')
+        success, _ = manager.worker_start('WorkerTestRun3', 'test_idle_stop')
         assert success
 
         state = manager.state['test_idle_stop']
@@ -349,7 +349,7 @@ class TestResourceManagement:
 
         # Start and let complete
         for i in range(3):
-            success, _ = manager.worker_start('WorkerTestRun5', f'test_leak_{i}')
+            success, _ = manager.worker_start('WorkerTestRun3', f'test_leak_{i}')
             assert success
 
             state = manager.state[f'test_leak_{i}']
@@ -401,7 +401,7 @@ class TestResourceManagement:
     def test_repeated_start_stop_no_leak(self, manager):
         """测试重复启停不泄漏"""
         for cycle in range(3):
-            success, _ = manager.worker_start('WorkerTestRun5', 'test_cycle')
+            success, _ = manager.worker_start('WorkerTestRun3', 'test_cycle')
             assert success, f"Failed at cycle {cycle}"
 
             state = manager.state['test_cycle']
@@ -467,7 +467,7 @@ class TestManagerLifecycle:
         """测试 close 可以多次调用"""
         manager = WorkerManager()
 
-        success, _ = manager.worker_start('WorkerTestRun5', 'test_idempotent')
+        success, _ = manager.worker_start('WorkerTestRun3', 'test_idempotent')
         assert success
 
         state = manager.state['test_idempotent']
@@ -481,7 +481,7 @@ class TestManagerLifecycle:
     def test_manager_recreation_after_close(self):
         """测试 close 后可以重新创建"""
         manager1 = WorkerManager()
-        manager1.worker_start('WorkerTestRun5', 'test_1')
+        manager1.worker_start('WorkerTestRun3', 'test_1')
 
         state = manager1.state['test_1']
         state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
@@ -491,7 +491,7 @@ class TestManagerLifecycle:
 
         # Create new manager
         manager2 = WorkerManager()
-        success, _ = manager2.worker_start('WorkerTestRun5', 'test_2')
+        success, _ = manager2.worker_start('WorkerTestRun3', 'test_2')
         assert success, "Cannot create worker after manager recreation"
 
         manager2.close()
