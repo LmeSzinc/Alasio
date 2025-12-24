@@ -577,7 +577,7 @@ class WorkerManager(metaclass=Singleton):
         """
         logger.info('[WorkerManager] Closing...')
         # Remove self from singleton cache, so the next access will have a new manager
-        self.__class__.singleton_clear_all()
+        self.__class__.singleton_clear()
 
         while 1:
             with self._lock:

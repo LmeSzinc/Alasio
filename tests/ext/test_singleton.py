@@ -46,8 +46,8 @@ def cleanup_singletons():
     """
     yield
     # Teardown code: executed after each test
-    BaseService.singleton_clear_all()
-    SubService.singleton_clear_all()
+    BaseService.singleton_clear()
+    SubService.singleton_clear()
     NamedService.singleton_clear_all()
     SubNamedService.singleton_clear_all()
 
@@ -90,7 +90,7 @@ class TestSingleton:
     def test_singleton_clear_all(self):
         """Verify that singleton_clear_all() allows a new instance to be created."""
         instance1 = BaseService()
-        BaseService.singleton_clear_all()
+        BaseService.singleton_clear()
         instance2 = BaseService()
 
         assert instance1 is not instance2, "A new instance should have been created after clearing."
@@ -145,7 +145,7 @@ class TestSingleton:
         t1.join(timeout=1)
         t2.join(timeout=1)
 
-        SlowInitService.singleton_clear_all()  # Cleanup this special class
+        SlowInitService.singleton_clear()  # Cleanup this special class
 
         assert init_call_count == 1, "The __init__ method was called more than once."
         assert len(instances_from_threads) == 2, "Both threads should have returned an instance."

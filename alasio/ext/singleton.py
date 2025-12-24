@@ -1,5 +1,5 @@
 import threading
-from typing import Type, TypeVar
+from typing import Any, Dict, Optional, Type, TypeVar
 
 T = TypeVar('T')
 
@@ -15,33 +15,39 @@ class Singleton(type):
 
     def __init__(cls, name, bases, dct):
         super().__init__(name, bases, dct)
-        cls.__instances = None
+        cls.__instance = None
         cls.__lock = threading.Lock()
 
     def __call__(cls: Type[T], *args, **kwargs) -> T:
         # return cached instance directly
-        instance = cls.__instances
+        instance = cls.__instance
         if instance is not None:
             return instance
 
         # create new instance
         with cls.__lock:
             # another thread may have created while we are waiting
-            instance = cls.__instances
+            instance = cls.__instance
             if instance is not None:
                 return instance
 
             # create
             instance = super().__call__(*args, **kwargs)
-            cls.__instances = instance
+            cls.__instance = instance
             return instance
 
-    def singleton_clear_all(cls):
+    def singleton_clear(cls):
         """
         Remove all instances
         """
         with cls.__lock:
-            cls.__instances = None
+            cls.__instance = None
+
+    def singleton_instance(cls) -> Optional[T]:
+        """
+        Access instance directly
+        """
+        return cls.__instance
 
 
 class SingletonNamed(type):
@@ -100,11 +106,8 @@ class SingletonNamed(type):
         with cls.__lock:
             cls.__instances.clear()
 
-    def singleton_instances(cls):
+    def singleton_instances(cls) -> Dict[Any, T]:
         """
         Access all instances directly
-
-        Returns:
-            dict:
         """
         return cls.__instances

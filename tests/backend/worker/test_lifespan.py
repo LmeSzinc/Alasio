@@ -42,7 +42,7 @@ def assert_worker_gone(workers):
 @pytest.fixture
 def manager():
     """Create a fresh WorkerManager instance"""
-    WorkerManager.singleton_clear_all()
+    WorkerManager.singleton_clear()
     mgr = WorkerManager()
     yield mgr
     try:

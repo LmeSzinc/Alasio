@@ -94,8 +94,8 @@ def cleanup_singletons():
     # Let the test run
     yield
     # After the test, clear all known singleton instances
-    Calculator.singleton_clear_all()
-    DeepDataProcessor.singleton_clear_all()
+    Calculator.singleton_clear()
+    DeepDataProcessor.singleton_clear()
     # Note: Locally defined singletons inside tests must be cleaned up manually.
 
 
@@ -178,8 +178,8 @@ def test_cross_object_reactivity_with_singletons():
         assert consumer.compute_count == 2
     finally:
         # Manually clean up locally defined singletons.
-        SourceProvider.singleton_clear_all()
-        DependentConsumer.singleton_clear_all()
+        SourceProvider.singleton_clear()
+        DependentConsumer.singleton_clear()
 
 
 def test_deep_dictionary_dependency(processor):
@@ -242,4 +242,4 @@ def test_weakref_observer_cleanup_with_singleton_source():
         assert len(source_value_descriptor.observers) == 0
     finally:
         # Clean up the singleton used in this test.
-        Source.singleton_clear_all()
+        Source.singleton_clear()
