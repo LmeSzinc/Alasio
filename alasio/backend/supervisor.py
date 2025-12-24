@@ -77,11 +77,16 @@ class Supervisor:
         return True
 
     @staticmethod
-    def backend_entry():
-        # Override this method
+    def backend_entry(args):
+        """
+        Subclasses must override this method
+
+        Args:
+            args (list[str]):
+        """
         pass
 
-    def process_entry(self, conn):
+    def process_entry(self, conn, args):
         """
         Entry point for the backend process.
 
@@ -93,7 +98,7 @@ class Supervisor:
         builtins.__mpipe_conn__ = conn
 
         try:
-            self.backend_entry()
+            self.backend_entry(args)
         except Exception as e:
             # Unexpected error in backend
             print(f"[Backend] Fatal error: {e}")
@@ -101,7 +106,7 @@ class Supervisor:
             traceback.print_exc()
         # Note that it's parent's responsibility to close pipe
 
-    def start_backend(self):
+    def start_backend(self, args):
         """
         Start the backend process with pipe communication.
 
@@ -125,7 +130,7 @@ class Supervisor:
         parent_conn, child_conn = ctx.Pipe()
         self.process = ctx.Process(
             target=self.process_entry,
-            args=(child_conn,),
+            args=(child_conn, args),
             name='alasio-backend',
             daemon=True,
         )
@@ -385,11 +390,15 @@ class Supervisor:
         # Set up custom SIGINT handler to track CTRL+C count
         import signal
         signal.signal(signal.SIGINT, self.handle_sigint)
+
+        import sys
+        args = sys.argv[1:]
+
         try:
             # Main supervision loop
             while True:
                 # Start the backend
-                self.start_backend()
+                self.start_backend(args)
 
                 # Listen for messages from backend
                 # This blocks until backend exits (pipe closes)

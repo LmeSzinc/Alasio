@@ -246,7 +246,15 @@ def create_app():
     return app
 
 
-def create_config():
+def create_config(args=None):
+    """
+    Args:
+        args (list[str] | None): Commandline args from supervisor level
+            Use this `args` input instead of `sys.args`, as backend is a sub-process
+
+    Returns:
+
+    """
     from hypercorn import Config
     config = Config()
 
@@ -260,10 +268,10 @@ def create_config():
     return config
 
 
-async def serve_app():
+async def serve_app(args=None):
     from hypercorn.trio import serve
 
-    config = create_config()
+    config = create_config(args)
     app = create_app()
     shutdown_trigger = get_shutdown_trigger()
 
@@ -271,5 +279,9 @@ async def serve_app():
     await serve(app, config, shutdown_trigger=shutdown_trigger)
 
 
-def run():
-    trio.run(serve_app)
+def run(args=None):
+    """
+    Backend entry point
+    """
+    import functools
+    trio.run(functools.partial(serve_app, args=args))

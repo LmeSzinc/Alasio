@@ -6,6 +6,6 @@ from alasio.backend.supervisor import Supervisor
 
 class BackendSupervisor(Supervisor):
     @staticmethod
-    def backend_entry():
+    def backend_entry(args):
         from alasio.backend.app import run
-        run()
+        run(args)
