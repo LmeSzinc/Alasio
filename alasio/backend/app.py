@@ -172,6 +172,7 @@ def mpipe_recv_loop(conn, trio_token, shutdown_event):
         if msg == b'stop':
             logger.info('Backend received stop request from supervisor, shutting down backend')
             trio.from_thread.run_sync(shutdown_event.set, trio_token=trio_token)
+            break
         else:
             logger.warning(f'Backend received unknown msg from supervisor: {msg}')
 
