@@ -9,6 +9,10 @@ from alasio.backend.supervisor import Supervisor
 class TestSupervisor(Supervisor):
     """测试用的Supervisor子类，根据命令行参数启动不同的后端"""
 
+    def run(self, args=None):
+        args = sys.argv[1:]
+        return super().run(args)
+
     @staticmethod
     def backend_entry(args):
         """根据命令行参数启动不同类型的后端"""

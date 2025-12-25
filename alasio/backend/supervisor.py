@@ -94,7 +94,7 @@ class Supervisor:
         Subclasses must override this method
 
         Args:
-            args (list[str]):
+            args (list[str] | None):
         """
         pass
 
@@ -374,7 +374,7 @@ class Supervisor:
         # Clean up pipe
         self._cleanup_conn()
 
-    def run(self):
+    def run(self, args=None):
         """
         Main supervisor loop.
 
@@ -382,6 +382,9 @@ class Supervisor:
         - Normal flow: start backend, listen to pipe, handle restart
         - CTRL+C: KeyboardInterrupt caught, graceful shutdown
         - Errors: caught and handled appropriately
+
+        Args:
+            args (list[str] | None):
         """
         # backend entry should not be placeholder
         if self.backend_entry == Supervisor.backend_entry:
@@ -389,8 +392,6 @@ class Supervisor:
             return
 
         mprint(f"Running on PID: {os.getpid()}")
-
-        args = sys.argv[1:]
 
         # Set up custom SIGINT handler to track CTRL+C count
         signal.signal(signal.SIGINT, self.handle_sigint)

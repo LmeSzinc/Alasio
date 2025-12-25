@@ -167,7 +167,7 @@ class ManagedProcess:
         """
         for _ in AssertTimeout(timeout, interval=interval):
             with _:
-                print(self.output_buffer)
+                # print(self.output_buffer)
                 assert self.has_output(text, case_sensitive), \
                     f"Timeout waiting for '{text}' in output"
 

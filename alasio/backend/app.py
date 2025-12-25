@@ -256,17 +256,19 @@ def create_config(args=None):
     """
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dir', type=str, default='')
+    parser.add_argument('--root', type=str, default='')
     parser.add_argument('--host', type=str, default='0.0.0.0')
     parser.add_argument('--port', type=int, default=8000)
     parsed_args, _ = parser.parse_known_args(args)
 
     # set project root, so we have the right path to save ./config
     from alasio.ext import env
-    if parsed_args.dir:
-        env.set_project_root(parsed_args.dir)
+    if parsed_args.root:
+        env.set_project_root(parsed_args.root)
     else:
         env.set_project_root(os.getcwd())
+    from alasio.logger import logger
+    logger.info(f'[PROJECT_ROOT] {env.PROJECT_ROOT}')
 
     from hypercorn import Config
     config = Config()
