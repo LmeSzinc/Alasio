@@ -1,9 +1,24 @@
+import os
 import re
 import time
 
 import psutil
 
-from tests.backend.supervisor.managed_process import create_supervisor_process
+from alasio.testing.managed_process import ManagedProcess
+
+
+def create_supervisor_process(backend_type: str) -> ManagedProcess:
+    """
+    便捷函数：创建supervisor进程
+
+    Args:
+        backend_type: 后端类型 (normal, immediate_error, etc.)
+
+    Returns:
+        ManagedProcess实例
+    """
+    script_path = os.path.join(os.path.dirname(__file__), "backends.py")
+    return ManagedProcess(script_path, backend_type)
 
 
 class TestSupervisor:

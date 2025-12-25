@@ -263,17 +263,3 @@ class ManagedProcess:
         status = "alive" if self.is_alive() else "dead"
         pid = self.process.pid if self.process else "N/A"
         return f"<ManagedProcess pid={pid} status={status} script={self.script_path}>"
-
-
-def create_supervisor_process(backend_type: str) -> ManagedProcess:
-    """
-    便捷函数：创建supervisor进程
-
-    Args:
-        backend_type: 后端类型 (normal, immediate_error, etc.)
-
-    Returns:
-        ManagedProcess实例
-    """
-    script_path = os.path.join(os.path.dirname(__file__), "backends.py")
-    return ManagedProcess(script_path, backend_type)
