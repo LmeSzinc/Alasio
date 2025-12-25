@@ -1,4 +1,5 @@
 import contextlib
+import os
 
 import trio
 from starlette.responses import PlainTextResponse
@@ -252,16 +253,26 @@ def create_config(args=None):
     Args:
         args (list[str] | None): Commandline args from supervisor level
             Use this `args` input instead of `sys.args`, as backend is a sub-process
-
-    Returns:
-
     """
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dir', type=str, default='')
+    parser.add_argument('--host', type=str, default='0.0.0.0')
+    parser.add_argument('--port', type=int, default=8000)
+    parsed_args, _ = parser.parse_known_args(args)
+
+    # set project root, so we have the right path to save ./config
+    from alasio.ext import env
+    if parsed_args.dir:
+        env.set_project_root(parsed_args.dir)
+    else:
+        env.set_project_root(os.getcwd())
+
     from hypercorn import Config
     config = Config()
 
     # Bind address
-    config.bind = '0.0.0.0:8000'
-    # config.bind = ['0.0.0.0:8000', '[::]:8000']
+    config.bind = [f'{parsed_args.host}:{parsed_args.port}']
 
     # To enable assess log
     config.accesslog = '-'

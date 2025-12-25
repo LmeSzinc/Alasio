@@ -17,7 +17,7 @@ SUNOS = sys.platform.startswith(("sunos", "solaris"))
 AIX = sys.platform.startswith("aix")
 
 # Global variable
-PROJECT_ROOT = PathStr.new(__file__).uppath(4)
+PROJECT_ROOT = PathStr.new(__file__).uppath(3)
 
 
 def set_project_root(root, up=0):
