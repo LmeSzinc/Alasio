@@ -148,11 +148,14 @@ class Supervisor:
         ctx = multiprocessing.get_context('spawn')
 
         parent_conn, child_conn = ctx.Pipe()
+        # Note that we use daemon=False here, because backend needs to spawn workers
+        # and python does not allow daemonic processes to have children
+        # It's fine without daemon as backend will exit if pipe broken
         self.process = ctx.Process(
             target=self.process_entry,
             args=(child_conn, args),
             name='alasio-backend',
-            daemon=True,
+            daemon=False,
         )
 
         # Start the process
