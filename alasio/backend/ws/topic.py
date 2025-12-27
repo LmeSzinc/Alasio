@@ -4,6 +4,7 @@ from alasio.backend.topic.config import ConfigArg, ConfigNav
 from alasio.backend.topic.mod import ModList
 from alasio.backend.topic.scan import ConfigScan
 from alasio.backend.topic.state import ConnState, DICT_CONFIG_TO_CONN
+from alasio.backend.topic.worker import Worker
 from alasio.backend.ws.ws_server import WebsocketTopicServer
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.ext.reactive.base_topic import MSGBUS_CONFIG_HANDLERS, MSGBUS_CONFIG_RECV, MSGBUS_GLOBAL_HANDLERS, \
@@ -33,6 +34,7 @@ class WebsocketServer(WebsocketTopicServer):
         ConfigScan,
         ConfigNav,
         ConfigArg,
+        Worker,
         # DevAssetsManager,
     ])
     # List of default subscribed topics.
