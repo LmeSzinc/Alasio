@@ -19,13 +19,15 @@ from alasio.logger import logger
 # scheduler-waiting: worker waiting for next task, no task running currently
 # killing: requesting to kill a worker, worker will stop and do GC asap
 # force-killing: requesting to kill worker process immediately
+# disconnected: backend just lost connection worker,
+#   worker process will be clean up and worker status will turn into idle or error very soon
 # error: worker stopped with error
 #   Note that scheduler will loop forever, so there is no "stopped" state
 #   If user request "scheduler_stopping" or "killing", state will later be "idle"
 WORKER_STATUS = Literal[
-    'idle', 'starting', 'running',
+    'idle', 'starting', 'running', 'disconnected', 'error',
     'scheduler-stopping', 'scheduler-waiting',
-    'killing', 'force-killing', 'error'
+    'killing', 'force-killing',
 ]
 # Allow worker set its status to one of the allows
 WORKER_STATUS_ALLOWS = ['running', 'scheduler-waiting']
@@ -267,7 +269,7 @@ class WorkerManager(metaclass=Singleton):
         """
         with self._lock:
             status_before = state.status
-            self._set_status(state, 'force-killing')
+            self._set_status(state, 'disconnected')
 
         process = state.process
         if process:
@@ -499,7 +501,7 @@ class WorkerManager(metaclass=Singleton):
             if not state:
                 return False, f'No such worker to stop: {config}'
             # check if worker is running
-            if state.status in ['idle', 'error']:
+            if state.status in ['idle', 'error', 'disconnected']:
                 return False, f'Worker not running: "{config}", state="{state.status}"'
             if state.status in ['scheduler-stopping', 'killing', 'force-killing']:
                 return False, f'Worker is already stopping: "{config}", state="{state.status}"'
@@ -526,7 +528,7 @@ class WorkerManager(metaclass=Singleton):
             if not state:
                 return False, f'No such worker to kill: {config}'
             # check if worker is running
-            if state.status in ['idle', 'error']:
+            if state.status in ['idle', 'error', 'disconnected']:
                 return False, f'Worker not running: "{config}", state="{state.status}"'
             if state.status in ['killing', 'force-killing']:
                 return False, f'Worker is already killing: "{config}", state="{state.status}"'
@@ -553,7 +555,7 @@ class WorkerManager(metaclass=Singleton):
             if not state:
                 return False, f'No such worker to force-kill: {config}'
             # check if already killed
-            if state.status in ['idle', 'error']:
+            if state.status in ['idle', 'error', 'disconnected']:
                 return False, f'Worker not running: "{config}", state="{state.status}"'
             if state.status in ['force-killing']:
                 return False, f'Worker is already force-killing: "{config}", state="{state.status}"'
