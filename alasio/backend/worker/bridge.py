@@ -1,3 +1,5 @@
+import os
+import sys
 import threading
 from typing import Literal
 
@@ -85,34 +87,62 @@ def worker_test_send_events():
         backend.test_wait.wait(timeout=0.05)
 
 
-def mod_entry(mod, config, child_conn):
+def mod_entry(mod_name, config_name, child_conn, project_root='', mod_root='', path_main=''):
     """
     Run mod scheduler infinitely
 
     Args:
-        mod:
-        config:
+        mod_name:
+        config_name:
         child_conn:
+        project_root:
+        mod_root:
+        path_main:
     """
     BackendBridge().init(child_conn)
 
-    if mod == 'WorkerTestInfinite':
+    if mod_name == 'WorkerTestInfinite':
         worker_test_infinite()
         return
-    if mod == 'WorkerTestRun3':
+    if mod_name == 'WorkerTestRun3':
         worker_test_run3()
         return
-    if mod == 'WorkerTestError':
+    if mod_name == 'WorkerTestError':
         worker_test_error()
         return
-    if mod == 'WorkerTestScheduler':
+    if mod_name == 'WorkerTestScheduler':
         worker_test_scheduler()
         return
-    if mod == 'WorkerTestSendEvents':
+    if mod_name == 'WorkerTestSendEvents':
         worker_test_send_events()
         return
 
-    raise KeyError(f'No such mod to run {mod}')
+    # if project_root, mod_root, path_main all provided, consider as real mod
+    if project_root and mod_root and path_main:
+        # set mod root path
+        os.chdir(mod_root)
+        sys.path[0] = mod_root
+
+        # set project root path
+        from alasio.ext import env
+        env.set_project_root(project_root)
+
+        # import Scheduler
+        import importlib
+        from alasio.ext.path.calc import to_python_import
+        entry = to_python_import(path_main)
+        module = importlib.import_module(entry)
+        try:
+            cls = module.Scheduler
+        except AttributeError:
+            raise AttributeError('Module entry file did not define class Scheduler')
+
+        # run mod scheduler
+        scheduler = cls(config_name)
+        scheduler.run()
+
+    else:
+        raise KeyError(f'No such mod to run {mod_name}')
 
 
 def _async_raise(tid):

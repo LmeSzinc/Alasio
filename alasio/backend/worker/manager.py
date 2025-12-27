@@ -7,8 +7,8 @@ from typing import Literal, Optional
 import msgspec
 from msgspec.msgpack import encode
 
-from alasio.backend.worker.event import CommandEvent, ConfigEvent, DECODER_CACHE
 from alasio.backend.worker.bridge import mod_entry
+from alasio.backend.worker.event import CommandEvent, ConfigEvent, DECODER_CACHE
 from alasio.ext.singleton import Singleton
 from alasio.logger import logger
 
@@ -419,7 +419,7 @@ class WorkerManager(metaclass=Singleton):
             logger.error('[WorkerManager] _io_loop died')
             raise
 
-    def worker_start(self, mod: str, config: str) -> "tuple[bool, str]":
+    def worker_start(self, mod: str, config: str, project_root='', mod_root='', path_main='') -> "tuple[bool, str]":
         """
         Request to start a worker
         Note that this method does not check if mod and config are valid
@@ -442,9 +442,15 @@ class WorkerManager(metaclass=Singleton):
         logger.info(f'[WorkerManager] Starting worker {config}')
         # start process without lock
         parent_conn, child_conn = self._ctx.Pipe()
+        if project_root and mod_root and path_main:
+            # if project_root, mod_root, path_main all provided, consider as real mod
+            args = (mod, config, child_conn, project_root, mod_root, path_main)
+        else:
+            # otherwise just testing
+            args = (mod, config, child_conn)
         process = self._ctx.Process(
             target=mod_entry,
-            args=(mod, config, child_conn),
+            args=args,
             name=f"Worker-{mod}-{config}",
             daemon=True
         )
