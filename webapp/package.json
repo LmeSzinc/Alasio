@@ -29,6 +29,8 @@
     "postcss-media-minmax": "^5.0.0",
     "postcss-nesting": "^13.0.2",
     "prettier": "^3.7.4",
+    "prettier-plugin-svelte": "^3.4.1",
+    "prettier-plugin-tailwindcss": "^0.7.2",
     "svelte": "^5.46.0",
     "tailwind-merge": "^3.4.0",
     "tailwind-variants": "^3.2.2",
