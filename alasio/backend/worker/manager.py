@@ -521,6 +521,35 @@ class WorkerManager(metaclass=Singleton):
 
         return True, 'Success'
 
+    def worker_scheduler_continue(self, config: str) -> "tuple[bool, str]":
+        """
+        Send "scheduler-continue" to worker, to cancel previous "scheduler-stopping"
+
+        Returns:
+            whether success, reason
+        """
+        with self._lock:
+            # get config state
+            state = self.state.get(config, None)
+            if not state:
+                return False, f'No such worker to stop: {config}'
+            # check if worker is running
+            if state.status in ['idle', 'error', 'disconnected']:
+                return False, f'Worker not running: "{config}", state="{state.status}"'
+            if state.status in ['scheduler-stopping', 'killing', 'force-killing']:
+                return False, f'Worker is already stopping: "{config}", state="{state.status}"'
+            if state.status not in ['scheduler-stopping', ]:
+                return False, f'Worker is not in scheduler-stopping: "{config}", state="{state.status}"'
+            # mark immediately
+            self._set_status(state, 'running')
+
+        logger.info(f'[WorkerManager] Requesting scheduler continue: {config}')
+        # send command without lock
+        command = CommandEvent(c='scheduler-continue')
+        state.send_command(command)
+
+        return True, 'Success'
+
     def worker_kill(self, config: str) -> "tuple[bool, str]":
         """
         Send "killing" to worker

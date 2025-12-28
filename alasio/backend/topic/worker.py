@@ -108,6 +108,19 @@ class Worker(BaseTopic):
             raise RpcValueError(msg)
 
     @rpc
+    async def scheduler_continue(self, config: str):
+        """
+        Request to continue scheduler loop, to cancel previous "scheduler-stopping"
+        """
+        manager = await get_worker_manager()
+        # Validate config/mod existence
+        await get_mod(config)
+
+        success, msg = await trio.to_thread.run_sync(manager.worker_scheduler_continue, config)
+        if not success:
+            raise RpcValueError(msg)
+
+    @rpc
     async def kill(self, config: str):
         """
         Request to kill worker

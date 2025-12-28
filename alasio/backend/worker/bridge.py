@@ -219,6 +219,9 @@ class BackendBridge(metaclass=Singleton):
         if command == 'scheduler-stopping':
             self.scheduler_stopping.set()
             return
+        if command == 'scheduler-continue':
+            self.scheduler_stopping.clear()
+            return
         if command in ['killing', 'force-killing']:
             _async_raise(self.main_tid)
             return
