@@ -19,6 +19,12 @@
   };
   let { class: className, onNavigate = () => {} }: $$props = $props();
 
+  // Easter egg spinning
+  const afspin = $derived.by(() => {
+    const now = new Date();
+    return now.getMonth() === 3 && now.getDate() === 1;
+  });
+
   // UI state
   type ConfigGroupData = {
     id: string;
@@ -85,7 +91,7 @@
           {@const active = activeConfigName === item.name}
           {@const status = workerClient.data?.[item.name] ?? "idle"}
           <div role="listitem" class="px-1">
-            <ConfigItem config={item} {active} {status} onclick={handleConfigClick} />
+            <ConfigItem config={item} {active} {status} {afspin} onclick={handleConfigClick} />
           </div>
         {:else if group.items.length > 1}
           <!-- Multiple items in group - display with border -->
@@ -99,7 +105,7 @@
               {@const active = activeConfigName === item.name}
               {@const status = workerClient.data?.[item.name] ?? "idle"}
               <div role="listitem">
-                <ConfigItem config={item} {active} {status} onclick={handleConfigClick} />
+                <ConfigItem config={item} {active} {status} {afspin} onclick={handleConfigClick} />
               </div>
             {/each}
           </div>

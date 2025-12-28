@@ -1,6 +1,6 @@
 <script lang="ts">
   import { cn } from "$lib/utils";
-  import { Circle, CirclePlay, Ghost, Pause } from "@lucide/svelte";
+  import { Circle, CircleDotDashed, CirclePlay, Ghost, Pause } from "@lucide/svelte";
   import { onDestroy, onMount, untrack } from "svelte";
   import type { WORKER_STATUS } from "./types";
 
@@ -18,6 +18,9 @@
 
   // Define stable states (that should be displayed immediately)
   const STABLE_STATES: WORKER_STATUS[] = ["idle", "running", "scheduler-waiting", "error", "scheduler-stopping"];
+  const spin = $derived(
+    displayedStatus === "running" || displayedStatus === "scheduler-waiting" ? "animate-spin" : "",
+  );
 
   // Effect to handle status changes with delay logic
   $effect(() => {
@@ -56,40 +59,28 @@
   });
 </script>
 
-<div class={displayedStatus === "running" ? "animate-spin" : ""} style:animation-delay={delay}>
+<div class={cn(spin, className)} style:animation-delay={delay}>
   {#if displayedStatus === "running"}
     <!-- Running: solid circle with theme color -->
-    <CirclePlay class={cn("h-3 w-3", !active && "text-primary", className)} strokeWidth="2.5" aria-label="Running" />
+    <CirclePlay class={cn("h-3 w-3", !active && "text-primary")} strokeWidth="2.5" aria-label="Running" />
   {:else if displayedStatus === "scheduler-waiting"}
     <!-- Scheduler waiting: hollow circle with theme color -->
-    <Circle class={cn("h-3 w-3", !active && "text-primary", className)} strokeWidth="2" aria-label="Waiting" />
+    <CircleDotDashed class={cn("h-3 w-3", !active && "text-primary")} strokeWidth="2" aria-label="Waiting" />
   {:else if displayedStatus === "error"}
     <!-- Error: red X -->
-    <Ghost class={cn("h-3 w-3", !active && "text-destructive", className)} strokeWidth="2.5" aria-label="Error" />
+    <Ghost class={cn("text-destructive h-3 w-3")} strokeWidth="2.5" aria-label="Error" />
   {:else if displayedStatus === "scheduler-stopping"}
     <!-- Scheduler stopping: pause icon (two vertical lines) -->
-    <Pause class={cn("h-3 w-3", !active && "text-primary", className)} strokeWidth="2" aria-label="Stopping" />
+    <Pause class={cn("h-3 w-3", !active && "text-primary")} strokeWidth="2" aria-label="Stopping" />
   {:else if displayedStatus === "starting"}
     <!-- Starting: hollow circle with muted color -->
-    <Circle
-      class={cn("h-3 w-3", !active && "text-muted-foreground", className)}
-      strokeWidth="2"
-      aria-label="Starting"
-    />
+    <CirclePlay class={cn("h-3 w-3", !active && "text-primary")} strokeWidth="2" aria-label="Starting" />
   {:else if displayedStatus === "killing" || displayedStatus === "force-killing"}
     <!-- Killing: X with muted color -->
-    <Ghost
-      class={cn("h-3 w-3", !active && "text-muted-foreground", className)}
-      strokeWidth="2.5"
-      aria-label="Killing"
-    />
+    <Ghost class={cn("h-3 w-3", !active && "text-primary")} strokeWidth="2.5" aria-label="Killing" />
   {:else if displayedStatus === "disconnected"}
     <!-- Disconnected: circle with muted color -->
-    <Circle
-      class={cn("h-3 w-3", !active && "text-muted-foreground", className)}
-      strokeWidth="2"
-      aria-label="Disconnected"
-    />
+    <Ghost class={cn("h-3 w-3", !active && "text-primary")} strokeWidth="2" aria-label="Disconnected" />
   {/if}
   <!-- idle: no display -->
 </div>
