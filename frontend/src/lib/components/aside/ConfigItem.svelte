@@ -61,7 +61,7 @@
     {:else}
       <Play class={cn("h-8 w-8", spin && "origin-[50%_42%] animate-[spin_400ms_linear_infinite]")} strokeWidth="1.5" aria-hidden="true" />
     {/if}
-    <ConfigStatus {status} {active} class="pointer-events-none absolute -right-1 bottom-0" />
+    <ConfigStatus {status} {active} class="absolute -right-1 bottom-0" />
   </div>
   <span class="line-clamp-2 text-center text-xs break-all" aria-hidden="true">
     {config.name}

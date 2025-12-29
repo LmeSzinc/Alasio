@@ -90,7 +90,7 @@
 
   <div class="grid gap-6 md:grid-cols-2">
     <!-- Part 2: Single Config Item Preview (Left) -->
-    <Card.Root class="neushadow">
+    <Card.Root class="neushadow border-none">
       <Card.Header>
         <Card.Title>Selected Config Preview</Card.Title>
       </Card.Header>
@@ -122,7 +122,7 @@
     </Card.Root>
 
     <!-- Part 1: Input Controls (Right) -->
-    <Card.Root class="neushadow">
+    <Card.Root class="neushadow border-none">
       <Card.Header>
         <Card.Title>Control Panel</Card.Title>
       </Card.Header>
@@ -144,12 +144,12 @@
   </div>
 
   <!-- Part 3: All Combinations Grid -->
-  <Card.Root class="neushadow">
+  <Card.Root class="neushadow border-none">
     <Card.Header>
       <Card.Title>All Status × Active Combinations</Card.Title>
     </Card.Header>
     <Card.Content>
-      <div class="space-y-8">
+      <div class="space-y-2">
         <!-- Inactive -->
         <div>
           <h3 class="mb-2 text-lg font-medium">Inactive</h3>

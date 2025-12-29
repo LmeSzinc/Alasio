@@ -27,9 +27,3 @@
   <LangSelector></LangSelector>
   <ThemeToggle variant="ghost"></ThemeToggle>
 </header>
-
-<style>
-  .header-shadow {
-    box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
-  }
-</style>

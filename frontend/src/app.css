@@ -47,9 +47,9 @@
 }
 
 .dark {
-  --background: oklch(0.141 0.005 285.823);
+  --background: #161618;
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
+  --card: #222224;
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.21 0.006 285.885);
   --popover-foreground: oklch(0.985 0 0);
@@ -142,6 +142,29 @@
       inset -8px -8px 32px #ffffff;
   }
   .dark .neushadow {
-    box-shadow: none;
+    box-shadow:
+      6px 6px 12px rgb(0 0 0 / 40%),
+      -6px -6px 12px rgb(174 174 192 / 8%),
+      inset 6px 6px 32px rgb(0 0 0 / 40%),
+      inset -6px -6px 32px rgb(174 174 192 / 8%);
+  }
+  .dotbg {
+    background-image: radial-gradient(rgba(0, 0, 0, 0.1) 1px, transparent 0);
+    background-size: 16px 16px;
+  }
+  .dark .dotbg {
+    background-image: radial-gradient(rgba(160, 160, 160, 0.1) 1px, transparent 0);
+  }
+  .header-shadow {
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
+  }
+  .dark .header-shadow {
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+  }
+  .aside-shadow {
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+  }
+  .dark .aside-shadow {
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
   }
 }
