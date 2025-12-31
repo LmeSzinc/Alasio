@@ -28,7 +28,11 @@ export function i18nPlugin(): Plugin {
       }
 
       // 2. Source code changed (ignore generated files)
-      if ((file.endsWith(".svelte") || file.endsWith(".ts")) && file.startsWith(absSrc) && !file.startsWith(absGen)) {
+      if (
+        (file.endsWith(".svelte") || file.endsWith(".ts") || file.endsWith(".js")) &&
+        file.startsWith(absSrc) &&
+        !file.startsWith(absGen)
+      ) {
         await generator.handleSourceUpdate(file);
       }
     },
