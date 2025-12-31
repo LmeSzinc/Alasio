@@ -3,7 +3,7 @@
   import { Button } from "$lib/components/ui/button";
   import { t } from "$lib/i18n";
   import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
-  import { Copy, GripVertical, Trash2 } from "@lucide/svelte";
+  import { Copy, FilePenLine, GripVertical, Trash2 } from "@lucide/svelte";
 
   export type Config = {
     name: string;
@@ -18,9 +18,10 @@
     config: Config;
     dropIndicator?: DropIndicatorState | null;
     onCopy?: (config: Config) => void;
+    onRename?: (config: Config) => void;
     onDelete?: (config: Config) => void;
   };
-  let { config, dropIndicator = null, onCopy, onDelete }: Props = $props();
+  let { config, dropIndicator = null, onCopy, onRename, onDelete }: Props = $props();
 
   const dndData = $derived({
     id: config.id,
@@ -38,6 +39,10 @@
   function handleCopy(event: Event) {
     event.stopPropagation();
     onCopy?.(config);
+  }
+  function handleRename(event: Event) {
+    event.stopPropagation();
+    onRename?.(config);
   }
   function handleDelete(event: Event) {
     event.stopPropagation();
@@ -66,11 +71,17 @@
       {config.mod}
     </div>
 
-    <!-- Action buttons - visible on hover -->
+    <!-- Action buttons -->
     <div class="ml-2 flex items-center gap-1">
+      <!-- Rename -->
+      <Button variant="ghost" size="sm" class="h-8 w-8 p-0" onclick={handleRename} title={t.ConfigScan.RenameConfig()}>
+        <FilePenLine class="h-4 w-4" />
+      </Button>
+      <!-- Copy -->
       <Button variant="ghost" size="sm" class="h-8 w-8 p-0" onclick={handleCopy} title={t.ConfigScan.CopyConfig()}>
         <Copy class="h-4 w-4" />
       </Button>
+      <!-- Delete -->
       <Button
         variant="ghost"
         size="sm"

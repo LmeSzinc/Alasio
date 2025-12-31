@@ -12,6 +12,7 @@
   import DialogAdd from "./DialogAdd.svelte";
   import DialogCopy from "./DialogCopy.svelte";
   import DialogDel from "./DialogDel.svelte";
+  import DialogRename from "./DialogRename.svelte";
 
   // props
   type $$props = {
@@ -26,6 +27,7 @@
   // RPC handlers for dialogs
   const addRpc = topicClient.rpc();
   const copyRpc = topicClient.rpc();
+  const renameRpc = topicClient.rpc();
   const delRpc = topicClient.rpc();
   const dndRpc = topicClient.rpc(); // Separate RPC for drag and drop operations
 
@@ -36,6 +38,7 @@
 
   // State for dialog management
   let copySourceConfig = $state<Config | null>(null);
+  let renameTargetConfig = $state<Config | null>(null);
   let deleteTargetConfig = $state<Config | null>(null);
 
   // This effect now correctly depends on the true reactive source: `websocketClient.topics`.
@@ -288,6 +291,10 @@
     copySourceConfig = config;
     copyRpc.open();
   }
+  function handleRenameConfig(config: Config) {
+    renameTargetConfig = config;
+    renameRpc.open();
+  }
   function handleDeleteConfig(config: Config) {
     deleteTargetConfig = config;
     delRpc.open();
@@ -328,7 +335,13 @@
       {#snippet children({ dropIndicator })}
         <div class="space-y-1">
           {#each uiGroups as group (group.id)}
-            <ConfigGroup {group} {dropIndicator} onCopy={handleCopyConfig} onDelete={handleDeleteConfig} />
+            <ConfigGroup
+              {group}
+              {dropIndicator}
+              onCopy={handleCopyConfig}
+              onRename={handleRenameConfig}
+              onDelete={handleDeleteConfig}
+            />
           {/each}
         </div>
       {/snippet}
@@ -352,5 +365,6 @@
   <!-- Dialogs -->
   <DialogAdd rpc={addRpc} />
   <DialogCopy rpc={copyRpc} sourceConfig={copySourceConfig} />
+  <DialogRename rpc={renameRpc} sourceConfig={renameTargetConfig} />
   <DialogDel rpc={delRpc} targetConfig={deleteTargetConfig} />
 </div>

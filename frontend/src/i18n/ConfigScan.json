@@ -6,6 +6,27 @@
     "zh-TW": "配置檔案管理器",
     "es-ES": "Administrador de Config"
   },
+  "SchedulerGroup": {
+    "en-US": "Scheduler group #{n}",
+    "zh-CN": "调度器组 #{n}",
+    "ja-JP": "スケジューラグループ #{n}",
+    "zh-TW": "調度器組 #{n}",
+    "es-ES": "Grupo de programador #{n}"
+  },
+  "CopyConfig": {
+    "en-US": "Copy Config",
+    "zh-CN": "复制配置",
+    "ja-JP": "設定をコピー",
+    "zh-TW": "複製配置",
+    "es-ES": "Copiar Configuración"
+  },
+  "DeleteConfig": {
+    "en-US": "Delete Config",
+    "zh-CN": "删除配置",
+    "ja-JP": "設定を削除",
+    "zh-TW": "刪除配置",
+    "es-ES": "Eliminar Configuración"
+  },
   "AddConfig": {
     "en-US": "Add Config",
     "zh-CN": "添加配置",
@@ -33,20 +54,6 @@
     "ja-JP": "キャンセル",
     "zh-TW": "取消",
     "es-ES": "Cancelar"
-  },
-  "SchedulerGroup": {
-    "en-US": "Scheduler group #{n}",
-    "zh-CN": "调度器组 #{n}",
-    "ja-JP": "スケジューラグループ #{n}",
-    "zh-TW": "調度器組 #{n}",
-    "es-ES": "Grupo de programador #{n}"
-  },
-  "CopyConfig": {
-    "en-US": "Copy Config",
-    "zh-CN": "复制配置",
-    "ja-JP": "設定をコピー",
-    "zh-TW": "複製配置",
-    "es-ES": "Copiar Configuración"
   },
   "CopyFrom": {
     "en-US": "Copy from",
@@ -76,13 +83,6 @@
     "zh-TW": "輸入新配置名稱",
     "es-ES": "Ingrese nuevo nombre de configuración"
   },
-  "DeleteConfig": {
-    "en-US": "Delete Config",
-    "zh-CN": "删除配置",
-    "ja-JP": "設定を削除",
-    "zh-TW": "刪除配置",
-    "es-ES": "Eliminar Configuración"
-  },
   "DeleteConfirmation": {
     "en-US": "Are you sure you want to delete this config?",
     "zh-CN": "确定要删除此配置吗？",
@@ -96,5 +96,26 @@
     "ja-JP": "この操作は元に戻せません。設定ファイルは完全に削除されます。",
     "zh-TW": "此操作無法撤銷。配置檔案將被永久刪除。",
     "es-ES": "Esta acción no se puede deshacer. El archivo de configuración se eliminará permanentemente."
+  },
+  "RenameConfig": {
+    "en-US": "Rename Config",
+    "zh-CN": "重命名配置",
+    "ja-JP": "設定名を変更",
+    "zh-TW": "重新命名配置",
+    "es-ES": "Renombrar Configuración"
+  },
+  "CurrentName": {
+    "en-US": "Current name",
+    "zh-CN": "当前名称",
+    "ja-JP": "現在の名前",
+    "zh-TW": "目前名稱",
+    "es-ES": "Nombre actual"
+  },
+  "NewName": {
+    "en-US": "New name",
+    "zh-CN": "新名称",
+    "ja-JP": "新しい名前",
+    "zh-TW": "新名稱",
+    "es-ES": "Nuevo nombre"
   }
 }
