@@ -20,6 +20,13 @@
     "zh-TW": "開發工具",
     "es-ES": "Herramientas de Desarrollo"
   },
+  "DebugTool": {
+    "en-US": "DebugTool",
+    "zh-CN": "DebugTool",
+    "ja-JP": "DebugTool",
+    "zh-TW": "DebugTool",
+    "es-ES": "DebugTool"
+  },
   "RestartBackend": {
     "en-US": "Restart Backend",
     "zh-CN": "重启后端",

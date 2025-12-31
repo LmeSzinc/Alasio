@@ -1,10 +1,11 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import type { WORKER_STATUS } from "$lib/components/aside/types";
+  import { Scheduler } from "$lib/components/scheduler";
   import { NavContext } from "$lib/slotcontext.svelte";
   import { useTopic } from "$lib/ws";
   import { onDestroy, setContext } from "svelte";
   import ConfigNav from "./ConfigNav.svelte";
-  import Scheduler from "./Scheduler.svelte";
   import UIState from "./state.svelte";
 
   // nav context
@@ -66,10 +67,14 @@
       onOverviewClick();
     }
   });
+
+  // Scheduler
+  const workerClient = useTopic<Record<string, WORKER_STATUS> | undefined>("Worker");
+  const status = $derived(workerClient.data?.[config_name] || "idle");
 </script>
 
 {#snippet nav()}
-  <Scheduler {config_name} {onOverviewClick} {onDeviceClick} />
+  <Scheduler {config_name} {status} {onOverviewClick} {onDeviceClick} />
   <ConfigNav nav_name={ui.nav_name} card_name={ui.card_name} bind:opened_nav={ui.opened_nav} {onCardClick} />
 {/snippet}
 
