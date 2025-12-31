@@ -66,7 +66,7 @@
   async function handleConfigClick(config: ConfigLike) {
     // push to `/config/{config_name}`, target page will do rpc call
     const encodedConfigName = encodeURIComponent(config.name);
-    await goto(`/config/${encodedConfigName}`);
+    await goto(`/config/${encodedConfigName}/overview`);
     // additional callback
     onNavigate();
   }

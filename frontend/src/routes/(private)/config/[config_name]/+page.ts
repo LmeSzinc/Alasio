@@ -1,10 +1,6 @@
+import { redirect } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 
-export const load: PageLoad = ({ params }) => {
-  // Get config_name from URL
-  const rawConfigName = params.config_name;
-  const decodedConfigName = decodeURIComponent(rawConfigName);
-  return {
-    config_name: decodedConfigName,
-  };
+export const load: PageLoad = async ({ params }) => {
+  throw redirect(302, `/config/${params.config_name}/overview`);
 };
