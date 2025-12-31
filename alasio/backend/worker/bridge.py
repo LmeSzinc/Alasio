@@ -119,27 +119,31 @@ def mod_entry(mod_name, config_name, child_conn, project_root='', mod_root='', p
 
     # if project_root, mod_root, path_main all provided, consider as real mod
     if project_root and mod_root and path_main:
-        # set mod root path
-        os.chdir(mod_root)
-        sys.path[0] = mod_root
-
-        # set project root path
-        from alasio.ext import env
-        env.set_project_root(project_root)
-
-        # import Scheduler
-        import importlib
-        from alasio.ext.path.calc import to_python_import
-        entry = to_python_import(path_main)
-        module = importlib.import_module(entry)
         try:
-            cls = module.Scheduler
-        except AttributeError:
-            raise AttributeError('Module entry file did not define class Scheduler')
+            # set mod root path
+            os.chdir(mod_root)
+            sys.path[0] = mod_root
 
-        # run mod scheduler
-        scheduler = cls(config_name)
-        scheduler.run()
+            # set project root path
+            from alasio.ext import env
+            env.set_project_root(project_root)
+
+            # import Scheduler
+            import importlib
+            from alasio.ext.path.calc import to_python_import
+            entry = to_python_import(path_main)
+            module = importlib.import_module(entry)
+            try:
+                cls = module.Scheduler
+            except AttributeError:
+                raise AttributeError('Module entry file did not define class Scheduler')
+
+            # run mod scheduler
+            scheduler = cls(config_name)
+            scheduler.run()
+
+        except KeyboardInterrupt:
+            pass
 
     else:
         raise KeyError(f'No such mod to run {mod_name}')

@@ -280,6 +280,7 @@ class WorkerManager(metaclass=Singleton):
             state.process_graceful_kill()
 
         exitcode = process.exitcode
+        logger.info(f'[WorkerManager] Worker stopped: {state.config}, exitcode={exitcode}')
 
         with self._lock:
             state.conn = None
@@ -439,7 +440,7 @@ class WorkerManager(metaclass=Singleton):
             # mark immediately
             self._set_status(state, 'starting')
 
-        logger.info(f'[WorkerManager] Starting worker {config}')
+        logger.info(f'[WorkerManager] Starting worker: {config}')
         # start process without lock
         parent_conn, child_conn = self._ctx.Pipe()
         if project_root and mod_root and path_main:
@@ -509,8 +510,10 @@ class WorkerManager(metaclass=Singleton):
             # check if worker is running
             if state.status in ['idle', 'error', 'disconnected']:
                 return False, f'Worker not running: "{config}", state="{state.status}"'
-            if state.status in ['scheduler-stopping', 'killing', 'force-killing']:
+            if state.status in ['scheduler-stopping']:
                 return False, f'Worker is already stopping: "{config}", state="{state.status}"'
+            if state.status in ['killing', 'force-killing']:
+                return False, f'Worker is already killing: "{config}", state="{state.status}"'
             # mark immediately
             self._set_status(state, 'scheduler-stopping')
 
@@ -536,8 +539,8 @@ class WorkerManager(metaclass=Singleton):
             # check if worker is running
             if state.status in ['idle', 'error', 'disconnected']:
                 return False, f'Worker not running: "{config}", state="{state.status}"'
-            if state.status in ['scheduler-stopping', 'killing', 'force-killing']:
-                return False, f'Worker is already stopping: "{config}", state="{state.status}"'
+            if state.status in ['killing', 'force-killing']:
+                return False, f'Worker is already killing: "{config}", state="{state.status}"'
             if state.status not in ['scheduler-stopping', ]:
                 return False, f'Worker is not in scheduler-stopping: "{config}", state="{state.status}"'
             # mark immediately
