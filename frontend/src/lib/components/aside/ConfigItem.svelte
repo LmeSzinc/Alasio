@@ -1,7 +1,7 @@
 <script lang="ts">
   import { cn } from "$lib/utils.js";
-  import { Play } from "@lucide/svelte";
   import ConfigStatus from "./ConfigStatus.svelte";
+  import ModIcon from "./ModIcon.svelte";
   import type { ConfigLike, WORKER_STATUS } from "./types";
 
   // props
@@ -15,20 +15,8 @@
   };
   let { config, status = "idle", active = false, class: className, onclick, afspin = false }: Props = $props();
 
-  // Easter egg spinning
-  // afspin should be True on April 1st
   const RUNNING_STATUSES: WORKER_STATUS[] = ["running", "scheduler-stopping", "scheduler-waiting"];
   const spin = $derived(afspin && RUNNING_STATUSES.includes(status));
-
-  // icon handing
-  let iconError = $state(false);
-  $effect(() => {
-    // Reset iconError when config.mod changes
-    iconError = false;
-  });
-  function handleIconError() {
-    iconError = true;
-  }
 
   // callbacks
   function handleClick() {
@@ -50,17 +38,7 @@
   title={config.name}
 >
   <div class="relative">
-    {#if config.mod && !iconError}
-      <img
-        src="/static/icon/{config.mod}.svg"
-        alt=""
-        role="presentation"
-        class={cn("h-8 w-8 object-contain", spin && "origin-[50%_42%] animate-[spin_400ms_linear_infinite]")}
-        onerror={handleIconError}
-      />
-    {:else}
-      <Play class={cn("h-8 w-8", spin && "origin-[50%_42%] animate-[spin_400ms_linear_infinite]")} strokeWidth="1.5" aria-hidden="true" />
-    {/if}
+    <ModIcon mod={config.mod} afspin={spin} />
     <ConfigStatus {status} {active} class="absolute -right-1 bottom-0" />
   </div>
   <span class="line-clamp-2 text-center text-xs break-all" aria-hidden="true">
