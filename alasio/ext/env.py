@@ -34,4 +34,5 @@ def set_project_root(root, up=0):
 
 
 # Environ
+ELECTRON_SECRET = os.environ.get("ELECTRON_SECRET", "")
 CHINAC_CLOUDPHONE = os.environ.get("cloudphone", "") == "cloudphone"
