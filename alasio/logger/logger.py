@@ -12,12 +12,27 @@ from alasio.ext.path import PathStr
 from alasio.ext.singleton import Singleton
 
 
+class PseudoBackendBridge:
+    # Pseudo Backend that don't send logs
+    def send_log(self, *args, **kwargs):
+        pass
+
+
 # It's a singleton because on each logger.bind() structlog.PrintLoggerFactory will create new `file` object
 # But we don't want to open multiple files
 class LogWriter(metaclass=Singleton):
     def __init__(self):
         self.create_date = ''
         self.is_electron = bool(env.ELECTRON_SECRET)
+
+    @threaded_cached_property
+    def backend(self):
+        from alasio.backend.worker.bridge import BackendBridge
+        backend = BackendBridge()
+        if backend.inited:
+            return backend
+        else:
+            return PseudoBackendBridge()
 
     @threaded_cached_property
     def fd(self):
@@ -118,15 +133,15 @@ class LogRenderer:
     # - loguru-like logging format:
     #   2026-01-01 00:00:00.000 | INFO | User John
 
-    def __call__(self, log, method_name, event_dict) -> str:
+    def __call__(self, log, level, event_dict) -> str:
         # from structlog.__log_levels.add_log_level()
         # warn is just a deprecated alias in the stdlib.
-        if method_name == "warn":
-            method_name = "warning"
+        if level == "warn":
+            level = "warning"
         # Calling exception("") is the same as error("", exc_info=True)
-        if method_name == "exception":
-            method_name = "error"
-        method_name = method_name.upper()
+        if level == "exception":
+            level = "error"
+        level = level.upper()
 
         # inject time
         now = datetime.now().isoformat(sep=' ', timespec='milliseconds')
@@ -153,9 +168,16 @@ class LogRenderer:
                 # maybe {} is unpaired
                 pass
 
-        text = f'{now} | {method_name} | {event}'
+        # build log text
+        text = f'{now} | {level} | {event}'
+        event = {'time': now, 'level': level, 'msg': event}
         if 'exception' in event_dict:
-            text = '\n'.join([text, event_dict['exception']])
+            exception = event_dict['exception']
+            text = f'{text}\n{exception}'
+            event['exception'] = exception
+
+        # send log to backend bridge
+        log._file.backend.send_log(event)
         return text
 
 
@@ -188,7 +210,7 @@ class AlasioLogger(structlog.BoundLoggerBase):
         except DropEvent:
             return None
 
-    def exception(self, event: str, **kwargs):
+    def exception(self, event: "str | Exception", **kwargs):
         # see structlog._native.exception()
         kwargs.setdefault("exc_info", True)
         return self.error(event, **kwargs)

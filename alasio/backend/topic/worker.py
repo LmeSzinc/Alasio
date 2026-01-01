@@ -1,6 +1,7 @@
 import trio
 
 from alasio.backend.topic.scan import ConfigScanSource
+from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.worker.manager import WORKER_STATUS, WorkerManager
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
@@ -28,8 +29,13 @@ class BackendWorkerManager(WorkerManager):
     def on_worker_status(self, config: str, status: WORKER_STATUS):
         # Broadcast worker status to msgbus
         trio.from_thread.run(
-            BaseTopic.msgbus_global_asend,
-            'Worker', (config, status),
+            BaseTopic.msgbus_global_asend, 'Worker', (config, status),
+            trio_token=self.trio_token
+        )
+
+    def on_config_event(self, event: ConfigEvent):
+        trio.from_thread.run(
+            BaseTopic.msgbus_config_asend, event,
             trio_token=self.trio_token
         )
 

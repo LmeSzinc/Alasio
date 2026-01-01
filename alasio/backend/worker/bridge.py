@@ -176,6 +176,7 @@ def _async_raise(tid):
 
 class BackendBridge(metaclass=Singleton):
     def __init__(self):
+        self.inited = False
         self.conn = None
         self.main_tid = 0
         self._io_thread = None
@@ -192,6 +193,7 @@ class BackendBridge(metaclass=Singleton):
         self._io_thread = threading.Thread(target=self._io_loop, daemon=True)
         self._io_thread.start()
         self.send_worker_state('running')
+        self.inited = True
 
     def send(self, event: ConfigEvent):
         conn = self.conn

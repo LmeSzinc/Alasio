@@ -2,14 +2,14 @@ from typing import Any, TYPE_CHECKING
 
 import trio
 
-from alasio.logger import logger
-from .base_rpc import RPCMethod
+from alasio.backend.worker.event import ConfigEvent
+from alasio.ext.reactive.base_rpc import RPCMethod
 
 if TYPE_CHECKING:
     MSGBUS_GLOBAL_SEND: "trio.MemorySendChannel[tuple[str, Any]]"
     MSGBUS_GLOBAL_RECV: "trio.MemoryReceiveChannel[tuple[str, Any]]"
-    MSGBUS_CONFIG_SEND: "trio.MemorySendChannel[tuple[str, str, Any]]"
-    MSGBUS_CONFIG_RECV: "trio.MemoryReceiveChannel[tuple[str, str, Any]]"
+    MSGBUS_CONFIG_SEND: "trio.MemorySendChannel[ConfigEvent]"
+    MSGBUS_CONFIG_RECV: "trio.MemoryReceiveChannel[ConfigEvent]"
 MSGBUS_GLOBAL_SEND, MSGBUS_GLOBAL_RECV = trio.open_memory_channel(64)
 MSGBUS_CONFIG_SEND, MSGBUS_CONFIG_RECV = trio.open_memory_channel(1024)
 
@@ -77,19 +77,6 @@ class BaseTopic:
                     continue
 
     @staticmethod
-    def msgbus_global_send(topic: str, value):
-        """
-        Send an event to global msgbus, sync method
-        """
-        event = (topic, value)
-        try:
-            MSGBUS_GLOBAL_SEND.send_nowait(event)
-            return True
-        except trio.WouldBlock:
-            logger.warning(f'msgbus_global buffer full, event dropped: {event}')
-            return False
-
-    @staticmethod
     async def msgbus_global_asend(topic: str, value):
         """
         Send an event to global msgbus, async method
@@ -98,22 +85,8 @@ class BaseTopic:
         await MSGBUS_GLOBAL_SEND.send(event)
 
     @staticmethod
-    def msgbus_config_send(topic: str, config: str, value):
-        """
-        Send an event to config msgbus, sync method
-        """
-        event = (topic, config, value)
-        try:
-            MSGBUS_CONFIG_SEND.send_nowait(event)
-            return True
-        except trio.WouldBlock:
-            logger.warning(f'msgbus_config buffer full, event dropped: {event}')
-            return False
-
-    @staticmethod
-    async def msgbus_config_asend(topic: str, config: str, value):
+    async def msgbus_config_asend(event: ConfigEvent):
         """
         Send an event to config msgbus, async method
         """
-        event = (topic, config, value)
         await MSGBUS_CONFIG_SEND.send(event)

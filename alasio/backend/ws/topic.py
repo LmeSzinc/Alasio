@@ -5,6 +5,7 @@ from alasio.backend.topic.mod import ModList
 from alasio.backend.topic.scan import ConfigScan
 from alasio.backend.topic.state import ConnState, DICT_CONFIG_TO_CONN
 from alasio.backend.topic.worker import Worker
+from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_server import WebsocketTopicServer
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.ext.reactive.base_topic import MSGBUS_CONFIG_HANDLERS, MSGBUS_CONFIG_RECV, MSGBUS_GLOBAL_HANDLERS, \
@@ -76,17 +77,17 @@ class WebsocketServer(WebsocketTopicServer):
                 await func(topic_obj, value)
 
     @classmethod
-    async def handle_config_event(cls, topic: str, config: str, value):
+    async def handle_config_event(cls, event: ConfigEvent):
         """
         Broadcast config events to all connections that subscribed this config
         """
-        connections = DICT_CONFIG_TO_CONN[config]
+        connections = DICT_CONFIG_TO_CONN[event.c]
         if not connections:
             # nobody subscribing given config
             return
 
         try:
-            handlers = MSGBUS_CONFIG_HANDLERS[topic]
+            handlers = MSGBUS_CONFIG_HANDLERS[event.t]
         except KeyError:
             # nobody listening given topic
             return
@@ -105,7 +106,7 @@ class WebsocketServer(WebsocketTopicServer):
                     # or DICT_CONFIG_TO_CONN is inconsistent with topic_cls(conn_id)
                     continue
                 # broadcast
-                await func(topic_obj, value)
+                await func(topic_obj, event.v)
 
     @classmethod
     async def task_msgbus_global(cls):
@@ -129,6 +130,6 @@ class WebsocketServer(WebsocketTopicServer):
             # receive then do, msg order matters
             event = await MSGBUS_CONFIG_RECV.receive()
             try:
-                await cls.handle_config_event(*event)
+                await cls.handle_config_event(event)
             except Exception as e:
                 logger.exception(e)

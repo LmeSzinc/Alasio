@@ -3,6 +3,7 @@ import re
 from alasio.assets_dev.parse import AssetAll, AssetImage, AssetModule, AssetMultilang
 from alasio.base.image.imfile import image_fixup
 from alasio.config.const import Const
+from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.file.watchdog import PathEvent, Watchdog
@@ -14,6 +15,8 @@ from alasio.git.stage.gitadd import GitAdd
 from alasio.logger import logger
 
 REGEX_ASSETS_NAME = re.compile(r'^[a-zA-Z0-9_]+$')
+
+env.set_project_root(__file__, up=3)
 
 
 class AssetsExtractor:
