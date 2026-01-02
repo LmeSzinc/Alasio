@@ -201,7 +201,7 @@ class async_reactive(Generic[T]):
         """
         Manually triggers a broadcast for this reactive property on a specific instance.
         Current value will be broadcast to all observers as `new`,
-        `old` would be _NOT_FOUND because value is already changed by in-place mutation.
+        `old` is always _NOT_FOUND because value is already changed by in-place mutation.
 
         Args:
             obj: The instance on which to trigger the broadcast.
@@ -285,6 +285,6 @@ class AsyncReactiveCallback:
     async def reactive_callback(self, name, old, new):
         """
         If any reactive value from this object is changed, this method will be called
-        Note that `old` might be _NOT_FOUND
+        Note that `old` is always _NOT_FOUND because value is already changed by in-place mutation.
         """
         pass

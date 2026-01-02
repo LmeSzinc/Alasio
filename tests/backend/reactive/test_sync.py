@@ -242,3 +242,262 @@ def test_weakref_observer_cleanup_with_singleton_source():
     finally:
         # Clean up the singleton used in this test.
         Source.singleton_clear()
+
+
+def test_reactive_callback_invocation():
+    """
+    Tests that reactive_callback is invoked correctly when reactive properties change.
+    """
+
+    class CallbackTracker(ReactiveCallback, metaclass=Singleton):
+        def __init__(self):
+            self._x = 10
+            self._y = 20
+            self.callback_log = []
+
+        @reactive_source
+        def x(self):
+            return self._x
+
+        @reactive_source
+        def y(self):
+            return self._y
+
+        @reactive
+        def sum_xy(self):
+            return self.x + self.y
+
+        def reactive_callback(self, name, old, new):
+            self.callback_log.append((name, old, new))
+
+    try:
+        tracker = CallbackTracker()
+
+        # Initial access should not trigger callbacks
+        assert tracker.sum_xy == 30
+        assert len(tracker.callback_log) == 0
+
+        # Change x, should trigger callbacks for x and sum_xy
+        tracker.x = 15
+        assert len(tracker.callback_log) == 2
+        assert ('x', 10, 15) in tracker.callback_log
+        assert ('sum_xy', 30, 35) in tracker.callback_log
+
+        # Clear log and change y
+        tracker.callback_log.clear()
+        tracker.y = 25
+        assert len(tracker.callback_log) == 2
+        assert ('y', 20, 25) in tracker.callback_log
+        assert ('sum_xy', 35, 40) in tracker.callback_log
+
+    finally:
+        CallbackTracker.singleton_clear()
+
+
+def test_parallel_dependencies_no_unnecessary_recompute():
+    """
+    Tests that in a tree where C depends on both A and B (parallel dependencies),
+    when A changes, C recomputes but B does not.
+
+    Dependency graph:
+        A   B
+         \ /
+          C
+    """
+
+    class ParallelDeps(ReactiveCallback, metaclass=Singleton):
+        def __init__(self):
+            self._a = 5
+            self._b = 10
+            self.b_compute_count = 0
+            self.c_compute_count = 0
+
+        @reactive_source
+        def a(self):
+            return self._a
+
+        @reactive_source
+        def b(self):
+            return self._b
+
+        @reactive
+        def b_doubled(self):
+            self.b_compute_count += 1
+            return self.b * 2
+
+        @reactive
+        def c(self):
+            self.c_compute_count += 1
+            return self.a + self.b_doubled
+
+    try:
+        obj = ParallelDeps()
+
+        # Initial computation
+        assert obj.c == 25  # 5 + 10*2 = 25
+        assert obj.b_compute_count == 1
+        assert obj.c_compute_count == 1
+
+        # Change A, should recompute C but NOT B
+        obj.a = 10
+        assert obj.c == 30  # 10 + 10*2 = 30
+        assert obj.b_compute_count == 1  # B should NOT recompute
+        assert obj.c_compute_count == 2  # C should recompute
+
+        # Change B, should recompute both b_doubled and C
+        obj.b = 15
+        assert obj.c == 40  # 10 + 15*2 = 40
+        assert obj.b_compute_count == 2  # B should recompute now
+        assert obj.c_compute_count == 3  # C should recompute
+
+    finally:
+        ParallelDeps.singleton_clear()
+
+
+def test_chain_dependencies_no_propagate_if_value_unchanged():
+    """
+    Tests that in a chain C -> B -> A, when A changes but B's computed value
+    remains the same, C does not recompute.
+
+    Dependency graph:
+        A -> B -> C
+    """
+
+    class ChainDeps(ReactiveCallback, metaclass=Singleton):
+        def __init__(self):
+            self._a = 10
+            self.b_compute_count = 0
+            self.c_compute_count = 0
+            self.callback_log = []
+
+        @reactive_source
+        def a(self):
+            return self._a
+
+        @reactive
+        def b(self):
+            """B rounds A to nearest 10, so changes in A within same decade don't change B"""
+            self.b_compute_count += 1
+            return (self.a // 10) * 10
+
+        @reactive
+        def c(self):
+            """C depends on B"""
+            self.c_compute_count += 1
+            return self.b * 2
+
+        def reactive_callback(self, name, old, new):
+            self.callback_log.append((name, old, new))
+
+    try:
+        obj = ChainDeps()
+
+        # Initial computation
+        assert obj.c == 20  # (10//10)*10 * 2 = 10 * 2 = 20
+        assert obj.b_compute_count == 1
+        assert obj.c_compute_count == 1
+
+        # Change A from 10 to 15, B should recompute but value stays 10, C should NOT recompute
+        obj.callback_log.clear()
+        obj.a = 15
+
+        assert obj.b == 10  # (15//10)*10 = 10, unchanged
+        assert obj.c == 20  # Should still be 20
+        assert obj.b_compute_count == 2  # B recomputed
+        assert obj.c_compute_count == 1  # C should NOT recompute because B value unchanged
+
+        # Check callbacks: only 'a' should have changed, not 'b' or 'c'
+        callback_names = [name for name, old, new in obj.callback_log]
+        assert 'a' in callback_names
+        assert 'b' not in callback_names  # B didn't change value
+        assert 'c' not in callback_names  # C didn't change value
+
+        # Now change A to 20, B changes to 20, so C should recompute
+        obj.callback_log.clear()
+        obj.a = 20
+
+        assert obj.b == 20  # (20//10)*10 = 20, changed!
+        assert obj.c == 40  # 20 * 2 = 40
+        assert obj.b_compute_count == 3  # B recomputed
+        assert obj.c_compute_count == 2  # C should recompute now
+
+        # Check callbacks: all three should have changed
+        callback_names = [name for name, old, new in obj.callback_log]
+        assert 'a' in callback_names
+        assert 'b' in callback_names
+        assert 'c' in callback_names
+
+    finally:
+        ChainDeps.singleton_clear()
+
+
+def test_complex_tree_selective_recomputation():
+    """
+    Tests a more complex dependency tree to verify selective recomputation.
+
+    Dependency graph:
+        A   B
+        |   |
+        D   E
+         \ /
+          F
+
+    When A changes, D and F recompute, but B and E do not.
+    """
+
+    class ComplexTree(ReactiveCallback, metaclass=Singleton):
+        def __init__(self):
+            self._a = 1
+            self._b = 2
+            self.d_compute_count = 0
+            self.e_compute_count = 0
+            self.f_compute_count = 0
+
+        @reactive_source
+        def a(self):
+            return self._a
+
+        @reactive_source
+        def b(self):
+            return self._b
+
+        @reactive
+        def d(self):
+            self.d_compute_count += 1
+            return self.a * 10
+
+        @reactive
+        def e(self):
+            self.e_compute_count += 1
+            return self.b * 10
+
+        @reactive
+        def f(self):
+            self.f_compute_count += 1
+            return self.d + self.e
+
+    try:
+        obj = ComplexTree()
+
+        # Initial computation
+        assert obj.f == 30  # (1*10) + (2*10) = 30
+        assert obj.d_compute_count == 1
+        assert obj.e_compute_count == 1
+        assert obj.f_compute_count == 1
+
+        # Change A, should recompute D and F, but NOT E
+        obj.a = 5
+        assert obj.f == 70  # (5*10) + (2*10) = 70
+        assert obj.d_compute_count == 2  # D recomputed
+        assert obj.e_compute_count == 1  # E should NOT recompute
+        assert obj.f_compute_count == 2  # F recomputed
+
+        # Change B, should recompute E and F, but NOT D
+        obj.b = 3
+        assert obj.f == 80  # (5*10) + (3*10) = 80
+        assert obj.d_compute_count == 2  # D should NOT recompute
+        assert obj.e_compute_count == 2  # E recomputed
+        assert obj.f_compute_count == 3  # F recomputed
+
+    finally:
+        ComplexTree.singleton_clear()
