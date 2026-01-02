@@ -1,10 +1,12 @@
 import contextvars
 import weakref
 from typing import Any, Callable, Generator, Generic, TypeVar
+
 import trio
 
+from alasio.backend.reactive.not_found import _NOT_FOUND
+
 T = TypeVar('T')
-_NOT_FOUND = object()
 
 
 class ReactiveContext:

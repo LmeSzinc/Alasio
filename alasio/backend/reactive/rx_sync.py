@@ -2,8 +2,9 @@ import threading
 import weakref
 from typing import Callable, Generic, TypeVar
 
+from alasio.backend.reactive.not_found import _NOT_FOUND
+
 T = TypeVar('T')
-_NOT_FOUND = object()
 
 
 class ReactiveContext:
