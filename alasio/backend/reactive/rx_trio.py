@@ -43,7 +43,19 @@ class AwaitableProperty(Generic[T]):
         self.obj = obj
 
     def __await__(self) -> Generator[Any, Any, T]:
+        """
+        Allows usage: state = await self.prop
+        """
         return self.reactive_deco.get_value(self.obj).__await__()
+
+    async def mutate(self, new=_NOT_FOUND):
+        """
+        Allows usage: await self.prop.mutate() or await self.prop.mutate(new_value)
+
+        This proxies the call to the descriptor's mutate method,
+        automatically passing the bound instance (self.obj).
+        """
+        await self.reactive_deco.mutate(self.obj, new)
 
 
 class async_reactive(Generic[T]):
@@ -255,7 +267,7 @@ class async_reactive_source(async_reactive):
     def __set__(self, obj, value):
         raise TypeError(
             f'You should not set an async reactive source synchronously. '
-            f'Use "await {obj.__class__.__name__}.{self.name}.mutate(instance, value)" instead.'
+            f'Use "await self.{self.name}.mutate(value)" instead.'
         )
 
 

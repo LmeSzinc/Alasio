@@ -55,7 +55,7 @@ class WebsocketServer(WebsocketTopicServer):
             lang = self._negotiate_lang()
             state = await topic.nav_state
             state.lang = lang
-            await ConnState.nav_state.mutate(topic, state)
+            await topic.nav_state.mutate()
 
     @classmethod
     async def handle_global_event(cls, topic: str, value):

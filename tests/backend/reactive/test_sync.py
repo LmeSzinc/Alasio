@@ -501,3 +501,35 @@ def test_complex_tree_selective_recomputation():
 
     finally:
         ComplexTree.singleton_clear()
+
+
+def test_cannot_set_reactive_property():
+    """
+    Tests that attempting to set a reactive property (not reactive_source) raises an error.
+    """
+
+    class Sample(ReactiveCallback, metaclass=Singleton):
+        def __init__(self):
+            self._value = 10
+
+        @reactive_source
+        def value(self):
+            return self._value
+
+        @reactive
+        def doubled(self):
+            return self.value * 2
+
+    try:
+        obj = Sample()
+        assert obj.doubled == 20
+
+        # Attempting to set a reactive property should raise ValueError
+        with pytest.raises(ValueError) as exc_info:
+            obj.doubled = 30
+
+        assert "You should not set value to a reactive object" in str(exc_info.value)
+        assert "break the observation chain" in str(exc_info.value)
+
+    finally:
+        Sample.singleton_clear()

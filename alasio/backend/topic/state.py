@@ -64,7 +64,7 @@ class ConnState(BaseTopic):
         # set
         state: NavState = await self.nav_state
         state.lang = lang
-        await self.__class__.nav_state.mutate(self, state)
+        await self.nav_state.mutate()
 
     async def op_unsub(self):
         await super().op_unsub()
@@ -95,7 +95,7 @@ class ConnState(BaseTopic):
             state: NavState = await self.nav_state
             state.clear()
             # broadcast
-            await self.__class__.nav_state.mutate(self, state)
+            await self.nav_state.mutate()
             return
 
         # check if name is a validate filename
@@ -129,7 +129,7 @@ class ConnState(BaseTopic):
         state.nav_name = ''
 
         # broadcast
-        await self.__class__.nav_state.mutate(self, state)
+        await self.nav_state.mutate()
 
     @rpc
     async def set_nav(self, name: str):
@@ -145,4 +145,4 @@ class ConnState(BaseTopic):
         state.nav_name = name
 
         # broadcast
-        await self.__class__.nav_state.mutate(self, state)
+        await self.nav_state.mutate()

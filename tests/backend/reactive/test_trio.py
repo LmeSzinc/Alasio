@@ -139,7 +139,7 @@ async def test_initial_computation(calc):
 async def test_dependency_propagation(calc):
     """Tests that changes to a source propagate correctly through the dependency graph."""
     assert await calc.complex_expr == 82
-    await Calculator.a.mutate(calc, 5)
+    await calc.a.mutate(5)
     assert await calc.a == 5
     assert await calc.b == 4
     assert await calc.sum == 9
@@ -183,7 +183,7 @@ async def test_cross_object_reactivity_with_singletons():
         assert consumer.compute_count == 1
 
         # 3. Change Propagation: Modify the source singleton.
-        await SourceProvider.value.mutate(source, 20)
+        await source.value.mutate(20)
 
         # The consumer singleton should update automatically.
         assert await consumer.derived_value == 200
@@ -207,7 +207,7 @@ async def test_deep_dictionary_dependency(processor):
     # Irrelevant change
     new_data_irrelevant = (await processor.raw_data).copy()
     new_data_irrelevant["version"] = 2
-    await DeepDataProcessor.raw_data.mutate(processor, new_data_irrelevant)
+    await processor.raw_data.mutate()
     assert await processor.username == "Alice"
     assert await processor.greeting_message == "Welcome, Alice!"
     processor.greeting_compute_mock.assert_called_once()  # No new call
@@ -215,7 +215,7 @@ async def test_deep_dictionary_dependency(processor):
     # Relevant change
     new_data_relevant = (await processor.raw_data).copy()
     new_data_relevant["user"]["profile"]["name"] = "Bob"
-    await DeepDataProcessor.raw_data.mutate(processor, new_data_relevant)
+    await processor.raw_data.mutate()
     assert await processor.username == "Bob"
     assert await processor.greeting_message == "Welcome, Bob!"
     assert processor.greeting_compute_mock.call_count == 2
@@ -306,7 +306,7 @@ async def test_reactive_callback_invocation():
 
         # Change x, should trigger callbacks for x and sum_xy
         # Note: old value for x will be _NOT_FOUND due to mutate() behavior
-        await CallbackTracker.x.mutate(tracker, 15)
+        await tracker.x.mutate(15)
         await trio.testing.wait_all_tasks_blocked()
         assert len(tracker.callback_log) == 2
         # Check x callback - old is _NOT_FOUND in async version
@@ -320,7 +320,7 @@ async def test_reactive_callback_invocation():
 
         # Clear log and change y
         tracker.callback_log.clear()
-        await CallbackTracker.y.mutate(tracker, 25)
+        await tracker.y.mutate(25)
         await trio.testing.wait_all_tasks_blocked()
         assert len(tracker.callback_log) == 2
         # Check y callback
@@ -382,13 +382,13 @@ async def test_parallel_dependencies_no_unnecessary_recompute():
         assert obj.c_compute_count == 1
 
         # Change A, should recompute C but NOT B
-        await ParallelDeps.a.mutate(obj, 10)
+        await obj.a.mutate(10)
         assert await obj.c == 30  # 10 + 10*2 = 30
         assert obj.b_compute_count == 1  # B should NOT recompute
         assert obj.c_compute_count == 2  # C should recompute
 
         # Change B, should recompute both b_doubled and C
-        await ParallelDeps.b.mutate(obj, 15)
+        await obj.b.mutate(15)
         assert await obj.c == 40  # 10 + 15*2 = 40
         assert obj.b_compute_count == 2  # B should recompute now
         assert obj.c_compute_count == 3  # C should recompute
@@ -447,7 +447,7 @@ async def test_chain_dependencies_no_propagate_if_value_unchanged():
 
         # Change A from 10 to 15, B should recompute but value stays 10, C should NOT recompute
         obj.callback_log.clear()
-        await ChainDeps.a.mutate(obj, 15)
+        await obj.a.mutate(15)
         await trio.testing.wait_all_tasks_blocked()
 
         assert await obj.b == 10  # (15//10)*10 = 10, unchanged
@@ -467,7 +467,7 @@ async def test_chain_dependencies_no_propagate_if_value_unchanged():
 
         # Now change A to 20, B changes to 20, so C should recompute
         obj.callback_log.clear()
-        await ChainDeps.a.mutate(obj, 20)
+        await obj.a.mutate(20)
         await trio.testing.wait_all_tasks_blocked()
 
         assert await obj.b == 20  # (20//10)*10 = 20, changed!
@@ -541,14 +541,14 @@ async def test_complex_tree_selective_recomputation():
         assert obj.f_compute_count == 1
 
         # Change A, should recompute D and F, but NOT E
-        await ComplexTree.a.mutate(obj, 5)
+        await obj.a.mutate(5)
         assert await obj.f == 70  # (5*10) + (2*10) = 70
         assert obj.d_compute_count == 2  # D recomputed
         assert obj.e_compute_count == 1  # E should NOT recompute
         assert obj.f_compute_count == 2  # F recomputed
 
         # Change B, should recompute E and F, but NOT D
-        await ComplexTree.b.mutate(obj, 3)
+        await obj.b.mutate(3)
         assert await obj.f == 80  # (5*10) + (3*10) = 80
         assert obj.d_compute_count == 2  # D should NOT recompute
         assert obj.e_compute_count == 2  # E recomputed
@@ -599,3 +599,71 @@ async def test_concurrent_access():
 
     finally:
         ConcurrentCounter.singleton_clear()
+
+
+@pytest.mark.trio
+async def test_cannot_set_reactive_property():
+    """
+    Tests that attempting to set a reactive property (not reactive_source) raises an error.
+    """
+
+    class Sample(AsyncReactiveCallback, metaclass=Singleton):
+        def __init__(self):
+            self._value = 10
+
+        @async_reactive_source
+        async def value(self):
+            return self._value
+
+        @async_reactive
+        async def doubled(self):
+            return await self.value * 2
+
+    try:
+        obj = Sample()
+        assert await obj.doubled == 20
+
+        # Attempting to set a reactive property should raise ValueError
+        with pytest.raises(ValueError) as exc_info:
+            obj.doubled = 30
+
+        assert "You should not set value to a reactive object" in str(exc_info.value)
+        assert "break the observation chain" in str(exc_info.value)
+
+    finally:
+        Sample.singleton_clear()
+
+
+@pytest.mark.trio
+async def test_cannot_set_async_reactive_source_synchronously():
+    """
+    Tests that attempting to set an async_reactive_source synchronously raises TypeError.
+    This ensures users are forced to use the async mutate() method.
+    """
+
+    class Sample(AsyncReactiveCallback, metaclass=Singleton):
+        def __init__(self):
+            self._value = 10
+
+        @async_reactive_source
+        async def value(self):
+            return self._value
+
+    try:
+        obj = Sample()
+        assert await obj.value == 10
+
+        # Attempting to set synchronously should raise TypeError
+        with pytest.raises(TypeError) as exc_info:
+            obj.value = 20
+
+        error_msg = str(exc_info.value)
+        assert "should not set an async reactive source synchronously" in error_msg
+        assert "mutate" in error_msg
+
+        # Verify the correct way still works
+        await obj.value.mutate(20)
+        assert await obj.value == 20
+
+    finally:
+        Sample.singleton_clear()
