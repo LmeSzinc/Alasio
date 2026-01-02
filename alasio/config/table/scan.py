@@ -4,6 +4,7 @@ from typing import Union
 
 import msgspec
 
+from alasio.backend.reactive.event import RpcValueError
 from alasio.config.table.base import AlasioConfigDB, AlasioGuiDB
 from alasio.config.table.key import AlasioKeyTable
 from alasio.db.conn import SQLITE_POOL
@@ -11,7 +12,6 @@ from alasio.ext import env
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.ext.path.validate import validate_filename
 from alasio.ext.pool import WORKER_POOL
-from alasio.ext.reactive.event import RpcValueError
 from alasio.logger import logger
 
 PROTECTED_NAMES = {'gui', 'template'}

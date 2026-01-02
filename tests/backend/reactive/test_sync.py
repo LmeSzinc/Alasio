@@ -1,10 +1,9 @@
-
 import gc
 from unittest.mock import MagicMock
 
 import pytest
 
-from alasio.ext.reactive.rx_sync import ReactiveCallback, reactive, reactive_source
+from alasio.backend.reactive.rx_sync import ReactiveCallback, reactive, reactive_source
 from alasio.ext.singleton import Singleton
 
 

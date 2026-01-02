@@ -3,7 +3,7 @@ from typing import Any, TYPE_CHECKING
 import trio
 
 from alasio.backend.worker.event import ConfigEvent
-from alasio.ext.reactive.base_rpc import RPCMethod
+from alasio.backend.reactive.base_rpc import RPCMethod
 
 if TYPE_CHECKING:
     MSGBUS_GLOBAL_SEND: "trio.MemorySendChannel[tuple[str, Any]]"
