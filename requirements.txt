@@ -22,3 +22,4 @@ PyJWT
 
 # test
 pytest
+pytest-trio
