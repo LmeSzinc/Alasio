@@ -128,6 +128,21 @@ class SafeDict(dict):
         return f"<key {key} missing>"
 
 
+def has_user_keys(event_dict):
+    """
+    Check if event_dict contains user-provided keys (not just built-in fields)
+    Built-in fields: 'event', 'exception'
+    """
+    length = len(event_dict)
+    # Fast path: empty or single item (must be built-in)
+    if length <= 1:
+        return False
+
+    # Calculate how many built-in fields are present
+    builtin_count = ('event' in event_dict) + ('exception' in event_dict)
+    return length > builtin_count
+
+
 class LogRenderer:
     # A renderer that mixes
     # - structlog.processors.TimeStamper(fmt="iso", utc=False)
@@ -160,7 +175,13 @@ class LogRenderer:
             event_dict["event"] = event
 
         # build message, ignore errors
-        if '{' in event:
+        # check event_dict also, if someone log like this:
+        #   modules = set('combat_ui')
+        #   logger.info(f'Assets generate, modules={modules}')
+        # we won't log:
+        #   Assets generate, modules=<key 'combat_ui' missing>
+        if '{' in event and has_user_keys(event_dict):
+
             try:
                 event = event.format(**event_dict)
             except KeyError:
