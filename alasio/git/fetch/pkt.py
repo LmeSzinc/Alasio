@@ -28,7 +28,15 @@ async def aparse_pkt_line(stream_iterator):
             # get next line
             length_hex = buffer[:4]
             if length_hex == b'0000':
-                yield b''
+                yield b''  # flush-pkt
+                del buffer[:4]
+                continue
+            elif length_hex == b'0001':
+                yield b'\x01'  # delimiter-pkt (v2)
+                del buffer[:4]
+                continue
+            elif length_hex == b'0002':
+                yield b'\x02'  # response-end-pkt (v2)
                 del buffer[:4]
                 continue
 
@@ -59,6 +67,14 @@ def parse_pkt_line(content):
         if not length_hex:
             break
         if length_hex == b'0000':
+            index += 4
+            continue
+        elif length_hex == b'0001':
+            yield b'\x01'  # delimiter-pkt (v2)
+            index += 4
+            continue
+        elif length_hex == b'0002':
+            yield b'\x02'  # response-end-pkt (v2)
             index += 4
             continue
         try:
@@ -137,8 +153,9 @@ async def aparse_packfile_stream(stream_iterator, buffer_size=262144) -> int:
         elif channel == b'\x03':
             content = content.decode(errors='replace').strip()
             logger.error(f'Remote error: {content}')
-        # ACK 4b6229f1236825f353b5d7154aed834622e9a2b7 common\n
-        elif channel == b'A':
+        # ACK/NAK line during negotiation end
+        elif channel in [b'A', b'N']:
+            # A for ACK, N for NAK
             pass
 
         # this shouldn't happen
@@ -168,19 +185,23 @@ async def agather_bytes(stream_iterator):
 
 def create_pkt_line(data):
     """
-    Create a pkt-line formatted byte string from a string.
+    Create a standard pkt-line formatted byte string.
+    Format: <4-byte hex length><data>
+    Length includes the 4-byte header.
 
     Args:
-        data (str): The string data to encode, without \n at string end
+        data (str | bytes): The data to encode.
 
     Returns:
-        bytes: pkt-line, {length}{data}\n
+        bytes: The pkt-line.
     """
-    data = data.encode('utf-8')
-    # len(data) + len(length) + len('\n')
-    length = len(data) + 5
-    length = f'{length:04x}'.encode('utf-8')
-    return b''.join([length, data, b'\n'])
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    
+    # Standard pkt-line length is len(data) + 4
+    length = len(data) + 4
+    length_hex = f'{length:04x}'.encode('utf-8')
+    return b''.join([length_hex, data])
 
 
 class FetchPayload(deque):
@@ -196,24 +217,26 @@ class FetchPayload(deque):
         Args:
             line (str):
         """
+        if not line.endswith('\n'):
+            line += '\n'
         self.append(create_pkt_line(line))
 
     def add_delimiter(self):
         self.append(b'0000')
 
     def add_done(self):
-        self.append(create_pkt_line('done'))
+        self.append(create_pkt_line('done\n'))
 
     def add_have(self, sha1):
         """
         Args:
             sha1 (str):
         """
-        self.append(create_pkt_line(f'have {sha1}'))
+        self.append(create_pkt_line(f'have {sha1}\n'))
 
     def add_deepen(self, deepen):
         """
         Args:
             deepen (int):
         """
-        self.append(create_pkt_line(f'deepen {deepen}'))
+        self.append(create_pkt_line(f'deepen {deepen}\n'))
