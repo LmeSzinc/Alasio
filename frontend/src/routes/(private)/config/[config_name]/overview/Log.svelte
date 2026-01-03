@@ -19,7 +19,7 @@
     {#if logs.length === 0}
       <div class="text-muted-foreground text-sm">暂无日志</div>
     {:else}
-      {#each logs as log (log.t)}
+      {#each logs as log}
         <LogData {...log} />
       {/each}
     {/if}

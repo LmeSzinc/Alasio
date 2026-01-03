@@ -215,7 +215,7 @@ class LogCache(metaclass=SingletonNamed):
             self._inbox.clear()
 
 
-class LogData(msgspec.Struct):
+class LogData(msgspec.Struct, omit_defaults=True):
     # timestamp in seconds, in UTC
     t: float
     # logging level in uppercase:
@@ -224,7 +224,10 @@ class LogData(msgspec.Struct):
     # log message, might contain "\n"
     m: str
     # exception track back if error occurs, might contain "\n"
-    e: Optional[str]
+    e: Optional[str] = None
+    # raw tag, if r=1 this is a raw message
+    # meaning don't show time and level, log message is pre-formatted, show it directly
+    r: Optional[int] = None
 
 
 class Log(BaseTopic):

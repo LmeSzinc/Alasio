@@ -2,10 +2,10 @@
   import { cn } from "$lib/utils";
   import type { LogDataProps } from "./types";
 
-  let { t, l, m, e }: LogDataProps = $props();
+  let { t: timestamp, l: level, m: message, e: exception, r: raw }: LogDataProps = $props();
 
   // Format timestamp to local time
-  const date = $derived(new Date(t * 1000));
+  const date = $derived(new Date(timestamp * 1000));
 
   // Short format: hh:mm:ss.ms
   const shortTime = $derived.by(() => {
@@ -21,7 +21,6 @@
 
   // Get level color classes
   const levelClass = $derived.by(() => {
-    const level = l.toUpperCase();
     switch (level) {
       case "DEBUG":
         return "text-muted-foreground";
@@ -40,17 +39,21 @@
 
 <div
   class={cn(
-    "hover:bg-muted/50 hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor] hover:shadow-muted-foreground/15",
+    "hover:bg-muted/50 hover:shadow-muted-foreground/15 hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor]",
     "font-mono text-xs",
     levelClass,
   )}
 >
-  <span class="text-muted-foreground inline-block" title={fullTime}>
-    {shortTime}
-  </span>
-  <span class="text-muted-foreground inline-block">|</span>
-  <pre class="inline wrap-break-word whitespace-pre-wrap">{m}</pre>
-  {#if e}
-    <pre class="mt-1 ml-8 wrap-break-word whitespace-pre-wrap text-red-600 dark:text-red-400">{e}</pre>
+  {#if raw}
+    <pre class="inline wrap-break-word whitespace-pre-wrap">{message}</pre>
+  {:else}
+    <span class="text-muted-foreground inline-block" title={fullTime}>
+      {shortTime}
+    </span>
+    <span class="text-muted-foreground inline-block">|</span>
+    <pre class="inline wrap-break-word whitespace-pre-wrap">{message}</pre>
+    {#if exception}
+      <pre class="ml-8 wrap-break-word whitespace-pre-wrap text-red-600 dark:text-red-400">{exception}</pre>
+    {/if}
   {/if}
 </div>

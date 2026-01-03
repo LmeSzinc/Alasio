@@ -157,7 +157,7 @@ class LogRenderer:
     # - loguru-like logging format:
     #   2026-01-01 00:00:00.000 | INFO | User John
 
-    def __call__(self, log, level, event_dict) -> str:
+    def __call__(self, log, level: str, event_dict: dict) -> str:
         # from structlog.__log_levels.add_log_level()
         # warn is just a deprecated alias in the stdlib.
         if level == "warn":
@@ -204,13 +204,18 @@ class LogRenderer:
 
         backend = log._file.backend
         if backend.inited:
-            # send log to backend bridge
             event = {'t': timestamp, 'l': level, 'm': event}
+            # add exception
             if 'exception' in event_dict:
                 exception = event_dict['exception']
                 text = f'{text}\n{exception}'
                 event['e'] = exception
+            # add raw tag
+            raw = event_dict.pop('__raw__', None)
+            if raw:
+                event['r'] = raw
 
+            # send log to backend bridge
             log._file.backend.send_log(event)
         else:
             # no backend
@@ -279,24 +284,15 @@ class AlasioLogger(structlog.BoundLoggerBase):
     Custom logging methods
     """
 
-    def raw(self, message: str, **kwargs):
+    def raw(self, event: str, **kwargs):
         """
         Log raw messages
         """
-        # build message, ignore errors
-        if '{' in message:
-            try:
-                message = message.format(**kwargs)
-            except KeyError:
-                try:
-                    message = message.format_map(SafeDict(kwargs))
-                except Exception:
-                    pass
-            except Exception:
-                # maybe {} is unpaired
-                pass
+        # act like info but tag __raw__
+        kwargs['__raw__'] = 1
         try:
-            return self._logger.msg(message)
+            args, kw = self._process_event('info', event, kwargs)
+            return self._logger.msg(*args, **kw)
         except DropEvent:
             return None
 
