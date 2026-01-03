@@ -1,4 +1,5 @@
 import sys
+import time
 from datetime import date, datetime
 from io import StringIO
 
@@ -13,6 +14,8 @@ from alasio.ext.singleton import Singleton
 
 
 class PseudoBackendBridge:
+    inited = False
+
     # Pseudo Backend that don't send logs
     def send_log(self, *args, **kwargs):
         pass
@@ -144,7 +147,8 @@ class LogRenderer:
         level = level.upper()
 
         # inject time
-        now = datetime.now().isoformat(sep=' ', timespec='milliseconds')
+        timestamp = time.time()
+        now = datetime.fromtimestamp(timestamp).isoformat(sep=' ', timespec='milliseconds')
         # convert event
         try:
             event = event_dict['event']
@@ -170,14 +174,23 @@ class LogRenderer:
 
         # build log text
         text = f'{now} | {level} | {event}'
-        event = {'time': now, 'level': level, 'msg': event}
-        if 'exception' in event_dict:
-            exception = event_dict['exception']
-            text = f'{text}\n{exception}'
-            event['exception'] = exception
 
-        # send log to backend bridge
-        log._file.backend.send_log(event)
+        backend = log._file.backend
+        if backend.inited:
+            # send log to backend bridge
+            event = {'t': timestamp, 'l': level, 'm': event}
+            if 'exception' in event_dict:
+                exception = event_dict['exception']
+                text = f'{text}\n{exception}'
+                event['exception'] = exception
+
+            log._file.backend.send_log(event)
+        else:
+            # no backend
+            if 'exception' in event_dict:
+                exception = event_dict['exception']
+                text = f'{text}\n{exception}'
+
         return text
 
 
