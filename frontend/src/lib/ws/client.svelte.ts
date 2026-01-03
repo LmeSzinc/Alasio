@@ -16,7 +16,7 @@ interface WebsocketManagerOptions {
 
 // --- Base configurations ---
 const BASE_DEFAULT_SUBSCRIPTIONS = ["ConnState"];
-const BASE_SCROLL_TOPICS = { log: 1000 };
+const BASE_SCROLL_TOPICS = { Log: 1024 };
 
 class WebsocketManager {
   // --- State Management (Svelte 5 Runes) ---
@@ -126,8 +126,14 @@ class WebsocketManager {
 
       // Handle data events.
       try {
-        const data: ResponseEvent = JSON.parse(message);
-        this.#handleEvent(data);
+        const data: ResponseEvent | ResponseEvent[] = JSON.parse(message);
+        if (Array.isArray(data)) {
+          for (const item of data) {
+            this.#handleEvent(item);
+          }
+        } else {
+          this.#handleEvent(data);
+        }
       } catch (e) {
         console.error("Failed to parse WebSocket message:", message, e);
       }
