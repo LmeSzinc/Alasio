@@ -27,6 +27,9 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         self.conn_id = conn_id
         self.server = server
 
+    def __str__(self):
+        return f'{self.topic_name()}({self.conn_id})>'
+
     @async_reactive
     async def data(self):
         """

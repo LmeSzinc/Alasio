@@ -208,6 +208,16 @@ class WebsocketTopicServer:
             # buffer closed
             pass
 
+    def send_nowait(self, data: ResponseEvent):
+        """
+        Send an event to send buffer without blocking
+        """
+        try:
+            self.send_buffer.send_nowait(data)
+        except TRIO_CHANNEL_ERRORS:
+            # buffer closed
+            pass
+
     async def send_error(self, data: "ResponseEvent | Exception | str | bytes"):
         """
         Send data as error

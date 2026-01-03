@@ -3,6 +3,7 @@ from typing import Type
 from alasio.backend.reactive.base_topic import MSGBUS_CONFIG_HANDLERS, MSGBUS_CONFIG_RECV, MSGBUS_GLOBAL_HANDLERS, \
     MSGBUS_GLOBAL_RECV
 from alasio.backend.topic.config import ConfigArg, ConfigNav
+from alasio.backend.topic.log import Log
 from alasio.backend.topic.mod import ModList
 from alasio.backend.topic.scan import ConfigScan
 from alasio.backend.topic.state import ConnState, DICT_CONFIG_TO_CONN
@@ -36,6 +37,7 @@ class WebsocketServer(WebsocketTopicServer):
         ConfigNav,
         ConfigArg,
         Worker,
+        Log,
         # DevAssetsManager,
     ])
     # List of default subscribed topics.

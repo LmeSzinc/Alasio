@@ -3,6 +3,7 @@ import trio
 from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import ResponseEvent, RpcValueError
+from alasio.backend.topic.log import LogCache
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.worker.manager import WORKER_STATUS, WorkerManager
@@ -34,10 +35,16 @@ class BackendWorkerManager(WorkerManager):
         )
 
     def on_config_event(self, event: ConfigEvent):
-        trio.from_thread.run(
-            BaseTopic.msgbus_config_asend, event,
-            trio_token=self.trio_token
-        )
+        if event.t == 'Log':
+            # cache and broadcast log
+            cache = LogCache(event.c)
+            cache.on_event(event)
+        else:
+            # broadcast other config events to msgbus
+            trio.from_thread.run(
+                BaseTopic.msgbus_config_asend, event,
+                trio_token=self.trio_token
+            )
 
 
 async def get_worker_manager():
