@@ -41,16 +41,22 @@ class LogWriter(metaclass=Singleton):
     def fd(self):
         root = env.PROJECT_ROOT.abspath()
         folder = root / 'log'
-        # xxx/path/module.py -> module
-        name = PathStr.new(sys.argv[0]).rootstem
         self.create_date = date.today()
-        # write logs to xxx/log/2020-01-01_module.log
-        file = folder / f'{self.create_date}_{name}.txt'
+
+        if self.backend.inited:
+            name = self.backend.config_name
+            # write logs to xxx/log/2020-01-01_{config_name}.txt
+            file = folder / f'{self.create_date}_{name}.txt'
+        else:
+            # xxx/path/module.py -> module
+            name = PathStr.new(sys.argv[0]).rootstem
+            # write logs to xxx/log/2020-01-01_{module_name}.txt
+            file = folder / f'{self.create_date}_{name}.txt'
         try:
-            return open(file, 'w', encoding='utf-8')
+            return open(file, 'a', encoding='utf-8')
         except FileNotFoundError:
             folder.makedirs(exist_ok=True)
-        return open(file, 'w', encoding='utf-8')
+        return open(file, 'a', encoding='utf-8')
 
     def check_rotate(self):
         # rotate log to file with new date
@@ -203,7 +209,7 @@ class LogRenderer:
             if 'exception' in event_dict:
                 exception = event_dict['exception']
                 text = f'{text}\n{exception}'
-                event['exception'] = exception
+                event['e'] = exception
 
             log._file.backend.send_log(event)
         else:

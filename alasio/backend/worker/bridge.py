@@ -99,7 +99,7 @@ def mod_entry(mod_name, config_name, child_conn, project_root='', mod_root='', p
         mod_root:
         path_main:
     """
-    BackendBridge().init(child_conn)
+    BackendBridge().init(mod_name, config_name, child_conn)
 
     if mod_name == 'WorkerTestInfinite':
         worker_test_infinite()
@@ -177,17 +177,22 @@ def _async_raise(tid):
 class BackendBridge(metaclass=Singleton):
     def __init__(self):
         self.inited = False
+        self.mod_name = ''
+        self.config_name = ''
         self.conn = None
+
         self.main_tid = 0
         self._io_thread = None
         self.scheduler_stopping = threading.Event()
         # For test control
         self.test_wait = threading.Event()
 
-    def init(self, child_conn):
+    def init(self, mod_name, config_name, child_conn):
         """
         initialize BackendBridge in main thread
         """
+        self.mod_name = mod_name
+        self.config_name = config_name
         self.conn = child_conn
         self.main_tid = threading.get_ident()
         self._io_thread = threading.Thread(target=self._io_loop, daemon=True)
