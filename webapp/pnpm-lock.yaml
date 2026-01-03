@@ -29,9 +29,6 @@ importers:
       '@types/culori':
         specifier: ^4.0.1
         version: 4.0.1
-      '@types/node':
-        specifier: ^22.19.3
-        version: 22.19.3
       autoprefixer:
         specifier: ^10.4.23
         version: 10.4.23(postcss@8.5.6)
