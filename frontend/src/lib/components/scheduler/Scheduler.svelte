@@ -77,7 +77,7 @@
 </script>
 
 <div
-  class="border-muted-foreground/35 relative m-2 flex max-w-60 flex-col gap-1.5 rounded-md border p-2"
+  class="border-muted-foreground/35 relative flex max-w-60 flex-col gap-1.5 p-3"
   onclick={onOverviewClick}
   onkeydown={(e) => (e.key === "Enter" || e.key === " ") && onOverviewClick?.()}
   role="button"
