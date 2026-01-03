@@ -27,10 +27,10 @@
       case "INFO":
         return "";
       case "WARNING":
-        return "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 px-1 rounded";
+        return "bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-700 dark:text-yellow-400";
       case "ERROR":
       case "CRITICAL":
-        return "bg-red-500/20 text-red-700 dark:text-red-400 px-1 rounded";
+        return "bg-red-500/20 hover:bg-red-500/40 text-red-700 dark:text-red-400";
       default:
         return "";
     }
@@ -40,20 +40,21 @@
 <div
   class={cn(
     "hover:bg-muted/50 hover:shadow-muted-foreground/15 hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor]",
-    "font-mono text-xs",
+    "flex w-fit min-w-[calc(100cqw)] gap-1.5 px-1 font-mono text-xs",
     levelClass,
   )}
 >
   {#if raw}
-    <pre class="inline wrap-break-word whitespace-pre-wrap">{message}</pre>
+    <pre class="whitespace-pre">{message}</pre>
   {:else}
-    <span class="text-muted-foreground inline-block" title={fullTime}>
+    <span class="text-muted-foreground inline-block shrink-0" title={fullTime}>
       {shortTime}
     </span>
-    <span class="text-muted-foreground inline-block">|</span>
-    <pre class="inline wrap-break-word whitespace-pre-wrap">{message}</pre>
-    {#if exception}
-      <pre class="ml-8 wrap-break-word whitespace-pre-wrap text-red-600 dark:text-red-400">{exception}</pre>
-    {/if}
+    <span class="text-muted-foreground inline-block shrink-0">|</span>
+    <!-- 5.87rem(86.7px+7.225px) for time and separator + 2 gap + 2 padding x -->
+    <pre class="max-w-[calc(100cqw-7.12rem)] min-w-0 flex-1 wrap-break-word whitespace-pre-wrap">{message}</pre>
   {/if}
 </div>
+{#if exception}
+  <pre class="ml-8 w-fit px-1 font-mono text-xs whitespace-pre">{exception}</pre>
+{/if}

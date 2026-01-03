@@ -23,6 +23,8 @@ class Scheduler:
         logger.hr1('hr1')
         logger.hr2('hr2')
         logger.hr3('hr3')
+        logger.info('Text with\nnew line')
+        logger.info('Super long text. ' * 30)
         logger.debug('DEBUG')
         logger.info('INFO')
         logger.warning('WARNING')
