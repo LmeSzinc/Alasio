@@ -45,7 +45,7 @@ class WebsocketManager {
 
   #messageQueue: RequestEvent[] = [];
   #reconnectAttempts = 0;
-  #reconnectTimeout: number | undefined = undefined;
+  #reconnectTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
   #encoder = new TextEncoder();
   #decoder = new TextDecoder();
   #options: Required<WebsocketManagerOptions>;

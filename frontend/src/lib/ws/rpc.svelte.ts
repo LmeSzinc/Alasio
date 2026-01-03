@@ -91,8 +91,8 @@ export function createRpc(
   let successMsg = $state<string | null>(null);
   let isOpen = $state(false);
 
-  let operationTimeoutId: number | undefined;
-  let pendingDelayTimeoutId: number | undefined;
+  let operationTimeoutId: ReturnType<typeof setTimeout> | undefined;
+  let pendingDelayTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
   const PENDING_DELAY = options.pendingDelay ?? 300;
   const TIMEOUT = options.timeout ?? 5000;

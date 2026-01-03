@@ -35,7 +35,7 @@
 
   let status: "loading" | "loaded" | "error" = $state("loading");
   let showLoader = $state(false);
-  let loadingTimer: number | undefined;
+  let loadingTimer: ReturnType<typeof setTimeout>;
 
   let containerEl: HTMLDivElement;
   let isIntersecting = $state(false);
