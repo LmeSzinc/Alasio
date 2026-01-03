@@ -237,7 +237,18 @@ class AlasioLogger(structlog.BoundLoggerBase):
         except DropEvent:
             return None
 
-    def error(self, event: str, **kwargs):
+    def error(self, event: "str | Exception", **kwargs):
+        # Better exception logging
+        # If someone do:
+        #   try:
+        #       raise ExampleError
+        #   except ExampleError as e:
+        #       logger.error(e)
+        # We can log:
+        #   ExampleError:
+        # instead of just empty string ""
+        if isinstance(event, Exception):
+            event = f'{type(event).__name__}: {event}'
         try:
             args, kw = self._process_event('error', event, kwargs)
             return self._logger.msg(*args, **kw)
@@ -245,6 +256,8 @@ class AlasioLogger(structlog.BoundLoggerBase):
             return None
 
     def exception(self, event: "str | Exception", **kwargs):
+        if isinstance(event, Exception):
+            event = f'{type(event).__name__}: {event}'
         # see structlog._native.exception()
         kwargs.setdefault("exc_info", True)
         return self.error(event, **kwargs)
