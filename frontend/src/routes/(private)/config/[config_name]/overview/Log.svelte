@@ -15,22 +15,22 @@
   // Subscribe to Log topic
   const logClient = useTopic<LogDataProps[]>("Log");
 
-  $effect(() => {
-    // tracking the length of logs
-    logClient.data?.length;
-    // auto scroll on data changes
-    if (logContainer) {
-      setTimeout(() => {
-        scrollToBottom();
-      }, 10);
-    }
-  });
+  // auto scroll on data changes
+  let scrollRAF: number | null = null;
   function scrollToBottom() {
+    scrollRAF = null;
     if (logContainer) {
       logContainer.scrollTop = logContainer.scrollHeight;
       logContainer.scrollLeft = 0;
     }
   }
+  $effect(() => {
+    // tracking the length of logs
+    logClient.data?.length;
+    if (logContainer && scrollRAF === null) {
+      scrollRAF = requestAnimationFrame(scrollToBottom);
+    }
+  });
 </script>
 
 <ScrollArea
@@ -42,7 +42,7 @@
   bind:viewportRef={logContainer}
 >
   {#if logClient.data}
-    {#each logClient.data as log}
+    {#each logClient.data as log (log)}
       <LogData {...log} />
     {/each}
   {:else}

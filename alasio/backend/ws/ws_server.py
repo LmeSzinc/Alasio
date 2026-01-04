@@ -124,7 +124,7 @@ class WebsocketTopicServer:
             # start 4 async tasks, sender, receiver, job handler, heartbeat handler
 
             # send buffer, set send buffer first
-            self.send_buffer, recv = trio.open_memory_channel(32)
+            self.send_buffer, recv = trio.open_memory_channel(64)
             nursery.start_soon(self.task_send, recv)
 
             # recv buffer

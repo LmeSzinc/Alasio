@@ -4,5 +4,5 @@
 
 <div class="">
   <h1 class="mb-6 text-2xl font-bold">Overview</h1>
-  <Log />
+  <Log class="h-120" />
 </div>

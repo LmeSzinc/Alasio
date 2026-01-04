@@ -16,7 +16,7 @@ interface WebsocketManagerOptions {
 
 // --- Base configurations ---
 const BASE_DEFAULT_SUBSCRIPTIONS = ["ConnState"];
-const BASE_SCROLL_TOPICS = { Log: 1024 };
+const BASE_SCROLL_TOPICS = { Log: 500 };
 
 class WebsocketManager {
   // --- State Management (Svelte 5 Runes) ---
@@ -127,12 +127,28 @@ class WebsocketManager {
       // Handle data events.
       try {
         const data: ResponseEvent | ResponseEvent[] = JSON.parse(message);
-        if (Array.isArray(data)) {
-          for (const item of data) {
-            this.#handleEvent(item);
+        const events = Array.isArray(data) ? data : [data];
+
+        // Group events by topic to perform batch updates
+        const updates = new Map<string, ResponseEvent[]>();
+
+        for (const item of events) {
+          // 1. Check if it's an RPC response.
+          if (item.i) {
+            this.#handleRpc(item);
+            continue;
           }
-        } else {
-          this.#handleEvent(data);
+          // 2. Group data events
+          const topic = item.t;
+          if (!updates.has(topic)) {
+            updates.set(topic, []);
+          }
+          updates.get(topic)!.push(item);
+        }
+
+        // Apply updates per topic
+        for (const [topic, items] of updates) {
+          this.#handleTopicBatch(topic, items);
         }
       } catch (e) {
         console.error("Failed to parse WebSocket message:", message, e);
@@ -173,9 +189,9 @@ class WebsocketManager {
   }
 
   /**
-   * Processes a single event from the server, routing it to the correct handler.
+   * Handles RPC responses.
    */
-  #handleEvent(data: ResponseEvent) {
+  #handleRpc(data: ResponseEvent) {
     // 1. Check if it's an RPC response.
     if (data.i) {
       if (this.#rpcCallbacks.has(data.i)) {
@@ -193,11 +209,15 @@ class WebsocketManager {
         return;
       }
     }
+  }
 
-    // 2. If not an RPC response, handle as a standard data event.
-    // Apply defaults based on the backend spec for omitted fields.
-    const { t: topic, o: op = "add", k: keys = [], v: value = null } = data;
+  #pendingScrollUpdates = new Map<string, ResponseEvent[]>();
+  #flushHandle: number | null = null;
 
+  /**
+   * Processes a batch of events for a single topic.
+   */
+  #handleTopicBatch(topic: string, events: ResponseEvent[]) {
     // Discard messages for topics we are not subscribed to.
     if (!this.#isSubscribed(topic)) {
       return;
@@ -206,46 +226,95 @@ class WebsocketManager {
     const maxLines = this.#options.scrollTopics[topic];
     if (maxLines) {
       // --- High-performance path for scroll topics (e.g., logs) ---
-      if (op === "full") {
-        this.topics[topic] = Array.isArray(value) ? value : [];
-      } else if (op === "add") {
-        const logArray = this.topics[topic];
-        if (!Array.isArray(logArray)) {
-          this.topics[topic] = [value]; // Initialize if it's the first log entry.
+      // Buffer events and schedule a flush on the next animation frame.
+      // This decouples the WebSocket reception rate from the render rate,
+      // preventing the main thread from being blocked by excessive reactivity updates.
+      if (!this.#pendingScrollUpdates.has(topic)) {
+        this.#pendingScrollUpdates.set(topic, []);
+      }
+      const buffer = this.#pendingScrollUpdates.get(topic)!;
+      buffer.push(...events);
+
+      // Safety valve: prevent memory explosion if flush is delayed (e.g. background tab)
+      // If the buffer grows too large, flush immediately regardless of the scheduler.
+      if (buffer.length > 50) {
+        this.#flushScrollUpdates();
+        return;
+      }
+
+      if (this.#flushHandle === null) {
+        // Use setTimeout when hidden to keep processing in background (RAF pauses in background)
+        if (document.hidden) {
+          this.#flushHandle = window.setTimeout(() => this.#flushScrollUpdates(), 50);
         } else {
-          logArray.push(value);
-          if (logArray.length > maxLines) {
-            logArray.shift(); // Efficiently remove the oldest entry.
-          }
+          this.#flushHandle = requestAnimationFrame(() => this.#flushScrollUpdates());
         }
       }
-      // `set` and `del` operations are intentionally ignored for scroll topics.
       return;
     }
 
     // --- Generic path for standard topics ---
-    switch (op) {
-      case "full":
-        this.topics[topic] = value;
-        break;
-      case "add":
-      case "set":
-        if (keys.length === 0) {
+    for (const data of events) {
+      const { o: op = "add", k: keys = [], v: value = null } = data;
+      switch (op) {
+        case "full":
           this.topics[topic] = value;
-        } else {
-          if (this.topics[topic] === undefined) {
-            this.topics[topic] = {};
+          break;
+        case "add":
+        case "set":
+          if (keys.length === 0) {
+            this.topics[topic] = value;
+          } else {
+            if (this.topics[topic] === undefined) {
+              this.topics[topic] = {};
+            }
+            // Mutate in-place. Svelte 5's $state detects deep mutations.
+            deepSet(this.topics[topic], keys, value);
           }
-          // Mutate in-place. Svelte 5's $state detects deep mutations.
-          deepSet(this.topics[topic], keys, value);
-        }
-        break;
-      case "del":
-        if (this.topics[topic] !== undefined && keys.length > 0) {
-          deepDel(this.topics[topic], keys);
-        }
-        break;
+          break;
+        case "del":
+          if (this.topics[topic] !== undefined && keys.length > 0) {
+            deepDel(this.topics[topic], keys);
+          }
+          break;
+      }
     }
+  }
+
+  /**
+   * Flushes buffered updates for scroll topics.
+   * This runs at most once per frame (approx. 60fps).
+   */
+  #flushScrollUpdates() {
+    this.#flushHandle = null;
+
+    for (const [topic, events] of this.#pendingScrollUpdates) {
+      const maxLines = this.#options.scrollTopics[topic];
+      // Clone the array to avoid intermediate reactivity triggers
+      let logArray = Array.isArray(this.topics[topic]) ? [...this.topics[topic]] : [];
+      let changed = false;
+
+      for (const event of events) {
+        const { o: op = "add", v: value = null } = event;
+        if (op === "full") {
+          logArray = Array.isArray(value) ? value : [];
+          changed = true;
+        } else if (op === "add") {
+          logArray.push(value);
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        // Enforce limit once per batch
+        if (logArray.length > maxLines) {
+          // Keep the last maxLines elements
+          logArray.splice(0, logArray.length - maxLines);
+        }
+        this.topics[topic] = logArray;
+      }
+    }
+    this.#pendingScrollUpdates.clear();
   }
   #clearAll() {
     // Clear all topic data to prevent displaying stale information.

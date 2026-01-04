@@ -62,12 +62,12 @@ class LogCache(metaclass=SingletonNamed):
         self.trio_token: "TrioToken | None" = None
 
         # 1. 历史缓存：所有产生的 log 都会在这里
-        # 固定大小 1024, 前端最多显示 1024 行
-        self.cache: "deque[ResponseEvent]" = deque(maxlen=1024)
+        # 固定大小 500, 前端最多显示 500 行
+        self.cache: "deque[ResponseEvent]" = deque(maxlen=500)
 
         # 2. 实时中转站：仅在有 WS 订阅时使用
         # 设置 maxlen 是为了防止后端处理不过来时内存爆炸（自动丢弃最旧的实时消息）
-        self._inbox: "deque[ResponseEvent]" = deque(maxlen=1024)
+        self._inbox: "deque[ResponseEvent]" = deque(maxlen=1000)
 
         # 3. 订阅者集合：存储 log topic
         self._subscribers: "set[BaseTopic]" = set()
