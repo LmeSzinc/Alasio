@@ -189,18 +189,18 @@ class LogCache(metaclass=SingletonNamed):
         # --- 原子操作区间 结束 ---
 
         # 4. 发送快照
-        # 使用 send_nowait 确保这一步不会挂起 (yield)。
-        # 如果使用 await send()，Trio 可能会在等待期间切换去执行 _sync_to_trio，
-        # 导致 target_ws_channel 在收到 "full" 之前先收到了 "add"。
-        # 只要 target_ws_channel 的 buffer 足够 (例如 > 1)，这里就不会报错。
-        if snapshot:
-            # 合并全部行到一个 full 事件
-            event = ResponseEvent(t=topic.topic_name(), o='full', v=[e.v for e in snapshot])
-            try:
-                topic.server.send_nowait(event)
-            except trio.WouldBlock:
-                # 极其罕见：连接刚建立 channel 就满了？
-                pass
+        # 合并全部行到一个 full 事件
+        # 不论有没有snapshot，都要发送full事件来显式通知前端
+        event = ResponseEvent(t=topic.topic_name(), o='full', v=[e.v for e in snapshot])
+        try:
+            # 使用 send_nowait 确保这一步不会挂起 (yield)。
+            # 如果使用 await send()，Trio 可能会在等待期间切换去执行 _sync_to_trio，
+            # 导致 target_ws_channel 在收到 "full" 之前先收到了 "add"。
+            # 只要 target_ws_channel 的 buffer 足够 (例如 > 1)，这里就不会报错。
+            topic.server.send_nowait(event)
+        except trio.WouldBlock:
+            # 极其罕见：连接刚建立 channel 就满了？
+            pass
 
         # 5. 保持订阅状态
         # 接下来会持续推送，直到调用 unsubscribe

@@ -450,8 +450,17 @@ async def test_log_topic_config_switch():
 
     # Switch to Config 2
     cache1.unsubscribe(topic)
+    topic.server.send_nowait.reset_mock()
+
     cache2 = await LogCache.get_instance('config2')
     cache2.subscribe(topic)
+
+    # Check for empty full event
+    assert topic.server.send_nowait.call_count == 1
+    snapshot_event = topic.server.send_nowait.call_args[0][0]
+    assert snapshot_event.o == 'full'
+    assert snapshot_event.v == []
+
     topic.server.send_nowait.reset_mock()
 
     # Send events from worker thread for config2
