@@ -174,6 +174,18 @@ async def test_logcache_unsubscribe_cleanup():
     assert len(cache._subscribers) == 0
 
 
+@pytest.mark.trio
+async def test_logcache_unsubscribe_not_subscribed():
+    """Test that unsubscribing a topic that is not subscribed doesn't raise error"""
+    cache = await LogCache.get_instance('test_config')
+    topic = MockTopic()
+
+    # Unsubscribe without subscribing first
+    # This should not raise KeyError
+    cache.unsubscribe(topic)
+    assert len(cache._subscribers) == 0
+
+
 # ---- High-Frequency Message Tests ----
 
 
