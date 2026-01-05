@@ -44,7 +44,7 @@ class MockTopic:
 def cleanup_logcache():
     """Clean up LogCache singletons after each test"""
     yield
-    LogCache.singleton_clear_all()
+    LogCache.singleton_clear()
 
 
 # ---- LogCache Basic Functionality Tests ----

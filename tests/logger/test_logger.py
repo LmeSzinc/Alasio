@@ -29,8 +29,7 @@ class TestLogger:
         env.ELECTRON_SECRET = None
 
         # Reset LogWriter singleton to force reinit
-        if hasattr(LogWriter, '_instances'):
-            LogWriter._instances = {}
+        LogWriter.singleton_clear()
 
         # Clear cached property
         writer = LogWriter()
@@ -47,8 +46,7 @@ class TestLogger:
         env.ELECTRON_SECRET = original_electron
 
         # Reset singleton
-        if hasattr(LogWriter, '_instances'):
-            LogWriter._instances = {}
+        LogWriter.singleton_clear()
 
         # Clean up log directory
         log_dir = self.test_dir / 'log'
@@ -211,8 +209,7 @@ class TestLoggerBind:
         env.ELECTRON_SECRET = None
 
         # Reset LogWriter singleton
-        if hasattr(LogWriter, '_instances'):
-            LogWriter._instances = {}
+        LogWriter.singleton_clear()
 
         # Clear cached property
         writer = LogWriter()
@@ -227,8 +224,7 @@ class TestLoggerBind:
         env.PROJECT_ROOT = original_root
         env.ELECTRON_SECRET = original_electron
 
-        if hasattr(LogWriter, '_instances'):
-            LogWriter._instances = {}
+        LogWriter.singleton_clear()
 
         log_dir = self.test_dir / 'log'
         log_dir.folder_rmtree()

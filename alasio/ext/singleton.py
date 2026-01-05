@@ -120,7 +120,7 @@ class SingletonNamed(type):
         except KeyError:
             return False
 
-    def singleton_clear_all(cls):
+    def singleton_clear(cls):
         """
         Remove all instances
         """
