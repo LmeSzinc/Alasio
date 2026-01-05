@@ -359,33 +359,34 @@ class PrintLogger(structlog.PrintLogger):
         writer: LogWriter = self._file
         text = f'{text}\n'
 
-        # do 3 things parallely, print to stdout, write into file, send to backend
-        if writer.backend.inited:
-            if writer.is_electron:
-                # backend + file
-                job = writer.backend.send_log(event)
-                writer.fd.write(text)
-                writer.fd.flush()
-                job.acquire()
+        with self._lock:
+            # do 3 things parallely, print to stdout, write into file, send to backend
+            if writer.backend.inited:
+                if writer.is_electron:
+                    # backend + file
+                    job = writer.backend.send_log(event)
+                    writer.fd.write(text)
+                    writer.fd.flush()
+                    job.acquire()
+                else:
+                    # backend + stdout + file
+                    job = writer.backend.send_log(event)
+                    writer.fd.write(text)
+                    sys.stdout.write(text)
+                    writer.fd.flush()
+                    sys.stdout.flush()
+                    job.acquire()
             else:
-                # backend + stdout + file
-                job = writer.backend.send_log(event)
-                writer.fd.write(text)
-                sys.stdout.write(text)
-                writer.fd.flush()
-                sys.stdout.flush()
-                job.acquire()
-        else:
-            if writer.is_electron:
-                # file
-                job = writer.backend.send_log(event)
-                job.acquire()
-            else:
-                # stdout + file
-                writer.fd.write(text)
-                sys.stdout.write(text)
-                writer.fd.flush()
-                sys.stdout.flush()
+                if writer.is_electron:
+                    # file
+                    job = writer.backend.send_log(event)
+                    job.acquire()
+                else:
+                    # stdout + file
+                    writer.fd.write(text)
+                    sys.stdout.write(text)
+                    writer.fd.flush()
+                    sys.stdout.flush()
 
 
 structlog.configure(
