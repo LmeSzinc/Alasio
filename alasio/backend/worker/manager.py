@@ -1,7 +1,7 @@
 import multiprocessing
 import threading
 import time
-from multiprocessing.connection import Connection, wait
+from multiprocessing.connection import Connection
 from typing import Literal, Optional
 
 import msgspec
@@ -49,6 +49,7 @@ class WorkerState(WorkerStateInfo):
     conn: Optional[Connection] = None
     running_event: threading.Event = msgspec.field(default_factory=threading.Event)
     stopped_event: threading.Event = msgspec.field(default_factory=threading.Event)
+    recv_thread: Optional[threading.Thread] = None
 
     def set_status(self, status: WORKER_STATUS):
         self.status = status
@@ -173,11 +174,7 @@ class WorkerManager(metaclass=Singleton):
         # if config not in self.state, its status is default to "idle"
         self.state: "dict[str, WorkerState]" = {}
 
-        # pipe to awake io_loop when new process added
         self._ctx = multiprocessing.get_context('spawn')
-        self._notify_r, self._notify_w = self._ctx.Pipe(duplex=False)
-        self._io_thread = threading.Thread(target=self._io_loop_wrapper, daemon=True)
-        self._io_thread.start()
 
     def get_state_info(self) -> "dict[str, WorkerStateInfo]":
         """
@@ -191,77 +188,6 @@ class WorkerManager(metaclass=Singleton):
                 info = WorkerStateInfo(mod=w.mod, config=w.config, status=w.status, update=w.update)
                 out[w.config] = info
         return out
-
-    def _rebuild_notify_pipe(self):
-        with self._lock:
-            try:
-                self._notify_r.close()
-            except Exception:
-                pass
-            try:
-                self._notify_r.close()
-            except Exception:
-                pass
-            self._notify_r, self._notify_w = self._ctx.Pipe(duplex=False)
-            logger.info('[WorkerManager] Notify pipe re-initialized')
-
-    def _notify_update(self, msg: "Literal[b'x', b'close']" = b'x'):
-        """
-        Notify io_loop that pipe list changed
-        """
-        try:
-            self._notify_w.send_bytes(msg)
-            return True
-        except OSError as e:
-            logger.warning(f'[WorkerManager] Failed to notify io_loop: {e}')
-            pass
-        # retry
-        self._rebuild_notify_pipe()
-        try:
-            self._notify_w.send_bytes(msg)
-            return True
-        except OSError as e:
-            logger.warning(f'[WorkerManager] Failed to notify io_loop twice: {e}')
-            pass
-        # no luck
-        return False
-
-    def _cleanup_invalid_pipes(self):
-        with self._lock:
-            to_remove = []
-            for state in self.state.values():
-                if not state.conn:
-                    continue
-                try:
-                    # test if pipe valid
-                    state.conn.fileno()
-                except (ValueError, OSError):
-                    to_remove.append(state)
-
-            # check notify pipe
-            try:
-                self._notify_r.fileno()
-            except (ValueError, OSError):
-                logger.warning('[WorkerManager] notify_r invalid, re-initializing...')
-                self._notify_r, self._notify_w = self._ctx.Pipe(duplex=False)
-
-        for state in to_remove:
-            logger.warning(f'[WorkerManager] Cleaning up invalid pipe from "{state.config}"')
-            self._handle_disconnect(state)
-
-    def _dict_readers(self) -> "dict[Connection, WorkerState]":
-        with self._lock:
-            # build all pipes
-            # wait() internally iterates object_list input, so it's safe to input a dict
-            # by using dict, we can find config from pipe
-            dict_readers = {}
-            for state in self.state.values():
-                if state.process and state.conn:
-                    dict_readers[state.conn] = state
-            # also add notify pipe, so readers can be rebuilt when configs changed
-            dict_readers[self._notify_r] = None
-
-        return dict_readers
 
     def _handle_disconnect(self, state: WorkerState):
         """
@@ -279,12 +205,22 @@ class WorkerManager(metaclass=Singleton):
             # otherwise, kill it manually
             state.process_graceful_kill()
 
-        exitcode = process.exitcode
+        # Close connection to unblock recv thread
+        state.conn_close()
+
+        # Join recv thread if it is not the current thread
+        recv_thread = state.recv_thread
+        if recv_thread and recv_thread is not threading.current_thread():
+            if recv_thread.is_alive():
+                recv_thread.join(timeout=1)
+
+        exitcode = process.exitcode if process else None
         logger.info(f'[WorkerManager] Worker stopped: {state.config}, exitcode={exitcode}')
 
         with self._lock:
             state.conn = None
             state.process = None
+            state.recv_thread = None
             if exitcode == 0:
                 self._set_status(state, 'idle')
             else:
@@ -344,81 +280,32 @@ class WorkerManager(metaclass=Singleton):
         # broadcast
         self.on_worker_status(worker.config, status)
 
-    def _io_loop(self):
+    def _worker_recv_loop(self, state: WorkerState):
         """
-        IO thread entry function to handle message from workers
+        Thread entry to receive message from worker
         """
-        dict_readers = self._dict_readers()
-        should_rebuild = False
-        while 1:
-            # rebuild
-            if should_rebuild:
-                dict_readers = self._dict_readers()
-            # wait
-            try:
-                ready_pipes = wait(dict_readers)
-            except OSError:
-                # Race condition in manager process, which shouldn't happen
-                # OSError: [Errno 9] Bad file descriptor
-                self._cleanup_invalid_pipes()
-                should_rebuild = True
-                time.sleep(0.1)  # avoid infinite loop in bad circumstances
-                continue
-
-            should_close = False
-            for pipe in ready_pipes:
-                if pipe == self._notify_r:
-                    try:
-                        while True:
-                            msg = pipe.recv_bytes()
-                            if msg == b'close':
-                                should_close = True
-                            if not pipe.poll():
-                                break
-                    except (EOFError, OSError):
-                        logger.warning('[WorkerManager] notify_r broke during recv, re-initializing...')
-                        self._rebuild_notify_pipe()
-                    except Exception:
-                        pass
-                    should_rebuild = True
-                    continue
-                # handle config event
-                try:
-                    data = pipe.recv_bytes()
-                except (EOFError, OSError):
-                    try:
-                        worker = dict_readers[pipe]
-                    except KeyError:
-                        # this shouldn't happen
-                        continue
-                    self._handle_disconnect(worker)
-                    should_rebuild = True
-                    continue
-                try:
-                    worker = dict_readers[pipe]
-                except KeyError:
-                    # this shouldn't happen
-                    continue
-                try:
-                    self._handle_config_event(data, worker)
-                except Exception:
-                    logger.warning(f'[WorkerManager] Failed to handle config event '
-                                   f'from "{worker.config}": {repr(data)}')
-                    continue
-
-            if should_close:
-                break
-
-    def _io_loop_wrapper(self):
-        """
-        A wrapper of _io_loop to log if _io_loop died
-        """
+        conn = state.conn
+        config = state.config
         try:
-            self._io_loop()
-            return
-        except Exception:
-            logger.error('[WorkerManager] _io_loop died')
-            raise
+            while True:
+                # check if pipe closed
+                if not state.conn:
+                    break
+                try:
+                    data = conn.recv_bytes()
+                except (EOFError, OSError):
+                    break
+
+                try:
+                    self._handle_config_event(data, state)
+                except Exception as e:
+                    logger.warning(f'[WorkerManager] Failed to handle config event '
+                                   f'from "{config}": {e}')
+        except Exception as e:
+            logger.error(f'[WorkerManager] Recv loop error "{config}": {e}')
+
+        # Handle disconnect
+        self._handle_disconnect(state)
 
     def worker_start(self, mod: str, config: str, project_root='', mod_root='', path_main='') -> "tuple[bool, str]":
         """
@@ -462,8 +349,17 @@ class WorkerManager(metaclass=Singleton):
         with self._lock:
             state.process = process
             state.conn = parent_conn
-            self._notify_update()
             # status will become "running" when worker process initialize BackendBridge
+
+            # start recv thread
+            thread = threading.Thread(
+                target=self._worker_recv_loop,
+                args=(state,),
+                name=f"WorkerRecv-{config}",
+                daemon=True
+            )
+            thread.start()
+            state.recv_thread = thread
 
         return True, 'Success'
 
@@ -603,10 +499,13 @@ class WorkerManager(metaclass=Singleton):
         # cleanup
         state.process_graceful_kill()
         state.conn_close()
+        if state.recv_thread and state.recv_thread.is_alive():
+            state.recv_thread.join(timeout=1)
 
         with self._lock:
             state.process = None
             state.conn = None
+            state.recv_thread = None
             self._set_status(state, 'idle')
 
         return True, 'Success'
@@ -641,25 +540,17 @@ class WorkerManager(metaclass=Singleton):
             for state in states:
                 state.conn_close()
 
+            # Wait for threads
+            for state in states:
+                if state.recv_thread is not None and state.recv_thread.is_alive():
+                    state.recv_thread.join(timeout=1)
+
             with self._lock:
                 for state in states:
                     state.process = None
+                    state.recv_thread = None
                     self._set_status(state, 'idle')
             # maybe new worker started while we are killing existing workers
-
-        # Finally close _io_loop
-        self._notify_update(b'close')
-        self._io_thread.join(timeout=1)
-        if self._io_thread.is_alive():
-            logger.warning(f'[WorkerManager] _io_thread did not close')
-        try:
-            self._notify_r.close()
-        except Exception:
-            pass
-        try:
-            self._notify_w.close()
-        except Exception:
-            pass
 
         logger.info('[WorkerManager] All closed')
 
@@ -675,7 +566,6 @@ if __name__ == '__main__':
     # self.worker_kill('alas')
     # self.close()
     # self.state['alas'].conn.close()
-    self._notify_r.close()
 
     for _ in range(10):
         print(self.state)
