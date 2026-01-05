@@ -1,11 +1,12 @@
 import os
 import sys
-import threading
+from threading import Event, Thread, get_ident
 from typing import Literal
 
-from msgspec.msgpack import decode, encode
+from msgspec.msgpack import Encoder, decode
 
 from alasio.backend.worker.event import CommandEvent, ConfigEvent
+from alasio.ext.cache import cached_property
 from alasio.ext.singleton import Singleton
 
 
@@ -182,10 +183,10 @@ class BackendBridge(metaclass=Singleton):
         self.conn = None
 
         self.main_tid = 0
-        self._io_thread = None
-        self.scheduler_stopping = threading.Event()
+        self._recv_thread = None
+        self.scheduler_stopping = Event()
         # For test control
-        self.test_wait = threading.Event()
+        self.test_wait = Event()
 
     def init(self, mod_name, config_name, child_conn):
         """
@@ -194,11 +195,15 @@ class BackendBridge(metaclass=Singleton):
         self.mod_name = mod_name
         self.config_name = config_name
         self.conn = child_conn
-        self.main_tid = threading.get_ident()
-        self._io_thread = threading.Thread(target=self._io_loop, daemon=True)
-        self._io_thread.start()
+        self.main_tid = get_ident()
+        self._recv_thread = Thread(target=self._recv_loop, daemon=True)
+        self._recv_thread.start()
         self.send_worker_state('running')
         self.inited = True
+
+    @cached_property
+    def _encoder(self):
+        return Encoder()
 
     def send(self, event: ConfigEvent):
         conn = self.conn
@@ -206,10 +211,10 @@ class BackendBridge(metaclass=Singleton):
             # allow worker running without backend
             return
 
-        data = encode(event)
+        data = self._encoder.encode(event)
 
         try:
-            # Equivalent to  conn.send_bytes() but bypass all by
+            # Equivalent to conn.send_bytes() but bypass all memorybuffer pre-checks
             conn._check_closed()
             conn._check_writable()
             conn._send_bytes(data)
@@ -244,7 +249,7 @@ class BackendBridge(metaclass=Singleton):
         # ignore unknown events
         return
 
-    def _io_loop(self):
+    def _recv_loop(self):
         conn = self.conn
         if not conn:
             # this shouldn't happen
