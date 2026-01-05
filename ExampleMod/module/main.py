@@ -36,4 +36,6 @@ class Scheduler:
             logger.exception(e)
 
         time.sleep(3)
+        # for n in range(1200):
+        #     logger.info(f'[{n}] key = self.dict_config_to_topic.get((event.task, event.group, event.arg))')
         logger.info('end')

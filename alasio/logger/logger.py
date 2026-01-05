@@ -2,6 +2,7 @@ import sys
 import time
 from datetime import date, datetime
 from io import StringIO
+from typing import TYPE_CHECKING
 
 import structlog
 from structlog import DropEvent
@@ -12,13 +13,12 @@ from alasio.ext.cache import threaded_cached_property
 from alasio.ext.path import PathStr
 from alasio.ext.singleton import Singleton
 
+if TYPE_CHECKING:
+    from alasio.backend.worker.bridge import BackendBridge
+
 
 class PseudoBackendBridge:
     inited = False
-
-    # Pseudo Backend that don't send logs
-    def send_log(self, *args, **kwargs):
-        pass
 
 
 # It's a singleton because on each logger.bind() structlog.PrintLoggerFactory will create new `file` object
@@ -29,7 +29,7 @@ class LogWriter(metaclass=Singleton):
         self.is_electron = bool(env.ELECTRON_SECRET)
 
     @threaded_cached_property
-    def backend(self):
+    def backend(self) -> "BackendBridge":
         from alasio.backend.worker.bridge import BackendBridge
         backend = BackendBridge()
         if backend.inited:
@@ -75,18 +75,6 @@ class LogWriter(metaclass=Singleton):
                 fd.close()
             except Exception:
                 pass
-
-    def write(self, message):
-        # suppress console logs when running in electron
-        # because logs will send to backend, nobody can see the console
-        if not self.is_electron:
-            sys.stdout.write(message)
-        self.fd.write(message)
-
-    def flush(self):
-        if not self.is_electron:
-            sys.stdout.flush()
-        self.fd.flush()
 
 
 def rich_formatter(exc_info):
@@ -157,7 +145,7 @@ class LogRenderer:
     # - loguru-like logging format:
     #   2026-01-01 00:00:00.000 | INFO | User John
 
-    def __call__(self, log, level: str, event_dict: dict) -> str:
+    def __call__(self, log, level: str, event_dict: dict) -> dict:
         # from structlog.__log_levels.add_log_level()
         # warn is just a deprecated alias in the stdlib.
         if level == "warn":
@@ -200,30 +188,29 @@ class LogRenderer:
                 pass
 
         # build log text
-        text = f'{now} | {level} | {event}'
+        raw = event_dict.pop('__raw__', None)
+        text = event if raw else f'{now} | {level} | {event}'
 
         backend = log._file.backend
         if backend.inited:
-            event = {'t': timestamp, 'l': level, 'm': event}
+            backend_event = {'t': timestamp, 'l': level, 'm': event}
             # add exception
             if 'exception' in event_dict:
                 exception = event_dict['exception']
                 text = f'{text}\n{exception}'
-                event['e'] = exception
+                backend_event['e'] = exception
             # add raw tag
-            raw = event_dict.pop('__raw__', None)
             if raw:
-                event['r'] = raw
-
-            # send log to backend bridge
-            log._file.backend.send_log(event)
+                backend_event['r'] = raw
         else:
             # no backend
+            backend_event = {}
             if 'exception' in event_dict:
                 exception = event_dict['exception']
                 text = f'{text}\n{exception}'
 
-        return text
+        # return dict must match the signature of PrintLogger.msg()
+        return {'text': text, 'event': backend_event}
 
 
 class AlasioLogger(structlog.BoundLoggerBase):
@@ -367,6 +354,34 @@ class AlasioLogger(structlog.BoundLoggerBase):
         logger.info(f'{name}: {text}')
 
 
+class PrintLogger(structlog.PrintLogger):
+    def msg(self, text: str, event: dict) -> None:
+        writer: LogWriter = self._file
+
+        # do 3 things parallely, print to stdout, write into file, send to backend
+        if writer.backend.inited:
+            if writer.is_electron:
+                # backend + file
+                job = writer.backend.send_log(event)
+                print(text, file=writer.fd, flush=True)
+                job.acquire()
+            else:
+                # backend + stdout + file
+                job = writer.backend.send_log(event)
+                print(text, file=writer.fd, flush=True)
+                print(text, file=sys.stdout, flush=True)
+                job.acquire()
+        else:
+            if writer.is_electron:
+                # file
+                job = writer.backend.send_log(event)
+                job.acquire()
+            else:
+                # stdout + file
+                print(text, file=writer.fd, flush=True)
+                print(text, file=sys.stdout, flush=True)
+
+
 structlog.configure(
     processors=[
         ExceptionRenderer(rich_formatter),
@@ -376,9 +391,7 @@ structlog.configure(
     context_class=dict,
     # ignore type error here
     # as LogWriter is a pseudo TextIO object that has write() flush()
-    logger_factory=structlog.PrintLoggerFactory(
-        file=LogWriter(),
-    ),
+    logger_factory=lambda: PrintLogger(file=LogWriter()),
     cache_logger_on_first_use=True,
 )
 
