@@ -1,6 +1,6 @@
 import os
 import sys
-from threading import Event, Thread, get_ident
+from threading import Event, Lock, Thread, get_ident
 from typing import Literal
 
 from msgspec.msgpack import Encoder, decode
@@ -183,10 +183,25 @@ class BackendBridge(metaclass=Singleton):
         self.conn = None
 
         self.main_tid = 0
-        self._recv_thread = None
+        self._recv_thread: "Thread | None" = None
+        self._send_thread: "Thread | None" = None
         self.scheduler_stopping = Event()
         # For test control
         self.test_wait = Event()
+
+        # send thread
+        self.running = True
+        # 初始为空，稍后存放 (bytes, threading.Lock)
+        self._task_slot: "tuple[bytes, Lock] | None" = None
+        # 1. 互斥锁：保护 send 入口
+        self._mutex = Lock()
+        # 2. Worker 空闲信号：
+        # Locked = Worker 忙; Unlocked = Worker 空闲
+        self._worker_idle = Lock()
+        # 3. 任务就绪信号：
+        # Locked = 无任务; Unlocked = 有任务
+        self._work_ready = Lock()
+        self._work_ready.acquire()  # 初始锁定，让 Worker 待命
 
     def init(self, mod_name, config_name, child_conn):
         """
@@ -196,8 +211,12 @@ class BackendBridge(metaclass=Singleton):
         self.config_name = config_name
         self.conn = child_conn
         self.main_tid = get_ident()
-        self._recv_thread = Thread(target=self._recv_loop, daemon=True)
+
+        self._send_thread = Thread(target=self._send_loop, daemon=True, name='BackendBridgeSender')
+        self._send_thread.start()
+        self._recv_thread = Thread(target=self._recv_loop, daemon=True, name='BackendBridgeReceiver')
         self._recv_thread.start()
+
         self.send_worker_state('running')
         self.inited = True
 
@@ -205,29 +224,103 @@ class BackendBridge(metaclass=Singleton):
     def _encoder(self):
         return Encoder()
 
-    def send(self, event: ConfigEvent):
+    def send(self, event: ConfigEvent) -> Lock:
         conn = self.conn
         if not conn:
             # allow worker running without backend
-            return
+            return Lock()
 
         data = self._encoder.encode(event)
 
+        # 创建属于本次任务的专属锁
+        # 调用者可以通过这个 lock.acquire() 等待消息真正发送完毕
+        task_lock = Lock()
+        # 预先锁住，用户只有在 Worker 释放后才能 acquire 成功
+        task_lock.acquire()
+
+        # 1. 竞争入口，防止多个线程同时修改共享数据
+        self._mutex.acquire()
         try:
-            # Equivalent to conn.send_bytes() but bypass all memorybuffer pre-checks
-            conn._check_closed()
-            conn._check_writable()
-            conn._send_bytes(data)
-            return True
-        except AttributeError:
-            # this shouldn't happen
-            from alasio.logger import logger
-            logger.error(f'[BackendBridge] Failed to send command: pipe connection not initialized')
-            return False
-        except Exception as e:
-            from alasio.logger import logger
-            logger.error(f'[BackendBridge] Failed to send command: {e}')
-            return False
+            # 2. 等待 Worker 空闲 (Back-pressure 核心)
+            # 如果 Worker 正在发上一条，这里会阻塞，直到 Worker 释放锁
+            self._worker_idle.acquire()
+
+            # 3. 数据交接 (Zero Copy，只是引用赋值)
+            # 将数据和锁打包在一起,这是一个原子赋值操作，不可分割。
+            self._task_slot = (data, task_lock)
+
+            # 4. 唤醒 Worker
+            # 释放触发锁，允许 Worker 通过阻塞点
+            self._work_ready.release()
+
+            return task_lock
+
+        finally:
+            # 5. 释放入口锁
+            # 注意：此时 _worker_idle 依然被持有（被当前线程获取，将在 Worker 线程释放）
+            # 下一个调用者进来后，会在步骤 2 被阻塞，直到 Worker 完成本次任务。
+            self._mutex.release()
+
+    def _send_loop(self):
+        """
+        后台 Worker 线程逻辑
+        """
+        # 本地缓存方法查找，微小的性能优化
+        wait_for_work = self._work_ready.acquire
+        signal_idle = self._worker_idle.release
+        conn = self.conn
+
+        while True:
+            # 1. 等待任务 (阻塞)
+            # 只有当 send() 调用 release() 时，这里才会通过
+            wait_for_work()
+
+            if not self.running:
+                break
+
+            try:
+                data, task_lock = self._task_slot
+            except (TypeError, ValueError):
+                # 防御性编程，处理可能的 None 或格式错误（虽然逻辑上不应发生）
+                try:
+                    signal_idle()
+                except RuntimeError:
+                    pass
+                continue
+
+            try:
+                # 2. 发送数据
+                # Equivalent to conn.send_bytes() but bypass all memorybuffer pre-checks
+                conn._check_closed()
+                conn._check_writable()
+                conn._send_bytes(data)
+            except AttributeError:
+                # this shouldn't happen
+                from alasio.logger import logger
+                logger.error(f'[BackendBridge] Failed to send command: pipe connection not initialized')
+                return False
+            except (EOFError, OSError):
+                if self.running:
+                    from alasio.logger import logger
+                    logger.error(f'[BackendBridge] Failed to send command: pipe broken')
+                # if pipe is already closed, failed silently
+                return False
+            except Exception as e:
+                from alasio.logger import logger
+                logger.error(f'[BackendBridge] Failed to send command: {e}')
+            finally:
+                # 3. 通知用户（如果用户在关心结果）
+                # release 会让等待这个锁的用户线程继续执行
+                try:
+                    task_lock.release()
+                except RuntimeError:
+                    pass
+                # 4. 标记 Worker 空闲
+                # 释放锁，允许下一个 send() 调用通过步骤 2
+                try:
+                    signal_idle()
+                except RuntimeError:
+                    pass
 
     def _handle_backend_command(self, data: bytes):
         event = decode(data, type=CommandEvent)
@@ -257,12 +350,13 @@ class BackendBridge(metaclass=Singleton):
             logger.error(f'[BackendBridge] Failed to recv command: pipe connection not initialized')
             return False
 
-        while 1:
+        while self.running:
             try:
                 data = conn.recv_bytes()
             except (EOFError, OSError):
-                from alasio.logger import logger
-                logger.error(f'[BackendBridge] Failed to recv command: pipe broken')
+                if self.running:
+                    from alasio.logger import logger
+                    logger.error(f'[BackendBridge] Failed to recv command: pipe broken')
                 return False
             except Exception as e:
                 from alasio.logger import logger
@@ -275,8 +369,45 @@ class BackendBridge(metaclass=Singleton):
                 logger.warning(f'[BackendBridge] Failed to handle command: {e}')
                 continue
 
+    def close(self):
+        """
+        Gracefully close the BackendBridge
+
+        This method will:
+        1. Set the closing flag to stop background threads
+        2. Close the pipe connection
+        3. Wait for threads to finish (with timeout)
+        """
+        if not self.inited:
+            return
+
+        # Set closing flag to stop threads from logging errors
+        self.running = False
+
+        # Close connection to unblock recv_bytes() call
+        if self.conn:
+            try:
+                self.conn.close()
+            except:
+                pass
+
+        # Wake up send thread if it's waiting
+        try:
+            self._work_ready.release()
+        except RuntimeError:
+            pass
+
+        # Wait for threads to finish with timeout
+        if self._send_thread and self._send_thread.is_alive():
+            self._send_thread.join(timeout=0.5)
+
+        if self._recv_thread and self._recv_thread.is_alive():
+            self._recv_thread.join(timeout=0.5)
+
+        self.inited = False
+
     def send_log(self, value):
-        self.send(ConfigEvent(t='Log', v=value))
+        return self.send(ConfigEvent(t='Log', v=value))
 
     def send_worker_state(self, value: Literal['running', 'scheduler-waiting']):
-        self.send(ConfigEvent(t='WorkerState', v=value))
+        return self.send(ConfigEvent(t='WorkerState', v=value))
