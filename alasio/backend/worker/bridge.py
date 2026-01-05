@@ -225,6 +225,30 @@ class BackendBridge(metaclass=Singleton):
         return Encoder()
 
     def send(self, event: ConfigEvent) -> Lock:
+        """
+        高性能事件发送
+
+        1. 崩溃安全性 (Crash Safety) - "No-Queue Strategy":
+           - 核心痛点：在高频日志场景下，使用 Queue 会导致内存中堆积大量未发送数据。一旦主进程崩溃（Crash），队列中所有数据瞬间丢失。
+           - 解决方案：放弃队列，采用“单槽位（Single Slot）”设计。内存中永远最多只有 1 条正在处理的消息。
+           - 收益：最大程度减少进程崩溃时的数据丢失窗口，仅限于当前正在 socket/pipe 中传输的那一条。
+
+        2. 流量控制 (Back-Pressure):
+           - 机制：当 Worker 线程正在发送上一条消息时，新的 send() 调用会在 _worker_idle 锁上发生物理阻塞。
+           - 收益：自动平衡生产速度与消费（IO）速度。防止因日志产生过快导致内存暴涨（OOM）。
+           - 行为：并发调用 send() 时，线程会排队等待槽位释放，严格保证串行化入管。
+
+        3. 极致性能 (High Performance):
+           - Zero-Copy: 数据仅通过引用传递，不进行 bytes 对象的内存复制（避免 append/pop 开销）。
+           - Raw Bytes IO: 使用 pipe.send_bytes() 而非 pipe.send()，避开 pickle 序列化开销，直接传输二进制流。
+           - Lightweight Locking: 仅使用 threading.Lock（底层 futex/semaphore），避免 Condition/Event 的额外开销。
+           - Fast Path: 减少属性查找，Worker 内部使用局部变量缓存方法引用。
+
+        4. 线程安全 (Thread Safety):
+           - Lock Handoff: 使用锁传递机制（主线程 acquire，子线程 release）实现精确的同步接力。
+           - Snapshotting: 将 (data, lock) 打包为元组，Worker 取出后即形成“本地快照”。
+             即使实例属性在下一毫秒被新任务覆盖，Worker 手中的锁依然能正确通知对应的旧任务调用者。
+        """
         conn = self.conn
         if not conn:
             # allow worker running without backend

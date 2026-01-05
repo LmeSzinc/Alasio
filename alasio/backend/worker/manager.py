@@ -283,6 +283,14 @@ class WorkerManager(metaclass=Singleton):
     def _worker_recv_loop(self, state: WorkerState):
         """
         Thread entry to receive message from worker
+
+        我们给每个Worker进程单独开一个线程循环接收消息，而不是像web服务一样使用 wait(list_pipe) 同时接收所有消息
+        在真实运行场景下，log是稀疏产生的，而一旦有log很可能是短时间内产生大量log
+        wait(list_pipe) 虽然对多个pipe有很好的接收性能，但是对单一pipe的高频接收就远不如直接 conn.recv_bytes() 了。
+
+        多线程recv_bytes() 的问题是同时接收多个pipe的时候会有频繁GIL切换导致性能远不如 wait(list_pipe)
+        但因为log是稀疏产生的，每个worker的高频时段通常不会集中，所以在我们的运行情景下
+        使用 多线程recv_bytes() 的性能就是单线程 recv_bytes()
         """
         conn = state.conn
         config = state.config
