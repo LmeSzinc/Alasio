@@ -69,11 +69,11 @@
   // Generate task list based on input
   const taskRunning = $derived.by(() => {
     if (taskListInput.value === "running-only" || taskListInput.value === "running-and-next") {
-      return { name: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) };
+      return { TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) };
     }
     if (taskListInput.value === "long-names") {
       return {
-        name: "VeryLongTaskNameThatShouldBeTruncatedInTheUI",
+        TaskName: "VeryLongTaskNameThatShouldBeTruncatedInTheUI",
         NextRun: Math.floor(Date.now() / 1000),
       };
     }
@@ -83,19 +83,19 @@
   const taskNext = $derived.by(() => {
     if (taskListInput.value === "next-only" || taskListInput.value === "running-and-next") {
       return [
-        { name: "Task1", NextRun: Math.floor(Date.now() / 1000) + 3600 },
-        { name: "Task2", NextRun: Math.floor(Date.now() / 1000) + 7200 },
-        { name: "Task3", NextRun: Math.floor(Date.now() / 1000) + 100000 },
+        { TaskName: "Task1", NextRun: Math.floor(Date.now() / 1000) + 3600 },
+        { TaskName: "Task2", NextRun: Math.floor(Date.now() / 1000) + 7200 },
+        { TaskName: "Task3", NextRun: Math.floor(Date.now() / 1000) + 100000 },
       ];
     }
     if (taskListInput.value === "long-names") {
       return [
         {
-          name: "AnotherVeryLongTaskNameThatWillDefinitelyBeTruncated",
+          TaskName: "AnotherVeryLongTaskNameThatWillDefinitelyBeTruncated",
           NextRun: Math.floor(Date.now() / 1000) + 1800,
         },
         {
-          name: "ShortTask",
+          TaskName: "ShortTask",
           NextRun: Math.floor(Date.now() / 1000) + 3600,
         },
       ];
@@ -163,10 +163,10 @@
               {status}
               deviceType="Emulator"
               deviceSerial="127.0.0.1:5555"
-              taskRunning={{ name: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) }}
+              taskRunning={{ TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) }}
               taskNext={[
-                { name: "NextTask1", NextRun: Math.floor(Date.now() / 1000) + 3600 },
-                { name: "NextTask2", NextRun: Math.floor(Date.now() / 1000) + 7200 },
+                { TaskName: "NextTask1", NextRun: Math.floor(Date.now() / 1000) + 3600 },
+                { TaskName: "NextTask2", NextRun: Math.floor(Date.now() / 1000) + 7200 },
               ]}
             />
           {/each}
@@ -202,12 +202,12 @@
               deviceType="VeryLongEmulatorType"
               deviceSerial="127.0.0.1:5555-with-very-long-serial-number"
               taskRunning={{
-                name: "VeryLongTaskNameThatWillBeTruncated",
+                TaskName: "VeryLongTaskNameThatWillBeTruncated",
                 NextRun: Math.floor(Date.now() / 1000),
               }}
               taskNext={[
                 {
-                  name: "AnotherVeryLongTaskNameForTesting",
+                  TaskName: "AnotherVeryLongTaskNameForTesting",
                   NextRun: Math.floor(Date.now() / 1000) + 1800,
                 },
               ]}
@@ -231,9 +231,9 @@
               deviceType="Device"
               deviceSerial="123456"
               taskNext={[
-                { name: "Future1", NextRun: Math.floor(Date.now() / 1000) + 600 },
-                { name: "Future2", NextRun: Math.floor(Date.now() / 1000) + 3600 },
-                { name: "Future3", NextRun: Math.floor(Date.now() / 1000) + 100000 },
+                { TaskName: "Future1", NextRun: Math.floor(Date.now() / 1000) + 600 },
+                { TaskName: "Future2", NextRun: Math.floor(Date.now() / 1000) + 3600 },
+                { TaskName: "Future3", NextRun: Math.floor(Date.now() / 1000) + 100000 },
               ]}
             />
           {/each}
@@ -252,8 +252,8 @@
             <Scheduler
               config_name="NoDevice"
               {status}
-              taskRunning={{ name: "Task", NextRun: Math.floor(Date.now() / 1000) }}
-              taskNext={[{ name: "Next", NextRun: Math.floor(Date.now() / 1000) + 3600 }]}
+              taskRunning={{ TaskName: "Task", NextRun: Math.floor(Date.now() / 1000) }}
+              taskNext={[{ TaskName: "Next", NextRun: Math.floor(Date.now() / 1000) + 3600 }]}
             />
           {/each}
         </div>

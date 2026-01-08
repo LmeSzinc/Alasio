@@ -33,7 +33,7 @@ class ConfigSetEvent(Struct):
 
 
 class Task(Struct):
-    task: str
+    TaskName: str
     NextRun: datetime
 
 
@@ -721,10 +721,10 @@ class Mod:
                 # TypeError: can't compare offset-naive and offset-aware datetimes
                 continue
             if is_waiting:
-                list_waiting.append(Task(task=task_name, NextRun=data.NextRun))
+                list_waiting.append(Task(TaskName=task_name, NextRun=data.NextRun))
             else:
-                list_pending.append(Task(task=task_name, NextRun=data.NextRun))
+                list_pending.append(Task(TaskName=task_name, NextRun=data.NextRun))
 
-        list_waiting.sort(key=lambda x: (x.NextRun, dict_task_priority.get(x.task, 0)))
-        list_pending.sort(key=lambda x: dict_task_priority.get(x.task, 0))
+        list_waiting.sort(key=lambda x: (x.NextRun, dict_task_priority.get(x.TaskName, 0)))
+        list_pending.sort(key=lambda x: dict_task_priority.get(x.TaskName, 0))
         return list_pending, list_waiting

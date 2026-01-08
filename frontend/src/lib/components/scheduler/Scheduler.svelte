@@ -11,7 +11,7 @@
   import ActionStop from "./ActionStop.svelte";
   import NextRun from "./NextRun.svelte";
 
-  type TaskItem = { name: string; NextRun: number };
+  type TaskItem = { TaskName: string; NextRun: number };
   type $$props = {
     config_name: string;
     status?: WORKER_STATUS;
@@ -140,7 +140,7 @@
       {#if taskRunning}
         <div class="flex items-center gap-1">
           <ConfigStatus {status} displayIdle={true} iconClass="h-3 w-3" class="shrink-0" />
-          <span class="flex-1 truncate text-xs">{taskRunning.name}</span>
+          <span class="flex-1 truncate text-xs">{taskRunning.TaskName}</span>
           <span class="min-w-8 shrink-0 text-right text-xs">now</span>
         </div>
       {/if}
@@ -151,7 +151,7 @@
             class={cn("text-muted-foreground h-3 w-3 shrink-0", isRunning ? "animate-spin" : "")}
             strokeWidth="2"
           />
-          <span class="flex-1 truncate text-xs">{task.name}</span>
+          <span class="flex-1 truncate text-xs">{task.TaskName}</span>
           <!-- now, hh:mm, >24h -->
           <NextRun timestamp={task.NextRun} class="min-w-8 shrink-0 text-right text-xs" />
         </div>

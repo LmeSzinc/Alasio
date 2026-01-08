@@ -176,7 +176,7 @@ class AlasioConfigBase:
     def get_next_task(self) -> Task:
         pending_task, waiting_task = self.mod.get_task_schedule(self.config_name)
         if pending_task:
-            logger.info(f'Pending tasks: {[f.task for f in pending_task]}')
+            logger.info(f'Pending tasks: {[f.TaskName for f in pending_task]}')
             task = pending_task[0]
             logger.attr('Task', task)
             return task
@@ -206,7 +206,7 @@ class AlasioConfigBase:
         #         return True
         prev = self.task
         self.load()
-        new = self.get_next_task().task
+        new = self.get_next_task().TaskName
         if prev == new:
             logger.info(f'Continue task `{new}`')
             return False
