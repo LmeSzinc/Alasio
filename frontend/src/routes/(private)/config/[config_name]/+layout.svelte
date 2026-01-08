@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import type { WORKER_STATUS } from "$lib/components/aside/types";
-  import { Scheduler } from "$lib/components/scheduler";
+  import { Scheduler, type TaskQueueData } from "$lib/components/scheduler";
   import { NavContext } from "$lib/slotcontext.svelte";
   import { useTopic } from "$lib/ws";
   import { onDestroy, setContext } from "svelte";
@@ -71,10 +71,18 @@
   // Scheduler
   const workerClient = useTopic<Record<string, WORKER_STATUS> | undefined>("Worker");
   const status = $derived(workerClient.data?.[config_name] || "idle");
+
+  const taskQueueClient = useTopic<TaskQueueData>("TaskQueue");
+  const taskRunning = $derived(taskQueueClient.data?.running ?? undefined);
+  const taskNext = $derived(
+    [...(taskQueueClient.data?.pending || []), ...(taskQueueClient.data?.waiting || [])].filter(
+      (task) => task.TaskName !== taskRunning?.TaskName,
+    ),
+  );
 </script>
 
 {#snippet nav()}
-  <Scheduler {config_name} {status} {onOverviewClick} {onDeviceClick} />
+  <Scheduler {config_name} {status} {taskRunning} {taskNext} {onOverviewClick} {onDeviceClick} />
   <ConfigNav nav_name={ui.nav_name} card_name={ui.card_name} bind:opened_nav={ui.opened_nav} {onCardClick} />
 {/snippet}
 

@@ -4,4 +4,5 @@ import ActionStop from "./ActionStop.svelte";
 import NextRun from "./NextRun.svelte";
 import Scheduler from "./Scheduler.svelte";
 
+export * from "./types";
 export { ActionKill, ActionStart, ActionStop, NextRun, Scheduler };

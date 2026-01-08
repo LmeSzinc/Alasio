@@ -10,8 +10,8 @@
   import ActionStart from "./ActionStart.svelte";
   import ActionStop from "./ActionStop.svelte";
   import NextRun from "./NextRun.svelte";
+  import type { TaskItem } from "./types";
 
-  type TaskItem = { TaskName: string; NextRun: number };
   type $$props = {
     config_name: string;
     status?: WORKER_STATUS;

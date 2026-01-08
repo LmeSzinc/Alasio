@@ -33,6 +33,6 @@
 
 <div class="my-4 w-full">
   {#if topicClient.data}
-    <ArgGroups bind:data={topicClient.data} indicateCard={ui.opened_nav} {handleEdit} {handleReset} />
+    <ArgGroups bind:data={topicClient.data} indicateCard={ui.card_name} {handleEdit} {handleReset} />
   {/if}
 </div>

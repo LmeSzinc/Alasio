@@ -1,7 +1,7 @@
 <script lang="ts">
   type $$Props = {
-    // timestamp in seconds
-    timestamp: number;
+    // timestamp in seconds or ISO string
+    timestamp: number | string;
     class?: string;
   };
   let { timestamp, class: className }: $$Props = $props();
@@ -15,7 +15,7 @@
   });
 
   const displayTime = $derived.by(() => {
-    const target = new Date(timestamp * 1000).getTime();
+    const target = typeof timestamp === "number" ? timestamp * 1000 : new Date(timestamp).getTime();
     const diff = target - now;
     const dayInMs = 24 * 60 * 60 * 1000;
 
