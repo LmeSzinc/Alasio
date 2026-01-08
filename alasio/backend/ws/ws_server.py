@@ -1,4 +1,4 @@
-from typing import Type
+from typing import Optional, Type, Union
 
 import msgspec
 import trio
@@ -77,7 +77,7 @@ class WebsocketTopicServer:
         # track if "pong" is received
         self.pong_received = trio.Event()
         # buffer the message to be sent
-        self.send_buffer: "trio.MemorySendChannel[ResponseEvent]" = None
+        self.send_buffer: "trio.MemorySendChannel[bytes]" = None
         # All subscribed topics
         # key: topic name, value: topic object Topic(self.id)
         self.subscribed: "dict[str, BaseTopic]" = {}
@@ -198,27 +198,55 @@ class WebsocketTopicServer:
     Websocket methods
     """
 
-    async def send(self, data: ResponseEvent):
+    @staticmethod
+    def _encode_msg(data: "Union[ResponseEvent, list[ResponseEvent], bytes]") -> "Optional[bytes]":
+        # return directly if already bytes
+        if isinstance(data, bytes):
+            return data
+        # encode message
+        try:
+            return RESPONSE_EVENT_ENCODER.encode(data)
+        except ENCODE_ERRORS as e:
+            # invalid data, this shouldn't happen
+            logger.error(f'Failed to encode data {data}')
+            logger.exception(e)
+            return None
+        except Exception as e:
+            # this shouldn't happen
+            logger.error(f'Failed to encode data {data}')
+            logger.exception(e)
+            return None
+
+    async def send(self, data: "Union[ResponseEvent, list[ResponseEvent], bytes]"):
         """
         Send an event to send buffer
         """
+        data = self._encode_msg(data)
+        if data is None:
+            return
         try:
             await self.send_buffer.send(data)
         except TRIO_CHANNEL_ERRORS:
             # buffer closed
             pass
 
-    def send_nowait(self, data: ResponseEvent):
+    def send_nowait(self, data: "Union[ResponseEvent, list[ResponseEvent], bytes]"):
         """
         Send an event to send buffer without blocking
+
+        Raises:
+            trio.WouldBlock:
         """
+        data = self._encode_msg(data)
+        if data is None:
+            return
         try:
             self.send_buffer.send_nowait(data)
         except TRIO_CHANNEL_ERRORS:
             # buffer closed
             pass
 
-    async def send_error(self, data: "ResponseEvent | Exception | str | bytes"):
+    async def send_error(self, data: "Union[ResponseEvent, Exception, str, bytes]"):
         """
         Send data as error
         """
@@ -226,8 +254,11 @@ class WebsocketTopicServer:
         if isinstance(data, Exception):
             data = f'{data.__class__.__name__}: {data}'
         # convert to event
-        if not isinstance(data, ResponseEvent):
+        if isinstance(data, str):
             data = ResponseEvent(t='error', o='full', v=data)
+        data = self._encode_msg(data)
+        if data is None:
+            return
 
         await self.send(data)
 
@@ -349,7 +380,7 @@ class WebsocketTopicServer:
 
     async def task_send(
             self,
-            send_buffer: "trio.MemoryReceiveChannel[ResponseEvent]"
+            send_buffer: "trio.MemoryReceiveChannel[bytes]"
     ):
         """
         Coroutine task that receive data from send_buffer and send to websocket
@@ -362,23 +393,9 @@ class WebsocketTopicServer:
                 # websocket closed -> recv_buffer closed -> send_buffer closed
                 break
 
-            # encode message
-            try:
-                message = RESPONSE_EVENT_ENCODER.encode(data)
-            except ENCODE_ERRORS as e:
-                # invalid data, this shouldn't happen
-                logger.error(f'Failed to encode data {data}')
-                logger.exception(e)
-                continue
-            except Exception as e:
-                # this shouldn't happen
-                logger.error(f'Failed to encode data {data}')
-                logger.exception(e)
-                continue
-
             # send message
             try:
-                await self.ws.send_bytes(message)
+                await self.ws.send_bytes(data)
                 # send success, update activity
                 self.last_active = trio.current_time()
             except WEBSOCKET_ERRORS:
