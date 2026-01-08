@@ -1,65 +1,29 @@
-import time
 from typing import List
 
 import trio
 
-from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
 from alasio.backend.reactive.base_rpc import rpc
-from alasio.backend.reactive.event import ResponseEvent
+from alasio.backend.reactive.event_cache import GlobalEventCache
 from alasio.backend.ws.ws_topic import BaseTopic
-from alasio.config.table.scan import ConfigInfo, DndRequest, ScanTable
-from alasio.ext.singleton import Singleton
+from alasio.config.table.scan import DndRequest, ScanTable
 
 
-class ConfigScanSource(metaclass=Singleton):
-    def __init__(self):
-        self.lastrun = 0
-        self.data: "dict[str, ConfigInfo]" = {}
-        self.lock = trio.Lock()
+class ConfigScanSource(GlobalEventCache):
+    TOPIC = 'ConfigScan'
 
-    async def scan(self, force=False):
-        """
-        Args:
-            force:
-
-        Returns:
-            dict[str, ConfigInfo]:
-        """
-        now = time.time()
-        if not force and now - self.lastrun < 5:
-            return self.data
-
-        async with self.lock:
-            # Double lock check
-            if not force:
-                now = time.time()
-                if now - self.lastrun < 5:
-                    return self.data
-
-            # call
-            table = ScanTable()
-            data = await trio.to_thread.run_sync(table.scan)
-            # broadcast
-            topic = 'ConfigScan'
-            if self.data and data != self.data:
-                # send on updates only, because full event is already send on topic subscription
-                # send full event to avoid data bouncing after drag and drop
-                event = ResponseEvent(t=topic, o='full', v=data)
-                await BaseTopic.msgbus_global_asend(topic, event)
-            # record time after all awaits
-            self.data = data
-            self.lastrun = time.time()
-            return data
+    def on_init(self):
+        table = ScanTable()
+        return table.scan()
 
 
 class ConfigScan(BaseTopic):
-    async def getdata(self):
-        # re-scan before getting data
-        return await ConfigScanSource().scan()
+    async def op_sub(self):
+        cache = ConfigScanSource()
+        await cache.subscribe(self)
 
-    @on_msgbus_global_event('ConfigScan')
-    async def on_scan_diff(self, value: ResponseEvent):
-        await self.server.send(value)
+    async def op_unsub(self):
+        cache = ConfigScanSource()
+        cache.unsubscribe(self)
 
     @rpc
     async def config_add(self, name: str, mod: str):
@@ -75,7 +39,7 @@ class ConfigScan(BaseTopic):
         await trio.to_thread.run_sync(scan_table.config_add, name, mod)
 
         # Force rescan to update the data and notify observers
-        await ConfigScanSource().scan(force=True)
+        await ConfigScanSource().reinit()
 
     @rpc
     async def config_copy(self, old_name: str, new_name: str):
@@ -91,7 +55,7 @@ class ConfigScan(BaseTopic):
         await trio.to_thread.run_sync(scan_table.config_copy, old_name, new_name)
 
         # Force rescan to update the data and notify observers
-        await ConfigScanSource().scan(force=True)
+        await ConfigScanSource().reinit()
 
     @rpc
     async def config_rename(self, old_name: str, new_name: str):
@@ -107,7 +71,7 @@ class ConfigScan(BaseTopic):
         await trio.to_thread.run_sync(scan_table.config_rename, old_name, new_name)
 
         # Force rescan to update the data and notify observers
-        await ConfigScanSource().scan(force=True)
+        await ConfigScanSource().reinit()
 
     @rpc
     async def config_del(self, name: str):
@@ -122,7 +86,7 @@ class ConfigScan(BaseTopic):
         await trio.to_thread.run_sync(scan_table.config_del, name)
 
         # Force rescan to update the data and notify observers
-        await ConfigScanSource().scan(force=True)
+        await ConfigScanSource().reinit()
 
     @rpc
     async def config_dnd(self, configs: List[DndRequest]):
@@ -139,4 +103,4 @@ class ConfigScan(BaseTopic):
         await trio.to_thread.run_sync(scan_table.config_dnd, configs)
 
         # Force rescan to update the data and notify observers
-        await ConfigScanSource().scan(force=True)
+        await ConfigScanSource().reinit()
