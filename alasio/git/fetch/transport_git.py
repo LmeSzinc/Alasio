@@ -21,22 +21,20 @@ class GitTransport(BaseTransport):
         path = self.arguments.repo_url.path
         logger.info(f'fetch_refs: git://{host}:{port}{path}')
 
-        # Connect and send handshake
-        stream = await trio.open_tcp_stream(host, port)
-        handshake = f'git-upload-pack {path}\0host={host}\0'
-        await stream.send_all(create_pkt_line(handshake))
+        async with await trio.open_tcp_stream(host, port) as stream:
+            # Send handshake
+            handshake = f'git-upload-pack {path}\0host={host}\0'
+            await stream.send_all(create_pkt_line(handshake))
 
-        # Read refs
-        content = bytearray()
-        while True:
-            chunk = await stream.receive_some(4096)
-            if not chunk:
-                break
-            content.extend(chunk)
-            if content.endswith(b'0000'):
-                break
-
-        await stream.aclose()
+            # Read refs
+            content = bytearray()
+            while True:
+                chunk = await stream.receive_some(4096)
+                if not chunk:
+                    break
+                content.extend(chunk)
+                if content.endswith(b'0000'):
+                    break
 
         logger.debug(f'Received {len(content)} bytes from server')
         logger.debug(f'First 200 bytes: {bytes(content[:200])!r}')
@@ -80,37 +78,35 @@ class GitTransport(BaseTransport):
         path = self.arguments.repo_url.path
         logger.info(f'fetch_pack_v1: git://{host}:{port}{path}')
 
-        # Connect and send handshake
-        stream = await trio.open_tcp_stream(host, port)
-        handshake = f'git-upload-pack {path}\0host={host}\0'
-        await stream.send_all(create_pkt_line(handshake))
+        async with await trio.open_tcp_stream(host, port) as stream:
+            # Send handshake
+            handshake = f'git-upload-pack {path}\0host={host}\0'
+            await stream.send_all(create_pkt_line(handshake))
 
-        # Read and discard refs (already fetched in fetch_refs)
-        content = bytearray()
-        while True:
-            chunk = await stream.receive_some(4096)
-            if not chunk:
-                break
-            content.extend(chunk)
-            if content.endswith(b'0000'):
-                break
-
-        # Send want/have/done
-        await stream.send_all(payload.build())
-
-        # Receive packfile
-        async def stream_iterator():
+            # Read and discard refs (already fetched in fetch_refs)
+            content = bytearray()
             while True:
-                chunk = await stream.receive_some(65536)
+                chunk = await stream.receive_some(4096)
                 if not chunk:
                     break
-                yield chunk
+                content.extend(chunk)
+                if content.endswith(b'0000'):
+                    break
 
-        pkt_stream = aparse_pkt_line(stream_iterator())
-        file_stream = aparse_packfile_stream(pkt_stream)
-        data = await agather_bytes(file_stream)
+            # Send want/have/done
+            await stream.send_all(payload.build())
 
-        await stream.aclose()
+            # Receive packfile
+            async def stream_iterator():
+                while True:
+                    chunk = await stream.receive_some(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+
+            pkt_stream = aparse_pkt_line(stream_iterator())
+            file_stream = aparse_packfile_stream(pkt_stream)
+            data = await agather_bytes(file_stream)
 
         atomic_write(output_file, data)
 
@@ -131,41 +127,38 @@ class GitTransport(BaseTransport):
         path = self.arguments.repo_url.path
         logger.info(f'fetch_pack_v2: git://{host}:{port}{path}')
 
-        # Connect and send v2 handshake
-        stream = await trio.open_tcp_stream(host, port)
-        # v2 handshake includes version=2
-        handshake = f'git-upload-pack {path}\0host={host}\0\0version=2\0'
-        await stream.send_all(create_pkt_line(handshake))
+        async with await trio.open_tcp_stream(host, port) as stream:
+            # Send v2 handshake (includes version=2)
+            handshake = f'git-upload-pack {path}\0host={host}\0\0version=2\0'
+            await stream.send_all(create_pkt_line(handshake))
 
-        # Read server capabilities
-        content = bytearray()
-        while True:
-            chunk = await stream.receive_some(4096)
-            if not chunk:
-                break
-            content.extend(chunk)
-            if content.endswith(b'0000'):
-                break
-
-        logger.debug(f'Server capabilities: {bytes(content[:200])!r}')
-
-        # Build and send v2 fetch command
-        v2_payload = self._build_v2_payload(payload)
-        await stream.send_all(v2_payload)
-
-        # Receive packfile
-        async def stream_iterator():
+            # Read server capabilities
+            content = bytearray()
             while True:
-                chunk = await stream.receive_some(65536)
+                chunk = await stream.receive_some(4096)
                 if not chunk:
                     break
-                yield chunk
+                content.extend(chunk)
+                if content.endswith(b'0000'):
+                    break
 
-        pkt_stream = aparse_pkt_line(stream_iterator())
-        file_stream = aparse_packfile_stream(pkt_stream)
-        data = await agather_bytes(file_stream)
+            logger.debug(f'Server capabilities: {bytes(content[:200])!r}')
 
-        await stream.aclose()
+            # Build and send v2 fetch command
+            v2_payload = self._build_v2_payload(payload)
+            await stream.send_all(v2_payload)
+
+            # Receive packfile
+            async def stream_iterator():
+                while True:
+                    chunk = await stream.receive_some(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+
+            pkt_stream = aparse_pkt_line(stream_iterator())
+            file_stream = aparse_packfile_stream(pkt_stream)
+            data = await agather_bytes(file_stream)
 
         atomic_write(output_file, data)
 
@@ -193,26 +186,27 @@ class GitTransport(BaseTransport):
         # Delimiter
         lines.append(b'0001')
         
-        # Extract want/have/done from v1 payload
-        v1_content = payload.build()
-        
-        # Parse v1 payload and convert to v2
-        for line in parse_pkt_line(v1_content):
-            if not line:
+        # Directly iterate over payload (it's a deque of pkt-lines)
+        for pkt_line in payload:
+            if pkt_line == b'0000':  # Skip delimiters from v1
                 continue
             
-            line_str = line.decode('utf-8', errors='ignore').strip()
-            
-            if line_str.startswith('want '):
-                # Remove capabilities from want line
-                sha1 = line_str.split()[1]
-                lines.append(create_pkt_line(f'want {sha1}\n'))
-            elif line_str.startswith('have '):
-                lines.append(create_pkt_line(line_str + '\n'))
-            elif line_str.startswith('deepen '):
-                lines.append(create_pkt_line(line_str + '\n'))
-            elif line_str == 'done':
-                lines.append(create_pkt_line('done\n'))
+            # Decode pkt-line: skip first 4 bytes (length header)
+            if len(pkt_line) > 4:
+                content = pkt_line[4:].decode('utf-8', errors='ignore').strip()
+                
+                if content.startswith('want '):
+                    # Remove capabilities from want line
+                    parts = content.split()
+                    if len(parts) >= 2:
+                        sha1 = parts[1]
+                        lines.append(create_pkt_line(f'want {sha1}\n'))
+                elif content.startswith('have '):
+                    lines.append(create_pkt_line(content + '\n'))
+                elif content.startswith('deepen '):
+                    lines.append(create_pkt_line(content + '\n'))
+                elif content == 'done':
+                    lines.append(create_pkt_line('done\n'))
         
         # End with flush-pkt
         lines.append(b'0000')
