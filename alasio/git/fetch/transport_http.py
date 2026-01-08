@@ -147,27 +147,28 @@ class HttpTransport(BaseTransport):
         # Delimiter
         lines.append(b'0001')
         
-        # Extract want/have/done from v1 payload
-        # v1 payload format: want <sha1> <caps>\n0000\nhave <sha1>\ndone\n
-        v1_content = payload.build()
-        
-        # Parse v1 payload and convert to v2
-        for line in parse_pkt_line(v1_content):
-            if not line:
+        # Directly iterate over payload (it's a deque of pkt-lines)
+        # We need to extract the actual content from each pkt-line
+        for pkt_line in payload:
+            if pkt_line == b'0000':  # Skip delimiters from v1
                 continue
             
-            line_str = line.decode('utf-8', errors='ignore').strip()
-            
-            if line_str.startswith('want '):
-                # Remove capabilities from want line
-                sha1 = line_str.split()[1]
-                lines.append(create_pkt_line(f'want {sha1}\n'))
-            elif line_str.startswith('have '):
-                lines.append(create_pkt_line(line_str + '\n'))
-            elif line_str.startswith('deepen '):
-                lines.append(create_pkt_line(line_str + '\n'))
-            elif line_str == 'done':
-                lines.append(create_pkt_line('done\n'))
+            # Decode pkt-line: skip first 4 bytes (length header)
+            if len(pkt_line) > 4:
+                content = pkt_line[4:].decode('utf-8', errors='ignore').strip()
+                
+                if content.startswith('want '):
+                    # Remove capabilities from want line (everything after first space after SHA)
+                    parts = content.split()
+                    if len(parts) >= 2:
+                        sha1 = parts[1]
+                        lines.append(create_pkt_line(f'want {sha1}\n'))
+                elif content.startswith('have '):
+                    lines.append(create_pkt_line(content + '\n'))
+                elif content.startswith('deepen '):
+                    lines.append(create_pkt_line(content + '\n'))
+                elif content == 'done':
+                    lines.append(create_pkt_line('done\n'))
         
         # End with flush-pkt
         lines.append(b'0000')
