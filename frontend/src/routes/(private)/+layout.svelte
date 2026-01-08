@@ -51,12 +51,12 @@
     <!-- 1.1 Header -->
     <Header onMenuClick={openSheet} />
     <!-- 1.2 Layout body -->
-    <div class="app-layout-body flex-1 overflow-hidden">
+    <div class="dotbg app-layout-body flex-1 overflow-hidden">
       <div class="mx-auto flex h-full xl:ml-4">
         <!-- 1.2.1 Aside and nav -->
         <!-- If media<xl, aside and nav show as one sidebar -->
         <!-- If media>=xl, aside and nav show as standalone cards -->
-        <div class="aside-container hidden md:flex">
+        <div class="aside-container aside-shadow hidden md:flex">
           <div class={cn("aside-item bg-card border-border border-r", isXlScreen && "neushadow")}>
             <ConfigAside class="pt-1 xl:pt-0" />
           </div>
@@ -68,7 +68,7 @@
         </div>
         <!-- 1.2.2 If media<md, aside and nav show as sheet  -->
         <Sheet.Root bind:open={isSheetOpen}>
-          <Sheet.Content side="left" class="max-width-85vw">
+          <Sheet.Content side="left" class="max-width-85vw aside-shadow bg-card">
             <div class="flex h-full">
               <ConfigAside onNavigate={closeSheet} class="border-border border-r" />
               <div class="flex-1">
@@ -86,8 +86,8 @@
   </div>
 {:else}
   <!-- 2. Error page -->
-  <div class="bg-background fixed inset-0 z-50 flex items-center justify-center">
-    <Card.Root class="animate-in fade-in-0 zoom-in-95 mx-4 w-full max-w-md">
+  <div class="dotbg bg-background fixed inset-0 z-50 flex items-center justify-center">
+    <Card.Root class="neushadow border-none animate-in fade-in-0 zoom-in-95 mx-4 w-full max-w-md">
       <Card.Header class="text-center">
         <Card.Title class="text-2xl font-semibold">Oops!</Card.Title>
         <Card.Description>Authorization failed</Card.Description>
@@ -116,7 +116,6 @@
 
 <style>
   .aside-container {
-    box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
     background-color: (--background);
     overflow: hidden;
   }

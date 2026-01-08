@@ -4,7 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { t } from "$lib/i18n";
-  import { cn } from "$lib/utils.js";
+  import { cn } from "$lib/utils";
 
   // --- Props Definition (Svelte 5 Runes) ---
   type $$props = {
@@ -18,8 +18,12 @@
   const devNavItems = $derived([
     { path: "/dev/tools", name: t.DevTool.SystemTool() },
     { path: "/dev/assets", name: t.AssetManager.AssetManager() },
-    { path: "/dev/ws", name: t.WebsocketTest.Title() },
     { path: "/dev/compat", name: "Browser Compatibility" },
+  ]);
+  const debugNavItems = $derived([
+    { path: "/dev/ws", name: t.WebsocketTest.Title() },
+    { path: "/dev/workerstatus", name: "Worker Status" },
+    { path: "/dev/scheduler", name: "Scheduler" },
   ]);
 
   // --- Derived State ---
@@ -53,5 +57,6 @@
   <aside class={cn("w-full space-y-4 p-4", className)} role="navigation" aria-label="Main navigation">
     {@render navSection(t.DevTool.AlasioTool(), alasioNavItems)}
     {@render navSection(t.DevTool.DevTool(), devNavItems)}
+    {@render navSection(t.DevTool.DebugTool(), debugNavItems)}
   </aside>
 </ScrollArea>

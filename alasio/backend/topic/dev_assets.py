@@ -5,11 +5,11 @@ from msgspec import Struct
 
 from alasio.assets.manager import AssetsManager
 from alasio.assets.model.folder import AssetFolder
+from alasio.backend.reactive.base_rpc import rpc
+from alasio.backend.reactive.event import RpcValueError
+from alasio.backend.reactive.rx_trio import async_reactive, async_reactive_nocache, async_reactive_source
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
-from alasio.ext.reactive.base_rpc import rpc
-from alasio.ext.reactive.event import RpcValueError
-from alasio.ext.reactive.rx_trio import async_reactive, async_reactive_nocache, async_reactive_source
 
 
 class ManagerState(Struct):
@@ -69,7 +69,7 @@ class DevAssetsManager(BaseTopic):
         # set mod
         state.mod_name = mod_name
         state.path = mod.entry.path_assets
-        await self.__class__.assets_state.mutate(self, state)
+        await self.assets_state.mutate()
 
     @rpc
     async def set_path(self, path: str):
@@ -85,7 +85,7 @@ class DevAssetsManager(BaseTopic):
         except ValueError as e:
             # path invalid
             raise RpcValueError(e)
-        await self.__class__.assets_state.mutate(self, state)
+        await self.assets_state.mutate()
 
     @rpc
     async def resource_add_base64(self, source: str, data: str):
@@ -100,7 +100,7 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_add_base64, source, data)
         except ValueError as e:
             raise RpcValueError(str(e))
-        await self.__class__.data.mutate(self)
+        await self.data.mutate()
 
     @rpc
     async def resource_del(self, names: List[str]):
@@ -115,7 +115,7 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_del_force, names)
         except ValueError as e:
             raise RpcValueError(str(e))
-        await self.__class__.data.mutate(self)
+        await self.data.mutate()
 
     @rpc
     async def resource_track(self, names: List[str]):
@@ -127,7 +127,7 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_track, names)
         except ValueError as e:
             raise RpcValueError(str(e))
-        await self.__class__.data.mutate(self)
+        await self.data.mutate()
 
     @rpc
     async def resource_untrack(self, names: List[str]):
@@ -139,7 +139,7 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_untrack_force, names)
         except ValueError as e:
             raise RpcValueError(str(e))
-        await self.__class__.data.mutate(self)
+        await self.data.mutate()
 
     @rpc
     async def resource_to_asset(self, names: List[str]):
@@ -155,7 +155,7 @@ class DevAssetsManager(BaseTopic):
         except ValueError as e:
             raise RpcValueError(str(e))
 
-        await self.__class__.data.mutate(self)
+        await self.data.mutate()
 
     @rpc
     async def asset_add(self, name: str):
@@ -171,7 +171,7 @@ class DevAssetsManager(BaseTopic):
         except ValueError as e:
             raise RpcValueError(str(e))
 
-        await self.__class__.data.mutate(self)
+        await self.data.mutate()
 
     @rpc
     async def asset_del(self, names: List[str]):
@@ -187,7 +187,7 @@ class DevAssetsManager(BaseTopic):
         except ValueError as e:
             raise RpcValueError(str(e))
 
-        await self.__class__.data.mutate(self)
+        await self.data.mutate()
 
     @rpc
     async def resource_rename(self, old_name: str, new_name: str):
@@ -199,7 +199,7 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_rename, old_name, new_name)
         except ValueError as e:
             raise RpcValueError(str(e))
-        await self.__class__.data.mutate(self)
+        await self.data.mutate()
 
     @rpc
     async def asset_rename(self, old_name: str, new_name: str):
@@ -212,4 +212,4 @@ class DevAssetsManager(BaseTopic):
         except ValueError as e:
             raise RpcValueError(str(e))
 
-        await self.__class__.data.mutate(self)
+        await self.data.mutate()

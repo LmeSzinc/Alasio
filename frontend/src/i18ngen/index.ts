@@ -6,6 +6,7 @@ import * as DevTool from './DevTool';
 import * as Input from './Input';
 import * as Language from './Language';
 import * as Mod from './Mod';
+import * as Scheduler from './Scheduler';
 import * as WebsocketTest from './WebsocketTest';
 
 export const t = {
@@ -16,6 +17,7 @@ export const t = {
   Input,
   Language,
   Mod,
+  Scheduler,
   WebsocketTest,
 };
 export * from './constants';

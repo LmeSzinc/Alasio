@@ -1,10 +1,10 @@
 <script lang="ts">
   import { Indicator, type DropIndicatorState } from "$lib/components/dnd";
+  import { t } from "$lib/i18n";
   import { cn } from "$lib/utils";
   import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
   import { GripVertical } from "@lucide/svelte";
   import ConfigItem, { type Config } from "./ConfigItem.svelte";
-  import { t } from "$lib/i18n";
 
   export type ConfigGroupData = {
     id: string;
@@ -16,9 +16,10 @@
     group: ConfigGroupData;
     dropIndicator?: DropIndicatorState | null;
     onCopy?: (config: Config) => void;
+    onRename?: (config: Config) => void;
     onDelete?: (config: Config) => void;
   };
-  let { group, dropIndicator = null, onCopy, onDelete }: Props = $props();
+  let { group, dropIndicator = null, onCopy, onRename, onDelete }: Props = $props();
 
   const dndData = $derived({
     id: group.id,
@@ -35,7 +36,7 @@
 
 <div use:setDraggableNode use:setDroppableNode data-dragging={isDragging.current} class="drag-placeholder relative">
   <div class="group-container relative rounded-lg p-3 pt-4">
-    <div class="z-2 absolute -top-2 left-6 flex items-center">
+    <div class="absolute -top-2 left-6 z-2 flex items-center">
       <!-- icon and text cover the border -->
       <span class="text-muted-foreground bg-background pl-2 text-xs">
         {t.ConfigScan.SchedulerGroup({ n: group.gid })}
@@ -52,7 +53,7 @@
     <div class={cn("space-y-1 transition-colors", { "bg-accent/30 rounded-md": isOver.current })}>
       {#if group.items.length > 0}
         {#each group.items as item (item.id)}
-          <ConfigItem config={item} {dropIndicator} {onCopy} {onDelete} />
+          <ConfigItem config={item} {dropIndicator} {onCopy} {onRename} {onDelete} />
         {/each}
       {:else}
         <div

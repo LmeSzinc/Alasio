@@ -5,6 +5,8 @@
 
 	let {
 		ref = $bindable(null),
+		// MODIFIED: expose viewportRef for auto scroll
+		viewportRef = $bindable(null),
 		class: className,
 		orientation = "vertical",
 		scrollbarXClasses = "",
@@ -15,6 +17,7 @@
 		orientation?: "vertical" | "horizontal" | "both" | undefined;
 		scrollbarXClasses?: string | undefined;
 		scrollbarYClasses?: string | undefined;
+		viewportRef?: HTMLDivElement | null;
 	} = $props();
 </script>
 
@@ -26,6 +29,7 @@
 >
 	<ScrollAreaPrimitive.Viewport
 		data-slot="scroll-area-viewport"
+		bind:ref={viewportRef}
 		class="ring-ring/10 dark:ring-ring/20 dark:outline-ring/40 outline-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] focus-visible:outline-1 focus-visible:ring-4"
 	>
 		{@render children?.()}

@@ -4,13 +4,13 @@ import trio
 from msgspec import Struct
 
 from alasio.backend.locale.accept_language import negotiate_accept_language
+from alasio.backend.reactive.base_rpc import rpc
+from alasio.backend.reactive.event import RpcValueError
+from alasio.backend.reactive.rx_trio import async_reactive, async_reactive_source
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
 from alasio.config.table.scan import validate_config_name
-from alasio.ext.reactive.base_rpc import rpc
-from alasio.ext.reactive.event import RpcValueError
-from alasio.ext.reactive.rx_trio import async_reactive, async_reactive_source
 
 # dict to speedup message backwards from worker to connection
 # key: config_name, value: set of conn_id
@@ -64,7 +64,7 @@ class ConnState(BaseTopic):
         # set
         state: NavState = await self.nav_state
         state.lang = lang
-        await self.__class__.nav_state.mutate(self, state)
+        await self.nav_state.mutate()
 
     async def op_unsub(self):
         await super().op_unsub()
@@ -95,7 +95,7 @@ class ConnState(BaseTopic):
             state: NavState = await self.nav_state
             state.clear()
             # broadcast
-            await self.__class__.nav_state.mutate(self, state)
+            await self.nav_state.mutate()
             return
 
         # check if name is a validate filename
@@ -129,7 +129,7 @@ class ConnState(BaseTopic):
         state.nav_name = ''
 
         # broadcast
-        await self.__class__.nav_state.mutate(self, state)
+        await self.nav_state.mutate()
 
     @rpc
     async def set_nav(self, name: str):
@@ -145,4 +145,4 @@ class ConnState(BaseTopic):
         state.nav_name = name
 
         # broadcast
-        await self.__class__.nav_state.mutate(self, state)
+        await self.nav_state.mutate()

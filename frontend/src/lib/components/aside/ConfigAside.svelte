@@ -6,20 +6,24 @@
   import { useTopic } from "$lib/ws";
   import { Settings } from "@lucide/svelte";
   import ConfigItem from "./ConfigItem.svelte";
-  import type { ConfigLike, ConfigTopicLike } from "./types";
+  import type { ConfigLike, ConfigTopicLike, WORKER_STATUS } from "./types";
 
   // Subscribe to ConfigScan topic
-  const topicClient = useTopic("ConfigScan");
-  const stateClient = useTopic("ConnState");
-  const rpc = stateClient.rpc();
+  const topicClient = useTopic<ConfigTopicLike | undefined>("ConfigScan");
+  const workerClient = useTopic<Record<string, WORKER_STATUS> | undefined>("Worker");
 
   // props
   type $$props = {
-    activeId?: number;
     class?: string;
     onNavigate?: () => void;
   };
-  let { activeId, class: className, onNavigate = () => {} }: $$props = $props();
+  let { class: className, onNavigate = () => {} }: $$props = $props();
+
+  // Easter egg spinning
+  const afspin = $derived.by(() => {
+    const now = new Date();
+    return now.getMonth() === 3 && now.getDate() === 1;
+  });
 
   // UI state
   type ConfigGroupData = {
@@ -31,7 +35,7 @@
 
   // This effect syncs server data with UI state
   $effect(() => {
-    const serverData = topicClient.data as ConfigTopicLike | undefined;
+    const serverData = topicClient.data;
 
     if (!serverData) {
       groups = [];
@@ -62,7 +66,7 @@
   async function handleConfigClick(config: ConfigLike) {
     // push to `/config/{config_name}`, target page will do rpc call
     const encodedConfigName = encodeURIComponent(config.name);
-    await goto(`/config/${encodedConfigName}`);
+    await goto(`/config/${encodedConfigName}/overview`);
     // additional callback
     onNavigate();
   }
@@ -84,9 +88,10 @@
         {#if group.items.length === 1}
           <!-- Single item in group - display directly -->
           {@const item = group.items[0]}
-          {@const variant = activeConfigName === item.name ? "active" : "default"}
+          {@const active = activeConfigName === item.name}
+          {@const status = workerClient.data?.[item.name] ?? "idle"}
           <div role="listitem" class="px-1">
-            <ConfigItem config={item} {variant} onclick={handleConfigClick} />
+            <ConfigItem config={item} {active} {status} {afspin} onclick={handleConfigClick} />
           </div>
         {:else if group.items.length > 1}
           <!-- Multiple items in group - display with border -->
@@ -97,9 +102,10 @@
           >
             {#each group.items as item (item.id)}
               <!-- Items in vertical layout -->
-              {@const variant = activeConfigName === item.name ? "active" : "default"}
+              {@const active = activeConfigName === item.name}
+              {@const status = workerClient.data?.[item.name] ?? "idle"}
               <div role="listitem">
-                <ConfigItem config={item} {variant} onclick={handleConfigClick} />
+                <ConfigItem config={item} {active} {status} {afspin} onclick={handleConfigClick} />
               </div>
             {/each}
           </div>

@@ -5,7 +5,11 @@
   let { children } = $props();
 </script>
 
-<AppHeader>
-  <h1 class="w-full text-center text-lg">{t.Auth.Login()}</h1>
-</AppHeader>
-{@render children()}
+<div class="flex min-h-screen flex-col">
+  <AppHeader>
+    <h1 class="w-full text-center text-lg">{t.Auth.Login()}</h1>
+  </AppHeader>
+  <div class="dotbg flex-1">
+    {@render children()}
+  </div>
+</div>

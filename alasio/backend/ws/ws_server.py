@@ -6,10 +6,10 @@ from msgspec import DecodeError, EncodeError, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from alasio.backend.locale.accept_language import negotiate_accept_language
+from alasio.backend.reactive.event import AccessDenied, RequestEvent, ResponseEvent
+from alasio.backend.reactive.safeid import SafeIDGenerator
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
-from alasio.ext.reactive.event import AccessDenied, RequestEvent, ResponseEvent
-from alasio.ext.reactive.safeid import SafeIDGenerator
 from alasio.logger import logger
 
 TRIO_CHANNEL_ERRORS = (trio.BrokenResourceError, trio.BusyResourceError, trio.ClosedResourceError, trio.EndOfChannel)
@@ -124,7 +124,7 @@ class WebsocketTopicServer:
             # start 4 async tasks, sender, receiver, job handler, heartbeat handler
 
             # send buffer, set send buffer first
-            self.send_buffer, recv = trio.open_memory_channel(32)
+            self.send_buffer, recv = trio.open_memory_channel(64)
             nursery.start_soon(self.task_send, recv)
 
             # recv buffer
@@ -204,6 +204,16 @@ class WebsocketTopicServer:
         """
         try:
             await self.send_buffer.send(data)
+        except TRIO_CHANNEL_ERRORS:
+            # buffer closed
+            pass
+
+    def send_nowait(self, data: ResponseEvent):
+        """
+        Send an event to send buffer without blocking
+        """
+        try:
+            self.send_buffer.send_nowait(data)
         except TRIO_CHANNEL_ERRORS:
             # buffer closed
             pass

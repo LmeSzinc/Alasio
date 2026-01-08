@@ -1,44 +1,24 @@
-<script lang="ts" module>
-  import { tv, type VariantProps } from "tailwind-variants";
-
-  export const badgeVariants = tv({
-    base: "focus:ring-ring flex w-full cursor-pointer flex-col items-center py-1.5 rounded-md transition-colors",
-    variants: {
-      variant: {
-        default: "hover:bg-accent hover:text-primary text-foreground/70",
-        active: "bg-primary hover:bg-primary text-primary-foreground/85",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-    },
-  });
-  export type ItemVariant = VariantProps<typeof badgeVariants>["variant"];
-</script>
-
 <script lang="ts">
   import { cn } from "$lib/utils.js";
-  import { Play } from "@lucide/svelte";
-  import type { ConfigLike } from "./types";
+  import ConfigStatus from "./ConfigStatus.svelte";
+  import ModIcon from "./ModIcon.svelte";
+  import { useWorkerStatus } from "./status.svelte";
+  import type { ConfigLike, WORKER_STATUS } from "./types";
 
   // props
   type Props<T extends ConfigLike = ConfigLike> = {
     config: T;
-    variant?: ItemVariant;
+    status?: WORKER_STATUS;
+    active?: boolean;
     class?: string;
     onclick?: (config: T) => void;
+    afspin?: boolean;
   };
-  let { config, variant = "default", class: className, onclick }: Props = $props();
+  let { config, status = "idle", active = false, class: className, onclick, afspin = false }: Props = $props();
 
-  // icon handing
-  let iconError = $state(false);
-  $effect(() => {
-    // Reset iconError when config.mod changes
-    iconError = false;
-  });
-  function handleIconError() {
-    iconError = true;
-  }
+  const displayStatus = useWorkerStatus(() => status);
+  const RUNNING_STATUSES: WORKER_STATUS[] = ["running", "scheduler-stopping", "scheduler-waiting"];
+  const spin = $derived(afspin && RUNNING_STATUSES.includes(displayStatus.value));
 
   // callbacks
   function handleClick() {
@@ -47,23 +27,22 @@
 </script>
 
 <button
-  class={cn(badgeVariants({ variant }), className)}
+  class={cn(
+    "focus:ring-ring flex w-16 cursor-pointer flex-col items-center rounded-md py-1.5 transition-colors",
+    active
+      ? "bg-primary hover:bg-primary text-primary-foreground/85"
+      : "hover:bg-accent hover:text-primary text-foreground/70",
+    className,
+  )}
   onclick={handleClick}
   disabled={!onclick}
   aria-label="Open configuration: {config.name}"
   title={config.name}
 >
-  {#if config.mod && !iconError}
-    <img
-      src="/static/icon/{config.mod}.svg"
-      alt=""
-      role="presentation"
-      class="h-8 w-8 object-contain"
-      onerror={handleIconError}
-    />
-  {:else}
-    <Play class="h-8 w-8" strokeWidth="1.5" aria-hidden="true" />
-  {/if}
+  <div class="relative">
+    <ModIcon mod={config.mod} afspin={spin} />
+    <ConfigStatus status={displayStatus.value} {active} class="absolute -right-1 bottom-0" />
+  </div>
   <span class="line-clamp-2 text-center text-xs break-all" aria-hidden="true">
     {config.name}
   </span>

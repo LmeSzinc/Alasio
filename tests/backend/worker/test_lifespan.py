@@ -4,6 +4,7 @@ WorkerManager 生命周期测试
 测试 worker 的启动、停止和状态管理等基本功能
 """
 import multiprocessing
+import threading
 import time
 
 import pytest
@@ -37,6 +38,28 @@ def assert_worker_gone(workers):
     names = {p.name for p in children}
     remaining = target_names.intersection(names)
     assert not remaining, f"Worker processes still alive: {remaining}. Active: {names}"
+
+
+def assert_recv_thread_gone(configs):
+    """
+    Assert that no recv thread exists for the given configs
+
+    Args:
+        configs (list[str]): List of config names to check
+    """
+    target_names = {f"WorkerRecv-{c}" for c in configs}
+    # Give it a bit of time to cleanup
+    for _ in range(20):
+        threads = threading.enumerate()
+        names = {t.name for t in threads}
+        if not target_names.intersection(names):
+            return
+        time.sleep(0.05)
+
+    threads = threading.enumerate()
+    names = {t.name for t in threads}
+    remaining = target_names.intersection(names)
+    assert not remaining, f"Worker recv threads still alive: {remaining}"
 
 
 @pytest.fixture
@@ -398,17 +421,40 @@ class TestResourceManagement:
         # Check no process leak
         assert_worker_gone(workers)
 
+    def test_no_thread_leak(self, manager):
+        """测试没有线程泄漏"""
+        config = 'test_thread_leak'
+
+        # Start worker
+        success, _ = manager.worker_start('WorkerTestInfinite', config)
+        assert success
+        state = manager.state[config]
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+
+        # Verify thread exists
+        threads = threading.enumerate()
+        names = {t.name for t in threads}
+        assert f"WorkerRecv-{config}" in names
+
+        # Force kill
+        manager.worker_force_kill(config)
+
+        # Verify thread gone
+        assert_recv_thread_gone([config])
+
     def test_repeated_start_stop_no_leak(self, manager):
         """测试重复启停不泄漏"""
+        config = 'test_cycle'
+
         for cycle in range(3):
-            success, _ = manager.worker_start('WorkerTestRun3', 'test_cycle')
+            success, _ = manager.worker_start('WorkerTestRun3', config)
             assert success, f"Failed at cycle {cycle}"
 
-            state = manager.state['test_cycle']
+            state = manager.state[config]
             state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
             if cycle % 2 == 0:
-                manager.worker_force_kill('test_cycle')
+                manager.worker_force_kill(config)
                 time.sleep(0.2)
             else:
                 # 快速推进到完成
@@ -424,6 +470,7 @@ class TestResourceManagement:
         # Verify no leaks
         assert len(manager.state) <= 1, "State leak after repeated cycles"
         assert_worker_gone([state])
+        assert_recv_thread_gone([config])
 
 
 # ============================================================================
@@ -435,16 +482,18 @@ class TestManagerLifecycle:
 
     def test_manager_close_with_running_workers(self):
         """测试关闭运行中的 manager"""
+        WorkerManager.singleton_clear()
         manager = WorkerManager()
 
         # Start workers
-        for i in range(3):
-            success, _ = manager.worker_start('WorkerTestInfinite', f'test_close_{i}')
+        configs = [f'test_close_{i}' for i in range(3)]
+        for config in configs:
+            success, _ = manager.worker_start('WorkerTestInfinite', config)
             assert success
 
         # 等待所有启动
-        for i in range(3):
-            state = manager.state[f'test_close_{i}']
+        for config in configs:
+            state = manager.state[config]
             state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         workers = list(manager.state.values())
@@ -455,13 +504,15 @@ class TestManagerLifecycle:
         # 等待所有停止
         for _ in AssertTimeout(3.0):
             with _:
-                for i in range(3):
-                    if f'test_close_{i}' in manager.state:
-                        state = manager.state[f'test_close_{i}']
+                for config in configs:
+                    if config in manager.state:
+                        state = manager.state[config]
                         assert not state.process or not state.process.is_alive()
 
         # Check no process leak
         assert_worker_gone(workers)
+        # Check no thread leak
+        assert_recv_thread_gone(configs)
 
     def test_manager_close_idempotent(self):
         """测试 close 可以多次调用"""

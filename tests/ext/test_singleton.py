@@ -48,8 +48,8 @@ def cleanup_singletons():
     # Teardown code: executed after each test
     BaseService.singleton_clear()
     SubService.singleton_clear()
-    NamedService.singleton_clear_all()
-    SubNamedService.singleton_clear_all()
+    NamedService.singleton_clear()
+    SubNamedService.singleton_clear()
 
 
 # ==============================================================================
@@ -213,7 +213,7 @@ class TestSingletonNamed:
         instance_a1 = NamedService("A")
         instance_b1 = NamedService("B")
 
-        NamedService.singleton_clear_all()
+        NamedService.singleton_clear()
 
         instance_a2 = NamedService("A")
         instance_b2 = NamedService("B")
@@ -255,7 +255,7 @@ class TestSingletonNamed:
         t1.join(timeout=1)
         t2.join(timeout=1)
 
-        SlowInitNamedService.singleton_clear_all()  # Cleanup
+        SlowInitNamedService.singleton_clear()  # Cleanup
 
         assert init_call_count == 1, "The __init__ method was called more than once for the same name."
         assert len(instances_from_threads) == 2, "Both threads should have returned an instance."

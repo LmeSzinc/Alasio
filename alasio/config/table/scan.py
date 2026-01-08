@@ -4,6 +4,7 @@ from typing import Union
 
 import msgspec
 
+from alasio.backend.reactive.event import RpcValueError
 from alasio.config.table.base import AlasioConfigDB, AlasioGuiDB
 from alasio.config.table.key import AlasioKeyTable
 from alasio.db.conn import SQLITE_POOL
@@ -11,7 +12,6 @@ from alasio.ext import env
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.ext.path.validate import validate_filename
 from alasio.ext.pool import WORKER_POOL
-from alasio.ext.reactive.event import RpcValueError
 from alasio.logger import logger
 
 PROTECTED_NAMES = {'gui', 'template'}
@@ -295,21 +295,21 @@ class ScanTable(AlasioGuiDB):
             for name in list_record:
                 if name not in local:
                     # not exist
-                    logger.info(f'ConfigScan: Config disappear: {record[name]}')
+                    logger.info(f'ConfigScan: Config disappear: "{record[name]}"')
                     self.delete_row(record[name], _cursor_=c)
                     record.pop(name, None)
                     continue
                 row = record[name]
                 if not row.mod:
                     # empty mod, this shouldn't happen
-                    logger.info(f'ConfigScan: Config has empty mod: {record[name]}')
+                    logger.info(f'ConfigScan: Config has empty mod: "{record[name]}"')
                     self.delete_row(record[name], _cursor_=c)
                     record.pop(name, None)
                     continue
                 local_row = local[name]
                 if row.mod != local_row.mod:
                     # mod changed
-                    logger.info(f'ConfigScan: Config mod changed to {local_row.mod}: {record[name]}')
+                    logger.info(f'ConfigScan: Config "{record[name]}" changed to mod "{local_row.mod}"')
                     row.mod = local_row.mod
                     self.update_row(row, updates='mod', _cursor_=c)
                     continue
@@ -333,7 +333,7 @@ class ScanTable(AlasioGuiDB):
                 gid += 1
                 iid = 1
                 new = ConfigInfo(name=row.name, mod=row.mod, gid=gid, iid=iid)
-                logger.info(f'ConfigScan: Config appear: {new}')
+                logger.info(f'ConfigScan: Config appear: "{new}"')
                 self.insert_row(new, _cursor_=c)
                 record[row.name] = new
 
@@ -363,7 +363,7 @@ class ScanTable(AlasioGuiDB):
             raise RpcValueError(f'Config file to add already exists {file}')
 
         # create
-        logger.info(f'config_add: name={name}, mod={mod}')
+        logger.info(f'config_add: name="{name}", mod="{mod}"')
         table = AlasioKeyTable(name)
         table.mod_set(mod)
 
@@ -383,9 +383,49 @@ class ScanTable(AlasioGuiDB):
             raise RpcValueError(error)
 
         # delete
-        logger.info(f'config_del: name={name}')
+        logger.info(f'config_del: name="{name}"')
         file = AlasioConfigDB.config_file(name)
         SQLITE_POOL.delete_file(file)
+
+    def config_rename(self, old_name, new_name):
+        """
+        Rename a config file
+
+        Args:
+            old_name (str):
+            new_name (str):
+        """
+        error = validate_config_name(old_name)
+        if error:
+            raise RpcValueError(error)
+        error = validate_config_name(new_name)
+        if error:
+            raise RpcValueError(error)
+
+        if old_name == new_name:
+            raise RpcValueError(f'new_name is the same as old_name: "{new_name}"')
+        old_file = AlasioConfigDB.config_file(old_name)
+        new_file = AlasioConfigDB.config_file(new_name)
+        if not old_file.exists():
+            raise RpcValueError(f'Config file to rename does not exist: {old_file}')
+        if new_file.exists():
+            raise RpcValueError(f'Config file with new name already exists: {new_file}')
+
+        # rename
+        logger.info(f'config_rename: old_name="{old_name}", new_name="{new_name}"')
+        try:
+            SQLITE_POOL.rename_file(old_file, new_file)
+        except FileNotFoundError:
+            raise RpcValueError(f'Config file to rename does not exist: {old_file}')
+        except FileExistsError:
+            raise RpcValueError(f'Config file with new name already exists: {new_file}')
+
+        # update scan table
+        with self.cursor() as c:
+            row = self.select_one(name=old_name, _cursor_=c)
+            if row is not None:
+                row.name = new_name
+                self.upsert_row(row, updates='name')
 
     def config_copy(self, source, target):
         """
@@ -403,7 +443,7 @@ class ScanTable(AlasioGuiDB):
             raise RpcValueError(error)
 
         if source == target:
-            raise RpcValueError(f'Target is the same as source: {target}')
+            raise RpcValueError(f'Target is the same as source: "{target}"')
         source_file = AlasioConfigDB.config_file(source)
         target_file = AlasioConfigDB.config_file(target)
         if target_file.exists():
@@ -414,7 +454,7 @@ class ScanTable(AlasioGuiDB):
             content = atomic_read_bytes(source_file)
         except FileNotFoundError:
             raise RpcValueError(f'Source file to copy not found: {source_file}') from None
-        logger.info(f'config_copy: source={source}, target={target}')
+        logger.info(f'config_copy: source="{source}", target="{target}"')
         atomic_write(target_file, content)
 
     def config_dnd(self, configs):

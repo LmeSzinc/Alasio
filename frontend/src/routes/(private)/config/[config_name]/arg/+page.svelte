@@ -1,22 +1,16 @@
 <script lang="ts">
   import ArgGroups from "$lib/components/arg/ArgGroups.svelte";
   import type { ArgData } from "$lib/components/arg/utils.svelte";
-  import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
-
-  // --- Props Definition (Svelte 5 Runes) ---
-  type $$props = {
-    indicateCard?: string;
-    class?: string;
-  };
-  let { indicateCard, class: className }: $$props = $props();
+  import { getContext } from "svelte";
+  import UIState from "../state.svelte";
 
   // --- WebSocket & RPC Setup ---
   type ConfigArgData = Record<string, Record<string, ArgData>>;
   const topicClient = useTopic<ConfigArgData>("ConfigArg");
   const rpc = topicClient.rpc();
 
-  // --- Reactive Logic (Svelte 5 Runes) ---
+  const ui = getContext<UIState>("ui_state");
 
   // --- Event Handlers (passed down to ArgGroups) ---
   function handleEdit(data: ArgData) {
@@ -37,8 +31,8 @@
   }
 </script>
 
-<div class={cn("my-4 w-full", className)}>
+<div class="my-4 w-full">
   {#if topicClient.data}
-    <ArgGroups bind:data={topicClient.data} {indicateCard} {handleEdit} {handleReset} />
+    <ArgGroups bind:data={topicClient.data} indicateCard={ui.opened_nav} {handleEdit} {handleReset} />
   {/if}
 </div>

@@ -11,6 +11,14 @@ class Singleton(type):
     Any class using this metaclass will have only one instance.
     Subclasses will have their own unique singleton instance.
     This implementation is thread-safe.
+
+    Usage:
+        class ConfigScanSource(metaclass=Singleton):
+            pass
+        # first call creates new instance
+        source = ConfigScanSource()
+        # second and later calls return the same instance
+        source = ConfigScanSource()
     """
 
     def __init__(cls, name, bases, dct):
@@ -57,6 +65,19 @@ class SingletonNamed(type):
     Instances are created based on the first argument provided to the constructor.
     Each class will have its own separate cache of named instances.
     This implementation is thread-safe.
+
+    Usage:
+        class AlasioConfigDB(metaclass=SingletonNamed):
+            # __init__ must have at least one argument
+            def __init__(self, config_name):
+                self.file = config_name
+
+        # first call creates new instance
+        db = AlasioConfigDB("alas")
+        # second and later calls return the same instance
+        db = AlasioConfigDB("alas")
+        # different input different instance
+        db2 = AlasioConfigDB("alas2")
     """
 
     def __init__(cls, name, bases, dct):
@@ -99,7 +120,7 @@ class SingletonNamed(type):
         except KeyError:
             return False
 
-    def singleton_clear_all(cls):
+    def singleton_clear(cls):
         """
         Remove all instances
         """

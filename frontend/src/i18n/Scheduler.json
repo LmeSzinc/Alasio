@@ -1,0 +1,107 @@
+{
+  "Idle": {
+    "en-US": "Idle",
+    "zh-CN": "空闲",
+    "ja-JP": "待機中",
+    "zh-TW": "空閒",
+    "es-ES": "Inactivo"
+  },
+  "Starting": {
+    "en-US": "Starting",
+    "zh-CN": "启动中",
+    "ja-JP": "起動中",
+    "zh-TW": "啟動中",
+    "es-ES": "Iniciando"
+  },
+  "Running": {
+    "en-US": "Running",
+    "zh-CN": "运行中",
+    "ja-JP": "実行中",
+    "zh-TW": "執行中",
+    "es-ES": "Ejecutando"
+  },
+  "Disconnected": {
+    "en-US": "Disconnected",
+    "zh-CN": "已断开",
+    "ja-JP": "切断",
+    "zh-TW": "已斷開",
+    "es-ES": "Desconectado"
+  },
+  "Error": {
+    "en-US": "Error",
+    "zh-CN": "错误",
+    "ja-JP": "エラー",
+    "zh-TW": "錯誤",
+    "es-ES": "Error"
+  },
+  "SchedulerStopping": {
+    "en-US": "Stopping",
+    "zh-CN": "停止中",
+    "ja-JP": "停止中",
+    "zh-TW": "停止中",
+    "es-ES": "Deteniendo"
+  },
+  "SchedulerWaiting": {
+    "en-US": "Waiting",
+    "zh-CN": "等待中",
+    "ja-JP": "待機中",
+    "zh-TW": "等待中",
+    "es-ES": "Esperando"
+  },
+  "Killing": {
+    "en-US": "Killing",
+    "zh-CN": "终止中",
+    "ja-JP": "終了中",
+    "zh-TW": "終止中",
+    "es-ES": "Terminando"
+  },
+  "ForceKilling": {
+    "en-US": "Force Killing",
+    "zh-CN": "强杀中",
+    "ja-JP": "強制終了中",
+    "zh-TW": "強殺中",
+    "es-ES": "Forzando cierre"
+  },
+  "NoDevice": {
+    "en-US": "No Device",
+    "zh-CN": "无设备",
+    "ja-JP": "デバイスなし",
+    "zh-TW": "無設備",
+    "es-ES": "Sin dispositivo"
+  },
+  "NoTask": {
+    "en-US": "No Task",
+    "zh-CN": "无任务",
+    "ja-JP": "タスクなし",
+    "zh-TW": "無任務",
+    "es-ES": "Sin tarea"
+  },
+  "Start": {
+    "en-US": "Start",
+    "zh-CN": "启动",
+    "ja-JP": "開始",
+    "zh-TW": "啟動",
+    "es-ES": "Iniciar"
+  },
+  "SchedulerStop": {
+    "en-US": "Stop",
+    "zh-CN": "停止",
+    "ja-JP": "停止",
+    "zh-TW": "停止",
+    "es-ES": "Detener"
+  },
+  "SchedulerContinue": {
+    "en-US": "Continue",
+    "zh-CN": "继续",
+    "ja-JP": "継続",
+    "zh-TW": "繼續",
+    "es-ES": "Continuar"
+  },
+  "Kill": {
+    "en-US": "Kill",
+    "zh-CN": "终止",
+    "ja-JP": "終了",
+    "zh-TW": "終止",
+    "es-ES": "Terminar"
+  }
+}

@@ -19,6 +19,8 @@ class ModEntryInfo(Struct):
     # relative path from mod root to config folder,
     # where you have config.index.json, nav.index.json, model.index.json, and all config definitions
     path_config: str = 'module/config'
+    # relative path from mod root to mod scheduler
+    path_main: str = 'module/main.py'
     # relative path from mod root to assets folder
     path_assets: str = 'assets'
     # valid file extension of assets

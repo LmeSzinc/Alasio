@@ -3,11 +3,11 @@ from typing import List
 
 import trio
 
+from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
+from alasio.backend.reactive.base_rpc import rpc
+from alasio.backend.reactive.event import ResponseEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.table.scan import ConfigInfo, DndRequest, ScanTable
-from alasio.ext.reactive.base_msgbus import on_msgbus_global_event
-from alasio.ext.reactive.base_rpc import rpc
-from alasio.ext.reactive.event import ResponseEvent
 from alasio.ext.singleton import Singleton
 
 
@@ -89,6 +89,22 @@ class ConfigScan(BaseTopic):
         # Run the synchronous ScanTable.config_copy in a thread
         scan_table = ScanTable()
         await trio.to_thread.run_sync(scan_table.config_copy, old_name, new_name)
+
+        # Force rescan to update the data and notify observers
+        await ConfigScanSource().scan(force=True)
+
+    @rpc
+    async def config_rename(self, old_name: str, new_name: str):
+        """
+        Rename an existing config.
+
+        Args:
+            old_name (str): Source config name
+            new_name (str): Target config name
+        """
+        # Run the synchronous ScanTable.config_copy in a thread
+        scan_table = ScanTable()
+        await trio.to_thread.run_sync(scan_table.config_rename, old_name, new_name)
 
         # Force rescan to update the data and notify observers
         await ConfigScanSource().scan(force=True)

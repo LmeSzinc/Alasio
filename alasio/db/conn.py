@@ -3,7 +3,7 @@ import sqlite3
 import time
 from threading import Lock
 
-from alasio.ext.path.atomic import atomic_remove
+from alasio.ext.path.atomic import atomic_remove, atomic_rename
 from alasio.logger import logger
 
 
@@ -512,6 +512,30 @@ class SqlitePool:
 
         for pool in all_pool:
             pool.release_all()
+
+    def rename_file(self, old_file, new_file):
+        """
+        Release pool of old_file and rename it.
+
+        Args:
+            old_file (str):
+            new_file (str):
+
+        Returns:
+            bool: If success
+        """
+        with self.create_lock:
+            try:
+                pool = self.all_pool.pop(old_file)
+            except KeyError:
+                # no such pool, no need to release
+                pass
+            else:
+                # Delete within create_lock, because we need to prevent other threads starts using the file
+                pool.release_all()
+
+            # rename file
+            return atomic_rename(old_file, new_file)
 
     def delete_file(self, file):
         """

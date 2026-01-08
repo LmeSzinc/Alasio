@@ -17,7 +17,7 @@ SUNOS = sys.platform.startswith(("sunos", "solaris"))
 AIX = sys.platform.startswith("aix")
 
 # Global variable
-PROJECT_ROOT = PathStr.new(__file__).uppath(3)
+PROJECT_ROOT = PathStr.new('')
 
 
 def set_project_root(root, up=0):
@@ -34,4 +34,5 @@ def set_project_root(root, up=0):
 
 
 # Environ
+ELECTRON_SECRET = os.environ.get("ELECTRON_SECRET", "")
 CHINAC_CLOUDPHONE = os.environ.get("cloudphone", "") == "cloudphone"

@@ -35,7 +35,7 @@
 
   let status: "loading" | "loaded" | "error" = $state("loading");
   let showLoader = $state(false);
-  let loadingTimer: number | undefined;
+  let loadingTimer: ReturnType<typeof setTimeout>;
 
   let containerEl: HTMLDivElement;
   let isIntersecting = $state(false);
@@ -107,7 +107,7 @@
   bind:this={containerEl}
   class={cn(
     "relative flex h-full w-full items-center justify-center",
-    status === "error" && "outline-muted-foreground outline-1 outline-offset-[-1px] outline-dashed",
+    status === "error" && "outline-muted-foreground outline-1 -outline-offset-1 outline-dashed",
     className,
   )}
 >
