@@ -40,7 +40,7 @@
 <div
   class={cn(
     "hover:bg-muted/50 hover:shadow-muted-foreground/15 hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor]",
-    "flex w-fit min-w-[calc(100cqw)] gap-1.5 px-1 font-mono text-xs",
+    "flex w-fit min-w-[calc(100cqw)] gap-0.5 px-1 font-mono text-xs",
     levelClass,
   )}
 >
@@ -51,8 +51,8 @@
       {shortTime}
     </span>
     <span class="text-muted-foreground inline-block shrink-0">|</span>
-    <!-- 5.87rem(86.7px+7.225px) for time and separator + 2 gap + 2 padding x -->
-    <pre class="max-w-[calc(100cqw-7.12rem)] min-w-0 flex-1 wrap-break-word whitespace-pre-wrap">{message}</pre>
+    <!-- 5.87rem(86.7px+7.225px) for time and separator + gap(0.125rem) * 2 + paddingX(0.25rem) * 2 = 6.62rem -->
+    <pre class="max-w-[calc(100cqw-6.62rem)] min-w-0 flex-1 break-all whitespace-pre-wrap">{message}</pre>
   {/if}
 </div>
 {#if exception}

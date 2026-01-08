@@ -35,7 +35,7 @@
 
 <ScrollArea
   class={cn(
-    "bg-card neushadow @container relative flex h-full max-h-screen w-full flex-col gap-1 rounded-lg p-4",
+    "bg-card neushadow @container relative flex h-full max-h-screen w-full flex-col gap-1 rounded-lg px-2.5 py-4",
     className,
   )}
   orientation="both"
