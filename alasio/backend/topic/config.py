@@ -8,6 +8,7 @@ from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import ResponseEvent
 from alasio.backend.reactive.rx_trio import async_reactive_nocache
 from alasio.backend.topic.state import ConnState, NavState
+from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.mod import ConfigSetEvent
@@ -126,7 +127,8 @@ class ConfigArg(BaseTopic):
         # logger.info([success, resp])
         if success:
             # broadcast to all connections
-            await self.msgbus_config_asend(self.topic_name(), config_name, resp)
+            event = ConfigEvent(t=self.topic_name(), c=config_name, v=resp)
+            await self.msgbus_config_asend(event)
         else:
             # rollback self
             key = self.dict_config_to_topic.get((resp.task, resp.group, resp.arg))
@@ -166,4 +168,5 @@ class ConfigArg(BaseTopic):
             return
 
         # broadcast to all connections
-        await self.msgbus_config_asend(self.topic_name(), config_name, resp)
+        event = ConfigEvent(t=self.topic_name(), c=config_name, v=resp)
+        await self.msgbus_config_asend(event)
