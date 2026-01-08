@@ -31,8 +31,16 @@
   }
 </script>
 
-<div class="my-4 w-full">
+<div class="h-full w-full overflow-auto">
   {#if topicClient.data}
-    <ArgGroups bind:data={topicClient.data} indicateCard={ui.card_name} {handleEdit} {handleReset} />
+    <ArgGroups
+      class="my-4 h-full w-full px-2.5"
+      bind:data={topicClient.data}
+      indicateCard={ui.card_name}
+      {handleEdit}
+      {handleReset}
+    />
+  {:else}
+    <div class="text-muted-foreground text-center text-sm">No data</div>
   {/if}
 </div>

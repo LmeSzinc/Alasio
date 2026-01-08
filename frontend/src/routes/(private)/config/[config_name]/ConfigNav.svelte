@@ -73,36 +73,34 @@
 </script>
 
 <nav class={cn("shadow-custom-complex w-full space-y-2 px-3", className)} aria-label="Configuration Navigation">
-  <ScrollArea class="h-full w-full">
-    {#if navItems.length}
-      <!-- 
+  {#if navItems.length}
+    <!-- 
           Accordion's value is bound to our internal `nav_name` state.
           When a user clicks a trigger, `nav_name` is updated.
         -->
-      <Accordion type="single" class="w-full" bind:value={opened_nav}>
-        {#each navItems as nav (nav.key)}
-          <AccordionItem value={nav.key}>
-            <AccordionTrigger class="text-md capitalize">{nav.name}</AccordionTrigger>
-            <AccordionContent class="pl-2">
-              <div class="flex flex-col space-y-1">
-                {#each nav.cards as card (card.key)}
-                  <Button
-                    variant={card.key === card_name
-                      ? "default" // Indicated by parent: Primary theme color
-                      : "ghost"}
-                    class="h-9 w-full justify-start px-3"
-                    onclick={() => handleCardClick(nav.key, card.key)}
-                  >
-                    {card.name}
-                  </Button>
-                {/each}
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        {/each}
-      </Accordion>
-    {:else}
-      <p>No data</p>
-    {/if}
-  </ScrollArea>
+    <Accordion type="single" class="w-full" bind:value={opened_nav}>
+      {#each navItems as nav (nav.key)}
+        <AccordionItem value={nav.key}>
+          <AccordionTrigger class="text-md capitalize">{nav.name}</AccordionTrigger>
+          <AccordionContent class="pl-2">
+            <div class="flex flex-col space-y-1">
+              {#each nav.cards as card (card.key)}
+                <Button
+                  variant={card.key === card_name
+                    ? "default" // Indicated by parent: Primary theme color
+                    : "ghost"}
+                  class="h-9 w-full justify-start px-3"
+                  onclick={() => handleCardClick(nav.key, card.key)}
+                >
+                  {card.name}
+                </Button>
+              {/each}
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      {/each}
+    </Accordion>
+  {:else}
+    <p>No data</p>
+  {/if}
 </nav>

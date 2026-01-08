@@ -104,10 +104,10 @@
   });
 </script>
 
-<div class="container mx-auto space-y-8 p-6">
+<div class="container mx-auto flex h-full w-full flex-col gap-4 overflow-auto p-4">
   <h1 class="text-3xl font-bold">Scheduler Component Debug Page</h1>
 
-  <div class="grid gap-6 md:grid-cols-2">
+  <div class="grid gap-4 md:grid-cols-2">
     <!-- Selected Config Preview -->
     <Card.Root class="neushadow border-none">
       <Card.Header>
@@ -149,7 +149,7 @@
   </div>
 
   <!-- All Status Combinations -->
-  <div class="space-y-6">
+  <div class="flex flex-col gap-4">
     <!-- Normal task list -->
     <Card.Root class="neushadow border-none">
       <Card.Header>

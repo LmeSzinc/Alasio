@@ -3,6 +3,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Help } from "$lib/components/ui/help";
   import { t } from "$lib/i18n";
+  import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
   import { Loader2, Plus } from "@lucide/svelte";
   import type { ConfigGroupData } from "./ConfigGroup.svelte";
@@ -307,8 +308,8 @@
   });
 </script>
 
-<div class={className}>
-  <header class="mx-4 my-6 flex items-center justify-between">
+<div class={cn("h-full w-full overflow-auto", className)}>
+  <header class="mx-4 mb-6 flex items-center justify-between">
     <h1 class="text-3xl font-bold tracking-tight">{t.ConfigScan.ConfigManager()}</h1>
     <Button onclick={handleAddConfig} class="flex items-center gap-2">
       <Plus class="h-4 w-4" />

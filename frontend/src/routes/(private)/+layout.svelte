@@ -56,7 +56,7 @@
         <!-- 1.2.1 Aside and nav -->
         <!-- If media<xl, aside and nav show as one sidebar -->
         <!-- If media>=xl, aside and nav show as standalone cards -->
-        <div class="aside-container aside-shadow hidden md:flex">
+        <div class="aside-container aside-shadow hidden shrink-0 md:flex">
           <div class={cn("aside-item bg-card border-border border-r", isXlScreen && "neushadow")}>
             <ConfigAside class="pt-1 xl:pt-0" />
           </div>
@@ -78,7 +78,7 @@
           </Sheet.Content>
         </Sheet.Root>
         <!-- 1.2.3 Content -->
-        <main class="app-content flex-1 overflow-auto px-2.5">
+        <main class="app-content min-w-0 flex-1 overflow-visible">
           {@render children()}
         </main>
       </div>
@@ -87,7 +87,7 @@
 {:else}
   <!-- 2. Error page -->
   <div class="dotbg bg-background fixed inset-0 z-50 flex items-center justify-center">
-    <Card.Root class="neushadow border-none animate-in fade-in-0 zoom-in-95 mx-4 w-full max-w-md">
+    <Card.Root class="neushadow animate-in fade-in-0 zoom-in-95 mx-4 w-full max-w-md border-none">
       <Card.Header class="text-center">
         <Card.Title class="text-2xl font-semibold">Oops!</Card.Title>
         <Card.Description>Authorization failed</Card.Description>

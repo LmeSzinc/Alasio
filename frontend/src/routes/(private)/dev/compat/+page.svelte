@@ -35,8 +35,8 @@
   });
 </script>
 
-<ScrollArea class="h-full w-full">
-  <div class={cn("w-full space-y-8 p-6", className)}>
+<div class="h-full w-full overflow-auto p-4">
+  <div class={cn("w-full space-y-4", className)}>
     <!-- Page Header -->
     <div class="space-y-2">
       <h1 class="text-3xl font-bold">Browser Compatibility Test</h1>
@@ -526,4 +526,4 @@
       </Card.Content>
     </Card.Root>
   </div>
-</ScrollArea>
+</div>

@@ -2,6 +2,7 @@
   import { goto } from "$app/navigation";
   import type { WORKER_STATUS } from "$lib/components/aside/types";
   import { Scheduler, type TaskQueueData } from "$lib/components/scheduler";
+  import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { NavContext } from "$lib/slotcontext.svelte";
   import { useTopic } from "$lib/ws";
   import { onDestroy, setContext } from "svelte";
@@ -82,8 +83,10 @@
 </script>
 
 {#snippet nav()}
-  <Scheduler {config_name} {status} {taskRunning} {taskNext} {onOverviewClick} {onDeviceClick} />
-  <ConfigNav nav_name={ui.nav_name} card_name={ui.card_name} bind:opened_nav={ui.opened_nav} {onCardClick} />
+  <ScrollArea class="h-full w-full">
+    <Scheduler {config_name} {status} {taskRunning} {taskNext} {onOverviewClick} {onDeviceClick} />
+    <ConfigNav nav_name={ui.nav_name} card_name={ui.card_name} bind:opened_nav={ui.opened_nav} {onCardClick} />
+  </ScrollArea>
 {/snippet}
 
 {@render children()}

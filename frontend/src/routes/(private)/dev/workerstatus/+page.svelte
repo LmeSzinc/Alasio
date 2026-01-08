@@ -85,10 +85,10 @@
   };
 </script>
 
-<div class="container mx-auto space-y-8 p-6">
+<div class="container h-full w-full mx-auto flex flex-col gap-4 overflow-auto p-4">
   <h1 class="text-3xl font-bold">ConfigItem Debug Page</h1>
 
-  <div class="grid gap-6 md:grid-cols-2">
+  <div class="grid gap-4 md:grid-cols-2">
     <!-- Part 2: Single Config Item Preview (Left) -->
     <Card.Root class="neushadow border-none">
       <Card.Header>

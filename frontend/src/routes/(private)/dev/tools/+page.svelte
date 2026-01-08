@@ -12,12 +12,12 @@
   const restartRpc = topicClient.rpc();
 </script>
 
-<div class="container mx-auto p-6">
-  <header class="mb-8">
+<div class="container mx-auto flex h-full w-full flex-col gap-4 overflow-auto p-4">
+  <header class="flex items-center justify-between">
     <h1 class="text-3xl font-bold tracking-tight">{t.DevTool.SystemTool()}</h1>
   </header>
 
-  <div class="flex gap-4">
+  <div class="flex flex-wrap gap-4">
     <!-- Restart Backend Card -->
     <Card class="neushadow min-w-64 border-0">
       <CardHeader>

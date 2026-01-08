@@ -112,14 +112,14 @@
   });
 </script>
 
-<div class="mx-auto p-2">
-  <header class="mb-8 flex items-center justify-between">
+<div class="mx-auto flex h-full w-full flex-col gap-4 overflow-auto p-4">
+  <header class="flex items-center justify-between">
     <h1 class="text-3xl font-bold tracking-tight">{t.WebsocketTest.Title()}</h1>
   </header>
 
-  <div class="grid grid-cols-1 gap-8 lg:grid-cols-2">
+  <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
     <!-- Left Column: Command Panel -->
-    <div class="space-y-6">
+    <div class="gap-4">
       <Card.Root class="relative">
         <Badge variant={badgeVariant} class="absolute top-4 right-4 capitalize transition-colors">
           {websocketClient.connectionState}
@@ -128,7 +128,7 @@
           <Card.Title>{t.WebsocketTest.SendCommand()}</Card.Title>
           <Card.Description>{t.WebsocketTest.SendCommandDesc()}</Card.Description>
         </Card.Header>
-        <Card.Content class="space-y-6">
+        <Card.Content class="gap-4">
           <!-- Topic Management -->
           <div class="grid gap-2">
             <Label for="topic">{t.WebsocketTest.Topic()}</Label>
@@ -186,7 +186,6 @@
 
     <!-- Right Column: Subscriptions -->
     <div class="space-y-4">
-      <h2 class="text-2xl font-semibold tracking-tight">{t.WebsocketTest.SubscribedTopicsData()}</h2>
       {#if sortedTopicsData.length === 0}
         <div class="rounded-lg border-2 border-dashed py-10 text-center">
           <p class="text-muted-foreground">{t.WebsocketTest.NoDataReceived()}</p>
@@ -196,7 +195,7 @@
         <!-- This container arranges the cards -->
         <div class="space-y-4">
           {#each sortedTopicsData as [topicName, data]}
-            <Card.Root class="flex max-h-128 w-full flex-col">
+            <Card.Root class="flex max-h-80 w-full flex-col">
               <Card.Header class="flex flex-row items-center justify-between">
                 <Card.Title>{topicName}</Card.Title>
                 <div class="flex items-center gap-2">

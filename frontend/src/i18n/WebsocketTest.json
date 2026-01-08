@@ -118,13 +118,6 @@
     "zh-TW": "RPC 呼叫",
     "es-ES": "Llamada RPC"
   },
-  "SubscribedTopicsData": {
-    "en-US": "Subscribed Topics Data",
-    "zh-CN": "已订阅主题数据",
-    "ja-JP": "購読中のトピックデータ",
-    "zh-TW": "已訂閱主題數據",
-    "es-ES": "Datos de Temas Suscritos"
-  },
   "NoDataReceived": {
     "en-US": "No data received yet.",
     "zh-CN": "尚未接收到数据。",
