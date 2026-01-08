@@ -3,6 +3,7 @@ from typing import Optional
 
 import msgspec
 import trio
+from trio._core import TrioToken
 from typing_extensions import Self
 
 from alasio.backend.reactive.event import ResponseEvent
@@ -59,15 +60,15 @@ class LogCache(metaclass=SingletonNamed):
 
     def __init__(self, config_name):
         self.config_name = config_name
-        self.trio_token: "TrioToken | None" = None
+        self.trio_token: "Optional[TrioToken]" = None
 
         # 1. 历史缓存：所有产生的 log 都会在这里
         # 固定大小 500, 前端最多显示 500 行
-        self.cache: "deque[ResponseEvent]" = deque(maxlen=500)
+        self._cache: "deque[ResponseEvent]" = deque(maxlen=500)
 
         # 2. 实时中转站：仅在有 WS 订阅时使用
         # 设置 maxlen 是为了防止后端处理不过来时内存爆炸（自动丢弃最旧的实时消息）
-        self._inbox: "deque[ResponseEvent]" = deque(maxlen=1000)
+        self._inbox: "deque[ResponseEvent]" = deque(maxlen=500)
 
         # 3. 订阅者集合：存储 log topic
         self._subscribers: "set[BaseTopic]" = set()
@@ -97,11 +98,11 @@ class LogCache(metaclass=SingletonNamed):
                 except trio.RunFinishedError:
                     pass  # 事件循环已关闭
                 except AttributeError:
-                    logger.warning('Failed to broadcast event, trio_token not initialized')
+                    logger.warning('Failed to broadcast log event, trio_token not initialized')
 
         # 2. 推入历史缓存 (Cache)
         # deque.append 在 CPython 中是线程安全的原子操作
-        self.cache.append(response)
+        self._cache.append(response)
 
     def _sync_to_trio(self):
         """
@@ -151,7 +152,7 @@ class LogCache(metaclass=SingletonNamed):
         # 即使子线程在疯狂写入，list() 复制是瞬间完成的。
         # 关键读顺序：先 Cache，后 Inbox。
         # 配合子线程的“先 Inbox 后 Cache”，确保了我们覆盖了所有时间线。
-        snapshot = list(self.cache)  # 历史
+        snapshot = list(self._cache)  # 历史
         pending_copy = list(self._inbox)  # 已经在路上但还没分发的实时消息
 
         # 3. 极速去重逻辑 (Deduplication)

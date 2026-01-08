@@ -60,8 +60,8 @@ async def test_logcache_on_event_no_subscribers():
     cache.on_event(event)
 
     # Check cache has the event
-    assert len(cache.cache) == 1
-    assert cache.cache[0].v == event.v
+    assert len(cache._cache) == 1
+    assert cache._cache[0].v == event.v
 
     # Check inbox is empty (no subscribers)
     assert len(cache._inbox) == 0
@@ -84,7 +84,7 @@ async def test_logcache_on_event_with_subscribers():
     await trio.testing.wait_all_tasks_blocked()
 
     # Check cache has the event
-    assert len(cache.cache) == 1
+    assert len(cache._cache) == 1
 
     # Check server.send_nowait was called
     assert topic.server.send_nowait.call_count >= 1
@@ -231,7 +231,7 @@ async def test_logcache_zero_overhead_idle():
         cache.on_event(event)
 
     # Check that cache is populated but inbox is empty
-    assert len(cache.cache) == 10
+    assert len(cache._cache) == 10
     assert len(cache._inbox) == 0
     # No trio tasks should have been scheduled
 
@@ -252,9 +252,9 @@ async def test_logcache_memory_safety():
     await trio.to_thread.run_sync(send_events_from_thread, cache, events, 0)
 
     # Cache should be limited to maxlen
-    assert len(cache.cache) == 1024
+    assert len(cache._cache) == 500
     # The oldest messages should be dropped, newest retained
-    assert cache.cache[-1].v['t'] == float(num_events - 1)
+    assert cache._cache[-1].v['t'] == float(num_events - 1)
 
 
 @pytest.mark.trio
