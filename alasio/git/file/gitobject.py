@@ -7,38 +7,32 @@ from alasio.git.file.exception import PackBroken
 from alasio.git.file.loose import LoosePath
 from alasio.git.file.pack import PackFile
 from alasio.git.obj.obj import GitLooseObject, GitObject, OBJTYPE_BASIC, parse_objdata
+from alasio.git.stage.base import GitRepoBase
 
 
-class GitObjectManager:
-    def __init__(self, path):
-        """
-        Args:
-            path (str): Absolute path to repo, repo should contain .git folder
-        """
-        self.path: str = path
+class GitObjectManager(GitRepoBase):
+    # key: filepath to pack file, value: PackFile object
+    dict_pack: "dict[os.DirEntry, PackFile]" = {}
+    # LoosePath object to manage loose files
+    loose: LoosePath = None
 
-        # key: filepath to pack file, value: PackFile object
-        self.dict_pack: "dict[os.DirEntry, PackFile]" = {}
-        # LoosePath object to manage loose files
-        self.loose: LoosePath = None
+    # all git objects
+    # key: sha1 of git object, value: GitObject
+    dict_object: "dict[str, GitObject | GitLooseObject]" = {}
+    # git objects that not yet parsed
+    # key: sha1 of git object, value: data in memoryview
+    dict_object_data: "dict[str, memoryview]" = {}
+    # git objects that not yet read
+    # key: sha1 of git object, value: self
+    dict_object_unread: "dict[str, PackFile | LoosePath]" = {}
+    # where git object is from, used for query ofs_delta
+    # key: sha1 of git object, value: sub manager
+    dict_object_from: "dict[str, PackFile | LoosePath]" = {}
 
-        # all git objects
-        # key: sha1 of git object, value: GitObject
-        self.dict_object: "dict[str, GitObject | GitLooseObject]" = {}
-        # git objects that not yet parsed
-        # key: sha1 of git object, value: data in memoryview
-        self.dict_object_data: "dict[str, memoryview]" = {}
-        # git objects that not yet read
-        # key: sha1 of git object, value: self
-        self.dict_object_unread: "dict[str, PackFile | LoosePath]" = {}
-        # where git object is from, used for query ofs_delta
-        # key: sha1 of git object, value: sub manager
-        self.dict_object_from: "dict[str, PackFile | LoosePath]" = {}
-
-        # Skip reading objects with size > skip_size in lazy read
-        # 1MB is balanced value that assume reading from HDD of 100MB/s read and 100 IOPS,
-        # so read 1MB less file read means we can have 1 more file seek
-        self.skip_size: int = 1048576
+    # Skip reading objects with size > skip_size in lazy read
+    # 1MB is balanced value that assume reading from HDD of 100MB/s read and 100 IOPS,
+    # so read 1MB less file read means we can have 1 more file seek
+    skip_size: int = 1048576
 
     def _manager_prepare(self):
         """

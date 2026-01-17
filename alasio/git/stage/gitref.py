@@ -1,4 +1,5 @@
 import os
+from typing import Literal
 
 from msgspec import Struct
 
@@ -6,6 +7,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_remove, atomic_write
 from alasio.ext.path.calc import joinnormpath, subpath_to, to_posix
 from alasio.ext.path.iter import iter_files
+from alasio.git.stage.base import GitRepoBase
 from alasio.logger import logger
 
 
@@ -81,10 +83,7 @@ def parse_packed_refs(content):
     return out
 
 
-class GitRef:
-    # Absolute path to repo, repo should contain .git folder
-    path: str
-
+class GitRef(GitRepoBase):
     @cached_property
     def _packed_refs(self):
         """
@@ -170,6 +169,39 @@ class GitRef:
             return self.ref_get(loose.ref)
         # this shouldn't happen
         logger.error(f'GitRef error, no sha1 nor ref, at file {file}')
+
+    def head_get(self, head: Literal['HEAD', 'ORIG_HEAD'] = None):
+        """
+        Get current git HEAD or ORIG_HEAD
+
+        Args:
+            head: None to get head with fallback, or input specific head
+
+        Returns:
+            str: sha1, or empty string ""
+        """
+        if head is None:
+            heads = ['HEAD', 'ORIG_HEAD']
+        else:
+            heads = [head]
+
+        for head in heads:
+            file = joinnormpath(self.path, f'.git/{head}')
+            try:
+                content = atomic_read_bytes(file)
+                loose = parse_loose_ref(content)
+            except FileNotFoundError:
+                # no head file, try another
+                continue
+            except ValueError as e:
+                logger.error(f'GitRef.head_get error, {e}, at file "{file}"')
+                return ''
+            if loose.sha1:
+                return loose.sha1
+            if loose.ref:
+                return self.ref_get(loose.ref)
+
+        return ''
 
     def ref_set(self, ref, target_sha1='', target_ref=''):
         """

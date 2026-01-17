@@ -2,7 +2,10 @@ import struct
 
 import msgspec
 
+from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
+from alasio.ext.path.calc import joinnormpath
+from alasio.git.stage.base import GitRepoBase
 
 
 class GitIndexBroken(Exception):
@@ -131,23 +134,21 @@ def _gen_extended_flags(skip_worktree, intend_to_add):
     return flags
 
 
-class GitIndex:
-    def __init__(self, file):
-        """
-        Args:
-            file (str): Absolute path to .git/index
-        """
-        self.file = file
-        # all indexed files in workspace
-        # key: (filepath, stage), value: GitIndexEntry object
-        # stage is 0 if not in merge
-        self.dict_entry: "dict[tuple[str, int], GitIndexEntry]" = {}
-        # git index version, 2, 3, 4, or 0 if not loaded
-        self.version = 0
+class GitIndex(GitRepoBase):
+    # all indexed files in workspace
+    # key: (filepath, stage), value: GitIndexEntry object
+    # stage is 0 if not in merge
+    dict_entry: "dict[tuple[str, int], GitIndexEntry]" = {}
+    # git index version, 2, 3, 4, or 0 if not loaded
+    index_version = 0
 
-    def clear_object(self):
+    @cached_property
+    def index_file(self):
+        return joinnormpath(self.path, '.git/index')
+
+    def clear_index_cache(self):
         self.dict_entry = {}
-        self.version = 0
+        self.index_version = 0
 
     def index_read(self, file=None, data=None):
         """
@@ -165,7 +166,7 @@ class GitIndex:
             GitIndexBroken:
         """
         if file is None:
-            file = self.file
+            file = self.index_file
         if data is None:
             data = atomic_read_bytes(file)
 
@@ -176,7 +177,7 @@ class GitIndex:
         # index file must have signature DIRC
         if signature != b'DIRC':
             raise GitIndexBroken(f'Invalid signature: {signature!r}')
-        self.version = version
+        self.index_version = version
 
         data = memoryview(data)
         if version in [2, 3]:
@@ -205,7 +206,7 @@ class GitIndex:
         # 12bytes header
         cursor = 12
         total_len = len(data)
-        has_extended_flag = self.version >= 3
+        has_extended_flag = self.index_version >= 3
 
         for i in range(entry_count):
             # unpack fixed part
@@ -220,7 +221,8 @@ class GitIndex:
 
             if extended:
                 if not has_extended_flag:
-                    raise GitIndexBroken(f'Current version {self.version} should not have extended_flag on entry {i}')
+                    raise GitIndexBroken(
+                        f'Current version {self.index_version} should not have extended_flag on entry {i}')
                 try:
                     extended_flag = unpacker_uint16(data[path_start:path_start + 2])[0]
                 except struct.error:
@@ -363,7 +365,7 @@ class GitIndex:
             version (int): Specify a version to write, None to use current version
         """
         if version is None:
-            version = self.version
+            version = self.index_version
         # prepare content
         if version in [2, 3]:
             data = b''.join(self._gen_v2())
@@ -378,7 +380,7 @@ class GitIndex:
         data += checksum
 
         if file is None:
-            file = self.file
+            file = self.index_file
         # self.index_read(data=data)
         atomic_write(file, data)
 
@@ -396,7 +398,7 @@ class GitIndex:
 
         # header
         entry_count = len(list_entry)
-        yield struct.pack('>4sII', b'DIRC', self.version, entry_count)
+        yield struct.pack('>4sII', b'DIRC', self.index_version, entry_count)
 
         # content
         for entry in list_entry:
@@ -439,7 +441,7 @@ class GitIndex:
 
         # header
         entry_count = len(list_entry)
-        yield struct.pack('>4sII', b'DIRC', self.version, entry_count)
+        yield struct.pack('>4sII', b'DIRC', self.index_version, entry_count)
 
         # content
         prev_path = b''

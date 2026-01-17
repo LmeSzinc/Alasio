@@ -2,9 +2,8 @@ import os
 import stat
 
 from alasio.ext.cache import cached_property
-from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
-from alasio.ext.path.calc import is_abspath, subpath_to, to_posix
+from alasio.ext.path.calc import is_abspath, joinnormpath, subpath_to, to_posix
 from alasio.git.eol import eol_crlf_remove
 from alasio.git.stage.hashobj import blob_hash, encode_loosedata
 from alasio.git.stage.index import GitIndex, GitIndexEntry
@@ -31,21 +30,12 @@ def convert_file_mode(mode):
 
 
 class GitAdd(GitIndex):
-    def __init__(self, path):
-        """
-        Args:
-            path (str): Absolute path to repo, repo should contain .git folder
-        """
-        self.path = PathStr.new(path)
-        # filepath to .git/index
-        file = self.path.joinpath('.git/index')
-        # track if entry modified
-        self.entry_modified = False
-        super().__init__(file)
+    # track if entry modified
+    entry_modified = False
 
     @cached_property
     def exists(self):
-        exists = os.path.exists(self.file)
+        exists = os.path.exists(self.index_file)
         if not exists:
             logger.info(f'GitAdd skipped, not a git repo: {self.path}')
         return exists
@@ -61,7 +51,7 @@ class GitAdd(GitIndex):
             sha1 = sha1.decode()
         folder = sha1[:2]
         file = sha1[2:]
-        return self.path.joinpath(f'.git/objects/{folder}/{file}')
+        return joinnormpath(self.path, f'.git/objects/{folder}/{file}')
 
     def _stage_restore(self, path):
         """
@@ -90,7 +80,7 @@ class GitAdd(GitIndex):
             bool: True if success.
                 False if file not exist or file is the same in staging area
         """
-        abspath = self.path.joinpath(path)
+        abspath = joinnormpath(self.path, path)
         path = to_posix(path)
 
         try:
@@ -199,7 +189,7 @@ class GitAdd(GitIndex):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.exists and self.entry_modified:
-            logger.info(f'stage_add write file: {self.file}')
+            logger.info(f'stage_add write file: {self.index_file}')
             self.index_write()
         self.entry_modified = False
 
