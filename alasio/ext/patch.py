@@ -1,5 +1,6 @@
 # This file is a collection of magic matches to provide consistent behaviour on all deployment
 
+
 def patch_mimetype():
     """
     Patch mimetype db to use the builtin table instead of reading from environment.
@@ -135,7 +136,8 @@ def patch_environ():
 def patch_startup():
     """
     A collection of patches on process startup
-    This function is supposed to be called in entry file (outside of `if __name__ == "__main__":`)
+    This function is supposed to be called in entry file (outside `if __name__ == "__main__":`)
+        so subprocesses can be patched too
 
     It's also recommended to launch with
         python -s -OO gui.py
