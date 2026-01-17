@@ -1,5 +1,6 @@
 import sys
-from typing import Literal
+
+from typing_extensions import Literal
 
 if sys.version_info >= (3, 9):
     def removeprefix(s, prefix):
@@ -137,3 +138,67 @@ def fix_py37_subprocess_communicate():
         return (stdout, stderr)
 
     subprocess.Popen._communicate = _communicate_fixed
+
+
+def patch_threadpool_executor_maxworker():
+    """
+    Backport Python 3.13's default max_workers logic to older Python versions.
+    Applicable for: Python 3.7 ~ 3.12
+
+    py3.7:
+        max_workers = (os.cpu_count() or 1) * 5
+    py3.8~py3.12:
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+    py3.13:
+        max_workers = min(32, (os.process_cpu_count() or 1) + 4)
+
+    Ref:
+        https://bugs.python.org/issue35279
+        https://github.com/python/cpython/pull/110165
+    """
+    current_version = sys.version_info[:2]
+    if not ((3, 7) <= current_version < (3, 13)):
+        return
+
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+    original_init = ThreadPoolExecutor.__init__
+
+    # Prevent duplicate patching
+    if getattr(ThreadPoolExecutor, "_is_defaults_patched", False):
+        return
+
+    def init_backport(self, max_workers=None, *args, **kwargs):
+        """
+        Wrapper around ThreadPoolExecutor.__init__ to inject new default max_workers.
+        """
+        if max_workers is None:
+            # --- BACKPORT START ---
+            # Python 3.13 logic:
+            # max_workers = min(32, (os.process_cpu_count() or 1) + 4)
+
+            # Compatibility handling:
+            # os.process_cpu_count was introduced in Python 3.13.
+            # If the current environment lacks this function (3.7-3.12), fall back to os.cpu_count.
+            # os.cpu_count returns the number of physical/logical cores without considering process affinity,
+            # but this is the closest behavior achievable in older Python versions.
+            get_cpu_count = getattr(os, "process_cpu_count", os.cpu_count)
+
+            try:
+                # cpu_count may return None (e.g., on systems where it cannot be detected)
+                count = get_cpu_count()
+            except Exception:
+                count = None
+
+            max_workers = min(32, (count or 1) + 4)
+            # --- BACKPORT END ---
+
+        # Call the original __init__, passing the calculated max_workers or the user-specified value
+        # Note: Python 3.7's __init__ does not accept **kwargs (ctxkwargs),
+        # but subsequent versions do. For generality, we pass them through directly.
+        # If invalid arguments are passed on 3.7, original_init will raise a TypeError as expected.
+        original_init(self, max_workers, *args, **kwargs)
+
+    # Apply Monkey Patch
+    ThreadPoolExecutor.__init__ = init_backport
+    ThreadPoolExecutor._is_defaults_patched = True

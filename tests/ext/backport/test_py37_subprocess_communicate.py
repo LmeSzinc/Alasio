@@ -8,7 +8,20 @@ from alasio.ext.backport import fix_py37_subprocess_communicate
 
 @pytest.mark.skipif(
     sys.platform != 'win32' or sys.version_info[:2] != (3, 7),
-    reason="Only for Windows Python 3.7"
+    reason="Patch only applies to Windows Python 3.7"
+)
+@pytest.fixture(scope="module", autouse=True)
+def apply_patch():
+    """
+    Automatically apply the patch before all tests start.
+    """
+    fix_py37_subprocess_communicate()
+    yield
+
+
+@pytest.mark.skipif(
+    sys.platform != 'win32' or sys.version_info[:2] != (3, 7),
+    reason="Patch only applies to Windows Python 3.7"
 )
 class TestSubprocessPatch:
 
@@ -16,14 +29,11 @@ class TestSubprocessPatch:
         """
         Test: Check if subprocess.Popen._communicate becomes our function after running the patch function
         """
-        # 1. Apply patch
-        fix_py37_subprocess_communicate()
-
-        # 2. Get the _communicate method in the Popen class
+        # 1. Get the _communicate method in the Popen class
         # Note: In Python 3, accessing class methods directly will get a function object
         current_method = subprocess.Popen._communicate
 
-        # 3. Verify function name
+        # 2. Verify function name
         # The __name__ of the native method is "_communicate"
         # The function name defined in our closure is "_communicate_fixed"
         assert current_method.__name__ == "_communicate_fixed", \
@@ -35,9 +45,6 @@ class TestSubprocessPatch:
         """
         Test: Verify if the replaced communicate method can execute commands normally and capture output
         """
-        # Ensure patch is applied
-        fix_py37_subprocess_communicate()
-
         test_str = "hello_world"
 
         # 1. Execute a command normally (cmd /c echo ...)
@@ -59,7 +66,7 @@ class TestSubprocessPatch:
         assert current_method.__name__ == "_communicate_fixed", \
             "Patch not applied successfully, current method name is still the native _communicate"
 
-        # 3. Verify functionality is normal
+        # 2. Verify functionality is normal
         assert process.returncode == 0
         assert test_str in stdout
         assert f"{test_str}_err" in stderr
@@ -73,8 +80,6 @@ class TestSubprocessPatch:
         Test: Verify that the new function does not report an error when there is no output (this is a potential
         scenario for triggering the original bug)
         """
-        fix_py37_subprocess_communicate()
-
         # Execute a command that does not produce any output
         cmd = 'cmd /c "exit 0"'
 
