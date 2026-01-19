@@ -1,7 +1,5 @@
 import sys
 
-from typing_extensions import Literal
-
 if sys.version_info >= (3, 9):
     def removeprefix(s, prefix):
         return s.removeprefix(prefix)
@@ -61,6 +59,7 @@ def to_literal(items):
     Returns:
         LiteralType[T]:
     """
+    from typing import Literal
     return Literal.__getitem__(tuple(items))
 
 
@@ -84,7 +83,6 @@ def fix_py37_subprocess_communicate():
         return
 
     def _communicate_fixed(self, input, endtime, orig_timeout):
-
         # Start reader threads feeding into a list hanging off of this
         # object, unless they've already been started.
         if self.stdout and not hasattr(self, "_stdout_buff"):
