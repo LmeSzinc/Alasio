@@ -260,7 +260,7 @@ class WorkerPool:
     """
 
     # Thread exits after 10s idling.
-    IDLE_TIMEOUT = 1
+    IDLE_TIMEOUT = 10
 
     def __init__(self, pool_size: int = 8):
         # Pool has 8 threads at max.
