@@ -138,6 +138,26 @@ def fix_py37_subprocess_communicate():
     subprocess.Popen._communicate = _communicate_fixed
 
 
+def process_cpu_count():
+    """
+    Backport os.process_cpu_count() on python >= 3.13
+
+    If the current environment lacks this function (3.7-3.12), fall back to os.cpu_count.
+    os.cpu_count returns the number of physical/logical cores without considering process affinity,
+    but this is the closest behavior achievable in older Python versions.
+
+    Returns:
+        int | None:
+    """
+    import os
+    get_cpu_count = getattr(os, "process_cpu_count", os.cpu_count)
+    try:
+        # cpu_count may return None (e.g., on systems where it cannot be detected)
+        return get_cpu_count()
+    except Exception:
+        return None
+
+
 def patch_threadpool_executor_maxworker():
     """
     Backport Python 3.13's default max_workers logic to older Python versions.
@@ -158,7 +178,6 @@ def patch_threadpool_executor_maxworker():
     if not ((3, 7) <= current_version < (3, 13)):
         return
 
-    import os
     from concurrent.futures import ThreadPoolExecutor
     original_init = ThreadPoolExecutor.__init__
 
@@ -174,21 +193,7 @@ def patch_threadpool_executor_maxworker():
             # --- BACKPORT START ---
             # Python 3.13 logic:
             # max_workers = min(32, (os.process_cpu_count() or 1) + 4)
-
-            # Compatibility handling:
-            # os.process_cpu_count was introduced in Python 3.13.
-            # If the current environment lacks this function (3.7-3.12), fall back to os.cpu_count.
-            # os.cpu_count returns the number of physical/logical cores without considering process affinity,
-            # but this is the closest behavior achievable in older Python versions.
-            get_cpu_count = getattr(os, "process_cpu_count", os.cpu_count)
-
-            try:
-                # cpu_count may return None (e.g., on systems where it cannot be detected)
-                count = get_cpu_count()
-            except Exception:
-                count = None
-
-            max_workers = min(32, (count or 1) + 4)
+            max_workers = min(32, (process_cpu_count() or 1) + 4)
             # --- BACKPORT END ---
 
         # Call the original __init__, passing the calculated max_workers or the user-specified value
