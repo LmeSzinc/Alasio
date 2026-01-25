@@ -2,7 +2,8 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Optional
 
-from msgspec import NODEFAULT, Struct, ValidationError, convert
+from msgspec import DecodeError, NODEFAULT, Struct, ValidationError, convert
+from msgspec.json import Decoder
 from msgspec.msgpack import encode
 from msgspec.structs import asdict
 
@@ -12,6 +13,7 @@ from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX, MODEL_TASK_INDEX, ModelConfigRef
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.cache import cached_property
+from alasio.ext.cache.resource import T
 from alasio.ext.deep import deep_set
 from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.ext.file.msgspecfile import JsonCacheTTL
@@ -20,8 +22,6 @@ from alasio.ext.msgspec_error.error import parse_msgspec_error
 from alasio.ext.msgspec_error.parse_struct import get_field_default
 from alasio.ext.path import PathStr
 from alasio.logger import logger
-
-MOD_JSON_CACHE = JsonCacheTTL()
 
 
 class ConfigSetEvent(Struct):
@@ -35,6 +35,21 @@ class ConfigSetEvent(Struct):
 class Task(Struct):
     TaskName: str
     NextRun: datetime
+
+
+class ModJsonCacheTTL(JsonCacheTTL):
+    def load_resource(self, file: str, decoder: Decoder = None, default_factory=dict) -> T:
+        try:
+            return super().load_resource(file, decoder=decoder)
+        except (FileNotFoundError, DecodeError) as e:
+            logger.error(f'Failed to read model json: "{file}": {e}')
+            return default_factory()
+        except Exception as e:
+            logger.exception(e)
+            return default_factory()
+
+
+MOD_JSON_CACHE = ModJsonCacheTTL()
 
 
 class Mod:
