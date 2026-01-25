@@ -206,3 +206,27 @@ def test_no_retry():
             job.get()
         assert job.retries == 0
         assert job._status == 'ERROR'
+
+
+def test_performance_overhead():
+    count = 1000
+    with ProcessPool(worker_echo, max_workers=1) as pool:
+        # Warm up to ignore process startup overhead
+        pool.submit(0).get()
+
+        # Measure ProcessPool execution time
+        start_time = time.perf_counter()
+        jobs = [pool.submit(i) for i in range(count)]
+        for job in jobs:
+            job.get()
+        pool_duration = time.perf_counter() - start_time
+
+    # Measure local execution time
+    start_time = time.perf_counter()
+    for i in range(count):
+        worker_echo(i)
+    local_duration = time.perf_counter() - start_time
+
+    overhead = (pool_duration - local_duration) / count * 1000  # ms per task
+    print(f"\nProcessPool Overhead: {overhead:.3f} ms/task "
+          f"(Pool: {pool_duration:.3f}s, Local: {local_duration:.3f}s, Count: {count})")
