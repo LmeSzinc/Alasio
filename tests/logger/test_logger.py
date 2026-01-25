@@ -9,9 +9,9 @@ from alasio.ext.path import PathStr
 from alasio.logger.logger import LogWriter, logger
 
 
-class TestLogger:
+class BaseLoggerTest:
     """
-    Test basic logging functionality
+    Base class for logger tests with setup and teardown
     """
 
     @pytest.fixture(autouse=True)
@@ -52,21 +52,6 @@ class TestLogger:
         log_dir = self.test_dir / 'log'
         log_dir.folder_rmtree()
 
-    def _get_log_file_path(self):
-        """
-        Get the expected log file path
-
-        Returns:
-            PathStr: Path to log file
-        """
-        log_dir = self.test_dir / 'log'
-        today = date.today()
-        # Get the name from sys.argv[0]
-        import sys
-        from alasio.ext.path import PathStr
-        name = PathStr.new(sys.argv[0]).rootstem
-        return log_dir / f'{today}_{name}.txt'
-
     def _read_log_file(self):
         """
         Read content from log file
@@ -74,12 +59,25 @@ class TestLogger:
         Returns:
             str: Log file content
         """
-        log_file = self._get_log_file_path()
+        log_dir = self.test_dir / 'log'
+        today = date.today()
+        # Get the name from sys.argv[0]
+        import sys
+        from alasio.ext.path import PathStr
+        name = PathStr.new(sys.argv[0]).rootstem
+        log_file = log_dir / f'{today}_{name}.txt'
+
         if not log_file.exists():
             return ''
 
         with open(log_file, 'r', encoding='utf-8') as f:
             return f.read()
+
+
+class TestLogger(BaseLoggerTest):
+    """
+    Test basic logging functionality
+    """
 
     def test_basic_logging_info(self):
         """
@@ -171,63 +169,11 @@ class TestLogger:
         # Verify hr3 contains dots
         assert '.....' in content
 
-    def test_exception_logging(self):
-        """
-        Test exception logging
-        """
-        try:
-            raise ValueError('Test exception')
-        except ValueError:
-            logger.exception('An error occurred')
 
-        content = self._read_log_file()
-
-        # Verify exception message and traceback
-        assert 'An error occurred' in content
-        assert 'ValueError' in content
-        assert 'Test exception' in content
-        assert 'Traceback' in content or 'ERROR' in content
-
-
-class TestLoggerBind:
+class TestLoggerBind(BaseLoggerTest):
     """
     Test that logger.bind() does not create new file writes
     """
-
-    @pytest.fixture(autouse=True)
-    def setup_teardown(self):
-        """
-        Setup and cleanup for each test
-        """
-        # Store original env values
-        original_root = env.PROJECT_ROOT
-        original_electron = env.ELECTRON_SECRET
-
-        # Create temp directory for test logs
-        self.test_dir = PathStr.new(__file__).uppath(1)
-        env.PROJECT_ROOT = self.test_dir
-        env.ELECTRON_SECRET = None
-
-        # Reset LogWriter singleton
-        LogWriter.singleton_clear()
-
-        # Clear cached property
-        writer = LogWriter()
-        threaded_cached_property.pop(writer, 'fd')
-
-        yield
-
-        # Cleanup
-        writer = LogWriter()
-        writer.close()
-
-        env.PROJECT_ROOT = original_root
-        env.ELECTRON_SECRET = original_electron
-
-        LogWriter.singleton_clear()
-
-        log_dir = self.test_dir / 'log'
-        log_dir.folder_rmtree()
 
     def _get_log_dir(self):
         """
@@ -339,66 +285,10 @@ class TestLoggerBind:
         assert 'User logger' in content
 
 
-class TestLoggerFormatting:
+class TestLoggerFormatting(BaseLoggerTest):
     """
     Test logger formatting behavior to prevent double-formatting bugs
     """
-
-    @pytest.fixture(autouse=True)
-    def setup_teardown(self):
-        """
-        Setup and cleanup for each test
-        """
-        # Store original env values
-        original_root = env.PROJECT_ROOT
-        original_electron = env.ELECTRON_SECRET
-
-        # Create temp directory for test logs
-        self.test_dir = PathStr.new(__file__).uppath(1)
-        env.PROJECT_ROOT = self.test_dir
-        env.ELECTRON_SECRET = None
-
-        # Reset LogWriter singleton
-        if hasattr(LogWriter, '_instances'):
-            LogWriter._instances = {}
-
-        # Clear cached property
-        writer = LogWriter()
-        threaded_cached_property.pop(writer, 'fd')
-
-        yield
-
-        # Cleanup
-        writer = LogWriter()
-        writer.close()
-
-        env.PROJECT_ROOT = original_root
-        env.ELECTRON_SECRET = original_electron
-
-        if hasattr(LogWriter, '_instances'):
-            LogWriter._instances = {}
-
-        log_dir = self.test_dir / 'log'
-        log_dir.folder_rmtree()
-
-    def _read_log_file(self):
-        """
-        Read content from log file
-
-        Returns:
-            str: Log file content
-        """
-        log_dir = self.test_dir / 'log'
-        today = date.today()
-        import sys
-        name = PathStr.new(sys.argv[0]).rootstem
-        log_file = log_dir / f'{today}_{name}.txt'
-
-        if not log_file.exists():
-            return ''
-
-        with open(log_file, 'r', encoding='utf-8') as f:
-            return f.read()
 
     def test_fstring_with_set_no_double_format(self):
         """
@@ -531,3 +421,171 @@ class TestLoggerFormatting:
 
         # Should use SafeDict placeholder for missing 'location'
         assert 'User Bob from <key location missing>' in content or 'User Bob from {location}' in content
+
+
+class TestLoggerError(BaseLoggerTest):
+    """
+    Test logger.error() specific functionality
+    """
+
+    def test_error_with_exception(self):
+        """
+        Test logger.error(e) prints exception name and message
+        """
+        try:
+            raise ValueError("Invalid value")
+        except ValueError as e:
+            logger.error(e)
+
+        content = self._read_log_file()
+
+        # Should contain exception type and message
+        assert "ValueError: Invalid value" in content
+        # Should be ERROR level
+        assert "ERROR" in content
+
+    def test_error_with_exception_group(self):
+        """
+        Test logger.error(e) with ExceptionGroup prints tree structure
+        """
+        import sys
+        if sys.version_info >= (3, 11):
+            ExceptionGroupType = ExceptionGroup
+        else:
+            try:
+                from exceptiongroup import ExceptionGroup as ExceptionGroupType
+            except ImportError:
+                pytest.skip("exceptiongroup module not installed")
+
+        # Create a complex exception group
+        # Top
+        #  - ValueError: val_err
+        #  - NestedGroup: nested
+        #    - TypeError: type_err
+        #    - IndexError: index_err
+
+        exc = ExceptionGroupType(
+            "Top error",
+            [
+                ValueError("val_err"),
+                ExceptionGroupType(
+                    "Nested group",
+                    [
+                        TypeError("type_err"),
+                        IndexError("index_err")
+                    ]
+                )
+            ]
+        )
+
+        logger.error(exc)
+
+        content = self._read_log_file()
+
+        # Verify structure by checking lines order or indentation
+        lines = content.strip().split('\n')
+
+        # Find the start of the error message
+        error_lines = []
+        capture = False
+        for line in lines:
+            if "ExceptionGroup: Top error" in line:
+                capture = True
+            if capture:
+                error_lines.append(line)
+
+        # We expect something like:
+        # ... | ERROR | ExceptionGroup: Top error
+        # - ExceptionGroup: Top error
+        #   - ValueError: val_err
+        #   - ExceptionGroup: Nested group
+        #     - TypeError: type_err
+        #     - IndexError: index_err
+
+        # Join relevant lines to check for substrings with indentation
+        full_text = '\n'.join(error_lines)
+
+        assert "- ExceptionGroup: Top error" in full_text
+        assert "  - ValueError: val_err" in full_text
+        assert "  - ExceptionGroup: Nested group" in full_text
+        assert "    - TypeError: type_err" in full_text
+        assert "    - IndexError: index_err" in full_text
+
+        # Verify order: val_err comes before Nested group
+        pos_val = full_text.find("ValueError: val_err")
+        pos_nested = full_text.find("ExceptionGroup: Nested group")
+        assert pos_val < pos_nested
+
+        # Verify order within nested group
+        pos_type = full_text.find("TypeError: type_err")
+        pos_index = full_text.find("IndexError: index_err")
+        assert pos_type < pos_index
+        assert pos_type < pos_index
+        assert pos_nested < pos_type
+
+
+class TestLoggerException(BaseLoggerTest):
+    """
+    Test logger.exception() functionality
+    """
+
+    def test_exception_logging(self):
+        """
+        Test exception logging
+        """
+        try:
+            raise ValueError('Test exception')
+        except ValueError:
+            logger.exception('An error occurred')
+
+        content = self._read_log_file()
+
+        # Verify exception message and traceback
+        assert 'An error occurred' in content
+        assert 'ValueError' in content
+        assert 'Test exception' in content
+        assert 'Traceback' in content or 'ERROR' in content
+
+    def test_exception_group_logging(self):
+        """
+        Test logging of ExceptionGroup (Python 3.11+ or via exceptiongroup backport)
+        """
+        import sys
+        if sys.version_info >= (3, 11):
+            # Built-in in Python 3.11+
+            ExceptionGroupType = ExceptionGroup
+        else:
+            try:
+                from exceptiongroup import ExceptionGroup as ExceptionGroupType
+            except ImportError:
+                pytest.skip("exceptiongroup module not installed on Python < 3.11")
+
+        try:
+            raise ExceptionGroupType(
+                "multiple errors",
+                [
+                    ValueError("error 1"),
+                    TypeError("error 2"),
+                    ExceptionGroupType(
+                        "nested errors",
+                        [
+                            ValueError("nested error 1")
+                        ]
+                    )
+                ]
+            )
+        except ExceptionGroupType as e:
+            logger.exception(e)
+
+        content = self._read_log_file()
+
+        # Verify main group message
+        assert "ExceptionGroup: multiple errors" in content
+
+        # Verify nested exceptions
+        assert "ValueError: error 1" in content
+        assert "TypeError: error 2" in content
+
+        # Verify nested group
+        assert "nested errors" in content
+        assert "nested error 1" in content

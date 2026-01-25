@@ -1,20 +1,25 @@
 import sys
 import time
+from collections import deque
 from datetime import date, datetime
 from io import StringIO
 from typing import TYPE_CHECKING
 
 import structlog
+from exceptiongroup import BaseExceptionGroup, ExceptionGroup
 from structlog import DropEvent
 from structlog.processors import ExceptionRenderer
 
 from alasio.ext import env
+from alasio.ext.backport import patch_rich_traceback_extract
 from alasio.ext.cache import threaded_cached_property
 from alasio.ext.path import PathStr
 from alasio.ext.singleton import Singleton
 
 if TYPE_CHECKING:
     from alasio.backend.worker.bridge import BackendBridge
+
+patch_rich_traceback_extract()
 
 
 class PseudoBackendBridge:
@@ -89,7 +94,7 @@ def rich_formatter(exc_info):
     )
     tb = Traceback.from_exception(
         # see structlog.dev.RichTracebackFormatter()
-        *exc_info, show_locals=True, word_wrap=True,
+        *exc_info, show_locals=True, word_wrap=True, max_frames=100,
     )
     if hasattr(tb, "code_width"):
         # `code_width` requires `rich>=13.8.0`
@@ -135,6 +140,28 @@ def has_user_keys(event_dict):
     # Calculate how many built-in fields are present
     builtin_count = ('event' in event_dict) + ('exception' in event_dict)
     return length > builtin_count
+
+
+def gen_exception_tree(exc: BaseException):
+    """
+    Generate exception tree like:
+    - sub exception 1, depth 1
+      - sub exception 1, depth 2
+    - sub exception 2
+    """
+    # (exc, depth)
+    stack = deque()
+    stack.append((exc, 0))
+
+    while stack:
+        current_exc, depth = stack.pop()
+
+        prefix = "  " * depth
+        yield f'{prefix}- {type(current_exc).__name__}: {current_exc}'
+
+        if BaseExceptionGroup and isinstance(current_exc, BaseExceptionGroup):
+            children = [(e, depth + 1) for e in current_exc.exceptions]
+            stack.extend(reversed(children))
 
 
 class LogRenderer:
@@ -246,7 +273,12 @@ class AlasioLogger(structlog.BoundLoggerBase):
         #   ExampleError:
         # instead of just empty string ""
         if isinstance(event, Exception):
-            event = f'{type(event).__name__}: {event}'
+            if isinstance(event, (BaseExceptionGroup, ExceptionGroup)):
+                title = f'{type(event).__name__}: {event}'
+                detail = '\n'.join(gen_exception_tree(event))
+                event = f'{title}\n{detail}'
+            else:
+                event = f'{type(event).__name__}: {event}'
         try:
             args, kw = self._process_event('error', event, kwargs)
             return self._logger.msg(*args, **kw)
@@ -255,6 +287,8 @@ class AlasioLogger(structlog.BoundLoggerBase):
 
     def exception(self, event: "str | Exception", **kwargs):
         if isinstance(event, Exception):
+            if isinstance(event, (BaseExceptionGroup, ExceptionGroup)):
+                kwargs["exc_info"] = (type(event), event, event.__traceback__)
             event = f'{type(event).__name__}: {event}'
         # see structlog._native.exception()
         kwargs.setdefault("exc_info", True)
