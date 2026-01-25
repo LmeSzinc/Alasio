@@ -1,3 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0", "msgspec"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alasio"
+version = "0.1.0"
+description = "Mobile game bot framework abstracted from AzurLaneAutoScript and StarRailCopilot"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "LmeSzinc" }
+]
+dependencies = [
+    # alasio
+    "msgspec",
+    "PyYAML",
+    "lxml",
+    "httpx",
+    # alasio/log
+    "structlog>=25.5.0",
+    "rich",
+    "colorama",
+]
+
+[project.optional-dependencies]
+image = [
+    "numpy",
+    "opencv-python-headless",
+]
+backend = [
+    "hypercorn>=0.17.3",
+    "trio",
+    "starlette>=0.19.0",
+    "PyJWT",
+]
+test = [
+    "pytest",
+    "pytest-trio",
+]
+all = ["alasio[image,backend,test]"]
+
+[tool.setuptools]
+packages = ["alasio"]
+
 [tool.pytest.ini_options]
 tmp_path_retention_count = 1
 tmp_path_retention_policy = "failed"
