@@ -43,7 +43,7 @@ class LogWriter(metaclass=Singleton):
             return PseudoBackendBridge()
 
     @threaded_cached_property
-    def fd(self):
+    def file(self):
         root = env.PROJECT_ROOT.abspath()
         folder = root / 'log'
         self.create_date = date.today()
@@ -51,35 +51,39 @@ class LogWriter(metaclass=Singleton):
         if self.backend.inited:
             name = self.backend.config_name
             # write logs to xxx/log/2020-01-01_{config_name}.txt
-            file = folder / f'{self.create_date}_{name}.txt'
+            return folder / f'{self.create_date}_{name}.txt'
         else:
             # xxx/path/module.py -> module
             name = PathStr.new(sys.argv[0]).rootstem
             # write logs to xxx/log/2020-01-01_{module_name}.txt
-            file = folder / f'{self.create_date}_{name}.txt'
+            return folder / f'{self.create_date}_{name}.txt'
+
+    @threaded_cached_property
+    def fd(self):
+        file = self.file
         try:
             return open(file, 'a', encoding='utf-8')
         except FileNotFoundError:
-            folder.makedirs(exist_ok=True)
+            file.uppath().makedirs(exist_ok=True)
         return open(file, 'a', encoding='utf-8')
 
     def check_rotate(self):
         # rotate log to file with new date
         if self.create_date and self.create_date != date.today():
-            fd = threaded_cached_property.pop(self, 'fd')
-            if fd is not None:
-                try:
-                    fd.close()
-                except Exception:
-                    pass
+            self.close()
 
     def close(self):
+        threaded_cached_property.pop(self, 'backend')
+        threaded_cached_property.pop(self, 'file')
         fd = threaded_cached_property.pop(self, 'fd')
         if fd is not None:
             try:
                 fd.close()
             except Exception:
                 pass
+
+    def __del__(self):
+        self.close()
 
 
 def rich_formatter(exc_info):

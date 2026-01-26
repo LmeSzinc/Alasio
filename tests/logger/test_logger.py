@@ -1,10 +1,8 @@
 import re
-from datetime import date
 
 import pytest
 
 from alasio.ext import env
-from alasio.ext.cache import threaded_cached_property
 from alasio.ext.path import PathStr
 from alasio.logger.logger import LogWriter, logger
 
@@ -28,12 +26,9 @@ class BaseLoggerTest:
         env.PROJECT_ROOT = self.test_dir
         env.ELECTRON_SECRET = None
 
-        # Reset LogWriter singleton to force reinit
-        LogWriter.singleton_clear()
-
-        # Clear cached property
+        # init fd
         writer = LogWriter()
-        threaded_cached_property.pop(writer, 'fd')
+        _ = writer.fd
 
         yield
 
@@ -44,9 +39,6 @@ class BaseLoggerTest:
         # Restore original env values
         env.PROJECT_ROOT = original_root
         env.ELECTRON_SECRET = original_electron
-
-        # Reset singleton
-        LogWriter.singleton_clear()
 
         # Clean up log directory
         log_dir = self.test_dir / 'log'
@@ -59,19 +51,12 @@ class BaseLoggerTest:
         Returns:
             str: Log file content
         """
-        log_dir = self.test_dir / 'log'
-        today = date.today()
-        # Get the name from sys.argv[0]
-        import sys
-        from alasio.ext.path import PathStr
-        name = PathStr.new(sys.argv[0]).rootstem
-        log_file = log_dir / f'{today}_{name}.txt'
+        log_file = LogWriter().file
 
         if not log_file.exists():
             return ''
 
-        with open(log_file, 'r', encoding='utf-8') as f:
-            return f.read()
+        return log_file.atomic_read_text()
 
 
 class TestLogger(BaseLoggerTest):

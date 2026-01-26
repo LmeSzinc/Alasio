@@ -1,12 +1,12 @@
 import re
 import time
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from alasio.backend.worker.bridge import BackendBridge
 from alasio.ext import env
+from alasio.ext.cache import threaded_cached_property
 from alasio.ext.path import PathStr
 from alasio.logger.logger import LogWriter, logger
 
@@ -43,7 +43,7 @@ class MockBackendBridge:
         self.send_log_calls.clear()
 
 
-class TestBackendLogging:
+class BaseLoggerTest:
     """
     Test that logger correctly sends messages to backend
     """
@@ -62,41 +62,20 @@ class TestBackendLogging:
         env.PROJECT_ROOT = self.test_dir
         env.ELECTRON_SECRET = None
 
-        # Clear all singletons to start fresh
-        BackendBridge.singleton_clear()
-        LogWriter.singleton_clear()
-
         # Create mock backend
         self.mock_backend = MockBackendBridge()
 
         # Patch BackendBridge class to return our mock
-        self.backend_patcher = patch(
-            'alasio.backend.worker.bridge.BackendBridge',
-            return_value=self.mock_backend
-        )
-        self.backend_patcher.start()
-
-        # Force creation of new LogWriter singleton with mocked backend
-        # This will call BackendBridge() internally, which returns our mock
-        new_writer = LogWriter()
-
-        # Trigger logger initialization by calling bind()
-        # bind() accesses _logger, forcing lazy initialization if needed
-        new = logger.bind()
-
-        # Now replace the file object in the existing logger's PrintLogger
-        new._logger._file = new_writer
+        writer = LogWriter()
+        threaded_cached_property.set(writer, 'backend', self.mock_backend)
 
         # Clear any initialization events
         self.mock_backend.clear()
 
         # Use the existing logger instance
-        self.logger = new
+        self.logger = logger
 
         yield
-
-        # Cleanup
-        self.backend_patcher.stop()
 
         writer = LogWriter()
         writer.close()
@@ -104,12 +83,14 @@ class TestBackendLogging:
         env.PROJECT_ROOT = original_root
         env.ELECTRON_SECRET = original_electron
 
-        # Clear both singletons
-        LogWriter.singleton_clear()
-        BackendBridge.singleton_clear()
-
         log_dir = self.test_dir / 'log'
         log_dir.folder_rmtree()
+
+
+class TestBackendLogging(BaseLoggerTest):
+    """
+    Test that logger correctly sends messages to backend
+    """
 
     def _get_last_event(self):
         """
@@ -371,72 +352,10 @@ class TestBackendLogging:
         assert log_files[0].name == expected_filename
 
 
-class TestBackendLoggingWithElectron:
+class TestBackendLoggingWithElectron(BaseLoggerTest):
     """
     Test backend logging behavior in Electron mode
     """
-
-    @pytest.fixture(autouse=True)
-    def setup_teardown(self):
-        """
-        Setup and cleanup for each test
-        """
-        # Store original env values
-        original_root = env.PROJECT_ROOT
-        original_electron = env.ELECTRON_SECRET
-
-        # Create temp directory for test logs
-        self.test_dir = PathStr.new(__file__).uppath(1)
-        env.PROJECT_ROOT = self.test_dir
-        # Set Electron mode
-        env.ELECTRON_SECRET = 'test_electron_secret'
-
-        # Clear all singletons to start fresh
-        BackendBridge.singleton_clear()
-        LogWriter.singleton_clear()
-
-        # Create mock backend
-        self.mock_backend = MockBackendBridge()
-
-        # Patch BackendBridge class to return our mock
-        self.backend_patcher = patch(
-            'alasio.backend.worker.bridge.BackendBridge',
-            return_value=self.mock_backend
-        )
-        self.backend_patcher.start()
-
-        # Force creation of new LogWriter singleton with mocked backend
-        new_writer = LogWriter()
-
-        # Trigger logger initialization by calling bind()
-        new = logger.bind()
-
-        # Replace the file object in the existing logger's PrintLogger
-        new._logger._file = new_writer
-
-        # Clear any initialization events
-        self.mock_backend.clear()
-
-        # Use the existing logger instance
-        self.logger = new
-
-        yield
-
-        # Cleanup
-        self.backend_patcher.stop()
-
-        writer = LogWriter()
-        writer.close()
-
-        env.PROJECT_ROOT = original_root
-        env.ELECTRON_SECRET = original_electron
-
-        # Clear both singletons
-        LogWriter.singleton_clear()
-        BackendBridge.singleton_clear()
-
-        log_dir = self.test_dir / 'log'
-        log_dir.folder_rmtree()
 
     def test_electron_mode_logs_to_backend(self):
         """
@@ -452,77 +371,17 @@ class TestBackendLoggingWithElectron:
         assert events[0]['l'] == 'INFO'
 
 
-class TestBackendNoInit:
+class TestBackendNoInit(BaseLoggerTest):
     """
     Test logging behavior when backend is not initialized
     """
-
-    @pytest.fixture(autouse=True)
-    def setup_teardown(self):
-        """
-        Setup and cleanup for each test
-        """
-        # Store original env values
-        original_root = env.PROJECT_ROOT
-        original_electron = env.ELECTRON_SECRET
-
-        # Create temp directory for test logs
-        self.test_dir = PathStr.new(__file__).uppath(1)
-        env.PROJECT_ROOT = self.test_dir
-        env.ELECTRON_SECRET = None
-
-        # Clear all singletons to start fresh
-        BackendBridge.singleton_clear()
-        LogWriter.singleton_clear()
-
-        # Create mock backend with inited=False
-        self.mock_backend = MockBackendBridge()
-        self.mock_backend.inited = False
-
-        # Patch BackendBridge class to return our mock
-        self.backend_patcher = patch(
-            'alasio.backend.worker.bridge.BackendBridge',
-            return_value=self.mock_backend
-        )
-        self.backend_patcher.start()
-
-        # Force creation of new LogWriter singleton with mocked backend
-        new_writer = LogWriter()
-
-        # Trigger logger initialization by calling bind()
-        new = logger.bind()
-
-        # Replace the file object in the existing logger's PrintLogger
-        new._logger._file = new_writer
-
-        # Clear any initialization events
-        self.mock_backend.clear()
-
-        # Use the existing logger instance
-        self.logger = new
-
-        yield
-
-        # Cleanup
-        self.backend_patcher.stop()
-
-        writer = LogWriter()
-        writer.close()
-
-        env.PROJECT_ROOT = original_root
-        env.ELECTRON_SECRET = original_electron
-
-        # Clear both singletons
-        LogWriter.singleton_clear()
-        BackendBridge.singleton_clear()
-
-        log_dir = self.test_dir / 'log'
-        log_dir.folder_rmtree()
 
     def test_no_backend_no_events(self):
         """
         Test that when backend is not initialized, no events are sent
         """
+        self.mock_backend.inited = False
+
         # Log a message
         self.logger.info('Message without backend')
 
@@ -536,6 +395,8 @@ class TestBackendNoInit:
         """
         Test that exceptions can still be logged when backend is not initialized
         """
+        self.mock_backend.inited = False
+
         # Log an exception
         try:
             raise ValueError('Test exception')
