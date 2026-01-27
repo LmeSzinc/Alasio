@@ -1,5 +1,5 @@
 {
-  "card-OpsiExplore": {
+  "card-OpsiExplore-OpsiExplore": {
     "_info": {"group": "OpsiExplore", "arg": "_info"},
     "Scheduler_Enable": {
       "task": "OpsiExplore",
@@ -44,7 +44,7 @@
       "value": 0
     }
   },
-  "card-OpsiDaily": {
+  "card-OpsiDaily-OpsiDaily": {
     "_info": {"group": "OpsiDaily", "arg": "_info"},
     "Scheduler_Enable": {
       "task": "OpsiDaily",
@@ -129,7 +129,7 @@
       "value": ["ActionPoint", "PurpleCoins"]
     }
   },
-  "card-OpsiGeneral": {
+  "card-OpsiGeneral-OpsiGeneral": {
     "_info": {"group": "OpsiGeneral", "arg": "_info"},
     "OpsiGeneral_UseLogger": {
       "task": "OpsiGeneral",
@@ -179,7 +179,7 @@
       "value": ["ActionPoint", "PurpleCoins"]
     }
   },
-  "card-OpsiAshAssist": {
+  "card-OpsiAshAssist-OpsiAshAssist": {
     "_info": {"group": "OpsiAshAssist", "arg": "_info"},
     "Scheduler_Enable": {
       "task": "OpsiAshAssist",

@@ -1,6 +1,6 @@
 {
-  "card-Scheduler": {
-    "_info": {"group": "Scheduler", "arg": "_info"},
+  "card-Main-Main": {
+    "_info": {"group": "Main", "arg": "_info"},
     "Scheduler_Enable": {
       "task": "Main",
       "group": "Scheduler",
@@ -23,7 +23,7 @@
       "value": "00:00"
     }
   },
-  "card-Campaign": {
+  "card-Main-Campaign": {
     "_info": {"group": "Campaign", "arg": "_info"},
     "Campaign_Name": {
       "task": "Main",
@@ -84,7 +84,7 @@
       "value": true
     }
   },
-  "card-StopCondition": {
+  "card-Main-StopCondition": {
     "_info": {"group": "StopCondition", "arg": "_info"},
     "StopCondition_OilLimit": {
       "task": "Main",
@@ -130,7 +130,7 @@
       "value": 0
     }
   },
-  "card-Fleet": {
+  "card-Main-Fleet": {
     "_info": {"group": "Fleet", "arg": "_info"},
     "Fleet1_Fleet": {
       "task": "Main",
@@ -197,7 +197,7 @@
       "option": [2, 3, 4, 5]
     }
   },
-  "card-Submarine": {
+  "card-Main-Submarine": {
     "_info": {"group": "Submarine", "arg": "_info"},
     "Submarine_Fleet": {
       "task": "Main",
@@ -232,7 +232,7 @@
       "option": ["to_boss_position", "1_grid_to_boss", "2_grid_to_boss", "use_open_ocean_support"]
     }
   },
-  "card-Emotion": {
+  "card-Main-Emotion": {
     "_info": {"group": "Emotion", "arg": "_info"},
     "Emotion_Mode": {
       "task": "Main",
@@ -317,7 +317,7 @@
       "value": false
     }
   },
-  "card-HpControl": {
+  "card-Main-HpControl": {
     "_info": {"group": "HpControl", "arg": "_info"},
     "HpControl_UseHpBalance": {
       "task": "Main",
@@ -376,7 +376,7 @@
       "value": 0.3
     }
   },
-  "card-EnemyPriority": {
+  "card-Main-EnemyPriority": {
     "_info": {"group": "EnemyPriority", "arg": "_info"},
     "EnemyPriority_EnemyScaleBalanceWeight": {
       "task": "Main",

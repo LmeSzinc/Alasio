@@ -10,7 +10,8 @@ Main:
     - HpControl
     - EnemyPriority
   displays:
-    - Scheduler
+    - info: Main
+      groups: Scheduler
     - Campaign
     - StopCondition
     - info: Fleet

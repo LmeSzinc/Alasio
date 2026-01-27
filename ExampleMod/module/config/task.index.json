@@ -1,14 +1,4 @@
 {
-  "Alas": {
-    "group": {
-      "Retirement": {"file": "alas/alas_model.py", "cls": "Retirement", "task": "Alas"},
-      "OneClickRetire": {"file": "alas/alas_model.py", "cls": "OneClickRetire", "task": "Alas"},
-      "Enhance": {"file": "alas/alas_model.py", "cls": "Enhance", "task": "Alas"},
-      "OldRetire": {"file": "alas/alas_model.py", "cls": "OldRetire", "task": "Alas"},
-      "DropRecord": {"file": "alas/alas_model.py", "cls": "DropRecord", "task": "Alas"}
-    },
-    "config": {"task": ["Alas"], "group": []}
-  },
   "Device": {
     "group": {
       "Emulator": {"file": "alasio/device_model.py", "cls": "Emulator", "task": "Device"},
@@ -29,6 +19,22 @@
       "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerStatic", "task": "RestartGame"}
     },
     "config": {"task": ["RestartGame"], "group": []}
+  },
+  "Alas": {
+    "group": {
+      "Game": {"file": "alas/alas_model.py", "cls": "Game", "task": "Alas"}
+    },
+    "config": {"task": ["Alas"], "group": []}
+  },
+  "General": {
+    "group": {
+      "Retirement": {"file": "general/general_model.py", "cls": "Retirement", "task": "General"},
+      "OneClickRetire": {"file": "general/general_model.py", "cls": "OneClickRetire", "task": "General"},
+      "Enhance": {"file": "general/general_model.py", "cls": "Enhance", "task": "General"},
+      "OldRetire": {"file": "general/general_model.py", "cls": "OldRetire", "task": "General"},
+      "DropRecord": {"file": "general/general_model.py", "cls": "DropRecord", "task": "General"}
+    },
+    "config": {"task": ["General"], "group": []}
   },
   "Main": {
     "group": {
@@ -74,16 +80,17 @@
   },
   "_global_bind": {
     "group": {
-      "Retirement": {"file": "alas/alas_model.py", "cls": "Retirement", "task": "Alas"},
-      "OneClickRetire": {"file": "alas/alas_model.py", "cls": "OneClickRetire", "task": "Alas"},
-      "Enhance": {"file": "alas/alas_model.py", "cls": "Enhance", "task": "Alas"},
-      "OldRetire": {"file": "alas/alas_model.py", "cls": "OldRetire", "task": "Alas"},
-      "DropRecord": {"file": "alas/alas_model.py", "cls": "DropRecord", "task": "Alas"},
       "Emulator": {"file": "alasio/device_model.py", "cls": "Emulator", "task": "Device"},
       "EmulatorInfo": {"file": "alasio/device_model.py", "cls": "EmulatorInfo", "task": "Device"},
       "Error": {"file": "alasio/device_model.py", "cls": "Error", "task": "Device"},
-      "Optimization": {"file": "alasio/device_model.py", "cls": "Optimization", "task": "Device"}
+      "Optimization": {"file": "alasio/device_model.py", "cls": "Optimization", "task": "Device"},
+      "Game": {"file": "alas/alas_model.py", "cls": "Game", "task": "Alas"},
+      "Retirement": {"file": "general/general_model.py", "cls": "Retirement", "task": "General"},
+      "OneClickRetire": {"file": "general/general_model.py", "cls": "OneClickRetire", "task": "General"},
+      "Enhance": {"file": "general/general_model.py", "cls": "Enhance", "task": "General"},
+      "OldRetire": {"file": "general/general_model.py", "cls": "OldRetire", "task": "General"},
+      "DropRecord": {"file": "general/general_model.py", "cls": "DropRecord", "task": "General"}
     },
-    "config": {"task": ["Alas", "Device"], "group": []}
+    "config": {"task": ["Device", "Alas", "General"], "group": []}
   }
 }

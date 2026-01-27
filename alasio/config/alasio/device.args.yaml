@@ -1,12 +1,6 @@
 Emulator:
   args:
     Serial: auto
-    PackageName:
-      value: auto
-      option: [ auto, ]
-    ServerName:
-      value: disabled
-      option: [ disabled, ]
     ScreenshotMethod:
       value: auto
       option: [

@@ -1,8 +1,20 @@
 Alas:
   global_bind: true
   groups:
-    - Retirement
-    - OneClickRetire
-    - Enhance
-    - OldRetire
-    - DropRecord
+    - Game
+  displays:
+    - Game
+    - { task: Device, group: Emulator }
+    - { task: Device, group: EmulatorInfo }
+    - { task: Device, group: Error }
+    - { task: Device, group: Optimization }
+
+RestartDeviceDisplay:
+  displays:
+    - info: RestartDevice
+      groups: { task: RestartDevice, group: Scheduler }
+
+RestartGameDisplay:
+  displays:
+    - info: RestartGame
+      groups: { task: RestartGame, group: Scheduler }

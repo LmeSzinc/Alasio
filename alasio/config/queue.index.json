@@ -1,0 +1,20 @@
+{
+  "Device": {
+    "zh-CN": "Device",
+    "zh-TW": "Device",
+    "en-US": "Device",
+    "ja-JP": "Device"
+  },
+  "RestartDevice": {
+    "zh-CN": "RestartDevice",
+    "zh-TW": "RestartDevice",
+    "en-US": "RestartDevice",
+    "ja-JP": "RestartDevice"
+  },
+  "RestartGame": {
+    "zh-CN": "RestartGame",
+    "zh-TW": "RestartGame",
+    "en-US": "RestartGame",
+    "ja-JP": "RestartGame"
+  }
+}

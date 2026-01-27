@@ -12,6 +12,7 @@ from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.model import DECODER_CACHE, MODEL_CONFIG_INDEX, MODEL_TASK_INDEX, ModelConfigRef
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
+from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.cache.resource import T
 from alasio.ext.deep import deep_set
@@ -63,6 +64,8 @@ class Mod:
         self.root = PathStr.new(entry.root)
         self.path_config = self.root.joinpath(entry.path_config)
         self.path_assets = self.root.joinpath(entry.path_assets)
+        alasio = ModEntryInfo.alasio()
+        self.path_alasio_config = env.ALASIO_ROOT.joinpath(alasio.path_config)
 
     def __str__(self):
         """
@@ -112,7 +115,10 @@ class Mod:
                     {"task": task, "group": group, "arg": arg, **ArgData.to_dict()} for normal args
                         which is arg path appended with ArgData
         """
-        file = self.path_config / file
+        if file.startswith('alasio/'):
+            file = self.path_alasio_config / file
+        else:
+            file = self.path_config / file
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 
@@ -127,7 +133,10 @@ class Mod:
                     where field is "name", "help", "option_i18n", etc.
                 value: translation
         """
-        file = self.path_config / file
+        if file.startswith('alasio/'):
+            file = self.path_alasio_config / file
+        else:
+            file = self.path_config / file
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 
@@ -142,7 +151,10 @@ class Mod:
         Returns:
             Type[msgspec.Struct] | None:
         """
-        file = self.path_config / file
+        if file.startswith('alasio/'):
+            file = self.path_alasio_config / file
+        else:
+            file = self.path_config / file
         try:
             module = LOADPY_CACHE.get(file)
         except ImportError as e:

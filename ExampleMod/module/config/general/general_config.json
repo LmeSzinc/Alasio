@@ -1,0 +1,161 @@
+{
+  "card-General-Retirement": {
+    "_info": {"group": "Retirement", "arg": "_info"},
+    "Retirement_RetireMode": {
+      "task": "General",
+      "group": "Retirement",
+      "arg": "RetireMode",
+      "dt": "select",
+      "value": "one_click_retire",
+      "option": ["one_click_retire", "enhance", "old_retire"]
+    }
+  },
+  "card-General-OneClickRetire": {
+    "_info": {"group": "OneClickRetire", "arg": "_info"},
+    "OneClickRetire_KeepLimitBreak": {
+      "task": "General",
+      "group": "OneClickRetire",
+      "arg": "KeepLimitBreak",
+      "dt": "select",
+      "value": "keep_limit_break",
+      "option": ["keep_limit_break", "do_not_keep"]
+    }
+  },
+  "card-General-Enhance": {
+    "_info": {"group": "Enhance", "arg": "_info"},
+    "Enhance_ShipToEnhance": {
+      "task": "General",
+      "group": "Enhance",
+      "arg": "ShipToEnhance",
+      "dt": "select",
+      "value": "all",
+      "option": ["all", "favourite"]
+    },
+    "Enhance_Filter": {
+      "task": "General",
+      "group": "Enhance",
+      "arg": "Filter",
+      "dt": "input",
+      "value": ""
+    },
+    "Enhance_CheckPerCategory": {
+      "task": "General",
+      "group": "Enhance",
+      "arg": "CheckPerCategory",
+      "dt": "input-int",
+      "value": 5
+    }
+  },
+  "card-General-OldRetire": {
+    "_info": {"group": "OldRetire", "arg": "_info"},
+    "OldRetire_N": {
+      "task": "General",
+      "group": "OldRetire",
+      "arg": "N",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OldRetire_R": {
+      "task": "General",
+      "group": "OldRetire",
+      "arg": "R",
+      "dt": "checkbox",
+      "value": true
+    },
+    "OldRetire_SR": {
+      "task": "General",
+      "group": "OldRetire",
+      "arg": "SR",
+      "dt": "checkbox",
+      "value": false
+    },
+    "OldRetire_SSR": {
+      "task": "General",
+      "group": "OldRetire",
+      "arg": "SSR",
+      "dt": "checkbox",
+      "value": false
+    },
+    "OldRetire_RetireAmount": {
+      "task": "General",
+      "group": "OldRetire",
+      "arg": "RetireAmount",
+      "dt": "select",
+      "value": "retire_all",
+      "option": ["retire_all", "retire_10"]
+    }
+  },
+  "card-General-DropRecord": {
+    "_info": {"group": "DropRecord", "arg": "_info"},
+    "DropRecord_SaveFolder": {
+      "task": "General",
+      "group": "DropRecord",
+      "arg": "SaveFolder",
+      "dt": "input",
+      "value": "./screenshots"
+    },
+    "DropRecord_AzurStatsID": {
+      "task": "General",
+      "group": "DropRecord",
+      "arg": "AzurStatsID",
+      "dt": "input",
+      "value": ""
+    },
+    "DropRecord_API": {
+      "task": "General",
+      "group": "DropRecord",
+      "arg": "API",
+      "dt": "select",
+      "value": "default",
+      "option": ["default", "cn_gz_reverse_proxy"]
+    },
+    "DropRecord_ResearchRecord": {
+      "task": "General",
+      "group": "DropRecord",
+      "arg": "ResearchRecord",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save", "upload", "save_and_upload"]
+    },
+    "DropRecord_CommissionRecord": {
+      "task": "General",
+      "group": "DropRecord",
+      "arg": "CommissionRecord",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save", "upload", "save_and_upload"]
+    },
+    "DropRecord_CombatRecord": {
+      "task": "General",
+      "group": "DropRecord",
+      "arg": "CombatRecord",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save"]
+    },
+    "DropRecord_OpsiRecord": {
+      "task": "General",
+      "group": "DropRecord",
+      "arg": "OpsiRecord",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save", "upload", "save_and_upload"]
+    },
+    "DropRecord_MeowfficerBuy": {
+      "task": "General",
+      "group": "DropRecord",
+      "arg": "MeowfficerBuy",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save"]
+    },
+    "DropRecord_MeowfficerTalent": {
+      "task": "General",
+      "group": "DropRecord",
+      "arg": "MeowfficerTalent",
+      "dt": "select",
+      "value": "do_not",
+      "option": ["do_not", "save", "upload", "save_and_upload"]
+    }
+  }
+}

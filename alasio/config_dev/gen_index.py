@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 from alasio.config.const import Const
-from alasio.config.entry.const import DICT_MOD_ENTRY
+from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.gen_cross import CrossNavGenerator
 from alasio.config_dev.parse.base import DefinitionError
@@ -11,6 +11,7 @@ from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
+from alasio.ext.path.atomic import atomic_remove
 from alasio.ext.path.calc import to_posix
 from alasio.git.stage.gitadd import GitAdd
 from alasio.logger import logger
@@ -66,8 +67,17 @@ class IndexGenerator(CrossNavGenerator):
                 key: task_name
                 value: A set of group name in task
         """
+
+        def iter_model_data():
+            if self.alasio:
+                yield from deep_iter_depth2(self.alasio.model_data)
+            yield from deep_iter_depth2(self.model_data)
+
         out = defaultdict(set)
-        for task_name, group_name, ref in deep_iter_depth2(self.model_data):
+        for task_name, group_name, ref in iter_model_data():
+            # drop _global_bind
+            if task_name.startswith('_'):
+                continue
             try:
                 task = ref['task']
             except KeyError:
@@ -143,9 +153,19 @@ class IndexGenerator(CrossNavGenerator):
                     "config" is {"task": list[str], "group": list[tuple[str, str]]}
                     which indicates to read task and taskgroups in user config
         """
-        out = {}
 
-        for task_name, group_data in self.model_data.items():
+        def iter_model_data():
+            if self.alasio:
+                for k, v in self.alasio.model_data.items():
+                    # drop _global_bind
+                    if k.startswith('_'):
+                        continue
+                    yield k, v
+            # but keep _global_bind of self
+            yield from self.model_data.items()
+
+        out = {}
+        for task_name, group_data in iter_model_data():
             all_task_groups = []
             for group_name, ref in group_data.items():
                 try:
@@ -252,7 +272,13 @@ class IndexGenerator(CrossNavGenerator):
                 value: translation
         """
         out = {}
-        for config in self.dict_nav_config.values():
+
+        def iter_configs():
+            yield from self.dict_nav_config.values()
+            if self.alasio:
+                yield from self.alasio.dict_nav_config.values()
+
+        for config in iter_configs():
             for group_name, group_data in config.i18n_data.items():
                 group_name = self.dict_group_variant2base.get(group_name, group_name)
                 i18n = deep_get(group_data, ['_info'], default={})
@@ -261,7 +287,7 @@ class IndexGenerator(CrossNavGenerator):
                     try:
                         name = field_data['name']
                     except KeyError:
-                        name = ''
+                        name = group_name
                     deep_set(out, [group_name, lang], name)
 
         return out
@@ -305,11 +331,16 @@ class IndexGenerator(CrossNavGenerator):
                 except KeyError:
                     raise DefinitionError(f'Card "{nav_name}.{card_name}._info" has no "group"')
                 group_name = self.dict_group_variant2base.get(group_name, group_name)
+                # if self.alasio and group_name in self.alasio.dict_group_name_i18n:
+                #     raise DefinitionError(
+                #         f'Card "{nav_name}.{card_name}._info" reference a group from alasio: "{group_name}". '
+                #         f'Maybe define a dedicated group for info?'
+                #     )
                 try:
                     name = self.dict_group_name_i18n[group_name]
                 except KeyError:
                     raise DefinitionError(
-                        f'Card "{nav_name}.{card_name}._info" reference a non-exist group: {group_name}')
+                        f'Card "{nav_name}.{card_name}._info" reference a non-exist group: "{group_name}"')
                 deep_set(out, [nav_name, card_name], name)
 
         return out
@@ -366,8 +397,11 @@ class IndexGenerator(CrossNavGenerator):
         # Basic imports
         gen.Import('typing')
         gen.Empty()
-        gen.FromImport('alasio.config.base', 'AlasioConfigBase')
-        gen.FromImport('const', 'entry')
+        if self.alasio:
+            gen.FromImport('alasio.config.config_generated', 'ConfigGenerated as AlasioConfigBase')
+            gen.FromImport('const', 'entry')
+        else:
+            gen.FromImport('alasio.config.base', 'AlasioConfigBase')
         gen.Empty(1)
 
         # TYPE_CHECKING block - imports only used for type hints
@@ -383,7 +417,8 @@ class IndexGenerator(CrossNavGenerator):
         # Class definition
         with gen.Class('ConfigGenerated', inherit='AlasioConfigBase'):
             gen.Comment('A generated config struct to fool IDE\'s type-predict and auto-complete')
-            gen.add('entry = entry')
+            if self.alasio:
+                gen.add('entry = entry')
             gen.Empty()
 
             # Generate group attributes organized by nav
@@ -440,9 +475,15 @@ class IndexGenerator(CrossNavGenerator):
         self.generate_config_json(gitadd=gitadd)
 
         def write(f, d):
-            op = write_json_custom_indent(f, d, skip_same=True)
-            if op:
-                logger.info(f'Write file {f}')
+            if d:
+                op = write_json_custom_indent(f, d, skip_same=True)
+                if op:
+                    logger.info(f'Write file {f}')
+                    if gitadd:
+                        gitadd.stage_add(f)
+            else:
+                logger.info(f'Delete file {f}')
+                atomic_remove(f)
                 if gitadd:
                     gitadd.stage_add(f)
 
@@ -459,7 +500,7 @@ class IndexGenerator(CrossNavGenerator):
         write(self.queue_index_file, self.queue_index_data)
 
         # config_generated.py
-        self.generate_config_generated_file()
+        self.generate_config_generated_file(gitadd=gitadd)
 
     def generate(self):
         with GitAdd(env.PROJECT_ROOT) as gitadd:
@@ -467,7 +508,6 @@ class IndexGenerator(CrossNavGenerator):
 
 
 if __name__ == '__main__':
-    _entry = DICT_MOD_ENTRY['alasio'].copy()
-    _entry.root = env.PROJECT_ROOT.joinpath('alasio')
-    self = IndexGenerator(_entry)
+    env.set_project_root(env.ALASIO_ROOT)
+    self = IndexGenerator(ModEntryInfo.alasio())
     self.generate()

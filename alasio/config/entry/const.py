@@ -4,6 +4,7 @@ from typing import Dict
 
 from msgspec import Struct, field
 
+from alasio.ext import env
 from alasio.ext.path.calc import joinnormpath
 
 
@@ -56,6 +57,15 @@ class ModEntryInfo(Struct):
         """
         yield ''
         yield from self.asset_lang
+
+    @classmethod
+    def alasio(cls):
+        return cls(
+            name='alasio',
+            root=env.ALASIO_ROOT,
+            path_config='alasio/config',
+            gui_language=dict.fromkeys(['zh-CN', 'en-US', 'ja-JP', 'zh-TW', 'en-ES']),
+        )
 
 
 class ConfigConst:

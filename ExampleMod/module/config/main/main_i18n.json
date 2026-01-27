@@ -1,4 +1,12 @@
 {
+  "Main": {
+    "_info": {
+      "zh-CN": {"name": "主线图", "help": ""},
+      "zh-TW": {"name": "Main", "help": ""},
+      "en-US": {"name": "Main", "help": ""},
+      "ja-JP": {"name": "Main", "help": ""}
+    }
+  },
   "Campaign": {
     "_info": {
       "zh-CN": {"name": "Campaign", "help": ""},

@@ -1,12 +1,11 @@
 import typing
 
-from alasio.config.base import AlasioConfigBase
+from alasio.config.config_generated import ConfigGenerated as AlasioConfigBase
 from const import entry
 
 if typing.TYPE_CHECKING:
     from .alas import alas_model as alas
-    from .alasio import alasio_model as alasio
-    from .alasio import device_model as device
+    from .general import general_model as general
     from .main import main_model as main
     from .opsi import opsi_model as opsi
 
@@ -16,20 +15,14 @@ class ConfigGenerated(AlasioConfigBase):
     entry = entry
 
     # alas
-    DropRecord: "alas.DropRecord"
-    Retirement: "alas.Retirement"
-    OneClickRetire: "alas.OneClickRetire"
-    Enhance: "alas.Enhance"
-    OldRetire: "alas.OldRetire"
+    Game: "alas.Game"
 
-    # alasio
-    Scheduler: "alasio.Scheduler"
-
-    # device
-    Emulator: "device.Emulator"
-    EmulatorInfo: "device.EmulatorInfo"
-    Error: "device.Error"
-    Optimization: "device.Optimization"
+    # general
+    DropRecord: "general.DropRecord"
+    Retirement: "general.Retirement"
+    OneClickRetire: "general.OneClickRetire"
+    Enhance: "general.Enhance"
+    OldRetire: "general.OldRetire"
 
     # main
     Campaign: "main.Campaign"

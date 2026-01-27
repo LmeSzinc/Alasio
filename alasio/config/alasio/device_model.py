@@ -10,8 +10,6 @@ import typing_extensions as e
 
 class Emulator(m.Struct, omit_defaults=True):
     Serial: str = 'auto'
-    PackageName: t.Literal['auto'] = 'auto'
-    ServerName: t.Literal['disabled'] = 'disabled'
     ScreenshotMethod: t.Literal[
         'auto',
         'ADB',

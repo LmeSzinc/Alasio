@@ -12,66 +12,6 @@
       "en-US": {"name": "Emulator.Serial", "help": ""},
       "ja-JP": {"name": "Emulator.Serial", "help": ""}
     },
-    "PackageName": {
-      "zh-CN": {
-        "name": "Emulator.PackageName",
-        "help": "",
-        "option_i18n": {
-          "auto": "auto"
-        }
-      },
-      "zh-TW": {
-        "name": "Emulator.PackageName",
-        "help": "",
-        "option_i18n": {
-          "auto": "auto"
-        }
-      },
-      "en-US": {
-        "name": "Emulator.PackageName",
-        "help": "",
-        "option_i18n": {
-          "auto": "auto"
-        }
-      },
-      "ja-JP": {
-        "name": "Emulator.PackageName",
-        "help": "",
-        "option_i18n": {
-          "auto": "auto"
-        }
-      }
-    },
-    "ServerName": {
-      "zh-CN": {
-        "name": "Emulator.ServerName",
-        "help": "",
-        "option_i18n": {
-          "disabled": "disabled"
-        }
-      },
-      "zh-TW": {
-        "name": "Emulator.ServerName",
-        "help": "",
-        "option_i18n": {
-          "disabled": "disabled"
-        }
-      },
-      "en-US": {
-        "name": "Emulator.ServerName",
-        "help": "",
-        "option_i18n": {
-          "disabled": "disabled"
-        }
-      },
-      "ja-JP": {
-        "name": "Emulator.ServerName",
-        "help": "",
-        "option_i18n": {
-          "disabled": "disabled"
-        }
-      }
-    },
     "ScreenshotMethod": {
       "zh-CN": {
         "name": "Emulator.ScreenshotMethod",
@@ -333,7 +273,7 @@
   },
   "Optimization": {
     "_info": {
-      "zh-CN": {"name": "Optimization", "help": ""},
+      "zh-CN": {"name": "优化设置", "help": ""},
       "zh-TW": {"name": "Optimization", "help": ""},
       "en-US": {"name": "Optimization", "help": ""},
       "ja-JP": {"name": "Optimization", "help": ""}

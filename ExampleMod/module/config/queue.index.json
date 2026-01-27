@@ -5,23 +5,11 @@
     "en-US": "Alas",
     "ja-JP": "Alas"
   },
-  "Device": {
-    "zh-CN": "Device",
-    "zh-TW": "Device",
-    "en-US": "Device",
-    "ja-JP": "Device"
-  },
-  "RestartDevice": {
-    "zh-CN": "RestartDevice",
-    "zh-TW": "RestartDevice",
-    "en-US": "RestartDevice",
-    "ja-JP": "RestartDevice"
-  },
-  "RestartGame": {
-    "zh-CN": "RestartGame",
-    "zh-TW": "RestartGame",
-    "en-US": "RestartGame",
-    "ja-JP": "RestartGame"
+  "General": {
+    "zh-CN": "General",
+    "zh-TW": "General",
+    "en-US": "General",
+    "ja-JP": "General"
   },
   "Main": {
     "zh-CN": "Main",

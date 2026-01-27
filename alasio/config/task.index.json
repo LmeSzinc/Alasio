@@ -1,0 +1,32 @@
+{
+  "Device": {
+    "group": {
+      "Emulator": {"file": "alasio/device_model.py", "cls": "Emulator", "task": "Device"},
+      "EmulatorInfo": {"file": "alasio/device_model.py", "cls": "EmulatorInfo", "task": "Device"},
+      "Error": {"file": "alasio/device_model.py", "cls": "Error", "task": "Device"},
+      "Optimization": {"file": "alasio/device_model.py", "cls": "Optimization", "task": "Device"}
+    },
+    "config": {"task": ["Device"], "group": []}
+  },
+  "RestartDevice": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerStatic", "task": "RestartDevice"}
+    },
+    "config": {"task": ["RestartDevice"], "group": []}
+  },
+  "RestartGame": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerStatic", "task": "RestartGame"}
+    },
+    "config": {"task": ["RestartGame"], "group": []}
+  },
+  "_global_bind": {
+    "group": {
+      "Emulator": {"file": "alasio/device_model.py", "cls": "Emulator", "task": "Device"},
+      "EmulatorInfo": {"file": "alasio/device_model.py", "cls": "EmulatorInfo", "task": "Device"},
+      "Error": {"file": "alasio/device_model.py", "cls": "Error", "task": "Device"},
+      "Optimization": {"file": "alasio/device_model.py", "cls": "Optimization", "task": "Device"}
+    },
+    "config": {"task": ["Device"], "group": []}
+  }
+}

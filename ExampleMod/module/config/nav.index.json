@@ -6,79 +6,85 @@
       "en-US": "alas",
       "ja-JP": "alas"
     },
-    "card-Retirement": {
-      "zh-CN": "Retirement",
-      "zh-TW": "Retirement",
-      "en-US": "Retirement",
-      "ja-JP": "Retirement"
+    "card-Alas-Game": {
+      "zh-CN": "Game",
+      "zh-TW": "Game",
+      "en-US": "Game",
+      "ja-JP": "Game"
     },
-    "card-OneClickRetire": {
-      "zh-CN": "OneClickRetire",
-      "zh-TW": "OneClickRetire",
-      "en-US": "OneClickRetire",
-      "ja-JP": "OneClickRetire"
-    },
-    "card-Enhance": {
-      "zh-CN": "Enhance",
-      "zh-TW": "Enhance",
-      "en-US": "Enhance",
-      "ja-JP": "Enhance"
-    },
-    "card-OldRetire": {
-      "zh-CN": "OldRetire",
-      "zh-TW": "OldRetire",
-      "en-US": "OldRetire",
-      "ja-JP": "OldRetire"
-    },
-    "card-DropRecord": {
-      "zh-CN": "DropRecord",
-      "zh-TW": "DropRecord",
-      "en-US": "DropRecord",
-      "ja-JP": "DropRecord"
-    }
-  },
-  "device": {
-    "_info": {
-      "zh-CN": "device",
-      "zh-TW": "device",
-      "en-US": "device",
-      "ja-JP": "device"
-    },
-    "card-Emulator": {
+    "card-Alas-Emulator": {
       "zh-CN": "Emulator",
       "zh-TW": "Emulator",
       "en-US": "Emulator",
       "ja-JP": "Emulator"
     },
-    "card-EmulatorInfo": {
+    "card-Alas-EmulatorInfo": {
       "zh-CN": "EmulatorInfo",
       "zh-TW": "EmulatorInfo",
       "en-US": "EmulatorInfo",
       "ja-JP": "EmulatorInfo"
     },
-    "card-Error": {
+    "card-Alas-Error": {
       "zh-CN": "Error",
       "zh-TW": "Error",
       "en-US": "Error",
       "ja-JP": "Error"
     },
-    "card-Optimization": {
-      "zh-CN": "Optimization",
+    "card-Alas-Optimization": {
+      "zh-CN": "优化设置",
       "zh-TW": "Optimization",
       "en-US": "Optimization",
       "ja-JP": "Optimization"
     },
-    "card-RestartDevice": {
+    "card-RestartDeviceDisplay-RestartDevice": {
       "zh-CN": "RestartDevice",
       "zh-TW": "RestartDevice",
       "en-US": "RestartDevice",
       "ja-JP": "RestartDevice"
     },
-    "card-RestartGame": {
+    "card-RestartGameDisplay-RestartGame": {
       "zh-CN": "RestartGame",
       "zh-TW": "RestartGame",
       "en-US": "RestartGame",
       "ja-JP": "RestartGame"
+    }
+  },
+  "general": {
+    "_info": {
+      "zh-CN": "general",
+      "zh-TW": "general",
+      "en-US": "general",
+      "ja-JP": "general"
+    },
+    "card-General-Retirement": {
+      "zh-CN": "Retirement",
+      "zh-TW": "Retirement",
+      "en-US": "Retirement",
+      "ja-JP": "Retirement"
+    },
+    "card-General-OneClickRetire": {
+      "zh-CN": "OneClickRetire",
+      "zh-TW": "OneClickRetire",
+      "en-US": "OneClickRetire",
+      "ja-JP": "OneClickRetire"
+    },
+    "card-General-Enhance": {
+      "zh-CN": "Enhance",
+      "zh-TW": "Enhance",
+      "en-US": "Enhance",
+      "ja-JP": "Enhance"
+    },
+    "card-General-OldRetire": {
+      "zh-CN": "OldRetire",
+      "zh-TW": "OldRetire",
+      "en-US": "OldRetire",
+      "ja-JP": "OldRetire"
+    },
+    "card-General-DropRecord": {
+      "zh-CN": "DropRecord",
+      "zh-TW": "DropRecord",
+      "en-US": "DropRecord",
+      "ja-JP": "DropRecord"
     }
   },
   "main": {
@@ -88,49 +94,49 @@
       "en-US": "main",
       "ja-JP": "main"
     },
-    "card-Scheduler": {
-      "zh-CN": "Scheduler",
-      "zh-TW": "Scheduler",
-      "en-US": "Scheduler",
-      "ja-JP": "Scheduler"
+    "card-Main-Main": {
+      "zh-CN": "主线图",
+      "zh-TW": "Main",
+      "en-US": "Main",
+      "ja-JP": "Main"
     },
-    "card-Campaign": {
+    "card-Main-Campaign": {
       "zh-CN": "Campaign",
       "zh-TW": "Campaign",
       "en-US": "Campaign",
       "ja-JP": "Campaign"
     },
-    "card-StopCondition": {
+    "card-Main-StopCondition": {
       "zh-CN": "StopCondition",
       "zh-TW": "StopCondition",
       "en-US": "StopCondition",
       "ja-JP": "StopCondition"
     },
-    "card-Fleet": {
+    "card-Main-Fleet": {
       "zh-CN": "Fleet",
       "zh-TW": "Fleet",
       "en-US": "Fleet",
       "ja-JP": "Fleet"
     },
-    "card-Submarine": {
+    "card-Main-Submarine": {
       "zh-CN": "Submarine",
       "zh-TW": "Submarine",
       "en-US": "Submarine",
       "ja-JP": "Submarine"
     },
-    "card-Emotion": {
+    "card-Main-Emotion": {
       "zh-CN": "Emotion",
       "zh-TW": "Emotion",
       "en-US": "Emotion",
       "ja-JP": "Emotion"
     },
-    "card-HpControl": {
+    "card-Main-HpControl": {
       "zh-CN": "HpControl",
       "zh-TW": "HpControl",
       "en-US": "HpControl",
       "ja-JP": "HpControl"
     },
-    "card-EnemyPriority": {
+    "card-Main-EnemyPriority": {
       "zh-CN": "EnemyPriority",
       "zh-TW": "EnemyPriority",
       "en-US": "EnemyPriority",
@@ -144,25 +150,25 @@
       "en-US": "opsi",
       "ja-JP": "opsi"
     },
-    "card-OpsiExplore": {
+    "card-OpsiExplore-OpsiExplore": {
       "zh-CN": "OpsiExplore",
       "zh-TW": "OpsiExplore",
       "en-US": "OpsiExplore",
       "ja-JP": "OpsiExplore"
     },
-    "card-OpsiDaily": {
+    "card-OpsiDaily-OpsiDaily": {
       "zh-CN": "OpsiDaily",
       "zh-TW": "OpsiDaily",
       "en-US": "OpsiDaily",
       "ja-JP": "OpsiDaily"
     },
-    "card-OpsiGeneral": {
+    "card-OpsiGeneral-OpsiGeneral": {
       "zh-CN": "大世界通用设置",
       "zh-TW": "OpsiGeneral",
       "en-US": "OpsiGeneral",
       "ja-JP": "OpsiGeneral"
     },
-    "card-OpsiAshAssist": {
+    "card-OpsiAshAssist-OpsiAshAssist": {
       "zh-CN": "META支援",
       "zh-TW": "OpsiAshAssist",
       "en-US": "Opsi AshAssist",

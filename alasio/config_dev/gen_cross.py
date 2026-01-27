@@ -1,8 +1,9 @@
+from typing import Optional
+
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.parse_args import GroupData
-from alasio.config_dev.parse.parse_tasks import DisplayCard
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
@@ -21,6 +22,12 @@ class CrossNavGenerator:
         self.root = PathStr.new(entry.root).abspath()
         self.path_config: PathStr = self.root.joinpath(entry.path_config)
 
+        # Alasio global
+        alasio = ModEntryInfo.alasio()
+        self.alasio: "Optional[CrossNavGenerator]" = None
+        if entry.root != alasio.root:
+            self.alasio = self.__class__(alasio)
+
     @cached_property
     def dict_nav_config(self):
         """
@@ -32,6 +39,7 @@ class CrossNavGenerator:
                 value: generator
         """
         out = {}
+        # no alasio global loading
         for folder in self.path_config.iter_folders():
             # skip hidden folder
             if folder.name.startswith('_'):
@@ -41,9 +49,14 @@ class CrossNavGenerator:
                 parser.folder = folder.name
                 # nav
                 nav = parser.nav_name
+                if self.alasio and nav in self.alasio.dict_nav_config:
+                    raise DefinitionError(
+                        f'Conflict nav name: "{nav}", which is already used in alasio',
+                        file=file,
+                    )
                 if nav in out:
                     raise DefinitionError(
-                        f'Duplicate nav name: {nav}',
+                        f'Duplicate nav name: "{nav}"',
                         file=file,
                     )
                 out[nav] = parser
@@ -55,6 +68,8 @@ class CrossNavGenerator:
         Convert variant name to base name
         """
         out = {}
+        if self.alasio:
+            out = self.alasio.dict_group_variant2base
         for config in self.dict_nav_config.values():
             for group in config.groups_data.values():
                 if not group.base:
@@ -77,6 +92,8 @@ class CrossNavGenerator:
                 value: {'file': file, 'cls': class_name}
         """
         out = {}
+        if self.alasio:
+            out = self.alasio.dict_group_ref
         for config in self.dict_nav_config.values():
             # calculate module file
             file = config.model_file.subpath_to(self.path_config)
@@ -87,11 +104,15 @@ class CrossNavGenerator:
             # iter group models
             for group_name in config.groups_data:
                 # group must be unique
+                if self.alasio and group_name in self.alasio.dict_group_ref:
+                    raise DefinitionError(
+                        f'Conflict group name: "{group_name}", which is already used in alasio',
+                        file=config.file, keys=group_name,
+                    )
                 if group_name in out:
                     raise DefinitionError(
-                        f'Duplicate group name: {group_name}',
-                        file=config.file,
-                        keys=group_name,
+                        f'Duplicate group name: "{group_name}"',
+                        file=config.file, keys=group_name,
                     )
                 # build model reference
                 ref = {'file': file, 'cls': group_name}
@@ -115,13 +136,21 @@ class CrossNavGenerator:
         """
         out = {}
         global_bind = {}
+        # load alasio global_bind only
+        if self.alasio:
+            global_bind = self.alasio.model_data.get('_global_bind', {})
         all_groups = set()
         for config in self.dict_nav_config.values():
             for task_name, task in config.tasks_data.items():
                 # task name must be unique
+                if self.alasio and task_name in self.alasio.model_data:
+                    raise DefinitionError(
+                        f'Conflict task name: "{task_name}", which is already used in alasio',
+                        file=config.tasks_file, keys=task_name,
+                    )
                 if task_name in out:
                     raise DefinitionError(
-                        f'Duplicate task name: {task_name}',
+                        f'Duplicate task name: "{task_name}"',
                         file=config.tasks_file, keys=task_name,
                     )
                 # generate groups
@@ -169,10 +198,13 @@ class CrossNavGenerator:
         # check if {ref_task_name}.{group_name} reference has corresponding value
         for _, group, ref in deep_iter_depth2(out):
             ref_task = ref['task']
-            if not deep_exist(out, [ref_task, group]):
-                raise DefinitionError(
-                    f'Cross-task group ref does not exist: {ref_task}.{group}',
-                )
+            if deep_exist(out, [ref_task, group]):
+                continue
+            if self.alasio and deep_exist(self.alasio.model_data, [ref_task, group]):
+                continue
+            raise DefinitionError(
+                f'Cross-task group ref does not exist: {ref_task}.{group}',
+            )
 
         out['_global_bind'] = global_bind
 
@@ -193,6 +225,8 @@ class CrossNavGenerator:
                 value: relative path to {nav}.config.json
         """
         out = {}
+        if self.alasio:
+            out = self.alasio.dict_group2file
         for config in self.dict_nav_config.values():
             # calculate module file
             file = config.i18n_file.subpath_to(self.path_config)
@@ -202,13 +236,7 @@ class CrossNavGenerator:
             # iter group models
             file = to_posix(file)
             for group_name in config.i18n_data.keys():
-                # group must be unique
-                if group_name in out:
-                    raise DefinitionError(
-                        f'Duplicate group name: {group_name}',
-                        file=config.tasks_file,
-                        keys=group_name,
-                    )
+                # no need to check if group is unique, dict_group_ref checked it already
                 out[group_name] = file
 
         return out
@@ -222,6 +250,8 @@ class CrossNavGenerator:
             dict[str, ConfigGenerator]:
         """
         out = {}
+        if self.alasio:
+            out = self.alasio.dict_group2configgen
         for config in self.dict_nav_config.values():
             for group_name in config.groups_data.keys():
                 out[group_name] = config
@@ -242,13 +272,18 @@ class CrossNavGenerator:
             raise DefinitionError(f'Nav args "{config.file}" has no group_name={group_name}')
         return group
 
-    def _get_card_name(self, card: DisplayCard):
-        if card.info:
-            info = self.dict_group_variant2base.get(card.info, card.info)
-            return f'card-{info}'
-        else:
-            card_name = '_'.join([self.dict_group_variant2base.get(d.group, d.group) for d in card.groups])
-            return f'card-{card_name}'
+    def _validate_task_group(self, task: str, group: str):
+        try:
+            return self.model_data[task][group]['cls']
+        except KeyError:
+            pass
+        if self.alasio:
+            try:
+                return self.alasio.model_data[task][group]['cls']
+            except KeyError:
+                pass
+        raise DefinitionError(
+            f'Display group has no corresponding task group: "{task}.{group}"')
 
     def _generate_nav_config_json(self, config: ConfigGenerator):
         """
@@ -266,23 +301,26 @@ class CrossNavGenerator:
         for task_name, task in config.tasks_data.items():
             for card in task.displays:
                 # gen _info
-                row = {'group': card.info, 'arg': '_info'}
                 _ = self._group_name_to_data(card.info)  # check if card.info valid
-                card_name = self._get_card_name(card)
+                card_info = self.dict_group_variant2base.get(card.info, card.info)
+                card_name = f'card-{card.task}-{card_info}'
+                row = {'group': card_info, 'arg': '_info'}
                 deep_set(out, keys=[card_name, '_info'], value=NoIndent(row))
                 # gen args
                 for group in card.groups:
-                    # validate if display_group refs an task group
+                    # validate if display_group refs a task group.
+                    # accept both variant name and base name, here convert to base name first, then query its variant
                     base_name = self.dict_group_variant2base.get(group.group, group.group)
                     try:
-                        cls = self.model_data[task_name][base_name]['cls']
-                    except KeyError:
-                        raise DefinitionError(
-                            f'Display group has no corresponding task group: "{task_name}"."{group.group}"',
-                            file=config.tasks_file, keys=[task_name, 'displays'], value=group.group)
+                        cls = self._validate_task_group(group.task, base_name)
+                    except DefinitionError as e:
+                        e.file = config.tasks_file
+                        e.keys = [group.task, 'displays']
+                        e.value = group
+                        raise
                     group_data = self._group_name_to_data(cls)
 
-                    is_variant = base_name != group.group
+                    is_variant = base_name != cls
                     for arg_name, arg_data in group_data.args.items():
                         row = {
                             'task': group.task,
@@ -291,7 +329,7 @@ class CrossNavGenerator:
                         }
                         # set cls on variant override
                         if is_variant and arg_name in group_data.override_args:
-                            row['cls'] = group.group
+                            row['cls'] = cls
                         row.update(arg_data.to_dict())
                         arg_name = f'{base_name}_{arg_name}'
                         deep_set(out, keys=[card_name, arg_name], value=row)

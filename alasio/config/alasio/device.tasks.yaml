@@ -1,0 +1,27 @@
+Device:
+  global_bind: true
+  groups:
+    - Emulator
+    - EmulatorInfo
+    - Error
+    - Optimization
+  displays: null
+
+RestartDevice:
+  groups:
+    - SchedulerStatic
+  displays: null
+
+RestartGame:
+  groups:
+    - SchedulerStatic
+  displays: null
+
+#TestMergeDisplayGroup:
+#  displays: [
+#    [
+#      {task: Device, group: Emulator},
+#      {task: Device, group: EmulatorInfo},
+#      {task: RestartGame, group: Scheduler},
+#    ],
+#  ]

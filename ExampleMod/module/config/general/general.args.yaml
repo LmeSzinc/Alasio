@@ -1,0 +1,55 @@
+DropRecord:
+  args:
+    SaveFolder: ./screenshots
+    AzurStatsID: ""
+    API:
+      value: default
+      option: [ default, cn_gz_reverse_proxy]
+    ResearchRecord:
+      value: do_not
+      option: [ do_not, save, upload, save_and_upload ]
+    CommissionRecord:
+      value: do_not
+      option: [ do_not, save, upload, save_and_upload ]
+    CombatRecord:
+      value: do_not
+      option: [ do_not, save ]
+    OpsiRecord:
+      value: do_not
+      option: [ do_not, save, upload, save_and_upload ]
+    MeowfficerBuy:
+      value: do_not
+      option: [ do_not, save ]
+    MeowfficerTalent:
+      value: do_not
+      option: [ do_not, save, upload, save_and_upload ]
+
+Retirement:
+  args:
+    RetireMode:
+      value: one_click_retire
+      option: [ one_click_retire, enhance, old_retire ]
+
+OneClickRetire:
+  args:
+    KeepLimitBreak:
+      value: keep_limit_break
+      option: [ keep_limit_break, do_not_keep ]
+
+Enhance:
+  args:
+    ShipToEnhance:
+      value: all
+      option: [ all, favourite ]
+    Filter: ""
+    CheckPerCategory: 5
+
+OldRetire:
+  args:
+    N: true
+    R: true
+    SR: false
+    SSR: false
+    RetireAmount:
+      value: retire_all
+      option: [ retire_all, retire_10 ]

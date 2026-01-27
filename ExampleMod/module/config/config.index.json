@@ -2,29 +2,30 @@
   "alas": {
     "file": "alas/alas_config.json",
     "i18n": [
-      "alas/alas_i18n.json"
-    ],
-    "config": {
-      "task": ["Alas"],
-      "group": []
-    }
-  },
-  "device": {
-    "file": "alasio/device_config.json",
-    "i18n": [
+      "alas/alas_i18n.json",
       "alasio/device_i18n.json",
       "alasio/alasio_i18n.json"
     ],
     "config": {
-      "task": ["Device", "RestartDevice", "RestartGame"],
+      "task": ["Alas", "Device", "RestartDevice", "RestartGame"],
+      "group": []
+    }
+  },
+  "general": {
+    "file": "general/general_config.json",
+    "i18n": [
+      "general/general_i18n.json"
+    ],
+    "config": {
+      "task": ["General"],
       "group": []
     }
   },
   "main": {
     "file": "main/main_config.json",
     "i18n": [
-      "alasio/alasio_i18n.json",
-      "main/main_i18n.json"
+      "main/main_i18n.json",
+      "alasio/alasio_i18n.json"
     ],
     "config": {
       "task": ["Main"],
