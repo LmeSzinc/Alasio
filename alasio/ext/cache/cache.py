@@ -129,7 +129,7 @@ class cached_property(CacheOperation):
     A high-performance, non-thread-safe cached property
     """
 
-    def __init__(self, func: "Callable[[Any], T]"):
+    def __init__(self, func: Callable[[Any], T]):
         self.func = func
         wraps(func)(self)
 
@@ -166,7 +166,7 @@ class threaded_cached_property(CacheOperation):
     A thread-safe cached property
     """
 
-    def __init__(self, func: "Callable[[Any], T]"):
+    def __init__(self, func: Callable[[Any], T]):
         self.func = func
         # per-property, cross-instance lock, shares among all instances
         self.create_lock = Lock()
