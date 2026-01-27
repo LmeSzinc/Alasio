@@ -13,28 +13,28 @@
       "ja-JP": "Game"
     },
     "card-Alas-Emulator": {
-      "zh-CN": "Emulator",
-      "zh-TW": "Emulator",
-      "en-US": "Emulator",
-      "ja-JP": "Emulator"
+      "zh-CN": "模拟器设置",
+      "zh-TW": "模擬器設定",
+      "en-US": "Emulator Settings",
+      "ja-JP": "Emulator._info.name"
     },
     "card-Alas-EmulatorInfo": {
-      "zh-CN": "EmulatorInfo",
-      "zh-TW": "EmulatorInfo",
-      "en-US": "EmulatorInfo",
-      "ja-JP": "EmulatorInfo"
+      "zh-CN": "模拟器设置",
+      "zh-TW": "模擬器設定",
+      "en-US": "Emulator Settings",
+      "ja-JP": "EmulatorInfo._info.name"
     },
     "card-Alas-Error": {
-      "zh-CN": "Error",
-      "zh-TW": "Error",
-      "en-US": "Error",
-      "ja-JP": "Error"
+      "zh-CN": "调试设置",
+      "zh-TW": "除錯設定",
+      "en-US": "Debug Settings",
+      "ja-JP": "Error._info.name"
     },
     "card-Alas-Optimization": {
       "zh-CN": "优化设置",
-      "zh-TW": "Optimization",
-      "en-US": "Optimization",
-      "ja-JP": "Optimization"
+      "zh-TW": "優化設定",
+      "en-US": "Optimization Settings",
+      "ja-JP": "Optimization._info.name"
     },
     "card-RestartDeviceDisplay-RestartDevice": {
       "zh-CN": "RestartDevice",

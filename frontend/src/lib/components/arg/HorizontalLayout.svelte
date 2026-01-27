@@ -1,6 +1,7 @@
 <script lang="ts">
   import { cn } from "$lib/utils";
   import { getArgName, type LayoutProps } from "./utils.svelte";
+  import I18nText from "./I18nText.svelte";
 
   let {
     data = $bindable(),
@@ -19,8 +20,8 @@
   <!-- Top row: name (left) and input (right) -->
   <div class="flex min-h-8 flex-row items-center justify-between gap-x-4">
     <!-- Top-left: name -->
-    <div class="min-w-0 flex-1">
-      <p class="font-medium break-words">{displayName}</p>
+    <div class="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+      <I18nText text={displayName} class="font-medium" />
     </div>
 
     <!-- Top-right: input -->
@@ -33,8 +34,8 @@
   {#if data.help}
     <div class={cn("flex flex-row gap-x-4", isCompact && "flex-col")}>
       <!-- Bottom-left: help (spans full width in compact mode) -->
-      <div class={cn("min-w-0", !isCompact && "flex-1")}>
-        <p class="text-muted-foreground text-sm break-words">{data.help}</p>
+      <div class={cn("flex min-w-0 flex-col justify-center gap-0.5", !isCompact && "flex-1")}>
+        <I18nText text={data.help} class="text-muted-foreground text-sm" />
       </div>
 
       <!-- Bottom-right: placeholder (hidden in compact mode) -->

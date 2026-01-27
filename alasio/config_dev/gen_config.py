@@ -1,4 +1,5 @@
 from alasio.config.const import Const
+from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.config_dev.format.format_yaml import yaml_formatter
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.parse_args import ArgData, ParseArgs, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
@@ -160,11 +161,13 @@ class ConfigGenerator(ParseArgs, ParseTasks):
             value = deep_get(old, key, default='')
             if not value:
                 value = f'{group_name}.{arg_name}'
-            deep_set(new, key, str(value))
+            value = format_i18n(value)
+            deep_set(new, key, value)
             # help, help can be empty
             key = [lang, 'help']
             value = deep_get(old, key, default='')
-            deep_set(new, key, str(value))
+            value = format_i18n(value)
+            deep_set(new, key, value)
         # option
         if arg.option:
             for lang in Const.GUI_LANGUAGE:

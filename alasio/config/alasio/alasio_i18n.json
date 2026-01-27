@@ -39,7 +39,10 @@
       },
       "en-US": {
         "name": "Next Run",
-        "help": "Updated automatically after completing the task to set next scheduled run, typically not manually modified\nHowever you can force immediate scheduling if you clear this text field"
+        "help": [
+          "Updated automatically after completing the task to set next scheduled run, typically not manually modified",
+          "However you can force immediate scheduling if you clear this text field"
+        ]
       },
       "ja-JP": {
         "name": "Scheduler.NextRun.name",
@@ -51,13 +54,18 @@
       },
       "en-ES": {
         "name": "Siguiente ejecución",
-        "help": "Se actualiza automáticamente a la siguiente vez que hay que ejecutar la tarea, normalmente no se modifica manualmente.\nSin embargo, puedes forzar la ejecución dejando este campo en blanco."
+        "help": [
+          "Se actualiza automáticamente a la siguiente vez que hay que ejecutar la tarea, normalmente no se modifica manualmente.",
+          "Sin embargo, puedes forzar la ejecución dejando este campo en blanco."
+        ]
       }
     },
     "ServerUpdate": {
       "zh-CN": {
         "name": "服务器刷新时间",
-        "help": "一些任务运行成功后，将推迟下一次运行至服务器刷新时间\n自动换算时区，一般不需要修改"
+        "help": [
+          "一些任务运行成功后，将推迟下一次运行至服务器刷新时间。自动换算时区，一般不需要修改"
+        ]
       },
       "en-US": {
         "name": "Server Update",
@@ -69,7 +77,9 @@
       },
       "zh-TW": {
         "name": "伺服器更新時間",
-        "help": "一些任務執行成功後，將推遲下一次執行伺服器更新的時間\n自動換算時區，一般不需要修改"
+        "help": [
+          "一些任務執行成功後，將推遲下一次執行伺服器更新的時間。自動換算時區，一般不需要修改"
+        ]
       },
       "en-ES": {
         "name": "Actualización de servidor",
