@@ -143,7 +143,6 @@ class CrossNavGenerator:
                     # copy ref, set ref_task
                     ref = {k: v for k, v in ref.items()}
                     ref['task'] = ref_task
-                    ref = NoIndent(ref)
                     base_name = self.dict_group_variant2base.get(group.group, group.group)
                     deep_set(out, [task_name, base_name], ref)
                     # add global bind

@@ -158,6 +158,7 @@ class IndexGenerator(CrossNavGenerator):
             config = {'task': NoIndent(tasks), 'group': NoIndent(groups)}
             if not groups or not tasks:
                 config = NoIndent(config)
+            group_data = {k: NoIndent(v) for k, v in group_data.items()}
             out[task_name] = {
                 'group': group_data,
                 'config': config,
