@@ -126,7 +126,8 @@
       "group": "OpsiGeneral",
       "arg": "AkashiShopFilter",
       "dt": "filter",
-      "value": ["ActionPoint", "PurpleCoins"]
+      "value": ["ActionPoint", "PurpleCoins"],
+      "layout": "vert"
     }
   },
   "card-OpsiGeneral-OpsiGeneral": {
@@ -176,7 +177,8 @@
       "group": "OpsiGeneral",
       "arg": "AkashiShopFilter",
       "dt": "filter",
-      "value": ["ActionPoint", "PurpleCoins"]
+      "value": ["ActionPoint", "PurpleCoins"],
+      "layout": "vert"
     }
   },
   "card-OpsiAshAssist-OpsiAshAssist": {

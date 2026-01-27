@@ -16,6 +16,7 @@
     input: Input,
     checkbox: Checkbox,
     select: Select,
+    textarea: Textarea,
     filter: Textarea,
   };
   const layoutMap: Record<string, Component<LayoutProps>> = {

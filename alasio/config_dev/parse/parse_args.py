@@ -206,6 +206,10 @@ class ArgData(Struct, omit_defaults=True):
         # Split filters
         if self.dt in TYPE_ARG_TUPLE and vtype is str:
             self.value = tuple(s.strip() for s in value.split('>'))
+        # textarea is default to vert layout
+        if self.layout is UNSET:
+            if self.dt in ['textarea', 'filter', 'filter-order']:
+                self.layout = 'vert'
         return self
 
     def to_dict(self) -> dict:

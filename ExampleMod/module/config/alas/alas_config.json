@@ -73,14 +73,16 @@
       "group": "EmulatorInfo",
       "arg": "Name",
       "dt": "textarea",
-      "value": ""
+      "value": "",
+      "layout": "vert"
     },
     "EmulatorInfo_Path": {
       "task": "Device",
       "group": "EmulatorInfo",
       "arg": "Path",
       "dt": "textarea",
-      "value": ""
+      "value": "",
+      "layout": "vert"
     }
   },
   "card-Alas-Error": {
@@ -104,7 +106,8 @@
       "group": "Error",
       "arg": "OnePushConfig",
       "dt": "textarea",
-      "value": "provider: null"
+      "value": "provider: null",
+      "layout": "vert"
     },
     "Error_ScreenshotLength": {
       "task": "Device",
