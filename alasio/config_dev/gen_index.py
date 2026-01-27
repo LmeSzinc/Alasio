@@ -11,7 +11,7 @@ from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
-from alasio.ext.path.atomic import atomic_remove
+from alasio.ext.path import PathStr
 from alasio.ext.path.calc import to_posix
 from alasio.git.stage.gitadd import GitAdd
 from alasio.logger import logger
@@ -474,7 +474,7 @@ class IndexGenerator(CrossNavGenerator):
         # {nav}_config.json
         self.generate_config_json(gitadd=gitadd)
 
-        def write(f, d):
+        def write(f: PathStr, d):
             if d:
                 op = write_json_custom_indent(f, d, skip_same=True)
                 if op:
@@ -482,10 +482,11 @@ class IndexGenerator(CrossNavGenerator):
                     if gitadd:
                         gitadd.stage_add(f)
             else:
-                logger.info(f'Delete file {f}')
-                atomic_remove(f)
-                if gitadd:
-                    gitadd.stage_add(f)
+                if f.exists():
+                    logger.info(f'Delete file {f}')
+                    f.atomic_remove()
+                    if gitadd:
+                        gitadd.stage_add(f)
 
         # task.index.json
         write(self.task_index_file, self.task_index_data)
@@ -509,5 +510,7 @@ class IndexGenerator(CrossNavGenerator):
 
 if __name__ == '__main__':
     env.set_project_root(env.ALASIO_ROOT)
-    self = IndexGenerator(ModEntryInfo.alasio())
+    alasio = ModEntryInfo.alasio()
+    Const.GUI_LANGUAGE = alasio.gui_language
+    self = IndexGenerator(alasio)
     self.generate()

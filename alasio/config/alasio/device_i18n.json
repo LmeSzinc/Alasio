@@ -1,21 +1,73 @@
 {
   "Emulator": {
     "_info": {
-      "zh-CN": {"name": "Emulator", "help": ""},
-      "zh-TW": {"name": "Emulator", "help": ""},
-      "en-US": {"name": "Emulator", "help": ""},
-      "ja-JP": {"name": "Emulator", "help": ""}
+      "zh-CN": {"name": "模拟器设置", "help": ""},
+      "en-US": {"name": "Emulator Settings", "help": ""},
+      "ja-JP": {
+        "name": "Emulator._info.name",
+        "help": "Emulator._info.help"
+      },
+      "zh-TW": {"name": "模擬器設定", "help": ""},
+      "en-ES": {"name": "Ajustes de emulador", "help": ""}
     },
     "Serial": {
-      "zh-CN": {"name": "Emulator.Serial", "help": ""},
-      "zh-TW": {"name": "Emulator.Serial", "help": ""},
-      "en-US": {"name": "Emulator.Serial", "help": ""},
-      "ja-JP": {"name": "Emulator.Serial", "help": ""}
+      "zh-CN": {
+        "name": "模拟器 Serial",
+        "help": "常见的模拟器 Serial 可以查询下方列表\n填 \"auto\" 自动检测模拟器，多个模拟器正在运行或使用不支持自动检测的模拟器时无法使用 \"auto\"，必须手动填写\n\n模拟器默认 Serial：\n- 蓝叠模拟器 127.0.0.1:5555\n- 蓝叠模拟器4 Hyper-v版，填\"bluestacks4-hyperv\"自动连接，多开填\"bluestacks4-hyperv-2\"以此类推\n- 蓝叠模拟器5 Hyper-v版，填\"bluestacks5-hyperv\"自动连接，多开填\"bluestacks5-hyperv-1\"以此类推\n- 夜神模拟器 127.0.0.1:62001\n- 夜神模拟器64位 127.0.0.1:59865\n- MuMu模拟器/MuMu模拟器X 127.0.0.1:7555\n- MuMu模拟器12 127.0.0.1:16384\n- 逍遥模拟器 127.0.0.1:21503\n- 雷电模拟器 emulator-5554 或 127.0.0.1:5555\n- WSA，填\"wsa-0\"使游戏在后台运行，需要使用第三方软件操控或关闭（建议使用scrcpy操控）\n如果你使用了模拟器的多开功能，它们的 Serial 将不是默认的，可以在 console.bat 中执行 `adb devices` 查询，或根据模拟器官方的教程填写"
+      },
+      "en-US": {
+        "name": "Serial",
+        "help": "Common emulator Serial can be queried in the list below\nUse \"auto\" to auto-detect emulators, but if multiple emulators are running or use emulators that do not support auto-detect, \"auto\" cannot be used and serial must be filled in manually\nDefault serial for select emulators:\n- BlueStacks 127.0.0.1:5555\n- BlueStacks4 Hyper-V use \"bluestacks4-hyperv\", \"bluestacks4-hyperv-2\" for multi instance, and so on\n- BlueStacks5 Hyper-V use \"bluestacks5-hyperv\", \"bluestacks5-hyperv-1\" for multi instance, and so on\n- NoxPlayer 127.0.0.1:62001\n- NoxPlayer64bit 127.0.0.1:59865\n- MuMuPlayer/MuMuPlayer X 127.0.0.1:7555\n- MuMuPlayer12 127.0.0.1:16384\n- MemuPlayer 127.0.0.1:21503\n- LDPlayer emulator-5554 or 127.0.0.1:5555\n- WSA use \"wsa-0\" to make the game run in the background, which needs to be controlled or closed by third-party software\nIf there are multiple emulator instances running, the default is reserved for one of them and the others will use different serials to avoid conflicts\nOpen console.bat and run `adb devices` to find them or follow the emulator's official tutorial"
+      },
+      "ja-JP": {
+        "name": "Emulator.Serial.name",
+        "help": "Emulator.Serial.help"
+      },
+      "zh-TW": {
+        "name": "模擬器 Serial",
+        "help": "常見的模擬器 Serial 可以查詢下方列表\n填 \"auto\" 自動檢測模擬器，多個模擬器正在運行或使用不支援自動檢測的模擬器時無法使用 \"auto\"，必須手動填寫\n模擬器預設 Serial：\n- 藍疊模擬器 127.0.0.1:5555\n- 藍疊模擬器4 Hyper-v版，填\"bluestacks4-hyperv\"自動連接，多開填\"bluestacks4-hyperv-2\"以此類推\n- 藍疊模擬器5 Hyper-v版，填\"bluestacks5-hyperv\"自動連接，多開填\"bluestacks5-hyperv-1\"以此類推\n- 夜神模擬器 127.0.0.1:62001\n- 夜神模擬器64位元 127.0.0.1:59865\n- MuMu模擬器/MuMu模擬器X 127.0.0.1:7555\n- MuMu模擬器12 127.0.0.1:16384\n- 逍遙模擬器 127.0.0.1:21503\n- 雷電模擬器 emulator-5554 或 127.0.0.1:5555\n- WSA，填\"wsa-0\"使遊戲在後臺運行，需要使用第三方軟件操控或關閉\n如果你使用了模擬器的多開功能，他們的 Serial 將不是預設的，可以在 console.bat 中執行 `adb devices` 查詢，或根據模擬器官方的教程填寫"
+      },
+      "en-ES": {
+        "name": "Serial",
+        "help": "Los serial de emuladores comunes pueden ser consultados aquí:\nUsa \"auto\" para detectar automáticamente el emulador, pero si hay varios ejecutando a la vez o no se puede detectar de forma automática, \"auto\" no podrá ser usado y tendrás que ajustarlo manualmente.\nSerial comunes de algunos emuladores:\n- BlueStacks 127.0.0.1:5555\n- BlueStacks4 Hyper-V usa \"bluestacks4-hyperv\", \"bluestacks4-hyperv-2\" para multi-instancia, etc...\n- BlueStacks5 Hyper-V usa \"bluestacks5-hyperv\", \"bluestacks5-hyperv-1\" para multi-instancia, etc...\n- NoxPlayer 127.0.0.1:62001\n- NoxPlayer64bit 127.0.0.1:59865\n- MuMuPlayer/MuMuPlayer X 127.0.0.1:7555\n- MuMuPlayer12 127.0.0.1:16384\n- MemuPlayer 127.0.0.1:21503\n- LDPlayer emulator-5554 or 127.0.0.1:5555\n- WSA usa \"wsa-0\" para ejecutar el juego en segundo plano, que será cerrado/controlado por software externo.\nSi hay varias instancias ejecutándose a la vez, se usará la predeterminada para la primera y las demás se reajustarán.\nAbre console.bat y ejecuta `adb devices` para encontrarlas o usa la guía oficial del emulador."
+      }
     },
     "ScreenshotMethod": {
       "zh-CN": {
-        "name": "Emulator.ScreenshotMethod",
-        "help": "",
+        "name": "模拟器截图方案",
+        "help": "使用自动选择时，将执行一次性能测试并自动更改为最快的截图方案\n一般情况下的速度: DroidCast_raw >> aScreenCap_nc > ADB_nc >>> aScreenCap > uiautomator2 ~= ADB\n运行 工具 - 性能测试 以寻找最快的方案",
+        "option_i18n": {
+          "auto": "自动选择最快的",
+          "ADB": "ADB",
+          "ADB_nc": "ADB_nc",
+          "uiautomator2": "uiautomator2",
+          "aScreenCap": "aScreenCap",
+          "aScreenCap_nc": "aScreenCap_nc",
+          "DroidCast": "DroidCast",
+          "DroidCast_raw": "DroidCast_raw",
+          "nemu_ipc": "nemu_ipc",
+          "ldopengl": "ldopengl"
+        }
+      },
+      "en-US": {
+        "name": "Screenshot Method",
+        "help": "When using auto-select, a benchmark will be performed and automatically changed to the fastest screenshot method.\nGeneral speed: DroidCast_raw >> aScreenCap_nc > ADB_nc >>> aScreenCap > uiautomator2 ~= ADB.\nRun Tools - Performance Test to find the fastest method.",
+        "option_i18n": {
+          "auto": "Auto-select the fastest",
+          "ADB": "ADB ",
+          "ADB_nc": "ADB_nc",
+          "uiautomator2": "uiautomator2",
+          "aScreenCap": "aScreenCap",
+          "aScreenCap_nc": "aScreenCap_nc",
+          "DroidCast": "DroidCast",
+          "DroidCast_raw": "DroidCast_raw",
+          "nemu_ipc": "nemu_ipc",
+          "ldopengl": "ldopengl"
+        }
+      },
+      "ja-JP": {
+        "name": "Emulator.ScreenshotMethod.name",
+        "help": "Emulator.ScreenshotMethod.help",
         "option_i18n": {
           "auto": "auto",
           "ADB": "ADB",
@@ -30,10 +82,10 @@
         }
       },
       "zh-TW": {
-        "name": "Emulator.ScreenshotMethod",
-        "help": "",
+        "name": "模擬器截圖方案",
+        "help": "使用自動選擇時，將執行一次性能測試並自動更改為最快的截圖方案\n一般情況下的速度: DroidCast_raw >> aScreenCap_nc > ADB_nc >>> aScreenCap > uiautomator2 ~= ADB\n運行 工具 - 性能測試 以尋找最快的方案",
         "option_i18n": {
-          "auto": "auto",
+          "auto": "自動選擇最快的",
           "ADB": "ADB",
           "ADB_nc": "ADB_nc",
           "uiautomator2": "uiautomator2",
@@ -45,28 +97,12 @@
           "ldopengl": "ldopengl"
         }
       },
-      "en-US": {
-        "name": "Emulator.ScreenshotMethod",
-        "help": "",
+      "en-ES": {
+        "name": "Método de captura",
+        "help": "Cuando seleccionas detectar auto, se ejecutará una prueba para determinar el método más rápido.\nNormalmente, el orden es: DroidCast_raw >> aScreenCap_nc > ADB_nc >>> aScreenCap > uiautomator2 ~= ADB.\nEjecuta Herramientas - Prueba de rendimiento para encontrar el método más rápido.",
         "option_i18n": {
-          "auto": "auto",
-          "ADB": "ADB",
-          "ADB_nc": "ADB_nc",
-          "uiautomator2": "uiautomator2",
-          "aScreenCap": "aScreenCap",
-          "aScreenCap_nc": "aScreenCap_nc",
-          "DroidCast": "DroidCast",
-          "DroidCast_raw": "DroidCast_raw",
-          "nemu_ipc": "nemu_ipc",
-          "ldopengl": "ldopengl"
-        }
-      },
-      "ja-JP": {
-        "name": "Emulator.ScreenshotMethod",
-        "help": "",
-        "option_i18n": {
-          "auto": "auto",
-          "ADB": "ADB",
+          "auto": "Detectar auto. el más rápido",
+          "ADB": "ADB ",
           "ADB_nc": "ADB_nc",
           "uiautomator2": "uiautomator2",
           "aScreenCap": "aScreenCap",
@@ -80,19 +116,8 @@
     },
     "ControlMethod": {
       "zh-CN": {
-        "name": "Emulator.ControlMethod",
-        "help": "",
-        "option_i18n": {
-          "ADB": "ADB",
-          "uiautomator2": "uiautomator2",
-          "minitouch": "minitouch",
-          "Hermit": "Hermit",
-          "MaaTouch": "MaaTouch"
-        }
-      },
-      "zh-TW": {
-        "name": "Emulator.ControlMethod",
-        "help": "",
+        "name": "模拟器控制方案",
+        "help": "速度: MaaTouch = minitouch >>> uiautomator2 ~= ADB\n建议选MaaTouch",
         "option_i18n": {
           "ADB": "ADB",
           "uiautomator2": "uiautomator2",
@@ -102,8 +127,8 @@
         }
       },
       "en-US": {
-        "name": "Emulator.ControlMethod",
-        "help": "",
+        "name": "Control Method",
+        "help": "Speed: MaaTouch = minitouch >>> uiautomator2 ~= ADB\nMaaTouch is recommended",
         "option_i18n": {
           "ADB": "ADB",
           "uiautomator2": "uiautomator2",
@@ -113,8 +138,30 @@
         }
       },
       "ja-JP": {
-        "name": "Emulator.ControlMethod",
-        "help": "",
+        "name": "Emulator.ControlMethod.name",
+        "help": "Emulator.ControlMethod.help",
+        "option_i18n": {
+          "ADB": "ADB",
+          "uiautomator2": "uiautomator2",
+          "minitouch": "minitouch",
+          "Hermit": "Hermit",
+          "MaaTouch": "MaaTouch"
+        }
+      },
+      "zh-TW": {
+        "name": "模擬器控制方案",
+        "help": "速度: MaaTouch = minitouch > Hermit >>> uiautomator2 ~= ADB\n建議選MaaTouch",
+        "option_i18n": {
+          "ADB": "ADB",
+          "uiautomator2": "uiautomator2",
+          "minitouch": "minitouch",
+          "Hermit": "Hermit",
+          "MaaTouch": "MaaTouch"
+        }
+      },
+      "en-ES": {
+        "name": "Método de control",
+        "help": "Velocidad: MaaTouch = minitouch >>> uiautomator2 ~= ADB\nMaaTouch es el recomendado.",
         "option_i18n": {
           "ADB": "ADB",
           "uiautomator2": "uiautomator2",
@@ -126,28 +173,89 @@
     },
     "ScreenshotDedithering": {
       "zh-CN": {"name": "Emulator.ScreenshotDedithering", "help": ""},
-      "zh-TW": {"name": "Emulator.ScreenshotDedithering", "help": ""},
       "en-US": {"name": "Emulator.ScreenshotDedithering", "help": ""},
-      "ja-JP": {"name": "Emulator.ScreenshotDedithering", "help": ""}
+      "ja-JP": {"name": "Emulator.ScreenshotDedithering", "help": ""},
+      "zh-TW": {"name": "Emulator.ScreenshotDedithering", "help": ""},
+      "en-ES": {"name": "Emulator.ScreenshotDedithering", "help": ""}
     },
     "AdbRestart": {
-      "zh-CN": {"name": "Emulator.AdbRestart", "help": ""},
-      "zh-TW": {"name": "Emulator.AdbRestart", "help": ""},
-      "en-US": {"name": "Emulator.AdbRestart", "help": ""},
-      "ja-JP": {"name": "Emulator.AdbRestart", "help": ""}
+      "zh-CN": {"name": "在检测不到设备的时候尝试重启adb", "help": ""},
+      "en-US": {"name": "Try to restart adb when no device found", "help": ""},
+      "ja-JP": {
+        "name": "Emulator.AdbRestart.name",
+        "help": "Emulator.AdbRestart.help"
+      },
+      "zh-TW": {"name": "在檢測不到設備的時候嘗試重啟adb", "help": ""},
+      "en-ES": {"name": "Intentar reiniciar el ADB cuando no se encuentre ninguno.", "help": ""}
     }
   },
   "EmulatorInfo": {
     "_info": {
-      "zh-CN": {"name": "EmulatorInfo", "help": ""},
-      "zh-TW": {"name": "EmulatorInfo", "help": ""},
-      "en-US": {"name": "EmulatorInfo", "help": ""},
-      "ja-JP": {"name": "EmulatorInfo", "help": ""}
+      "zh-CN": {
+        "name": "模拟器设置",
+        "help": "下列数值是根据Serial自动填充的，如果不懂请不要随意修改"
+      },
+      "en-US": {
+        "name": "Emulator Settings",
+        "help": "The following values are auto-filled according to \"Serial\", if you don’t understand, please don't modify them"
+      },
+      "ja-JP": {
+        "name": "EmulatorInfo._info.name",
+        "help": "EmulatorInfo._info.help"
+      },
+      "zh-TW": {
+        "name": "模擬器設定",
+        "help": "下列數值是根據Serial自動填充的，如果不懂請不要隨意修改"
+      },
+      "en-ES": {
+        "name": "Ajustes de emulador",
+        "help": "Los siguientes ajustes son rellenados de manera automática de acuerdo al \"Serial\", si no lo entiendes, por favor no los modifiques."
+      }
     },
     "Emulator": {
       "zh-CN": {
-        "name": "EmulatorInfo.Emulator",
+        "name": "模拟器类型",
         "help": "",
+        "option_i18n": {
+          "auto": "自动检测",
+          "NoxPlayer": "夜神模拟器",
+          "NoxPlayer64": "夜神模拟器64位",
+          "BlueStacks4": "蓝叠模拟器4",
+          "BlueStacks5": "蓝叠模拟器5",
+          "BlueStacks4HyperV": "蓝叠模拟器4 Hyper-V",
+          "BlueStacks5HyperV": "蓝叠模拟器5 Hyper-V",
+          "LDPlayer3": "雷电模拟器3",
+          "LDPlayer4": "雷电模拟器4",
+          "LDPlayer9": "雷电模拟器9",
+          "MuMuPlayer": "MuMu模拟器",
+          "MuMuPlayerX": "MuMu模拟器X",
+          "MuMuPlayer12": "MuMu模拟器12",
+          "MEmuPlayer": "逍遥模拟器"
+        }
+      },
+      "en-US": {
+        "name": "Emulator Type",
+        "help": "",
+        "option_i18n": {
+          "auto": "Auto-detect",
+          "NoxPlayer": "Nox Player",
+          "NoxPlayer64": "Nox Player 64bit",
+          "BlueStacks4": "BlueStacks 4",
+          "BlueStacks5": "BlueStacks 5",
+          "BlueStacks4HyperV": "BlueStacks 4 Hyper-V",
+          "BlueStacks5HyperV": "BlueStacks 5 Hyper-V",
+          "LDPlayer3": "LD Player 3",
+          "LDPlayer4": "LD Player 4",
+          "LDPlayer9": "LD Player 9",
+          "MuMuPlayer": "MuMu Player",
+          "MuMuPlayerX": "MuMu Player X",
+          "MuMuPlayer12": "MuMu Player 12",
+          "MEmuPlayer": "MEmu Player"
+        }
+      },
+      "ja-JP": {
+        "name": "EmulatorInfo.Emulator.name",
+        "help": "EmulatorInfo.Emulator.help",
         "option_i18n": {
           "auto": "auto",
           "NoxPlayer": "NoxPlayer",
@@ -166,140 +274,218 @@
         }
       },
       "zh-TW": {
-        "name": "EmulatorInfo.Emulator",
+        "name": "模擬器類型",
         "help": "",
         "option_i18n": {
-          "auto": "auto",
-          "NoxPlayer": "NoxPlayer",
-          "NoxPlayer64": "NoxPlayer64",
-          "BlueStacks4": "BlueStacks4",
-          "BlueStacks5": "BlueStacks5",
-          "BlueStacks4HyperV": "BlueStacks4HyperV",
-          "BlueStacks5HyperV": "BlueStacks5HyperV",
-          "LDPlayer3": "LDPlayer3",
-          "LDPlayer4": "LDPlayer4",
-          "LDPlayer9": "LDPlayer9",
-          "MuMuPlayer": "MuMuPlayer",
-          "MuMuPlayerX": "MuMuPlayerX",
-          "MuMuPlayer12": "MuMuPlayer12",
-          "MEmuPlayer": "MEmuPlayer"
+          "auto": "自動檢測",
+          "NoxPlayer": "夜神模擬器",
+          "NoxPlayer64": "夜神模擬器64位",
+          "BlueStacks4": "藍疊模擬器4",
+          "BlueStacks5": "藍疊模擬器5",
+          "BlueStacks4HyperV": "藍疊模擬器4 Hyper-V",
+          "BlueStacks5HyperV": "藍疊模擬器5 Hyper-V",
+          "LDPlayer3": "雷電模擬器3",
+          "LDPlayer4": "雷電模擬器4",
+          "LDPlayer9": "雷電模擬器9",
+          "MuMuPlayer": "MuMu模擬器",
+          "MuMuPlayerX": "MuMu模擬器X",
+          "MuMuPlayer12": "MuMu模擬器12",
+          "MEmuPlayer": "逍遙模擬器"
         }
       },
-      "en-US": {
-        "name": "EmulatorInfo.Emulator",
+      "en-ES": {
+        "name": "Tipo de emulador",
         "help": "",
         "option_i18n": {
-          "auto": "auto",
-          "NoxPlayer": "NoxPlayer",
-          "NoxPlayer64": "NoxPlayer64",
-          "BlueStacks4": "BlueStacks4",
-          "BlueStacks5": "BlueStacks5",
-          "BlueStacks4HyperV": "BlueStacks4HyperV",
-          "BlueStacks5HyperV": "BlueStacks5HyperV",
-          "LDPlayer3": "LDPlayer3",
-          "LDPlayer4": "LDPlayer4",
-          "LDPlayer9": "LDPlayer9",
-          "MuMuPlayer": "MuMuPlayer",
-          "MuMuPlayerX": "MuMuPlayerX",
-          "MuMuPlayer12": "MuMuPlayer12",
-          "MEmuPlayer": "MEmuPlayer"
-        }
-      },
-      "ja-JP": {
-        "name": "EmulatorInfo.Emulator",
-        "help": "",
-        "option_i18n": {
-          "auto": "auto",
-          "NoxPlayer": "NoxPlayer",
-          "NoxPlayer64": "NoxPlayer64",
-          "BlueStacks4": "BlueStacks4",
-          "BlueStacks5": "BlueStacks5",
-          "BlueStacks4HyperV": "BlueStacks4HyperV",
-          "BlueStacks5HyperV": "BlueStacks5HyperV",
-          "LDPlayer3": "LDPlayer3",
-          "LDPlayer4": "LDPlayer4",
-          "LDPlayer9": "LDPlayer9",
-          "MuMuPlayer": "MuMuPlayer",
-          "MuMuPlayerX": "MuMuPlayerX",
-          "MuMuPlayer12": "MuMuPlayer12",
-          "MEmuPlayer": "MEmuPlayer"
+          "auto": "Detectar automáticamente",
+          "NoxPlayer": "Nox Player",
+          "NoxPlayer64": "Nox Player 64bit",
+          "BlueStacks4": "BlueStacks 4",
+          "BlueStacks5": "BlueStacks 5",
+          "BlueStacks4HyperV": "BlueStacks 4 Hyper-V",
+          "BlueStacks5HyperV": "BlueStacks 5 Hyper-V",
+          "LDPlayer3": "LD Player 3",
+          "LDPlayer4": "LD Player 4",
+          "LDPlayer9": "LD Player 9",
+          "MuMuPlayer": "MuMu Player",
+          "MuMuPlayerX": "MuMu Player X",
+          "MuMuPlayer12": "MuMu Player 12",
+          "MEmuPlayer": "MEmu Player"
         }
       }
     },
     "Name": {
       "zh-CN": {"name": "EmulatorInfo.Name", "help": ""},
-      "zh-TW": {"name": "EmulatorInfo.Name", "help": ""},
       "en-US": {"name": "EmulatorInfo.Name", "help": ""},
-      "ja-JP": {"name": "EmulatorInfo.Name", "help": ""}
+      "ja-JP": {"name": "EmulatorInfo.Name", "help": ""},
+      "zh-TW": {"name": "EmulatorInfo.Name", "help": ""},
+      "en-ES": {"name": "EmulatorInfo.Name", "help": ""}
     },
     "Path": {
       "zh-CN": {"name": "EmulatorInfo.Path", "help": ""},
-      "zh-TW": {"name": "EmulatorInfo.Path", "help": ""},
       "en-US": {"name": "EmulatorInfo.Path", "help": ""},
-      "ja-JP": {"name": "EmulatorInfo.Path", "help": ""}
+      "ja-JP": {"name": "EmulatorInfo.Path", "help": ""},
+      "zh-TW": {"name": "EmulatorInfo.Path", "help": ""},
+      "en-ES": {"name": "EmulatorInfo.Path", "help": ""}
     }
   },
   "Error": {
     "_info": {
-      "zh-CN": {"name": "Error", "help": ""},
-      "zh-TW": {"name": "Error", "help": ""},
-      "en-US": {"name": "Error", "help": ""},
-      "ja-JP": {"name": "Error", "help": ""}
+      "zh-CN": {"name": "调试设置", "help": ""},
+      "en-US": {"name": "Debug Settings", "help": ""},
+      "ja-JP": {
+        "name": "Error._info.name",
+        "help": "Error._info.help"
+      },
+      "zh-TW": {"name": "除錯設定", "help": ""},
+      "en-ES": {"name": "Ajustes de depuración", "help": ""}
     },
     "HandleError": {
       "zh-CN": {"name": "Error.HandleError", "help": ""},
-      "zh-TW": {"name": "Error.HandleError", "help": ""},
       "en-US": {"name": "Error.HandleError", "help": ""},
-      "ja-JP": {"name": "Error.HandleError", "help": ""}
+      "ja-JP": {"name": "Error.HandleError", "help": ""},
+      "zh-TW": {"name": "Error.HandleError", "help": ""},
+      "en-ES": {"name": "Error.HandleError", "help": ""}
     },
     "SaveError": {
-      "zh-CN": {"name": "Error.SaveError", "help": ""},
-      "zh-TW": {"name": "Error.SaveError", "help": ""},
-      "en-US": {"name": "Error.SaveError", "help": ""},
-      "ja-JP": {"name": "Error.SaveError", "help": ""}
+      "zh-CN": {"name": "出错时，保存 Log 和截图", "help": ""},
+      "en-US": {
+        "name": "Record Exception",
+        "help": "Records exception and log into directory for review or sharing"
+      },
+      "ja-JP": {
+        "name": "Error.SaveError.name",
+        "help": "Error.SaveError.help"
+      },
+      "zh-TW": {"name": "出錯時，保存 Log 和截圖", "help": ""},
+      "en-ES": {
+        "name": "Guardar errores",
+        "help": "Graba los errores y los guarda automáticamente en la carpeta de logs para que puedas compartirlos fácilmente."
+      }
     },
     "OnePushConfig": {
-      "zh-CN": {"name": "Error.OnePushConfig", "help": ""},
-      "zh-TW": {"name": "Error.OnePushConfig", "help": ""},
-      "en-US": {"name": "Error.OnePushConfig", "help": ""},
-      "ja-JP": {"name": "Error.OnePushConfig", "help": ""}
+      "zh-CN": {
+        "name": "错误推送设置",
+        "help": "发生无法处理的异常后，使用 Onepush 推送一条错误信息。配置方法见文档：https://github.com/LmeSzinc/AzurLaneAutoScript/wiki/Onepush-configuration-%5BCN%5D"
+      },
+      "en-US": {
+        "name": "Error notify config",
+        "help": "When Alas cannot handle exception, send a message through Onepush. Configuration document: \nhttps://github.com/LmeSzinc/AzurLaneAutoScript/wiki/Onepush-configuration-%5BEN%5D"
+      },
+      "ja-JP": {
+        "name": "Error.OnePushConfig.name",
+        "help": "Error.OnePushConfig.help"
+      },
+      "zh-TW": {
+        "name": "錯誤推送設定",
+        "help": "發生無法處理的異常後，使用 Onepush 推送错误消息。設定參考文檔：https://github.com/LmeSzinc/AzurLaneAutoScript/wiki/Onepush-configuration-%5BCN%5D"
+      },
+      "en-ES": {
+        "name": "Configuración para notificar errores",
+        "help": "Cuando SRC no puede manejar un error, envía un mensaje automáticamente. Puedes leer más información sobre este ajuste aquí:\nhttps://github.com/LmeSzinc/AzurLaneAutoScript/wiki/Onepush-configuration-%5BEN%5D"
+      }
     },
     "ScreenshotLength": {
-      "zh-CN": {"name": "Error.ScreenshotLength", "help": ""},
-      "zh-TW": {"name": "Error.ScreenshotLength", "help": ""},
-      "en-US": {"name": "Error.ScreenshotLength", "help": ""},
-      "ja-JP": {"name": "Error.ScreenshotLength", "help": ""}
+      "zh-CN": {"name": "出错时，保留最后 X 张截图", "help": ""},
+      "en-US": {
+        "name": "Record Screenshot(s)",
+        "help": "Number of screenshots saved when exception occurs"
+      },
+      "ja-JP": {
+        "name": "Error.ScreenshotLength.name",
+        "help": "Error.ScreenshotLength.help"
+      },
+      "zh-TW": {"name": "出錯時，保留最後 X 張截圖", "help": ""},
+      "en-ES": {
+        "name": "Tomar capturas de pantalla",
+        "help": "Número de capturas de pantalla tomadas cuando ocurra un error"
+      }
     }
   },
   "Optimization": {
     "_info": {
       "zh-CN": {"name": "优化设置", "help": ""},
-      "zh-TW": {"name": "Optimization", "help": ""},
-      "en-US": {"name": "Optimization", "help": ""},
-      "ja-JP": {"name": "Optimization", "help": ""}
+      "en-US": {"name": "Optimization Settings", "help": ""},
+      "ja-JP": {
+        "name": "Optimization._info.name",
+        "help": "Optimization._info.help"
+      },
+      "zh-TW": {"name": "優化設定", "help": ""},
+      "en-ES": {"name": "Ajustes de optimización", "help": ""}
     },
     "ScreenshotInterval": {
-      "zh-CN": {"name": "Optimization.ScreenshotInterval", "help": ""},
-      "zh-TW": {"name": "Optimization.ScreenshotInterval", "help": ""},
-      "en-US": {"name": "Optimization.ScreenshotInterval", "help": ""},
-      "ja-JP": {"name": "Optimization.ScreenshotInterval", "help": ""}
+      "zh-CN": {
+        "name": "放慢截图速度至 X 秒一张",
+        "help": "执行两次截图之间的最小间隔，限制在 0.1 ~ 0.3，对于高配置电脑能降低 CPU 占用"
+      },
+      "en-US": {
+        "name": "Take Screenshots Every X Second(s)",
+        "help": "Minimum interval between 2 screenshots, limited in 0.1 ~ 0.3, can help reduce CPU on high-end PCs"
+      },
+      "ja-JP": {
+        "name": "Optimization.ScreenshotInterval.name",
+        "help": "Optimization.ScreenshotInterval.help"
+      },
+      "zh-TW": {
+        "name": "放慢截圖速度至 X 秒一張",
+        "help": "執行兩次截圖之間的最小間隔，限制在 0.1 ~ 0.3，對於高配置電腦能降低 CPU 佔用"
+      },
+      "en-ES": {
+        "name": "Tomar capturas cada X segundos",
+        "help": "El intervalo mínimo entre 2 capturas, limitarlo a 0.1 ~ 0.3, puede ayudar a reducir el consumo de CPU."
+      }
     },
     "CombatScreenshotInterval": {
-      "zh-CN": {"name": "Optimization.CombatScreenshotInterval", "help": ""},
-      "zh-TW": {"name": "Optimization.CombatScreenshotInterval", "help": ""},
-      "en-US": {"name": "Optimization.CombatScreenshotInterval", "help": ""},
-      "ja-JP": {"name": "Optimization.CombatScreenshotInterval", "help": ""}
+      "zh-CN": {
+        "name": "战斗中放慢截图速度至 X 秒一张",
+        "help": "执行两次截图之间的最小间隔，限制在 0.1 ~ 1.0，能降低战斗时的 CPU 占用"
+      },
+      "en-US": {
+        "name": "Take Screenshots Every X Second(s) In Combat",
+        "help": "Minimum interval between 2 screenshots, limited in 0.1 ~ 1.0, can help reduce CPU during battle"
+      },
+      "ja-JP": {
+        "name": "Optimization.CombatScreenshotInterval.name",
+        "help": "Optimization.CombatScreenshotInterval.help"
+      },
+      "zh-TW": {
+        "name": "戰鬥中放慢截圖速度至 X 秒一張",
+        "help": "執行兩次截圖之間的最小間隔，限制在 0.1 ~ 1.0，能降低戰鬥時的 CPU 佔用"
+      },
+      "en-ES": {
+        "name": "Tomar capturas cada X segundos en combate",
+        "help": "El intervalo mínimo entre 2 capturas, limitarlo a 0.1 ~ 1.0, puede ayudar a reducir el consumo de CPU."
+      }
     },
     "TaskHoardingDuration": {
       "zh-CN": {"name": "Optimization.TaskHoardingDuration", "help": ""},
-      "zh-TW": {"name": "Optimization.TaskHoardingDuration", "help": ""},
       "en-US": {"name": "Optimization.TaskHoardingDuration", "help": ""},
-      "ja-JP": {"name": "Optimization.TaskHoardingDuration", "help": ""}
+      "ja-JP": {"name": "Optimization.TaskHoardingDuration", "help": ""},
+      "zh-TW": {"name": "Optimization.TaskHoardingDuration", "help": ""},
+      "en-ES": {"name": "Optimization.TaskHoardingDuration", "help": ""}
     },
     "WhenTaskQueueEmpty": {
       "zh-CN": {
-        "name": "Optimization.WhenTaskQueueEmpty",
-        "help": "",
+        "name": "当任务队列清空后",
+        "help": "无任务时关闭游戏，能在收菜期间降低 CPU 占用",
+        "option_i18n": {
+          "stay_there": "停在原处",
+          "goto_main": "前往主界面",
+          "close_game": "关闭游戏"
+        }
+      },
+      "en-US": {
+        "name": "When Task Queue is Empty",
+        "help": "Close AL when there are no pending tasks, can help reduce CPU",
+        "option_i18n": {
+          "stay_there": "Stay There",
+          "goto_main": "Goto Main Page",
+          "close_game": "Close Game"
+        }
+      },
+      "ja-JP": {
+        "name": "Optimization.WhenTaskQueueEmpty.name",
+        "help": "Optimization.WhenTaskQueueEmpty.help",
         "option_i18n": {
           "stay_there": "stay_there",
           "goto_main": "goto_main",
@@ -307,30 +493,21 @@
         }
       },
       "zh-TW": {
-        "name": "Optimization.WhenTaskQueueEmpty",
-        "help": "",
+        "name": "當任務隊列清空後",
+        "help": "無任務時關閉遊戲，能在收菜期間降低 CPU 佔用",
         "option_i18n": {
-          "stay_there": "stay_there",
-          "goto_main": "goto_main",
-          "close_game": "close_game"
+          "stay_there": "停在原處",
+          "goto_main": "前往主界面",
+          "close_game": "關閉遊戲"
         }
       },
-      "en-US": {
-        "name": "Optimization.WhenTaskQueueEmpty",
-        "help": "",
+      "en-ES": {
+        "name": "Cuando no haya tareas",
+        "help": "Cerrar Honkai: Star Rail cuando no haya tareas puede ayudar a reducir el consumo de CPU.",
         "option_i18n": {
-          "stay_there": "stay_there",
-          "goto_main": "goto_main",
-          "close_game": "close_game"
-        }
-      },
-      "ja-JP": {
-        "name": "Optimization.WhenTaskQueueEmpty",
-        "help": "",
-        "option_i18n": {
-          "stay_there": "stay_there",
-          "goto_main": "goto_main",
-          "close_game": "close_game"
+          "stay_there": "Quedarse en el sitio",
+          "goto_main": "Ir al lugar principal",
+          "close_game": "Cerrar el juego"
         }
       }
     }
@@ -338,17 +515,19 @@
   "RestartDevice": {
     "_info": {
       "zh-CN": {"name": "RestartDevice", "help": ""},
-      "zh-TW": {"name": "RestartDevice", "help": ""},
       "en-US": {"name": "RestartDevice", "help": ""},
-      "ja-JP": {"name": "RestartDevice", "help": ""}
+      "ja-JP": {"name": "RestartDevice", "help": ""},
+      "zh-TW": {"name": "RestartDevice", "help": ""},
+      "en-ES": {"name": "RestartDevice", "help": ""}
     }
   },
   "RestartGame": {
     "_info": {
       "zh-CN": {"name": "RestartGame", "help": ""},
-      "zh-TW": {"name": "RestartGame", "help": ""},
       "en-US": {"name": "RestartGame", "help": ""},
-      "ja-JP": {"name": "RestartGame", "help": ""}
+      "ja-JP": {"name": "RestartGame", "help": ""},
+      "zh-TW": {"name": "RestartGame", "help": ""},
+      "en-ES": {"name": "RestartGame", "help": ""}
     }
   }
 }

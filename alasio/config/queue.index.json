@@ -1,20 +1,23 @@
 {
   "Device": {
     "zh-CN": "Device",
-    "zh-TW": "Device",
     "en-US": "Device",
-    "ja-JP": "Device"
+    "ja-JP": "Device",
+    "zh-TW": "Device",
+    "en-ES": "Device"
   },
   "RestartDevice": {
     "zh-CN": "RestartDevice",
-    "zh-TW": "RestartDevice",
     "en-US": "RestartDevice",
-    "ja-JP": "RestartDevice"
+    "ja-JP": "RestartDevice",
+    "zh-TW": "RestartDevice",
+    "en-ES": "RestartDevice"
   },
   "RestartGame": {
     "zh-CN": "RestartGame",
-    "zh-TW": "RestartGame",
     "en-US": "RestartGame",
-    "ja-JP": "RestartGame"
+    "ja-JP": "RestartGame",
+    "zh-TW": "RestartGame",
+    "en-ES": "RestartGame"
   }
 }

@@ -1,28 +1,80 @@
 {
   "Scheduler": {
     "_info": {
-      "zh-CN": {"name": "Scheduler", "help": ""},
-      "zh-TW": {"name": "Scheduler", "help": ""},
+      "zh-CN": {"name": "任务设置", "help": ""},
       "en-US": {"name": "Scheduler", "help": ""},
-      "ja-JP": {"name": "Scheduler", "help": ""}
+      "ja-JP": {
+        "name": "Scheduler._info.name",
+        "help": "Scheduler._info.help"
+      },
+      "zh-TW": {"name": "任務設定", "help": ""},
+      "en-ES": {"name": "Planificador", "help": ""}
     },
     "Enable": {
-      "zh-CN": {"name": "Scheduler.Enable", "help": ""},
-      "zh-TW": {"name": "Scheduler.Enable", "help": ""},
-      "en-US": {"name": "Scheduler.Enable", "help": ""},
-      "ja-JP": {"name": "Scheduler.Enable", "help": ""}
+      "zh-CN": {
+        "name": "启用该功能",
+        "help": "将这个任务加入调度器"
+      },
+      "en-US": {
+        "name": "Enable Task",
+        "help": "Join this task to scheduler."
+      },
+      "ja-JP": {
+        "name": "Scheduler.Enable.name",
+        "help": "Scheduler.Enable.help"
+      },
+      "zh-TW": {
+        "name": "啟用該功能",
+        "help": "將這個任務加入調度器"
+      },
+      "en-ES": {
+        "name": "Activar tarea",
+        "help": "Añadir tarea al Planificador."
+      }
     },
     "NextRun": {
-      "zh-CN": {"name": "Scheduler.NextRun", "help": ""},
-      "zh-TW": {"name": "Scheduler.NextRun", "help": ""},
-      "en-US": {"name": "Scheduler.NextRun", "help": ""},
-      "ja-JP": {"name": "Scheduler.NextRun", "help": ""}
+      "zh-CN": {
+        "name": "下一次运行时间",
+        "help": "自动计算的数值，不需要手动修改。清空后将立即运行"
+      },
+      "en-US": {
+        "name": "Next Run",
+        "help": "Updated automatically after completing the task to set next scheduled run, typically not manually modified\nHowever you can force immediate scheduling if you clear this text field"
+      },
+      "ja-JP": {
+        "name": "Scheduler.NextRun.name",
+        "help": "Scheduler.NextRun.help"
+      },
+      "zh-TW": {
+        "name": "下一次執行時間",
+        "help": "自動計算的數值，不需要手動修改。清空後將立刻執行"
+      },
+      "en-ES": {
+        "name": "Siguiente ejecución",
+        "help": "Se actualiza automáticamente a la siguiente vez que hay que ejecutar la tarea, normalmente no se modifica manualmente.\nSin embargo, puedes forzar la ejecución dejando este campo en blanco."
+      }
     },
     "ServerUpdate": {
-      "zh-CN": {"name": "Scheduler.ServerUpdate", "help": ""},
-      "zh-TW": {"name": "Scheduler.ServerUpdate", "help": ""},
-      "en-US": {"name": "Scheduler.ServerUpdate", "help": ""},
-      "ja-JP": {"name": "Scheduler.ServerUpdate", "help": ""}
+      "zh-CN": {
+        "name": "服务器刷新时间",
+        "help": "一些任务运行成功后，将推迟下一次运行至服务器刷新时间\n自动换算时区，一般不需要修改"
+      },
+      "en-US": {
+        "name": "Server Update",
+        "help": "Series of server refresh time(s) as to when this task will next run, this is automatically converted to respective time zone, generally do not need to modify"
+      },
+      "ja-JP": {
+        "name": "Scheduler.ServerUpdate.name",
+        "help": "Scheduler.ServerUpdate.help"
+      },
+      "zh-TW": {
+        "name": "伺服器更新時間",
+        "help": "一些任務執行成功後，將推遲下一次執行伺服器更新的時間\n自動換算時區，一般不需要修改"
+      },
+      "en-ES": {
+        "name": "Actualización de servidor",
+        "help": "Conjunto de horas a las que se actualiza el servidor (se resetea). Se convierte automáticamente a la zona horaria, y no es necesario modificarlo manualmente."
+      }
     }
   },
   "SchedulerStatic": {
@@ -32,13 +84,6 @@
         "help": "",
         "option_i18n": {
           "True": "[zh-CN]True"
-        }
-      },
-      "zh-TW": {
-        "name": "SchedulerStatic.Enable",
-        "help": "",
-        "option_i18n": {
-          "True": "[zh-TW]True"
         }
       },
       "en-US": {
@@ -53,6 +98,20 @@
         "help": "",
         "option_i18n": {
           "True": "[ja-JP]True"
+        }
+      },
+      "zh-TW": {
+        "name": "SchedulerStatic.Enable",
+        "help": "",
+        "option_i18n": {
+          "True": "[zh-TW]True"
+        }
+      },
+      "en-ES": {
+        "name": "SchedulerStatic.Enable",
+        "help": "",
+        "option_i18n": {
+          "True": "True"
         }
       }
     }
