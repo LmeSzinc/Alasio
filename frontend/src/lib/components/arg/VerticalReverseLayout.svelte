@@ -29,7 +29,7 @@
   <!-- Third row: help -->
   {#if data.help}
     <div class="flex flex-col justify-center gap-0.5">
-      <I18nText text={data.help} class="text-muted-foreground text-sm" />
+      <I18nText text={data.help} class="text-muted-foreground text-xs" />
     </div>
   {/if}
 </div>

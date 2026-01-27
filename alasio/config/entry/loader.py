@@ -152,28 +152,30 @@ class ModLoader:
 
         for arg_data in deep_values_depth2(out):
             try:
-                task_name = arg_data['task']
+                task_name = arg_data.get('task', '')
                 group_name = arg_data['group']
                 arg_name = arg_data['arg']
             except KeyError:
                 # this shouldn't happen
                 continue
-            base_name = arg_data.get('cls', group_name)
+            cls_name = arg_data.get('cls', group_name)
 
             # insert i18n
-            i18n_data = deep_get(i18n, [base_name, arg_name, lang])
+            i18n_data = deep_get(i18n, [cls_name, arg_name, lang])
             try:
                 arg_data.update(i18n_data)
             except TypeError:
                 # this shouldn't happen, as i18n_data should be dict
+                continue
+            if arg_name == '_info':
                 continue
             # insert config
             try:
                 value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
             except KeyError:
                 # this shouldn't happen
-                logger.warning(f'DataInconsistent: Missing config of {task_name}.{group_name}.{arg_name} '
-                               f'when getting mod={mod_name}, nav={nav_name}')
+                logger.warning(f'DataInconsistent: Missing config of "{task_name}.{group_name}.{arg_name}" '
+                               f'when getting mod="{mod_name}", nav="{nav_name}"')
                 continue
             arg_data['value'] = value
 
