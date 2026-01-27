@@ -26,6 +26,39 @@ def yaml_formatter(yaml_bytes):
     return b'\n'.join(formatted_lines)
 
 
+def _is_group_comment(lines):
+    """
+    Iterate lines after a root-level comment
+
+    This is a group comment:
+        # Multi-line comment
+        # attached to key2
+        key2: value2
+    This is not a group comment:
+        TestMergeDisplayGroup:
+          displays: [
+            [
+              {task: Device, group: Emulator},
+              {task: Device, group: EmulatorInfo},
+        #      {task: RestartGame, group: Scheduler},
+            ],
+          ]
+    """
+    for line in lines:
+        # skip empty lines, we are focusing if there's any intent content
+        if not line:
+            continue
+        # continue reading comment
+        if line.startswith(b'#'):
+            continue
+        # Not a group comment if having any intent content
+        if line.startswith((b' ', b'\t')):
+            return False
+        # having any root conent
+        break
+    return True
+
+
 def _yaml_line_generator(lines):
     """
     Generator that yields formatted YAML lines with proper spacing
@@ -39,7 +72,7 @@ def _yaml_line_generator(lines):
     cache = deque()
     is_grouped_comment = False
 
-    for line in lines:
+    for index, line in enumerate(lines):
         line = line.rstrip()
 
         # Guard: Handle empty lines
@@ -62,14 +95,16 @@ def _yaml_line_generator(lines):
 
         # Guard: Handle root-level comments
         if line.startswith(b'#'):
+            new_grouped_comment = _is_group_comment(lines[index + 1:])
             if cache and not is_grouped_comment:
                 # Yield previous non-comment cache with spacing
                 yield from cache
-                yield b''
+                if new_grouped_comment:
+                    yield b''
                 cache.clear()
 
             cache.append(line)
-            is_grouped_comment = True
+            is_grouped_comment = new_grouped_comment
             continue
 
         # Handle regular root-level objects

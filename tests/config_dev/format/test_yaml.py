@@ -118,6 +118,43 @@ key3: value3
 """
         assert yaml_formatter(input_yaml) == expected
 
+    def test_keep_indent_comment(self):
+        input_yaml = b"""items:
+  - item1
+  # comment
+  - item2
+"""
+        assert yaml_formatter(input_yaml) == input_yaml
+
+        input_yaml = b"""TestMergeDisplayGroup:
+  displays: [
+    [
+      {task: Device, group: Emulator},
+#       {task: Device, group: EmulatorInfo},
+#       {task: RestartGame, group: Scheduler},
+    ],
+  ]
+"""
+        assert yaml_formatter(input_yaml) == input_yaml
+
+    def test_remove_blank_lines_around_indent_comment(self):
+        expected = b"""TestMergeDisplayGroup:
+          displays: [
+    [
+      {task: Device, group: Emulator},
+#       {task: Device, group: EmulatorInfo},
+#       {task: RestartGame, group: Scheduler},
+      {task: RestartDevice, group: Scheduler},
+    ],
+  ]
+"""
+        rows = expected.strip().splitlines()
+        for position in range(len(rows) + 1):
+            input_rows = rows.copy()
+            input_rows.insert(position, b'')
+            input_yaml = b'\n'.join(input_rows)
+            assert yaml_formatter(input_yaml) == expected
+
     def test_trailing_spaces_removed(self):
         """Test trailing spaces are removed from all lines"""
         input_yaml = b"""key1: value1   
