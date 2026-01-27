@@ -30,7 +30,7 @@
   }
   function onReset() {
     // Trigger the provided reset callback
-    arg.reset(handleReset)
+    arg.reset(handleReset);
   }
 </script>
 

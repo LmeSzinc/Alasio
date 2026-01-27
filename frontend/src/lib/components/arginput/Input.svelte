@@ -90,7 +90,7 @@
   }
 </script>
 
-<div class={cn("flex-col", className)}>
+<div class={cn("w-full", className)}>
   <div class="relative flex w-full items-center">
     <!-- Primary color bottom border -->
     <!-- On focus, gray bottom border and primary color rounded ring -->
