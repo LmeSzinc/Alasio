@@ -52,17 +52,25 @@ class DisplayCard(msgspec.Struct, dict=True):
             {"info": "Fleet", "groups": "Fleet1"}
             {"info": "Fleet", "groups": ["Fleet1", "Fleet2"]}
             ["Fleet1", "Fleet2"]
+            {"task": "Commission", "group": "Preset"}
             [{"task": "Commission", "group": "Preset"}, "Custom"]
-            {"info": "Commission", "groups": [{"task": "Commission", "group": "Preset"}, "Custom"]
+            {"info": "Commission", "groups": {"task": "Commission", "group": "Preset"}}
+            {"info": "Commission", "groups": [{"task": "Commission", "group": "Preset"}, "Custom"]}
         """
         if type(row) is dict:
             info = row.get('info', '')
             groups = row.get('groups', [])
+            if not info and not groups:
+                # may be a dict like {"task": "Commission", "group": "Preset"}
+                info = ''
+                groups = [TaskGroup.from_row(task, row)]
         else:
             info = ''
             groups = row
         if type(groups) is list:
             groups = [TaskGroup.from_row(task, r) for r in groups]
+        elif type(groups) is dict:
+            groups = [TaskGroup.from_row(task, groups)]
         else:
             # others treat as str
             groups = [TaskGroup.from_row(task, str(groups))]

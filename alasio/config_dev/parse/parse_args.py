@@ -345,7 +345,7 @@ class ParseArgs(ParseBase):
     @cached_property
     def groups_data(self) -> "dict[str, GroupData]":
         """
-        Structured data of {nav}.tasks.yaml
+        Structured data of {nav}.args.yaml
 
         Returns:
             key: {GroupName}
