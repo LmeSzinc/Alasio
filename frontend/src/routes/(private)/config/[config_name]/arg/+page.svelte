@@ -31,10 +31,10 @@
   }
 </script>
 
-<div class="h-full w-full overflow-auto">
+<div class="h-full w-full overflow-auto py-4">
   {#if topicClient.data}
     <ArgGroups
-      class="my-4 h-full w-full px-2.5"
+      class="w-full px-2.5"
       bind:data={topicClient.data}
       indicateCard={ui.card_name}
       {handleEdit}
