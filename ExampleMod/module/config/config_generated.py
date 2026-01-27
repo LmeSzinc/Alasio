@@ -1,7 +1,7 @@
 import typing
 
 from alasio.config.config_generated import ConfigGenerated as AlasioConfigBase
-from const import entry
+from .const import entry
 
 if typing.TYPE_CHECKING:
     from .alas import alas_model as alas

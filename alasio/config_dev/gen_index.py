@@ -399,10 +399,11 @@ class IndexGenerator(CrossNavGenerator):
         gen.Empty()
         if self.alasio:
             gen.FromImport('alasio.config.config_generated', 'ConfigGenerated as AlasioConfigBase')
-            gen.FromImport('const', 'entry')
+            gen.Empty()
+            gen.FromImport('.const', 'entry')
         else:
             gen.FromImport('alasio.config.base', 'AlasioConfigBase')
-        gen.Empty(1)
+        gen.Empty()
 
         # TYPE_CHECKING block - imports only used for type hints
         gen.add('if typing.TYPE_CHECKING:')
