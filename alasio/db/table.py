@@ -4,8 +4,8 @@ import msgspec
 from msgspec.structs import asdict
 
 from alasio.db.conn import SQLITE_POOL, SqlitePoolCursor
-from alasio.db.field import iter_class_field
 from alasio.ext.cache import cached_property
+from alasio.ext.msgspec_error.parse_anno import get_annotations
 
 T_model = TypeVar('T_model', bound=msgspec.Struct)
 
@@ -449,7 +449,7 @@ class AlasioTable:
             model = self.MODEL
         except AttributeError:
             raise AlasioTableError(f'AlasioTable {self.__class__.__name__} has no MODEL defined')
-        return [name for name, _, _ in iter_class_field(model)]
+        return list(get_annotations(model))
 
     @cached_property
     def sql_insert_columns_placeholders(self):
