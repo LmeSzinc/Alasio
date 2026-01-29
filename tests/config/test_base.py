@@ -2,9 +2,10 @@ import datetime as d
 
 import pytest
 
+from ExampleMod.module.config.const import entry
 from alasio.config.base import AlasioConfigBase, ModelProxy
 from alasio.config.const import DataInconsistent
-from alasio.config.entry.loader import MOD_LOADER
+from alasio.config.entry.mod import Mod
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.scan import ScanTable
 
@@ -13,9 +14,7 @@ from alasio.config.table.scan import ScanTable
 @pytest.fixture(scope='module')
 def example_mod():
     """Get the example mod from MOD_LOADER"""
-    mod = MOD_LOADER.dict_mod.get('example_mod')
-    if mod is None:
-        pytest.skip("example_mod not available")
+    mod = Mod(entry)
     return mod
 
 

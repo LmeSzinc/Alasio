@@ -6,8 +6,19 @@ from alasio.ext.cache import cached_property
 from alasio.logger import logger
 
 if TYPE_CHECKING:
-    # avoid circular inport
-    from alasio.config.base import AlasioConfigBase
+    # avoid circular import
+    from alasio.config.base import AlasioConfigBase, BatchSetContext, TemporaryContext
+
+
+class EmptyContext:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 class DeviceConfig:
@@ -129,3 +140,36 @@ class DeviceConfig:
             except AttributeError:
                 logger.warning(f'DeviceConfig: Failed to proxy setattr, missing key in config "{group}.{arg}"')
                 return
+
+    def batch_set(self) -> "BatchSetContext":
+        """
+        Context manager to suppress auto-save for batch modifications.
+        Saves are triggered only when the outermost context exits.
+        """
+        if self.config is None:
+            logger.warning('DeviceConfig: Failed to proxy batch_set(), config is None')
+            return EmptyContext()
+        return self.config.batch_set()
+
+    def override(self, **kwargs):
+        """
+        Permanently override config values in memory.
+        These overrides persist across init_task() calls but are not saved to file.
+
+        Returns:
+            tuple[dict[str, dict[str, Any]], dict[str, Any]]: prev_config, prev_const
+        """
+        if self.config is None:
+            logger.warning('DeviceConfig: Failed to proxy override(), config is None')
+            return EmptyContext(**kwargs)
+        return self.config.override(**kwargs)
+
+    def temporary(self, **kwargs) -> "TemporaryContext":
+        """
+        Temporarily override config values in memory within a context.
+        Restores previous values (from DB or previous overrides) upon exit.
+        """
+        if self.config is None:
+            logger.warning('DeviceConfig: Failed to proxy temporary(), config is None')
+            return EmptyContext(**kwargs)
+        return self.config.temporary(**kwargs)

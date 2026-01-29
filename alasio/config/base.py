@@ -1,5 +1,4 @@
 from collections import defaultdict
-from contextlib import contextmanager
 from typing import Any
 
 from msgspec import NODEFAULT, Struct
@@ -41,6 +40,40 @@ class ModelProxy(Struct):
 
     def __str__(self):
         return str(self._obj)
+
+
+class BatchSetContext:
+    def __init__(self, config: "AlasioConfigBase"):
+        self.config = config
+
+    def __enter__(self):
+        self.config._batch_depth += 1
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.config._batch_depth -= 1
+        # Only save if we are back at the top level and auto_save is enabled
+        if self.config._batch_depth == 0 and self.config.auto_save:
+            self.config.save()
+
+
+class TemporaryContext:
+    def __init__(self, config: "AlasioConfigBase", **kwargs):
+        self.config = config
+        self.kwargs = kwargs
+        self.prev_config = None
+        self.prev_const = None
+
+    def __enter__(self):
+        self.prev_config, self.prev_const = self.config.override(**self.kwargs)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # rollback
+        for key, value in self.prev_const.items():
+            self.config._apply_override_const(key, value)
+        for group, arg, value in deep_iter_depth2(self.prev_config):
+            self.config._apply_override_config(group, arg, value)
 
 
 class AlasioConfigBase:
@@ -191,7 +224,7 @@ class AlasioConfigBase:
         """
         Check if scheduler needs to switch task.
 
-        Raises:
+        Returns:
             bool: If task switched
 
         Examples:
@@ -214,7 +247,7 @@ class AlasioConfigBase:
             logger.info(f'Switch task `{prev}` to `{new}`')
             return True
 
-    def _group_construct(self, group) -> "Struct":
+    def _group_construct(self, group) -> Struct:
         """
         Convert group annotation like "opsi.OpsiGeneral", convert to msgspec validation model
 
@@ -297,8 +330,7 @@ class AlasioConfigBase:
             # batch set
             self.mod.config_batch_set(self.config_name, events)
 
-    @contextmanager
-    def batch_set(self):
+    def batch_set(self) -> BatchSetContext:
         """
         Context manager to suppress auto-save for batch modifications.
         Saves are triggered only when the outermost context exits.
@@ -309,14 +341,7 @@ class AlasioConfigBase:
                 config.Group.Arg2 = 2
             # Saved here
         """
-        self._batch_depth += 1
-        try:
-            yield
-        finally:
-            self._batch_depth -= 1
-            # Only save if we are back at the top level and auto_save is enabled
-            if self._batch_depth == 0 and self.auto_save:
-                self.save()
+        return BatchSetContext(self)
 
     def _apply_override_config(self, group, arg, value):
         """
@@ -359,7 +384,7 @@ class AlasioConfigBase:
         setattr(self, key, value)
         return prev
 
-    def override(self, **kwargs) -> "tuple[dict[str, dict[str, Any]], dict[str, Any]]":
+    def override(self, **kwargs):
         """
         Permanently override config values in memory.
         These overrides persist across init_task() calls but are not saved to file.
@@ -368,7 +393,7 @@ class AlasioConfigBase:
             **kwargs: Key format is Group_Arg=Value, or CONST_NAME=Value
 
         Returns:
-            prev_config, prev_const
+            tuple[dict[str, dict[str, Any]], dict[str, Any]]: prev_config, prev_const
 
         Usage:
             config.override(
@@ -402,14 +427,13 @@ class AlasioConfigBase:
 
         return prev_config, prev_const
 
-    @contextmanager
-    def temporary(self, **kwargs):
+    def temporary(self, **kwargs) -> TemporaryContext:
         """
         Temporarily override config values in memory within a context.
         Restores previous values (from DB or previous overrides) upon exit.
 
         Args:
-            Key format is Group_Arg=Value
+            **kwargs: Key format is Group_Arg=Value
 
         Usage:
             with config.temporary(
@@ -420,13 +444,4 @@ class AlasioConfigBase:
                 # override persists
             # override rollback
         """
-        prev_config, prev_const = self.override(**kwargs)
-
-        try:
-            yield
-        finally:
-            # rollback
-            for key, value in prev_const.items():
-                self._apply_override_const(key, value)
-            for group, arg, value in deep_iter_depth2(prev_config):
-                self._apply_override_config(group, arg, value)
+        return TemporaryContext(self, **kwargs)
