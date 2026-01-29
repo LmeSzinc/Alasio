@@ -262,7 +262,11 @@ class AlasioConfigBase:
             raise DataInconsistent(f'Config annotation {self.__class__.__name__}.{group} has no dot "."')
 
         # get validation model
-        file = f'{nav}/{nav}_model.py'
+        from .config_generated import ConfigGenerated
+        if group in ConfigGenerated.__annotations__:
+            file = f'alasio/{nav}_model.py'
+        else:
+            file = f'{nav}/{nav}_model.py'
         model = self.mod.get_group_model(file, cls)
         if model is None:
             # details are logged

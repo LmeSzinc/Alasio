@@ -3,7 +3,8 @@ import datetime as d
 import pytest
 
 from ExampleMod.module.config.const import entry
-from alasio.config.base import AlasioConfigBase, ModelProxy
+from alasio.config.base import ModelProxy
+from alasio.config.config_generated import ConfigGenerated as AlasioConfigBase
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.mod import Mod
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
@@ -25,7 +26,8 @@ def config_cls(example_mod):
     class MyConfig(AlasioConfigBase):
         entry = example_mod.entry
         # Annotation mapping group name to "nav.Class"
-        Scheduler: "scheduler.Scheduler"
+        # Scheduler: "scheduler.Scheduler"
+        Campaign: "main.Campaign"
 
     return MyConfig
 
@@ -101,6 +103,18 @@ class TestAlasioConfigBase:
         config = config_cls(self.TEST_CONFIG_NAME, task='Main')
 
         # Scheduler is bound to Main task
+        campaign = config.Campaign
+        assert type(campaign) is ModelProxy
+        assert campaign._task == 'Main'
+        assert campaign._group == 'Campaign'
+
+    def test_bound_alasio_group_access(self, config_cls):
+        """
+        Test accessing a group that does not define in mod, but define in alasio, should return ModelProxy
+        """
+        config = config_cls(self.TEST_CONFIG_NAME, task='Main')
+
+        # Scheduler is bound to Main task
         scheduler = config.Scheduler
         assert type(scheduler) is ModelProxy
         assert scheduler._task == 'Main'
@@ -120,16 +134,16 @@ class TestAlasioConfigBase:
         class ConfigWithUnbound(AlasioConfigBase):
             entry = config_cls.entry
             # UnboundGroup is not in Main task
-            UnboundGroup: "scheduler.Scheduler"
+            UnboundGroup: "main.Campaign"
 
         config = ConfigWithUnbound(self.TEST_CONFIG_NAME, task='Main')
 
         # Access should trigger fallback, not bound to task
         group = config.UnboundGroup
         # Should be plain Struct, not ModelProxy
-        assert type(group).__name__ == 'Scheduler'
+        assert type(group).__name__ == 'Campaign'
         # Default values should work
-        assert group.Enable is False
+        assert group.Name == '12-4'
 
     def test_invalid_group_access_raises_error(self, config_cls):
         """Test accessing non-existent group raises AttributeError"""
@@ -401,15 +415,15 @@ class TestConfigOverride:
         # Create config with unbound group
         class ConfigWithUnbound(AlasioConfigBase):
             entry = config.mod.entry
-            UnboundScheduler: "scheduler.Scheduler"
+            UnboundScheduler: "main.Campaign"
 
         cfg = ConfigWithUnbound(self.TEST_CONFIG_NAME + '_unbound', task='Main')
 
         # Override before accessing group
-        cfg.override(UnboundScheduler_Enable=True)
+        cfg.override(UnboundScheduler_Name='a3')
 
         # Now access the group
-        assert cfg.UnboundScheduler.Enable is True
+        assert cfg.UnboundScheduler.Name == 'a3'
 
     def test_override_updates_existing_override(self, config):
         """Test that override can update existing override"""
