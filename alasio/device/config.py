@@ -161,7 +161,7 @@ class DeviceConfig:
         """
         if self.config is None:
             logger.warning('DeviceConfig: Failed to proxy override(), config is None')
-            return EmptyContext(**kwargs)
+            return {}, {}
         return self.config.override(**kwargs)
 
     def temporary(self, **kwargs) -> "TemporaryContext":
