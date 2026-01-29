@@ -85,3 +85,92 @@ class HttpTransport(BaseTransport):
 
         atomic_write(output_file, data)
 
+    async def fetch_pack_v2(self, payload: FetchPayload, output_file=None):
+        """
+        Fetch pack using HTTP Protocol v2.
+        
+        Args:
+            payload (FetchPayload): The fetch request payload.
+            output_file (str): Write into output_file directly.
+                If output_file is None, return pack file data.
+
+        Returns:
+            bytes | None:
+        """
+        repo = self.arguments.repo_url.to_http()
+        url = f'{repo}/git-upload-pack'
+        logger.info(f'fetch_pack_v2: {url}')
+
+        headers = self.capabilities.headers(protocol_v2=True)
+        headers.update({
+            'Content-Type': 'application/x-git-upload-pack-request',
+            'Accept': 'application/x-git-upload-pack-result',
+        })
+        
+        # Build v2 payload: command=fetch + delimiter + want/have/done
+        content = self._build_v2_payload(payload)
+
+        async with httpx.AsyncClient(
+                http2=True, follow_redirects=True, trust_env=False, proxy=self.arguments.proxy
+        ) as client:
+            async with client.stream('POST', url, content=content, headers=headers) as response:
+                response.raise_for_status()
+                pkt_stream = aparse_pkt_line(response.aiter_raw())
+                file_stream = aparse_packfile_stream(pkt_stream)
+                data = await agather_bytes(file_stream)
+
+        atomic_write(output_file, data)
+
+    def _build_v2_payload(self, payload: FetchPayload):
+        """
+        Build Protocol v2 format payload.
+        
+        v2 format:
+            command=fetch
+            0001  (delimiter)
+            want <sha1>
+            have <sha1>
+            done
+            0000
+        
+        Args:
+            payload (FetchPayload): Original v1 payload.
+            
+        Returns:
+            bytes: v2 formatted payload.
+        """
+        from alasio.git.fetch.pkt import create_pkt_line
+        
+        lines = []
+        # Command
+        lines.append(create_pkt_line('command=fetch\n'))
+        # Delimiter
+        lines.append(b'0001')
+        
+        # Directly iterate over payload (it's a deque of pkt-lines)
+        # We need to extract the actual content from each pkt-line
+        for pkt_line in payload:
+            if pkt_line == b'0000':  # Skip delimiters from v1
+                continue
+            
+            # Decode pkt-line: skip first 4 bytes (length header)
+            if len(pkt_line) > 4:
+                content = pkt_line[4:].decode('utf-8', errors='ignore').strip()
+                
+                if content.startswith('want '):
+                    # Remove capabilities from want line (everything after first space after SHA)
+                    parts = content.split()
+                    if len(parts) >= 2:
+                        sha1 = parts[1]
+                        lines.append(create_pkt_line(f'want {sha1}\n'))
+                elif content.startswith('have '):
+                    lines.append(create_pkt_line(content + '\n'))
+                elif content.startswith('deepen '):
+                    lines.append(create_pkt_line(content + '\n'))
+                elif content == 'done':
+                    lines.append(create_pkt_line('done\n'))
+        
+        # End with flush-pkt
+        lines.append(b'0000')
+        
+        return b''.join(lines)
