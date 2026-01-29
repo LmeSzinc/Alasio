@@ -13,6 +13,8 @@ authors = [
 ]
 dependencies = [
     # alasio
+    "exceptiongroup",
+    "typing-extensions",
     "msgspec",
     "PyYAML",
     "lxml",
@@ -23,7 +25,6 @@ dependencies = [
     # 14.1.0 is the minimum version to have exceptiongroup support
     # see alasio/ext/backport/__init__.py patch_rich_traceback_extract()
     "rich>=14.1.0,<=14.3.1",
-    "exceptiongroup",
     "colorama",
 ]
 
