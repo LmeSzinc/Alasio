@@ -9,8 +9,10 @@ from alasio.config.entry.mod import ConfigSetEvent, Mod, Task
 from alasio.config.entry.utils import validate_task_name
 from alasio.config.exception import RequestHumanTakeover, TaskEnd
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
+from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
+from alasio.ext.msgspec_error.parse_anno import get_annotations
 from alasio.logger import logger
 
 
@@ -126,10 +128,19 @@ class AlasioConfigBase:
 
         self.init_task()
 
+    @cached_property
+    def _annotations(self):
+        return get_annotations(self.__class__)
+
+    @cached_property
+    def _annotations_alasio(self):
+        from .config_generated import ConfigGenerated
+        return get_annotations(ConfigGenerated)
+
     def init_task(self):
         # clear existing cache
         # Note: self._overrides is persisted across init_task
-        for key in self.__class__.__annotations__:
+        for key in self._annotations:
             if key in self.__dict__:
                 self.__dict__.pop(key, None)
         self.dict_value.clear()
@@ -254,7 +265,7 @@ class AlasioConfigBase:
         Args:
             group (str):
         """
-        anno = self.__class__.__annotations__.get(group)
+        anno = self._annotations.get(group)
         if not anno:
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{group}'")
         nav, sep, cls = anno.partition('.')
@@ -262,8 +273,7 @@ class AlasioConfigBase:
             raise DataInconsistent(f'Config annotation {self.__class__.__name__}.{group} has no dot "."')
 
         # get validation model
-        from .config_generated import ConfigGenerated
-        if group in ConfigGenerated.__annotations__:
+        if group in self._annotations_alasio:
             file = f'alasio/{nav}_model.py'
         else:
             file = f'{nav}/{nav}_model.py'

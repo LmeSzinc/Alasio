@@ -105,6 +105,7 @@ class DeviceConfig:
     @classmethod
     def from_config(cls, config: "AlasioConfigBase") -> Self:
         obj = cls()
+        obj.config = config
         for name, key in obj._device_bind_keys.items():
             group, arg = key
             try:
@@ -173,3 +174,15 @@ class DeviceConfig:
             logger.warning('DeviceConfig: Failed to proxy temporary(), config is None')
             return EmptyContext(**kwargs)
         return self.config.temporary(**kwargs)
+
+    @property
+    def is_template_config(self):
+        if self.config is None:
+            return True
+        return self.config.is_template_config
+
+    @property
+    def task(self):
+        if self.config is None:
+            return ''
+        return self.config.task

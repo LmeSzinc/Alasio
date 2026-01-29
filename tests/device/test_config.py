@@ -113,10 +113,6 @@ class TestDeviceConfig:
         mock_config = MockConfig()
         device_config = DeviceConfig.from_config(mock_config)
 
-        # Manually bind config if from_config doesn't do it
-        # (We will check if we should fix from_config to do this automatically)
-        device_config.config = mock_config
-
         # Change value on device_config
         device_config.Emulator_Serial = '127.0.0.1:62001'
         # Verify it's broadcasted to mock_config
@@ -135,7 +131,7 @@ class TestDeviceConfig:
         Test that DeviceConfig does not broadcast if self.config is None
         """
         mock_config = MockConfig()
-        device_config = DeviceConfig.from_config(mock_config)
+        device_config = DeviceConfig()
 
         # device_config.config is None by default (based on current implementation)
         device_config.Emulator_Serial = '127.0.0.1:62001'
@@ -152,7 +148,6 @@ class TestDeviceConfig:
         """
         mock_config = MockConfig()
         device_config = DeviceConfig.from_config(mock_config)
-        device_config.config = mock_config
 
         # DEVICE_OVER_HTTP is not in _device_bind_keys
         device_config.DEVICE_OVER_HTTP = True
@@ -183,7 +178,6 @@ class TestDeviceConfig:
         assert 'DeviceConfig.from_config: Missing key in config "Emulator.Serial"' in captured.out
 
         # Now test broadcast to missing group
-        device_config.config = incomplete_config
         device_config.Emulator_Serial = '127.0.0.1:5555'
 
         captured = capsys.readouterr()
@@ -195,7 +189,6 @@ class TestDeviceConfig:
         """
         mock_config = MockConfig()
         device_config = DeviceConfig.from_config(mock_config)
-        device_config.config = mock_config
 
         # MockConfig.save is not called by DeviceConfig directly, 
         # but AlasioConfigBase.register_modify usually triggers save().
@@ -232,7 +225,6 @@ class TestDeviceConfig:
         """
         mock_config = MockConfig()
         device_config = DeviceConfig.from_config(mock_config)
-        device_config.config = mock_config
 
         # Initial value
         assert device_config.Emulator_Serial == '127.0.0.1:5555'
