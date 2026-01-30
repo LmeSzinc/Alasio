@@ -28,7 +28,6 @@ class DeviceConfig:
 
         # Group `Emulator`
         self.Emulator_Serial = 'auto'
-        self.Emulator_PackageName = 'auto'
         self.Emulator_ScreenshotMethod = 'auto'  # auto, ADB, ADB_nc, uiautomator2, aScreenCap, aScreenCap_nc,
         # DroidCast, DroidCast_raw, nemu_ipc, ldopengl
         self.Emulator_ControlMethod = 'MaaTouch'  # ADB, uiautomator2, minitouch, Hermit, MaaTouch
