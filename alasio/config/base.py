@@ -134,8 +134,8 @@ class AlasioConfigBase:
 
     @cached_property
     def _annotations_alasio(self):
-        from .config_generated import ConfigGenerated
-        return get_annotations(ConfigGenerated)
+        from .config_generated import AlasioConfigGenerated
+        return get_annotations(AlasioConfigGenerated)
 
     def init_task(self):
         # clear existing cache
@@ -299,10 +299,9 @@ class AlasioConfigBase:
             arg (str):
             value:
         """
-        event = ConfigSetEvent(task=task, group=group, arg=arg, value=value)
-        self.modified[(task, group, arg)] = event
-
         if self.auto_save and self._batch_depth == 0:
+            event = ConfigSetEvent(task=task, group=group, arg=arg, value=value)
+            self.modified[(task, group, arg)] = event
             self.save()
 
     def __getattr__(self, item):

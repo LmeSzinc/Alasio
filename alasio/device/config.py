@@ -7,7 +7,8 @@ from alasio.logger import logger
 
 if TYPE_CHECKING:
     # avoid circular import
-    from alasio.config.base import AlasioConfigBase, BatchSetContext, TemporaryContext
+    from alasio.config.base import BatchSetContext, TemporaryContext
+    from alasio.config.config_generated import AlasioConfigGenerated
 
 
 class EmptyContext:
@@ -24,7 +25,7 @@ class EmptyContext:
 class DeviceConfig:
     def __init__(self):
         self._inited = False
-        self.config: "Optional[AlasioConfigBase]" = None
+        self.config: "Optional[AlasioConfigGenerated]" = None
 
         # Group `Emulator`
         self.Emulator_Serial = 'auto'
@@ -102,7 +103,7 @@ class DeviceConfig:
         return keys
 
     @classmethod
-    def from_config(cls, config: "AlasioConfigBase") -> Self:
+    def from_config(cls, config: "AlasioConfigGenerated") -> Self:
         obj = cls()
         obj.config = config
         for name, key in obj._device_bind_keys.items():

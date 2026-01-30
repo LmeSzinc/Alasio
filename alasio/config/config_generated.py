@@ -7,7 +7,7 @@ if typing.TYPE_CHECKING:
     from .alasio import device_model as device
 
 
-class ConfigGenerated(AlasioConfigBase):
+class AlasioConfigGenerated(AlasioConfigBase):
     # A generated config struct to fool IDE's type-predict and auto-complete
 
     # alasio

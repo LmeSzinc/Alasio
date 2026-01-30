@@ -4,7 +4,7 @@ import pytest
 
 from ExampleMod.module.config.const import entry
 from alasio.config.base import ModelProxy
-from alasio.config.config_generated import ConfigGenerated as AlasioConfigBase
+from alasio.config.config_generated import AlasioConfigGenerated as AlasioConfigBase
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.mod import Mod
 from alasio.config.table.config import AlasioConfigTable, ConfigRow

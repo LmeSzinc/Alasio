@@ -1,6 +1,7 @@
 import typing
 
-from alasio.config.config_generated import ConfigGenerated as AlasioConfigBase
+from alasio.config.config_generated import AlasioConfigGenerated
+
 from .const import entry
 
 if typing.TYPE_CHECKING:
@@ -10,7 +11,7 @@ if typing.TYPE_CHECKING:
     from .opsi import opsi_model as opsi
 
 
-class ConfigGenerated(AlasioConfigBase):
+class ConfigGenerated(AlasioConfigGenerated):
     # A generated config struct to fool IDE's type-predict and auto-complete
     entry = entry
 

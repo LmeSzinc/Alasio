@@ -398,7 +398,7 @@ class IndexGenerator(CrossNavGenerator):
         gen.Import('typing')
         gen.Empty()
         if self.alasio:
-            gen.FromImport('alasio.config.config_generated', 'ConfigGenerated as AlasioConfigBase')
+            gen.FromImport('alasio.config.config_generated', 'AlasioConfigGenerated')
             gen.Empty()
             gen.FromImport('.const', 'entry')
         else:
@@ -416,7 +416,11 @@ class IndexGenerator(CrossNavGenerator):
         gen.Empty(2)
 
         # Class definition
-        with gen.Class('ConfigGenerated', inherit='AlasioConfigBase'):
+        if self.alasio:
+            cls = gen.Class('ConfigGenerated', inherit='AlasioConfigGenerated')
+        else:
+            cls = gen.Class('AlasioConfigGenerated', inherit='AlasioConfigBase')
+        with cls:
             gen.Comment('A generated config struct to fool IDE\'s type-predict and auto-complete')
             if self.alasio:
                 gen.add('entry = entry')
