@@ -1,13 +1,18 @@
 from collections import defaultdict
+from datetime import timedelta
 from typing import Any
 
 from msgspec import NODEFAULT, Struct
 
+from alasio.backend.worker.bridge import BackendBridge
+from alasio.base.exception import RequestHumanTakeover, ScriptError, TaskStop
+from alasio.base.pretty import dict2kv
+from alasio.base.servertime import ServerTime, nearest_future, random_time
+from alasio.base.timer import now
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.mod import ConfigSetEvent, Mod, Task
 from alasio.config.entry.utils import validate_task_name
-from alasio.config.exception import RequestHumanTakeover, TaskEnd
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth2
@@ -106,6 +111,9 @@ class AlasioConfigBase:
         # We don't update config realtime, otherwise things will get really complex if user modify configs
         # when task is running.
         self.dict_value: "dict[tuple[str, str], bytes]" = {}
+        # A cache of validated group object
+        # Key: (task, group). Value: validated megspec.Struct object
+        self.dict_obj: "dict[tuple[str, str], Struct]" = {}
         # Modified configs. Key: (task, group, arg). Value: ConfigSetEvent.
         # All variable modifications will be record here and saved in method `save()`.
         self.modified: "dict[tuple[str, str, str], ConfigSetEvent]" = {}
@@ -137,6 +145,14 @@ class AlasioConfigBase:
         from .config_generated import AlasioConfigGenerated
         return get_annotations(AlasioConfigGenerated)
 
+    @cached_property
+    def servertime(self) -> ServerTime:
+        """
+        Server time calculation may depend on user settings, mod needs to override this
+        Default to server time at UTF+8
+        """
+        return ServerTime(8)
+
     def init_task(self):
         # clear existing cache
         # Note: self._overrides is persisted across init_task
@@ -144,7 +160,9 @@ class AlasioConfigBase:
             if key in self.__dict__:
                 self.__dict__.pop(key, None)
         self.dict_value.clear()
+        self.dict_obj.clear()
         self.modified.clear()
+        cached_property.pop(self, 'servertime')
 
         if self.is_template_config:
             return
@@ -153,10 +171,12 @@ class AlasioConfigBase:
         rows: "list[ConfigRow]" = table.select()
 
         dict_value = {}
+        dict_obj = {}
         for row in rows:
             key = (row.task, row.group)
             dict_value[key] = row.value
         self.dict_value = dict_value
+        self.dict_obj = {}
 
         for group, group_ref in self._iter_task_groups(self.task):
             key = (group_ref.task, group)
@@ -171,8 +191,9 @@ class AlasioConfigBase:
             # for error in errors:
             #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
             if obj is NODEFAULT:
-                # Failed to convert
+                logger.warning(f'Class "{group_ref.cls}" in "{group_ref.file}" cannot be default constructed')
                 continue
+            dict_obj[key] = obj
 
             # create proxy on groups, so we can catch arg set
             obj = ModelProxy(_obj=obj, _config=self, _task=group_ref.task, _group=group)
@@ -182,6 +203,51 @@ class AlasioConfigBase:
             self._apply_override_const(key, value)
         for group, arg, value in deep_iter_depth2(self._override_config):
             self._apply_override_config(group, arg, value)
+
+    def cross_get(self, task, group, arg, default=None):
+        """
+        Get config from other task
+
+        Args:
+            task (str):
+            group (str):
+            arg (str):
+            default:
+        """
+        key = (task, group)
+        obj = self.dict_obj.get(key, None)
+        if obj is None:
+            # build group obj
+            index = self.mod.task_index_data()
+            task_ref = index.get(task, None)
+            if task_ref is None:
+                logger.warning(f'cross_get failed, no such task: "{task}"')
+                return default
+            group_ref = task_ref.group.get(group, None)
+            if group_ref is None:
+                # check global_bind
+                global_bind = index.get('_global_bind', None)
+                if global_bind is not None:
+                    group_ref = global_bind.group.get(group, None)
+                    if group_ref is None:
+                        logger.warning(f'cross_get failed, no such group: "{task}.{group}"')
+                        return default
+
+            model = self.mod.get_group_model(file=group_ref.file, cls=group_ref.cls)
+            if model is None:
+                # DataInconsistent error, ignore to reduce runtime crash
+                return default
+            value = self.dict_value.get(key, b'\x80')
+            obj, errors = load_msgpack_with_default(value, model=model)
+            # for error in errors:
+            #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+            if obj is NODEFAULT:
+                logger.warning(f'Class "{group_ref.cls}" in "{group_ref.file}" cannot be default constructed')
+                return default
+            self.dict_obj[key] = obj
+
+        # get group.arg
+        return getattr(obj, arg, default)
 
     def _iter_task_groups(self, task):
         """
@@ -209,54 +275,6 @@ class AlasioConfigBase:
                 raise KeyError(f'No such task "{task}"')
             for group, group_ref in task_ref.group.items():
                 yield group, group_ref
-
-    @staticmethod
-    def task_stop(message=''):
-        """
-        Helper method to stop current task.
-        """
-        raise TaskEnd(message)
-
-    def get_next_task(self) -> Task:
-        pending_task, waiting_task = self.mod.get_task_schedule(self.config_name)
-        if pending_task:
-            logger.info(f'Pending tasks: {[f.TaskName for f in pending_task]}')
-            task = pending_task[0]
-            logger.attr('Task', task)
-            return task
-        if waiting_task:
-            logger.info('No task pending')
-            task = waiting_task[0]
-            logger.attr('Task', task)
-            return task
-        raise RequestHumanTakeover('No task waiting or pending, please enable at least on task')
-
-    def task_switched(self):
-        """
-        Check if scheduler needs to switch task.
-
-        Returns:
-            bool: If task switched
-
-        Examples:
-            if self.config.task_switched():
-                # do task specific cleanup
-                self.campaign.ensure_auto_search_exit()
-                self.config.task_stop()
-        """
-        # Update event
-        # if self.stop_event is not None:
-        #     if self.stop_event.is_set():
-        #         return True
-        prev = self.task
-        self.load()
-        new = self.get_next_task().TaskName
-        if prev == new:
-            logger.info(f'Continue task `{new}`')
-            return False
-        else:
-            logger.info(f'Switch task `{prev}` to `{new}`')
-            return True
 
     def _group_construct(self, group) -> Struct:
         """
@@ -303,6 +321,18 @@ class AlasioConfigBase:
             event = ConfigSetEvent(task=task, group=group, arg=arg, value=value)
             self.modified[(task, group, arg)] = event
             self.save()
+
+    def cross_set(self, task, group, arg, value):
+        """
+        Set config to other task
+
+        Args:
+            task (str):
+            group (str):
+            arg (str):
+            value:
+        """
+        return self.register_modify(task, group, arg, value)
 
     def __getattr__(self, item):
         """
@@ -458,3 +488,102 @@ class AlasioConfigBase:
             # override rollback
         """
         return TemporaryContext(self, **kwargs)
+
+    @staticmethod
+    def task_stop(message=''):
+        """
+        Helper method to stop current task.
+        """
+        raise TaskStop(message)
+
+    def get_next_task(self) -> Task:
+        pending_task, waiting_task = self.mod.get_task_schedule(self.config_name)
+        if pending_task:
+            logger.info(f'Pending tasks: {[f.TaskName for f in pending_task]}')
+            task = pending_task[0]
+            logger.attr('Task', task)
+            return task
+        if waiting_task:
+            logger.info('No task pending')
+            task = waiting_task[0]
+            logger.attr('Task', task)
+            return task
+        raise RequestHumanTakeover('No task waiting or pending, please enable at least on task')
+
+    def task_switched(self):
+        """
+        Check if scheduler needs to switch task.
+
+        Returns:
+            bool: If task switched
+
+        Examples:
+            if self.config.task_switched():
+                # do task specific cleanup
+                self.campaign.ensure_auto_search_exit()
+                self.config.task_stop()
+        """
+        prev = self.task
+
+        # check update event
+        backend = BackendBridge()
+        if backend.scheduler_stopping.is_set():
+            logger.info(f'Stop task {prev}, scheduler stopping')
+            return True
+
+        # check task switch
+        self.load()
+        new = self.get_next_task().TaskName
+        if prev == new:
+            logger.info(f'Continue task `{new}`')
+            return False
+        else:
+            logger.info(f'Switch task `{prev}` to `{new}`')
+            return True
+
+    def task_delay(self, minute=None, server_update=None, target=None, task=None):
+        """
+        Set "Scheduler.NextRun" to delay task.
+        At lease one argument should be set.
+        If multiple arguments are set, task will be delayed to the nearest future.
+
+        Args:
+            minute (int | str | float | tuple[int, int], list[int]):
+                Delay several minutes, or random minutes like (delay_min, delay_max), or "10~30", "10, 30"
+            server_update (bool | list[str] | str):
+                True to delay to the nearest Scheduler.ServerUpdate
+                list[str] or str to delay to given server update, like "00:00", ["00:00", "12:00"], "00:00, 12:00"
+            target (datetime):
+                Delay to given target
+            task (str):
+                None to delay current task
+                str to delay given task
+        """
+        futures = []
+        if minute is not None:
+            delay = int(random_time(minute) * 60)
+            futures.append(now() + timedelta(delay))
+        if server_update is not None:
+            if server_update is True:
+                try:
+                    server_update = self.Scheduler.ServerUpdate
+                except AttributeError:
+                    logger.warning(f'DataInconsistent: Missing Scheduler.ServerUpdate in config')
+                    server_update = None
+            if server_update is not None:
+                futures.append(self.servertime.get_next_update(server_update))
+        if target is not None:
+            futures.append(target)
+
+        kv = dict2kv({'minute': minute, 'server_update': server_update, 'target': target}, drop_none=True)
+        if futures:
+            run = nearest_future(futures)
+        else:
+            raise ScriptError(f'Missing argument in task_delay(), should set at least one')
+        if task:
+            task = self.task
+        if not task:
+            raise ScriptError(f'Empty task, cannot call task_delay()')
+
+        logger.info(f"Delay task `{task}` to {run} ({kv})")
+        self.cross_set(task, 'Scheduler', 'NextRun', run)
