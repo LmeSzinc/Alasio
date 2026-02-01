@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from alasio.ext.utils.servertime import ServerTime, nearest_future, parse_second, parse_server_update, parse_timezone
+from alasio.base.servertime import ServerTime, nearest_future, parse_second, parse_server_update, parse_timezone
 
 
 class TestParseTimezone:

@@ -1,5 +1,6 @@
 import pytest
-from alasio.ext.utils.inflect import Inflection
+
+from alasio.base.inflect import Inflection
 
 
 class TestInflectionBasic:
