@@ -1,6 +1,6 @@
 from datetime import datetime
 from functools import wraps
-from time import perf_counter, sleep, time
+from time import perf_counter, sleep
 
 
 def timer(function):
@@ -19,18 +19,20 @@ def timer(function):
     return function_timer
 
 
-def now():
+def now(tz=True):
     """
-    Get datatime now without timezone
-    """
-    return datetime.now().replace(microsecond=0)
+    Get datatime now without microsecond
 
-
-def nowtz():
+    Args:
+        tz (tzinfo | bool):
     """
-    Get datatime now with timezone
-    """
-    return datetime.now().replace(microsecond=0).astimezone()
+    n = datetime.now().replace(microsecond=0)
+    if tz is True:
+        return n.astimezone()
+    elif tz is False:
+        return n
+    else:
+        n.astimezone(tz)
 
 
 class Timer:
@@ -72,7 +74,7 @@ class Timer:
                 pass
         """
         if self._start <= 0:
-            self._start = time()
+            self._start = perf_counter()
             self._access = 0
 
         return self
@@ -90,7 +92,7 @@ class Timer:
             float:
         """
         if self._start > 0:
-            diff = time() - self._start
+            diff = perf_counter() - self._start
             if diff < 0:
                 diff = 0.
             return diff
@@ -116,12 +118,12 @@ class Timer:
         if current is not None:
             if count is not None:
                 # set both
-                self._start = time() - current
+                self._start = perf_counter() - current
                 self._access = count
             else:
                 # set current only, calculate count
                 count = int(current / speed)
-                self._start = time() - current
+                self._start = perf_counter() - current
                 self._access = count
         else:
             if count is not None:
@@ -144,7 +146,7 @@ class Timer:
         # each reached() call is consider as an access
         self._access += 1
         if self._start > 0:
-            return self._access > self.count and time() - self._start > self.limit
+            return self._access > self.count and perf_counter() - self._start > self.limit
         else:
             # not started, return True for fast first try
             return True
@@ -153,7 +155,7 @@ class Timer:
         """
         Reset the timer as if it just started
         """
-        self._start = time()
+        self._start = perf_counter()
         self._access = 0
         return self
 
@@ -180,7 +182,7 @@ class Timer:
         """
         Wait until timer reached.
         """
-        diff = self._start + self.limit - time()
+        diff = self._start + self.limit - perf_counter()
         if diff > 0:
             sleep(diff)
 

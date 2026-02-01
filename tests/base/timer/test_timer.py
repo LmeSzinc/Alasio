@@ -40,7 +40,7 @@ class TestTimerStart:
         """Test starting the timer"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.return_value = 100.0
             t = Timer(limit=5.0, count=10)
 
@@ -54,7 +54,7 @@ class TestTimerStart:
         """Test multiple starts don't reset the timer"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 105.0]
             t = Timer(limit=5.0, count=10)
 
@@ -81,7 +81,7 @@ class TestTimerCurrent:
         """Test current time after starting"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 103.5]
             t = Timer(limit=5.0)
 
@@ -93,7 +93,7 @@ class TestTimerCurrent:
         """Test protection against time going backwards"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 95.0]  # Time goes backwards
             t = Timer(limit=5.0)
 
@@ -125,7 +125,7 @@ class TestTimerReached:
         """Test returns False when time is insufficient"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 102.0]  # Only 2 seconds elapsed
             t = Timer(limit=5.0, count=10)
 
@@ -140,7 +140,7 @@ class TestTimerReached:
         """Test returns False when access count is insufficient"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 106.0]  # 6 seconds elapsed
             t = Timer(limit=5.0, count=10)
 
@@ -155,7 +155,7 @@ class TestTimerReached:
         """Test returns True when both time and count conditions are met"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 106.0]  # 6 seconds elapsed
             t = Timer(limit=5.0, count=10)
 
@@ -170,7 +170,7 @@ class TestTimerReached:
         """Test each reached() call increments access count"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.return_value = 100.0
             t = Timer(limit=5.0, count=10)
 
@@ -187,7 +187,7 @@ class TestTimerReset:
         """Test reset() resets the timer"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 150.0]
             t = Timer(limit=5.0, count=10)
 
@@ -212,7 +212,7 @@ class TestTimerReset:
         """Test reached_and_reset() when condition is met"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 106.0, 106.0]
             t = Timer(limit=5.0, count=10)
 
@@ -227,7 +227,7 @@ class TestTimerReset:
         """Test reached_and_reset() when condition is not met"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 102.0]
             t = Timer(limit=5.0, count=10)
 
@@ -247,7 +247,7 @@ class TestTimerWait:
         timer_module = Timer.__module__
 
         with patch(f'{timer_module}.sleep') as mock_sleep, \
-                patch(f'{timer_module}.time') as mock_time:
+                patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 102.0]  # At start and at wait
             t = Timer(limit=5.0, count=10)
 
@@ -263,7 +263,7 @@ class TestTimerWait:
         timer_module = Timer.__module__
 
         with patch(f'{timer_module}.sleep') as mock_sleep, \
-                patch(f'{timer_module}.time') as mock_time:
+                patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 106.0]  # Already timed out
             t = Timer(limit=5.0, count=10)
 
@@ -281,7 +281,7 @@ class TestTimerIntegration:
         """Test typical loop usage scenario"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             # Simulate time sequence
             times = [100.0, 101.0, 102.0, 103.0, 106.0, 107.0]
             mock_time.side_effect = times
@@ -304,7 +304,7 @@ class TestTimerIntegration:
         """Test method chaining"""
         timer_module = Timer.__module__
 
-        with patch(f'{timer_module}.time') as mock_time:
+        with patch(f'{timer_module}.perf_counter') as mock_time:
             mock_time.side_effect = [100.0, 100.0]
             t = Timer(limit=5.0, count=10)
 
