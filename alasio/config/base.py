@@ -317,9 +317,10 @@ class AlasioConfigBase:
             arg (str):
             value:
         """
+        event = ConfigSetEvent(task=task, group=group, arg=arg, value=value)
+        self.modified[(task, group, arg)] = event
+
         if self.auto_save and self._batch_depth == 0:
-            event = ConfigSetEvent(task=task, group=group, arg=arg, value=value)
-            self.modified[(task, group, arg)] = event
             self.save()
 
     def cross_set(self, task, group, arg, value):
@@ -562,7 +563,7 @@ class AlasioConfigBase:
         futures = []
         if minute is not None:
             delay = int(random_time(minute) * 60)
-            futures.append(now() + timedelta(delay))
+            futures.append(now() + timedelta(seconds=delay))
         if server_update is not None:
             if server_update is True:
                 try:
@@ -580,7 +581,7 @@ class AlasioConfigBase:
             run = nearest_future(futures)
         else:
             raise ScriptError(f'Missing argument in task_delay(), should set at least one')
-        if task:
+        if not task:
             task = self.task
         if not task:
             raise ScriptError(f'Empty task, cannot call task_delay()')

@@ -39,8 +39,8 @@ class DeviceConfig:
         self.EmulatorInfo_Emulator = 'auto'  # auto, NoxPlayer, NoxPlayer64, BlueStacks4, BlueStacks5,
         # BlueStacks4HyperV, BlueStacks5HyperV, LDPlayer3, LDPlayer4, LDPlayer9, MuMuPlayer, MuMuPlayerX,
         # MuMuPlayer12, MEmuPlayer
-        self.EmulatorInfo_name = None
-        self.EmulatorInfo_path = None
+        self.EmulatorInfo_Name = None
+        self.EmulatorInfo_Path = None
 
         # Group `Error`
         self.Error_HandleError = True
