@@ -5,15 +5,51 @@ import trio
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event_cache import GlobalEventCache
 from alasio.backend.ws.ws_topic import BaseTopic
-from alasio.config.table.scan import DndRequest, ScanTable
+from alasio.config.entry.loader import MOD_LOADER
+from alasio.config.table.scan import ConfigInfo, DndRequest, ScanTable
+from alasio.logger import logger
 
 
 class ConfigScanSource(GlobalEventCache):
     TOPIC = 'ConfigScan'
+    data: "dict[str, ConfigInfo]"
 
     def on_init(self):
         table = ScanTable()
         return table.scan()
+
+    def _create_default_config(self):
+        # keep using dict to keep mod sorting
+        all_mod = MOD_LOADER.dict_mod.copy()
+        # access self.data with thread safe
+        data = self.data.copy()
+        for config in data.values():
+            all_mod.pop(config.name, None)
+        if not all_mod:
+            return
+
+        logger.info(f'Create default config: {list(all_mod)}')
+        table = ScanTable()
+        # create self mod first
+        self_mod = MOD_LOADER.self_mod
+        if self_mod:
+            mod_name = all_mod.pop(self_mod.name, None)
+            if mod_name:
+                table.config_add(mod_name, mod_name)
+        # create sub mods
+        for mod_name in all_mod:
+            table.config_add(mod_name, mod_name)
+
+    @classmethod
+    async def create_default_config(cls):
+        """
+        Create default config for each mod, named with mod name.
+        So user can easily find an entry when having a new mod.
+        """
+        self = cls()
+        await self._fetch_init()
+        await trio.to_thread.run_sync(self._create_default_config)
+        await self.reinit()
 
 
 class ConfigScan(BaseTopic):

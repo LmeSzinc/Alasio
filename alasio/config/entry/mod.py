@@ -73,6 +73,9 @@ class Mod:
         """
         return f'{self.__class__.__name__}(name="{self.name}", root="{self.root.to_posix()}")'
 
+    def __bool__(self):
+        return True
+
     """
     Index json
     """

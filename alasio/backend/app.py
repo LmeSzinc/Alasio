@@ -135,6 +135,9 @@ async def lifespan(app):
         from alasio.backend.ws.topic import WebsocketServer
         nursery.start_soon(WebsocketServer.task_msgbus_global)
         nursery.start_soon(WebsocketServer.task_msgbus_config)
+        # warmups
+        from alasio.backend.topic.scan import ConfigScanSource
+        nursery.start_soon(ConfigScanSource.create_default_config)
 
         # actual backend runs here
         yield

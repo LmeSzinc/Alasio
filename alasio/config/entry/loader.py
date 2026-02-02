@@ -8,6 +8,7 @@ from alasio.config.entry.utils import validate_nav_name
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_get, deep_get_with_error, deep_iter_depth2, deep_values_depth2
+from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import is_abspath, joinnormpath
@@ -31,6 +32,28 @@ class ModLoader:
         self.dict_mod_entry = dict_mod_entry
 
     @cached_property
+    def self_mod(self):
+        """
+        Returns:
+            Mod | None:
+        """
+        file = self.root.joinpath('module/config/const.py')
+        try:
+            module = LOADPY_CACHE.get(file)
+        except ImportError:
+            return None
+        try:
+            entry = module.entry
+            if not isinstance(entry, const.ModEntryInfo):
+                return None
+            # try to access name
+            if not isinstance(entry.name, str):
+                return None
+        except (AttributeError, TypeError):
+            return None
+        return Mod(entry)
+
+    @cached_property
     def dict_mod(self):
         """
         Returns:
@@ -39,7 +62,17 @@ class ModLoader:
                 value: Mod
         """
         out = {}
+
+        # add self mod
+        self_mod = self.self_mod
+        if self_mod:
+            out[self_mod.name] = self_mod
+
+        # add sub mods
         for entry in self.dict_mod_entry.values():
+            # No duplicate or nested mod
+            if entry.name in out:
+                continue
             if not entry.root:
                 # logger.warning(f'Mod entry root empty: name={name}, entry={entry.root}')
                 # continue
@@ -66,7 +99,8 @@ class ModLoader:
         mod = len(self.dict_mod)
         lines = [
             'Show all mods',
-            f'{self.__class__.__name__}(root="{self.root.to_posix()}", mod={mod}):'
+            f'{self.__class__.__name__}(root="{self.root.to_posix()}", mod={mod}):',
+            f'self_mod: {self.self_mod}',
         ]
         for entry in self.dict_mod.values():
             lines.append(f'- {entry}')
