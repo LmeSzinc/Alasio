@@ -14,3 +14,20 @@ def dict2kv(dic, drop_none=False):
     else:
         items = [f'{k}={repr(v)}' for k, v in dic.items()]
     return ', '.join(items)
+
+
+def pretty_time(second):
+    """
+    Format time with adaptive units (s or ms or us)
+
+    Args:
+        time_seconds (float): Time in seconds
+
+    Returns:
+        str: Formatted time string
+    """
+    if second >= 1:
+        return f'{second:.3f}s'
+    if second >= 0.001:
+        return f"{second * 1000:.3f}ms"
+    return f"{second * 1000000:.3f}us"

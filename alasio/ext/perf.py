@@ -1,5 +1,7 @@
 import time
 
+from alasio.base.pretty import pretty_time
+
 
 class PerformanceTest:
     """Performance testing framework"""
@@ -88,22 +90,6 @@ class PerformanceTest:
         return param_str
 
     @staticmethod
-    def _format_time(time_seconds):
-        """
-        Format time with adaptive units (ms or us)
-
-        Args:
-            time_seconds (float): Time in seconds
-
-        Returns:
-            str: Formatted time string
-        """
-        if time_seconds < 0.001:
-            return f"{time_seconds * 1000000:.3f}us"
-        else:
-            return f"{time_seconds * 1000:.3f}ms"
-
-    @staticmethod
     def _format_output(output):
         """
         Format output for comparison (supports numpy arrays without importing numpy)
@@ -173,7 +159,7 @@ class PerformanceTest:
                 formatted_output = self._format_output(result)
                 formatted_outputs.append(formatted_output)
 
-                print(f"   Execution time: {self._format_time(end_time - start_time)}")
+                print(f"   Execution time: {pretty_time(end_time - start_time)}")
                 print(f"   Output: {formatted_output}")
                 print()
 
@@ -239,7 +225,7 @@ class PerformanceTest:
                         single_duration = total_time / test_iterations
                         break
 
-            print(f"   Single execution time: {self._format_time(single_duration)}")
+            print(f"   Single execution time: {pretty_time(single_duration)}")
 
             # Calculate required iterations
             time_based_iterations = max(1, int(self.min_duration / single_duration))
@@ -362,7 +348,7 @@ class PerformanceTest:
 
         # Data rows
         for i, result in enumerate(sorted_results):
-            row = f"{result['name']:<{name_width}} {result['iterations']:<12} {self._format_time(result['avg_time']):<12}"
+            row = f"{result['name']:<{name_width}} {result['iterations']:<12} {pretty_time(result['avg_time']):<12}"
 
             if i == 0:
                 # Fastest function - no slower ratio
