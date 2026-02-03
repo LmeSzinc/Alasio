@@ -1,15 +1,15 @@
-from typing import Optional, Type, Union
+from collections import deque
+from typing import Deque, Optional, Type, Union
 
 import msgspec
 import trio
 from msgspec import DecodeError, EncodeError, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
+from trio import Event
 
-from alasio.backend.locale.accept_language import negotiate_accept_language
 from alasio.backend.reactive.event import AccessDenied, RequestEvent, ResponseEvent
 from alasio.backend.reactive.safeid import SafeIDGenerator
 from alasio.backend.ws.ws_topic import BaseTopic
-from alasio.config.const import Const
 from alasio.logger import logger
 
 TRIO_CHANNEL_ERRORS = (trio.BrokenResourceError, trio.BusyResourceError, trio.ClosedResourceError, trio.EndOfChannel)
@@ -29,7 +29,7 @@ class WebsocketTopicServer:
     Class methods that manage all connections
     """
 
-    server_terminated = trio.Event()
+    server_terminated = Event()
 
     @classmethod
     async def endpoint(cls, ws: WebSocket):
@@ -50,6 +50,10 @@ class WebsocketTopicServer:
         """
         cls.server_terminated.set()
 
+    # messages in send_buffer will be sent first, then lossy_buffer
+    # if websocket is busy, send_buffer will create back-pressure, old messages in lossy buffer will be dropped
+    SEND_BUFFER_LENGTH = 32
+    LOSSY_BUFFER_LENGTH = 128
     # If no activity for X seconds,
     # we will send a "ping" to client
     PING_INTERVAL = 30
@@ -71,13 +75,15 @@ class WebsocketTopicServer:
         self.ws = ws
         self.id = CONN_ID_GENERATOR.get()
 
-        self.conn_terminated = trio.Event()
+        self.conn_terminated = Event()
         # timestamp of last activity, used to calculate the next "ping"
         self.last_active = 0.
         # track if "pong" is received
-        self.pong_received = trio.Event()
+        self.pong_received = Event()
         # buffer the message to be sent
         self.send_buffer: "trio.MemorySendChannel[bytes]" = None
+        self.lossy_buffer = deque(maxlen=self.LOSSY_BUFFER_LENGTH)
+        self.send_event = Event()
         # All subscribed topics
         # key: topic name, value: topic object Topic(self.id)
         self.subscribed: "dict[str, BaseTopic]" = {}
@@ -124,8 +130,8 @@ class WebsocketTopicServer:
             # start 4 async tasks, sender, receiver, job handler, heartbeat handler
 
             # send buffer, set send buffer first
-            self.send_buffer, recv = trio.open_memory_channel(64)
-            nursery.start_soon(self.task_send, recv)
+            self.send_buffer, recv = trio.open_memory_channel(self.SEND_BUFFER_LENGTH)
+            nursery.start_soon(self.task_send, recv, self.lossy_buffer)
 
             # recv buffer
             send, recv = trio.open_memory_channel(8)
@@ -143,42 +149,6 @@ class WebsocketTopicServer:
         for topic_name, topic_class in self.DEFAULT_TOPIC_CLASS.items():
             topic = topic_class(self.id, self)
             self.subscribed[topic_name] = topic
-
-    def _negotiate_lang(self, default='en-US'):
-        """
-        Parse request into one available language
-
-        Returns:
-            str:
-        """
-        available = Const.GUI_LANGUAGE
-        ws = self.ws
-        # try to match the lang in cookie
-        prefer = ws.cookies.get('alasio_lang', '')
-        if prefer:
-            use = negotiate_accept_language(prefer, available)
-            if use:
-                return use
-        # try to match Accept-Language header
-        try:
-            prefer = ws.headers['Accept-Language']
-        except KeyError:
-            # this shouldn't happen, most browsers would post Accept-Language header
-            prefer = ''
-        if prefer:
-            use = negotiate_accept_language(prefer, available)
-            if use:
-                return use
-        # no luck, try to use default
-        if default in available:
-            return default
-        # ohno, default language is not available, use the first language
-        try:
-            return available[0]
-        except IndexError:
-            # empty available languages, there's nothing we can do
-            # return default anyway
-            return default
 
     async def close(self, code=1000, reason=None):
         """
@@ -217,34 +187,64 @@ class WebsocketTopicServer:
             logger.exception(e)
             return None
 
+    def _set_send_event(self):
+        # safely clear trio.Event()
+        event = self.send_event
+        self.send_event = Event()
+        event.set()
+
     async def send(self, data: "Union[ResponseEvent, list[ResponseEvent], bytes]"):
         """
         Send an event to send buffer
+
+        Returns:
+            bool: If success
         """
         data = self._encode_msg(data)
         if data is None:
-            return
+            return False
         try:
             await self.send_buffer.send(data)
         except TRIO_CHANNEL_ERRORS:
             # buffer closed
-            pass
+            return False
+        self._set_send_event()
+        return True
 
     def send_nowait(self, data: "Union[ResponseEvent, list[ResponseEvent], bytes]"):
         """
         Send an event to send buffer without blocking
+
+        Returns:
+            bool: If success
 
         Raises:
             trio.WouldBlock:
         """
         data = self._encode_msg(data)
         if data is None:
-            return
+            return False
         try:
             self.send_buffer.send_nowait(data)
         except TRIO_CHANNEL_ERRORS:
             # buffer closed
-            pass
+            return False
+        self._set_send_event()
+        return True
+
+    def send_lossy(self, data: "Union[ResponseEvent, list[ResponseEvent], bytes]"):
+        """
+        Send an event to lossy buffer
+
+        Returns:
+            bool: If success
+        """
+        data = self._encode_msg(data)
+        if data is None:
+            return False
+        self.lossy_buffer.append(data)
+        self._set_send_event()
+        return True
 
     async def send_error(self, data: "Union[ResponseEvent, Exception, str, bytes]"):
         """
@@ -258,8 +258,7 @@ class WebsocketTopicServer:
             data = ResponseEvent(t='error', o='full', v=data)
         data = self._encode_msg(data)
         if data is None:
-            return
-
+            return False
         await self.send(data)
 
     """
@@ -341,14 +340,11 @@ class WebsocketTopicServer:
                 # channel closed, skip sending
                 continue
 
-        # close from upstream to downstream, so downstream can still finish curren job
+        # close from upstream to downstream, so downstream can still finish current job
         await send_buffer.aclose()
         # logger.info(f'{self} task_recv closed')
 
-    async def task_job(
-            self,
-            recv_buffer: "trio.MemoryReceiveChannel[RequestEvent]",
-    ):
+    async def task_job(self, recv_buffer: "trio.MemoryReceiveChannel[RequestEvent]"):
         """
         Coroutine task that receive data from recv_buffer and do the actual job
         """
@@ -374,24 +370,42 @@ class WebsocketTopicServer:
         # close from upstream to downstream, so downstream can still finish current job
         if self.send_buffer is not None:
             await self.send_buffer.aclose()
+            # notify task_send to close
+            self._set_send_event()
         # task_job is the final downstream, once it finished, we tell task_heartbeat to close
         self.conn_terminated.set()
         # logger.info(f'{self} task_job closed')
 
     async def task_send(
             self,
-            send_buffer: "trio.MemoryReceiveChannel[bytes]"
+            send_buffer: "trio.MemoryReceiveChannel[bytes]",
+            lossy_buffer: "Deque[bytes]",
     ):
         """
         Coroutine task that receive data from send_buffer and send to websocket
         """
         while True:
-            # receive from buffer
-            try:
-                data = await send_buffer.receive()
-            except TRIO_CHANNEL_ERRORS:
-                # websocket closed -> recv_buffer closed -> send_buffer closed
+            # Priority 1: receive from send_buffer
+            if send_buffer._state.data:
+                try:
+                    data = send_buffer.receive_nowait()
+                except TRIO_CHANNEL_ERRORS:
+                    # websocket closed -> recv_buffer closed -> send_buffer closed
+                    break
+                except trio.WouldBlock:
+                    # maybe race condition that send_buffer is empty
+                    continue
+            # Priority 2: receive from lossy_buffer
+            elif lossy_buffer:
+                data = lossy_buffer.popleft()
+            # If upstream closed buffer
+            elif send_buffer._closed or not send_buffer._state.open_send_channels:
                 break
+            # wait new event
+            else:
+                await self.send_event.wait()
+                continue
+            # print(data, flush=True)
 
             # send message
             try:
@@ -455,10 +469,9 @@ class WebsocketTopicServer:
         """
         Coroutine task that send "ping" to keep websocket alive if it idled for 30s
         """
-
         while True:
             now = trio.current_time()
-            next_ping = self.last_active + 30
+            next_ping = self.last_active + self.PING_INTERVAL
             max_wait_time = next_ping - now
 
             # wait until next ping time or server terminated
@@ -467,20 +480,22 @@ class WebsocketTopicServer:
 
             # woke up, check activity
             now = trio.current_time()
-            next_ping = self.last_active + 30
+            next_ping = self.last_active + self.PING_INTERVAL
             if now < next_ping:
                 # we have activity during sleep, no need to ping for now
                 continue
 
             # no activity, do ping
-            self.pong_received = trio.Event()
+            self.pong_received = Event()
             try:
-                await self.ws.send_bytes(b'ping')
+                success = await self.send(b'ping')
                 # send success, update activity
                 self.last_active = trio.current_time()
             except WEBSOCKET_ERRORS:
                 # websocket disconnected
                 # we capture and exit silently, so trio will wait other task to finish current job
+                break
+            if not success:
                 break
 
             # wait pong

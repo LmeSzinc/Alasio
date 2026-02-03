@@ -1,5 +1,6 @@
 from typing import Type
 
+from alasio.backend.locale.accept_language import negotiate_accept_language
 from alasio.backend.reactive.base_topic import MSGBUS_CONFIG_HANDLERS, MSGBUS_CONFIG_RECV, MSGBUS_GLOBAL_HANDLERS, \
     MSGBUS_GLOBAL_RECV
 from alasio.backend.topic.config import ConfigArg, ConfigNav
@@ -12,6 +13,7 @@ from alasio.backend.topic.worker import Worker
 from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_server import WebsocketTopicServer
 from alasio.backend.ws.ws_topic import BaseTopic
+from alasio.config.const import Const
 from alasio.logger import logger
 
 
@@ -60,6 +62,42 @@ class WebsocketServer(WebsocketTopicServer):
             state = await topic.nav_state
             state.lang = lang
             await topic.nav_state.mutate()
+
+    def _negotiate_lang(self, default='en-US'):
+        """
+        Parse request into one available language
+
+        Returns:
+            str:
+        """
+        available = Const.GUI_LANGUAGE
+        ws = self.ws
+        # try to match the lang in cookie
+        prefer = ws.cookies.get('alasio_lang', '')
+        if prefer:
+            use = negotiate_accept_language(prefer, available)
+            if use:
+                return use
+        # try to match Accept-Language header
+        try:
+            prefer = ws.headers['Accept-Language']
+        except KeyError:
+            # this shouldn't happen, most browsers would post Accept-Language header
+            prefer = ''
+        if prefer:
+            use = negotiate_accept_language(prefer, available)
+            if use:
+                return use
+        # no luck, try to use default
+        if default in available:
+            return default
+        # ohno, default language is not available, use the first language
+        try:
+            return available[0]
+        except IndexError:
+            # empty available languages, there's nothing we can do
+            # return default anyway
+            return default
 
     @classmethod
     async def handle_global_event(cls, topic: str, value):

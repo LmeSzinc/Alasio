@@ -49,10 +49,7 @@ class EventCache:
         集合结构就是安全的。
         """
         for ch in self._subscribers:
-            try:
-                ch.server.send_nowait(data)
-            except trio.WouldBlock:
-                pass
+            ch.server.send_lossy(data)
 
     def on_event(self, event: ConfigEvent, trio_token: TrioToken):
         """

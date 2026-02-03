@@ -131,12 +131,9 @@ class LogCache(metaclass=SingletonNamed):
             # encode to bytes first instead of encoding in each for loop
             event = LOG_ENCODER.encode(batch)
             for topic in self._subscribers:
-                try:
-                    # 使用 send_nowait 防止某个订阅者阻塞导致整个后端卡顿
-                    # 如果订阅者处理太慢，send_nowait 会抛出 WouldBlock (或丢弃，取决于 channel 类型)
-                    topic.server.send_nowait(event)
-                except trio.WouldBlock:
-                    pass
+                # 使用 send_lossy 防止某个订阅者阻塞导致整个后端卡顿
+                # 如果订阅者处理太慢，send_nowait 会抛出 WouldBlock (或丢弃，取决于 channel 类型)
+                topic.server.send_lossy(event)
 
     def subscribe(self, topic: BaseTopic):
         """
