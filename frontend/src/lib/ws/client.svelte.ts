@@ -61,6 +61,13 @@ class WebsocketManager {
       defaultSubscriptions: [...BASE_DEFAULT_SUBSCRIPTIONS, ...(options.defaultSubscriptions || [])],
       scrollTopics: { ...BASE_SCROLL_TOPICS, ...(options.scrollTopics || {}) },
     };
+
+    // Initialize cache for default subscriptions.
+    for (const topic of this.#options.defaultSubscriptions) {
+      if (this.topics[topic] === undefined) {
+        this.topics[topic] = this.#options.scrollTopics[topic] ? [] : {};
+      }
+    }
   }
 
   /**
@@ -388,6 +395,11 @@ class WebsocketManager {
     // CRITICAL: Update the subscription count *before* initiating connection logic.
     // This prevents a race condition where `onopen` could fire before the count is updated.
     this.subscriptions[topic] = currentCount + 1;
+
+    // Initialize cache for the topic if it doesn't exist.
+    if (this.topics[topic] === undefined) {
+      this.topics[topic] = this.#options.scrollTopics[topic] ? [] : {};
+    }
 
     // Ensure a connection is active or being established.
     this.connect();

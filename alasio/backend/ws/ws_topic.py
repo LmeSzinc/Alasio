@@ -85,7 +85,8 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         event = ResponseEvent(t=topic, o='full', v=data)
 
         # send event
-        await self.server.send(event)
+        if data:
+            await self.server.send(event)
 
     async def reactive_callback(self, name, old, new):
         """

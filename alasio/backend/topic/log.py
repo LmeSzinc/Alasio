@@ -192,7 +192,8 @@ class LogCache(metaclass=SingletonNamed):
 
         # 4. 发送快照
         # 合并全部行到一个 full 事件
-        # 不论有没有snapshot，都要发送full事件来显式通知前端
+        if not snapshot:
+            return
         event = ResponseEvent(t=topic.topic_name(), o='full', v=[e.v for e in snapshot])
         try:
             # 使用 send_nowait 确保这一步不会挂起 (yield)。
@@ -249,8 +250,8 @@ class Log(BaseTopic):
         config_name = await state.config_name
         if not config_name:
             # empty logs if config_name is empty
-            event = ResponseEvent(t=self.topic_name(), o='full', v=[])
-            await self.server.send(event)
+            # event = ResponseEvent(t=self.topic_name(), o='full', v=[])
+            # await self.server.send(event)
             return
 
         cache = await LogCache.get_instance(config_name)

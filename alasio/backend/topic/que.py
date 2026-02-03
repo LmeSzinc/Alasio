@@ -53,8 +53,8 @@ class TaskQueue(BaseTopic):
         config_name = await state.config_name
         if not config_name:
             # empty logs if config_name is empty
-            event = ResponseEvent(t=self.topic_name(), o='full', v={})
-            await self.server.send(event)
+            # event = ResponseEvent(t=self.topic_name(), o='full', v={})
+            # await self.server.send(event)
             return
 
         cache = TaskQueueSource(config_name)

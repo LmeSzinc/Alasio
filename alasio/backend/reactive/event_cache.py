@@ -122,6 +122,8 @@ class EventCache:
             self._subscribers.add(topic)
             # 2. 拍快照 & 编码
             # 此时持有锁，子线程无法修改 data，状态是绝对静止的
+            if not self.data:
+                return
             full = ResponseEvent(t=self.TOPIC, o='full', v=self.data)
             full = encode(full)
 
