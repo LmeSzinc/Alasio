@@ -1,6 +1,6 @@
 import sys
 from datetime import date
-from typing import Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
 from alasio.ext import env
 from alasio.ext.cache import threaded_cached_property
@@ -78,3 +78,80 @@ class LogWriter(metaclass=Singleton):
 
     def __del__(self):
         self.close()
+
+
+class CaptureStream:
+    def __init__(self):
+        self.logs: List[str] = []
+
+    def write(self, text):
+        self.logs.append(text)
+
+    def flush(self):
+        pass
+
+    def any_contains(self, text):
+        """
+        Check if any log contains the given text
+
+        Args:
+            text (str): Text to search for
+
+        Returns:
+            bool: True if text is found in any log
+        """
+        for log in self.logs:
+            if text in log:
+                return True
+        return False
+
+
+class CaptureJob:
+    def acquire(self):
+        pass
+
+
+class CaptureBackend:
+    def __init__(self):
+        self.logs: List[dict] = []
+        self.inited = True
+        self.config_name = "mock"
+
+    def send_log(self, event):
+        self.logs.append(event)
+        return CaptureJob()
+
+    def any_contains(self, text):
+        """
+        Check if any log entry (dict values) contains the given text
+
+        Args:
+            text (str): Text to search for
+
+        Returns:
+            bool: True if text is found in any log entry value
+        """
+        for log in self.logs:
+            for value in log.values():
+                if isinstance(value, str) and text in value:
+                    return True
+        return False
+
+
+class CaptureWriter:
+    def __init__(self):
+        self.is_electron = False
+        self.stdout = CaptureStream()
+        self.fd = CaptureStream()
+        self.backend = CaptureBackend()
+
+    def clear(self):
+        self.stdout.logs.clear()
+        self.fd.logs.clear()
+        self.backend.logs.clear()
+
+    def check_rotate(self):
+        pass
+
+    def close(self):
+        pass

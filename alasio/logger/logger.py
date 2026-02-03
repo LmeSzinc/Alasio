@@ -9,7 +9,7 @@ from typing_extensions import Self
 
 from alasio.ext.backport import patch_rich_traceback_extract
 from alasio.logger.utils import event_format, figure_out_exc_info, gen_exception_tree, replace_unicode_table
-from alasio.logger.writer import LogWriter
+from alasio.logger.writer import CaptureWriter, LogWriter
 
 patch_rich_traceback_extract()
 
@@ -38,6 +38,21 @@ def rich_formatter(exc_info):
     return output
 
 
+class CaptureWriterContext:
+    def __init__(self, logger: "AlasioLogger"):
+        self.logger = logger
+        self.writer = CaptureWriter()
+        self.old_writer = None
+
+    def __enter__(self):
+        self.old_writer = self.logger._writer
+        self.logger._writer = self.writer
+        return self.writer
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.logger._writer = self.old_writer
+
+
 class AlasioLogger:
     # global logging lock
     _lock = threading.Lock()
@@ -45,6 +60,20 @@ class AlasioLogger:
     def __init__(self):
         self._context = {}
         self._writer = LogWriter()
+
+    def mock_capture_writer(self):
+        """
+        Mock writer for testing purpose
+
+        Examples:
+            with logger.mock_capture_writer() as capture:
+                logger.info("Hello Info")
+                assert any("Hello Info" in log for log in capture.fd.logs)
+                assert any("Hello Info" in log for log in capture.stdout.logs)
+                assert any(log['l'] == 'INFO' and log['m'] == 'Hello Info' for log in capture.backend.logs)
+                capture.clear()
+        """
+        return CaptureWriterContext(self)
 
     def _process_event(self, level: str, event: str, event_dict: dict) -> Tuple[str, str, dict]:
         """
@@ -163,6 +192,7 @@ class AlasioLogger:
         context = self._context.copy()
         context.update(**value_dict)
         new._context = context
+        new._writer = self._writer
         return new
 
     def unbind(self, *keys) -> Self:
@@ -175,6 +205,7 @@ class AlasioLogger:
         for key in keys:
             context.pop(key, None)
         new._context = context
+        new._writer = self._writer
         return new
 
     """
