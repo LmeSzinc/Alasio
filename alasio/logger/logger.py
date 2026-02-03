@@ -1,89 +1,17 @@
-import sys
+import threading
 import time
-from collections import deque
-from datetime import date, datetime
+from datetime import datetime
 from io import StringIO
-from typing import TYPE_CHECKING
+from typing import Tuple, Union
 
-import structlog
 from exceptiongroup import BaseExceptionGroup, ExceptionGroup
-from structlog import DropEvent
-from structlog.processors import ExceptionRenderer
+from typing_extensions import Self
 
-from alasio.ext import env
 from alasio.ext.backport import patch_rich_traceback_extract
-from alasio.ext.cache import threaded_cached_property
-from alasio.ext.path import PathStr
-from alasio.ext.singleton import Singleton
-
-if TYPE_CHECKING:
-    from alasio.backend.worker.bridge import BackendBridge
+from alasio.logger.utils import event_format, figure_out_exc_info, gen_exception_tree, replace_unicode_table
+from alasio.logger.writer import LogWriter
 
 patch_rich_traceback_extract()
-
-
-class PseudoBackendBridge:
-    inited = False
-
-
-# It's a singleton because on each logger.bind() structlog.PrintLoggerFactory will create new `file` object
-# But we don't want to open multiple files
-class LogWriter(metaclass=Singleton):
-    def __init__(self):
-        self.create_date = ''
-        self.is_electron = bool(env.ELECTRON_SECRET)
-
-    @threaded_cached_property
-    def backend(self) -> "BackendBridge":
-        from alasio.backend.worker.bridge import BackendBridge
-        backend = BackendBridge()
-        if backend.inited:
-            return backend
-        else:
-            return PseudoBackendBridge()
-
-    @threaded_cached_property
-    def file(self):
-        root = env.PROJECT_ROOT.abspath()
-        folder = root / 'log'
-        self.create_date = date.today()
-
-        if self.backend.inited:
-            name = self.backend.config_name
-            # write logs to xxx/log/2020-01-01_{config_name}.txt
-            return folder / f'{self.create_date}_{name}.txt'
-        else:
-            # xxx/path/module.py -> module
-            name = PathStr.new(sys.argv[0]).rootstem
-            # write logs to xxx/log/2020-01-01_{module_name}.txt
-            return folder / f'{self.create_date}_{name}.txt'
-
-    @threaded_cached_property
-    def fd(self):
-        file = self.file
-        try:
-            return open(file, 'a', encoding='utf-8')
-        except FileNotFoundError:
-            file.uppath().makedirs(exist_ok=True)
-        return open(file, 'a', encoding='utf-8')
-
-    def check_rotate(self):
-        # rotate log to file with new date
-        if self.create_date and self.create_date != date.today():
-            self.close()
-
-    def close(self):
-        threaded_cached_property.pop(self, 'backend')
-        threaded_cached_property.pop(self, 'file')
-        fd = threaded_cached_property.pop(self, 'fd')
-        if fd is not None:
-            try:
-                fd.close()
-            except Exception:
-                pass
-
-    def __del__(self):
-        self.close()
 
 
 def rich_formatter(exc_info):
@@ -106,167 +34,163 @@ def rich_formatter(exc_info):
     console.print(tb)
     output = sio.getvalue()
 
-    mapping = {
-        "┌": "+", "┐": "+", "└": "+", "┘": "+",
-        "├": "+", "┤": "+", "┬": "+", "┴": "+",
-        "┼": "+", "─": "-", "│": "|", "═": "=",
-        "║": "|", "╒": "+", "╓": "+", "╔": "+",
-        "╕": "+", "╖": "+", "╗": "+", "╘": "+",
-        "╙": "+", "╚": "+", "╛": "+", "╜": "+",
-        "╝": "+", "╞": "+", "╟": "+", "╠": "+",
-        "╡": "+", "╢": "+", "╣": "+", "╤": "+",
-        "╥": "+", "╦": "+", "╧": "+", "╨": "+",
-        "╩": "+", "╪": "+", "╫": "+", "╬": "+",
-        "…": "~",
-    }
-    for unicode_char, ascii_char in mapping.items():
-        output = output.replace(unicode_char, ascii_char)
-
+    output = replace_unicode_table(output)
     return output
 
 
-class SafeDict(dict):
-    def __missing__(self, key):
-        # Return placeholder when key is missing, for better debugging
-        return f"<key {key} missing>"
+class AlasioLogger:
+    # global logging lock
+    _lock = threading.Lock()
 
+    def __init__(self):
+        self._context = {}
+        self._writer = LogWriter()
 
-def has_user_keys(event_dict):
-    """
-    Check if event_dict contains user-provided keys (not just built-in fields)
-    Built-in fields: 'event', 'exception'
-    """
-    length = len(event_dict)
-    # Fast path: empty or single item (must be built-in)
-    if length <= 1:
-        return False
-
-    # Calculate how many built-in fields are present
-    builtin_count = ('event' in event_dict) + ('exception' in event_dict)
-    return length > builtin_count
-
-
-def gen_exception_tree(exc: BaseException):
-    """
-    Generate exception tree like:
-    - sub exception 1, depth 1
-      - sub exception 1, depth 2
-    - sub exception 2
-    """
-    # (exc, depth)
-    stack = deque()
-    stack.append((exc, 0))
-
-    while stack:
-        current_exc, depth = stack.pop()
-
-        prefix = "  " * depth
-        yield f'{prefix}- {type(current_exc).__name__}: {current_exc}'
-
-        if BaseExceptionGroup and isinstance(current_exc, BaseExceptionGroup):
-            children = [(e, depth + 1) for e in current_exc.exceptions]
-            stack.extend(reversed(children))
-
-
-class LogRenderer:
-    # A renderer that mixes
-    # - structlog.processors.TimeStamper(fmt="iso", utc=False)
-    # - structlog.processors.add_log_level
-    # - Support for logger.info("User {name}", name="John")
-    # - loguru-like logging format:
-    #   2026-01-01 00:00:00.000 | INFO | User John
-
-    def __call__(self, log, level: str, event_dict: dict) -> dict:
+    def _process_event(self, level: str, event: str, event_dict: dict) -> Tuple[str, str, dict]:
+        """
+        Internal method that emulates structlog processors chain
+        """
         # from structlog.__log_levels.add_log_level()
         # warn is just a deprecated alias in the stdlib.
-        if level == "warn":
-            level = "warning"
+        if level == "WARN":
+            level = "WARNING"
         # Calling exception("") is the same as error("", exc_info=True)
-        if level == "exception":
-            level = "error"
-        level = level.upper()
+        if level == "EXCEPTION":
+            level = "ERROR"
+
+        # from structlog _process_event
+        if self._context:
+            context = self._context.copy()
+            context.update(**event_dict)
+            event_dict = context
+
+        # ExceptionRenderer(rich_formatter)
+        exc_info = event_dict.pop('exc_info', None)
+        if exc_info is not None:
+            exc_info = figure_out_exc_info(exc_info)
+            if exc_info is not None:
+                event_dict['exception'] = rich_formatter(exc_info)
+
+        return level, event, event_dict
+
+    def _msg(self, level: str, event: str, event_dict: dict):
+        """
+        Internal method to render message
+        """
+        level, event, event_dict = self._process_event(level, event, event_dict)
+
+        # build message, ignore errors
+        raw = event_dict.pop('__raw__', None)
+        event = event_format(event, event_dict)
 
         # inject time
         timestamp = time.time()
         now = datetime.fromtimestamp(timestamp).isoformat(sep=' ', timespec='milliseconds')
-        # convert event
-        try:
-            event = event_dict['event']
-        except KeyError:
-            # this shouldn't happen
-            event = ''
-        if not isinstance(event, str):
-            event = str(event)
-            event_dict["event"] = event
-
-        # build message, ignore errors
-        # check event_dict also, if someone log like this:
-        #   modules = set('combat_ui')
-        #   logger.info(f'Assets generate, modules={modules}')
-        # we won't log:
-        #   Assets generate, modules=<key 'combat_ui' missing>
-        if '{' in event and has_user_keys(event_dict):
-
-            try:
-                event = event.format(**event_dict)
-            except KeyError:
-                try:
-                    event = event.format_map(SafeDict(event_dict))
-                except Exception:
-                    pass
-            except Exception:
-                # maybe {} is unpaired
-                pass
 
         # build log text
-        raw = event_dict.pop('__raw__', None)
-        text = event if raw else f'{now} | {level} | {event}'
+        if raw:
+            text = f'{event}\n'
+        else:
+            text = f'{now} | {level} | {event}\n'
 
-        backend = log._file.backend
-        if backend.inited:
+        backend_inited = self._writer.backend.inited
+        if backend_inited:
             backend_event = {'t': timestamp, 'l': level, 'm': event}
             # add exception
             if 'exception' in event_dict:
                 exception = event_dict['exception']
-                text = f'{text}\n{exception}'
+                text = f'{text}{exception}\n'
                 backend_event['e'] = exception
             # add raw tag
             if raw:
-                backend_event['r'] = raw
+                backend_event['r'] = 1
         else:
             # no backend
             backend_event = {}
             if 'exception' in event_dict:
                 exception = event_dict['exception']
-                text = f'{text}\n{exception}'
+                text = f'{text}{exception}\n'
 
-        # return dict must match the signature of PrintLogger.msg()
-        return {'text': text, 'event': backend_event}
+        # print text
+        self._emit(text, backend_event)
 
+    def _emit(self, text: str, backend_event: dict):
+        """
+        Internal method to emit event directly
+        `text` will be print to stdout and log file, `event` will be sent to backend
+        """
+        writer = self._writer
+        backend_inited = writer.backend.inited
+        is_electron = writer.is_electron
+        with self._lock:
+            # do 3 things parallely, print to stdout, write into file, send to backend
+            if backend_inited:
+                if is_electron:
+                    # backend + file
+                    job = writer.backend.send_log(backend_event)
+                    writer.fd.write(text)
+                    writer.fd.flush()
+                    job.acquire()
+                else:
+                    # backend + stdout + file
+                    job = writer.backend.send_log(backend_event)
+                    writer.fd.write(text)
+                    writer.stdout.write(text)
+                    writer.fd.flush()
+                    writer.stdout.flush()
+                    job.acquire()
+            else:
+                if is_electron:
+                    # file
+                    job = writer.backend.send_log(backend_event)
+                    job.acquire()
+                else:
+                    # stdout + file
+                    writer.fd.write(text)
+                    writer.stdout.write(text)
+                    writer.fd.flush()
+                    writer.stdout.flush()
 
-class AlasioLogger(structlog.BoundLoggerBase):
+    """
+    structlog-like features
+    """
+
+    def bind(self, **value_dict) -> Self:
+        """
+        Return a new logger with *new_values* added to the existing ones.
+        """
+        new = self.__class__()
+        context = self._context.copy()
+        context.update(**value_dict)
+        new._context = context
+        return new
+
+    def unbind(self, *keys) -> Self:
+        """
+        Return a new logger with *keys* removed from the context.
+        missing keys are ignored.
+        """
+        new = self.__class__()
+        context = self._context.copy()
+        for key in keys:
+            context.pop(key, None)
+        new._context = context
+        return new
+
+    """
+    Logging levels
+    """
+
     def debug(self, event: str, **kwargs):
-        try:
-            args, kw = self._process_event('debug', event, kwargs)
-            return self._logger.msg(*args, **kw)
-        except DropEvent:
-            return None
+        self._msg('DEBUG', event, kwargs)
 
     def info(self, event: str, **kwargs):
-        try:
-            args, kw = self._process_event('info', event, kwargs)
-            return self._logger.msg(*args, **kw)
-        except DropEvent:
-            return None
+        self._msg('INFO', event, kwargs)
 
     def warning(self, event: str, **kwargs):
-        try:
-            args, kw = self._process_event('warning', event, kwargs)
-            return self._logger.msg(*args, **kw)
-        except DropEvent:
-            return None
+        self._msg('WARNING', event, kwargs)
 
-    def error(self, event: "str | Exception", **kwargs):
+    def error(self, event: Union[str, Exception], **kwargs):
         # Better exception logging
         # If someone do:
         #   try:
@@ -283,27 +207,19 @@ class AlasioLogger(structlog.BoundLoggerBase):
                 event = f'{title}\n{detail}'
             else:
                 event = f'{type(event).__name__}: {event}'
-        try:
-            args, kw = self._process_event('error', event, kwargs)
-            return self._logger.msg(*args, **kw)
-        except DropEvent:
-            return None
+        self._msg('ERROR', event, kwargs)
 
-    def exception(self, event: "str | Exception", **kwargs):
+    def exception(self, event: Union[str, Exception], **kwargs):
         if isinstance(event, Exception):
             if isinstance(event, (BaseExceptionGroup, ExceptionGroup)):
                 kwargs["exc_info"] = (type(event), event, event.__traceback__)
             event = f'{type(event).__name__}: {event}'
         # see structlog._native.exception()
         kwargs.setdefault("exc_info", True)
-        return self.error(event, **kwargs)
+        self._msg('EXCEPTION', event, kwargs)
 
     def critical(self, event: str, **kwargs):
-        try:
-            args, kw = self._process_event('critical', event, kwargs)
-            return self._logger.msg(*args, **kw)
-        except DropEvent:
-            return None
+        self._msg('CRITICAL', event, kwargs)
 
     """
     Custom logging methods
@@ -315,11 +231,7 @@ class AlasioLogger(structlog.BoundLoggerBase):
         """
         # act like info but tag __raw__
         kwargs['__raw__'] = 1
-        try:
-            args, kw = self._process_event('info', event, kwargs)
-            return self._logger.msg(*args, **kw)
-        except DropEvent:
-            return None
+        self._msg('INFO', event, kwargs)
 
     def hr(self, title: str, level: int = 3, **kwargs):
         if level == 0:
@@ -392,52 +304,4 @@ class AlasioLogger(structlog.BoundLoggerBase):
         logger.info(f'{name}: {text}')
 
 
-class PrintLogger(structlog.PrintLogger):
-    def msg(self, text: str, event: dict) -> None:
-        writer: LogWriter = self._file
-        text = f'{text}\n'
-
-        with self._lock:
-            # do 3 things parallely, print to stdout, write into file, send to backend
-            if writer.backend.inited:
-                if writer.is_electron:
-                    # backend + file
-                    job = writer.backend.send_log(event)
-                    writer.fd.write(text)
-                    writer.fd.flush()
-                    job.acquire()
-                else:
-                    # backend + stdout + file
-                    job = writer.backend.send_log(event)
-                    writer.fd.write(text)
-                    sys.stdout.write(text)
-                    writer.fd.flush()
-                    sys.stdout.flush()
-                    job.acquire()
-            else:
-                if writer.is_electron:
-                    # file
-                    job = writer.backend.send_log(event)
-                    job.acquire()
-                else:
-                    # stdout + file
-                    writer.fd.write(text)
-                    sys.stdout.write(text)
-                    writer.fd.flush()
-                    sys.stdout.flush()
-
-
-structlog.configure(
-    processors=[
-        ExceptionRenderer(rich_formatter),
-        LogRenderer(),
-    ],
-    wrapper_class=AlasioLogger,
-    context_class=dict,
-    # ignore type error here
-    # as LogWriter is a pseudo TextIO object that has write() flush()
-    logger_factory=lambda: PrintLogger(file=LogWriter()),
-    cache_logger_on_first_use=True,
-)
-
-logger: AlasioLogger = structlog.get_logger()
+logger = AlasioLogger()
