@@ -8,7 +8,8 @@ from exceptiongroup import BaseExceptionGroup, ExceptionGroup
 from typing_extensions import Self
 
 from alasio.ext.backport import patch_rich_traceback_extract
-from alasio.logger.utils import event_format, figure_out_exc_info, gen_exception_tree, replace_unicode_table
+from alasio.logger.utils import event_format, figure_out_exc_info, gen_exception_tree, join_event_dict, \
+    replace_unicode_table
 from alasio.logger.writer import CaptureWriter, LogWriter
 
 patch_rich_traceback_extract()
@@ -111,6 +112,7 @@ class AlasioLogger:
         # build message, ignore errors
         raw = event_dict.pop('__raw__', None)
         event = event_format(event, event_dict)
+        event = join_event_dict(event, event_dict)
 
         # inject time
         timestamp = time.time()

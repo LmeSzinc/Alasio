@@ -93,6 +93,28 @@ def event_format(event, event_dict):
     return event
 
 
+def join_event_dict(event, event_dict):
+    """
+    Format event_dict into event, like:
+        Hello {user}, user='May'
+
+    Args:
+        event (str):
+        event_dict (dict[str, Any]):
+
+    Returns:
+        str:
+    """
+    if not event_dict:
+        return event
+    items = [f'{k}={repr(v)}' for k, v in event_dict.items() if k != 'exception']
+    if not items:
+        return event
+    items.insert(0, event)
+    event = ', '.join(items)
+    return event
+
+
 def gen_exception_tree(exc: BaseException):
     """
     Generate exception tree like:
