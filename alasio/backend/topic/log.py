@@ -14,6 +14,8 @@ from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.ext.singleton import SingletonNamed
 from alasio.logger import logger
 
+LOG_ENCODER = msgspec.json.Encoder()
+
 
 class LogCache(metaclass=SingletonNamed):
     """
@@ -119,18 +121,20 @@ class LogCache(metaclass=SingletonNamed):
             try:
                 batch.append(self._inbox.popleft())
             except IndexError:
-                # maybe raise condition that _inbox is empty
+                # maybe race condition that _inbox is empty
                 break
             if not self._inbox:
                 break
 
         # 2. 广播给所有订阅者
         if batch:
+            # encode to bytes first instead of encoding in each for loop
+            event = LOG_ENCODER.encode(batch)
             for topic in self._subscribers:
                 try:
                     # 使用 send_nowait 防止某个订阅者阻塞导致整个后端卡顿
                     # 如果订阅者处理太慢，send_nowait 会抛出 WouldBlock (或丢弃，取决于 channel 类型)
-                    topic.server.send_nowait(batch)
+                    topic.server.send_nowait(event)
                 except trio.WouldBlock:
                     pass
 

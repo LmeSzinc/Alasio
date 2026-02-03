@@ -1,5 +1,6 @@
 import time
 
+from alasio.base.pretty import pretty_time
 from alasio.logger import logger
 
 
@@ -35,7 +36,14 @@ class Scheduler:
         except ExampleError as e:
             logger.exception(e)
 
-        time.sleep(3)
-        for n in range(1200):
+        time.sleep(2)
+        start = time.perf_counter()
+        count = 1200
+        for n in range(count):
             logger.info(f'[{n}] key = self.dict_config_to_topic.get((event.task, event.group, event.arg))')
+        cost = time.perf_counter() - start
+        # Print 1200 logs in 75.579ms, 62.983us each, 15877 log/s
+        logger.info(f'Print {count} logs in {pretty_time(cost)}, '
+                    f'{pretty_time(cost / count)} each, '
+                    f'{int(count / cost)} log/s')
         logger.info('end')
