@@ -11,6 +11,7 @@
   };
   let { class: className }: Props = $props();
   let logContainer: HTMLDivElement | null = $state(null);
+  let isInitial = $state(true);
 
   // Subscribe to Log topic
   const logClient = useTopic<LogDataProps[]>("Log");
@@ -22,31 +23,33 @@
     if (logContainer) {
       logContainer.scrollTop = logContainer.scrollHeight;
       logContainer.scrollLeft = 0;
+      if (isInitial && logClient.data && logClient.data.length > 0) {
+        isInitial = false;
+      }
     }
   }
   $effect(() => {
     // tracking the length of logs
-    logClient.data?.length;
-    if (logContainer && scrollRAF === null) {
+    const length = logClient.data?.length ?? 0;
+    if (logContainer && scrollRAF === null && length > 0) {
       scrollRAF = requestAnimationFrame(scrollToBottom);
     }
   });
 </script>
 
 <ScrollArea
-  class={cn(
-    "bg-card neushadow @container relative flex h-full max-h-screen w-full flex-col gap-1 rounded-lg px-2.5 py-4",
-    className,
-  )}
+  class={cn("bg-card neushadow @container relative h-full max-h-screen w-full rounded-lg px-2.5 py-4", className)}
   orientation="both"
   bind:viewportRef={logContainer}
 >
-  {#if logClient.data}
-    {#each logClient.data as log (log)}
-      <LogData {...log} />
-    {/each}
-  {:else}
-    <div class="text-muted-foreground text-sm">暂无日志</div>
-  {/if}
+  <div class={cn("flex flex-col gap-1", isInitial && logClient.data && logClient.data.length > 0 && "invisible")}>
+    {#if logClient.data}
+      {#each logClient.data as log (log)}
+        <LogData {...log} />
+      {/each}
+    {:else}
+      <div class="text-muted-foreground text-sm">暂无日志</div>
+    {/if}
+  </div>
   <Button onclick={scrollToBottom} class="absolute top-4 right-4 z-10" variant="outline">Scroll</Button>
 </ScrollArea>
