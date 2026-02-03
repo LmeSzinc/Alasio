@@ -142,8 +142,8 @@ class AlasioLogger:
             else:
                 if is_electron:
                     # file
-                    job = writer.backend.send_log(backend_event)
-                    job.acquire()
+                    writer.fd.write(text)
+                    writer.fd.flush()
                 else:
                     # stdout + file
                     writer.fd.write(text)

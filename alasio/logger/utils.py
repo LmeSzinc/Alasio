@@ -79,7 +79,7 @@ def event_format(event, event_dict):
     Returns:
         str:
     """
-    if '{' in event and has_user_keys(event_dict):
+    if '{' in event and event_dict and has_user_keys(event_dict):
         try:
             event = event.format(**event_dict)
         except KeyError:
