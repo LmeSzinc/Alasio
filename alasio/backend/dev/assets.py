@@ -3,8 +3,7 @@ from starlette.middleware.gzip import GZipResponder
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
-from alasio.config.entry.loader import MOD_LOADER
-from alasio.ext.starapi.router import APIRouter
+from alasio.logger import logger
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -26,6 +25,29 @@ class NoCacheStaticFiles(StaticFiles):
         resp = GZipResponder(resp, minimum_size=500, compresslevel=9)
 
         return resp
+
+    @classmethod
+    def mount(
+            cls,
+            router,
+            path,
+            name: "str | None" = None,
+            directory: "PathLike | None " = None,
+            packages: "list[str | tuple[str, str]] | None" = None,
+            html: bool = False,
+            check_dir: bool = True,
+            follow_symlink: bool = False,
+    ):
+        """
+        Safely mount a directory to router or app
+        """
+        try:
+            app = cls(directory=directory, packages=packages, html=html,
+                      check_dir=check_dir, follow_symlink=follow_symlink)
+        except RuntimeError as e:
+            logger.error(f'Mount static files failed: {e}')
+            return
+        router.mount(path, app, name=name)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -49,12 +71,3 @@ class SPAStaticFiles(StaticFiles):
 
 class SPANoCacheStaticFiles(SPAStaticFiles, NoCacheStaticFiles):
     pass
-
-
-router = APIRouter('/dev_assets')
-
-# Mount all mod assets
-for mod in MOD_LOADER.dict_mod.values():
-    app = NoCacheStaticFiles(directory=mod.path_assets, check_dir=False)
-    path = f'/{mod.name}/{mod.entry.path_assets}'
-    router.mount(path, app)

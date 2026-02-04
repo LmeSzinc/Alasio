@@ -231,8 +231,16 @@ def create_app():
     app.routes.append(Route('/robots.txt', robots_txt))
 
     # Mound dev files
-    from alasio.backend.dev import assets
-    app.add_router('/api', assets.router)
+    from alasio.backend.dev.assets import NoCacheStaticFiles, SPANoCacheStaticFiles
+    from alasio.config.entry.loader import MOD_LOADER
+    from alasio.ext.starapi.router import APIRouter
+
+    # Mount all mod assets
+    assets_router = APIRouter('/dev_assets')
+    for mod in MOD_LOADER.dict_mod.values():
+        path = f'/{mod.name}/{mod.entry.path_assets}'
+        NoCacheStaticFiles.mount(assets_router, path, directory=dict, check_dir=False)
+    app.add_router('/api', assets_router)
 
     # Mount mod APIs
     pass
@@ -244,8 +252,7 @@ def create_app():
     from alasio.ext.path import PathStr
     # for frontend local builds
     root = PathStr(__file__).uppath(3).joinpath('frontend/build')
-    static_app = assets.SPANoCacheStaticFiles(directory=root)
-    app.mount('/', static_app, name='static')
+    SPANoCacheStaticFiles.mount(app, '/', directory=root, name='static')
     # since static files mounted at "/", any route after it won't work
 
     return app
