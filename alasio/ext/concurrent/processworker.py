@@ -5,20 +5,31 @@ def worker_loop(conn, func):
 
     worker_loop 是一个单独的 python 文件，来避免 worker 进程启动的时候导入 ProcessPool
     """
-    while True:
-        try:
-            # 阻塞等待任务
-            args, kwargs = conn.recv()
-        except (EOFError, KeyboardInterrupt, OSError):
-            # 连接断开，退出进程
-            break
-
-        try:
-            result = func(*args, **kwargs)
-            conn.send(('OK', result))
-        except Exception as e:
-            # 捕获业务逻辑异常发回主进程
+    try:
+        while True:
             try:
-                conn.send(('ERR', e))
-            except (OSError, BrokenPipeError):
+                args, kwargs = conn.recv()
+            except (OSError, EOFError, BrokenPipeError):
+                # pipe broken, exit process
                 break
+
+            try:
+                result = func(*args, **kwargs)
+            except Exception as e:
+                # failed, send ERR
+                try:
+                    conn.send(('ERR', e))
+                    continue
+                except (OSError, EOFError, BrokenPipeError):
+                    # pipe broken, exit process
+                    break
+
+            # success, send OK
+            try:
+                conn.send(('OK', result))
+            except (OSError, EOFError, BrokenPipeError):
+                # pipe broken, exit process
+                break
+    except KeyboardInterrupt:
+        # suppress KeyboardInterrupt of worker process logging on terminal
+        pass
