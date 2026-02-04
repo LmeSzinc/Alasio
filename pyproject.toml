@@ -17,8 +17,8 @@ dependencies = [
     "typing-extensions",
     "msgspec",
     "PyYAML",
-    "lxml",
     "httpx",
+    "psutil",
     # alasio/log
     # rich version is limited because we patched rich.trackback to enable exceptiongroup tracebacks on py<3.11
     # 14.1.0 is the minimum version to have exceptiongroup support
