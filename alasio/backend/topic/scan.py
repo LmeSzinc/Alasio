@@ -3,6 +3,7 @@ from typing import List
 import trio
 
 from alasio.backend.reactive.base_rpc import rpc
+from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.reactive.event_cache import GlobalEventCache
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
@@ -19,26 +20,58 @@ class ConfigScanSource(GlobalEventCache):
         return table.scan()
 
     def _create_default_config(self):
+        """
+        Returns:
+            bool: If created any file
+        """
         # keep using dict to keep mod sorting
         all_mod = MOD_LOADER.dict_mod.copy()
         # access self.data with thread safe
         data = self.data.copy()
         for config in data.values():
-            all_mod.pop(config.name, None)
+            all_mod.pop(config.mod, None)
         if not all_mod:
-            return
+            return False
 
         logger.info(f'Create default config: {list(all_mod)}')
-        table = ScanTable()
+        created = False
         # create self mod first
         self_mod = MOD_LOADER.self_mod
         if self_mod:
-            mod_name = all_mod.pop(self_mod.name, None)
-            if mod_name:
-                table.config_add(mod_name, mod_name)
+            mod = all_mod.pop(self_mod.name, None)
+            if mod:
+                if self._create_mod_config(self_mod.name):
+                    created = True
         # create sub mods
         for mod_name in all_mod:
-            table.config_add(mod_name, mod_name)
+            if mod_name:
+                if self._create_mod_config(mod_name):
+                    created = True
+        return created
+
+    @staticmethod
+    def _create_mod_config(mod_name):
+        """
+        Create mod config with retries
+
+        Args:
+            mod_name (str):
+
+        Returns:
+            bool: If success
+        """
+        table = ScanTable()
+        for n in range(1, 11):
+            config_name = f'{mod_name}{n}' if n > 1 else mod_name
+            try:
+                table.config_add(config_name, mod_name)
+                return True
+            except RpcValueError as e:
+                # maybe {mod_name}.db already exists, but it's not an alasio db
+                logger.warning(f'Failed to create default config: {e}')
+                continue
+        logger.error(f'Failed to create default config for mod="{mod_name}"')
+        return False
 
     @classmethod
     async def create_default_config(cls):
@@ -47,9 +80,12 @@ class ConfigScanSource(GlobalEventCache):
         So user can easily find an entry when having a new mod.
         """
         self = cls()
+        # ensure having data in self.data, no need to be the latest
         await self._fetch_init()
-        await trio.to_thread.run_sync(self._create_default_config)
-        await self.reinit()
+        created = await trio.to_thread.run_sync(self._create_default_config)
+        if created:
+            # rescan configs if created any
+            await self.reinit()
 
 
 class ConfigScan(BaseTopic):
