@@ -7,7 +7,8 @@ from exceptiongroup import BaseExceptionGroup, ExceptionGroup
 
 from alasio.ext.backport import patch_rich_traceback_extract
 from alasio.logger.utils import (
-    empty_function, event_format, figure_out_exc_info, join_event_dict, replace_unicode_table, stringify_event
+    empty_function, event_args_format, event_format, figure_out_exc_info, join_event_dict, replace_unicode_table,
+    stringify_event
 )
 from alasio.logger.writer import CaptureWriter, LogWriter
 
@@ -83,14 +84,86 @@ _LEVEL_METHODS = {
 }
 
 
-class AlasioLogger:
+class LoggingLevel:
+    def __init__(self):
+        self._level = 20
+
+    def set_level(self, level=20):
+        """
+        Set logging level.
+        Methods below this level will be replaced with empty_function.
+
+        Args:
+            level (str | int): Level name or value. Defaults to 20 (INFO).
+        """
+        if isinstance(level, str):
+            level = LOG_LEVELS.get(level.upper(), level)
+        if isinstance(level, str):
+            # level is still str, maybe invalid level name
+            level = 20
+
+        self._level = level
+        for method_name, method_level in _LEVEL_METHODS.items():
+            if method_level < level:
+                setattr(self, method_name, empty_function)
+            else:
+                # Restore original method from class if it was overridden
+                if method_name in self.__dict__:
+                    try:
+                        delattr(self, method_name)
+                    except AttributeError:
+                        pass
+
+
+class ClassicLogger(LoggingLevel):
+    def __init__(self, parent):
+        """
+        Args:
+            parent (AlasioLogger): AlasioLogger instance
+        """
+        super().__init__()
+        self._logger = parent
+        self.set_level(logger._level)
+
+    def debug(self, event, *args, **kwargs):
+        if args:
+            event = event_args_format(event, args)
+        self._logger.debug(event, **kwargs)
+
+    def info(self, event, *args, **kwargs):
+        if args:
+            event = event_args_format(event, args)
+        self._logger.info(event, **kwargs)
+
+    def warning(self, event, *args, **kwargs):
+        if args:
+            event = event_args_format(event, args)
+        self._logger.warning(event, **kwargs)
+
+    def error(self, event, *args, **kwargs):
+        if args:
+            event = event_args_format(event, args)
+        self._logger.error(event, **kwargs)
+
+    def exception(self, event, *args, **kwargs):
+        if args:
+            event = event_args_format(event, args)
+        self._logger.exception(event, **kwargs)
+
+    def critical(self, event, *args, **kwargs):
+        if args:
+            event = event_args_format(event, args)
+        self._logger.critical(event, **kwargs)
+
+
+class AlasioLogger(LoggingLevel):
     # global logging lock
     _lock = threading.Lock()
 
     def __init__(self):
+        super().__init__()
         self._context = {}
         self._writer = LogWriter()
-        self._level = 20
         self.set_level(self._level)
 
     def mock_capture_writer(self):
@@ -261,6 +334,13 @@ class AlasioLogger:
         new.set_level(self._level)
         return new
 
+    def classic_logger(self):
+        """
+        Returns:
+            ClassicLogger: Classic logger instance
+        """
+        return ClassicLogger(self)
+
     def unbind(self, *keys):
         """
         Return a new logger with *keys* removed from the context.
@@ -280,32 +360,6 @@ class AlasioLogger:
         new._writer = self._writer
         new.set_level(self._level)
         return new
-
-    def set_level(self, level=20):
-        """
-        Set logging level.
-        Methods below this level will be replaced with empty_function.
-
-        Args:
-            level (str | int): Level name or value. Defaults to 20 (INFO).
-        """
-        if isinstance(level, str):
-            level = LOG_LEVELS.get(level.upper(), level)
-        if isinstance(level, str):
-            # level is still str, maybe invalid level name
-            level = 20
-
-        self._level = level
-        for method_name, method_level in _LEVEL_METHODS.items():
-            if method_level < level:
-                setattr(self, method_name, empty_function)
-            else:
-                # Restore original method from class if it was overridden
-                if method_name in self.__dict__:
-                    try:
-                        delattr(self, method_name)
-                    except AttributeError:
-                        pass
 
     """
     Logging levels

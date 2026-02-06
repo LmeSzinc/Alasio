@@ -98,6 +98,25 @@ def event_format(event, event_dict):
     return event
 
 
+def event_args_format(event, event_args):
+    """
+    build message from `event % event_args`, ignore errors
+
+    Args:
+        event (str):
+        event_args (tuple[Any] | Any):
+
+    Returns:
+        str:
+    """
+    if '%' in event and event_args:
+        try:
+            event = event % event_args
+        except Exception:
+            pass
+    return event
+
+
 def join_event_dict(event, event_dict):
     """
     Format event_dict into event, like:
