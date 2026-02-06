@@ -1,6 +1,6 @@
 import pytest
 
-from alasio.base.inflect import Inflection
+from alasio.base.scheduler.inflect import Inflection
 
 
 class TestInflectionBasic:
