@@ -1,11 +1,14 @@
 import ctypes
-import subprocess
 from functools import wraps
 from threading import Lock, Thread
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
+from typing_extensions import ParamSpec
+
+from alasio.ext.concurrent.cmd import run_cmd
 from alasio.logger import logger
 
+ParamP = ParamSpec("ParamP")
 ResultT = TypeVar("ResultT")
 
 
@@ -386,18 +389,12 @@ class WorkerPool:
         # logger.info(f'New worker thread: {worker.default_name}')
         return worker
 
-    def start_thread_soon(self, func, *args, **kwargs):
+    def start_thread_soon(
+            self, func: Callable[ParamP, ResultT], *args: ParamP.args, **kwargs: ParamP.kwargs
+    ) -> Job[ResultT]:
         """
         Run a function on thread, costs extra ~15us,
         result can be got from `job` object
-
-        Args:
-            func (Callable[..., ResultT]):
-            *args:
-            **kwargs:
-
-        Returns:
-            Job[ResultT]:
 
         Examples:
             job = WORKER_POOL.start_thread_soon(func, *args)
@@ -410,16 +407,10 @@ class WorkerPool:
         worker.worker_lock.release()
         return job
 
-    def run_on_thread(self, func):
+    def run_on_thread(self, func: Callable[ParamP, ResultT]) -> Callable[ParamP, Job[ResultT]]:
         """
         Decorate a function to run on thread,
-        result can be got from `job` object
-
-        Args:
-            func (Callable[..., ResultT]):
-
-        Returns:
-            Job[ResultT]:
+        result can be got from `Job` object
 
         Examples:
             @run_on_thread
@@ -430,49 +421,26 @@ class WorkerPool:
         """
 
         @wraps(func)
-        def thread_wrapper(*args, **kwargs) -> "Job[ResultT]":
+        def thread_wrapper(*args: ParamP.args, **kwargs: ParamP.kwargs) -> Job[ResultT]:
             return self.start_thread_soon(func, *args, **kwargs)
 
         return thread_wrapper
 
-    @staticmethod
-    def _subprocess_execute(cmd, timeout=10):
-        """
-        Helper function to run cmd in subprocess
-
-        Args:
-            cmd (list[str]):
-            timeout:
-
-        Returns:
-            bytes:
-        """
-        logger.info(f'Execute: {cmd}')
-
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=False)
-
-        try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, stderr = process.communicate()
-            logger.warning(f'TimeoutExpired when calling {cmd}, stdout={stdout}, stderr={stderr}')
-        return stdout
-
-    def start_cmd_soon(self, cmd, timeout=10):
+    def start_cmd_soon(self, cmd, timeout=10, strip=True) -> Job[str]:
         """
         Run cmd on subprocess and communicate it on another thread,
         result can be got from `job` object
 
         Args:
             cmd (list[str]):
-            timeout:
+            timeout (int | float): Timeout in seconds
+            strip (bool): Whether to strip() output, stdout, stderr. Defaults to True.
 
         Returns:
-            Job[bytes]:
+            Job that returns str or raises CmdlineError
         """
         worker = self._get_thread_worker()
-        job = Job(worker, self._subprocess_execute, (cmd,), {'timeout': timeout})
+        job = Job(worker, run_cmd, (cmd,), {'timeout': timeout, 'strip': strip})
 
         worker.job = job
         worker.worker_lock.release()
