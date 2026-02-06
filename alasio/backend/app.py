@@ -258,6 +258,52 @@ def create_app():
     return app
 
 
+def apply_hypercorn_exclusivity_patch():
+    """
+    Apply cross-platform port exclusivity patch to Hypercorn Config class
+    """
+    import socket
+    import platform
+    from hypercorn import Config
+    from alasio.logger import logger
+    original_create_sockets = Config._create_sockets
+    system_platform = platform.system()
+
+    def patched_create_sockets(self, binds, type_=socket.SOCK_STREAM):
+        original_setsockopt = socket.socket.setsockopt
+
+        def mocked_setsockopt(sock_self, level, optname, value):
+            # --- Windows special handling ---
+            if system_platform == "Windows":
+                # Intercept REUSEADDR setting
+                if level == socket.SOL_SOCKET and optname == socket.SO_REUSEADDR:
+                    # On Windows, we replace REUSEADDR with EXCLUSIVEADDRUSE
+                    # This prevents port preemption, and if the port is already in use, bind() will raise an error
+                    exclusive_opt = getattr(socket, "SO_EXCLUSIVEADDRUSE", -5)
+                    return original_setsockopt(sock_self, level, exclusive_opt, 1)
+
+            # --- Unix handling ---
+            # On Linux/macOS, Hypercorn's default SO_REUSEADDR setting is correct,
+            # as long as workers=1, it won't set SO_REUSEPORT, thus ensuring bind() conflicts.
+
+            return original_setsockopt(sock_self, level, optname, value)
+
+        # monkeypatch socket.setsockopt
+        socket.socket.setsockopt = mocked_setsockopt
+        try:
+            # Call original logic, which triggers our mocked_setsockopt and eventually executes bind()
+            return original_create_sockets(self, binds, type_)
+        except OSError as e:
+            logger.critical(f'Failed to bind {binds}: {e}')
+            raise
+        finally:
+            # rollback
+            socket.socket.setsockopt = original_setsockopt
+
+    # override _create_sockets
+    Config._create_sockets = patched_create_sockets
+
+
 def create_config(args=None):
     """
     Args:
@@ -280,6 +326,7 @@ def create_config(args=None):
     from alasio.logger import logger
     logger.info(f'[PROJECT_ROOT] {env.PROJECT_ROOT}')
 
+    apply_hypercorn_exclusivity_patch()
     from hypercorn import Config
     config = Config()
 
