@@ -52,7 +52,7 @@ class DeviceConfig:
         self.Optimization_ScreenshotInterval = 0.3
         self.Optimization_CombatScreenshotInterval = 1.0
         self.Optimization_TaskHoardingDuration = 0
-        self.Optimization_WhenTaskQueueEmpty = 'goto_main'  # stay_there, goto_main, close_game
+        self.Optimization_WhenTaskQueueEmpty = 'goto_main'  # stay_there, goto_main, stop_game
 
         """
         module.device

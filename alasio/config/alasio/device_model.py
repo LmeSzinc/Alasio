@@ -65,4 +65,4 @@ class Optimization(m.Struct, omit_defaults=True):
     ScreenshotInterval: float = 0.3
     CombatScreenshotInterval: float = 1.0
     TaskHoardingDuration: int = 0
-    WhenTaskQueueEmpty: t.Literal['stay_there', 'goto_main', 'close_game'] = 'goto_main'
+    WhenTaskQueueEmpty: t.Literal['stay_there', 'goto_main', 'stop_game'] = 'goto_main'

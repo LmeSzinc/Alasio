@@ -568,7 +568,7 @@
         "option_i18n": {
           "stay_there": "停在原处",
           "goto_main": "前往主界面",
-          "close_game": "关闭游戏"
+          "stop_game": "关闭游戏"
         }
       },
       "en-US": {
@@ -577,7 +577,7 @@
         "option_i18n": {
           "stay_there": "Stay There",
           "goto_main": "Goto Main Page",
-          "close_game": "Close Game"
+          "stop_game": "Close Game"
         }
       },
       "ja-JP": {
@@ -586,7 +586,7 @@
         "option_i18n": {
           "stay_there": "stay_there",
           "goto_main": "goto_main",
-          "close_game": "close_game"
+          "stop_game": "stop_game"
         }
       },
       "zh-TW": {
@@ -595,7 +595,7 @@
         "option_i18n": {
           "stay_there": "停在原處",
           "goto_main": "前往主界面",
-          "close_game": "關閉遊戲"
+          "stop_game": "關閉遊戲"
         }
       },
       "en-ES": {
@@ -604,7 +604,7 @@
         "option_i18n": {
           "stay_there": "Quedarse en el sitio",
           "goto_main": "Ir al lugar principal",
-          "close_game": "Cerrar el juego"
+          "stop_game": "Cerrar el juego"
         }
       }
     }
