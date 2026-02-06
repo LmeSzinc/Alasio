@@ -74,7 +74,7 @@ async def test_logcache_on_event_with_subscribers():
     topic = MockTopic()
 
     # Add a subscriber
-    cache._subscribers.add(topic)
+    cache.subscribers.add(topic)
 
     # Send event
     event = ConfigEvent(t='Log', v={'t': 1.0, 'l': 'INFO', 'm': 'test message', 'e': None})
@@ -127,7 +127,7 @@ async def test_logcache_subscribe_deduplication():
 
     # Add a subscriber to trigger inbox usage
     topic1 = MockTopic()
-    cache._subscribers.add(topic1)
+    cache.subscribers.add(topic1)
 
     # Add more events (these will go to both cache and inbox)
     for i in range(5, 8):
@@ -171,7 +171,7 @@ async def test_logcache_unsubscribe_cleanup():
 
     # Inbox should be cleared
     assert len(cache._inbox) == 0
-    assert len(cache._subscribers) == 0
+    assert len(cache.subscribers) == 0
 
 
 @pytest.mark.trio
@@ -183,7 +183,7 @@ async def test_logcache_unsubscribe_not_subscribed():
     # Unsubscribe without subscribing first
     # This should not raise KeyError
     cache.unsubscribe(topic)
-    assert len(cache._subscribers) == 0
+    assert len(cache.subscribers) == 0
 
 
 # ---- High-Frequency Message Tests ----
@@ -436,7 +436,7 @@ async def test_log_topic_full_lifecycle():
 
     # 4. Unsubscribe
     cache.unsubscribe(topic)
-    assert topic not in cache._subscribers
+    assert topic not in cache.subscribers
     assert len(cache._inbox) == 0
 
 
@@ -506,7 +506,7 @@ async def test_log_topic_config_switch():
     cache1.unsubscribe(topic)
 
     # Verify resources are cleaned up for both caches
-    assert len(cache1._subscribers) == 0
-    assert len(cache2._subscribers) == 0
+    assert len(cache1.subscribers) == 0
+    assert len(cache2.subscribers) == 0
     assert len(cache1._inbox) == 0
     assert len(cache2._inbox) == 0

@@ -24,7 +24,7 @@ class EventCache:
     TOPIC = ''
 
     def __init__(self):
-        self._subscribers: "set[BaseTopic]" = set()
+        self.subscribers: "set[BaseTopic]" = set()
         self._fetch_lock = trio.Lock()
         self._data_lock = threading.Lock()
         self.data = {}
@@ -48,7 +48,7 @@ class EventCache:
         就没有任何代码能运行 `bridge` 里的 subscribers.remove/add。
         集合结构就是安全的。
         """
-        for ch in self._subscribers:
+        for ch in self.subscribers:
             ch.server.send_lossy(data)
 
     def on_event(self, event: ConfigEvent, trio_token: TrioToken):
@@ -74,7 +74,7 @@ class EventCache:
             except trio.RunFinishedError:
                 pass
 
-    async def _fetch_init(self, force=False):
+    async def fetch_init(self, force=False):
         if not force:
             with self._data_lock:
                 # 优先级 1: 如果 Worker 正在运行，我们完全信任内存缓存，无视 TTL
@@ -112,14 +112,14 @@ class EventCache:
             self._broadcast_update(updates)
 
     async def subscribe(self, topic: BaseTopic):
-        await self._fetch_init()
+        await self.fetch_init()
 
         # --- 原子操作区间 (Lock + No Await) ---
         # 我们必须持有锁，并且在释放锁之前就把快照塞进 channel
         # 或者是利用 Trio 的单线程特性，在 "Add Subscriber" 和 "Send Snapshot" 之间不让 Broadcast 插队
         with self._data_lock:
             # 1. 先入会
-            self._subscribers.add(topic)
+            self.subscribers.add(topic)
             # 2. 拍快照 & 编码
             # 此时持有锁，子线程无法修改 data，状态是绝对静止的
             if not self.data:
@@ -146,7 +146,7 @@ class EventCache:
 
     def unsubscribe(self, topic: BaseTopic):
         try:
-            self._subscribers.remove(topic)
+            self.subscribers.remove(topic)
         except KeyError:
             pass
 

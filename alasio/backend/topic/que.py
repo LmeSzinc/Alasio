@@ -1,10 +1,11 @@
 from typing import List, Optional, TypedDict
 
-from alasio.backend.reactive.event import ResponseEvent
+from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
 from alasio.backend.reactive.event_cache import ConfigEventCache
 from alasio.backend.reactive.rx_trio import async_reactive_nocache
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.topic.state import ConnState
+from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.mod import Task
@@ -75,3 +76,17 @@ class TaskQueue(BaseTopic):
     async def reactive_callback(self, name, old, new):
         # also no reactive callback
         pass
+
+    @on_msgbus_global_event('ConfigArg')
+    async def on_config_event(self, event: ConfigEvent):
+        """
+        Re-init TaskQueueSource if scheduler config changed, so frontend can receive new task queue
+        """
+        resp = event.v
+        if not resp.group == 'Scheduler':
+            return
+        if resp.arg != 'Enable' and resp.arg != 'NextRun':
+            return
+        cache = TaskQueueSource(event.c)
+        if cache.subscribers:
+            await cache.reinit()

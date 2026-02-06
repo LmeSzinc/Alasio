@@ -129,6 +129,7 @@ class ConfigArg(BaseTopic):
             # broadcast to all connections
             event = ConfigEvent(t=self.topic_name(), c=config_name, v=resp)
             await self.msgbus_config_asend(event)
+            await self.msgbus_global_asend(self.topic_name(), event)
         else:
             # rollback self
             key = self.dict_config_to_topic.get((resp.task, resp.group, resp.arg))

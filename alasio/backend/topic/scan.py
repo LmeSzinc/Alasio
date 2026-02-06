@@ -81,7 +81,7 @@ class ConfigScanSource(GlobalEventCache):
         """
         self = cls()
         # ensure having data in self.data, no need to be the latest
-        await self._fetch_init()
+        await self.fetch_init()
         created = await trio.to_thread.run_sync(self._create_default_config)
         if created:
             # rescan configs if created any
