@@ -586,7 +586,7 @@ class AlasioConfigBase:
         futures = []
         if minute is not None:
             delay = int(random_time(minute) * 60)
-            futures.append(now() + timedelta(seconds=delay))
+            futures.append(now().replace(microsecond=0) + timedelta(seconds=delay))
         if server_update is not None:
             if server_update is True:
                 try:
@@ -635,7 +635,7 @@ class AlasioConfigBase:
             logger.info(f'Task call: {task}')
             with self.batch_set():
                 self.cross_set(task, 'Scheduler', 'Enable', True)
-                self.cross_set(task, 'Scheduler', 'NextRun', now())
+                self.cross_set(task, 'Scheduler', 'NextRun', now().replace(microsecond=0))
             return True
         else:
             logger.info(f'Task call: {task} (skipped because disabled by user)')

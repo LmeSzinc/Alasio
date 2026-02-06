@@ -21,12 +21,12 @@ def timer(function):
 
 def now(tz=True):
     """
-    Get datatime now without microsecond
+    Get datatime now, with or without timezone
 
     Args:
         tz (tzinfo | bool):
     """
-    n = datetime.now().replace(microsecond=0)
+    n = datetime.now()
     if tz is True:
         return n.astimezone()
     elif tz is False:
