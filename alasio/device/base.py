@@ -6,3 +6,17 @@ class DeviceBase:
     def __init__(self, config: DeviceConfig):
         logger.hr('Device', level=1)
         self.config = config
+
+    def on_idle(self):
+        """
+        Release connections and cache during scheduler wait
+        Subclasses needs to implement this
+        """
+        pass
+
+    def on_task_switch(self):
+        """
+        Clear stuck record and click record when task switched
+        Subclasses needs to implement this
+        """
+        pass

@@ -611,3 +611,32 @@ class AlasioConfigBase:
 
         logger.info(f"Delay task `{task}` to {run} ({kv})")
         self.cross_set(task, 'Scheduler', 'NextRun', run)
+
+    def is_task_enabled(self, task):
+        return bool(self.cross_get(task, 'Scheduler', 'Enable', default=False))
+
+    def task_call(self, task, force_call=True):
+        """
+        Call another task to run.
+
+        That task will run when current task finished.
+        But it might not be run because:
+        - Other tasks should run first according to SCHEDULER_PRIORITY
+        - Task is disabled by user
+
+        Args:
+            task (str): Task name to call, such as `Restart`
+            force_call (bool):
+
+        Returns:
+            bool: If called.
+        """
+        if force_call or self.is_task_enabled(task):
+            logger.info(f'Task call: {task}')
+            with self.batch_set():
+                self.cross_set(task, 'Scheduler', 'Enable', True)
+                self.cross_set(task, 'Scheduler', 'NextRun', now())
+            return True
+        else:
+            logger.info(f'Task call: {task} (skipped because disabled by user)')
+            return False
