@@ -40,7 +40,7 @@
 <div
   class={cn(
     "hover:bg-muted/50 hover:shadow-muted-foreground/15 hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor]",
-    "flex w-fit min-w-[calc(100cqw)] gap-0.5 px-1 font-mono text-xs",
+    "flex w-fit min-w-[calc(100cqw)] gap-0.5 px-1 py-0.25 font-mono text-xs",
     levelClass,
   )}
 >
@@ -56,5 +56,5 @@
   {/if}
 </div>
 {#if exception}
-  <pre class="ml-8 w-fit px-1 font-mono text-xs whitespace-pre">{exception}</pre>
+  <pre class="w-fit px-1 font-mono text-xs whitespace-pre">{exception}</pre>
 {/if}

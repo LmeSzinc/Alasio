@@ -42,7 +42,7 @@
   orientation="both"
   bind:viewportRef={logContainer}
 >
-  <div class={cn("flex flex-col gap-1", isInitial && logClient.data && logClient.data.length > 0 && "invisible")}>
+  <div class={cn("flex flex-col", isInitial && logClient.data && logClient.data.length > 0 && "invisible")}>
     {#if logClient.data}
       {#each logClient.data as log (log)}
         <LogData {...log} />

@@ -122,6 +122,8 @@
   @media (min-width: 1280px) {
     .aside-container {
       margin-top: 1rem;
+      margin-bottom: 1rem;
+      height: calc(100% - 2rem);
       gap: 1rem;
       box-shadow: none;
       overflow: visible;
@@ -131,7 +133,7 @@
       overflow: hidden;
       border: none;
       border-radius: calc(var(--radius) + 2px);
-      align-self: flex-start;
+      height: 100%;
       min-height: 20rem;
     }
   }
