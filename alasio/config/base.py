@@ -14,10 +14,12 @@ from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.mod import ConfigSetEvent, Mod, Task
 from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
+from alasio.config.table.key import AlasioKeyTable
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.ext.msgspec_error.parse_anno import get_annotations
+from alasio.ext.pool import WORKER_POOL
 from alasio.logger import logger
 
 
@@ -153,6 +155,22 @@ class AlasioConfigBase:
         """
         return ServerTime(8)
 
+    def _check_config_mod(self):
+        """
+        Check if loading config with the correct mod
+        """
+        table = AlasioKeyTable(self.config_name)
+        mod_name = table.mod_get()
+        # new config
+        if not mod_name:
+            logger.info(f'Init config="{self.config_name}" as mod="{self.mod.name}"')
+            table.mod_set(self.mod.name)
+            return
+        # wrong mod
+        if mod_name != self.mod.name:
+            logger.warning(f'Loading config="{self.config_name}" mod="{mod_name}" as mod="{self.mod.name}", '
+                           f'maybe wrong config?')
+
     def init_task(self):
         # clear existing cache
         # Note: self._overrides is persisted across init_task
@@ -169,6 +187,8 @@ class AlasioConfigBase:
 
         table = AlasioConfigTable(self.config_name)
         rows: "list[ConfigRow]" = table.select()
+        # start check job, run parallely and reuse connection
+        check_job = WORKER_POOL.start_thread_soon(self._check_config_mod)
 
         dict_value = {}
         dict_obj = {}
@@ -203,6 +223,9 @@ class AlasioConfigBase:
             self._apply_override_const(key, value)
         for group, arg, value in deep_iter_depth2(self._override_config):
             self._apply_override_config(group, arg, value)
+
+        # wait jobs
+        check_job.get()
 
     def cross_get(self, task, group, arg, default=None):
         """
