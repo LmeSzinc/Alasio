@@ -147,7 +147,7 @@ class WorkerThread:
     def __init__(self, thread_pool, index):
         """
         Args:
-            thread_pool (WorkerPool):
+            thread_pool (ThreadPool):
             index (int): Thread index, starting from 0
         """
         self.job: "Job | None" = None
@@ -202,7 +202,7 @@ class WorkerThread:
     def _work(self) -> None:
         pool = self.thread_pool
         while True:
-            if self.worker_lock.acquire(timeout=WorkerPool.IDLE_TIMEOUT):
+            if self.worker_lock.acquire(timeout=ThreadPool.IDLE_TIMEOUT):
                 # We got a job
                 self._handle_job()
             else:
@@ -256,7 +256,7 @@ class WorkerThread:
             return False
 
 
-class WorkerPool:
+class ThreadPool:
     """
     A thread pool imitating trio.to_thread.start_thread_soon()
     https://github.com/python-trio/trio/issues/6
@@ -519,8 +519,8 @@ class WaitJobsWrapper:
     Wrapper class to wait all jobs
     """
 
-    def __init__(self, pool: "WorkerPool"):
-        self.pool: "WorkerPool" = pool
+    def __init__(self, pool: "ThreadPool"):
+        self.pool: "ThreadPool" = pool
         self.jobs: "list[Job[ResultT]]" = []
 
     def get(self):
@@ -558,7 +558,7 @@ class GatherJobsWrapper(WaitJobsWrapper):
     Wrapper class to gather all jobs
     """
 
-    def __init__(self, pool: "WorkerPool"):
+    def __init__(self, pool: "ThreadPool"):
         super().__init__(pool)
         self.results: "list[ResultT]" = []
 
@@ -574,4 +574,4 @@ class GatherJobsWrapper(WaitJobsWrapper):
         return self
 
 
-WORKER_POOL = WorkerPool()
+THREAD_POOL = ThreadPool()

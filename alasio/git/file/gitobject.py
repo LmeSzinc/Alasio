@@ -1,8 +1,8 @@
 import os
 from collections import defaultdict, deque
 
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path.calc import joinnormpath
-from alasio.ext.pool import WORKER_POOL
 from alasio.git.file.exception import PackBroken
 from alasio.git.file.loose import LoosePath
 from alasio.git.file.pack import PackFile
@@ -124,9 +124,9 @@ class GitObjectManager(GitRepoBase):
         self._manager_prepare()
 
         # read loose but get result very later
-        loose = WORKER_POOL.start_thread_soon(self.loose.loose_read_lazy)
+        loose = THREAD_POOL.start_thread_soon(self.loose.loose_read_lazy)
         # read pack and idx
-        with WORKER_POOL.wait_jobs() as pool:
+        with THREAD_POOL.wait_jobs() as pool:
             for pack in self.dict_pack.values():
                 pool.start_thread_soon(pack.read_full)
         # get loose result
@@ -152,9 +152,9 @@ class GitObjectManager(GitRepoBase):
         self._manager_prepare()
 
         # read loose but get result very later
-        loose = WORKER_POOL.start_thread_soon(self.loose.loose_read_lazy)
+        loose = THREAD_POOL.start_thread_soon(self.loose.loose_read_lazy)
         # read pack and idx
-        with WORKER_POOL.wait_jobs() as pool:
+        with THREAD_POOL.wait_jobs() as pool:
             for pack in self.dict_pack.values():
                 pool.start_thread_soon(pack.read_lazy, skip_size)
         # get loose result

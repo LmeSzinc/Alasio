@@ -8,8 +8,8 @@ from alasio.base.image.imfile import ImageBroken, image_load, image_size
 from alasio.base.op import Area, Slist
 from alasio.config.const import Const
 from alasio.ext.cache import cached_property
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path.calc import subpath_to
-from alasio.ext.pool import WORKER_POOL
 from alasio.logger import logger
 
 
@@ -323,7 +323,7 @@ class AssetModule:
         """
         Load all assets in module
         """
-        with WORKER_POOL.wait_jobs() as pool:
+        with THREAD_POOL.wait_jobs() as pool:
             for image in self:
                 pool.start_thread_soon(image.load())
 
@@ -375,7 +375,7 @@ class AssetAll:
         Args:
             modules (set[str]): To load given modules only
         """
-        with WORKER_POOL.wait_jobs() as pool:
+        with THREAD_POOL.wait_jobs() as pool:
             for module in self:
                 if modules is not None:
                     if module.module not in modules:

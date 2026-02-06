@@ -11,7 +11,7 @@ from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.ext.path.validate import validate_filename
-from alasio.ext.pool import WORKER_POOL
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.logger import logger
 
 PROTECTED_NAMES = {'gui', 'template'}
@@ -273,11 +273,11 @@ class ScanTable(AlasioGuiDB):
         Returns:
             dict[str, ConfigInfo]:
         """
-        job = WORKER_POOL.start_thread_soon(self.select_rows)
+        job = THREAD_POOL.start_thread_soon(self.select_rows)
 
         # local config files
         files = deque()
-        with WORKER_POOL.wait_jobs() as pool:
+        with THREAD_POOL.wait_jobs() as pool:
             for row in iter_local_files():
                 pool.start_thread_soon(row.read_mod_name)
                 files.append(row)

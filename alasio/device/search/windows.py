@@ -4,14 +4,14 @@ import re
 import winreg
 from dataclasses import dataclass
 
+from alasio.device.search.base import EmuStr, EmuType, EmulatorInstance, EmulatorSearchBase, flatten_list, \
+    remove_duplicated_path, vbox_file_to_serial
 from alasio.ext.cache import cached_property
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import normpath
 from alasio.ext.path.iter import CachePathExists, iter_files
-from alasio.ext.pool import WORKER_POOL
 from alasio.ext.proc import process_iter
-from alasio.device.search.base import EmuStr, EmuType, EmulatorInstance, EmulatorSearchBase, flatten_list, \
-    remove_duplicated_path, vbox_file_to_serial
 
 
 @dataclass
@@ -468,7 +468,7 @@ class EmulatorSearchWindows(EmulatorSearchBase, CachePathExists):
             self.search_user_assist,
             self.search_known_registry,
         ]
-        results = WORKER_POOL.thread_funcmap(func)
+        results = THREAD_POOL.thread_funcmap(func)
         output = flatten_list(results)
 
         return remove_duplicated_path(output)
@@ -482,7 +482,7 @@ class EmulatorSearchWindows(EmulatorSearchBase, CachePathExists):
         # for emulator in self.all_emulators:
         #     output += list(iter_instances(emulator))
 
-        results = WORKER_POOL.thread_map(list_instances, self.all_emulators)
+        results = THREAD_POOL.thread_map(list_instances, self.all_emulators)
         output = flatten_list(results)
 
         output = sorted(set(output), key=lambda x: str(x))
@@ -497,7 +497,7 @@ class EmulatorSearchWindows(EmulatorSearchBase, CachePathExists):
         # for emulator in self.all_emulators:
         #     output += list(list_adb_binaries(emulator))
 
-        results = WORKER_POOL.thread_map(list_adb_binaries, self.all_emulators)
+        results = THREAD_POOL.thread_map(list_adb_binaries, self.all_emulators)
         output = flatten_list(results)
 
         output = sorted(set(output), key=lambda x: str(x))

@@ -2,8 +2,8 @@ from collections import deque
 
 import msgspec
 
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path.atomic import file_write
-from alasio.ext.pool import WORKER_POOL
 from alasio.git.file.gitobject import GitObjectManager
 from alasio.git.stage.hashobj import git_file_hash
 
@@ -169,7 +169,7 @@ class GitReset(GitObjectManager):
         if len(tasks) == 1:
             self._reset_task_validate_files(tasks[0])
         else:
-            with WORKER_POOL.wait_jobs() as pool:
+            with THREAD_POOL.wait_jobs() as pool:
                 for task in tasks:
                     pool.start_thread_soon(self._reset_task_validate_files, task)
 

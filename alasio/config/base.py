@@ -16,10 +16,10 @@ from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
 from alasio.ext.cache import cached_property
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.ext.msgspec_error.parse_anno import get_annotations
-from alasio.ext.pool import WORKER_POOL
 from alasio.logger import logger
 
 
@@ -188,7 +188,7 @@ class AlasioConfigBase:
         table = AlasioConfigTable(self.config_name)
         rows: "list[ConfigRow]" = table.select()
         # start check job, run parallely and reuse connection
-        check_job = WORKER_POOL.start_thread_soon(self._check_config_mod)
+        check_job = THREAD_POOL.start_thread_soon(self._check_config_mod)
 
         dict_value = {}
         dict_obj = {}

@@ -1,7 +1,7 @@
 import itertools
 
 from alasio.ext.cache import cached_property
-from alasio.ext.pool import WORKER_POOL
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.git.file.gitobject import GitObjectManager
 from alasio.git.file.loose import LoosePath
 from alasio.git.obj.obj import OBJTYPE_BASIC, parse_objdata
@@ -76,7 +76,7 @@ class GitCommit(GitObjectManager):
                                f'sha1={sha1_}, offset_base={offset_base}, offset_delta={offset_delta_}')
                 return None
 
-        with WORKER_POOL.wait_jobs() as pool:
+        with THREAD_POOL.wait_jobs() as pool:
             for batch in batch_generator(self.dict_object_unread.items()):
                 pool.start_thread_soon(read_loose, batch)
 
