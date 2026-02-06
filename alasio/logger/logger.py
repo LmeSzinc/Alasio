@@ -7,8 +7,7 @@ from exceptiongroup import BaseExceptionGroup, ExceptionGroup
 
 from alasio.ext.backport import patch_rich_traceback_extract
 from alasio.logger.utils import (
-    empty_function, event_format, figure_out_exc_info, gen_exception_tree,
-    join_event_dict, replace_unicode_table
+    empty_function, event_format, figure_out_exc_info, join_event_dict, replace_unicode_table, stringify_event
 )
 from alasio.logger.writer import CaptureWriter, LogWriter
 
@@ -317,9 +316,10 @@ class AlasioLogger:
         Log at DEBUG level.
 
         Args:
-            event (str): Log message
+            event: Log message or exception
             **kwargs: Log context
         """
+        event = stringify_event(event)
         self._msg('DEBUG', event, kwargs)
 
     def info(self, event, **kwargs):
@@ -327,9 +327,10 @@ class AlasioLogger:
         Log at INFO level.
 
         Args:
-            event (str): Log message
+            event: Log message or exception
             **kwargs: Log context
         """
+        event = stringify_event(event)
         self._msg('INFO', event, kwargs)
 
     def warning(self, event, **kwargs):
@@ -337,9 +338,10 @@ class AlasioLogger:
         Log at WARNING level.
 
         Args:
-            event (str): Log message
+            event: Log message or exception
             **kwargs: Log context
         """
+        event = stringify_event(event)
         self._msg('WARNING', event, kwargs)
 
     def error(self, event, **kwargs):
@@ -347,39 +349,24 @@ class AlasioLogger:
         Log at ERROR level.
 
         Args:
-            event (str | Exception): Log message or exception
+            event: Log message or exception
             **kwargs: Log context
         """
-        # Better exception logging
-        # If someone do:
-        #   try:
-        #       raise ExampleError
-        #   except ExampleError as e:
-        #       logger.error(e)
-        # We can log:
-        #   ExampleError:
-        # instead of just empty string ""
-        if isinstance(event, Exception):
-            if isinstance(event, (BaseExceptionGroup, ExceptionGroup)):
-                title = f'{type(event).__name__}: {event}'
-                detail = '\n'.join(gen_exception_tree(event))
-                event = f'{title}\n{detail}'
-            else:
-                event = f'{type(event).__name__}: {event}'
+        event = stringify_event(event)
         self._msg('ERROR', event, kwargs)
 
     def exception(self, event, **kwargs):
         """
         Log at ERROR level with exception info.
-
-        Args:
-            event (str | Exception): Log message or exception
-            **kwargs: Log context
         """
         if isinstance(event, Exception):
             if isinstance(event, (BaseExceptionGroup, ExceptionGroup)):
                 kwargs["exc_info"] = (type(event), event, event.__traceback__)
-            event = f'{type(event).__name__}: {event}'
+            msg = str(event)
+            if msg:
+                event = f'{type(event).__name__}: {msg}'
+            else:
+                event = type(event).__name__
         # see structlog._native.exception()
         kwargs.setdefault("exc_info", True)
         self._msg('EXCEPTION', event, kwargs)
@@ -389,9 +376,10 @@ class AlasioLogger:
         Log at CRITICAL level.
 
         Args:
-            event (str): Log message
+            event: Log message or exception
             **kwargs: Log context
         """
+        event = stringify_event(event)
         self._msg('CRITICAL', event, kwargs)
 
     """

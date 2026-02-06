@@ -1,9 +1,10 @@
 import sys
 from collections import deque
+from inspect import isclass
 from types import TracebackType
 from typing import Any, Optional, Tuple, Type
 
-from exceptiongroup import BaseExceptionGroup
+from exceptiongroup import BaseExceptionGroup, ExceptionGroup
 
 ExcInfo = Tuple[Type[BaseException], BaseException, Optional[TracebackType]]
 
@@ -43,7 +44,11 @@ def empty_function(*args, **kwargs):
 class SafeDict(dict):
     def __missing__(self, key):
         # Return placeholder when key is missing, for better debugging
-        return f"<key {key} missing>"
+        # If key is not a valid identifier (e.g. from a set literal "{'a'}"),
+        # return the key with braces to preserve it.
+        if isinstance(key, str) and not key.isidentifier():
+            return f"{{{key}}}"
+        return f'<key "{key}" missing>'
 
 
 def has_user_keys(event_dict):
@@ -137,6 +142,44 @@ def gen_exception_tree(exc: BaseException):
         if BaseExceptionGroup and isinstance(current_exc, BaseExceptionGroup):
             children = [(e, depth + 1) for e in current_exc.exceptions]
             stack.extend(reversed(children))
+
+
+def stringify_event(event):
+    """
+    Convert whatever to str, pretty exceptions
+    """
+    t = type(event)
+    # fast path, most events are str
+    if t is str:
+        return event
+    # Better exception logging
+    # If someone do:
+    #   try:
+    #       raise ExampleError()
+    #   except ExampleError as e:
+    #       logger.error(e)
+    # We can log:
+    #   ExampleError:
+    # instead of just empty string ""
+    if isinstance(event, Exception):
+        if isinstance(event, (BaseExceptionGroup, ExceptionGroup)):
+            msg = str(event)
+            if msg:
+                title = f'{type(event).__name__}: {msg}'
+            else:
+                title = type(event).__name__
+            detail = '\n'.join(gen_exception_tree(event))
+            return f'{title}\n{detail}'
+        else:
+            msg = str(event)
+            if msg:
+                return f'{type(event).__name__}: {msg}'
+            else:
+                return type(event).__name__
+    # maybe just ExampleError
+    if isclass(event) and issubclass(event, Exception):
+        return event.__name__
+    return str(event)
 
 
 def replace_unicode_table(output):
