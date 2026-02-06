@@ -89,35 +89,35 @@
         "name": "SchedulerStatic.Enable",
         "help": "",
         "option_i18n": {
-          "True": "[zh-CN]True"
+          "enabled": "enabled"
         }
       },
       "en-US": {
         "name": "SchedulerStatic.Enable",
         "help": "",
         "option_i18n": {
-          "True": "[en-US]True"
+          "enabled": "enabled"
         }
       },
       "ja-JP": {
         "name": "SchedulerStatic.Enable",
         "help": "",
         "option_i18n": {
-          "True": "[ja-JP]True"
+          "enabled": "enabled"
         }
       },
       "zh-TW": {
         "name": "SchedulerStatic.Enable",
         "help": "",
         "option_i18n": {
-          "True": "[zh-TW]True"
+          "enabled": "enabled"
         }
       },
       "en-ES": {
         "name": "SchedulerStatic.Enable",
         "help": "",
         "option_i18n": {
-          "True": "True"
+          "enabled": "enabled"
         }
       }
     }

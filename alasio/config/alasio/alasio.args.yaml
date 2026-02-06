@@ -8,8 +8,10 @@ SchedulerStatic:
   base: Scheduler
   args:
     Enable:
-      value: true
-      option: [true,]
+      # TypeError: Literal may only contain None/integers/strings - typing.Literal[True] is not supported
+      # msgspec does not allow Literal[True], so here's a string
+      value: "enabled"
+      option: ["enabled",]
 
 #设备设置
 #Alas设置

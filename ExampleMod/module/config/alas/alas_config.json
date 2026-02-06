@@ -157,8 +157,8 @@
       "arg": "Enable",
       "cls": "SchedulerStatic",
       "dt": "select",
-      "value": true,
-      "option": [true]
+      "value": "enabled",
+      "option": ["enabled"]
     },
     "Scheduler_NextRun": {
       "task": "RestartDevice",
@@ -183,8 +183,8 @@
       "arg": "Enable",
       "cls": "SchedulerStatic",
       "dt": "select",
-      "value": true,
-      "option": [true]
+      "value": "enabled",
+      "option": ["enabled"]
     },
     "Scheduler_NextRun": {
       "task": "RestartGame",
