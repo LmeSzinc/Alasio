@@ -231,6 +231,15 @@ class AlasioLogger:
                     writer.fd.flush()
                     writer.stdout.flush()
 
+    def backend_event(self, event, timestamp: float = None, level='INFO', raw=0):
+        # create backend event directly
+        if timestamp is None:
+            timestamp = time.time()
+        backend_event = {'t': timestamp, 'l': level, 'm': event}
+        if raw:
+            backend_event['r'] = 1
+        return backend_event
+
     """
     structlog-like features
     """

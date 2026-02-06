@@ -215,7 +215,7 @@ class WorkerManager(metaclass=Singleton):
                 recv_thread.join(timeout=1)
 
         exitcode = process.exitcode if process else None
-        logger.info(f'[WorkerManager] Worker stopped: {state.config}, exitcode={exitcode}')
+        self.on_worker_info(state.config, f'[WorkerManager] Worker stopped: {state.config}, exitcode={exitcode}')
 
         with self._lock:
             state.conn = None
@@ -235,6 +235,15 @@ class WorkerManager(metaclass=Singleton):
         Callback when received config event from worker
         """
         print(event)
+
+    def on_worker_info(self, config: str, msg: str):
+        """
+        Callback when logging worker info
+        """
+        logger.info(msg)
+        event = logger.backend_event(msg, raw=1)
+        event = ConfigEvent(t='Log', c=config, v=event)
+        self.on_config_event(event)
 
     def _handle_config_event(self, data: bytes, worker: WorkerState):
         """
@@ -335,7 +344,7 @@ class WorkerManager(metaclass=Singleton):
             # mark immediately
             self._set_status(state, 'starting')
 
-        logger.info(f'[WorkerManager] Starting worker: {config}')
+        self.on_worker_info(config, f'[WorkerManager] Starting worker: {config}')
         # start process without lock
         parent_conn, child_conn = self._ctx.Pipe()
         if project_root and mod_root and path_main:
@@ -421,7 +430,7 @@ class WorkerManager(metaclass=Singleton):
             # mark immediately
             self._set_status(state, 'scheduler-stopping')
 
-        logger.info(f'[WorkerManager] Requesting scheduler stop: {config}')
+        self.on_worker_info(config, f'[WorkerManager] Requesting scheduler stop: {config}')
         # send command without lock
         command = CommandEvent(c='scheduler-stopping')
         state.send_command(command)
@@ -450,7 +459,7 @@ class WorkerManager(metaclass=Singleton):
             # mark immediately
             self._set_status(state, 'running')
 
-        logger.info(f'[WorkerManager] Requesting scheduler continue: {config}')
+        self.on_worker_info(config, f'[WorkerManager] Requesting scheduler continue: {config}')
         # send command without lock
         command = CommandEvent(c='scheduler-continue')
         state.send_command(command)
@@ -477,7 +486,7 @@ class WorkerManager(metaclass=Singleton):
             # mark immediately
             self._set_status(state, 'killing')
 
-        logger.info(f'[WorkerManager] Requesting worker kill: {config}')
+        self.on_worker_info(config, f'[WorkerManager] Requesting worker kill: {config}')
         # send command without lock
         command = CommandEvent(c='killing')
         state.send_command(command)
