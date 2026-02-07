@@ -5,7 +5,7 @@ from io import StringIO
 
 from exceptiongroup import BaseExceptionGroup, ExceptionGroup
 
-from alasio.ext.backport import patch_rich_traceback_extract
+from alasio.ext.backport.patch_rich import patch_rich_traceback_extract
 from alasio.logger.utils import (
     empty_function, event_args_format, event_format, figure_out_exc_info, join_event_dict, replace_unicode_table,
     stringify_event

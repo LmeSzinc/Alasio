@@ -5,7 +5,7 @@ import trio
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
 
-from alasio.ext.patch import patch_mimetype
+from alasio.ext.backport.patch import patch_mimetype
 
 patch_mimetype()
 

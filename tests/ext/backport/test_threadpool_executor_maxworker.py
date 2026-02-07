@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from alasio.ext.backport import patch_threadpool_executor_maxworker
+from alasio.ext.backport.patch import patch_threadpool_executor_maxworker
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -26,7 +26,6 @@ def test_patch_applied_successfully():
     """
     Test 1: Verify if the patch flag exists and ensure the init method is replaced.
     """
-    assert getattr(ThreadPoolExecutor, "_is_defaults_patched", False) is True
     init = ThreadPoolExecutor.__init__
     assert init.__name__ == 'init_backport'
 

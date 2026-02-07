@@ -1,4 +1,4 @@
-from alasio.ext.patch import patch_startup
+from alasio.ext.backport.patch import patch_startup
 
 patch_startup()
 

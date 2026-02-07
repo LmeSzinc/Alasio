@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from alasio.ext.backport import fix_py37_subprocess_communicate
+from alasio.ext.backport.patch import fix_py37_subprocess_communicate
 
 
 @pytest.mark.skipif(
