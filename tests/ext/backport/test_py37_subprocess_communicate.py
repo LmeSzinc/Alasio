@@ -5,11 +5,12 @@ import pytest
 
 from alasio.ext.backport.patch import fix_py37_subprocess_communicate
 
-
-@pytest.mark.skipif(
+pytestmark = pytest.mark.skipif(
     sys.platform != 'win32' or sys.version_info[:2] != (3, 7),
     reason="Patch only applies to Windows Python 3.7"
 )
+
+
 @pytest.fixture(scope="module", autouse=True)
 def apply_patch():
     """
@@ -19,10 +20,6 @@ def apply_patch():
     yield
 
 
-@pytest.mark.skipif(
-    sys.platform != 'win32' or sys.version_info[:2] != (3, 7),
-    reason="Patch only applies to Windows Python 3.7"
-)
 class TestSubprocessPatch:
 
     def test_patch_is_applied(self):

@@ -5,26 +5,31 @@ from io import StringIO
 
 from exceptiongroup import BaseExceptionGroup, ExceptionGroup
 
-from alasio.ext.backport.patch_rich import patch_rich_traceback_extract
+from alasio.ext.backport.patch import patch_startup
+from alasio.ext.backport.patch_rich import patch_rich_traceback_extract, patch_rich_traceback_links
 from alasio.logger.utils import (
     empty_function, event_args_format, event_format, figure_out_exc_info, join_event_dict, replace_unicode_table,
     stringify_event
 )
 from alasio.logger.writer import CaptureWriter, LogWriter
 
+patch_startup()
 patch_rich_traceback_extract()
+patch_rich_traceback_links()
 
 
 def rich_formatter(exc_info):
+    """
+    Args:
+        exc_info (tuple): Exception info
+
+    Returns:
+        tuple[str, str]: exception_rich, exception_plain
+    """
     # wrap structlog.dev.RichTracebackFormatter().__call__() as an input to ExceptionRenderer
-    # TODO: maybe having colors, dynamic width, unicode table chars in console, while keeping clean in log file
     from rich.console import Console
     from rich.traceback import Traceback
 
-    sio = StringIO()
-    console = Console(
-        file=sio, color_system=None, width=120
-    )
     tb = Traceback.from_exception(
         # see structlog.dev.RichTracebackFormatter()
         *exc_info, show_locals=True, word_wrap=True, max_frames=100,
@@ -32,11 +37,25 @@ def rich_formatter(exc_info):
     if hasattr(tb, "code_width"):
         # `code_width` requires `rich>=13.8.0`
         tb.code_width = 120
-    console.print(tb)
-    output = sio.getvalue()
 
-    output = replace_unicode_table(output)
-    return output
+    # Rich (for terminal)
+    sio_rich = StringIO()
+    console_rich = Console(
+        file=sio_rich, color_system='auto', force_terminal=True, width=120, legacy_windows=False
+    )
+    console_rich.print(tb)
+    exception_rich = sio_rich.getvalue()
+
+    # Plain (for file)
+    sio_plain = StringIO()
+    console_plain = Console(
+        file=sio_plain, color_system=None, width=120
+    )
+    console_plain.print(tb)
+    exception_plain = sio_plain.getvalue()
+    exception_plain = replace_unicode_table(exception_plain)
+
+    return exception_rich, exception_plain
 
 
 class CaptureWriterContext:
@@ -113,6 +132,7 @@ class LoggingLevel:
                         delattr(self, method_name)
                     except AttributeError:
                         pass
+        return self
 
 
 class ClassicLogger(LoggingLevel):
@@ -180,7 +200,7 @@ class AlasioLogger(LoggingLevel):
         """
         return CaptureWriterContext(self)
 
-    def _process_event(self, level, event, event_dict):
+    def _process_event(self, level, event, event_dict, exc_info=None):
         """
         Internal method that emulates structlog processors chain
 
@@ -188,9 +208,11 @@ class AlasioLogger(LoggingLevel):
             level (str): Log level name
             event (str): Log message
             event_dict (dict): Log context
+            exc_info (bool | tuple | Exception): Exception info. Defaults to None.
 
         Returns:
-            tuple[str, str, dict]: Processed level, event, and event_dict
+            tuple[str, str, dict, str | None, str | None]:
+                level, event, event_dict, exception_rich, exception_plain
         """
         # from structlog.__log_levels.add_log_level()
         # warn is just a deprecated alias in the stdlib.
@@ -207,15 +229,16 @@ class AlasioLogger(LoggingLevel):
             event_dict = context
 
         # ExceptionRenderer(rich_formatter)
-        exc_info = event_dict.pop('exc_info', None)
+        exception_rich = None
+        exception_plain = None
         if exc_info is not None:
             exc_info = figure_out_exc_info(exc_info)
             if exc_info is not None:
-                event_dict['exception'] = rich_formatter(exc_info)
+                exception_rich, exception_plain = rich_formatter(exc_info)
 
-        return level, event, event_dict
+        return level, event, event_dict, exception_rich, exception_plain
 
-    def _msg(self, level, event, event_dict):
+    def _msg(self, level, event, event_dict, raw=False, exc_info=None):
         """
         Internal method to render message
 
@@ -223,11 +246,14 @@ class AlasioLogger(LoggingLevel):
             level (str): Log level name
             event (str): Log message
             event_dict (dict): Log context
+            raw (bool): Whether to log raw message without timestamp and level. Defaults to False.
+            exc_info (bool | tuple | Exception): Exception info. Defaults to None.
         """
-        level, event, event_dict = self._process_event(level, event, event_dict)
+        level, event, event_dict, exception_rich, exception_plain = self._process_event(
+            level, event, event_dict, exc_info=exc_info
+        )
 
         # build message, ignore errors
-        raw = event_dict.pop('__raw__', None)
         event = event_format(event, event_dict)
         event = join_event_dict(event, event_dict)
 
@@ -241,34 +267,40 @@ class AlasioLogger(LoggingLevel):
         else:
             text = f'{now} | {level} | {event}\n'
 
+        text_rich = text
+        text_plain = text
+        if exception_rich:
+            # exception_rich already ends with \n
+            # but usually it's better to ensure it's on a new line
+            text_rich = f'{text_rich}{exception_rich}\n'
+        if exception_plain:
+            text_plain = f'{text_plain}{exception_plain}\n'
+
         backend_inited = self._writer.backend.inited
         if backend_inited:
             backend_event = {'t': timestamp, 'l': level, 'm': event}
             # add exception
-            if 'exception' in event_dict:
-                exception = event_dict['exception']
-                text = f'{text}{exception}\n'
-                backend_event['e'] = exception
+            if exception_plain:
+                backend_event['e'] = exception_plain
             # add raw tag
             if raw:
                 backend_event['r'] = 1
         else:
             # no backend
             backend_event = {}
-            if 'exception' in event_dict:
-                exception = event_dict['exception']
-                text = f'{text}{exception}\n'
 
         # print text
-        self._emit(text, backend_event)
+        self._emit(text_rich, text_plain, backend_event)
 
-    def _emit(self, text, backend_event):
+    def _emit(self, text_rich, text_plain, backend_event):
         """
         Internal method to emit event directly
-        `text` will be print to stdout and log file, `event` will be sent to backend
+        `text_rich` will be print to stdout, `text_plain` will be write into log file,
+        `backend_event` will be sent to backend
 
         Args:
-            text (str): Formatted log text
+            text_rich (str): Formatted log text with rich formatting
+            text_plain (str): Formatted log text without formatting
             backend_event (dict): Event dictionary for backend
         """
         writer = self._writer
@@ -280,30 +312,31 @@ class AlasioLogger(LoggingLevel):
                 if is_electron:
                     # backend + file
                     job = writer.backend.send_log(backend_event)
-                    writer.fd.write(text)
+                    writer.fd.write(text_plain)
                     writer.fd.flush()
                     job.acquire()
                 else:
                     # backend + stdout + file
                     job = writer.backend.send_log(backend_event)
-                    writer.fd.write(text)
-                    writer.stdout.write(text)
+                    writer.fd.write(text_plain)
+                    writer.stdout.write(text_rich)
                     writer.fd.flush()
                     writer.stdout.flush()
                     job.acquire()
             else:
                 if is_electron:
                     # file
-                    writer.fd.write(text)
+                    writer.fd.write(text_plain)
                     writer.fd.flush()
                 else:
                     # stdout + file
-                    writer.fd.write(text)
-                    writer.stdout.write(text)
+                    writer.fd.write(text_plain)
+                    writer.stdout.write(text_rich)
                     writer.fd.flush()
                     writer.stdout.flush()
 
-    def backend_event(self, event, timestamp: float = None, level='INFO', raw=0):
+    @staticmethod
+    def backend_event(event, timestamp: float = None, level='INFO', raw=0):
         # create backend event directly
         if timestamp is None:
             timestamp = time.time()
@@ -409,21 +442,25 @@ class AlasioLogger(LoggingLevel):
         event = stringify_event(event)
         self._msg('ERROR', event, kwargs)
 
-    def exception(self, event, **kwargs):
+    def exception(self, event, exc_info=True, **kwargs):
         """
         Log at ERROR level with exception info.
+
+        Args:
+            event: Log message or exception
+            exc_info (bool | tuple | Exception): Exception info. Defaults to True.
+            **kwargs: Log context
         """
         if isinstance(event, Exception):
             if isinstance(event, (BaseExceptionGroup, ExceptionGroup)):
-                kwargs["exc_info"] = (type(event), event, event.__traceback__)
+                exc_info = (type(event), event, event.__traceback__)
             msg = str(event)
             if msg:
                 event = f'{type(event).__name__}: {msg}'
             else:
                 event = type(event).__name__
         # see structlog._native.exception()
-        kwargs.setdefault("exc_info", True)
-        self._msg('EXCEPTION', event, kwargs)
+        self._msg('EXCEPTION', event, kwargs, exc_info=exc_info)
 
     def critical(self, event, **kwargs):
         """
@@ -448,9 +485,8 @@ class AlasioLogger(LoggingLevel):
             event (str): Log message
             **kwargs: Log context
         """
-        # act like info but tag __raw__
-        kwargs['__raw__'] = 1
-        self._msg('INFO', event, kwargs)
+        # act like info but tag raw=True
+        self._msg('INFO', event, kwargs, raw=True)
 
     def hr(self, title, level=3, **kwargs):
         """

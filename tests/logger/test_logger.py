@@ -4,7 +4,8 @@ import pytest
 
 from alasio.ext import env
 from alasio.ext.path import PathStr
-from alasio.logger.logger import LogWriter, logger
+from alasio.logger import logger
+from alasio.logger.writer import LogWriter
 
 
 class BaseLoggerTest:
@@ -29,6 +30,7 @@ class BaseLoggerTest:
         # init fd
         writer = LogWriter()
         _ = writer.fd
+        logger.set_level('DEBUG')
 
         yield
 
@@ -290,7 +292,7 @@ class TestLoggerFormatting(BaseLoggerTest):
         content = self._read_log_file()
 
         # Should use SafeDict placeholder for missing 'location'
-        assert 'User Bob from <key location missing>' in content or 'User Bob from {location}' in content
+        assert 'User Bob from <key "location" missing>' in content
 
 
 class TestLoggerError(BaseLoggerTest):

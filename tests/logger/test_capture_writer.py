@@ -33,7 +33,7 @@ def test_mock_capture_writer():
         assert capture.backend.any_contains("ValueError: Test Error")
         capture.clear()
 
-        logger.debug("Fresh log")
+        logger.info("Fresh log")
         assert capture.fd.any_contains("Fresh log")
         assert len(capture.backend.logs) == 1
 

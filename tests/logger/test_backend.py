@@ -74,6 +74,7 @@ class BaseLoggerTest:
 
         # Use the existing logger instance
         self.logger = logger
+        logger.set_level('DEBUG')
 
         yield
 
