@@ -1,14 +1,11 @@
-from typing import Optional, TYPE_CHECKING
+from typing import Generic, Optional, TypeVar
 
-from typing_extensions import Self
-
+from alasio.config.base import BatchSetContext, TemporaryContext
+from alasio.config.config_generated import AlasioConfigGenerated
 from alasio.ext.cache import cached_property
 from alasio.logger import logger
 
-if TYPE_CHECKING:
-    # avoid circular import
-    from alasio.config.base import BatchSetContext, TemporaryContext
-    from alasio.config.config_generated import AlasioConfigGenerated
+T = TypeVar("T", bound=AlasioConfigGenerated)
 
 
 class EmptyContext:
@@ -22,10 +19,12 @@ class EmptyContext:
         pass
 
 
-class DeviceConfig:
+class DeviceConfig(Generic[T]):
+    config: Optional[T]
+
     def __init__(self):
         self._inited = False
-        self.config: "Optional[AlasioConfigGenerated]" = None
+        self.config = None
 
         # Group `Emulator`
         self.Emulator_Serial = 'auto'
@@ -103,7 +102,7 @@ class DeviceConfig:
         return keys
 
     @classmethod
-    def from_config(cls, config: "AlasioConfigGenerated") -> Self:
+    def from_config(cls, config: T) -> "DeviceConfig[T]":
         obj = cls()
         obj.config = config
         for name, key in obj._device_bind_keys.items():
