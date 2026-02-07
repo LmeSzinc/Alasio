@@ -1,4 +1,7 @@
+from typing import Optional
+
 import trio
+from trio._core import TrioToken
 
 from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
 from alasio.backend.reactive.base_rpc import rpc
@@ -16,7 +19,7 @@ from alasio.ext import env
 class BackendWorkerManager(WorkerManager):
     def __init__(self):
         super().__init__()
-        self.trio_token = None
+        self.trio_token: Optional[TrioToken] = None
 
     def worker_start(self, mod: Mod, config: str) -> "tuple[bool, str]":
         project_root = env.PROJECT_ROOT
@@ -29,10 +32,13 @@ class BackendWorkerManager(WorkerManager):
 
     def on_worker_status(self, config: str, status: WORKER_STATUS):
         # Broadcast worker status to msgbus
-        trio.from_thread.run(
-            BaseTopic.msgbus_global_asend, 'Worker', (config, status),
-            trio_token=self.trio_token
-        )
+        try:
+            trio.from_thread.run(
+                BaseTopic.msgbus_global_asend, 'Worker', (config, status),
+                trio_token=self.trio_token
+            )
+        except trio.RunFinishedError:
+            pass
 
     def on_config_event(self, event: ConfigEvent):
         if event.t == 'Log':
@@ -41,10 +47,13 @@ class BackendWorkerManager(WorkerManager):
             cache.on_event(event)
         else:
             # broadcast other config events to msgbus
-            trio.from_thread.run(
-                BaseTopic.msgbus_config_asend, event,
-                trio_token=self.trio_token
-            )
+            try:
+                trio.from_thread.run(
+                    BaseTopic.msgbus_config_asend, event,
+                    trio_token=self.trio_token
+                )
+            except trio.RunFinishedError:
+                pass
 
 
 async def get_worker_manager():
