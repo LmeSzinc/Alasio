@@ -58,25 +58,6 @@ def rich_formatter(exc_info):
     return exception_rich, exception_plain
 
 
-class CaptureWriterContext:
-    def __init__(self, logger):
-        """
-        Args:
-            logger (AlasioLogger): Logger instance
-        """
-        self.logger = logger
-        self.writer = CaptureWriter()
-        self.old_writer = None
-
-    def __enter__(self):
-        self.old_writer = self.logger._writer
-        self.logger._writer = self.writer
-        return self.writer
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.logger._writer = self.old_writer
-
-
 LOG_LEVELS = {
     'DEBUG': 10,
     'INFO': 20,
@@ -85,7 +66,7 @@ LOG_LEVELS = {
     'CRITICAL': 50,
 }
 
-_LEVEL_METHODS = {
+LEVEL_METHODS = {
     'debug': 10,
     'info': 20,
     'raw': 20,
@@ -114,6 +95,9 @@ class LoggingLevel:
 
         Args:
             level (str | int): Level name or value. Defaults to 20 (INFO).
+
+        Returns:
+            Self:
         """
         if isinstance(level, str):
             level = LOG_LEVELS.get(level.upper(), level)
@@ -122,7 +106,7 @@ class LoggingLevel:
             level = 20
 
         self._level = level
-        for method_name, method_level in _LEVEL_METHODS.items():
+        for method_name, method_level in LEVEL_METHODS.items():
             if method_level < level:
                 setattr(self, method_name, empty_function)
             else:
@@ -133,6 +117,25 @@ class LoggingLevel:
                     except AttributeError:
                         pass
         return self
+
+
+class CaptureWriterContext:
+    def __init__(self, logger):
+        """
+        Args:
+            logger (AlasioLogger): Logger instance
+        """
+        self.logger = logger
+        self.writer = CaptureWriter()
+        self.old_writer = None
+
+    def __enter__(self):
+        self.old_writer = self.logger._writer
+        self.logger._writer = self.writer
+        return self.writer
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.logger._writer = self.old_writer
 
 
 class ClassicLogger(LoggingLevel):
@@ -242,6 +245,21 @@ class AlasioLogger(LoggingLevel):
         """
         Internal method to render message
 
+        Note that there is something different from structlog
+        1. Context will be appended to log message (same as structlog)
+                logger = logger.bind(user='May')
+                logger.info('User login')
+                # User login, user='May'
+        2. kwargs won't be appended to log message, extra kwargs will be dropped (different from structlog)
+            This is for i18n logging, log messages are auto extracted as i18n key.
+                logger.info('Hello {user}', user='May', age=18)
+                # Hello May
+        3. `%` formatting is not allowed (same as structlog, different from builtin logging)
+            If you need a placeholder, use `{key}` instead
+            If you do need `%` placeholder, use `logger.classic_logger()` instead
+                logger.info('Hello %s', 'May')
+                # will raise error
+
         Args:
             level (str): Log level name
             event (str): Log message
@@ -255,7 +273,7 @@ class AlasioLogger(LoggingLevel):
 
         # build message, ignore errors
         event = event_format(event, event_dict)
-        event = join_event_dict(event, event_dict)
+        event = join_event_dict(event, self._context)
 
         # inject time
         timestamp = time.time()

@@ -1,6 +1,6 @@
 from exceptiongroup import ExceptionGroup
 
-from alasio.logger.utils import event_format, stringify_event
+from alasio.logger.utils import event_args_format, event_format, join_event_dict, stringify_event
 
 
 class TestStringifyEvent:
@@ -70,10 +70,6 @@ class TestEventFormat:
     def test_event_format_empty_dict(self):
         assert event_format("Hello {name}", {}) == "Hello {name}"
 
-    def test_event_format_builtin_keys_only(self):
-        # 'exception' is a builtin key, has_user_keys will return False
-        assert event_format("Error {msg}", {"exception": ValueError("oops")}) == "Error {msg}"
-
     def test_event_format_mixed_keys(self):
         # 'name' is a user key, so it should format
         assert event_format("Hello {name}", {"name": "Bob", "exception": ValueError()}) == "Hello Bob"
@@ -107,3 +103,46 @@ class TestEventFormat:
 
         # {user} should be formatted, {'a'} should be preserved.
         assert event_format(event, event_dict) == "User admin has set {'combat_ui'}"
+
+
+class TestEventArgsFormat:
+    def test_event_args_format_single(self):
+        assert event_args_format("Hello %s", "World") == "Hello World"
+
+    def test_event_args_format_tuple(self):
+        assert event_args_format("Hello %s %s", ("World", "!")) == "Hello World !"
+
+    def test_event_args_format_dict(self):
+        assert event_args_format("Hello %(name)s", {"name": "World"}) == "Hello World"
+
+    def test_event_args_format_error(self):
+        # Should fail silently and return original string
+        assert event_args_format("Hello %s", ()) == "Hello %s"
+
+    def test_event_args_format_no_percent(self):
+        assert event_args_format("Hello World", "Something") == "Hello World"
+
+    def test_event_args_format_empty_args(self):
+        assert event_args_format("Hello %s", None) == "Hello %s"
+        assert event_args_format("Hello %s", ()) == "Hello %s"
+
+
+class TestJoinEventDict:
+    def test_join_event_dict_basic(self):
+        assert join_event_dict("Hello", {"user": "May"}) == "Hello, user='May'"
+
+    def test_join_event_dict_multiple(self):
+        # Order is preserved in modern Python dicts
+        assert join_event_dict("Hello", {"user": "May", "age": 18}) == "Hello, user='May', age=18"
+
+    def test_join_event_dict_empty_event(self):
+        assert join_event_dict("", {"user": "May"}) == "user='May'"
+
+    def test_join_event_dict_empty_dict(self):
+        assert join_event_dict("Hello", {}) == "Hello"
+
+    def test_join_event_dict_none_dict(self):
+        assert join_event_dict("Hello", None) == "Hello"
+
+    def test_join_event_dict_complex_types(self):
+        assert join_event_dict("Log", {"data": [1, 2], "val": None}) == "Log, data=[1, 2], val=None"

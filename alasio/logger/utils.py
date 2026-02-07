@@ -51,23 +51,6 @@ class SafeDict(dict):
         return f'<key "{key}" missing>'
 
 
-def has_user_keys(event_dict):
-    """
-    Check if event_dict contains user-provided keys (not just built-in fields)
-    Built-in fields: 'event', 'exception'
-    """
-    # Fast path: empty or single item (must be built-in)
-    if not event_dict:
-        return False
-
-    # Calculate how many built-in fields are present
-    length = len(event_dict)
-    builtin_count = 0
-    if 'exception' in event_dict:
-        builtin_count += 1
-    return length > builtin_count
-
-
 def event_format(event, event_dict):
     """
     build message from `event.format(event_dict)`, ignore errors
@@ -84,7 +67,7 @@ def event_format(event, event_dict):
     Returns:
         str:
     """
-    if '{' in event and event_dict and has_user_keys(event_dict):
+    if '{' in event and event_dict:
         try:
             event = event.format(**event_dict)
         except KeyError:
@@ -131,10 +114,11 @@ def join_event_dict(event, event_dict):
     """
     if not event_dict:
         return event
-    items = [f'{k}={repr(v)}' for k, v in event_dict.items() if k != 'exception']
+    items = [f'{k}={repr(v)}' for k, v in event_dict.items()]
     if not items:
         return event
-    items.insert(0, event)
+    if event:
+        items.insert(0, event)
     event = ', '.join(items)
     return event
 
