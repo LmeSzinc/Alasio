@@ -21,8 +21,7 @@ else:
         """
         if s.startswith(prefix):
             return s[len(prefix):]
-        else:
-            return s
+        return s
 
 
     # Backport `string.removesuffix(suffix)`, which is on Python>=3.9
@@ -35,10 +34,10 @@ else:
         Returns:
             T:
         """
-        if s.endswith(suffix):
+        # s[:-0] is empty string, so we need to check if suffix is empty
+        if suffix and s.endswith(suffix):
             return s[:-len(suffix)]
-        else:
-            return s
+        return s
 
 
 # Quote LiteralType because typing_extensions.LiteralType is not available on 3.8
