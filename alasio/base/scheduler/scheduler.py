@@ -65,7 +65,7 @@ class AlasioScheduler:
     def __init__(self, config_name):
         self.config_name = config_name
         # Skip first restart
-        self.is_first_task = True
+        self.skip_first_task = {'Restart', 'RestartDevice', 'RestartGame'}
 
     def create_config(self):
         return AlasioConfigGenerated(self.config_name)
@@ -190,12 +190,16 @@ class AlasioScheduler:
         if method == 'stop_game':
             logger.info('Stop game during wait')
             self._run_task('stop_game')
+            # re-log, incase task logs flush wait message
+            logger.info(f'Wait until {future} for task `{task}`')
         elif method == 'stop_device':
             logger.info('Stop device during wait')
             self._run_task('stop_device')
+            logger.info(f'Wait until {future} for task `{task}`')
         elif method == 'goto_main':
             logger.info('Goto main page during wait')
             self._run_task('goto_main')
+            logger.info(f'Wait until {future} for task `{task}`')
         elif method == 'stay_there':
             logger.info('Stay there during wait')
         else:
@@ -213,7 +217,7 @@ class AlasioScheduler:
             if backend.scheduler_stopping.is_set():
                 raise SchedulerStop
             # check if reached future
-            if future > now():
+            if now() > future:
                 return True
             # check if config modified every 5s
             if count % 5 == 0:
@@ -237,18 +241,18 @@ class AlasioScheduler:
         if not waited:
             return False
         # skip restart
-        if self.is_first_task:
-            if task.TaskName in ['Restart', 'RestartDevice', 'RestartGame']:
-                self.config.task_delay(server_update=True)
-                return True
+        if task.TaskName in self.skip_first_task:
+            self.config.task_delay(server_update=True)
+            self.skip_first_task.discard(task.TaskName)
+            return True
 
         # Run
-        logger.info(f'Scheduler: Start task `{task}`')
+        logger.info(f'Scheduler: Start task `{task.TaskName}`')
         self.device.on_task_switch()
         logger.hr0(task.TaskName)
         success = self._run_task(task.TaskName)
-        logger.info(f'Scheduler: End task `{task}`')
-        self.is_first_task = False
+        logger.info(f'Scheduler: End task `{task.TaskName}`')
+        self.skip_first_task.clear()
 
         # check failure
         failure = FailureRecord().mark_task_result(task=task.TaskName, success=success)
