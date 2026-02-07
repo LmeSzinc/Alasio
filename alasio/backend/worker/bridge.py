@@ -324,10 +324,11 @@ class BackendBridge(metaclass=Singleton):
                 logger.error(f'[BackendBridge] Failed to send command: pipe connection not initialized')
                 return False
             except (EOFError, OSError):
-                if self.running:
-                    from alasio.logger import logger
-                    logger.error(f'[BackendBridge] Failed to send command: pipe broken')
-                # if pipe is already closed, failed silently
+                self.running = False
+                # if pipe is already closed, failed silently,
+                # and don't try to log back into the pipe to avoid deadlock
+                # from alasio.logger import logger
+                # logger.error(f'[BackendBridge] Failed to send command: pipe broken')
                 return False
             except Exception as e:
                 from alasio.logger import logger
@@ -378,9 +379,11 @@ class BackendBridge(metaclass=Singleton):
             try:
                 data = conn.recv_bytes()
             except (EOFError, OSError):
-                if self.running:
-                    from alasio.logger import logger
-                    logger.error(f'[BackendBridge] Failed to recv command: pipe broken')
+                self.running = False
+                # handle error silently
+                # and don't try to log back into the pipe to avoid deadlock
+                # from alasio.logger import logger
+                # logger.error(f'[BackendBridge] Failed to recv command: pipe broken')
                 return False
             except Exception as e:
                 from alasio.logger import logger
@@ -408,10 +411,12 @@ class BackendBridge(metaclass=Singleton):
         # Set closing flag to stop threads from logging errors
         self.running = False
 
-        # Close connection to unblock recv_bytes() call
-        if self.conn:
+        # Close and NULLIFY connection to unblock recv_bytes() call
+        conn = self.conn
+        self.conn = None
+        if conn is not None:
             try:
-                self.conn.close()
+                conn.close()
             except:
                 pass
 

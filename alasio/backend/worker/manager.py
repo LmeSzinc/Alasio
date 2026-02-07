@@ -201,7 +201,9 @@ class WorkerManager(metaclass=Singleton):
         if process:
             # after pipe broken, process should terminate every soon
             if process.is_alive():
-                process.join(timeout=0.2)
+                # On Windows, process needs a bit of time for handle cleanup
+                # 0.5s is usually enough if child closed pipe manually
+                process.join(timeout=0.5)
             # otherwise, kill it manually
             state.process_graceful_kill()
 
