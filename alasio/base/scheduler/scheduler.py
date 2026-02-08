@@ -187,24 +187,27 @@ class AlasioScheduler:
 
         # release
         method = self.config.Optimization.WhenTaskQueueEmpty
+        run = False
         if method == 'stop_game':
             logger.info('Stop game during wait')
             self._run_task('stop_game')
-            # re-log, incase task logs flush wait message
-            logger.info(f'Wait until {future} for task `{task}`')
+            run = True
         elif method == 'stop_device':
             logger.info('Stop device during wait')
             self._run_task('stop_device')
-            logger.info(f'Wait until {future} for task `{task}`')
+            run = True
         elif method == 'goto_main':
             logger.info('Goto main page during wait')
             self._run_task('goto_main')
-            logger.info(f'Wait until {future} for task `{task}`')
+            run = True
         elif method == 'stay_there':
             logger.info('Stay there during wait')
         else:
             logger.warning(f'Unknown Optimization.WhenTaskQueueEmpty={method}, treat as stay_there')
         self.device.on_idle()
+        if run:
+            # re-log, incase task logs flush wait message
+            logger.info(f'Wait until {future} for task `{task}`')
 
         # wait
         watcher = ConfigWatcher(self.config_name).init()
