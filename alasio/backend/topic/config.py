@@ -171,3 +171,4 @@ class ConfigArg(BaseTopic):
         # broadcast to all connections
         event = ConfigEvent(t=self.topic_name(), c=config_name, v=resp)
         await self.msgbus_config_asend(event)
+        await self.msgbus_global_asend(self.topic_name(), event)
