@@ -88,7 +88,7 @@ class Worker(BaseTopic):
     async def getdata(self):
         """
         Returns:
-            dict[str, WorkerStateInfo]:
+            dict[str, WORKER_STATUS]: key: config name, value: worker state
         """
         manager = await get_worker_manager()
         return await trio.to_thread.run_sync(manager.get_state_info)

@@ -176,17 +176,15 @@ class WorkerManager(metaclass=Singleton):
 
         self._ctx = multiprocessing.get_context('spawn')
 
-    def get_state_info(self) -> "dict[str, WorkerStateInfo]":
+    def get_state_info(self):
         """
         Returns:
-            key: config name,
-            value: worker state
+            dict[str, WORKER_STATUS]: key: config name, value: worker state
         """
         out = {}
         with self._lock:
             for w in self.state.values():
-                info = WorkerStateInfo(mod=w.mod, config=w.config, status=w.status, update=w.update)
-                out[w.config] = info
+                out[w.config] = w.status
         return out
 
     def _handle_disconnect(self, state: WorkerState):
