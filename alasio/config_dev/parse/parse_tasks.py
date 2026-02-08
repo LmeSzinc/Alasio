@@ -8,7 +8,6 @@ from alasio.config_dev.parse.base import ParseBase
 from alasio.config_dev.parse.parse_args import DefinitionError
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
-from alasio.ext.file.yamlfile import read_yaml
 
 
 class TaskGroup(msgspec.Struct):
@@ -146,7 +145,7 @@ class ParseTasks(ParseBase):
                 value: TaskData
         """
         output = {}
-        data = read_yaml(self.tasks_file)
+        data = self.read_tasks_yaml()
         for task_name, data in deep_iter_depth1(data):
             # check task_name
             if not validate_task_name(task_name):

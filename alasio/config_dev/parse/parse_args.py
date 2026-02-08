@@ -10,8 +10,7 @@ from alasio.config_dev.parse.parse_range import parse_range
 from alasio.ext.backport import to_literal
 from alasio.ext.cache import cached_property
 from alasio.ext.codegen import ReprWrapper
-from alasio.ext.deep import deep_iter_depth1, deep_set
-from alasio.ext.file.yamlfile import read_yaml
+from alasio.ext.deep import deep_iter_depth1
 
 """
 The following dicts require manual maintain
@@ -356,7 +355,7 @@ class ParseArgs(ParseBase):
             value: GroupData
         """
         output = {}
-        data = read_yaml(self.file)
+        data = self.read_args_yaml()
         for group_name, group_value in deep_iter_depth1(data):
             # check group_name
             if not validate_task_name(group_name):

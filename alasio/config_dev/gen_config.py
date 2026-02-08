@@ -8,7 +8,6 @@ from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
-from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.file.yamlfile import format_yaml
 from alasio.ext.path import PathStr
 from alasio.logger import logger
@@ -141,7 +140,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         """
         Old {nav}_i18n.json, with manual written i18n
         """
-        return read_msgspec(self.i18n_file)
+        return self.read_i18n_json()
 
     def _update_arg_i18n(self, group_name, arg_name, arg: ArgData):
         """
