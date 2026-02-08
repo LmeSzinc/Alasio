@@ -27,9 +27,11 @@ def loadpy(file):
     Raises:
         ImportError: if encounter any error
     """
-    name = get_stem(file)
     # file can't be subclasses of str
     file = str(file)
+    if not file.endswith('.py'):
+        raise ImportError('Not a ".py" file')
+    name = get_stem(file)
 
     import importlib.util
 
@@ -42,6 +44,7 @@ def loadpy(file):
         raise ImportError(f'Could not create spec.loader for file "{file}"')
 
     # create module object
+    # may raise ImportError('loaders that define exec_module() must also define create_module()')
     module = importlib.util.module_from_spec(spec)
 
     # import
