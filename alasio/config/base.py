@@ -109,6 +109,8 @@ class AlasioConfigBase:
         # Task to run and bind.
         # Task means the name of the function to run in AzurLaneAutoScript class.
         self.task = task
+        # Whether config rows are cached
+        self._config_cached = False
         # A snapshot of config table, updated on task start and every init_task() call.
         # Key: (task, group). Value: group data in messagepack
         # We don't update config realtime, otherwise things will get really complex if user modify configs
@@ -156,6 +158,37 @@ class AlasioConfigBase:
         """
         return ServerTime(8)
 
+    def config_cache(self):
+        if self.is_template_config:
+            return
+        if self._config_cached:
+            return
+        # cache config rows
+        table = AlasioConfigTable(self.config_name)
+        rows: "list[ConfigRow]" = table.select()
+        dict_row = {}
+        for row in rows:
+            key = (row.task, row.group)
+            dict_row[key] = row.value
+        self.dict_row = dict_row
+        self.dict_group = {}
+        # check mod
+        self._check_config_mod()
+        # finish
+        self._config_cached = True
+
+    def release(self):
+        # clear existing cache
+        # Note: self._overrides is persisted across init_task
+        for key in self._annotations:
+            if key in self.__dict__:
+                self.__dict__.pop(key, None)
+        self.dict_row.clear()
+        self.dict_group.clear()
+        self._config_cached = False
+        self.modified.clear()
+        cached_property.pop(self, 'servertime')
+
     def _check_config_mod(self):
         """
         Check if loading config with the correct mod
@@ -173,34 +206,17 @@ class AlasioConfigBase:
                            f'maybe wrong config?')
 
     def init_task(self):
-        # clear existing cache
-        # Note: self._overrides is persisted across init_task
-        for key in self._annotations:
-            if key in self.__dict__:
-                self.__dict__.pop(key, None)
-        self.dict_row.clear()
-        self.dict_group.clear()
-        self.modified.clear()
-        cached_property.pop(self, 'servertime')
-
         if self.is_template_config:
             return
 
-        table = AlasioConfigTable(self.config_name)
-        rows: "list[ConfigRow]" = table.select()
-        # start check job, run parallely and reuse connection
-        check_job = THREAD_POOL.start_thread_soon(self._check_config_mod)
+        self.config_cache()
 
-        dict_row = {}
-        dict_group = {}
-        for row in rows:
-            key = (row.task, row.group)
-            dict_row[key] = row.value
-        self.dict_row = dict_row
-        self.dict_group = {}
-
+        dict_row = self.dict_row
+        dict_group = self.dict_group
         for group, group_ref in self._iter_task_groups(self.task):
             key = (group_ref.task, group)
+            if key in dict_group:
+                continue
             model = self.mod.get_group_model(file=group_ref.file, cls=group_ref.cls)
             if model is None:
                 # DataInconsistent error, ignore to reduce runtime crash
@@ -224,9 +240,6 @@ class AlasioConfigBase:
             self._apply_override_const(key, value)
         for group, arg, value in deep_iter_depth2(self._override_config):
             self._apply_override_config(group, arg, value)
-
-        # wait jobs
-        check_job.get()
 
     def _cross_get_group(self, task, group):
         """
@@ -564,6 +577,7 @@ class AlasioConfigBase:
         Returns:
             tuple[list[Task], list[Task]]:
         """
+        self.config_cache()
         # build scheduler groups
         for task, _ in self.mod.iter_task_scheduler_group():
             self._cross_get_group(task, 'Scheduler')

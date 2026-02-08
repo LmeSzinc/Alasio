@@ -163,6 +163,7 @@ class TestAlasioConfigBase:
         assert len(config.modified) == 1
 
         # Re-init should clear modifications and reload from DB (which has default False)
+        config.release()
         config.init_task()
         assert config.Scheduler.Enable is False
         assert len(config.modified) == 0
@@ -206,13 +207,12 @@ class TestConfigModification:
 
         # Check modified dict is cleared after auto save
         assert len(config.modified) == 0
+        # Re-init and verify
+        config.init_task()
+        assert config.Scheduler.Enable is True
 
         # Verify persisted to DB
-        table = AlasioConfigTable(self.TEST_CONFIG_NAME)
-        row = table.select_one(task='Main', group='Scheduler')
-        assert row is not None
-
-        # Re-init and verify
+        config.release()
         config.init_task()
         assert config.Scheduler.Enable is True
 
@@ -222,6 +222,12 @@ class TestConfigModification:
         config.Scheduler.ServerUpdate = '12:00'
 
         # Re-init and verify
+        config.init_task()
+        assert config.Scheduler.Enable is True
+        assert config.Scheduler.ServerUpdate == '12:00'
+
+        # Verify persisted to DB
+        config.release()
         config.init_task()
         assert config.Scheduler.Enable is True
         assert config.Scheduler.ServerUpdate == '12:00'
@@ -252,7 +258,13 @@ class TestConfigModification:
         # Should save after context exit
         assert len(config.modified) == 0
 
-        # Verify persisted
+        # Re-init and verify
+        config.init_task()
+        assert config.Scheduler.Enable is True
+        assert config.Scheduler.ServerUpdate == '15:00'
+
+        # Verify persisted to DB
+        config.release()
         config.init_task()
         assert config.Scheduler.Enable is True
         assert config.Scheduler.ServerUpdate == '15:00'

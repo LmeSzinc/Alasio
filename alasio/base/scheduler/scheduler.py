@@ -200,6 +200,7 @@ class AlasioScheduler:
         Callback function on scheduler idle
         """
         self.device.on_idle()
+        self.config.release()
         self._send_scheduler_running(None)
 
     def _wait_future(self, task: str, future: datetime):
@@ -263,6 +264,7 @@ class AlasioScheduler:
         if backend.scheduler_stopping.is_set():
             raise SchedulerStop
         # get next task
+        self.config.release()
         try:
             task = self.config.get_next_task()
         except RequestHumanTakeover:
