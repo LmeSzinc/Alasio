@@ -112,10 +112,10 @@ class AlasioConfigBase:
         # Key: (task, group). Value: group data in messagepack
         # We don't update config realtime, otherwise things will get really complex if user modify configs
         # when task is running.
-        self.dict_value: "dict[tuple[str, str], bytes]" = {}
+        self.dict_row: "dict[tuple[str, str], bytes]" = {}
         # A cache of validated group object
         # Key: (task, group). Value: validated megspec.Struct object
-        self.dict_obj: "dict[tuple[str, str], Struct]" = {}
+        self.dict_group: "dict[tuple[str, str], Struct]" = {}
         # Modified configs. Key: (task, group, arg). Value: ConfigSetEvent.
         # All variable modifications will be record here and saved in method `save()`.
         self.modified: "dict[tuple[str, str, str], ConfigSetEvent]" = {}
@@ -177,8 +177,8 @@ class AlasioConfigBase:
         for key in self._annotations:
             if key in self.__dict__:
                 self.__dict__.pop(key, None)
-        self.dict_value.clear()
-        self.dict_obj.clear()
+        self.dict_row.clear()
+        self.dict_group.clear()
         self.modified.clear()
         cached_property.pop(self, 'servertime')
 
@@ -190,13 +190,13 @@ class AlasioConfigBase:
         # start check job, run parallely and reuse connection
         check_job = THREAD_POOL.start_thread_soon(self._check_config_mod)
 
-        dict_value = {}
-        dict_obj = {}
+        dict_row = {}
+        dict_group = {}
         for row in rows:
             key = (row.task, row.group)
-            dict_value[key] = row.value
-        self.dict_value = dict_value
-        self.dict_obj = {}
+            dict_row[key] = row.value
+        self.dict_row = dict_row
+        self.dict_group = {}
 
         for group, group_ref in self._iter_task_groups(self.task):
             key = (group_ref.task, group)
@@ -206,14 +206,14 @@ class AlasioConfigBase:
                 continue
             # using dict.get() as user config is more likely to be the same as default
             # b'\x80' is {} in messagepack
-            value = dict_value.get(key, b'\x80')
+            value = dict_row.get(key, b'\x80')
             obj, errors = load_msgpack_with_default(value, model=model)
             # for error in errors:
             #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
             if obj is NODEFAULT:
                 logger.warning(f'Class "{group_ref.cls}" in "{group_ref.file}" cannot be default constructed')
                 continue
-            dict_obj[key] = obj
+            dict_group[key] = obj
 
             # create proxy on groups, so we can catch arg set
             obj = ModelProxy(_obj=obj, _config=self, _task=group_ref.task, _group=group)
@@ -227,6 +227,52 @@ class AlasioConfigBase:
         # wait jobs
         check_job.get()
 
+    def _cross_get_group(self, task, group):
+        """
+        Get config group from other task
+
+        Args:
+            task (str):
+            group (str):
+
+        Returns:
+            Struct | NODEFAULT:
+        """
+        key = (task, group)
+        obj = self.dict_group.get(key, None)
+        if obj is not None:
+            return obj
+        # build group obj
+        index = self.mod.task_index_data()
+        task_ref = index.get(task, None)
+        if task_ref is None:
+            logger.warning(f'cross_get failed, no such task: "{task}"')
+            return NODEFAULT
+        group_ref = task_ref.group.get(group, None)
+        if group_ref is None:
+            # check global_bind
+            global_bind = index.get('_global_bind', None)
+            if global_bind is not None:
+                group_ref = global_bind.group.get(group, None)
+                if group_ref is None:
+                    logger.warning(f'cross_get failed, no such group: "{task}.{group}"')
+                    return NODEFAULT
+
+        model = self.mod.get_group_model(file=group_ref.file, cls=group_ref.cls)
+        if model is None:
+            # DataInconsistent error, ignore to reduce runtime crash
+            return NODEFAULT
+        value = self.dict_row.get(key, b'\x80')
+        obj, errors = load_msgpack_with_default(value, model=model)
+        # for error in errors:
+        #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+        if obj is NODEFAULT:
+            logger.warning(f'Class "{group_ref.cls}" in "{group_ref.file}" cannot be default constructed')
+            return NODEFAULT
+        # no proxy on groups
+        self.dict_group[key] = obj
+        return obj
+
     def cross_get(self, task, group, arg, default=None):
         """
         Get config from other task
@@ -237,38 +283,9 @@ class AlasioConfigBase:
             arg (str):
             default:
         """
-        key = (task, group)
-        obj = self.dict_obj.get(key, None)
-        if obj is None:
-            # build group obj
-            index = self.mod.task_index_data()
-            task_ref = index.get(task, None)
-            if task_ref is None:
-                logger.warning(f'cross_get failed, no such task: "{task}"')
-                return default
-            group_ref = task_ref.group.get(group, None)
-            if group_ref is None:
-                # check global_bind
-                global_bind = index.get('_global_bind', None)
-                if global_bind is not None:
-                    group_ref = global_bind.group.get(group, None)
-                    if group_ref is None:
-                        logger.warning(f'cross_get failed, no such group: "{task}.{group}"')
-                        return default
-
-            model = self.mod.get_group_model(file=group_ref.file, cls=group_ref.cls)
-            if model is None:
-                # DataInconsistent error, ignore to reduce runtime crash
-                return default
-            value = self.dict_value.get(key, b'\x80')
-            obj, errors = load_msgpack_with_default(value, model=model)
-            # for error in errors:
-            #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
-            if obj is NODEFAULT:
-                logger.warning(f'Class "{group_ref.cls}" in "{group_ref.file}" cannot be default constructed')
-                return default
-            self.dict_obj[key] = obj
-
+        obj = self._cross_get_group(task, group)
+        if obj is NODEFAULT:
+            return default
         # get group.arg
         return getattr(obj, arg, default)
 
@@ -356,6 +373,27 @@ class AlasioConfigBase:
             arg (str):
             value:
         """
+        obj = self._cross_get_group(task, group)
+        if obj is NODEFAULT:
+            logger.warning(f'cross_set failed, no such group: "{task}.{group}"')
+            return
+        # unwrap proxy
+        if type(obj) is ModelProxy:
+            obj = obj._obj
+        try:
+            old = getattr(obj, arg)
+        except AttributeError:
+            logger.warning(f'cross_set failed, group "{task}.{group}" does not have arg: "{arg}"')
+            return
+        # same as before, no need to set
+        if old == value:
+            return
+        # set
+        try:
+            setattr(obj, arg, value)
+        except TypeError:
+            logger.warning(f'cross_set failed, group "{task}.{group}" does not have arg: "{arg}"')
+            return
         return self.register_modify(task, group, arg, value)
 
     def __getattr__(self, item):
@@ -376,7 +414,7 @@ class AlasioConfigBase:
         setattr(self, item, obj)
         # Apply config overrides
         for group, arg, value in deep_iter_depth2(self._override_config):
-            self._apply_overide_config(group, arg, value)
+            self._apply_override_config(group, arg, value)
         return obj
 
     def save(self):
@@ -521,7 +559,13 @@ class AlasioConfigBase:
         raise TaskStop(message)
 
     def get_next_task(self) -> Task:
-        pending_task, waiting_task = self.mod.get_task_schedule(self.config_name)
+        # build scheduler groups
+        for task, _ in self.mod.iter_task_scheduler_group():
+            self._cross_get_group(task, 'Scheduler')
+        # calculate scheduler
+        pending_task, waiting_task = self.mod.get_task_schedule(
+            self.config_name, dict_row=self.dict_row, dict_group=self.dict_group)
+        # get first task
         if pending_task:
             logger.info(f'Pending tasks: {[f.TaskName for f in pending_task]}')
             task = pending_task[0]

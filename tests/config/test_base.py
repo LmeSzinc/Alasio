@@ -175,7 +175,7 @@ class TestAlasioConfigBase:
         config.init_task()
 
         # dict_value should be empty
-        assert len(config.dict_value) == 0
+        assert len(config.dict_row) == 0
 
     def test_init_task_with_invalid_task(self, config_cls):
         """Test initialization with invalid task raises KeyError"""

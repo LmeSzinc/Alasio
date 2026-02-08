@@ -678,10 +678,33 @@ class Mod:
             dict_priority[task] = i
         return dict_priority
 
+    def iter_task_scheduler_group(self, dict_task_priority=None):
+        """
+        Args:
+            dict_task_priority (dict[str, int] | None):
+
+        Yields:
+            tuple[str, ModelGroupRef]:
+        """
+        if not dict_task_priority:
+            dict_task_priority = self._dict_task_priority
+        group_name = 'Scheduler'
+        for task_name, task_data in self.task_index_data().items():
+            if task_name not in dict_task_priority:
+                continue
+            model_ref = task_data.group.get(group_name, None)
+            if not model_ref:
+                continue
+            # skip cross-task ref
+            if model_ref.task != task_name:
+                continue
+            yield task_name, model_ref
+
     def get_task_schedule(
             self,
             config_name,
             dict_row: "dict[tuple[str, str], bytes]" = None,
+            dict_group: "dict[tuple[str, str], Struct]" = None,
             dict_task_priority: "dict[str, int]" = None,
 
     ) -> "tuple[list[Task], list[Task]]":
@@ -689,6 +712,7 @@ class Mod:
         Args:
             config_name:
             dict_row:
+            dict_group:
             dict_task_priority:
 
         Returns:
@@ -707,43 +731,42 @@ class Mod:
         if not dict_task_priority:
             dict_task_priority = self._dict_task_priority
         now = datetime.now().astimezone()
-        for task_name, task_data in self.task_index_data().items():
-            model_ref = task_data.group.get(group_name, None)
-            if not model_ref:
-                continue
-            # skip cross-task ref
-            if model_ref.task != task_name:
-                continue
-            if task_name not in dict_task_priority:
-                continue
-
-            model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
-            if model is None:
-                continue
-
-            value = dict_row.get((task_name, group_name), NODEFAULT)
-            if value is NODEFAULT:
-                # construct a default value from model
-                try:
-                    data = model()
-                except Exception as e:
-                    logger.warning(
-                        f'DataInconsistent: Class "{model_ref.cls}" in "{model_ref.file}" '
-                        f'failed to construct: {e}')
-                    continue
+        for task_name, model_ref in self.iter_task_scheduler_group(dict_task_priority):
+            # try to get from dict_group
+            if dict_group:
+                group = dict_group.get((task_name, group_name), None)
             else:
-                # validate value
-                data, errors = load_msgpack_with_default(value, model=model)
-                # for error in errors:
-                #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
-                if data is NODEFAULT:
-                    # Failed to convert
+                group = None
+
+            # try to get from dict_row
+            if group is None:
+                model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
+                if model is None:
                     continue
+                value = dict_row.get((task_name, group_name), NODEFAULT)
+                if value is NODEFAULT:
+                    # construct a default value from model
+                    try:
+                        data = model()
+                    except Exception as e:
+                        logger.warning(
+                            f'DataInconsistent: Class "{model_ref.cls}" in "{model_ref.file}" '
+                            f'failed to construct: {e}')
+                        continue
+                else:
+                    # validate value
+                    data, errors = load_msgpack_with_default(value, model=model)
+                    # for error in errors:
+                    #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+                    if data is NODEFAULT:
+                        # Failed to convert
+                        continue
+                group = data
             # set
             try:
-                if not data.Enable:
+                if not group.Enable:
                     continue
-                is_waiting = data.NextRun > now
+                is_waiting = group.NextRun > now
             except AttributeError:
                 # this shouldn't happen, unless Scheduler is not properly defined
                 continue
@@ -751,9 +774,9 @@ class Mod:
                 # TypeError: can't compare offset-naive and offset-aware datetimes
                 continue
             if is_waiting:
-                list_waiting.append(Task(TaskName=task_name, NextRun=data.NextRun))
+                list_waiting.append(Task(TaskName=task_name, NextRun=group.NextRun))
             else:
-                list_pending.append(Task(TaskName=task_name, NextRun=data.NextRun))
+                list_pending.append(Task(TaskName=task_name, NextRun=group.NextRun))
 
         list_waiting.sort(key=lambda x: (x.NextRun, dict_task_priority.get(x.TaskName, 0)))
         list_pending.sort(key=lambda x: dict_task_priority.get(x.TaskName, 0))
