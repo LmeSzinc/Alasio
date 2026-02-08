@@ -1,4 +1,4 @@
-from alasio.config.const import Const
+from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.config_dev.format.format_yaml import yaml_formatter
 from alasio.config_dev.parse.base import DefinitionError
@@ -14,7 +14,7 @@ from alasio.logger import logger
 
 
 class ConfigGenerator(ParseArgs, ParseTasks):
-    def __init__(self, file):
+    def __init__(self, entry, file):
         """
         维护一个nav下所有文件的数据一致性，一个nav对应前端导航组件中的一个组。
         数据文件夹的目录结构应该像这样：
@@ -61,9 +61,11 @@ class ConfigGenerator(ParseArgs, ParseTasks):
             你不应该修改这个文件。
 
         Args:
+            entry (ModEntryInfo):
             file (PathStr): Absolute filepath to {nav}.args.yaml
         """
         super().__init__(file)
+        self.entry = entry
         self.folder = ''
         # real data will be set in _generate_nav_config_json()
         # key: {card_name}.{arg_name}
@@ -154,7 +156,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         """
         old = deep_get(self._i18n_old, [group_name, arg_name], default={})
         new = {}
-        for lang in Const.GUI_LANGUAGE:
+        for lang in self.entry.gui_language:
             # name, name must not be empty, default to {group_name}.{arg_name}
             key = [lang, 'name']
             value = deep_get(old, key, default='')
@@ -169,7 +171,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
             deep_set(new, key, value)
         # option
         if arg.option:
-            for lang in Const.GUI_LANGUAGE:
+            for lang in self.entry.gui_language:
                 inline = True
                 for option in arg.option:
                     default = str(option)
@@ -214,7 +216,7 @@ class ConfigGenerator(ParseArgs, ParseTasks):
         """
         old = deep_get(self._i18n_old, [group_name, arg_name], default={})
         new = {}
-        for lang in Const.GUI_LANGUAGE:
+        for lang in self.entry.gui_language:
             # name, name must not be empty, default to {group_name}
             key = [lang, 'name']
             value = deep_get(old, key, default='')

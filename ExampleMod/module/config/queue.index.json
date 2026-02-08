@@ -1,44 +1,30 @@
 {
   "Alas": {
     "zh-CN": "Alas",
-    "zh-TW": "Alas",
-    "en-US": "Alas",
-    "ja-JP": "Alas"
+    "en-US": "Alas"
   },
   "General": {
     "zh-CN": "General",
-    "zh-TW": "General",
-    "en-US": "General",
-    "ja-JP": "General"
+    "en-US": "General"
   },
   "Main": {
     "zh-CN": "Main",
-    "zh-TW": "Main",
-    "en-US": "Main",
-    "ja-JP": "Main"
+    "en-US": "Main"
   },
   "OpsiExplore": {
     "zh-CN": "OpsiExplore",
-    "zh-TW": "OpsiExplore",
-    "en-US": "OpsiExplore",
-    "ja-JP": "OpsiExplore"
+    "en-US": "OpsiExplore"
   },
   "OpsiDaily": {
     "zh-CN": "OpsiDaily",
-    "zh-TW": "OpsiDaily",
-    "en-US": "OpsiDaily",
-    "ja-JP": "OpsiDaily"
+    "en-US": "OpsiDaily"
   },
   "OpsiGeneral": {
     "zh-CN": "OpsiGeneral",
-    "zh-TW": "OpsiGeneral",
-    "en-US": "OpsiGeneral",
-    "ja-JP": "OpsiGeneral"
+    "en-US": "OpsiGeneral"
   },
   "OpsiAshAssist": {
     "zh-CN": "OpsiAshAssist",
-    "zh-TW": "OpsiAshAssist",
-    "en-US": "OpsiAshAssist",
-    "ja-JP": "OpsiAshAssist"
+    "en-US": "OpsiAshAssist"
   }
 }

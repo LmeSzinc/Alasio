@@ -19,6 +19,7 @@ class CrossNavGenerator:
         model.index.json
         {nav}_i18n.json
         """
+        self.entry = entry
         self.root = PathStr.new(entry.root).abspath()
         self.path_config: PathStr = self.root.joinpath(entry.path_config)
 
@@ -45,7 +46,7 @@ class CrossNavGenerator:
             if folder.name.startswith('_'):
                 continue
             for file in folder.iter_files(ext='.args.yaml'):
-                parser = ConfigGenerator(file)
+                parser = ConfigGenerator(self.entry, file)
                 parser.folder = folder.name
                 # nav
                 nav = parser.nav_name

@@ -2,9 +2,7 @@
   "Game": {
     "_info": {
       "zh-CN": {"name": "Game", "help": ""},
-      "zh-TW": {"name": "Game", "help": ""},
-      "en-US": {"name": "Game", "help": ""},
-      "ja-JP": {"name": "Game", "help": ""}
+      "en-US": {"name": "Game", "help": ""}
     },
     "PackageName": {
       "zh-CN": {
@@ -14,21 +12,7 @@
           "auto": "auto"
         }
       },
-      "zh-TW": {
-        "name": "Game.PackageName",
-        "help": "",
-        "option_i18n": {
-          "auto": "auto"
-        }
-      },
       "en-US": {
-        "name": "Game.PackageName",
-        "help": "",
-        "option_i18n": {
-          "auto": "auto"
-        }
-      },
-      "ja-JP": {
         "name": "Game.PackageName",
         "help": "",
         "option_i18n": {
@@ -44,21 +28,7 @@
           "disabled": "disabled"
         }
       },
-      "zh-TW": {
-        "name": "Game.ServerName",
-        "help": "",
-        "option_i18n": {
-          "disabled": "disabled"
-        }
-      },
       "en-US": {
-        "name": "Game.ServerName",
-        "help": "",
-        "option_i18n": {
-          "disabled": "disabled"
-        }
-      },
-      "ja-JP": {
         "name": "Game.ServerName",
         "help": "",
         "option_i18n": {

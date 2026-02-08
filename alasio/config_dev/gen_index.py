@@ -1,6 +1,5 @@
 from collections import defaultdict
 
-from alasio.config.const import Const
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.gen_cross import CrossNavGenerator
@@ -281,13 +280,9 @@ class IndexGenerator(CrossNavGenerator):
         for config in iter_configs():
             for group_name, group_data in config.i18n_data.items():
                 group_name = self.dict_group_variant2base.get(group_name, group_name)
-                i18n = deep_get(group_data, ['_info'], default={})
                 # get "name" from a nested i18n dict
-                for lang, field_data in i18n.items():
-                    try:
-                        name = field_data['name']
-                    except KeyError:
-                        name = group_name
+                for lang in self.entry.gui_language:
+                    name = deep_get(group_data, keys=['_info', lang, 'name'], default=group_name)
                     deep_set(out, [group_name, lang], name)
 
         return out
@@ -312,7 +307,7 @@ class IndexGenerator(CrossNavGenerator):
                     empty = False
                     break
             if config.tasks_data and not empty:
-                for lang in Const.GUI_LANGUAGE:
+                for lang in self.entry.gui_language:
                     key = [nav_name, '_info', lang]
                     value = deep_get(old, key, default='')
                     if not value:
@@ -366,7 +361,7 @@ class IndexGenerator(CrossNavGenerator):
             for task_name, task_data in config.tasks_data.items():
                 if not task_data.groups:
                     continue
-                for lang in Const.GUI_LANGUAGE:
+                for lang in self.entry.gui_language:
                     key = [task_name, lang]
                     value = deep_get(old, key, default='')
                     if not value:
@@ -516,6 +511,5 @@ class IndexGenerator(CrossNavGenerator):
 if __name__ == '__main__':
     env.set_project_root(env.ALASIO_ROOT)
     alasio = ModEntryInfo.alasio()
-    Const.GUI_LANGUAGE = alasio.gui_language
     self = IndexGenerator(alasio)
     self.generate()
