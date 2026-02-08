@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Dict
 
 from alasio.backend.worker.bridge import BackendBridge
+from alasio.backend.worker.event import ConfigEvent
 from alasio.base.exception import *
 from alasio.base.scheduler.configwatcher import ConfigWatcher
 from alasio.base.scheduler.inflect import Inflection
@@ -171,6 +172,36 @@ class AlasioScheduler:
     def _save_error_log(self):
         pass
 
+    def _send_scheduler_running(self, task):
+        """
+        send running task to backend
+
+        Args:
+            task (str | None):
+        """
+        backend = BackendBridge()
+        if backend.inited:
+            running = task if task else None
+            event = ConfigEvent(t='TaskQueue', v={'running': running})
+            backend.send(event)
+
+    def _on_task_switch(self, task):
+        """
+        Callback function before running a task
+
+        Args:
+            task (str | None):
+        """
+        self.device.on_task_switch()
+        self._send_scheduler_running(task)
+
+    def _on_idle(self):
+        """
+        Callback function on scheduler idle
+        """
+        self.device.on_idle()
+        self._send_scheduler_running(None)
+
     def _wait_future(self, task: str, future: datetime):
         """
         Args:
@@ -204,7 +235,7 @@ class AlasioScheduler:
             logger.info('Stay there during wait')
         else:
             logger.warning(f'Unknown Optimization.WhenTaskQueueEmpty={method}, treat as stay_there')
-        self.device.on_idle()
+        self._on_idle()
         if run:
             # re-log, incase task logs flush wait message
             logger.info(f'Wait until {future} for task `{task}`')
@@ -251,7 +282,7 @@ class AlasioScheduler:
 
         # Run
         logger.info(f'Scheduler: Start task `{task.TaskName}`')
-        self.device.on_task_switch()
+        self._on_task_switch(task.TaskName)
         logger.hr0(task.TaskName)
         success = self._run_task(task.TaskName)
         logger.info(f'Scheduler: End task `{task.TaskName}`')
@@ -276,8 +307,11 @@ class AlasioScheduler:
 
     def run(self):
         logger.info(f'Start scheduler loop: {self.config_name}')
+        self._on_task_switch(None)
         while 1:
             try:
                 self._task_loop()
             except SchedulerStop:
                 break
+        self._on_task_switch(None)
+        self._on_idle()

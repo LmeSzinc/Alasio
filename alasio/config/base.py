@@ -5,6 +5,7 @@ from typing import Any
 from msgspec import NODEFAULT, Struct
 
 from alasio.backend.worker.bridge import BackendBridge
+from alasio.backend.worker.event import ConfigEvent
 from alasio.base.exception import RequestHumanTakeover, ScriptError, TaskStop
 from alasio.base.pretty import dict2kv
 from alasio.base.servertime import ServerTime, nearest_future, random_time
@@ -558,13 +559,28 @@ class AlasioConfigBase:
         """
         raise TaskStop(message)
 
-    def get_next_task(self) -> Task:
+    def get_task_schedule(self):
+        """
+        Returns:
+            tuple[list[Task], list[Task]]:
+        """
         # build scheduler groups
         for task, _ in self.mod.iter_task_scheduler_group():
             self._cross_get_group(task, 'Scheduler')
         # calculate scheduler
         pending_task, waiting_task = self.mod.get_task_schedule(
             self.config_name, dict_row=self.dict_row, dict_group=self.dict_group)
+        # send backend event
+        backend = BackendBridge()
+        if backend.inited:
+            # note that pending_task and waiting_task may contain running task
+            # frontend should remove it
+            data = {'pending': pending_task, 'waiting': waiting_task}
+            backend.send(ConfigEvent(t='TaskQueue', v=data))
+        return pending_task, waiting_task
+
+    def get_next_task(self) -> Task:
+        pending_task, waiting_task = self.get_task_schedule()
         # get first task
         if pending_task:
             logger.info(f'Pending tasks: {[f.TaskName for f in pending_task]}')
@@ -655,6 +671,7 @@ class AlasioConfigBase:
 
         logger.info(f"Delay task `{task}` to {run} ({kv})")
         self.cross_set(task, 'Scheduler', 'NextRun', run)
+        self.get_task_schedule()
 
     def is_task_enabled(self, task):
         return bool(self.cross_get(task, 'Scheduler', 'Enable', default=False))

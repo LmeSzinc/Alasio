@@ -238,10 +238,6 @@ class Log(BaseTopic):
 
     @async_reactive_nocache
     async def data(self):
-        """
-        Returns:
-            list[dict]: list of structlog data
-        """
         # reactive dependency changed, unsubscribe last cache
         if self.cache is not None:
             self.cache.unsubscribe(self)

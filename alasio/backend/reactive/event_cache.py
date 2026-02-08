@@ -51,15 +51,28 @@ class EventCache:
         for ch in self.subscribers:
             ch.server.send_lossy(data)
 
+    def _apply_event_update(self, event: ConfigEvent):
+        """
+        Internal method to apply event.
+        self._data_lock is already held.
+
+        Returns:
+            bool: If data changed
+        """
+        if event.k:
+            deep_set(self.data, keys=event.k, value=event.v)
+        else:
+            self.data = event.v
+        return True
+
     def on_event(self, event: ConfigEvent, trio_token: TrioToken):
         """
         [子线程 / Pipe接收端]
         """
         with self._data_lock:
-            if event.k:
-                deep_set(self.data, keys=event.k, value=event.v)
-            else:
-                self.data = event.v
+            modified = self._apply_event_update(event)
+            if not modified:
+                return
             # 只要收到更新，就刷新时间
             self._lastrun = time.monotonic()
             self._running = True

@@ -1,5 +1,7 @@
 from typing import List, Optional, TypedDict
 
+from msgspec import NODEFAULT
+
 from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
 from alasio.backend.reactive.event_cache import ConfigEventCache
 from alasio.backend.reactive.rx_trio import async_reactive_nocache
@@ -36,16 +38,31 @@ class TaskQueueSource(ConfigEventCache):
         pending_task, waiting_task = mod.get_task_schedule(self.config_name)
         return {'running': None, 'pending': pending_task, 'waiting': waiting_task}
 
+    def _apply_event_update(self, event: ConfigEvent):
+        # simple merge
+        # scheduler updates 'running'
+        # config updates 'pending', 'waiting'
+        value = event.v
+        modified = False
+        for key in ['running', 'pending', 'waiting']:
+            if key not in value:
+                continue
+            before = self.data.get(key, NODEFAULT)
+            after = value[key]
+            # stop broadcast if not modified
+            if before != after:
+                self.data[key] = after
+                modified = True
+        # modify to send full event
+        event.v = self.data
+        return modified
+
 
 class TaskQueue(BaseTopic):
     cache: "TaskQueueSource | None" = None
 
     @async_reactive_nocache
     async def data(self):
-        """
-        Returns:
-            list[dict]: list of structlog data
-        """
         # reactive dependency changed, unsubscribe last cache
         if self.cache is not None:
             self.cache.unsubscribe(self)

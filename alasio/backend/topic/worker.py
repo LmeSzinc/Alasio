@@ -7,6 +7,7 @@ from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import ResponseEvent, RpcValueError
 from alasio.backend.topic.log import LogCache
+from alasio.backend.topic.que import TaskQueueSource
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.worker.manager import WORKER_STATUS, WorkerManager
@@ -41,10 +42,14 @@ class BackendWorkerManager(WorkerManager):
             pass
 
     def on_config_event(self, event: ConfigEvent):
-        if event.t == 'Log':
+        topic = event.t
+        if topic == 'Log':
             # cache and broadcast log
             cache = LogCache(event.c)
             cache.on_event(event)
+        elif topic == 'TaskQueue':
+            cache = TaskQueueSource(event.c)
+            cache.on_event(event, self.trio_token)
         else:
             # broadcast other config events to msgbus
             try:
