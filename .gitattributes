@@ -1,7 +1,7 @@
 # gitattributes from:
 # https://github.com/gitattributes/gitattributes
 
-* text=auto
+* text=auto eol=lf
 
 
 # Basic .gitattributes for a python repo.
