@@ -17,7 +17,7 @@
     status?: WORKER_STATUS;
     deviceType?: string;
     deviceSerial?: string;
-    taskRunning?: TaskItem;
+    taskRunning?: string;
     taskNext?: TaskItem[];
     onOverviewClick?: () => void;
     onDeviceClick?: () => void;
@@ -140,7 +140,7 @@
       {#if taskRunning}
         <div class="flex items-center gap-1">
           <ConfigStatus {status} displayIdle={true} iconClass="h-3 w-3" class="shrink-0" />
-          <span class="flex-1 truncate text-xs">{taskRunning.TaskName}</span>
+          <span class="flex-1 truncate text-xs">{taskRunning}</span>
           <span class="min-w-8 shrink-0 text-right text-xs">now</span>
         </div>
       {/if}

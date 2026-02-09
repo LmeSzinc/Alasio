@@ -14,7 +14,7 @@ from alasio.config.entry.mod import Task
 
 
 class TaskQueueData(TypedDict):
-    running: Optional[Task]
+    running: Optional[str]
     pending: List[Task]
     waiting: List[Task]
 

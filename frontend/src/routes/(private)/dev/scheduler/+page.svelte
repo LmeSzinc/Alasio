@@ -69,13 +69,10 @@
   // Generate task list based on input
   const taskRunning = $derived.by(() => {
     if (taskListInput.value === "running-only" || taskListInput.value === "running-and-next") {
-      return { TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) };
+      return "CurrentTask";
     }
     if (taskListInput.value === "long-names") {
-      return {
-        TaskName: "VeryLongTaskNameThatShouldBeTruncatedInTheUI",
-        NextRun: Math.floor(Date.now() / 1000),
-      };
+      return "VeryLongTaskNameThatShouldBeTruncatedInTheUI";
     }
     return undefined;
   });
@@ -163,7 +160,7 @@
               {status}
               deviceType="Emulator"
               deviceSerial="127.0.0.1:5555"
-              taskRunning={{ TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) }}
+              taskRunning="CurrentTask"
               taskNext={[
                 { TaskName: "NextTask1", NextRun: Math.floor(Date.now() / 1000) + 3600 },
                 { TaskName: "NextTask2", NextRun: Math.floor(Date.now() / 1000) + 7200 },
@@ -201,10 +198,7 @@
               {status}
               deviceType="VeryLongEmulatorType"
               deviceSerial="127.0.0.1:5555-with-very-long-serial-number"
-              taskRunning={{
-                TaskName: "VeryLongTaskNameThatWillBeTruncated",
-                NextRun: Math.floor(Date.now() / 1000),
-              }}
+              taskRunning="VeryLongTaskNameThatWillBeTruncated"
               taskNext={[
                 {
                   TaskName: "AnotherVeryLongTaskNameForTesting",
@@ -252,7 +246,7 @@
             <Scheduler
               config_name="NoDevice"
               {status}
-              taskRunning={{ TaskName: "Task", NextRun: Math.floor(Date.now() / 1000) }}
+              taskRunning="Task"
               taskNext={[{ TaskName: "Next", NextRun: Math.floor(Date.now() / 1000) + 3600 }]}
             />
           {/each}

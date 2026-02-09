@@ -4,7 +4,7 @@ export type TaskItem = {
 };
 
 export type TaskQueueData = {
-  running: TaskItem | null;
+  running: string | null;
   pending: TaskItem[];
   waiting: TaskItem[];
 };

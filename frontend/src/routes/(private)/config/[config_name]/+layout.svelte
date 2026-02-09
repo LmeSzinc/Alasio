@@ -74,10 +74,10 @@
   const status = $derived(workerClient.data?.[config_name] || "idle");
 
   const taskQueueClient = useTopic<TaskQueueData>("TaskQueue");
-  const taskRunning = $derived(taskQueueClient.data?.running ?? undefined);
+  const taskRunning = $derived(taskQueueClient.data?.running || undefined);
   const taskNext = $derived(
     [...(taskQueueClient.data?.pending || []), ...(taskQueueClient.data?.waiting || [])].filter(
-      (task) => task.TaskName !== taskRunning?.TaskName,
+      (task) => task.TaskName !== taskRunning,
     ),
   );
 </script>
