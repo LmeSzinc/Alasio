@@ -59,6 +59,20 @@
     }
   });
 
+  let isStoppingDebouncing = $state(false);
+  $effect(() => {
+    if (status === "scheduler-stopping") {
+      isStoppingDebouncing = true;
+      const timer = setTimeout(() => {
+        isStoppingDebouncing = false;
+      }, 1000);
+      return () => {
+        clearTimeout(timer);
+        isStoppingDebouncing = false;
+      };
+    }
+  });
+
   function handleDeviceEdit(e: Event) {
     e.stopPropagation();
     onDeviceClick?.();
@@ -185,8 +199,12 @@
       <ActionKill onclick={handleKill} />
     {:else if displayStatus.value === "scheduler-stopping"}
       <!-- scheduler-stopping, show continue and kill button-->
-      <ActionStop onclick={handleSchedulerContinue} title={t.Scheduler.SchedulerContinue()} />
-      <ActionKill onclick={handleKill} />
+      <ActionStop
+        disabled={isStoppingDebouncing}
+        onclick={handleSchedulerContinue}
+        title={t.Scheduler.SchedulerContinue()}
+      />
+      <ActionKill disabled={isStoppingDebouncing} onclick={handleKill} />
     {:else if displayStatus.value === "killing" || displayStatus.value === "force-killing" || displayStatus.value === "disconnected"}
       <!-- killing, show kill button-->
       <ActionStop disabled title={t.Scheduler.SchedulerStop()} />

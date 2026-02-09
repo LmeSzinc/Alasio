@@ -246,22 +246,24 @@ class AlasioScheduler:
         backend = BackendBridge()
         count = 0
         while 1:
-            time.sleep(1)
+            time.sleep(0.5)
             count += 1
-            # check scheduler_stopping every 1s
+            # check scheduler_stopping every 0.5s
             if backend.scheduler_stopping.is_set():
+                logger.info('SchedulerStop: backend request scheduler-stopping')
                 raise SchedulerStop
             # check if reached future
             if now() > future:
                 return True
             # check if config modified every 5s
-            if count % 5 == 0:
+            if count % 10 == 0:
                 if watcher.is_modified():
                     return False
 
     def _task_loop(self):
         backend = BackendBridge()
         if backend.scheduler_stopping.is_set():
+            logger.info('SchedulerStop: backend request scheduler-stopping')
             raise SchedulerStop
         # get next task
         self.config.release()
