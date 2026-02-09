@@ -47,6 +47,18 @@
     return taskNext?.slice(0, limit) || [];
   });
 
+  let showNoTask = $state(false);
+  $effect(() => {
+    if (taskRunning || nextTasksToShow.length > 0) {
+      showNoTask = false;
+    } else {
+      const timer = setTimeout(() => {
+        showNoTask = true;
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  });
+
   function handleDeviceEdit(e: Event) {
     e.stopPropagation();
     onDeviceClick?.();
@@ -131,11 +143,7 @@
 
   <!-- Task list -->
   <div class="flex h-12 flex-col text-sm">
-    {#if !taskRunning && nextTasksToShow.length === 0}
-      <div class="text-muted-foreground flex items-center justify-center gap-1">
-        <span class="shrink-0 text-xs">{t.Scheduler.NoTask()}</span>
-      </div>
-    {:else}
+    {#if taskRunning || nextTasksToShow.length > 0}
       <!-- Task running -->
       {#if taskRunning}
         <div class="flex items-center gap-1">
@@ -156,6 +164,10 @@
           <NextRun timestamp={task.NextRun} class="min-w-8 shrink-0 text-right text-xs" />
         </div>
       {/each}
+    {:else if showNoTask}
+      <div class="text-muted-foreground flex items-center justify-center gap-1">
+        <span class="shrink-0 text-xs">{t.Scheduler.NoTask()}</span>
+      </div>
     {/if}
   </div>
 
