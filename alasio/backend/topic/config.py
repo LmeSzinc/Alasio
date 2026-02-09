@@ -90,10 +90,13 @@ class ConfigArg(BaseTopic):
         return data
 
     @on_msgbus_config_event('ConfigArg')
-    async def on_config_event(self, event: ConfigSetEvent):
+    async def on_config_event(self, event: "ConfigSetEvent | dict"):
         """
         Handle config event from msgbus
         """
+        # we may receive dict from worker, because it's decoded from bytes
+        if type(event) is dict:
+            event = ConfigSetEvent(**event)
         key = self.dict_config_to_topic.get((event.task, event.group, event.arg))
         if key is None:
             # not displaying this key

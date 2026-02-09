@@ -448,6 +448,11 @@ class AlasioConfigBase:
         else:
             # batch set
             self.mod.config_batch_set(self.config_name, events)
+        # broadcast to backend
+        backend = BackendBridge()
+        if backend.inited:
+            for event in events:
+                backend.send(ConfigEvent(t='ConfigArg', v=event))
 
     def batch_set(self) -> BatchSetContext:
         """
