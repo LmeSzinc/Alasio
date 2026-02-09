@@ -18,7 +18,7 @@
     class?: string;
     onNavigate?: () => void;
   };
-  let { class: className, onNavigate = () => {} }: $$props = $props();
+  let { class: className, onNavigate }: $$props = $props();
 
   // Easter egg spinning
   const afspin = $derived.by(() => {
@@ -68,8 +68,7 @@
     // push to `/config/{config_name}`, target page will do rpc call
     const encodedConfigName = encodeURIComponent(config.name);
     await goto(`/config/${encodedConfigName}/overview`);
-    // additional callback
-    onNavigate();
+    onNavigate?.();
   }
 
   // Determine if settings is active
@@ -78,6 +77,7 @@
   // Navigate to settings
   function handleSettings() {
     goto("/dev/config");
+    onNavigate?.();
   }
 </script>
 

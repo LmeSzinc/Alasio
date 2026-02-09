@@ -70,7 +70,7 @@
         <Sheet.Root bind:open={isSheetOpen}>
           <Sheet.Content side="left" class="max-width-85vw aside-shadow bg-card">
             <div class="flex h-full">
-              <ConfigAside onNavigate={closeSheet} class="border-border border-r" />
+              <ConfigAside class="border-border border-r" />
               <div class="flex-1">
                 {@render NavContext.snippet?.()}
               </div>
