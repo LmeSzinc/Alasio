@@ -244,6 +244,7 @@ class AlasioScheduler:
         # wait
         watcher = ConfigWatcher(self.config_name).init()
         backend = BackendBridge()
+        backend.send_worker_state('scheduler-waiting')
         count = 0
         while 1:
             time.sleep(0.5)
@@ -254,11 +255,16 @@ class AlasioScheduler:
                 raise SchedulerStop
             # check if reached future
             if now() > future:
-                return True
+                reached = True
+                break
             # check if config modified every 5s
             if count % 10 == 0:
                 if watcher.is_modified():
-                    return False
+                    reached = False
+                    break
+
+        backend.send_worker_state('running')
+        return reached
 
     def _task_loop(self):
         backend = BackendBridge()
@@ -275,8 +281,8 @@ class AlasioScheduler:
         self.config.task = task.TaskName
         self.config.init_task()
         # wait task
-        waited = self._wait_future(task=task.TaskName, future=task.NextRun)
-        if not waited:
+        reached = self._wait_future(task=task.TaskName, future=task.NextRun)
+        if not reached:
             return False
         # skip restart
         if task.TaskName in self.skip_first_task:
