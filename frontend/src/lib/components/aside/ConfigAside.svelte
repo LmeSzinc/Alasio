@@ -2,6 +2,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
+  import { t } from "$lib/i18n";
   import { cn } from "$lib/utils.js";
   import { useTopic } from "$lib/ws";
   import { Settings } from "@lucide/svelte";
@@ -71,6 +72,9 @@
     onNavigate();
   }
 
+  // Determine if settings is active
+  const isSettingsActive = $derived(page.url.pathname.startsWith("/dev/config"));
+
   // Navigate to settings
   function handleSettings() {
     goto("/dev/config");
@@ -115,14 +119,23 @@
   </ScrollArea>
 
   <!-- Settings button at the bottom -->
-  <div class="border-border border-t p-2">
+  <!-- Style needs to be the same as ConfigItem -->
+  <div class="border-border flex flex-col items-center border-t p-2">
     <button
-      class="hover:bg-accent/50 focus:ring-ring flex w-full cursor-pointer flex-col items-center justify-center rounded-md p-1 transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none"
+      class={cn(
+        "focus:ring-ring flex w-16 cursor-pointer flex-col items-center rounded-md py-1.5",
+        isSettingsActive
+          ? "bg-primary hover:bg-primary text-primary-foreground/85"
+          : "hover:bg-accent hover:text-primary text-foreground/70",
+      )}
       onclick={handleSettings}
       aria-label="Open configuration settings"
+      title={t.DevTool.Settings()}
     >
-      <Settings class="h-6 w-6" strokeWidth="1.5" aria-hidden="true" />
-      <span class="mt-1 line-clamp-2 text-center text-xs break-all" aria-hidden="true"> Tools </span>
+      <div class="relative flex h-8 items-center justify-center">
+        <Settings class="h-6 w-6" strokeWidth="1.5" aria-hidden="true" />
+      </div>
+      <span class="line-clamp-2 text-center text-xs break-all" aria-hidden="true">{t.DevTool.Settings()}</span>
     </button>
   </div>
 </aside>

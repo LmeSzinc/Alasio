@@ -40,5 +40,12 @@
     "ja-JP": "ログインに戻る",
     "zh-TW": "返回登入",
     "es-ES": "Volver al Inicio de Sesión"
+  },
+  "Settings": {
+    "en-US": "Settings",
+    "zh-CN": "设置",
+    "ja-JP": "設定",
+    "zh-TW": "設定",
+    "es-ES": "Ajustes"
   }
 }

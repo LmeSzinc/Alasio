@@ -28,7 +28,7 @@
 
 <button
   class={cn(
-    "focus:ring-ring flex w-16 cursor-pointer flex-col items-center rounded-md py-1.5 transition-colors",
+    "focus:ring-ring flex w-16 cursor-pointer flex-col items-center rounded-md py-1.5",
     active
       ? "bg-primary hover:bg-primary text-primary-foreground/85"
       : "hover:bg-accent hover:text-primary text-foreground/70",
