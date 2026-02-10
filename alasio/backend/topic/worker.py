@@ -1,74 +1,12 @@
-from typing import Optional
-
 import trio
-from trio._core import TrioToken
 
 from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import ResponseEvent, RpcValueError
-from alasio.backend.topic.log import LogCache
-from alasio.backend.topic.que import TaskQueueSource
+from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.scan import ConfigScanSource
-from alasio.backend.worker.event import ConfigEvent
-from alasio.backend.worker.manager import WORKER_STATUS, WorkerManager
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
-from alasio.config.entry.mod import Mod
-from alasio.ext import env
-
-
-class BackendWorkerManager(WorkerManager):
-    def __init__(self):
-        super().__init__()
-        self.trio_token: Optional[TrioToken] = None
-
-    def worker_start(self, mod: Mod, config: str) -> "tuple[bool, str]":
-        project_root = env.PROJECT_ROOT
-        mod_root = mod.root
-        path_main = mod.entry.path_main
-        return super().worker_start(
-            mod=mod.name, config=config,
-            project_root=project_root, mod_root=mod_root, path_main=path_main
-        )
-
-    def on_worker_status(self, config: str, status: WORKER_STATUS):
-        # Broadcast worker status to msgbus
-        try:
-            trio.from_thread.run(
-                BaseTopic.msgbus_global_asend, 'Worker', (config, status),
-                trio_token=self.trio_token
-            )
-        except trio.RunFinishedError:
-            pass
-
-    def on_config_event(self, event: ConfigEvent):
-        topic = event.t
-        if topic == 'Log':
-            # cache and broadcast log
-            cache = LogCache(event.c)
-            cache.on_event(event)
-        elif topic == 'TaskQueue':
-            cache = TaskQueueSource(event.c)
-            cache.on_event(event, self.trio_token)
-        else:
-            # broadcast other config events to msgbus
-            try:
-                trio.from_thread.run(
-                    BaseTopic.msgbus_config_asend, event,
-                    trio_token=self.trio_token
-                )
-            except trio.RunFinishedError:
-                pass
-
-
-async def get_worker_manager():
-    """
-    Get worker manager and inject trio token
-    """
-    manager = BackendWorkerManager()
-    if manager.trio_token is None:
-        manager.trio_token = trio.lowlevel.current_trio_token()
-    return manager
 
 
 async def get_mod(config: str):
@@ -95,8 +33,7 @@ class Worker(BaseTopic):
         Returns:
             dict[str, WORKER_STATUS]: key: config name, value: worker state
         """
-        manager = await get_worker_manager()
-        return await trio.to_thread.run_sync(manager.get_state_info)
+        return await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.get_state_info)
 
     @on_msgbus_global_event('Worker')
     async def on_worker_status(self, value):
@@ -114,10 +51,9 @@ class Worker(BaseTopic):
         """
         Start running a config
         """
-        manager = await get_worker_manager()
         mod = await get_mod(config)
 
-        success, msg = await trio.to_thread.run_sync(manager.worker_start, mod, config)
+        success, msg = await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.worker_start, mod, config)
         if not success:
             raise RpcValueError(msg)
 
@@ -126,11 +62,10 @@ class Worker(BaseTopic):
         """
         Request to stop scheduler loop
         """
-        manager = await get_worker_manager()
         # Validate config/mod existence
         await get_mod(config)
 
-        success, msg = await trio.to_thread.run_sync(manager.worker_scheduler_stop, config)
+        success, msg = await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.worker_scheduler_stop, config)
         if not success:
             raise RpcValueError(msg)
 
@@ -139,11 +74,10 @@ class Worker(BaseTopic):
         """
         Request to continue scheduler loop, to cancel previous "scheduler-stopping"
         """
-        manager = await get_worker_manager()
         # Validate config/mod existence
         await get_mod(config)
 
-        success, msg = await trio.to_thread.run_sync(manager.worker_scheduler_continue, config)
+        success, msg = await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.worker_scheduler_continue, config)
         if not success:
             raise RpcValueError(msg)
 
@@ -152,11 +86,10 @@ class Worker(BaseTopic):
         """
         Request to kill worker
         """
-        manager = await get_worker_manager()
         # Validate config/mod existence
         await get_mod(config)
 
-        success, msg = await trio.to_thread.run_sync(manager.worker_kill, config)
+        success, msg = await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.worker_kill, config)
         if not success:
             raise RpcValueError(msg)
 
@@ -165,10 +98,9 @@ class Worker(BaseTopic):
         """
         Request to force kill worker
         """
-        manager = await get_worker_manager()
         # Validate config/mod existence
         await get_mod(config)
 
-        success, msg = await trio.to_thread.run_sync(manager.worker_force_kill, config)
+        success, msg = await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.worker_force_kill, config)
         if not success:
             raise RpcValueError(msg)

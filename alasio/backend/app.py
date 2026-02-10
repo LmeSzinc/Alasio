@@ -150,10 +150,8 @@ async def lifespan(app):
 
     # cleanup before exit
     # Terminate all workers
-    from alasio.backend.worker.manager import WorkerManager
-    manager: WorkerManager = WorkerManager.singleton_instance()
-    if manager is not None:
-        manager.close()
+    from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
+    BACKEND_WORKER_MANAGER.close()
     # release db connections
     from alasio.db.conn import SQLITE_POOL
     SQLITE_POOL.release_all()
