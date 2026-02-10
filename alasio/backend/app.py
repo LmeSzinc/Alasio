@@ -127,6 +127,10 @@ async def lifespan(app):
     from alasio.logger import logger
     logger.info('Lifespan start')
     async with trio.open_nursery() as nursery:
+        # inject global context
+        from alasio.backend.ws.context import GLOBAL_CONTEXT, GlobalContext
+        GLOBAL_CONTEXT.global_nursery = nursery
+        GLOBAL_CONTEXT.trio_token = trio.lowlevel.current_trio_token()
         # start listening shutdown
         nursery.start_soon(task_listen_shutdown)
         # start gc task
@@ -145,14 +149,16 @@ async def lifespan(app):
         nursery.cancel_scope.cancel()
 
     # cleanup before exit
-    # release db connections
-    from alasio.db.conn import SQLITE_POOL
-    SQLITE_POOL.release_all()
     # Terminate all workers
     from alasio.backend.worker.manager import WorkerManager
     manager: WorkerManager = WorkerManager.singleton_instance()
     if manager is not None:
         manager.close()
+    # release db connections
+    from alasio.db.conn import SQLITE_POOL
+    SQLITE_POOL.release_all()
+    # clear global context
+    GlobalContext.singleton_clear()
 
     logger.info('Lifespan end')
 
