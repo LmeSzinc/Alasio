@@ -143,12 +143,16 @@ async def auth_renew(
     try:
         new = JWT_MANAGER.validate_token(token)
     except jwt.PyJWTError:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            # detail must be quoted to become a valid json
-            detail='"Token invalid or expired"',
-            headers={'WWW-Authenticate': 'Bearer'},
-        ) from None
+        if JWT_MANAGER.pwd:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                # detail must be quoted to become a valid json
+                detail='"Token invalid or expired"',
+                headers={'WWW-Authenticate': 'Bearer'},
+            ) from None
+        else:
+            # no password, treat any JWT as success
+            new = JWT_MANAGER.create()
 
     # success
     if new:
