@@ -25,6 +25,7 @@ class DeviceConfig(Generic[T]):
     def __init__(self):
         self._inited = False
         self.config = None
+        self.config_name = ''
 
         # Group `Emulator`
         self.Emulator_Serial = 'auto'
@@ -103,9 +104,10 @@ class DeviceConfig(Generic[T]):
 
     @classmethod
     def from_config(cls, config: T) -> "DeviceConfig[T]":
-        obj = cls()
-        obj.config = config
-        for name, key in obj._device_bind_keys.items():
+        self = cls()
+        self.config = config
+        self.config_name = config.config_name
+        for name, key in self._device_bind_keys.items():
             group, arg = key
             try:
                 group_data = getattr(config, group)
@@ -114,9 +116,9 @@ class DeviceConfig(Generic[T]):
                 logger.warning(f'DeviceConfig.from_config: Missing key in config "{group}.{arg}"')
                 continue
             # set property but avoid triggering broadcast
-            object.__setattr__(obj, name, value)
+            object.__setattr__(self, name, value)
 
-        return obj
+        return self
 
     def __setattr__(self, key, value):
         super().__setattr__(key, value)
