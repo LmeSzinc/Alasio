@@ -17,7 +17,6 @@ from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
 from alasio.ext.cache import cached_property
-from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.ext.msgspec_error.parse_anno import get_annotations
@@ -604,11 +603,13 @@ class AlasioConfigBase:
         if pending_task:
             logger.info(f'Pending tasks: {[f.TaskName for f in pending_task]}')
             task = pending_task[0]
+            task.NextRun = task.NextRun.astimezone()
             logger.attr('Task', task)
             return task
         if waiting_task:
             logger.info('No task pending')
             task = waiting_task[0]
+            task.NextRun = task.NextRun.astimezone()
             logger.attr('Task', task)
             return task
         raise RequestHumanTakeover('No task waiting or pending, please enable at least on task')

@@ -37,6 +37,12 @@ class Task(Struct):
     TaskName: str
     NextRun: datetime
 
+    def __str__(self):
+        # show as str, to avoid showing a long tzinfo object
+        return f'Task(TaskName="{self.TaskName}", NextRun="{self.NextRun}")'
+
+    __repr__ = __str__
+
 
 class ModJsonCacheTTL(JsonCacheTTL):
     def load_resource(self, file: str, decoder: Decoder = None, default_factory=dict) -> T:

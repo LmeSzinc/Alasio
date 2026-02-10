@@ -212,7 +212,6 @@ class AlasioScheduler:
         Returns:
             bool: True if waited to future, False if early stopped
         """
-        future = future.astimezone()
         if future <= now():
             return True
         logger.info(f'Wait until {future} for task `{task}`')
@@ -301,7 +300,7 @@ class AlasioScheduler:
         # check failure
         failure = FailureRecord().mark_task_result(task=task.TaskName, success=success)
         if failure >= 3:
-            logger.critical(f"Task `{task}` failed 3 or more times.")
+            logger.critical(f"Task `{task.TaskName}` failed 3 or more times.")
             logger.critical("Possible reason #1: You haven't used it correctly. "
                             "Please read the help text of the options.")
             logger.critical("Possible reason #2: There is a problem with this task. "
