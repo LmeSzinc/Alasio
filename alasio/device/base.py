@@ -38,6 +38,7 @@ class DeviceBase:
 
         flag = backend.preview_requested.get_and_clear()
         if flag:
+            # local import to avoid importing opencv globally
             from alasio.base.image.imfile import image_preview
             data = image_preview(image)
             return backend.send(ConfigEvent(t='Preview', v=data))

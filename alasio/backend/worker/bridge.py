@@ -6,6 +6,7 @@ from typing import Literal
 from msgspec.msgpack import Encoder, decode
 
 from alasio.backend.worker.event import CommandEvent, ConfigEvent
+from alasio.ext.backport.threading_ext import PreemptiveEvent
 from alasio.ext.cache import cached_property
 from alasio.ext.singleton import Singleton
 
@@ -186,6 +187,7 @@ class BackendBridge(metaclass=Singleton):
         self._recv_thread: "Thread | None" = None
         self._send_thread: "Thread | None" = None
         self.scheduler_stopping = Event()
+        self.preview_requested = PreemptiveEvent()
         # For test control
         self.test_wait = Event()
 
@@ -350,6 +352,9 @@ class BackendBridge(metaclass=Singleton):
     def _handle_backend_command(self, data: bytes):
         event = decode(data, type=CommandEvent)
         command = event.c
+        if command == 'preview':
+            self.preview_requested.set()
+            return
         if command == 'scheduler-stopping':
             self.scheduler_stopping.set()
             return

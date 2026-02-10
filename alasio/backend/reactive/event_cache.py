@@ -158,10 +158,7 @@ class EventCache:
             await topic.server.send(full)
 
     def unsubscribe(self, topic: BaseTopic):
-        try:
-            self.subscribers.remove(topic)
-        except KeyError:
-            pass
+        self.subscribers.discard(topic)
 
     async def reinit(self, running: Optional[bool] = None):
         """
