@@ -48,7 +48,7 @@ class WebsocketTopicServer:
         """
         Iterates over all active connections and requests them to close gracefully.
         """
-        cls.server_terminated.set()
+        WebsocketTopicServer.server_terminated.set()
 
     # messages in send_buffer will be sent first, then lossy_buffer
     # if websocket is busy, send_buffer will create back-pressure, old messages in lossy buffer will be dropped
@@ -427,7 +427,7 @@ class WebsocketTopicServer:
             nursery (trio.Nursery):
             out (list[str]):
         """
-        await self.__class__.server_terminated.wait()
+        await WebsocketTopicServer.server_terminated.wait()
         # server terminated
         out.append('server')
         await self.close(code=1001, reason='Server shutdown')
