@@ -440,13 +440,23 @@ class AlasioConfigBase:
             return False
 
         events = list(self.modified.values())
-        self.modified.clear()
+        # config_set will log on success
+        # messages = [f'{e.task}.{e.group}.{e.arg}={e.value}' for e in events]
+        # messages = ', '.join(messages)
+        # logger.info(f'Save config "{self.config_name}": {messages}')
         if len(events) == 1:
             # single set event
-            self.mod.config_set(self.config_name, events[0])
+            _, r = self.mod.config_set(self.config_name, events[0])
+            if r.error:
+                logger.info(f'Failed to save config "{self.config_name}", '
+                            f'key={r.task}.{r.group}.{r.arg}, error={r.error}')
         else:
             # batch set
-            self.mod.config_batch_set(self.config_name, events)
+            _, responses = self.mod.config_batch_set(self.config_name, events)
+            for r in responses:
+                if r.error:
+                    logger.info(f'Failed to save config "{self.config_name}", '
+                                f'key={r.task}.{r.group}.{r.arg}, error={r.error}')
         # broadcast to backend
         backend = BackendBridge()
         if backend.inited:
@@ -715,7 +725,11 @@ class AlasioConfigBase:
         if force_call or self.is_task_enabled(task):
             logger.info(f'Task call: {task}')
             with self.batch_set():
-                self.cross_set(task, 'Scheduler', 'Enable', True)
+                group = self._cross_get_group(task, 'Scheduler')
+                if group is not NODEFAULT and group.__class__.__name__ == 'SchedulerStatic':
+                    self.cross_set(task, 'Scheduler', 'Enable', 'enabled')
+                else:
+                    self.cross_set(task, 'Scheduler', 'Enable', True)
                 self.cross_set(task, 'Scheduler', 'NextRun', now().replace(microsecond=0))
             return True
         else:
