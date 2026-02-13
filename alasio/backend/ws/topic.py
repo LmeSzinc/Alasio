@@ -36,7 +36,6 @@ class WebsocketServer(WebsocketTopicServer):
     ALL_TOPIC_CLASS = create_topic_dict([
         # must contain ConnState
         ConnState,
-        Preview,
         ModList,
         ConfigScan,
         ConfigNav,
@@ -177,3 +176,11 @@ class WebsocketServer(WebsocketTopicServer):
                 await cls.handle_config_event(event)
             except Exception as e:
                 logger.exception(e)
+
+
+class PreviewServer(WebsocketTopicServer):
+    ALL_TOPIC_CLASS = create_topic_dict([
+        Preview,
+    ])
+    # buffer 1 preview only
+    LOSSY_BUFFER_LENGTH = 1

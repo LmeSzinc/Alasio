@@ -18,7 +18,7 @@ interface WebsocketManagerOptions {
 const BASE_DEFAULT_SUBSCRIPTIONS = ["ConnState"];
 const BASE_SCROLL_TOPICS = { Log: 500 };
 
-class WebsocketManager {
+export class WebsocketManager {
   // --- State Management (Svelte 5 Runes) ---
   connectionState = $state<"connecting" | "open" | "closed" | "reconnecting">("closed");
   topics = $state<Record<string, any>>({});
@@ -72,8 +72,9 @@ class WebsocketManager {
 
   /**
    * Constructs the WebSocket URL from the current window location.
+   * Can be overridden by subclasses to connect to different endpoints.
    */
-  #getWsUrl(): string {
+  protected getWsUrl(): string {
     const url = new URL("/api/ws", window.location.href);
     url.protocol = url.protocol.replace("http", "ws");
     return url.toString();
@@ -89,7 +90,7 @@ class WebsocketManager {
     this.connectionState = this.#reconnectAttempts > 0 ? "reconnecting" : "connecting";
 
     try {
-      this.#ws = new WebSocket(this.#getWsUrl());
+      this.#ws = new WebSocket(this.getWsUrl());
       this.#ws.binaryType = "arraybuffer";
     } catch (e) {
       console.error("Failed to create WebSocket:", e);
@@ -123,44 +124,7 @@ class WebsocketManager {
       }
     };
 
-    this.#ws.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-      // Handle server heartbeats.
-      const message = this.#decoder.decode(event.data);
-      if (message === "ping") {
-        this.#ws?.send(this.#encoder.encode("pong"));
-        return;
-      }
-
-      // Handle data events.
-      try {
-        const data: ResponseEvent | ResponseEvent[] = JSON.parse(message);
-        const events = Array.isArray(data) ? data : [data];
-
-        // Group events by topic to perform batch updates
-        const updates = new Map<string, ResponseEvent[]>();
-
-        for (const item of events) {
-          // 1. Check if it's an RPC response.
-          if (item.i) {
-            this.#handleRpc(item);
-            continue;
-          }
-          // 2. Group data events
-          const topic = item.t;
-          if (!updates.has(topic)) {
-            updates.set(topic, []);
-          }
-          updates.get(topic)!.push(item);
-        }
-
-        // Apply updates per topic
-        for (const [topic, items] of updates) {
-          this.#handleTopicBatch(topic, items);
-        }
-      } catch (e) {
-        console.error("Failed to parse WebSocket message:", message, e);
-      }
-    };
+    this.#ws.onmessage = (event: MessageEvent<ArrayBuffer>) => this.onMessage(event);
 
     this.#ws.onclose = (event: CloseEvent) => {
       console.warn(`WebSocket closed: code=${event.code}, reason=${event.reason}`);
@@ -193,6 +157,49 @@ class WebsocketManager {
     this.#ws.onerror = (error) => {
       console.error("WebSocket error:", error);
     };
+  }
+
+  /**
+   * Main entry point for processing incoming WebSocket messages.
+   * Can be overridden by subclasses to handle specialized message formats.
+   */
+  protected onMessage(event: MessageEvent<ArrayBuffer>) {
+    // Handle server heartbeats.
+    const message = this.#decoder.decode(event.data);
+    if (message === "ping") {
+      this.#ws?.send(this.#encoder.encode("pong"));
+      return;
+    }
+
+    // Handle data events.
+    try {
+      const data: ResponseEvent | ResponseEvent[] = JSON.parse(message);
+      const events = Array.isArray(data) ? data : [data];
+
+      // Group events by topic to perform batch updates
+      const updates = new Map<string, ResponseEvent[]>();
+
+      for (const item of events) {
+        // 1. Check if it's an RPC response.
+        if (item.i) {
+          this.#handleRpc(item);
+          continue;
+        }
+        // 2. Group data events
+        const topic = item.t;
+        if (!updates.has(topic)) {
+          updates.set(topic, []);
+        }
+        updates.get(topic)!.push(item);
+      }
+
+      // Apply updates per topic
+      for (const [topic, items] of updates) {
+        this.#handleTopicBatch(topic, items);
+      }
+    } catch (e) {
+      console.error("Failed to parse WebSocket message:", message, e);
+    }
   }
 
   /**

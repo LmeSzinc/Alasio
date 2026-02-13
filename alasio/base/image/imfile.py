@@ -424,13 +424,13 @@ def image_preview(image, quality=75):
 
     Returns:
         bytes: Formatted preview data
-            b'PREVIEW' + big-endian millisecond timestamp + JPG image in bytes
+            b'Preview' + big-endian millisecond timestamp + JPG image in bytes
     """
     # Use 0.5 scale factor to leverage OpenCV internal optimizations
     res = cv2.resize(image, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
     data = image_encode(res, ext='jpg', encode=[cv2.IMWRITE_JPEG_QUALITY, quality]).tobytes()
     now = int(time.time() * 1000)
-    return b'PREVIEW' + now.to_bytes(8, 'big') + data
+    return b'Preview' + now.to_bytes(8, 'big') + data
 
 
 def image_fixup(file, need_crop=False):

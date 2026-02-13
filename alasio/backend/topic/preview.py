@@ -99,7 +99,7 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
         if old_sub_speed == speed:
             # nothing changed
             return
-        print(old_sub_speed, speed)
+
         speed_decrease = (old_sub_speed == 'realtime') and (speed == 'normal')
         self._subscribers[topic] = speed
         self._speed = self._get_speed()
@@ -150,21 +150,30 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
         """
         Callback function when worker state changed
         """
+        # ignore "starting"
+        if status == 'starting':
+            return
         if not self._subscribers:
             self.task_stop()
             return
-        if status not in PREVIEW_AVAILABLE:
+        if status in PREVIEW_AVAILABLE:
+            # request to send preview when start running
+            if self._trigger_on_running:
+                # set False first, task_trigger may re-enable _trigger_on_running
+                self._trigger_on_running = False
+                self.task_trigger(self._nursery)
+        else:
+            self._trigger_on_running = True
             self.task_stop()
             return
-        # request to send preview when start running
-        if self._trigger_on_running:
-            # set False first, task_trigger may re-enable _trigger_on_running
-            self._trigger_on_running = False
-            self.task_trigger(self._nursery)
 
-    def on_preview(self, preview: bytes):
+    def on_preview(self, preview):
         """
         Callback function when worker sends a preview
+
+        Args:
+            preview (bytes):
+                b'Preview' + big-endian millisecond timestamp + JPG image in bytes
         """
         _subscribers = self._subscribers
         _normal_lastsend = self._normal_lastsend

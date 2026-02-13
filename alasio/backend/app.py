@@ -223,8 +223,9 @@ def create_app():
     app.add_router('/api', auth.router)
 
     # Global websocket
-    from alasio.backend.ws.topic import WebsocketServer
+    from alasio.backend.ws.topic import WebsocketServer, PreviewServer
     app.routes.append(WebSocketRoute('/api/ws', WebsocketServer.endpoint))
+    app.routes.append(WebSocketRoute('/api/preview', PreviewServer.endpoint))
 
     # Alasio should be a local service and should not be exposed on public network
     # We serve in-memory robots.txt to deny all spiders

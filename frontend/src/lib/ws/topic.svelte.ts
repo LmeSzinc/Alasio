@@ -1,5 +1,5 @@
 import { onDestroy } from "svelte";
-import { websocketClient } from "./client.svelte";
+import { websocketClient, WebsocketManager } from "./client.svelte";
 import { createResilientRpc, createRpc, type Rpc, type RpcOptions } from "./rpc.svelte";
 
 export type RpcFactory = (options?: RpcOptions) => Rpc;
@@ -16,25 +16,25 @@ export type TopicLifespan<T = any> = {
  * @param topic The name of the topic to subscribe to.
  * @returns A readonly object with a reactive `.data` signal and an `.rpc()` method factory.
  */
-export function useTopic<T = any>(topic: string): TopicLifespan<T> {
+export function useTopic<T = any>(topic: string, client: WebsocketManager = websocketClient): TopicLifespan<T> {
   // --- Step 1: Manage Subscription Lifecycle ---
   // On creation, tell the manager we're subscribing.
-  websocketClient.sub(topic);
+  client.sub(topic);
 
   // On destruction, tell the manager we're unsubscribing.
   onDestroy(() => {
-    websocketClient.unsub(topic);
+    client.unsub(topic);
   });
 
   // --- Step 2: Build the Reactive API ---
   // Create a derived signal that directly tracks the data from the manager's state.
-  // This dependency is direct and clean: $derived -> websocketClient.topics[topic]
-  const data = $derived(websocketClient.topics[topic] as T | undefined);
+  // This dependency is direct and clean: $derived -> client.topics[topic]
+  const data = $derived(client.topics[topic] as T | undefined);
 
   // Create the RPC factory function for this topic.
-  // It needs the topic name and the websocketClient instance (as the RpcContext).
-  const rpc = (options?: RpcOptions) => createRpc(topic, websocketClient, options);
-  const resilientRpc = (options?: RpcOptions) => createResilientRpc(topic, websocketClient, options);
+  // It needs the topic name and the client instance (as the RpcContext).
+  const rpc = (options?: RpcOptions) => createRpc(topic, client, options);
+  const resilientRpc = (options?: RpcOptions) => createResilientRpc(topic, client, options);
 
   // --- Step 3: Return the final, user-friendly API ---
   return {
