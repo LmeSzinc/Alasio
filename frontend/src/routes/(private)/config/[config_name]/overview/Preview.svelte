@@ -2,8 +2,9 @@
   import { cn } from "$lib/utils";
   type $$Props = {
     class?: string;
+    config_name: string;
   };
-  let { class: className }: $$Props = $props();
+  let { class: className, config_name }: $$Props = $props();
 </script>
 
 <div class={cn("neushadow bg-card rounded-lg p-4", "aspect-video", className)}>
