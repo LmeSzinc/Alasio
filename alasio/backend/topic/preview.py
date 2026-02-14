@@ -3,6 +3,7 @@ from typing import Literal
 from trio import current_time
 
 from alasio.backend.reactive.background import BackgroundTask
+from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.topic.scan import ConfigScanSource
@@ -12,7 +13,6 @@ from alasio.backend.ws.context import GLOBAL_CONTEXT
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.table.scan import validate_config_name
 from alasio.ext.singleton import SingletonNamed
-from alasio.logger import logger
 
 PREVIEW_AVAILABLE = ['running', 'scheduler-stopping']
 PREVIEW_SPEED = Literal['normal', 'realtime']
@@ -209,6 +209,13 @@ class Preview(BaseTopic):
         # no full data
         return {}
 
+    @on_msgbus_global_event('Worker')
+    async def on_worker_state(self, value):
+        # Broadcast worker state to PreviewTask
+        config, state = value
+        cache = PreviewTask(config)
+        cache.on_worker_state(state)
+
     @rpc
     async def preview_start(self, name: str, speed: PREVIEW_SPEED):
         # check if name is a validate filename
@@ -245,7 +252,6 @@ class Preview(BaseTopic):
             self.cache = None
 
     async def op_unsub(self):
-        logger.info('op_unsub')
         if self.cache is not None:
             self.cache.unsubscribe(self)
             self.cache = None

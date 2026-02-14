@@ -444,4 +444,8 @@ class BackendBridge(metaclass=Singleton):
         return self.send(ConfigEvent(t='Log', v=value))
 
     def send_worker_state(self, value: Literal['running', 'scheduler-waiting']):
+        if value not in ['running', 'scheduler-waiting']:
+            from alasio.logger import logger
+            logger.error(f'[BackendBridge] Invalid worker state "{value}", ignored')
+            return
         return self.send(ConfigEvent(t='WorkerState', v=value))
