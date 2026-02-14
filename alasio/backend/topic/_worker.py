@@ -4,7 +4,7 @@ from alasio.backend.topic.log import LogCache
 from alasio.backend.topic.preview import PreviewTask
 from alasio.backend.topic.que import TaskQueueSource
 from alasio.backend.worker.event import ConfigEvent
-from alasio.backend.worker.manager import WORKER_STATUS, WorkerManager
+from alasio.backend.worker.manager import WORKER_STATE, WorkerManager
 from alasio.backend.ws.context import GLOBAL_CONTEXT
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.mod import Mod
@@ -21,17 +21,17 @@ class BackendWorkerManager(WorkerManager):
             project_root=project_root, mod_root=mod_root, path_main=path_main
         )
 
-    async def _on_worker_status(self, config: str, status: WORKER_STATUS):
-        # Broadcast worker status to msgbus
-        await BaseTopic.msgbus_global_asend('Worker', (config, status))
+    async def _on_worker_state(self, config: str, state: WORKER_STATE):
+        # Broadcast worker state to msgbus
+        await BaseTopic.msgbus_global_asend('Worker', (config, state))
         # notify preview
         cache = PreviewTask(config)
-        cache.on_worker_status(status)
+        cache.on_worker_state(state)
 
-    def on_worker_status(self, config: str, status: WORKER_STATUS):
+    def on_worker_state(self, config: str, state: WORKER_STATE):
         try:
             trio.from_thread.run(
-                self._on_worker_status, config, status,
+                self._on_worker_state, config, state,
                 trio_token=GLOBAL_CONTEXT.trio_token
             )
         except trio.RunFinishedError:

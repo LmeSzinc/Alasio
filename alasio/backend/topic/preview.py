@@ -7,7 +7,7 @@ from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.worker.event import CommandEvent
-from alasio.backend.worker.manager import WORKER_STATUS
+from alasio.backend.worker.manager import WORKER_STATE
 from alasio.backend.ws.context import GLOBAL_CONTEXT
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.table.scan import validate_config_name
@@ -114,7 +114,7 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
         if worker is None:
             self._trigger_on_running = True
             return
-        if not worker.status in PREVIEW_AVAILABLE:
+        if not worker.state in PREVIEW_AVAILABLE:
             self._trigger_on_running = True
             return
         # trigger
@@ -137,7 +137,7 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
         if worker is None:
             self._trigger_on_running = True
             return
-        if worker.status in PREVIEW_AVAILABLE:
+        if worker.state in PREVIEW_AVAILABLE:
             self._trigger_on_running = False
         else:
             self._trigger_on_running = True
@@ -146,17 +146,17 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
         command = CommandEvent(c='preview')
         worker.send_command(command)
 
-    def on_worker_status(self, status: WORKER_STATUS):
+    def on_worker_state(self, state: WORKER_STATE):
         """
         Callback function when worker state changed
         """
         # ignore "starting"
-        if status == 'starting':
+        if state == 'starting':
             return
         if not self._subscribers:
             self.task_stop()
             return
-        if status in PREVIEW_AVAILABLE:
+        if state in PREVIEW_AVAILABLE:
             # request to send preview when start running
             if self._trigger_on_running:
                 # set False first, task_trigger may re-enable _trigger_on_running

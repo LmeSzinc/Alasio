@@ -31,19 +31,19 @@ class Worker(BaseTopic):
     async def getdata(self):
         """
         Returns:
-            dict[str, WORKER_STATUS]: key: config name, value: worker state
+            dict[str, WORKER_STATE]: key: config name, value: worker state
         """
         return await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.get_state_info)
 
     @on_msgbus_global_event('Worker')
-    async def on_worker_status(self, value):
-        # Broadcast worker status to websocket connection
-        config, status = value
-        if status == 'idle':
+    async def on_worker_state(self, value):
+        # Broadcast worker state to websocket connection
+        config, state = value
+        if state == 'idle':
             # remove worker state
             event = ResponseEvent(t='Worker', o='del', k=(config,))
         else:
-            event = ResponseEvent(t='Worker', o='set', k=(config,), v=status)
+            event = ResponseEvent(t='Worker', o='set', k=(config,), v=state)
         await self.server.send(event)
 
     @rpc

@@ -7,9 +7,9 @@ from alasio.backend.ws.context import GLOBAL_CONTEXT
 
 
 class MockWorker:
-    def __init__(self, config_name, status='running'):
+    def __init__(self, config_name, state='running'):
         self.config = config_name
-        self.status = status
+        self.state = state
         self.commands = []
 
     def send_command(self, command):
@@ -149,10 +149,10 @@ async def test_preview_task_realtime_infinite_trigger(preview_task, worker, auto
 @pytest.mark.trio
 async def test_preview_task_on_worker_state_handling(preview_task, worker, autojump_clock):
     """
-    Test how PreviewTask handles worker status changes (e.g., waiting for worker to start).
+    Test how PreviewTask handles worker state changes (e.g., waiting for worker to start).
     """
-    # Override worker status to idle for this test
-    worker.status = 'idle'
+    # Override worker state to idle for this test
+    worker.state = 'idle'
     topic = MockTopic()
 
     # Subscribe when worker is idle
@@ -162,15 +162,15 @@ async def test_preview_task_on_worker_state_handling(preview_task, worker, autoj
     assert preview_task._trigger_on_running is True
 
     # Worker starts running
-    worker.status = 'running'
-    preview_task.on_worker_status('running')
+    worker.state = 'running'
+    preview_task.on_worker_state('running')
     await trio.testing.wait_all_tasks_blocked()
     assert len(worker.commands) == 1
     assert preview_task._trigger_on_running is False
 
     # Worker stops
-    worker.status = 'idle'
-    preview_task.on_worker_status('idle')
+    worker.state = 'idle'
+    preview_task.on_worker_state('idle')
     await trio.testing.wait_all_tasks_blocked()
     # Task should stop and not send more commands
     worker.commands = []

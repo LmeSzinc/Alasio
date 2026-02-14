@@ -22,7 +22,7 @@ export type ConfigTopicLike = Record<string, ConfigLike>;
 // error: worker stopped with error
 //   Note that scheduler will loop forever, so there is no "stopped" state
 //   If user request "scheduler_stopping" or "killing", state will later be "idle"
-export type WORKER_STATUS =
+export type WORKER_STATE =
   | "idle"
   | "starting"
   | "running"

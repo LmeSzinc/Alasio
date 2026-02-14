@@ -7,11 +7,11 @@
   import { useTopic } from "$lib/ws";
   import { Settings } from "@lucide/svelte";
   import ConfigItem from "./ConfigItem.svelte";
-  import type { ConfigLike, ConfigTopicLike, WORKER_STATUS } from "./types";
+  import type { ConfigLike, ConfigTopicLike, WORKER_STATE } from "./types";
 
   // Subscribe to ConfigScan topic
   const topicClient = useTopic<ConfigTopicLike | undefined>("ConfigScan");
-  const workerClient = useTopic<Record<string, WORKER_STATUS> | undefined>("Worker");
+  const workerClient = useTopic<Record<string, WORKER_STATE> | undefined>("Worker");
 
   // props
   type $$props = {
@@ -93,9 +93,9 @@
           <!-- Single item in group - display directly -->
           {@const item = group.items[0]}
           {@const active = activeConfigName === item.name}
-          {@const status = workerClient.data?.[item.name] ?? "idle"}
+          {@const state = workerClient.data?.[item.name] ?? "idle"}
           <div role="listitem" class="px-1">
-            <ConfigItem config={item} {active} {status} {afspin} onclick={handleConfigClick} />
+            <ConfigItem config={item} {active} {state} {afspin} onclick={handleConfigClick} />
           </div>
         {:else if group.items.length > 1}
           <!-- Multiple items in group - display with border -->
@@ -107,9 +107,9 @@
             {#each group.items as item (item.id)}
               <!-- Items in vertical layout -->
               {@const active = activeConfigName === item.name}
-              {@const status = workerClient.data?.[item.name] ?? "idle"}
+              {@const state = workerClient.data?.[item.name] ?? "idle"}
               <div role="listitem">
-                <ConfigItem config={item} {active} {status} {afspin} onclick={handleConfigClick} />
+                <ConfigItem config={item} {active} {state} {afspin} onclick={handleConfigClick} />
               </div>
             {/each}
           </div>

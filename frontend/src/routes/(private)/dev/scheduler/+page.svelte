@@ -1,12 +1,12 @@
 <script lang="ts">
   import Arg from "$lib/components/arg/Arg.svelte";
   import type { ArgData } from "$lib/components/arg/utils.svelte";
-  import type { WORKER_STATUS } from "$lib/components/aside/types";
+  import type { WORKER_STATE } from "$lib/components/aside/types";
   import Scheduler from "$lib/components/scheduler/Scheduler.svelte";
   import * as Card from "$lib/components/ui/card";
 
-  // All available status options
-  const ALL_STATUSES: WORKER_STATUS[] = [
+  // All available state options
+  const ALL_STATES: WORKER_STATE[] = [
     "idle",
     "starting",
     "running",
@@ -28,14 +28,14 @@
     name: "Config Name",
   });
 
-  let statusInput = $state<ArgData>({
+  let stateInput = $state<ArgData>({
     task: "",
     group: "",
-    arg: "status",
+    arg: "state",
     dt: "select",
     value: "idle",
-    name: "Status",
-    option: ALL_STATUSES,
+    name: "State",
+    option: ALL_STATES,
   });
 
   let deviceTypeInput = $state<ArgData>({
@@ -115,7 +115,7 @@
           <div class="flex-1">
             <Scheduler
               config_name={configNameInput.value as string}
-              status={statusInput.value as WORKER_STATUS}
+              state={stateInput.value as WORKER_STATE}
               deviceType={deviceTypeInput.value as string}
               deviceSerial={deviceSerialInput.value as string}
               {taskRunning}
@@ -136,7 +136,7 @@
       <Card.Content>
         <div class="space-y-3">
           <Arg bind:data={configNameInput} />
-          <Arg bind:data={statusInput} />
+          <Arg bind:data={stateInput} />
           <Arg bind:data={deviceTypeInput} />
           <Arg bind:data={deviceSerialInput} />
           <Arg bind:data={taskListInput} />
@@ -154,10 +154,10 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATUSES as status}
+          {#each ALL_STATES as state}
             <Scheduler
               config_name="TestConfig"
-              {status}
+              {state}
               deviceType="Emulator"
               deviceSerial="127.0.0.1:5555"
               taskRunning="CurrentTask"
@@ -178,8 +178,8 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATUSES as status}
-            <Scheduler config_name="EmptyScheduler" {status} taskNext={[]} />
+          {#each ALL_STATES as state}
+            <Scheduler config_name="EmptyScheduler" {state} taskNext={[]} />
           {/each}
         </div>
       </Card.Content>
@@ -192,10 +192,10 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATUSES as status}
+          {#each ALL_STATES as state}
             <Scheduler
               config_name="VeryLongConfigurationNameThatShouldBeTruncatedInTheUserInterface"
-              {status}
+              {state}
               deviceType="VeryLongEmulatorType"
               deviceSerial="127.0.0.1:5555-with-very-long-serial-number"
               taskRunning="VeryLongTaskNameThatWillBeTruncated"
@@ -218,10 +218,10 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATUSES as status}
+          {#each ALL_STATES as state}
             <Scheduler
               config_name="NextOnly"
-              {status}
+              {state}
               deviceType="Device"
               deviceSerial="123456"
               taskNext={[
@@ -242,10 +242,10 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATUSES as status}
+          {#each ALL_STATES as state}
             <Scheduler
               config_name="NoDevice"
-              {status}
+              {state}
               taskRunning="Task"
               taskNext={[{ TaskName: "Next", NextRun: Math.floor(Date.now() / 1000) + 3600 }]}
             />

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import ConfigStatus from "$lib/components/aside/ConfigStatus.svelte";
-  import { useWorkerStatus } from "$lib/components/aside/status.svelte";
-  import type { WORKER_STATUS } from "$lib/components/aside/types";
+  import ConfigState from "$lib/components/aside/ConfigState.svelte";
+  import { useWorkerState } from "$lib/components/aside/state.svelte";
+  import type { WORKER_STATE } from "$lib/components/aside/types";
   import { t } from "$lib/i18n";
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
@@ -14,7 +14,7 @@
 
   type $$props = {
     config_name: string;
-    status?: WORKER_STATUS;
+    state?: WORKER_STATE;
     deviceType?: string;
     deviceSerial?: string;
     taskRunning?: string;
@@ -24,7 +24,7 @@
   };
   let {
     config_name,
-    status = "idle",
+    state: stateVal = "idle",
     deviceType = "",
     deviceSerial = "",
     taskRunning,
@@ -33,9 +33,9 @@
     onDeviceClick,
   }: $$props = $props();
 
-  const displayStatus = useWorkerStatus(() => status);
+  const displayState = useWorkerState(() => stateVal);
   const isRunning = $derived(
-    taskRunning && (displayStatus.value === "running" || displayStatus.value === "scheduler-waiting"),
+    taskRunning && (displayState.value === "running" || displayState.value === "scheduler-waiting"),
   );
   const displaySerial = $derived(
     deviceSerial.startsWith("127.0.0.1:") ? deviceSerial.replace("127.0.0.1:", "") : deviceSerial,
@@ -61,7 +61,7 @@
 
   let isStoppingDebouncing = $state(false);
   $effect(() => {
-    if (status === "scheduler-stopping") {
+    if (stateVal === "scheduler-stopping") {
       isStoppingDebouncing = true;
       const timer = setTimeout(() => {
         isStoppingDebouncing = false;
@@ -116,16 +116,16 @@
       <span class="flex-1 truncate text-lg font-semibold">{config_name}</span>
       <!-- Worker Status -->
       <span class="text-primary ml-auto pl-2 text-sm font-semibold">
-        {#if status === "idle"}{t.Scheduler.Idle()}
-        {:else if status === "starting"}{t.Scheduler.Starting()}
-        {:else if status === "running"}{t.Scheduler.Running()}
-        {:else if status === "disconnected"}{t.Scheduler.Disconnected()}
-        {:else if status === "error"}{t.Scheduler.Error()}
-        {:else if status === "scheduler-stopping"}{t.Scheduler.SchedulerStopping()}
-        {:else if status === "scheduler-waiting"}{t.Scheduler.SchedulerWaiting()}
-        {:else if status === "killing"}{t.Scheduler.Killing()}
-        {:else if status === "force-killing"}{t.Scheduler.ForceKilling()}
-        {:else}{status}{/if}
+        {#if stateVal === "idle"}{t.Scheduler.Idle()}
+        {:else if stateVal === "starting"}{t.Scheduler.Starting()}
+        {:else if stateVal === "running"}{t.Scheduler.Running()}
+        {:else if stateVal === "disconnected"}{t.Scheduler.Disconnected()}
+        {:else if stateVal === "error"}{t.Scheduler.Error()}
+        {:else if stateVal === "scheduler-stopping"}{t.Scheduler.SchedulerStopping()}
+        {:else if stateVal === "scheduler-waiting"}{t.Scheduler.SchedulerWaiting()}
+        {:else if stateVal === "killing"}{t.Scheduler.Killing()}
+        {:else if stateVal === "force-killing"}{t.Scheduler.ForceKilling()}
+        {:else}{stateVal}{/if}
       </span>
     </div>
 
@@ -161,7 +161,7 @@
       <!-- Task running -->
       {#if taskRunning}
         <div class="flex items-center gap-1">
-          <ConfigStatus {status} displayIdle={true} iconClass="h-3 w-3" class="shrink-0" />
+          <ConfigState state={stateVal} displayIdle={true} iconClass="h-3 w-3" class="shrink-0" />
           <span class="flex-1 truncate text-xs">{taskRunning}</span>
           <span class="min-w-8 shrink-0 text-right text-xs">now</span>
         </div>
@@ -187,17 +187,17 @@
 
   <!-- Buttons -->
   <div class="mt-0.5 flex gap-1">
-    {#if displayStatus.value === "idle" || displayStatus.value === "error"}
+    {#if displayState.value === "idle" || displayState.value === "error"}
       <!-- idle, show one start button-->
       <ActionStart onclick={handleStart} title={t.Scheduler.Start()} />
-    {:else if displayStatus.value === "starting"}
+    {:else if displayState.value === "starting"}
       <!-- starting, show one start button-->
       <ActionStart disabled title={t.Scheduler.Start()} />
-    {:else if displayStatus.value === "running" || displayStatus.value === "scheduler-waiting"}
+    {:else if displayState.value === "running" || displayState.value === "scheduler-waiting"}
       <!-- running, show stop and kill button-->
       <ActionStop onclick={handleSchedulerStop} title={t.Scheduler.SchedulerStop()} />
       <ActionKill onclick={handleKill} />
-    {:else if displayStatus.value === "scheduler-stopping"}
+    {:else if displayState.value === "scheduler-stopping"}
       <!-- scheduler-stopping, show continue and kill button-->
       <ActionStop
         disabled={isStoppingDebouncing}
@@ -205,7 +205,7 @@
         title={t.Scheduler.SchedulerContinue()}
       />
       <ActionKill disabled={isStoppingDebouncing} onclick={handleKill} />
-    {:else if displayStatus.value === "killing" || displayStatus.value === "force-killing" || displayStatus.value === "disconnected"}
+    {:else if displayState.value === "killing" || displayState.value === "force-killing" || displayState.value === "disconnected"}
       <!-- killing, show kill button-->
       <ActionStop disabled title={t.Scheduler.SchedulerStop()} />
       <ActionKill disabled title={t.Scheduler.Kill()} />

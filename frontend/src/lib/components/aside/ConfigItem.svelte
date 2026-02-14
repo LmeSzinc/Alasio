@@ -1,24 +1,24 @@
 <script lang="ts">
   import { cn } from "$lib/utils.js";
-  import ConfigStatus from "./ConfigStatus.svelte";
+  import ConfigState from "./ConfigState.svelte";
   import ModIcon from "./ModIcon.svelte";
-  import { useWorkerStatus } from "./status.svelte";
-  import type { ConfigLike, WORKER_STATUS } from "./types";
+  import { useWorkerState } from "./state.svelte";
+  import type { ConfigLike, WORKER_STATE } from "./types";
 
   // props
   type Props<T extends ConfigLike = ConfigLike> = {
     config: T;
-    status?: WORKER_STATUS;
+    state?: WORKER_STATE;
     active?: boolean;
     class?: string;
     onclick?: (config: T) => void;
     afspin?: boolean;
   };
-  let { config, status = "idle", active = false, class: className, onclick, afspin = false }: Props = $props();
+  let { config, state = "idle", active = false, class: className, onclick, afspin = false }: Props = $props();
 
-  const displayStatus = useWorkerStatus(() => status);
-  const RUNNING_STATUSES: WORKER_STATUS[] = ["running", "scheduler-stopping", "scheduler-waiting"];
-  const spin = $derived(afspin && RUNNING_STATUSES.includes(displayStatus.value));
+  const displayState = useWorkerState(() => state);
+  const RUNNING_STATES: WORKER_STATE[] = ["running", "scheduler-stopping", "scheduler-waiting"];
+  const spin = $derived(afspin && RUNNING_STATES.includes(displayState.value));
 
   // callbacks
   function handleClick() {
@@ -41,7 +41,7 @@
 >
   <div class="relative">
     <ModIcon mod={config.mod} afspin={spin} />
-    <ConfigStatus status={displayStatus.value} {active} class="absolute -right-1 bottom-0" />
+    <ConfigState state={displayState.value} {active} class="absolute -right-1 bottom-0" />
   </div>
   <span class="line-clamp-2 text-center text-xs break-all" aria-hidden="true">
     {config.name}

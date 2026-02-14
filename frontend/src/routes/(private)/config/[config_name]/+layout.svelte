@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import type { WORKER_STATUS } from "$lib/components/aside/types";
+  import type { WORKER_STATE } from "$lib/components/aside/types";
   import { Scheduler, type TaskQueueData } from "$lib/components/scheduler";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { NavContext } from "$lib/slotcontext.svelte";
@@ -70,8 +70,8 @@
   });
 
   // Scheduler
-  const workerClient = useTopic<Record<string, WORKER_STATUS> | undefined>("Worker");
-  const status = $derived(workerClient.data?.[config_name] || "idle");
+  const workerClient = useTopic<Record<string, WORKER_STATE> | undefined>("Worker");
+  const state = $derived(workerClient.data?.[config_name] || "idle");
 
   const taskQueueClient = useTopic<TaskQueueData>("TaskQueue");
   const taskRunning = $derived(taskQueueClient.data?.running || undefined);
@@ -84,7 +84,7 @@
 
 {#snippet nav()}
   <ScrollArea class="h-full w-full">
-    <Scheduler {config_name} {status} {taskRunning} {taskNext} {onOverviewClick} {onDeviceClick} />
+    <Scheduler {config_name} {state} {taskRunning} {taskNext} {onOverviewClick} {onDeviceClick} />
     <ConfigNav nav_name={ui.nav_name} card_name={ui.card_name} bind:opened_nav={ui.opened_nav} {onCardClick} />
   </ScrollArea>
 {/snippet}

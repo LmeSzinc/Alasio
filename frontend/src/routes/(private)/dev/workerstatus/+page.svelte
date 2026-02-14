@@ -2,7 +2,7 @@
   import Arg from "$lib/components/arg/Arg.svelte";
   import ConfigItem from "$lib/components/aside/ConfigItem.svelte";
   import type { ArgData } from "$lib/components/arg/utils.svelte";
-  import type { ConfigLike, WORKER_STATUS } from "$lib/components/aside/types";
+  import type { ConfigLike, WORKER_STATE } from "$lib/components/aside/types";
   import { useTopic } from "$lib/ws";
   import type { ConfigTopicLike } from "$lib/components/aside/types";
   import * as Card from "$lib/components/ui/card";
@@ -10,8 +10,8 @@
   // Subscribe to ConfigScan topic
   const topicClient = useTopic<ConfigTopicLike | undefined>("ConfigScan");
 
-  // All available status options
-  const ALL_STATUSES: WORKER_STATUS[] = [
+  // All available state options
+  const ALL_STATES: WORKER_STATE[] = [
     "idle",
     "starting",
     "running",
@@ -42,14 +42,14 @@
     name: "Active",
   });
 
-  let statusInput = $state<ArgData>({
+  let stateInput = $state<ArgData>({
     task: "",
     group: "",
-    arg: "status",
+    arg: "state",
     dt: "select",
     value: "idle",
-    name: "Status",
-    option: ALL_STATUSES,
+    name: "State",
+    option: ALL_STATES,
   });
 
   let spinInput = $state<ArgData>({
@@ -85,7 +85,7 @@
   };
 </script>
 
-<div class="container h-full w-full mx-auto flex flex-col gap-4 overflow-auto p-4">
+<div class="container mx-auto flex h-full w-full flex-col gap-4 overflow-auto p-4">
   <h1 class="text-3xl font-bold">ConfigItem Debug Page</h1>
 
   <div class="grid gap-4 md:grid-cols-2">
@@ -100,7 +100,7 @@
             <div class="w-20">
               <ConfigItem
                 config={selectedConfig}
-                status={statusInput.value as WORKER_STATUS}
+                state={stateInput.value as WORKER_STATE}
                 active={activeInput.value as boolean}
                 afspin={spinInput.value as boolean}
               />
@@ -109,7 +109,7 @@
             <div class="flex-1 space-y-2 text-sm">
               <div><strong>Name:</strong> {selectedConfig.name}</div>
               <div><strong>Mod:</strong> {selectedConfig.mod}</div>
-              <div><strong>Status:</strong> {statusInput.value}</div>
+              <div><strong>State:</strong> {stateInput.value}</div>
               <div><strong>Active:</strong> {activeInput.value}</div>
               <div><strong>Group ID:</strong> {selectedConfig.gid}</div>
               <div><strong>Item ID:</strong> {selectedConfig.iid}</div>
@@ -131,7 +131,7 @@
           <Arg bind:data={configNameInput} />
           <Arg bind:data={activeInput} />
           <Arg bind:data={spinInput} />
-          <Arg bind:data={statusInput} />
+          <Arg bind:data={stateInput} />
         </div>
 
         {#if configNameInput.value && !selectedConfig}
@@ -146,7 +146,7 @@
   <!-- Part 3: All Combinations Grid -->
   <Card.Root class="neushadow border-none">
     <Card.Header>
-      <Card.Title>All Status × Active Combinations</Card.Title>
+      <Card.Title>All State × Active Combinations</Card.Title>
     </Card.Header>
     <Card.Content>
       <div class="space-y-2">
@@ -154,12 +154,12 @@
         <div>
           <h3 class="mb-2 text-lg font-medium">Inactive</h3>
           <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-9">
-            {#each ALL_STATUSES as status}
+            {#each ALL_STATES as state}
               <div class="flex flex-col items-center gap-2 rounded border p-3">
-                <div class="w-full truncate text-center font-mono text-xs" title={status}>
-                  {status}
+                <div class="w-full truncate text-center font-mono text-xs" title={state}>
+                  {state}
                 </div>
-                <ConfigItem config={selectedConfig || mockConfig} {status} active={false} afspin={false} />
+                <ConfigItem config={selectedConfig || mockConfig} {state} active={false} afspin={false} />
               </div>
             {/each}
           </div>
@@ -169,12 +169,12 @@
         <div>
           <h3 class="mb-2 text-lg font-medium">Active</h3>
           <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-9">
-            {#each ALL_STATUSES as status}
+            {#each ALL_STATES as state}
               <div class="flex flex-col items-center gap-2 rounded border p-3">
-                <div class="w-full truncate text-center font-mono text-xs" title={status}>
-                  {status}
+                <div class="w-full truncate text-center font-mono text-xs" title={state}>
+                  {state}
                 </div>
-                <ConfigItem config={selectedConfig || mockConfig} {status} active={true} afspin={false} />
+                <ConfigItem config={selectedConfig || mockConfig} {state} active={true} afspin={false} />
               </div>
             {/each}
           </div>
@@ -184,12 +184,12 @@
         <div>
           <h3 class="mb-2 text-lg font-medium">Inactive + Spin</h3>
           <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-9">
-            {#each ALL_STATUSES as status}
+            {#each ALL_STATES as state}
               <div class="flex flex-col items-center gap-2 rounded border p-3">
-                <div class="w-full truncate text-center font-mono text-xs" title={status}>
-                  {status}
+                <div class="w-full truncate text-center font-mono text-xs" title={state}>
+                  {state}
                 </div>
-                <ConfigItem config={selectedConfig || mockConfig} {status} active={false} afspin={true} />
+                <ConfigItem config={selectedConfig || mockConfig} {state} active={false} afspin={true} />
               </div>
             {/each}
           </div>
@@ -199,12 +199,12 @@
         <div>
           <h3 class="mb-2 text-lg font-medium">Active + Spin</h3>
           <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-9">
-            {#each ALL_STATUSES as status}
+            {#each ALL_STATES as state}
               <div class="flex flex-col items-center gap-2 rounded border p-3">
-                <div class="w-full truncate text-center font-mono text-xs" title={status}>
-                  {status}
+                <div class="w-full truncate text-center font-mono text-xs" title={state}>
+                  {state}
                 </div>
-                <ConfigItem config={selectedConfig || mockConfig} {status} active={true} afspin={true} />
+                <ConfigItem config={selectedConfig || mockConfig} {state} active={true} afspin={true} />
               </div>
             {/each}
           </div>
