@@ -12,5 +12,5 @@ class PreemptiveEvent(threading.Event):
         """
         with self._cond:
             flag = self._flag
-            self.flag = False
+            self._flag = False
         return flag
