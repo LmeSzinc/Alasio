@@ -12,7 +12,7 @@ from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.mod import ConfigSetEvent
-from alasio.ext.deep import deep_iter_depth2, deep_set
+from alasio.ext.deep import deep_get, deep_iter_depth2, deep_set
 
 
 class ConfigNav(BaseTopic):
@@ -140,7 +140,9 @@ class ConfigArg(BaseTopic):
                 # not displaying this key
                 return
             key = (*key, 'value')
-            event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=resp.value)
+            data = await self.data
+            prev = deep_get(data, key, default=resp.value)
+            event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=prev)
             await self.server.send(event)
             # re-raise error, so server will treat as RPC call failed
             if resp.error is not None:
