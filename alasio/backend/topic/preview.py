@@ -3,7 +3,6 @@ from typing import Literal
 from trio import current_time
 
 from alasio.backend.reactive.background import BackgroundTask
-from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.topic.scan import ConfigScanSource
@@ -208,13 +207,6 @@ class Preview(BaseTopic):
     async def getdata(self):
         # no full data
         return {}
-
-    @on_msgbus_global_event('Worker')
-    async def on_worker_state(self, value):
-        # Broadcast worker state to PreviewTask
-        config, state = value
-        cache = PreviewTask(config)
-        cache.on_worker_state(state)
 
     @rpc
     async def preview_start(self, name: str, speed: PREVIEW_SPEED):

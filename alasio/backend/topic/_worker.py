@@ -21,10 +21,17 @@ class BackendWorkerManager(WorkerManager):
             project_root=project_root, mod_root=mod_root, path_main=path_main
         )
 
+    async def _on_worker_state(self, config: str, state: WORKER_STATE):
+        # Broadcast worker state to msgbus
+        await BaseTopic.msgbus_global_asend('Worker', (config, state))
+        # notify preview
+        cache = PreviewTask(config)
+        cache.on_worker_state(state)
+
     def on_worker_state(self, config: str, state: WORKER_STATE):
         try:
             trio.from_thread.run(
-                BaseTopic.msgbus_global_asend, 'Worker', (config, state),
+                self._on_worker_state, config, state,
                 trio_token=GLOBAL_CONTEXT.trio_token
             )
         except trio.RunFinishedError:
@@ -45,6 +52,8 @@ class BackendWorkerManager(WorkerManager):
         elif topic == 'TaskQueue':
             cache = TaskQueueSource(event.c)
             cache.on_event(event, GLOBAL_CONTEXT.trio_token)
+        elif topic == 'Worker':
+            self.on_worker_state(config=event.c, state=event.v)
         else:
             # broadcast other config events to msgbus
             try:
