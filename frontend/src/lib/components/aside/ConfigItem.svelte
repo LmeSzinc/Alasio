@@ -28,10 +28,8 @@
 
 <button
   class={cn(
-    "focus:ring-ring flex w-16 cursor-pointer flex-col items-center rounded-md py-1.5",
-    active
-      ? "bg-primary hover:bg-primary text-primary-foreground/85"
-      : "hover:bg-accent hover:text-primary text-foreground/70",
+    "hover:bg-accent relative flex w-16 cursor-pointer flex-col items-center rounded-md py-1.5 transition-colors",
+    active ? "text-primary" : "hover:text-primary text-foreground/85",
     className,
   )}
   onclick={handleClick}
@@ -39,6 +37,9 @@
   aria-label="Open configuration: {config.name}"
   title={config.name}
 >
+  {#if active}
+    <div class="bg-primary absolute top-2 bottom-2 left-0 w-1 rounded-r-full"></div>
+  {/if}
   <div class="relative">
     <ModIcon mod={config.mod} afspin={spin} />
     <ConfigState state={displayState.value} {active} class="absolute -right-1 bottom-0" />

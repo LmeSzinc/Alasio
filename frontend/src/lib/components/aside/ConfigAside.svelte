@@ -72,7 +72,7 @@
   }
 
   // Determine if settings is active
-  const isSettingsActive = $derived(page.url.pathname.startsWith("/dev/config"));
+  const isSettingsActive = $derived(page.url.pathname.startsWith("/dev"));
 
   // Navigate to settings
   function handleSettings() {
@@ -123,15 +123,16 @@
   <div class="border-border flex flex-col items-center border-t p-2">
     <button
       class={cn(
-        "focus:ring-ring flex w-16 cursor-pointer flex-col items-center rounded-md py-1.5",
-        isSettingsActive
-          ? "bg-primary hover:bg-primary text-primary-foreground/85"
-          : "hover:bg-accent hover:text-primary text-foreground/70",
+        "hover:bg-accent relative flex w-16 cursor-pointer flex-col items-center rounded-md py-1.5 transition-colors",
+        isSettingsActive ? "text-primary" : "hover:text-primary text-foreground/85",
       )}
       onclick={handleSettings}
       aria-label="Open configuration settings"
       title={t.DevTool.Settings()}
     >
+      {#if isSettingsActive}
+        <div class="bg-primary absolute top-2 bottom-2 left-0 w-1 rounded-r-full"></div>
+      {/if}
       <div class="relative flex h-8 items-center justify-center">
         <Settings class="h-6 w-6" strokeWidth="1.5" aria-hidden="true" />
       </div>
