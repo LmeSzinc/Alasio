@@ -16,8 +16,11 @@
     return `${hours}:${minutes}:${seconds}.${ms}`;
   });
 
-  // Full format for hover
-  const fullTime = $derived(date.toLocaleString());
+  // Full format for hover: YYYY/MM/DD hh:mm:ss.ms
+  const fullTime = $derived.by(() => {
+    const ms = date.getMilliseconds().toString().padStart(3, "0");
+    return `${date.toLocaleString()}.${ms}`;
+  });
 
   // Get level color classes
   const levelClass = $derived.by(() => {
@@ -25,12 +28,22 @@
       case "DEBUG":
         return "text-muted-foreground";
       case "INFO":
-        return "";
+        return "text-foreground";
       case "WARNING":
-        return "bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-700 dark:text-yellow-400";
+        return "bg-yellow-500/15 hover:bg-yellow-500/30 text-yellow-700 dark:text-yellow-400";
       case "ERROR":
+        return "bg-red-500/15 hover:bg-red-500/30 text-red-700 dark:text-red-400";
       case "CRITICAL":
-        return "bg-red-500/20 hover:bg-red-500/40 text-red-700 dark:text-red-400";
+        return "bg-red-500/15 hover:bg-red-500/30 font-bold text-red-700 dark:text-red-400";
+      default:
+        return "";
+    }
+  });
+  const timeClass = $derived.by(() => {
+    switch (level) {
+      case "DEBUG":
+      case "INFO":
+        return "text-muted-foreground";
       default:
         return "";
     }
@@ -40,19 +53,20 @@
 <div
   class={cn(
     "hover:bg-muted/50 hover:shadow-muted-foreground/15 hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor]",
-    "flex w-fit min-w-[calc(100cqw)] gap-0.5 px-1 py-0.25 font-mono text-xs",
+    "block max-w-[calc(100cqw)] min-w-[calc(100cqw)] px-1 py-0.25 font-mono text-xs",
     levelClass,
   )}
 >
   {#if raw}
     <pre class="whitespace-pre">{message}</pre>
   {:else}
-    <span class="text-muted-foreground inline-block shrink-0" title={fullTime}>
-      {shortTime}
-    </span>
-    <span class="text-muted-foreground inline-block shrink-0">|</span>
-    <!-- 5.87rem(86.7px+7.225px) for time and separator + gap(0.125rem) * 2 + paddingX(0.25rem) * 2 = 6.62rem -->
-    <pre class="max-w-[calc(100cqw-6.62rem)] min-w-0 flex-1 break-all whitespace-pre-wrap">{message}</pre>
+    <!-- Hanging indent calculation: (Time: 12ch=86.7px) + (Separator visual: 1ch=7.225px) + (Gap: 2 * 0.25rem = 8px) = 101.925px = 6.37rem -->
+    <pre class="m-0 pl-[6.37rem] -indent-[6.37rem] break-all whitespace-pre-wrap"><span
+        class={cn("inline", timeClass)}
+        title={fullTime}>{shortTime}</span
+      ><span
+        class={cn("mx-1 inline-flex w-[1ch] overflow-hidden", timeClass)}
+        style="text-indent: -1ch"> | </span>{message}</pre>
   {/if}
 </div>
 {#if exception}
