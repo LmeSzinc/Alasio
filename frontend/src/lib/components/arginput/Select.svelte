@@ -69,7 +69,7 @@
       class={cn(
         "group bg-card dark:bg-card relative h-7! w-full border-0 p-1 pl-2 shadow-none",
         "focus:shadow-none",
-        "focus:ring-ring focus:ring-2 focus:ring-offset-5",
+        "focus:ring-ring focus:ring-offset-background focus:ring-2 focus:ring-offset-5",
         "transition-shadow duration-200",
       )}
       bind:ref={triggerEl}

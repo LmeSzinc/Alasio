@@ -90,18 +90,17 @@
   }
 </script>
 
-<div class={cn("w-full", className)}>
+<div class={cn("group w-full", className)}>
   <div class="relative flex w-full items-center">
     <!-- Primary color bottom border -->
     <!-- On focus, gray bottom border and primary color rounded ring -->
     <Input
       type="text"
       class={cn(
-        "bg-card dark:bg-card peer border-0 p-1 pl-2 pr-7 shadow-none",
+        "bg-card dark:bg-card peer truncate border-0 p-1 px-2 shadow-none focus-visible:pr-6",
         "focus-visible:shadow-none",
-        "focus-visible:ring-ring focus-visible:ring-offset-5 focus-visible:ring-2",
-        "transition-shadow duration-200",
-        errorMessage && "ring-destructive ring-offset-5 ring-2",
+        "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-5",
+        errorMessage && "ring-destructive ring-2 ring-offset-5",
       )}
       bind:value={arg.value}
       bind:ref={inputEl}
@@ -111,11 +110,14 @@
 
     <!-- Draw bottom border with peer -->
     <div
-      class="border-primary peer-focus-visible:border-foreground/35 absolute bottom-0 left-0 right-0 border-b-2 transition-colors duration-200"
+      class="border-primary peer-focus-visible:border-foreground/35 absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200"
     ></div>
 
-    <!-- Reset button is always visible to allow resetting to a default value -->
-    <Reset {onReset} class="absolute right-0" />
+    <!-- Reset button is visible only on focus -->
+    <Reset
+      {onReset}
+      class="pointer-events-none absolute right-0 opacity-0 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+    />
   </div>
 
   <!-- Error message display -->

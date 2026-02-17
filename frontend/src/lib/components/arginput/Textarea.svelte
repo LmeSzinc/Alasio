@@ -34,14 +34,12 @@
   }
 </script>
 
-<div class={cn("relative flex w-full items-start", className)}>
+<div class={cn("group relative flex w-full items-start", className)}>
   <Textarea
     class={cn(
-      "peer bg-accent resize-y p-2 pr-8 pl-2 font-mono  shadow-none",
+      "bg-accent peer min-h-[80px] resize-y p-2 px-2 font-mono shadow-none focus-visible:pr-8",
       "focus-visible:shadow-none",
-      "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-5",
-      "transition-shadow duration-200",
-      "min-h-[80px]",
+      "focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-5",
     )}
     bind:value={arg.value}
     bind:ref={textareaEl}
@@ -49,6 +47,9 @@
     onblur={onBlur}
   />
 
-  <!-- Reset button is always visible to allow resetting to a default value -->
-  <Reset {onReset} class="hover:bg-card absolute top-1 right-1" />
+  <!-- Reset button is visible only on focus -->
+  <Reset
+    {onReset}
+    class="pointer-events-none absolute top-1 right-1 opacity-0 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+  />
 </div>
