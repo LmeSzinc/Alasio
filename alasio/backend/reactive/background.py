@@ -125,8 +125,7 @@ class BackgroundTask:
         """停止逻辑：中断运行状态，回到空闲等待"""
         if self._stop_scope:
             self._stop_scope.cancel()
-        self._last_finish_time = -10000
-        self._event = Event()
+        self._stop_scope = None
 
     def task_shutdown(self, fully=False):
         """关闭逻辑：完全销毁后台任务"""

@@ -253,3 +253,30 @@ async def test_background_task_none_recurrence(autojump_clock):
         assert task.run_count == 2
 
         task.task_shutdown()
+
+
+@pytest.mark.trio
+async def test_background_task_multiple_stop(autojump_clock):
+    """
+    Test multiple stops followed by a trigger:
+    Calling task_stop() multiple times should not break internal state
+    and it should be wakeable by trigger() afterwards.
+    """
+    task = MockBackgroundTask()
+    async with trio.open_nursery() as nursery:
+        task.task_trigger(nursery)
+        await trio.testing.wait_all_tasks_blocked()
+        assert task.run_count == 1
+
+        # Stop multiple times
+        task.task_stop()
+        task.task_stop()
+        task.task_stop()
+
+        # Should be wakeable by trigger()
+        await trio.sleep(10)
+        task.task_trigger(nursery)
+        await trio.testing.wait_all_tasks_blocked()
+        assert task.run_count == 2
+
+        task.task_shutdown()
