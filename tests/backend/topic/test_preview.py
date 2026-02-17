@@ -29,7 +29,7 @@ async def mock_env():
             # Mock BackendWorkerManager
             mock_manager = MagicMock()
             mock_manager.state = {}
-            with patch('alasio.backend.topic.preview.get_worker_manager', return_value=mock_manager):
+            with patch('alasio.backend.topic._worker.BACKEND_WORKER_MANAGER', mock_manager):
                 yield mock_manager, nursery
 
 
@@ -280,3 +280,87 @@ async def test_preview_task_mixed_speeds(preview_task, worker, autojump_clock):
     preview_task.on_preview(preview_data)
     topic_normal.server.send_lossy.assert_called_once_with(preview_data)
     topic_realtime.server.send_lossy.assert_called_once_with(preview_data)
+
+
+@pytest.mark.trio
+async def test_preview_task_subscribe_on_idle_sends_cache(preview_task, worker, autojump_clock):
+    """
+    Test that when worker is idle, a new subscriber receives the cached preview.
+    """
+    worker.state = 'idle'
+    topic = MockTopic()
+    preview_data = b'Preview\x00\x00\x00\x00\x00\x00\x00\x00JPG_DATA'
+
+    # Manually set cache
+    preview_task._preview = preview_data
+
+    # Subscribe on idle
+    preview_task.subscribe(topic, 'normal')
+    await trio.testing.wait_all_tasks_blocked()
+
+    # Should receive cache immediately
+    topic.server.send_lossy.assert_called_once_with(preview_data)
+
+
+@pytest.mark.trio
+async def test_preview_task_on_error_sends_cache(preview_task, worker, autojump_clock):
+    """
+    Test that when worker transitions to error, subscribers receive the cached preview,
+    but not duplicates if they already received it.
+    """
+    topic_normal = MockTopic()
+    topic_realtime = MockTopic()
+
+    preview_task.subscribe(topic_normal, 'normal')
+    preview_task.subscribe(topic_realtime, 'realtime')
+    await trio.testing.wait_all_tasks_blocked()
+
+    # 1. Received a preview (both should get it)
+    preview_data = b'Preview\x00\x00\x00\x00\x00\x00\x00\x01JPG_DATA'
+    preview_task.on_preview(preview_data)
+    topic_normal.server.send_lossy.assert_called_with(preview_data)
+    topic_realtime.server.send_lossy.assert_called_with(preview_data)
+
+    topic_normal.server.send_lossy.reset_mock()
+    topic_realtime.server.send_lossy.reset_mock()
+
+    # 2. Transition to error immediately (same preview data in cache)
+    # Should NOT receive duplicates because headers match
+    worker.state = 'error'
+    preview_task.on_worker_state('error')
+    topic_normal.server.send_lossy.assert_not_called()
+    topic_realtime.server.send_lossy.assert_not_called()
+
+    # 3. If it was a new preview not yet broadcasted to a subscriber (e.g. normal speed interval)
+    # Reset state to running and clear normal_lastsend to simulate time passing
+    worker.state = 'running'
+    preview_task.on_worker_state('running')
+    preview_task._normal_lastsend = -10000
+
+    # New preview arrives
+    preview_data_2 = b'Preview\x00\x00\x00\x00\x00\x00\x00\x02JPG_DATA'
+    preview_task.on_preview(preview_data_2)
+    topic_normal.server.send_lossy.assert_called_with(preview_data_2)
+    topic_realtime.server.send_lossy.assert_called_with(preview_data_2)
+
+    topic_normal.server.send_lossy.reset_mock()
+    topic_realtime.server.send_lossy.reset_mock()
+
+    # Now simulate 'normal' is in wait period but 'realtime' just got it
+    # We cheat by setting _normal_lastsend to now
+    preview_task._normal_lastsend = trio.current_time()
+    # And a new preview arrives that only realtime gets
+    preview_data_3 = b'Preview\x00\x00\x00\x00\x00\x00\x00\x03JPG_DATA'
+    preview_task.on_preview(preview_data_3)
+    topic_normal.server.send_lossy.assert_not_called()
+    topic_realtime.server.send_lossy.assert_called_with(preview_data_3)
+
+    topic_normal.server.send_lossy.reset_mock()
+    topic_realtime.server.send_lossy.reset_mock()
+
+    # Now transition to error.
+    # normal should get it (header changed since its last receive), realtime should not.
+    worker.state = 'error'
+    preview_task.on_worker_state('error')
+    topic_normal.server.send_lossy.assert_called_with(preview_data_3)
+    topic_realtime.server.send_lossy.assert_not_called()

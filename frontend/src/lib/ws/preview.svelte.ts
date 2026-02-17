@@ -7,12 +7,6 @@ import { WebsocketManager } from "./client.svelte";
 export class PreviewManager extends WebsocketManager {
   #previewHeader = new TextEncoder().encode("Preview");
 
-  constructor() {
-    super({
-      defaultSubscriptions: ["Preview"],
-    });
-  }
-
   protected override getWsUrl(): string {
     const url = new URL("/api/preview", window.location.href);
     url.protocol = url.protocol.replace("http", "ws");

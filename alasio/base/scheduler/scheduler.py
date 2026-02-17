@@ -98,19 +98,19 @@ class AlasioScheduler:
             raise SchedulerStop
 
     def restart_device(self):
-        raise NotImplemented
+        raise NotImplementedError
 
     def restart_game(self):
-        raise NotImplemented
+        raise NotImplementedError
 
     def stop_game(self):
-        raise NotImplemented
+        raise NotImplementedError
 
     def stop_device(self):
-        raise NotImplemented
+        raise NotImplementedError
 
     def goto_main(self):
-        raise NotImplemented
+        raise NotImplementedError
 
     def _run_task(self, task):
         """
@@ -128,6 +128,7 @@ class AlasioScheduler:
             raise SchedulerStop
         try:
             func()
+            return True
         except TaskStop:
             return True
         except GameNotRunningError as e:
@@ -199,6 +200,8 @@ class AlasioScheduler:
         """
         Callback function on scheduler idle
         """
+        # send last screenshot on idle
+        self.device.backend_send_preview(flag=True)
         self.device.on_idle()
         self.config.release()
         self._send_scheduler_running(None)
@@ -263,6 +266,9 @@ class AlasioScheduler:
                     break
 
         backend.send_worker_state('running')
+        if reached:
+            # send first screenshot on recover
+            backend.preview_requested.set()
         return reached
 
     def _task_loop(self):

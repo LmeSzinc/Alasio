@@ -414,12 +414,13 @@ def image_save(file, image, encode=None, skip_same=False):
     return True
 
 
-def image_preview(image, quality=75):
+def image_preview(image, now=None, quality=75):
     """
     Create a preview
 
     Args:
         image (np.ndarray): Input image
+        now (float | None): Time in second, or 0 or None for now
         quality (int): JPEG quality, 0~100, bigger for better quality
 
     Returns:
@@ -429,7 +430,10 @@ def image_preview(image, quality=75):
     # Use 0.5 scale factor to leverage OpenCV internal optimizations
     res = cv2.resize(image, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
     data = image_encode(res, ext='jpg', encode=[cv2.IMWRITE_JPEG_QUALITY, quality]).tobytes()
-    now = int(time.time() * 1000)
+    if now is None or now <= 0:
+        now = int(time.time() * 1000)
+    else:
+        now = int(now * 1000)
     return b'Preview' + now.to_bytes(8, 'big') + data
 
 

@@ -14,6 +14,7 @@ from alasio.config.table.scan import validate_config_name
 from alasio.ext.singleton import SingletonNamed
 
 PREVIEW_AVAILABLE = ['running', 'scheduler-stopping']
+PREVIEW_IDLE = ['idle', 'error', 'scheduler-waiting']
 PREVIEW_SPEED = Literal['normal', 'realtime']
 
 
@@ -87,6 +88,11 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
         self._speed: PREVIEW_SPEED = 'normal'
         self._trigger_on_running = False
 
+        # cache
+        self._preview = None
+        self._last_normal_header = b''
+        self._last_realtime_header = b''
+
     def _get_speed(self) -> PREVIEW_SPEED:
         for speed in self._subscribers.values():
             if speed == 'realtime':
@@ -110,11 +116,12 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
             self._normal_lastsend = -10000
         # worker idle, skip trigger and record as _trigger_on_running
         worker = self._manager.state.get(self.config_name)
-        if worker is None:
+        if worker is None or worker.state not in PREVIEW_AVAILABLE:
             self._trigger_on_running = True
-            return
-        if not worker.state in PREVIEW_AVAILABLE:
-            self._trigger_on_running = True
+            # if worker not running, send cache
+            # if worker running, trigger task to request new preview
+            if self._preview:
+                topic.server.send_lossy(self._preview)
             return
         # trigger
         if not speed_decrease:
@@ -162,9 +169,19 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
                 self._trigger_on_running = False
                 self.task_trigger(self._nursery)
         else:
-            self._trigger_on_running = True
+            if state in PREVIEW_IDLE and self._preview:
+                # send last screenshot on idle
+                header = self._preview[:15]
+                for topic, topic_speed in self._subscribers.items():
+                    if topic_speed == 'realtime' and header != self._last_realtime_header:
+                        topic.server.send_lossy(self._preview)
+                        continue
+                    if topic_speed == 'normal' and header != self._last_normal_header:
+                        topic.server.send_lossy(self._preview)
+                        continue
+
+            self._trigger_on_running = bool(self._subscribers)
             self.task_stop()
-            return
 
     def on_preview(self, preview):
         """
@@ -181,15 +198,20 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
         # broadcast
         now = current_time()
         normal_outdated = (now - _normal_lastsend) >= self.recurrence
+        self._preview = preview
+        header = preview[:15]
+        self._last_realtime_header = header
         if normal_outdated:
             self._normal_lastsend = now
+            self._last_normal_header = header
+
         for topic, topic_speed in _subscribers.items():
             # speed='realtime', send directly
             if topic_speed == 'realtime':
                 topic.server.send_lossy(preview)
                 continue
             # speed='normal', last send too far
-            if normal_outdated:
+            if topic_speed == 'normal' and normal_outdated:
                 topic.server.send_lossy(preview)
                 continue
             # speed='normal', just recently send, skip
