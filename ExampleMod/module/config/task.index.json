@@ -52,14 +52,14 @@
   },
   "OpsiExplore": {
     "group": {
-      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "Scheduler", "task": "OpsiExplore"},
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerU00", "task": "OpsiExplore"},
       "OpsiExplore": {"file": "opsi/opsi_model.py", "cls": "OpsiExplore", "task": "OpsiExplore"}
     },
     "config": {"task": ["OpsiExplore"], "group": []}
   },
   "OpsiDaily": {
     "group": {
-      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "Scheduler", "task": "OpsiDaily"},
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerU00", "task": "OpsiDaily"},
       "OpsiDaily": {"file": "opsi/opsi_model.py", "cls": "OpsiDaily", "task": "OpsiDaily"},
       "OpsiGeneral": {"file": "opsi/opsi_model.py", "cls": "OpsiGeneral", "task": "OpsiGeneral"}
     },
@@ -73,7 +73,7 @@
   },
   "OpsiAshAssist": {
     "group": {
-      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "Scheduler", "task": "OpsiAshAssist"},
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerU00", "task": "OpsiAshAssist"},
       "OpsiAshAssist": {"file": "opsi/opsi_model.py", "cls": "OpsiAshAssist", "task": "OpsiAshAssist"}
     },
     "config": {"task": ["OpsiAshAssist"], "group": []}

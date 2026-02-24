@@ -265,6 +265,8 @@ class ConfigGenerator(ParseArgs, ParseTasks):
                 base = None
             # {group}.{arg}
             for arg_name, arg in group.args.items():
+                if arg.hide:
+                    continue
                 # skip the same args
                 if base and base.get(arg_name) == arg:
                     continue

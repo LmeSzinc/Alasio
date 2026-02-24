@@ -322,7 +322,9 @@ class CrossNavGenerator:
                     group_data = self._group_name_to_data(cls)
 
                     is_variant = base_name != cls
-                    for arg_name, arg_data in group_data.args.items():
+                    for arg_name, arg in group_data.args.items():
+                        if arg.hide:
+                            continue
                         row = {
                             'task': group.task,
                             'group': base_name,
@@ -331,7 +333,7 @@ class CrossNavGenerator:
                         # set cls on variant override
                         if is_variant and arg_name in group_data.override_args:
                             row['cls'] = cls
-                        row.update(arg_data.to_dict())
+                        row.update(arg.to_dict())
                         arg_name = f'{base_name}_{arg_name}'
                         deep_set(out, keys=[card_name, arg_name], value=row)
                         # arg data post-process

@@ -156,7 +156,7 @@
       "group": "Scheduler",
       "arg": "Enable",
       "cls": "SchedulerStatic",
-      "dt": "select",
+      "dt": "static",
       "value": "enabled",
       "option": ["enabled"]
     },
@@ -182,7 +182,7 @@
       "group": "Scheduler",
       "arg": "Enable",
       "cls": "SchedulerStatic",
-      "dt": "select",
+      "dt": "static",
       "value": "enabled",
       "option": ["enabled"]
     },

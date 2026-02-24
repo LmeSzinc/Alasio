@@ -168,6 +168,8 @@ class ParseBase:
             return data
         for postprocess in list_postprocess:
             data = self._run_postprocess(postprocess, data)
+            if data is None:
+                print(f'Warning: postprocess function {postprocess.__name__} returns None')
         return data
 
 

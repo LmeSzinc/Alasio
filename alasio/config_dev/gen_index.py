@@ -1,6 +1,5 @@
 from collections import defaultdict
 
-from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.gen_cross import CrossNavGenerator
 from alasio.config_dev.parse.base import DefinitionError
@@ -506,10 +505,3 @@ class IndexGenerator(CrossNavGenerator):
     def generate(self):
         with GitAdd(env.PROJECT_ROOT) as gitadd:
             self._generate(gitadd)
-
-
-if __name__ == '__main__':
-    env.set_project_root(env.ALASIO_ROOT)
-    alasio = ModEntryInfo.alasio()
-    self = IndexGenerator(alasio)
-    self.generate()

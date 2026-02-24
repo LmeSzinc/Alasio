@@ -3,10 +3,7 @@
     "_info": {
       "zh-CN": {"name": "任务设置", "help": ""},
       "en-US": {"name": "Scheduler", "help": ""},
-      "ja-JP": {
-        "name": "Scheduler._info.name",
-        "help": "Scheduler._info.help"
-      },
+      "ja-JP": {"name": "タスク設定", "help": ""},
       "zh-TW": {"name": "任務設定", "help": ""},
       "en-ES": {"name": "Planificador", "help": ""}
     },
@@ -20,8 +17,8 @@
         "help": "Join this task to scheduler."
       },
       "ja-JP": {
-        "name": "Scheduler.Enable.name",
-        "help": "Scheduler.Enable.help"
+        "name": "この機能を有効にする",
+        "help": "このタスクをスケジューラに追加します"
       },
       "zh-TW": {
         "name": "啟用該功能",
@@ -45,8 +42,8 @@
         ]
       },
       "ja-JP": {
-        "name": "Scheduler.NextRun.name",
-        "help": "Scheduler.NextRun.help"
+        "name": "次回実行時間",
+        "help": "自動的に計算される値であり、手動で変更する必要はありません。クリアするとすぐに実行されます"
       },
       "zh-TW": {
         "name": "下一次執行時間",
@@ -55,8 +52,8 @@
       "en-ES": {
         "name": "Siguiente ejecución",
         "help": [
-          "Se actualiza automáticamente a la siguiente vez que hay que ejecutar la tarea, normalmente no se modifica manualmente.",
-          "Sin embargo, puedes forzar la ejecución dejando este campo en blanco."
+          "Se actualiza automáticamente a la siguiente vez que hay que ejecutar la tarea, normalmente no se modifica manualmente",
+          "Sin embargo, puedes forzar la ejecución dejando este campo en blanco"
         ]
       }
     },
@@ -70,8 +67,8 @@
         "help": "Series of server refresh time(s) as to when this task will next run, this is automatically converted to respective time zone, generally do not need to modify"
       },
       "ja-JP": {
-        "name": "Scheduler.ServerUpdate.name",
-        "help": "Scheduler.ServerUpdate.help"
+        "name": "サーバー更新時間",
+        "help": "一部のタスクが成功した後、次回の実行はサーバーの更新時間まで延期されます。タイムゾーンは自動的に変換されるため、通常は変更する必要はありません"
       },
       "zh-TW": {
         "name": "伺服器更新時間",
@@ -86,38 +83,116 @@
   "SchedulerStatic": {
     "Enable": {
       "zh-CN": {
-        "name": "SchedulerStatic.Enable",
-        "help": "",
+        "name": "启用该功能",
+        "help": "将这个任务加入调度器",
         "option_i18n": {
-          "enabled": "enabled"
+          "enabled": "已启用"
         }
       },
       "en-US": {
-        "name": "SchedulerStatic.Enable",
-        "help": "",
+        "name": "Enable Task",
+        "help": "Join this task to scheduler.",
         "option_i18n": {
           "enabled": "enabled"
         }
       },
       "ja-JP": {
-        "name": "SchedulerStatic.Enable",
-        "help": "",
+        "name": "この機能を有効にする",
+        "help": "このタスクをスケジューラに追加します",
         "option_i18n": {
-          "enabled": "enabled"
+          "enabled": "有効"
         }
       },
       "zh-TW": {
-        "name": "SchedulerStatic.Enable",
-        "help": "",
+        "name": "啟用該功能",
+        "help": "將這個任務加入調度器",
+        "option_i18n": {
+          "enabled": "已啟用"
+        }
+      },
+      "en-ES": {
+        "name": "Activar tarea",
+        "help": "Añadir tarea al Planificador.",
+        "option_i18n": {
+          "enabled": "activado"
+        }
+      }
+    }
+  },
+  "SchedulerStaticU00": {
+    "Enable": {
+      "zh-CN": {
+        "name": "启用该功能",
+        "help": "将这个任务加入调度器",
+        "option_i18n": {
+          "enabled": "已启用"
+        }
+      },
+      "en-US": {
+        "name": "Enable Task",
+        "help": "Join this task to scheduler.",
         "option_i18n": {
           "enabled": "enabled"
         }
       },
+      "ja-JP": {
+        "name": "この機能を有効にする",
+        "help": "このタスクをスケジューラに追加します",
+        "option_i18n": {
+          "enabled": "有効"
+        }
+      },
+      "zh-TW": {
+        "name": "啟用該功能",
+        "help": "將這個任務加入調度器",
+        "option_i18n": {
+          "enabled": "已啟用"
+        }
+      },
       "en-ES": {
-        "name": "SchedulerStatic.Enable",
-        "help": "",
+        "name": "Activar tarea",
+        "help": "Añadir tarea al Planificador.",
+        "option_i18n": {
+          "enabled": "activado"
+        }
+      }
+    }
+  },
+  "SchedulerStaticU04": {
+    "Enable": {
+      "zh-CN": {
+        "name": "启用该功能",
+        "help": "将这个任务加入调度器",
+        "option_i18n": {
+          "enabled": "已启用"
+        }
+      },
+      "en-US": {
+        "name": "Enable Task",
+        "help": "Join this task to scheduler.",
         "option_i18n": {
           "enabled": "enabled"
+        }
+      },
+      "ja-JP": {
+        "name": "この機能を有効にする",
+        "help": "このタスクをスケジューラに追加します",
+        "option_i18n": {
+          "enabled": "有効"
+        }
+      },
+      "zh-TW": {
+        "name": "啟用該功能",
+        "help": "將這個任務加入調度器",
+        "option_i18n": {
+          "enabled": "已啟用"
+        }
+      },
+      "en-ES": {
+        "name": "Activar tarea",
+        "help": "Añadir tarea al Planificador.",
+        "option_i18n": {
+          "enabled": "activado"
         }
       }
     }

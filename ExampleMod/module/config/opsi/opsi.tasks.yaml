@@ -1,6 +1,6 @@
 OpsiExplore:
   groups:
-    - Scheduler
+    - SchedulerU00
     - OpsiExplore
   displays: flat
 
@@ -18,7 +18,7 @@ OpsiExplore:
 
 OpsiDaily:
   groups:
-    - Scheduler
+    - SchedulerU00
     - OpsiDaily
     - task: OpsiGeneral
       group: OpsiGeneral
@@ -30,6 +30,6 @@ OpsiGeneral:
 
 OpsiAshAssist:
   groups:
-    - Scheduler
+    - SchedulerU00
     - OpsiAshAssist
   displays: flat

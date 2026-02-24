@@ -2,7 +2,7 @@ Scheduler:
   args:
     Enable: false
     NextRun: 2020-01-01T00:00:00Z
-    ServerUpdate: 00:00
+    ServerUpdate: "00:00"
 
 SchedulerStatic:
   base: Scheduler
@@ -10,8 +10,49 @@ SchedulerStatic:
     Enable:
       # TypeError: Literal may only contain None/integers/strings - typing.Literal[True] is not supported
       # msgspec does not allow Literal[True], so here's a string
+      dt: static
       value: "enabled"
-      option: ["enabled",]
+      option: ["enabled", ]
+
+SchedulerU00:
+  base: Scheduler
+  args:
+    ServerUpdate:
+      hide: true
+      value: "00:00"
+      option: ["00:00", ]
+
+SchedulerStaticU00:
+  base: Scheduler
+  args:
+    Enable:
+      dt: static
+      value: "enabled"
+      option: ["enabled", ]
+    ServerUpdate:
+      hide: true
+      value: "00:00"
+      option: [ "00:00", ]
+
+SchedulerU04:
+  base: Scheduler
+  args:
+    ServerUpdate:
+      hide: true
+      value: "04:00"
+      option: ["04:00", ]
+
+SchedulerStaticU04:
+  base: Scheduler
+  args:
+    Enable:
+      dt: static
+      value: "enabled"
+      option: ["enabled", ]
+    ServerUpdate:
+      hide: true
+      value: "04:00"
+      option: [ "04:00", ]
 
 #设备设置
 #Alas设置

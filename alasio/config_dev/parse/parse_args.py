@@ -38,6 +38,7 @@ TYPE_YAML_TO_DT = {
 #   Default value must be static, you should use "t.Tuple" instead of "t.List"
 #   All datetime should be timezone aware
 TYPE_DT_TO_PYTHON = {
+    'static': 'str',
     # text input
     'input': 'str',
     'input-int': 'int',
@@ -60,6 +61,7 @@ TYPE_DT_TO_PYTHON = {
 # Example:
 #   {'dt': 'select'} is a literal in python: Literal["option-A", "option-B"]
 TYPE_ARG_LITERAL = {
+    'static',
     'select', 'radio', 'multi-select', 'multi-radio',
 }
 # Define which "dt" is a tuple of value
@@ -146,6 +148,7 @@ class ArgData(Struct, omit_defaults=True):
     # key is option, value is translation
     # option_i18n: Union[Dict[any, str], UnsetType] = UNSET
 
+    hide: bool = False
     advanced: bool = False
     # Layout style, layout is determined according to `dt` by frontend (see $lib/component/arg/Arg.svelte)
     # Most `dt` are show as horizontal, some are special e.g. dt=textarea is vertical

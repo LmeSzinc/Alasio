@@ -15,13 +15,6 @@
       "dt": "datetime",
       "value": "2020-01-01T00:00:00Z"
     },
-    "Scheduler_ServerUpdate": {
-      "task": "OpsiExplore",
-      "group": "Scheduler",
-      "arg": "ServerUpdate",
-      "dt": "input",
-      "value": "00:00"
-    },
     "OpsiExplore_SpecialRadar": {
       "task": "OpsiExplore",
       "group": "OpsiExplore",
@@ -59,13 +52,6 @@
       "arg": "NextRun",
       "dt": "datetime",
       "value": "2020-01-01T00:00:00Z"
-    },
-    "Scheduler_ServerUpdate": {
-      "task": "OpsiDaily",
-      "group": "Scheduler",
-      "arg": "ServerUpdate",
-      "dt": "input",
-      "value": "00:00"
     },
     "OpsiDaily_DoMission": {
       "task": "OpsiDaily",
@@ -196,13 +182,6 @@
       "arg": "NextRun",
       "dt": "datetime",
       "value": "2020-01-01T00:00:00Z"
-    },
-    "Scheduler_ServerUpdate": {
-      "task": "OpsiAshAssist",
-      "group": "Scheduler",
-      "arg": "ServerUpdate",
-      "dt": "input",
-      "value": "00:00"
     },
     "OpsiAshAssist_Tier": {
       "task": "OpsiAshAssist",

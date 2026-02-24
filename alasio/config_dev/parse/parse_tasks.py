@@ -76,7 +76,7 @@ class DisplayCard(msgspec.Struct, dict=True):
         # use the first group that is not Scheduler
         if not info:
             for group in groups:
-                if group.group == 'Scheduler':
+                if group.group.startswith('Scheduler'):
                     continue
                 info = group.group
                 break
