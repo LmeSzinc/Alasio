@@ -107,6 +107,9 @@ def populate_arg(value) -> dict:
             dt = value['dt']
             if dt not in TYPE_DT_TO_PYTHON:
                 raise DefinitionError(f'Invalid datatype {dt}')
+            # dt="static" must have option
+            if dt == 'static':
+                value['option'] = [default]
             # Check if literal args have option
             if dt in TYPE_ARG_LITERAL and 'option' not in value:
                 raise DefinitionError(f'datatype {dt} must have "option" defined')

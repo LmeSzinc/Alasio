@@ -12,15 +12,14 @@ SchedulerStatic:
       # msgspec does not allow Literal[True], so here's a string
       dt: static
       value: "enabled"
-      option: ["enabled", ]
 
 SchedulerU00:
   base: Scheduler
   args:
     ServerUpdate:
       hide: true
+      dt: static
       value: "00:00"
-      option: ["00:00", ]
 
 SchedulerStaticU00:
   base: Scheduler
@@ -28,19 +27,18 @@ SchedulerStaticU00:
     Enable:
       dt: static
       value: "enabled"
-      option: ["enabled", ]
     ServerUpdate:
       hide: true
+      dt: static
       value: "00:00"
-      option: [ "00:00", ]
 
 SchedulerU04:
   base: Scheduler
   args:
     ServerUpdate:
       hide: true
+      dt: static
       value: "04:00"
-      option: ["04:00", ]
 
 SchedulerStaticU04:
   base: Scheduler
@@ -48,11 +46,10 @@ SchedulerStaticU04:
     Enable:
       dt: static
       value: "enabled"
-      option: ["enabled", ]
     ServerUpdate:
       hide: true
+      dt: static
       value: "04:00"
-      option: [ "04:00", ]
 
 #设备设置
 #Alas设置
