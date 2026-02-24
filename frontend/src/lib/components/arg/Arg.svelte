@@ -3,6 +3,7 @@
   import Checkbox from "../arginput/Checkbox.svelte";
   import Input from "../arginput/Input.svelte";
   import Select from "../arginput/Select.svelte";
+  import Static from "../arginput/Static.svelte";
   import Textarea from "../arginput/Textarea.svelte";
   import HorizontalLayout from "./HorizontalLayout.svelte";
   import type { ArgProps, InputProps, LayoutProps } from "./utils.svelte";
@@ -18,6 +19,7 @@
     select: Select,
     textarea: Textarea,
     filter: Textarea,
+    static: Static,
   };
   const layoutMap: Record<string, Component<LayoutProps>> = {
     filter: VerticalLayout,

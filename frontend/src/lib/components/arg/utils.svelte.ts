@@ -134,6 +134,13 @@ export function useArgValue<T>(data: ArgData) {
     handleReset?.(data);
   }
 
+  function getLabel(val: any): string {
+    if (data.option_i18n && data.option_i18n[val]) {
+      return data.option_i18n[val];
+    }
+    return val !== undefined && val !== null ? String(val) : "";
+  }
+
   // 3. RETURN API: Expose the local value and the submit function to the component.
   //    The getter/setter pair allows the component to use `bind:value={arg.value}`.
   return {
@@ -145,6 +152,7 @@ export function useArgValue<T>(data: ArgData) {
     },
     submit,
     reset,
+    getLabel,
   };
 }
 
@@ -155,10 +163,7 @@ export function useArgValue<T>(data: ArgData) {
  * @param dt Data type from ArgData (e.g., "input", "input-int", "input-float")
  * @returns Object containing the validated/converted value and error message (if any)
  */
-export function validateByDataType(
-  value: string,
-  dt: string
-): { value: any; error: string | null } {
+export function validateByDataType(value: string, dt: string): { value: any; error: string | null } {
   // For input-int, parse and validate integer
   if (dt === "input-int") {
     // If already a number, check if it's an integer
@@ -169,7 +174,7 @@ export function validateByDataType(
         return { value, error: t.Input.InvalidInteger() };
       }
     }
-    
+
     // Convert to string if needed and parse
     const stringValue = String(value);
     const parsedValue = parseInt(stringValue, 10);
@@ -187,7 +192,7 @@ export function validateByDataType(
     if (typeof value === "number" && !isNaN(value)) {
       return { value, error: null };
     }
-    
+
     // Convert to string if needed and parse
     const stringValue = String(value);
     const parsedValue = parseFloat(stringValue);

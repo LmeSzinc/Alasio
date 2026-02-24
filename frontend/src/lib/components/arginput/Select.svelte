@@ -10,25 +10,13 @@
 
   // Get options from data.option or use empty array as fallback
   const options = $derived(data.option || []);
-  // Get i18n labels dict if available (key: option value, value: display text)
-  const optionI18n = $derived(data.option_i18n || {});
   // Convert value to string for Select component compatibility
   const stringValue = $derived(arg.value !== undefined && arg.value !== null ? String(arg.value) : undefined);
 
-  // Get the display label for a given option value
-  function getLabel(optionValue: any): string {
-    // If option_i18n exists and has the key, use it
-    if (optionI18n[optionValue]) {
-      return optionI18n[optionValue];
-    }
-    // Otherwise use the option value itself as the label
-    return String(optionValue);
-  }
-
   // Find the label for the current selected value
   const triggerContent = $derived(() => {
-    if (arg.value !== undefined) {
-      return getLabel(arg.value);
+    if (arg.value !== undefined && arg.value !== null) {
+      return arg.getLabel(arg.value);
     }
     return "Select an option";
   });
@@ -87,7 +75,7 @@
       <Select.Group>
         {#if options.length > 0}
           {#each options as option (option)}
-            {@const label = getLabel(option)}
+            {@const label = arg.getLabel(option)}
             <Select.Item value={String(option)} {label}>
               {label}
             </Select.Item>
