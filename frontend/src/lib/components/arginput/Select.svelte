@@ -74,7 +74,9 @@
       )}
       bind:ref={triggerEl}
     >
-      {triggerContent()}
+      <span class="flex-1 truncate text-left">
+        {triggerContent()}
+      </span>
       <!-- Draw bottom border with peer -->
       <div
         class="border-primary group-focus:border-foreground/35 absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200"

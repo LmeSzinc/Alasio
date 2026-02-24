@@ -37,7 +37,7 @@
 <div class={cn("group relative flex w-full items-start", className)}>
   <Textarea
     class={cn(
-      "bg-accent peer min-h-[80px] resize-y p-2 px-2 font-mono shadow-none focus-visible:pr-8",
+      "bg-accent peer min-h-[80px] resize-y font-mono font-sm shadow-none",
       "focus-visible:shadow-none",
       "focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-5",
     )}
@@ -50,6 +50,9 @@
   <!-- Reset button is visible only on focus -->
   <Reset
     {onReset}
-    class="pointer-events-none absolute top-1 right-1 opacity-0 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+    class={cn(
+      "pointer-events-none absolute top-1 right-1 opacity-0 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+      "hover:bg-card dark:hover:bg-card",
+    )}
   />
 </div>
