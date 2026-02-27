@@ -329,13 +329,14 @@ class AlasioConfigBase:
             for group, group_ref in task_ref.group.items():
                 yield group, group_ref
 
-    def _group_construct(self, group) -> Struct:
+    def construct_group(self, group) -> Struct:
         """
-        Convert group annotation like "opsi.OpsiGeneral", convert to msgspec validation model
+        Convert group annotation like "OpsiGeneral" to msgspec validation model
 
         Args:
             group (str):
         """
+        # "OpsiGeneral" -> "opsi.OpsiGeneral"
         anno = self._annotations.get(group)
         if not anno:
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{group}'")
@@ -422,7 +423,7 @@ class AlasioConfigBase:
             # this shouldn't happen
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'") from None
 
-        obj = self._group_construct(item)
+        obj = self.construct_group(item)
         # no proxy on unbound groups
         setattr(self, item, obj)
         # Apply config overrides
