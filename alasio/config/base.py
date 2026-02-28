@@ -725,6 +725,7 @@ class AlasioConfigBase:
             if server_update is not None:
                 futures.append(self.servertime.get_next_update(server_update))
         if target is not None:
+            target = target.astimezone()
             futures.append(target)
 
         kv = dict2kv({'minute': minute, 'server_update': server_update, 'target': target}, drop_none=True)
