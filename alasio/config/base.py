@@ -1,3 +1,4 @@
+import threading
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
@@ -16,7 +17,7 @@ from alasio.config.entry.mod import ConfigSetEvent, Mod, Task
 from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
-from alasio.ext.cache import cached_property
+from alasio.ext.cache import cached_property, threaded_cached_property
 from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.ext.msgspec_error.parse_anno import get_annotations
@@ -55,14 +56,25 @@ class BatchSetContext:
     def __init__(self, config: "AlasioConfigBase"):
         self.config = config
 
+    @property
+    def depth(self) -> int:
+        return getattr(self.config._local, 'batch_depth', 0)
+
+    @depth.setter
+    def depth(self, value: int):
+        self.config._local.batch_depth = value
+
     def __enter__(self):
-        self.config._batch_depth += 1
+        self.depth += 1
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.config._batch_depth -= 1
+        depth = self.depth
+        if depth > 0:
+            depth -= 1
+            self.depth = depth
         # Only save if we are back at the top level and auto_save is enabled
-        if self.config._batch_depth == 0 and self.config.auto_save:
+        if depth == 0 and self.config.auto_save:
             self.config.save()
 
 
@@ -79,10 +91,11 @@ class TemporaryContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # rollback
-        for key, value in self.prev_const.items():
-            self.config._apply_override_const(key, value)
-        for group, arg, value in deep_iter_depth2(self.prev_config):
-            self.config._apply_override_config(group, arg, value)
+        with self.config._lock:
+            for key, value in self.prev_const.items():
+                self.config._apply_override_const(key, value)
+            for group, arg, value in deep_iter_depth2(self.prev_config):
+                self.config._apply_override_config(group, arg, value)
 
 
 class AlasioConfigBase:
@@ -129,8 +142,11 @@ class AlasioConfigBase:
 
         # If write after every variable modification.
         self.auto_save = True
-        # Batch depth counter. 0 means immediate save mode.
-        self._batch_depth = 0
+        # Re-entrant lock for thread safety
+        self._lock = threading.RLock()
+        # Thread-local state for context tracking (batch depth, etc)
+        self._local = threading.local()
+        self._local.batch_depth = 0
         # Template config is used for dev tools
         self.is_template_config = config_name.startswith("template")
         if self.is_template_config:
@@ -158,35 +174,39 @@ class AlasioConfigBase:
         return ServerTime(8)
 
     def config_cache(self):
-        if self.is_template_config:
-            return
-        if self._config_cached:
-            return
-        # cache config rows
-        table = AlasioConfigTable(self.config_name)
-        rows: "list[ConfigRow]" = table.select()
-        dict_row = {}
-        for row in rows:
-            key = (row.task, row.group)
-            dict_row[key] = row.value
-        self.dict_row = dict_row
-        self.dict_group = {}
-        # check mod
-        self._check_config_mod()
-        # finish
-        self._config_cached = True
+        with self._lock:
+            if self.is_template_config:
+                return
+            if self._config_cached:
+                return
+            # cache config rows
+            table = AlasioConfigTable(self.config_name)
+            rows: "list[ConfigRow]" = table.select()
+            dict_row = {}
+            for row in rows:
+                key = (row.task, row.group)
+                dict_row[key] = row.value
+            self.dict_row = dict_row
+            self.dict_group = {}
+            # check mod
+            self._check_config_mod()
+            # finish
+            self._config_cached = True
 
     def release(self):
-        # clear existing cache
-        # Note: self._overrides is persisted across init_task
-        for key in self._annotations:
-            if key in self.__dict__:
-                self.__dict__.pop(key, None)
-        self.dict_row.clear()
-        self.dict_group.clear()
-        self._config_cached = False
-        self.modified.clear()
-        cached_property.pop(self, 'servertime')
+        with self._lock:
+            # clear existing cache
+            # Note: self._overrides is persisted across init_task
+            for key in self._annotations:
+                if key in self.__dict__:
+                    self.__dict__.pop(key, None)
+            self.dict_row.clear()
+            self.dict_group.clear()
+            self._config_cached = False
+            self.modified.clear()
+            # clear thread-local state
+            self._local.batch_depth = 0
+            threaded_cached_property.pop(self, 'servertime')
 
     def _check_config_mod(self):
         """
@@ -205,40 +225,41 @@ class AlasioConfigBase:
                            f'maybe wrong config?')
 
     def init_task(self):
-        if self.is_template_config:
-            return
+        with self._lock:
+            if self.is_template_config:
+                return
 
-        self.config_cache()
+            self.config_cache()
 
-        dict_row = self.dict_row
-        dict_group = self.dict_group
-        for group, group_ref in self._iter_task_groups(self.task):
-            key = (group_ref.task, group)
-            if key in dict_group:
-                continue
-            model = self.mod.get_group_model(file=group_ref.file, cls=group_ref.cls)
-            if model is None:
-                # DataInconsistent error, ignore to reduce runtime crash
-                continue
-            # using dict.get() as user config is more likely to be the same as default
-            # b'\x80' is {} in messagepack
-            value = dict_row.get(key, b'\x80')
-            obj, errors = load_msgpack_with_default(value, model=model)
-            # for error in errors:
-            #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
-            if obj is NODEFAULT:
-                logger.warning(f'Class "{group_ref.cls}" in "{group_ref.file}" cannot be default constructed')
-                continue
-            dict_group[key] = obj
+            dict_row = self.dict_row
+            dict_group = self.dict_group
+            for group, group_ref in self._iter_task_groups(self.task):
+                key = (group_ref.task, group)
+                if key in dict_group:
+                    continue
+                model = self.mod.get_group_model(file=group_ref.file, cls=group_ref.cls)
+                if model is None:
+                    # DataInconsistent error, ignore to reduce runtime crash
+                    continue
+                # using dict.get() as user config is more likely to be the same as default
+                # b'\x80' is {} in messagepack
+                value = dict_row.get(key, b'\x80')
+                obj, errors = load_msgpack_with_default(value, model=model)
+                # for error in errors:
+                #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+                if obj is NODEFAULT:
+                    logger.warning(f'Class "{group_ref.cls}" in "{group_ref.file}" cannot be default constructed')
+                    continue
+                dict_group[key] = obj
 
-            # create proxy on groups, so we can catch arg set
-            obj = ModelProxy(_obj=obj, _config=self, _task=group_ref.task, _group=group)
-            setattr(self, group, obj)
-        # Apply config overrides
-        for key, value in self._override_const.items():
-            self._apply_override_const(key, value)
-        for group, arg, value in deep_iter_depth2(self._override_config):
-            self._apply_override_config(group, arg, value)
+                # create proxy on groups, so we can catch arg set
+                obj = ModelProxy(_obj=obj, _config=self, _task=group_ref.task, _group=group)
+                setattr(self, group, obj)
+            # Apply config overrides
+            for key, value in self._override_const.items():
+                self._apply_override_const(key, value)
+            for group, arg, value in deep_iter_depth2(self._override_config):
+                self._apply_override_config(group, arg, value)
 
     def _cross_get_group(self, task, group):
         """
@@ -251,40 +272,41 @@ class AlasioConfigBase:
         Returns:
             Struct | NODEFAULT:
         """
-        key = (task, group)
-        obj = self.dict_group.get(key, None)
-        if obj is not None:
-            return obj
-        # build group obj
-        index = self.mod.task_index_data()
-        task_ref = index.get(task, None)
-        if task_ref is None:
-            logger.warning(f'cross_get failed, no such task: "{task}"')
-            return NODEFAULT
-        group_ref = task_ref.group.get(group, None)
-        if group_ref is None:
-            # check global_bind
-            global_bind = index.get('_global_bind', None)
-            if global_bind is not None:
-                group_ref = global_bind.group.get(group, None)
-                if group_ref is None:
-                    logger.warning(f'cross_get failed, no such group: "{task}.{group}"')
-                    return NODEFAULT
+        with self._lock:
+            key = (task, group)
+            obj = self.dict_group.get(key, None)
+            if obj is not None:
+                return obj
+            # build group obj
+            index = self.mod.task_index_data()
+            task_ref = index.get(task, None)
+            if task_ref is None:
+                logger.warning(f'cross_get failed, no such task: "{task}"')
+                return NODEFAULT
+            group_ref = task_ref.group.get(group, None)
+            if group_ref is None:
+                # check global_bind
+                global_bind = index.get('_global_bind', None)
+                if global_bind is not None:
+                    group_ref = global_bind.group.get(group, None)
+                    if group_ref is None:
+                        logger.warning(f'cross_get failed, no such group: "{task}.{group}"')
+                        return NODEFAULT
 
-        model = self.mod.get_group_model(file=group_ref.file, cls=group_ref.cls)
-        if model is None:
-            # DataInconsistent error, ignore to reduce runtime crash
-            return NODEFAULT
-        value = self.dict_row.get(key, b'\x80')
-        obj, errors = load_msgpack_with_default(value, model=model)
-        # for error in errors:
-        #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
-        if obj is NODEFAULT:
-            logger.warning(f'Class "{group_ref.cls}" in "{group_ref.file}" cannot be default constructed')
-            return NODEFAULT
-        # no proxy on groups
-        self.dict_group[key] = obj
-        return obj
+            model = self.mod.get_group_model(file=group_ref.file, cls=group_ref.cls)
+            if model is None:
+                # DataInconsistent error, ignore to reduce runtime crash
+                return NODEFAULT
+            value = self.dict_row.get(key, b'\x80')
+            obj, errors = load_msgpack_with_default(value, model=model)
+            # for error in errors:
+            #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+            if obj is NODEFAULT:
+                logger.warning(f'Class "{group_ref.cls}" in "{group_ref.file}" cannot be default constructed')
+                return NODEFAULT
+            # no proxy on groups
+            self.dict_group[key] = obj
+            return obj
 
     def cross_get(self, task, group, arg, default=None):
         """
@@ -336,30 +358,31 @@ class AlasioConfigBase:
         Args:
             group (str):
         """
-        # "OpsiGeneral" -> "opsi.OpsiGeneral"
-        anno = self._annotations.get(group)
-        if not anno:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{group}'")
-        nav, sep, cls = anno.partition('.')
-        if not sep:
-            raise DataInconsistent(f'Config annotation {self.__class__.__name__}.{group} has no dot "."')
+        with self._lock:
+            # "OpsiGeneral" -> "opsi.OpsiGeneral"
+            anno = self._annotations.get(group)
+            if not anno:
+                raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{group}'")
+            nav, sep, cls = anno.partition('.')
+            if not sep:
+                raise DataInconsistent(f'Config annotation {self.__class__.__name__}.{group} has no dot "."')
 
-        # get validation model
-        if group in self._annotations_alasio:
-            file = f'alasio/{nav}_model.py'
-        else:
-            file = f'{nav}/{nav}_model.py'
-        model = self.mod.get_group_model(file, cls)
-        if model is None:
-            # details are logged
-            raise DataInconsistent('Failed to load group model')
+            # get validation model
+            if group in self._annotations_alasio:
+                file = f'alasio/{nav}_model.py'
+            else:
+                file = f'{nav}/{nav}_model.py'
+            model = self.mod.get_group_model(file, cls)
+            if model is None:
+                # details are logged
+                raise DataInconsistent('Failed to load group model')
 
-        try:
-            obj = model()
-        except TypeError:
-            raise DataInconsistent(f'Class "{cls}" in "{file}" cannot be default constructed') from None
+            try:
+                obj = model()
+            except TypeError:
+                raise DataInconsistent(f'Class "{cls}" in "{file}" cannot be default constructed') from None
 
-        return obj
+            return obj
 
     def register_modify(self, task, group, arg, value):
         """
@@ -372,10 +395,10 @@ class AlasioConfigBase:
             value:
         """
         event = ConfigSetEvent(task=task, group=group, arg=arg, value=value)
-        self.modified[(task, group, arg)] = event
-
-        if self.auto_save and self._batch_depth == 0:
-            self.save()
+        with self._lock:
+            self.modified[(task, group, arg)] = event
+            if self.auto_save and getattr(self._local, 'batch_depth', 0) == 0:
+                self.save()
 
     def cross_set(self, task, group, arg, value):
         """
@@ -415,21 +438,22 @@ class AlasioConfigBase:
         A fallback to access unbound groups.
         Default values are available but set event will be ignored
         """
-        try:
-            if not item[0].isupper():
-                # not a group access
+        with self._lock:
+            try:
+                if not item[0].isupper():
+                    # not a group access
+                    raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'") from None
+            except IndexError:
+                # this shouldn't happen
                 raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'") from None
-        except IndexError:
-            # this shouldn't happen
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'") from None
 
-        obj = self.construct_group(item)
-        # no proxy on unbound groups
-        setattr(self, item, obj)
-        # Apply config overrides
-        for group, arg, value in deep_iter_depth2(self._override_config):
-            self._apply_override_config(group, arg, value)
-        return obj
+            obj = self.construct_group(item)
+            # no proxy on unbound groups
+            setattr(self, item, obj)
+            # Apply config overrides
+            for group, arg, value in deep_iter_depth2(self._override_config):
+                self._apply_override_config(group, arg, value)
+            return obj
 
     def save(self):
         """
@@ -437,10 +461,13 @@ class AlasioConfigBase:
         Modifications are auto saved when you do:
             config.OpsiFleet.Fleet = 1
         """
-        if not self.modified:
-            return False
+        with self._lock:
+            if not self.modified:
+                return False
 
-        events = list(self.modified.values())
+            events = list(self.modified.values())
+            self.modified.clear()
+
         # config_set will log on success
         # messages = [f'{e.task}.{e.group}.{e.arg}={e.value}' for e in events]
         # messages = ', '.join(messages)
@@ -536,30 +563,35 @@ class AlasioConfigBase:
                 STORY_OPTION=0
             )
             # override persists
-        """
-        prev_config = defaultdict(dict)
-        prev_const = {}
-        for key, value in kwargs.items():
-            if key.isupper():
-                # const override
-                prev = self._apply_override_const(key, value)
-                if prev is NODEFAULT:
-                    continue
-                self._override_const[key] = value
-                prev_const[key] = prev
-            else:
-                # config override
-                group, sep, arg = key.partition('_')
-                if not sep:
-                    logger.warning(f'Trying to override {key}={value} but format invalid')
-                    continue
-                prev = self._apply_override_config(group, arg, value)
-                if prev is NODEFAULT:
-                    continue
-                self._override_config[group][arg] = value
-                prev_config[group][arg] = prev
 
-        return prev_config, prev_const
+        Note:
+            This method is not thread-isolated. Overrides modify shared configuration
+            objects and will be visible to all threads.
+        """
+        with self._lock:
+            prev_config = defaultdict(dict)
+            prev_const = {}
+            for key, value in kwargs.items():
+                if key.isupper():
+                    # const override
+                    prev = self._apply_override_const(key, value)
+                    if prev is NODEFAULT:
+                        continue
+                    self._override_const[key] = value
+                    prev_const[key] = prev
+                else:
+                    # config override
+                    group, sep, arg = key.partition('_')
+                    if not sep:
+                        logger.warning(f'Trying to override {key}={value} but format invalid')
+                        continue
+                    prev = self._apply_override_config(group, arg, value)
+                    if prev is NODEFAULT:
+                        continue
+                    self._override_config[group][arg] = value
+                    prev_config[group][arg] = prev
+
+            return prev_config, prev_const
 
     def temporary(self, **kwargs) -> TemporaryContext:
         """
@@ -577,6 +609,10 @@ class AlasioConfigBase:
             ):
                 # override persists
             # override rollback
+
+        Note:
+            This method is not thread-isolated. Temporary overrides modify shared
+            configuration objects and will be visible to all threads during the context.
         """
         return TemporaryContext(self, **kwargs)
 
@@ -592,13 +628,14 @@ class AlasioConfigBase:
         Returns:
             tuple[list[Task], list[Task]]:
         """
-        self.config_cache()
-        # build scheduler groups
-        for task, _ in self.mod.iter_task_scheduler_group():
-            self._cross_get_group(task, 'Scheduler')
-        # calculate scheduler
-        pending_task, waiting_task = self.mod.get_task_schedule(
-            self.config_name, dict_row=self.dict_row, dict_group=self.dict_group)
+        with self._lock:
+            self.config_cache()
+            # build scheduler groups
+            for task, _ in self.mod.iter_task_scheduler_group():
+                self._cross_get_group(task, 'Scheduler')
+            # calculate scheduler
+            pending_task, waiting_task = self.mod.get_task_schedule(
+                self.config_name, dict_row=self.dict_row, dict_group=self.dict_group)
         # send backend event
         backend = BackendBridge()
         if backend.inited:

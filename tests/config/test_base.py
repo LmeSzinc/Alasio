@@ -1,4 +1,6 @@
 import datetime as d
+import threading
+import time
 
 import pytest
 
@@ -79,7 +81,7 @@ class TestAlasioConfigBase:
         assert config.config_name == self.TEST_CONFIG_NAME
         assert config.task == 'Main'
         assert config.auto_save is True
-        assert config._batch_depth == 0
+        assert config.batch_set().depth == 0
         assert config.is_template_config is False
 
     def test_template_config_readonly(self, config_cls):
@@ -271,22 +273,22 @@ class TestConfigModification:
 
     def test_nested_batch_set(self, config):
         """Test nested batch_set context managers"""
-        with config.batch_set():
+        with config.batch_set() as bs:
             config.Scheduler.Enable = True
-            assert config._batch_depth == 1
+            assert bs.depth == 1
 
-            with config.batch_set():
+            with config.batch_set() as bs2:
                 config.Scheduler.ServerUpdate = '18:00'
-                assert config._batch_depth == 2
+                assert bs2.depth == 2
                 # Should not save yet
                 assert len(config.modified) == 2
 
             # Should not save at inner exit
-            assert config._batch_depth == 1
+            assert bs.depth == 1
             assert len(config.modified) == 2
 
         # Should save after outermost exit
-        assert config._batch_depth == 0
+        assert config.batch_set().depth == 0
         assert len(config.modified) == 0
 
     def test_batch_set_without_auto_save(self, config):
@@ -766,3 +768,138 @@ class TestConfigEdgeCases:
         # Should not crash
         assert len(prev_config) == 0
         assert len(prev_const) == 0
+
+
+class TestConfigConcurrency:
+    """Test suite for concurrent config access"""
+
+    TEST_CONFIG_NAME = 'test_config_concurrency'
+
+    @pytest.fixture
+    def config(self, example_mod):
+        """Create test config instance"""
+
+        class MyConfig(AlasioConfigBase):
+            entry = example_mod.entry
+            Scheduler: "scheduler.Scheduler"
+
+        return MyConfig(self.TEST_CONFIG_NAME, task='Main')
+
+    def test_concurrent_batch_set_isolation(self, config):
+        """Test that batch_set is isolated per thread"""
+        errors = []
+
+        def thread_task(thread_id):
+            try:
+                with config.batch_set() as bs:
+                    assert bs.depth == 1
+                    # Modify config
+                    config.Scheduler.Enable = (thread_id == 1)
+                    # Modification should stay in memory
+                    assert len(config.modified) >= 1
+                    
+                    # Wait for other thread to enter batch_set
+                    time.sleep(0.5)
+                    
+                    # Still in batch_set
+                    assert bs.depth == 1
+            except Exception as e:
+                errors.append(f"Thread {thread_id} error: {e}")
+
+        t1 = threading.Thread(target=thread_task, args=(1,))
+        t2 = threading.Thread(target=thread_task, args=(2,))
+        
+        t1.start()
+        # Ensure t1 enters batch_set first
+        time.sleep(0.1)
+        t2.start()
+        
+        t1.join()
+        t2.join()
+        
+        assert not errors, "\n".join(errors)
+
+    def test_concurrent_temporary_not_isolated(self, config):
+        """Test that temporary context is NOT isolated per thread"""
+        errors = []
+        
+        def thread1():
+            try:
+                # Initial is False
+                with config.temporary(Scheduler_Enable=True):
+                    # In thread1, it is True
+                    assert config.Scheduler.Enable is True, 'In thread1, it is True'
+                    # Wait for thread 2 to enter and set it to False
+                    time.sleep(0.3)
+                    # Thread 2 should have set it to False
+                    assert config.Scheduler.Enable is False, 'Thread 2 should have set it to False'
+                    # Wait for thread 2 to exit and rollback to True
+                    time.sleep(0.3)
+                    # Now it should be back to True because of thread 2's rollback
+                    assert config.Scheduler.Enable is True, 'Thread 2 exit should rollback to True'
+            except Exception as e:
+                errors.append(f"Thread 1 error: {e}")
+
+        def thread2():
+            try:
+                # Wait for thread 1 to set it to True
+                time.sleep(0.1)
+                # Thread 1 has set it to True, thread 2 sets it to False
+                with config.temporary(Scheduler_Enable=False):
+                    assert config.Scheduler.Enable is False, 'Thread 2 set it to False'
+                    # Hold it for a while
+                    time.sleep(0.3)
+                # After exit, it rolls back to True (what thread 2 saw when it entered)
+            except Exception as e:
+                errors.append(f"Thread 2 error: {e}")
+
+        t1 = threading.Thread(target=thread1)
+        t2 = threading.Thread(target=thread2)
+        
+        t1.start()
+        t2.start()
+        
+        t1.join()
+        t2.join()
+        
+        assert not errors, "\n".join(errors)
+
+    def test_race_condition_autosave(self, config, example_mod):
+        """
+        Force race condition between autosave and batch_set in different threads.
+        Thread 1: batch_set (depth 1) -> modify -> modify
+        Thread 2: no batch_set -> modify (triggers immediate save)
+        """
+        config.auto_save = True
+        errors = []
+        
+        def thread1():
+            try:
+                with config.batch_set():
+                    config.Scheduler.Enable = True
+                    time.sleep(0.3)
+                    config.Scheduler.ServerUpdate = '10:00'
+                    # modified should contain 2 events (or more if thread2 ran)
+                    # But thread1 hasn't saved yet
+            except Exception as e:
+                errors.append(f"Thread 1 error: {e}")
+
+        def thread2():
+            try:
+                time.sleep(0.1) # Wait for thread1 to enter batch_set
+                # Thread 2 is NOT in batch_set, this should trigger immediate save
+                # But it will also save whatever is in config.modified
+                config.Scheduler.NextRun = d.datetime(2025, 1, 1, tzinfo=d.timezone.utc)
+            except Exception as e:
+                errors.append(f"Thread 2 error: {e}")
+
+        t1 = threading.Thread(target=thread1)
+        t2 = threading.Thread(target=thread2)
+        
+        t1.start()
+        t2.start()
+        
+        t1.join()
+        t2.join()
+        
+        assert not errors, "\n".join(errors)
