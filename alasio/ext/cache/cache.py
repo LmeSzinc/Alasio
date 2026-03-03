@@ -1,6 +1,6 @@
 from functools import wraps
 from threading import Lock
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Generic, TypeVar
 
 # cached_property in python is kind of a mess, it has 3 different cached_property function.
 # - cached_property package, the original cached_property implementation before py3.8
@@ -124,7 +124,7 @@ class CacheOperation:
             pass
 
 
-class cached_property(CacheOperation):
+class cached_property(Generic[T], CacheOperation):
     """
     A high-performance, non-thread-safe cached property
     """
@@ -161,7 +161,7 @@ class cached_property(CacheOperation):
         return value
 
 
-class threaded_cached_property(CacheOperation):
+class cached_property_threadsafe(Generic[T], CacheOperation):
     """
     A thread-safe cached property
     """

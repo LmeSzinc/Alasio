@@ -1,1 +1,1 @@
-from .cache import cached_property, threaded_cached_property
+from .cache import cached_property, cached_property_threadsafe

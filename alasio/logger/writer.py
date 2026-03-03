@@ -3,7 +3,7 @@ from datetime import date
 from typing import List, Optional, TYPE_CHECKING
 
 from alasio.ext import env
-from alasio.ext.cache import threaded_cached_property
+from alasio.ext.cache import cached_property_threadsafe
 from alasio.ext.path import PathStr
 from alasio.ext.singleton import Singleton
 
@@ -22,7 +22,7 @@ class LogWriter(metaclass=Singleton):
         self.create_date: Optional[date] = None
         self.is_electron = bool(env.ELECTRON_SECRET)
 
-    @threaded_cached_property
+    @cached_property_threadsafe
     def backend(self) -> "BackendBridge":
         from alasio.backend.worker.bridge import BackendBridge
         backend = BackendBridge()
@@ -31,7 +31,7 @@ class LogWriter(metaclass=Singleton):
         else:
             return PseudoBackendBridge()
 
-    @threaded_cached_property
+    @cached_property_threadsafe
     def file(self):
         root = env.PROJECT_ROOT.abspath()
         folder = root / 'log'
@@ -47,7 +47,7 @@ class LogWriter(metaclass=Singleton):
             # write logs to xxx/log/2020-01-01_{module_name}.txt
             return folder / f'{self.create_date}_{name}.txt'
 
-    @threaded_cached_property
+    @cached_property_threadsafe
     def fd(self):
         file = self.file
         try:
@@ -56,7 +56,7 @@ class LogWriter(metaclass=Singleton):
             file.uppath().makedirs(exist_ok=True)
         return open(file, 'a', encoding='utf-8')
 
-    @threaded_cached_property
+    @cached_property_threadsafe
     def stdout(self):
         return sys.stdout
 
@@ -66,10 +66,10 @@ class LogWriter(metaclass=Singleton):
             self.close()
 
     def close(self):
-        threaded_cached_property.pop(self, 'backend')
-        threaded_cached_property.pop(self, 'file')
-        threaded_cached_property.pop(self, 'stdout')
-        fd = threaded_cached_property.pop(self, 'fd')
+        cached_property_threadsafe.pop(self, 'backend')
+        cached_property_threadsafe.pop(self, 'file')
+        cached_property_threadsafe.pop(self, 'stdout')
+        fd = cached_property_threadsafe.pop(self, 'fd')
         if fd is not None:
             try:
                 fd.close()

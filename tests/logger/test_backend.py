@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from alasio.ext import env
-from alasio.ext.cache import threaded_cached_property
+from alasio.ext.cache import cached_property_threadsafe
 from alasio.ext.path import PathStr
 from alasio.logger.logger import LogWriter, logger
 
@@ -67,7 +67,7 @@ class BaseLoggerTest:
 
         # Patch BackendBridge class to return our mock
         writer = LogWriter()
-        threaded_cached_property.set(writer, 'backend', self.mock_backend)
+        cached_property_threadsafe.set(writer, 'backend', self.mock_backend)
 
         # Clear any initialization events
         self.mock_backend.clear()

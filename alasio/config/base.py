@@ -17,7 +17,7 @@ from alasio.config.entry.mod import ConfigSetEvent, Mod, Task
 from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
-from alasio.ext.cache import cached_property, threaded_cached_property
+from alasio.ext.cache import cached_property, cached_property_threadsafe
 from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.ext.msgspec_error.parse_anno import get_annotations
@@ -206,7 +206,7 @@ class AlasioConfigBase:
             self.modified.clear()
             # clear thread-local state
             self._local.batch_depth = 0
-            threaded_cached_property.pop(self, 'servertime')
+            cached_property_threadsafe.pop(self, 'servertime')
 
     def _check_config_mod(self):
         """
