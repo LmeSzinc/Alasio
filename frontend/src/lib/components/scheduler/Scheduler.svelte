@@ -35,7 +35,7 @@
 
   const displayState = useWorkerState(() => stateVal);
   const isRunning = $derived(
-    taskRunning && (displayState.value === "running" || displayState.value === "scheduler-waiting"),
+    taskRunning && displayState.value !== "idle" && displayState.value !== "error",
   );
   const displaySerial = $derived(
     deviceSerial.startsWith("127.0.0.1:") ? deviceSerial.replace("127.0.0.1:", "") : deviceSerial,
