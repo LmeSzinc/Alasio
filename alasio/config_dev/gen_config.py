@@ -2,7 +2,8 @@ from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.config_dev.format.format_yaml import yaml_formatter
 from alasio.config_dev.parse.base import DefinitionError
-from alasio.config_dev.parse.parse_args import ArgData, ParseArgs, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
+from alasio.config_dev.parse.parse_args import ArgData, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
+from alasio.config_dev.parse.parse_groups import ParseGroups
 from alasio.config_dev.parse.parse_tasks import ParseTasks
 from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen
@@ -13,7 +14,7 @@ from alasio.ext.path import PathStr
 from alasio.logger import logger
 
 
-class ConfigGenerator(ParseArgs, ParseTasks):
+class ConfigGenerator(ParseGroups, ParseTasks):
     def __init__(self, entry, file):
         """
         维护一个nav下所有文件的数据一致性，一个nav对应前端导航组件中的一个组。
