@@ -1,0 +1,25 @@
+Oil:
+  dashboard: total
+  args:
+    Value:
+      value: 0
+      range: "0~25000"
+    Total:
+      dt: static
+      value: 25000
+
+Gems:
+  dashboard: value
+  args:
+    Value: 0
+
+Progress:
+  dashboard: progress
+  args:
+    Value: 0
+
+Planner:
+  dashboard: planner
+  args:
+    GreenValue: 0
+    GreenTotal: 0

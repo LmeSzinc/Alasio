@@ -322,24 +322,31 @@ class CrossNavGenerator:
                     group_data = self._group_name_to_data(cls)
 
                     is_variant = base_name != cls
+                    args = {}
                     for arg_name, arg in group_data.args.items():
                         if arg.hide:
                             continue
-                        row = {
-                            'task': group.task,
-                            'group': base_name,
-                            'arg': arg_name,
-                        }
+                        row = {'task': group.task, 'group': base_name, 'arg': arg_name}
                         # set cls on variant override
                         if is_variant and arg_name in group_data.override_args:
                             row['cls'] = cls
                         row.update(arg.to_dict())
                         arg_name = f'{base_name}_{arg_name}'
-                        deep_set(out, keys=[card_name, arg_name], value=row)
+                        args[arg_name] = row
                         # arg data post-process
                         for key in ['value', 'option']:
                             if key in row:
                                 row[key] = NoIndent(row[key])
+                    # add
+                    if group_data.dashboard:
+                        row = {
+                            'task': group.task, 'group': base_name, 'arg': '_info',
+                            'dt': f'dashboard-{group_data.dashboard}', 'value': args,
+                        }
+                        deep_set(out, keys=[card_name, group.group], value=row)
+                    else:
+                        for arg_name, row in args.items():
+                            deep_set(out, keys=[card_name, arg_name], value=row)
 
         # store in config object, so other methods can reuse
         config.config_data = out

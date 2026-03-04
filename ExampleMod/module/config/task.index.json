@@ -26,6 +26,15 @@
     },
     "config": {"task": ["Alas"], "group": []}
   },
+  "Dashboard": {
+    "group": {
+      "Oil": {"file": "dashboard/dashboard_model.py", "cls": "Oil", "task": "Dashboard"},
+      "Gems": {"file": "dashboard/dashboard_model.py", "cls": "Gems", "task": "Dashboard"},
+      "Progress": {"file": "dashboard/dashboard_model.py", "cls": "Progress", "task": "Dashboard"},
+      "Planner": {"file": "dashboard/dashboard_model.py", "cls": "Planner", "task": "Dashboard"}
+    },
+    "config": {"task": ["Dashboard"], "group": []}
+  },
   "General": {
     "group": {
       "Retirement": {"file": "general/general_model.py", "cls": "Retirement", "task": "General"},
@@ -85,12 +94,16 @@
       "Error": {"file": "alasio/device_model.py", "cls": "Error", "task": "Device"},
       "Optimization": {"file": "alasio/device_model.py", "cls": "Optimization", "task": "Device"},
       "Game": {"file": "alas/alas_model.py", "cls": "Game", "task": "Alas"},
+      "Oil": {"file": "dashboard/dashboard_model.py", "cls": "Oil", "task": "Dashboard"},
+      "Gems": {"file": "dashboard/dashboard_model.py", "cls": "Gems", "task": "Dashboard"},
+      "Progress": {"file": "dashboard/dashboard_model.py", "cls": "Progress", "task": "Dashboard"},
+      "Planner": {"file": "dashboard/dashboard_model.py", "cls": "Planner", "task": "Dashboard"},
       "Retirement": {"file": "general/general_model.py", "cls": "Retirement", "task": "General"},
       "OneClickRetire": {"file": "general/general_model.py", "cls": "OneClickRetire", "task": "General"},
       "Enhance": {"file": "general/general_model.py", "cls": "Enhance", "task": "General"},
       "OldRetire": {"file": "general/general_model.py", "cls": "OldRetire", "task": "General"},
       "DropRecord": {"file": "general/general_model.py", "cls": "DropRecord", "task": "General"}
     },
-    "config": {"task": ["Device", "Alas", "General"], "group": []}
+    "config": {"task": ["Device", "Alas", "Dashboard", "General"], "group": []}
   }
 }

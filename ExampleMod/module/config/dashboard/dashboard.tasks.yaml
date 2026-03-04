@@ -1,0 +1,8 @@
+Dashboard:
+  global_bind: true
+  groups:
+    - Oil
+    - Gems
+    - Progress
+    - Planner
+  displays: flat

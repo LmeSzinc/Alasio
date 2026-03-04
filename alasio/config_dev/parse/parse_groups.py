@@ -1,7 +1,8 @@
+from datetime import datetime, timezone
 from typing import Dict, Set
 
 import msgspec
-from msgspec import Struct
+from msgspec import Struct, UNSET
 
 from alasio.config.entry.utils import validate_task_name
 from alasio.config_dev.parse.base import DefinitionError, ParseBase
@@ -9,9 +10,22 @@ from alasio.config_dev.parse.parse_args import ArgData
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1
 
+TYPE_DASHBOARD = [
+    # 61549961
+    'value',
+    # 2437 / 3000
+    'total',
+    # 68.35%
+    'progress',
+    # 56.27% <3.6d
+    # (0, 0, 637) / (87, 91, 76)
+    'planner',
+]
+
 
 class GroupData(Struct):
     name: str
+    dashboard: str = ''
     args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
     # base group of variant, or empty string if this group is not a variant
     base: str = ''
@@ -53,6 +67,109 @@ class GroupData(Struct):
         if obj.base == obj.name:
             raise DefinitionError(f'Group variant base cannot be self', keys=[group, 'base'], value=obj.base)
         return obj
+
+    def __post_init__(self):
+        if not self.dashboard:
+            return
+        if self.dashboard not in TYPE_DASHBOARD:
+            raise DefinitionError(
+                f'Invalid dashboard datatype: "{self.dashboard}"',
+                keys=[self.name, 'dashboard'], value=self.dashboard
+            )
+        # dashboard group must have "Time"
+        if 'Time' in self.args:
+            raise DefinitionError(
+                f'Dashboard group cannot have custom arg "Time"',
+                keys=[self.name, 'args', 'Time'], value=self.args['Time']
+            )
+        self.args['Time'] = ArgData.from_arg_data(
+            datetime(2020, 1, 1, 0, 0, tzinfo=timezone.utc))
+        # validate dashboard="total"
+        if self.dashboard == 'total':
+            have = {'Value', 'Total'}
+            missing = have - set(self.args)
+            if missing:
+                raise DefinitionError(
+                    f'Dashboard datatype "{self.dashboard}" must have args {have}, missing {missing}',
+                    keys=[self.name, 'args'], value=self.args
+                )
+        # validate dashboard="value"
+        if self.dashboard in ['value', 'progress']:
+            if 'Value' not in self.args:
+                raise DefinitionError(
+                    f'Dashboard datatype "{self.dashboard}" must have arg "Value"',
+                    keys=[self.name, 'args'], value=self.args
+                )
+        # validate dashboard="progress"
+        if self.dashboard == 'progress':
+            arg = self.args['Value']
+            if not isinstance(arg.value, (int, float)):
+                raise DefinitionError(
+                    f'Dashboard datatype "{self.dashboard}" must have default value in int or float, '
+                    f'got "{arg.value}"',
+                    keys=[self.name, 'args', 'Value'], value=arg.value
+                )
+            arg.dt = 'input-float'
+        # validate dashboard="planner"
+        if self.dashboard == 'planner':
+            for gen in ['Progress', 'Eta']:
+                if gen in self.args:
+                    raise DefinitionError(
+                        f'Dashboard datatype "{self.dashboard}" cannot have custom arg "Eta"',
+                        keys=[self.name, 'args', 'Eta'], value=self.args['Eta']
+                    )
+            # add default Progress and Eta at top
+            args = dict(
+                Progress=ArgData.from_arg_data(0),
+                Eta=ArgData.from_arg_data(''),
+            )
+            args.update(self.args)
+            self.args = args
+            # check if "xxxValue" is paired with "xxxTotal"
+            for arg_name in self.args:
+                if arg_name.endswith('Value'):
+                    pair_name = f'{arg_name[:-5]}Total'
+                    if pair_name not in self.args:
+                        raise DefinitionError(
+                            f'Dashboard planner arg "{arg_name}" is not paired with "{pair_name}"',
+                            keys=[self.name, 'args', arg_name], value=pair_name
+                        )
+                if arg_name.endswith('Total'):
+                    pair_name = f'{arg_name[:-5]}Value'
+                    if pair_name not in self.args:
+                        raise DefinitionError(
+                            f'Dashboard planner arg "{arg_name}" is not paired with "{pair_name}"',
+                            keys=[self.name, 'args', arg_name], value=pair_name
+                        )
+        self._dashboard_populate_ge0()
+
+    def _dashboard_populate_ge0(self):
+        """
+        Add constraint >=0 to all args
+        """
+        populate_dt = {'input-int', 'input-float'}
+        for arg in self.args.values():
+            if arg is None:
+                continue
+            if arg.dt not in populate_dt:
+                continue
+            # already having minimum value
+            if arg.ge is not UNSET or arg.gt is not UNSET:
+                continue
+            # 0 <= value <= arg.le
+            if arg.le is not UNSET:
+                if arg.le >= 0:
+                    arg.ge = 0
+                else:
+                    continue
+            # 0 <= value < arg.le
+            if arg.lt is not UNSET:
+                if arg.lt > 0:
+                    arg.ge = 0
+                else:
+                    continue
+            # no other constraint
+            arg.ge = 0
 
 
 class ParseGroups(ParseBase):

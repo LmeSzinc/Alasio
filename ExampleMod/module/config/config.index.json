@@ -11,6 +11,16 @@
       "group": []
     }
   },
+  "dashboard": {
+    "file": "dashboard/dashboard_config.json",
+    "i18n": [
+      "dashboard/dashboard_i18n.json"
+    ],
+    "config": {
+      "task": ["Dashboard"],
+      "group": []
+    }
+  },
   "general": {
     "file": "general/general_config.json",
     "i18n": [

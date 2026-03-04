@@ -6,6 +6,7 @@ from .const import entry
 
 if typing.TYPE_CHECKING:
     from .alas import alas_model as alas
+    from .dashboard import dashboard_model as dashboard
     from .general import general_model as general
     from .main import main_model as main
     from .opsi import opsi_model as opsi
@@ -17,6 +18,12 @@ class ConfigGenerated(AlasioConfigGenerated):
 
     # alas
     Game: "alas.Game"
+
+    # dashboard
+    Oil: "dashboard.Oil"
+    Gems: "dashboard.Gems"
+    Progress: "dashboard.Progress"
+    Planner: "dashboard.Planner"
 
     # general
     DropRecord: "general.DropRecord"

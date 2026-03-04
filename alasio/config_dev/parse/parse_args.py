@@ -94,11 +94,12 @@ def populate_arg(value) -> dict:
         # Parse range
         if 'range' in value:
             range_str = value['range']
-            try:
-                dict_range = parse_range(range_str)
-            except ValueError as e:
-                raise DefinitionError(f'Cannot parse range "{range_str}", {e}')
-            value.update(dict_range)
+            if range_str:
+                try:
+                    dict_range = parse_range(range_str)
+                except ValueError as e:
+                    raise DefinitionError(f'Cannot parse range "{range_str}", {e}')
+                value.update(dict_range)
         if 'dt' in value:
             # Having pre-defined type, check if valid
             dt = value['dt']

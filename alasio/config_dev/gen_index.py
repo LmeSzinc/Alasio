@@ -299,6 +299,9 @@ class IndexGenerator(CrossNavGenerator):
         old = read_msgspec(self.nav_index_file)
         out = {}
         for nav_name, config in self.dict_nav_config.items():
+            # skip dashboard on nav
+            if nav_name == 'dashboard':
+                continue
             # nav name, which must not empty
             empty = True
             for group in config.tasks_data.values():

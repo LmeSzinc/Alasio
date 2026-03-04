@@ -1,0 +1,26 @@
+{
+  "Oil": {
+    "_info": {
+      "zh-CN": {"name": "Oil", "help": ""},
+      "en-US": {"name": "Oil", "help": ""}
+    }
+  },
+  "Gems": {
+    "_info": {
+      "zh-CN": {"name": "Gems", "help": ""},
+      "en-US": {"name": "Gems", "help": ""}
+    }
+  },
+  "Progress": {
+    "_info": {
+      "zh-CN": {"name": "Progress", "help": ""},
+      "en-US": {"name": "Progress", "help": ""}
+    }
+  },
+  "Planner": {
+    "_info": {
+      "zh-CN": {"name": "Planner", "help": ""},
+      "en-US": {"name": "Planner", "help": ""}
+    }
+  }
+}

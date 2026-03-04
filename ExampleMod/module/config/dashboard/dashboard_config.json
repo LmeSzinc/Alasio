@@ -1,0 +1,129 @@
+{
+  "card-Dashboard-Oil": {
+    "_info": {"group": "Oil", "arg": "_info"},
+    "Oil": {
+      "task": "Dashboard",
+      "group": "Oil",
+      "arg": "_info",
+      "dt": "dashboard-total",
+      "value": {
+        "Oil_Value": {
+          "task": "Dashboard",
+          "group": "Oil",
+          "arg": "Value",
+          "dt": "input-int",
+          "value": 0,
+          "ge": 0,
+          "le": 25000
+        },
+        "Oil_Total": {
+          "task": "Dashboard",
+          "group": "Oil",
+          "arg": "Total",
+          "dt": "static",
+          "value": 25000,
+          "option": [25000]
+        },
+        "Oil_Time": {
+          "task": "Dashboard",
+          "group": "Oil",
+          "arg": "Time",
+          "dt": "datetime",
+          "value": "2020-01-01T00:00:00Z"
+        }
+      }
+    },
+    "Gems": {
+      "task": "Dashboard",
+      "group": "Gems",
+      "arg": "_info",
+      "dt": "dashboard-value",
+      "value": {
+        "Gems_Value": {
+          "task": "Dashboard",
+          "group": "Gems",
+          "arg": "Value",
+          "dt": "input-int",
+          "value": 0,
+          "ge": 0
+        },
+        "Gems_Time": {
+          "task": "Dashboard",
+          "group": "Gems",
+          "arg": "Time",
+          "dt": "datetime",
+          "value": "2020-01-01T00:00:00Z"
+        }
+      }
+    },
+    "Progress": {
+      "task": "Dashboard",
+      "group": "Progress",
+      "arg": "_info",
+      "dt": "dashboard-progress",
+      "value": {
+        "Progress_Value": {
+          "task": "Dashboard",
+          "group": "Progress",
+          "arg": "Value",
+          "dt": "input-float",
+          "value": 0,
+          "ge": 0
+        },
+        "Progress_Time": {
+          "task": "Dashboard",
+          "group": "Progress",
+          "arg": "Time",
+          "dt": "datetime",
+          "value": "2020-01-01T00:00:00Z"
+        }
+      }
+    },
+    "Planner": {
+      "task": "Dashboard",
+      "group": "Planner",
+      "arg": "_info",
+      "dt": "dashboard-planner",
+      "value": {
+        "Planner_Progress": {
+          "task": "Dashboard",
+          "group": "Planner",
+          "arg": "Progress",
+          "dt": "input-int",
+          "value": 0,
+          "ge": 0
+        },
+        "Planner_Eta": {
+          "task": "Dashboard",
+          "group": "Planner",
+          "arg": "Eta",
+          "dt": "input",
+          "value": ""
+        },
+        "Planner_GreenValue": {
+          "task": "Dashboard",
+          "group": "Planner",
+          "arg": "GreenValue",
+          "dt": "input-int",
+          "value": 0,
+          "ge": 0
+        },
+        "Planner_GreenTotal": {
+          "task": "Dashboard",
+          "group": "Planner",
+          "arg": "GreenTotal",
+          "dt": "input-int",
+          "value": 0,
+          "ge": 0
+        },
+        "Planner_Time": {
+          "task": "Dashboard",
+          "group": "Planner",
+          "arg": "Time",
+          "dt": "datetime",
+          "value": "2020-01-01T00:00:00Z"
+        }
+      }
+    }
+  }
+}

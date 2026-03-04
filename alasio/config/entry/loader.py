@@ -195,7 +195,7 @@ class ModLoader:
             cls_name = arg_data.get('cls', group_name)
 
             # insert i18n
-            i18n_data = deep_get(i18n, [cls_name, arg_name, lang])
+            i18n_data = deep_get(i18n, [cls_name, arg_name, lang], default='')
             try:
                 arg_data.update(i18n_data)
             except TypeError:

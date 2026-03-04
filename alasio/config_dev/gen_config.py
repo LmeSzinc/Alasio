@@ -265,6 +265,8 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             else:
                 base = None
             # {group}.{arg}
+            if group.dashboard:
+                continue
             for arg_name, arg in group.args.items():
                 if arg.hide:
                     continue
