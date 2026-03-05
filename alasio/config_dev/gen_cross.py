@@ -331,7 +331,10 @@ class CrossNavGenerator:
                         if is_variant and arg_name in group_data.override_args:
                             row['cls'] = cls
                         row.update(arg.to_dict())
-                        arg_name = f'{base_name}_{arg_name}'
+                        # dashboard uses plain arg_name to have easier access at frontend
+                        # key collision won't happen as dashboard args are wrapped in value
+                        if not group_data.dashboard:
+                            arg_name = f'{base_name}_{arg_name}'
                         args[arg_name] = row
                         # arg data post-process
                         for key in ['value', 'option']:
@@ -339,12 +342,17 @@ class CrossNavGenerator:
                                 row[key] = NoIndent(row[key])
                     # add
                     if group_data.dashboard:
+                        # wrap dashboard group as arg
                         row = {
                             'task': group.task, 'group': base_name, 'arg': '_info',
-                            'dt': f'dashboard-{group_data.dashboard}', 'value': args,
+                            'dt': f'dashboard-{group_data.dashboard}',
                         }
+                        if group_data.dashboard_color:
+                            row['dashboard_color'] = group_data.dashboard_color
+                        row['value'] = args
                         deep_set(out, keys=[card_name, group.group], value=row)
                     else:
+                        # add args
                         for arg_name, row in args.items():
                             deep_set(out, keys=[card_name, arg_name], value=row)
 

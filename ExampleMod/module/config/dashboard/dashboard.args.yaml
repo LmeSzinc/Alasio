@@ -1,5 +1,6 @@
 Oil:
   dashboard: total
+  dashboard_color: "#7f7f7f"
   args:
     Value:
       value: 0
@@ -10,6 +11,7 @@ Oil:
 
 Gems:
   dashboard: value
+  dashboard_color: "#eb8efe"
   args:
     Value: 0
 

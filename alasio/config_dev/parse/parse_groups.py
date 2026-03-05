@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from typing import Dict, Set
 
@@ -26,6 +27,7 @@ TYPE_DASHBOARD = [
 class GroupData(Struct):
     name: str
     dashboard: str = ''
+    dashboard_color: str = ''
     args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
     # base group of variant, or empty string if this group is not a variant
     base: str = ''
@@ -66,6 +68,11 @@ class GroupData(Struct):
         # validate
         if obj.base == obj.name:
             raise DefinitionError(f'Group variant base cannot be self', keys=[group, 'base'], value=obj.base)
+        # validate dashboard color
+        if obj.dashboard_color:
+            if not re.match(r'^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{4}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{8})$', obj.dashboard_color):
+                raise DefinitionError(f'Invalid dashboard_color, expects #RGB #RGBA #RRGGBB #RRGGBBAA',
+                                      keys=[group, 'dashboard_color'], value=obj.dashboard_color)
         return obj
 
     def __post_init__(self):

@@ -6,8 +6,9 @@
       "group": "Oil",
       "arg": "_info",
       "dt": "dashboard-total",
+      "dashboard_color": "#7f7f7f",
       "value": {
-        "Oil_Value": {
+        "Value": {
           "task": "Dashboard",
           "group": "Oil",
           "arg": "Value",
@@ -16,7 +17,7 @@
           "ge": 0,
           "le": 25000
         },
-        "Oil_Total": {
+        "Total": {
           "task": "Dashboard",
           "group": "Oil",
           "arg": "Total",
@@ -24,7 +25,7 @@
           "value": 25000,
           "option": [25000]
         },
-        "Oil_Time": {
+        "Time": {
           "task": "Dashboard",
           "group": "Oil",
           "arg": "Time",
@@ -38,8 +39,9 @@
       "group": "Gems",
       "arg": "_info",
       "dt": "dashboard-value",
+      "dashboard_color": "#eb8efe",
       "value": {
-        "Gems_Value": {
+        "Value": {
           "task": "Dashboard",
           "group": "Gems",
           "arg": "Value",
@@ -47,7 +49,7 @@
           "value": 0,
           "ge": 0
         },
-        "Gems_Time": {
+        "Time": {
           "task": "Dashboard",
           "group": "Gems",
           "arg": "Time",
@@ -62,7 +64,7 @@
       "arg": "_info",
       "dt": "dashboard-progress",
       "value": {
-        "Progress_Value": {
+        "Value": {
           "task": "Dashboard",
           "group": "Progress",
           "arg": "Value",
@@ -70,7 +72,7 @@
           "value": 0,
           "ge": 0
         },
-        "Progress_Time": {
+        "Time": {
           "task": "Dashboard",
           "group": "Progress",
           "arg": "Time",
@@ -85,7 +87,7 @@
       "arg": "_info",
       "dt": "dashboard-planner",
       "value": {
-        "Planner_Progress": {
+        "Progress": {
           "task": "Dashboard",
           "group": "Planner",
           "arg": "Progress",
@@ -93,14 +95,14 @@
           "value": 0,
           "ge": 0
         },
-        "Planner_Eta": {
+        "Eta": {
           "task": "Dashboard",
           "group": "Planner",
           "arg": "Eta",
           "dt": "input",
           "value": ""
         },
-        "Planner_GreenValue": {
+        "GreenValue": {
           "task": "Dashboard",
           "group": "Planner",
           "arg": "GreenValue",
@@ -108,7 +110,7 @@
           "value": 0,
           "ge": 0
         },
-        "Planner_GreenTotal": {
+        "GreenTotal": {
           "task": "Dashboard",
           "group": "Planner",
           "arg": "GreenTotal",
@@ -116,7 +118,7 @@
           "value": 0,
           "ge": 0
         },
-        "Planner_Time": {
+        "Time": {
           "task": "Dashboard",
           "group": "Planner",
           "arg": "Time",

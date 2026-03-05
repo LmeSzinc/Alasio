@@ -10,6 +10,11 @@ export type ArgData = {
   name?: string;
   help?: string;
 
+  /**
+   * Dot color if arg is dashboard arg (`dt` startswith "dashboard")
+   * Might be #RGB, #RGBA, #RRGGBB, #RRGGBBAA
+   */
+  dashboard_color?: string;
   advanced?: boolean;
   /**
    * Layout style, layout is determined according to `dt` by frontend (see $lib/component/arg/Arg.svelte)
