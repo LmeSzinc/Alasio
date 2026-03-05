@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { globalClock } from "$lib/use/clock.svelte";
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
   import { previewClient } from "$lib/ws/preview.svelte";
   import { Zap } from "@lucide/svelte";
-  import { onDestroy, onMount, untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
 
   type Props = {
     class?: string;
@@ -19,6 +20,7 @@
   // Subscribe to Preview topic using the specialized previewClient
   const topic = useTopic<ArrayBuffer>("Preview", previewClient);
   const rpc = topic.resilientRpc();
+  globalClock.use()
 
   // Manage image object URL lifecycle
   function cleanupImage() {
@@ -67,16 +69,7 @@
   });
 
   // Timestamp formatting logic
-  let now = $state(Date.now());
-  onMount(() => {
-    const interval = setInterval(() => {
-      now = Date.now();
-    }, 1000);
-    return () => clearInterval(interval);
-  });
-
-  // Timestamp formatting logic
-  const diff = $derived(imageTime ? now - imageTime : 0);
+  const diff = $derived(imageTime ? globalClock.now - imageTime : 0);
   // Show timestamp only if the image is older than 10 seconds.
   // Display format: hh:mm:ss.xxx
   const showTime = $derived(diff > 10000); // 10s
