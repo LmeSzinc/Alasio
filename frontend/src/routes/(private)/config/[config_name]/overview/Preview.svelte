@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { globalClock } from "$lib/use/clock.svelte";
+  import { fullTime, globalClock, shortTime } from "$lib/use/clock.svelte";
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
   import { previewClient } from "$lib/ws/preview.svelte";
@@ -20,7 +20,7 @@
   // Subscribe to Preview topic using the specialized previewClient
   const topic = useTopic<ArrayBuffer>("Preview", previewClient);
   const rpc = topic.resilientRpc();
-  globalClock.use()
+  globalClock.use();
 
   // Manage image object URL lifecycle
   function cleanupImage() {
@@ -76,27 +76,7 @@
   // If the image is older than 12 hours, show the full date.
   // Display format: yy-mm-dd hh:mm:ss.xxx
   const isTooOld = $derived(diff > 12 * 60 * 60 * 1000); // 12h
-
-  function formatTimestamp(ts: number, full: boolean) {
-    const date = new Date(ts);
-    const pad = (n: number) => n.toString().padStart(2, "0");
-    const padMs = (n: number) => n.toString().padStart(3, "0");
-
-    const h = pad(date.getHours());
-    const m = pad(date.getMinutes());
-    const s = pad(date.getSeconds());
-    const ms = padMs(date.getMilliseconds());
-
-    if (full) {
-      const y = date.getFullYear().toString().slice(-2);
-      const mo = pad(date.getMonth() + 1);
-      const d = pad(date.getDate());
-      return `${y}-${mo}-${d} ${h}:${m}:${s}.${ms}`;
-    }
-    return `${h}:${m}:${s}.${ms}`;
-  }
-
-  const timeStr = $derived(imageTime ? formatTimestamp(imageTime, isTooOld) : "");
+  const timeStr = $derived(imageTime ? (isTooOld ? fullTime(imageTime) : shortTime(imageTime)) : "");
 </script>
 
 <div

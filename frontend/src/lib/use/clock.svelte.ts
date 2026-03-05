@@ -73,3 +73,43 @@ class GlobalClock {
 
 // Export as a singleton
 export const globalClock = new GlobalClock(1000);
+
+const pad = (n: number): string => n.toString().padStart(2, "0");
+const padMs = (n: number): string => n.toString().padStart(3, "0");
+
+/**
+ * Helper to format the time portion (HH:mm:ss.SSS)
+ */
+function formatTimeParts(date: Date): string {
+  const h = pad(date.getHours());
+  const m = pad(date.getMinutes());
+  const s = pad(date.getSeconds());
+  const ms = padMs(date.getMilliseconds());
+
+  return `${h}:${m}:${s}.${ms}`;
+}
+
+/**
+ * Formats a millisecond timestamp into a short time string: HH:mm:ss.SSS
+ * Example: "14:30:05.012"
+ */
+export function shortTime(ts: number): string {
+  const date = new Date(ts);
+  return formatTimeParts(date);
+}
+
+/**
+ * Formats a millisecond timestamp into a full date-time string: YYYY-MM-DD HH:mm:ss.SSS
+ * Example: "2023-10-25 14:30:05.012"
+ */
+export function fullTime(ts: number): string {
+  const date = new Date(ts);
+
+  // Extract date components
+  const yyyy = date.getFullYear(); // Full 4-digit year
+  const mo = pad(date.getMonth() + 1); // Months are 0-indexed
+  const d = pad(date.getDate());
+  const timeStr = formatTimeParts(date);
+
+  return `${yyyy}-${mo}-${d} ${timeStr}`;
+}
