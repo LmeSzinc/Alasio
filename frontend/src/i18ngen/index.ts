@@ -2,6 +2,7 @@
 import * as AssetManager from './AssetManager';
 import * as Auth from './Auth';
 import * as ConfigScan from './ConfigScan';
+import * as Dashboard from './Dashboard';
 import * as DevTool from './DevTool';
 import * as Input from './Input';
 import * as Language from './Language';
@@ -13,6 +14,7 @@ export const t = {
   AssetManager,
   Auth,
   ConfigScan,
+  Dashboard,
   DevTool,
   Input,
   Language,

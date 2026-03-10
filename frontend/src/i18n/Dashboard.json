@@ -1,0 +1,65 @@
+{
+  "NoData": {
+    "en-US": "No Data",
+    "zh-CN": "无数据",
+    "ja-JP": "データなし",
+    "zh-TW": "無數據",
+    "es-ES": "Sin datos"
+  },
+  "TimeError": {
+    "en-US": "Time Err",
+    "zh-CN": "时间错误",
+    "ja-JP": "時間エラー",
+    "zh-TW": "时间错误",
+    "es-ES": "Err. de tiempo"
+  },
+  "JustNow": {
+    "en-US": "JustNow",
+    "zh-CN": "刚刚",
+    "ja-JP": "たった今",
+    "zh-TW": "剛剛",
+    "es-ES": "Ahora"
+  },
+  "MinutesAgo": {
+    "en-US": "{time}m ago",
+    "zh-CN": "{time}分钟前",
+    "ja-JP": "{time}分前",
+    "zh-TW": "{time}分鐘前",
+    "es-ES": "Hace {time}m"
+  },
+  "HoursAgo": {
+    "en-US": "{time}h ago",
+    "zh-CN": "{time}小时前",
+    "ja-JP": "{time}時間前",
+    "zh-TW": "{time}小時前",
+    "es-ES": "Hace {time}h"
+  },
+  "DaysAgo": {
+    "en-US": "{time}d ago",
+    "zh-CN": "{time}天前",
+    "ja-JP": "{time}日前",
+    "zh-TW": "{time}天前",
+    "es-ES": "Hace {time}d"
+  },
+  "LongTimeAgo": {
+    "en-US": "Long ago",
+    "zh-CN": "很久以前",
+    "ja-JP": "ずっと前",
+    "zh-TW": "很久以前",
+    "es-ES": "Antiguo"
+  },
+  "Collapse": {
+    "en-US": "Collapse",
+    "zh-CN": "折叠",
+    "ja-JP": "折り畳む",
+    "zh-TW": "折疊",
+    "es-ES": "Contraer"
+  },
+  "Expand": {
+    "en-US": "Expand",
+    "zh-CN": "展开",
+    "ja-JP": "展開",
+    "zh-TW": "展開",
+    "es-ES": "Expandir"
+  }
+}

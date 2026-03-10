@@ -8,4 +8,4 @@
   const safeColor = $derived(hexRegex.test(color) ? color : "#777777");
 </script>
 
-<span class={cn("inline-block h-6 w-6 rounded-full", className)} style:background-color={safeColor}></span>
+<div class={cn("h-6 w-6 shrink-0 rounded-full", className)} style:background-color={safeColor}></div>

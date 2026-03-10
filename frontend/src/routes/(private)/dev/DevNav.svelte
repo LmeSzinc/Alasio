@@ -24,6 +24,7 @@
     { path: "/dev/ws", name: t.WebsocketTest.Title() },
     { path: "/dev/workerstatus", name: "Worker Status" },
     { path: "/dev/scheduler", name: "Scheduler" },
+    { path: "/dev/dashboard", name: "Dashboard" },
   ]);
 
   // --- Derived State ---
