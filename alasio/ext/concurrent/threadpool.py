@@ -139,6 +139,9 @@ class Job(Generic[ResultT]):
             except AttributeError:
                 # Trying to kill a finished job, do nothing
                 return
+            if worker is None:
+                # job running on unknown worker, do nothing
+                return
             worker.kill()
             del self.worker
 
@@ -163,7 +166,6 @@ class WorkerThread:
         self.default_name = f"Alasio thread {index}"
 
         self.thread = Thread(target=self._work, name=self.default_name, daemon=True)
-        self.thread.start()
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.default_name})'
@@ -202,7 +204,7 @@ class WorkerThread:
     def _work(self) -> None:
         pool = self.thread_pool
         while True:
-            if self.worker_lock.acquire(timeout=ThreadPool.IDLE_TIMEOUT):
+            if self.worker_lock.acquire(timeout=pool.IDLE_TIMEOUT):
                 # We got a job
                 self._handle_job()
             else:
@@ -386,11 +388,12 @@ class ThreadPool:
             # Create thread
             worker = WorkerThread(self, len(self.all_workers))
             self.all_workers[worker] = None
-        # logger.info(f'New worker thread: {worker.default_name}')
+            worker.thread.start()
+            # logger.info(f'New worker thread: {worker.default_name}')
         return worker
 
     def start_thread_soon(
-            self, func: Callable[ParamP, ResultT], *args: ParamP.args, **kwargs: ParamP.kwargs
+            self, func: Callable[[ParamP], ResultT], *args: ParamP.args, **kwargs: ParamP.kwargs
     ) -> Job[ResultT]:
         """
         Run a function on thread, costs extra ~15us,
@@ -407,7 +410,7 @@ class ThreadPool:
         worker.worker_lock.release()
         return job
 
-    def run_on_thread(self, func: Callable[ParamP, ResultT]) -> Callable[ParamP, Job[ResultT]]:
+    def run_on_thread(self, func: Callable[[ParamP], ResultT]) -> Callable[[ParamP], Job[ResultT]]:
         """
         Decorate a function to run on thread,
         result can be got from `Job` object
