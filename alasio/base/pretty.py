@@ -29,7 +29,7 @@ def pretty_time(second):
     Format time with adaptive units (s or ms or us)
 
     Args:
-        time_seconds (float): Time in seconds
+        second (float): Time in seconds
 
     Returns:
         str: Formatted time string
@@ -39,3 +39,25 @@ def pretty_time(second):
     if second >= 0.001:
         return f"{second * 1000:.3f}ms"
     return f"{second * 1000000:.3f}us"
+
+
+def pretty_size(size):
+    """Converts a byte size into a human-readable string format.
+
+    Args:
+        size (int | float): The size in bytes to be formatted.
+
+    Returns:
+        str: A formatted string representing the size (e.g., '123.12KB').
+             The maximum unit used is 'TB'.
+    """
+    # Handle zero or negative cases
+    if size <= 0:
+        return "0.00B"
+
+    units = ['B', 'KB', 'MB', 'GB']
+    for unit in units:
+        if size < 1024.0:
+            return f"{size:.2f}{unit}"
+        size /= 1024.0
+    return f"{size:.2f}TB"
