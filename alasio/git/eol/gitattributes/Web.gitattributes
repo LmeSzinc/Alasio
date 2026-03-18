@@ -16,6 +16,7 @@
 *                 text=auto
 
 # Source code
+*.astro           text
 *.bash            text eol=lf
 *.bat             text eol=crlf
 *.cmd             text eol=crlf
@@ -33,6 +34,7 @@
 *.less            text
 *.ls              text
 *.map             text -diff
+*.mdx             text
 *.od              text
 *.onlydata        text
 *.php             text diff=php
@@ -47,9 +49,11 @@
 .husky/*          text eol=lf
 *.sql             text
 *.styl            text
+*.svelte          text
 *.tag             text
 *.ts              text
 *.tsx             text
+*.vue             text
 *.xml             text
 *.xhtml           text diff=html
 
@@ -95,11 +99,9 @@ TODO              text
 *.mustache        text
 *.njk             text
 *.phtml           text
-*.svelte          text
 *.tmpl            text
 *.tpl             text
 *.twig            text
-*.vue             text
 
 # Configs
 *.cnf             text

@@ -16,10 +16,10 @@ SET_TEXT_SUFFIX = {
     'js', 'mjs', 'cjs', 'jsp', 'jspf', 'jspx', 'properties', 'tld', 'tag', 'tagx', 'xml', 'bat', 'lua', 'msh', 'msh1',
     'msh2', 'mshxml', 'msh1xml', 'msh2xml', 'mcf', 'php', 'phpt', 'phtml', 'twig', 'ps1', 'ps1x', 'psm1', 'psd1',
     'ps1xml', 'pssc', 'psrc', 'cdxml', 'pxd', 'py', 'py3', 'pyw', 'pyx', 'pyz', 'pyi', 'ipynb', 'rs', 'toml', 'swift',
-    'vim', 'bash', 'cmd', 'coffee', 'inc', 'ini', 'json', 'jsx', 'less', 'ls', 'map', 'od', 'onlydata', 'pl', 'rb',
-    'scm', 'sh', 'sql', 'styl', 'ts', 'tsx', 'xhtml', 'markdown', 'md', 'mdwn', 'mdown', 'mkd', 'mkdn', 'mdtxt',
-    'mdtext', 'txt', 'dot', 'ejs', 'erb', 'haml', 'handlebars', 'hbs', 'hbt', 'jade', 'latte', 'mustache', 'njk',
-    'svelte', 'tmpl', 'tpl', 'vue', 'cnf', 'conf', 'config', 'env', 'lock', 'yaml', 'yml', 'svg',
+    'vim', 'astro', 'bash', 'cmd', 'coffee', 'inc', 'ini', 'json', 'jsx', 'less', 'ls', 'map', 'mdx', 'od', 'onlydata',
+    'pl', 'rb', 'scm', 'sh', 'sql', 'styl', 'svelte', 'ts', 'tsx', 'vue', 'xhtml', 'markdown', 'md', 'mdwn', 'mdown',
+    'mkd', 'mkdn', 'mdtxt', 'mdtext', 'txt', 'dot', 'ejs', 'erb', 'haml', 'handlebars', 'hbs', 'hbt', 'jade', 'latte',
+    'mustache', 'njk', 'tmpl', 'tpl', 'cnf', 'conf', 'config', 'env', 'lock', 'yaml', 'yml', 'svg',
 }
 SET_LF_SUFFIX = {
     'phpt', 'ipynb', 'vim', 'bash', 'sh',
