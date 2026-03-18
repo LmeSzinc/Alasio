@@ -1,4 +1,4 @@
-from typing import Type, TypeVar
+from typing import Generic, Type, TypeVar
 
 import msgspec
 from msgspec.structs import asdict
@@ -88,7 +88,7 @@ class LazyCursor:
         self.query.clear()
 
 
-class AlasioTable:
+class AlasioTable(Generic[T_model]):
     # Tables should override these
     TABLE_NAME = ''
     # SQL to create the table

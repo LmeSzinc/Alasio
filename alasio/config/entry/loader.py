@@ -7,7 +7,8 @@ from alasio.config.entry.mod import ConfigSetEvent, Mod
 from alasio.config.entry.utils import validate_nav_name
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_get, deep_get_with_error, deep_iter_depth2, deep_values_depth2
+from alasio.ext.deep import deep_get, deep_get_with_error, deep_iter_depth2, deep_values_depth1, \
+    deep_values_depth2
 from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.path import PathStr
@@ -201,17 +202,45 @@ class ModLoader:
             except TypeError:
                 # this shouldn't happen, as i18n_data should be dict
                 continue
-            if arg_name == '_info':
-                continue
+
             # insert config
+            dt = arg_data.get('dt', '')
             try:
-                value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
-            except KeyError:
+                is_dashboard = dt.startswith('dashboard')
+            except (TypeError, AttributeError):
                 # this shouldn't happen
-                logger.warning(f'DataInconsistent: Missing config of "{task_name}.{group_name}.{arg_name}" '
-                               f'when getting mod="{mod_name}", nav="{nav_name}"')
-                continue
-            arg_data['value'] = value
+                is_dashboard = False
+            if is_dashboard:
+                try:
+                    arg_value = deep_get_with_error(arg_data, keys=['value'])
+                except KeyError:
+                    # this shouldn't happen
+                    continue
+                for dashboard_arg_data in deep_values_depth1(arg_value):
+                    try:
+                        arg_name = dashboard_arg_data['arg']
+                    except KeyError:
+                        # this shouldn't happen
+                        continue
+                    try:
+                        value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
+                    except KeyError:
+                        # this shouldn't happen
+                        logger.warning(f'DataInconsistent: Missing config of "{task_name}.{group_name}.{arg_name}" '
+                                       f'when getting mod="{mod_name}", nav="{nav_name}"')
+                        continue
+                    dashboard_arg_data['value'] = value
+            else:
+                if arg_name == '_info':
+                    continue
+                try:
+                    value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
+                except KeyError:
+                    # this shouldn't happen
+                    logger.warning(f'DataInconsistent: Missing config of "{task_name}.{group_name}.{arg_name}" '
+                                   f'when getting mod="{mod_name}", nav="{nav_name}"')
+                    continue
+                arg_data['value'] = value
 
         return out
 

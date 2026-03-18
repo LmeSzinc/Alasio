@@ -27,10 +27,10 @@
   }
 </script>
 
-<div class={cn("relative z-10 w-full", className)} {onfocusout}>
+<div class={cn("relative w-full", isExpanded ? "z-10" : "", className)} {onfocusout}>
   <!-- Spacer to maintain the 2-row height in document flow -->
   <!-- 2 rows (approx 42px each) + gap (12px) + padding (32px) ~= 128px -->
-  <div class="h-32 min-h-36 w-full shrink-0"></div>
+  <div class="h-32 w-full shrink-0"></div>
 
   <!-- Actual dashboard content -->
   <!-- Expand to 5 rows at max -->

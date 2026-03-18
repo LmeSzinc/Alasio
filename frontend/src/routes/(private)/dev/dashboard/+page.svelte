@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Dashboard from "$lib/components/dashboard/Dashboard.svelte";
+  import DashboardCard from "$lib/components/dashboard/DashboardCard.svelte";
   import type { DashboardArgData } from "$lib/components/dashboard/utils";
 
   // Mock data based on ExampleMod/module/config/dashboard/dashboard_config.json
@@ -195,7 +195,7 @@
       </p>
     </div>
 
-    <Dashboard items={mockItems} />
+    <DashboardCard items={mockItems} />
   </section>
 
   <section class="space-y-4">
@@ -207,7 +207,7 @@
     </div>
 
     <div class="space-y-4">
-      <Dashboard items={mockItemsLong} />
+      <DashboardCard items={mockItemsLong} />
 
       <div class="grid grid-cols-2 gap-4">
         <div class="bg-muted flex h-64 items-center justify-center rounded-xl font-mono text-sm">

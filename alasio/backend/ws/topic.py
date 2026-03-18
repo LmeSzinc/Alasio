@@ -4,6 +4,7 @@ from alasio.backend.locale.accept_language import negotiate_accept_language
 from alasio.backend.reactive.base_topic import MSGBUS_CONFIG_HANDLERS, MSGBUS_CONFIG_RECV, MSGBUS_GLOBAL_HANDLERS, \
     MSGBUS_GLOBAL_RECV
 from alasio.backend.topic.config import ConfigArg, ConfigNav
+from alasio.backend.topic.dashboard import Dashboard
 from alasio.backend.topic.log import Log
 from alasio.backend.topic.mod import ModList
 from alasio.backend.topic.preview import Preview
@@ -43,6 +44,7 @@ class WebsocketServer(WebsocketTopicServer):
         Worker,
         Log,
         TaskQueue,
+        Dashboard,
         # DevAssetsManager,
     ])
     # List of default subscribed topics.

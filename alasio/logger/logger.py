@@ -590,6 +590,7 @@ class AlasioLogger(LoggingLevel):
             align (int): Alignment width. Defaults to 22.
         """
         name = str(name).rjust(align)
+        front = str(front)
         if front:
             name = front + name[len(front):]
         self.info(f'{name}: {text}')
