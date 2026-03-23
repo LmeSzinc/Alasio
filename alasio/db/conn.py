@@ -32,7 +32,7 @@ class SqlitePoolCursor(sqlite3.Cursor):
             if conn.in_transaction:
                 logger.error(
                     f'DEV ERROR: A transaction was not explicitly committed or rolled back, '
-                    f'please check your code')
+                    f'please check your code. Auto rolling back anyway.')
             # rollback to prevent connection pollution
             try:
                 conn.rollback()
@@ -55,6 +55,12 @@ class SqlitePoolCursor(sqlite3.Cursor):
         Now you can commit in cursor object
         """
         self.connection.commit()
+
+    def rollback(self):
+        """
+        Now you can rollback in cursor object
+        """
+        self.connection.rollback()
 
     def create_table(self):
         """

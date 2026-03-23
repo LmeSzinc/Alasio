@@ -1,3 +1,4 @@
+import sqlite3
 from typing import Generic, Type, TypeVar
 
 import msgspec
@@ -480,10 +481,13 @@ class AlasioTable(Generic[T_model]):
 
         You can also input an existing cursor to manage transaction yourself
         with table.cursor() as cursor:
-            cursor.insert(row, _cursor_=cursor)
-            cursor.insert([row2, row3], _cursor_=cursor)
-            # don't forget to commit
-            cursor.commit()
+            try:
+                cursor.insert(row, _cursor_=cursor)
+                cursor.insert([row2, row3], _cursor_=cursor)
+                # don't forget to commit
+                cursor.commit()
+            except sqlite3.Error:
+                cursor.rollback()
         """
         columns, placeholders = self.sql_insert_columns_placeholders
         sql = f'INSERT INTO {self.TABLE_NAME} ({columns}) VALUES ({placeholders})'
@@ -521,8 +525,11 @@ class AlasioTable(Generic[T_model]):
             # execute
             if _cursor_ is None:
                 with self.cursor() as c:
-                    c.executemany(sql, rows)
-                    c.commit()
+                    try:
+                        c.executemany(sql, rows)
+                        c.commit()
+                    except sqlite3.Error:
+                        c.rollback()
             else:
                 _cursor_.executemany(sql, rows)
         else:
@@ -536,8 +543,11 @@ class AlasioTable(Generic[T_model]):
             # execute
             if _cursor_ is None:
                 with self.cursor() as c:
-                    c.execute(sql, rows)
-                    c.commit()
+                    try:
+                        c.execute(sql, rows)
+                        c.commit()
+                    except sqlite3.Error:
+                        c.rollback()
             else:
                 _cursor_.execute(sql, rows)
 
