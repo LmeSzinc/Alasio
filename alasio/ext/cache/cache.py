@@ -32,6 +32,7 @@ class CacheOperation:
     Helper functions to manage cached property.
     So you can use `cached_property.del(obj, attr)` without importing each individual function
     """
+
     @staticmethod
     def pop(instance, attrname, default=None):
         """
@@ -80,7 +81,7 @@ class CacheOperation:
             return instance.__dict__.get(attrname, default)
         except AttributeError:
             # No __dict__, just not exists
-            return False
+            return default
 
     @staticmethod
     def set(instance, attrname, value):
@@ -112,16 +113,45 @@ class CacheOperation:
     def warm(instance, attrname):
         """
         Warmup a cached property.
-        Return None to avoid passing big cached objects across threads.
 
         Args:
             instance:
             attrname (str):
+
+        Returns:
+            bool: True if warmup or already warmup
+                False if failed
         """
         try:
-            getattr(instance, attrname)
+            if attrname in instance.__dict__:
+                # already warmup
+                return True
         except AttributeError:
-            pass
+            # No '__dict__' attribute
+            return False
+
+        # find descriptor
+        cls = type(instance)
+        descriptor = None
+        for base in cls.__mro__:
+            try:
+                base_dict = base.__dict__
+            except AttributeError:
+                # No '__dict__' attribute
+                continue
+            descriptor = base_dict.get(attrname, None)
+            if descriptor is not None:
+                break
+        if descriptor is None:
+            return False
+
+        # call __get__ function
+        try:
+            descriptor_get = descriptor.__get__
+        except AttributeError:
+            return False
+        descriptor_get(instance, cls)
+        return True
 
 
 class cached_property(Generic[T], CacheOperation):
@@ -192,21 +222,8 @@ class cached_property_threadsafe(Generic[T], CacheOperation):
         with self.create_lock:
             # double-checked locking
             # check if in cache first to bypass except KeyError for faster because it's not in cache at happy path
-            if lock_name in cache:
-                try:
-                    lock = cache[attrname]
-                except KeyError:
-                    # race condition
-                    lock = Lock()
-                    try:
-                        cache[lock_name] = lock
-                    except TypeError:
-                        msg = (
-                            f"The '__dict__' attribute on {type(instance).__name__!r} instance "
-                            f"does not support item assignment for caching {lock_name!r} property."
-                        )
-                        raise TypeError(msg) from None
-            else:
+            lock = cache.get(lock_name, None)
+            if lock is None:
                 lock = Lock()
                 try:
                     cache[lock_name] = lock
