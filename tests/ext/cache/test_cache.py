@@ -1,7 +1,10 @@
 import threading
 import time
+
 import pytest
-from alasio.ext.cache.cache import cached_property, cached_property_threadsafe
+
+from alasio.ext.cache.cache import (ClassCacheOperation, cached_class_property, cached_class_property_threadsafe,
+                                    cached_property, cached_property_threadsafe)
 
 
 class MockInstance:
@@ -261,3 +264,200 @@ def test_no_side_effects():
     assert success is True
     assert obj.cached_val_ts == "ok_ts"
     assert obj.attr_calls == 0
+
+
+def test_cached_class_property():
+    class TestClass:
+        count = 0
+
+        @cached_class_property
+        def value(cls):
+            cls.count += 1
+            return f"val_{cls.count}"
+
+    # First access via class
+    assert TestClass.value == "val_1"
+    assert TestClass.count == 1
+    # Replaced in __dict__
+    assert TestClass.__dict__["value"] == "val_1"
+    
+    # Second access
+    assert TestClass.value == "val_1"
+    assert TestClass.count == 1
+
+
+def test_cached_class_property_threadsafe_concurrency():
+    class TestClassTS:
+        count = 0
+
+        @cached_class_property_threadsafe
+        def value(cls):
+            time.sleep(0.1)
+            cls.count += 1
+            return f"val_{cls.count}"
+
+    results = []
+
+    def access():
+        results.append(TestClassTS.value)
+
+    threads = [threading.Thread(target=access) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(results) == 5
+    assert all(r == "val_1" for r in results)
+    assert TestClassTS.count == 1
+
+
+def test_cached_class_property_no_side_effects():
+    # Meta is defined earlier in the file with RuntimeError on __setattr__
+    class SideEffectClass(metaclass=Meta):
+        @cached_class_property
+        def val(cls):
+            return "ok"
+
+    # Accessing SideEffectClass.val should use type.__setattr__ 
+    # and bypass Meta.__setattr__ (which raises RuntimeError)
+    assert SideEffectClass.val == "ok"
+    assert SideEffectClass.__dict__["val"] == "ok"
+
+
+def test_cache_class_operation_methods():
+    class TestClass:
+        count = 0
+
+        @cached_class_property
+        def value(cls):
+            cls.count += 1
+            return f"val_{cls.count}"
+
+    cls = TestClass
+    
+    # has
+    assert cached_class_property.has(cls, "value") is False
+    _ = cls.value
+    assert cached_class_property.has(cls, "value") is True
+    
+    # get
+    assert cached_class_property.get(cls, "value") == "val_1"
+    assert cached_class_property.get(cls, "non_existent", "default") == "default"
+    
+    # set
+    cached_class_property.set(cls, "value", "manual_value")
+    assert cls.value == "manual_value"
+    
+    # pop
+    val = cached_class_property.pop(cls, "value")
+    assert val == "manual_value"
+    assert cached_class_property.has(cls, "value") is False
+    
+    # recalculate after pop
+    assert cls.value == "val_2"
+    assert TestClass.count == 2
+
+
+def test_class_warmup():
+    class TestClassWarm:
+        count = 0
+        @cached_class_property
+        def value(cls):
+            cls.count += 1
+            return "val"
+
+    cls = TestClassWarm
+    assert cached_class_property.has(cls, "value") is False
+    
+    # Warmup
+    success = cached_class_property.warm(cls, "value")
+    assert success is True
+    assert cached_class_property.has(cls, "value") is True
+    assert cls.count == 1
+    
+    # Already warmup
+    success = cached_class_property.warm(cls, "value")
+    assert success is True
+    assert cls.count == 1
+
+
+def test_class_warmup_inheritance():
+    class Parent:
+        parent_count = 0
+        @cached_class_property
+        def parent_val(cls):
+            cls.parent_count += 1
+            return "parent"
+
+    class Child(Parent):
+        child_count = 0
+        @cached_class_property
+        def child_val(cls):
+            cls.child_count += 1
+            return "child"
+
+    cls = Child
+    assert cached_class_property.has(cls, "parent_val") is False
+    assert cached_class_property.has(cls, "child_val") is False
+
+    # Warmup parent property from child class
+    success = cached_class_property.warm(cls, "parent_val")
+    assert success is True
+    assert cached_class_property.has(Child, "parent_val") is True
+    assert Child.parent_val == "parent"
+    assert Child.parent_count == 1
+
+    # Warmup child property
+    success = cached_class_property.warm(cls, "child_val")
+    assert success is True
+    assert cached_class_property.has(Child, "child_val") is True
+    assert Child.child_val == "child"
+    assert Child.child_count == 1
+
+
+def test_class_slots_error():
+    # Classes themselves don't usually have __slots__ in simple cases, 
+    # but some built-in classes or objects might not support it.
+    pass
+
+
+def test_class_cache_operation_no_dict():
+    # e.g., int, str
+    cls = int
+    
+    assert cached_class_property.has(cls, "any") is False
+    assert cached_class_property.get(cls, "any", "def") == "def"
+    # pop on built-in type should just fail gracefully if no __dict__
+    assert cached_class_property.pop(cls, "any") is None
+    
+    # set on built-in class should raise TypeError
+    with pytest.raises(TypeError):
+        cached_class_property.set(cls, "any", 1)
+        
+    assert cached_class_property.warm(cls, "any") is False
+
+
+def test_class_operation_normal_attributes():
+    class TestClass:
+        a = 1
+        b = None
+    
+    cls = TestClass
+    # has/get
+    assert ClassCacheOperation.has(cls, "a") is True
+    assert ClassCacheOperation.get(cls, "a") == 1
+    assert ClassCacheOperation.has(cls, "b") is True
+    assert ClassCacheOperation.get(cls, "b") is None
+    
+    # set
+    ClassCacheOperation.set(cls, "a", 2)
+    assert cls.a == 2
+    
+    # pop
+    assert ClassCacheOperation.pop(cls, "a") == 2
+    assert not hasattr(cls, "a")
+    
+    # pop None
+    assert ClassCacheOperation.pop(cls, "b") is None
+    assert not hasattr(cls, "b")
