@@ -2,7 +2,7 @@ from typing import Any, Optional
 
 import msgspec
 
-from alasio.ext.msgspec_error.parse_anno import get_annotations, get_msgspec_annotations
+from alasio.ext.msgspec_error.parse_anno import get_class_annotations, get_msgspec_annotations
 
 
 class TestGetAnnotations:
@@ -16,7 +16,7 @@ class TestGetAnnotations:
             age: int = 0
             active: bool = True
 
-        annotations = get_annotations(SimpleClass)
+        annotations = get_class_annotations(SimpleClass)
 
         assert len(annotations) == 3
         assert annotations["name"] == str
@@ -30,7 +30,7 @@ class TestGetAnnotations:
             name: str
             age: int
 
-        annotations = get_annotations(NoDefaultClass)
+        annotations = get_class_annotations(NoDefaultClass)
 
         assert len(annotations) == 2
         assert annotations["name"] == str
@@ -46,7 +46,7 @@ class TestGetAnnotations:
         class Child(Parent):
             child_field: str = "child"
 
-        annotations = get_annotations(Child)
+        annotations = get_class_annotations(Child)
 
         assert len(annotations) == 3
         assert annotations["parent_field"] == str
@@ -63,7 +63,7 @@ class TestGetAnnotations:
             value: str = "20"  # Different type
             name: str = "child"
 
-        annotations = get_annotations(Child)
+        annotations = get_class_annotations(Child)
 
         # Child's annotation should override parent's
         assert annotations["value"] == str
@@ -82,7 +82,7 @@ class TestGetAnnotations:
         class Child(Parent):
             c_field: str = "child"
 
-        annotations = get_annotations(Child)
+        annotations = get_class_annotations(Child)
 
         assert len(annotations) == 4
         assert annotations["gp_field1"] == str
@@ -96,7 +96,7 @@ class TestGetAnnotations:
         class EmptyClass:
             pass
 
-        annotations = get_annotations(EmptyClass)
+        annotations = get_class_annotations(EmptyClass)
 
         assert len(annotations) == 0
 
@@ -108,7 +108,7 @@ class TestGetAnnotations:
             value = 10
             name = "test"
 
-        annotations = get_annotations(NoAnnotations)
+        annotations = get_class_annotations(NoAnnotations)
 
         assert len(annotations) == 0
 
@@ -121,7 +121,7 @@ class TestGetAnnotations:
             optional_value: Optional[int] = None
             mapping: Dict[str, Any] = {}
 
-        annotations = get_annotations(ComplexTypes)
+        annotations = get_class_annotations(ComplexTypes)
 
         assert len(annotations) == 3
         assert annotations["items"] == List[str]
@@ -140,7 +140,7 @@ class TestGetAnnotations:
         class Child(Mixin1, Mixin2):
             child_field: bool = True
 
-        annotations = get_annotations(Child)
+        annotations = get_class_annotations(Child)
 
         assert len(annotations) == 3
         assert annotations["mixin1_field"] == str
@@ -159,7 +159,7 @@ class TestGetAnnotations:
         class Child(Parent):
             pass
 
-        annotations = get_annotations(Child)
+        annotations = get_class_annotations(Child)
 
         # Parent's annotation should override GrandParent's
         assert annotations["field"] == str
@@ -172,7 +172,7 @@ class TestGetAnnotations:
             excluded: int = msgspec.UNSET
             also_included: bool = False
 
-        annotations = get_annotations(UnsetClass)
+        annotations = get_class_annotations(UnsetClass)
 
         # annotation_get should include all annotated fields
         assert len(annotations) == 3
@@ -185,10 +185,10 @@ class TestGetAnnotations:
         import pytest
 
         with pytest.raises(TypeError):
-            get_annotations("not a class")
+            get_class_annotations("not a class")
 
         with pytest.raises(TypeError):
-            get_annotations(42)
+            get_class_annotations(42)
 
 
 class TestGetMsgspecAnnotation:

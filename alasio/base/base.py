@@ -5,7 +5,7 @@ from alasio.config.config_generated import AlasioConfigGenerated
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
 from alasio.ext.cache import cached_property
-from alasio.ext.msgspec_error.parse_anno import get_annotations
+from alasio.ext.msgspec_error.parse_anno import get_class_annotations
 from alasio.logger import logger
 
 
@@ -16,7 +16,7 @@ class ModuleBase:
 
     @cached_property
     def _annotations(self):
-        return get_annotations(self.__class__)
+        return get_class_annotations(self.__class__)
 
     def __init__(
             self,

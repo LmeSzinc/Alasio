@@ -1,7 +1,7 @@
 from msgspec import NODEFAULT, UNSET
 
 
-def get_annotations(cls):
+def get_class_annotations(cls):
     """
     Safely get __annotations__ of a class and its parent classes
     A simpler version of `typing.get_type_hints`, that won't do _eval_type() just leave annotation as it is
