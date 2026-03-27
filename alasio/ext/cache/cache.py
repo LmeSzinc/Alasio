@@ -429,13 +429,25 @@ class cached_class_property(Generic[T], ClassCacheOperation):
     A high-performance, non-thread-safe cached class property
     """
 
-    def __init__(self, func: Callable[[Any], T]):
+    def __init__(self, func: Callable[[type], T]):
         self.func = func
-        wraps(func)(self)
+        if isinstance(func, classmethod):
+            wraps(func.__func__)(self)
+        else:
+            wraps(func)(self)
 
     def __get__(self, instance, cls) -> T:
-        attrname = self.func.__name__
-        value = self.func(cls)
+        """
+        Args:
+            instance (object): Instance that the property is accessed from,
+                can be None if accessed from class.
+            cls (type): The class that the property is accessed from.
+        """
+        attrname = self.__name__
+        if isinstance(self.func, classmethod):
+            value = self.func.__get__(None, cls)()
+        else:
+            value = self.func(cls)
         # Back up the descriptor so it can be restored by CacheOperation.pop
         type.__setattr__(cls, f"_cached_class_property_desc_for_{attrname}", self)
         # Use type.__setattr__ to bypass metaclass __setattr__
@@ -449,14 +461,23 @@ class cached_class_property_threadsafe(Generic[T], ClassCacheOperation):
     A thread-safe cached class property
     """
 
-    def __init__(self, func: Callable[[Any], T]):
+    def __init__(self, func: Callable[[type], T]):
         self.func = func
         # per-property, cross-instance lock, shares among all instances
         self.create_lock = Lock()
-        wraps(func)(self)
+        if isinstance(func, classmethod):
+            wraps(func.__func__)(self)
+        else:
+            wraps(func)(self)
 
     def __get__(self, instance, cls) -> T:
-        attrname = self.func.__name__
+        """
+        Args:
+            instance (object): Instance that the property is accessed from,
+                can be None if accessed from class.
+            cls (type): The class that the property is accessed from.
+        """
+        attrname = self.__name__
         lock_name = f"_cached_class_property_lock_for_{attrname}"
 
         with self.create_lock:
@@ -488,7 +509,10 @@ class cached_class_property_threadsafe(Generic[T], ClassCacheOperation):
                     return value
 
             # calculate
-            value = self.func(cls)
+            if isinstance(self.func, classmethod):
+                value = self.func.__get__(None, cls)()
+            else:
+                value = self.func(cls)
             try:
                 # Back up the descriptor so it can be restored by CacheOperation.pop
                 type.__setattr__(cls, f"_cached_class_property_desc_for_{attrname}", self)

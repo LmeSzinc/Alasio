@@ -461,3 +461,76 @@ def test_class_operation_normal_attributes():
     # pop None
     assert ClassCacheOperation.pop(cls, "b") is None
     assert not hasattr(cls, "b")
+
+
+def test_cached_class_property_via_instance():
+    class TestClass:
+        count = 0
+
+        @cached_class_property
+        def val(cls):
+            cls.count += 1
+            return f"val_{cls.count}"
+
+    obj = TestClass()
+    # Access via instance
+    assert obj.val == "val_1"
+    assert TestClass.count == 1
+
+    # Check if cached on class
+    assert "val" in TestClass.__dict__
+    assert TestClass.__dict__["val"] == "val_1"
+    # Verify it's NOT in instance dict
+    assert "val" not in obj.__dict__
+
+    # Access via class
+    assert TestClass.val == "val_1"
+
+    # Access via another instance
+    obj2 = TestClass()
+    assert obj2.val == "val_1"
+    assert TestClass.count == 1
+
+
+def test_cached_class_property_threadsafe_via_instance():
+    class TestClassTS:
+        count = 0
+
+        @cached_class_property_threadsafe
+        def val(cls):
+            time.sleep(0.01)
+            cls.count += 1
+            return f"val_{cls.count}"
+
+    obj = TestClassTS()
+    assert obj.val == "val_1"
+    assert TestClassTS.count == 1
+    assert "val" in TestClassTS.__dict__
+    assert "val" not in obj.__dict__
+
+    # Check another instance
+    obj2 = TestClassTS()
+    assert obj2.val == "val_1"
+    assert TestClassTS.count == 1
+
+
+def test_cached_class_property_with_classmethod():
+    class TestClassCM:
+        count = 0
+
+        @cached_class_property
+        @classmethod
+        def val(cls):
+            cls.count += 1
+            return f"val_{cls.count}"
+
+    # Via class
+    assert TestClassCM.val == "val_1"
+    assert TestClassCM.count == 1
+    # Check cache
+    assert TestClassCM.val == "val_1"
+    assert TestClassCM.count == 1
+
+    # Via instance
+    obj = TestClassCM()
+    assert obj.val == "val_1"
