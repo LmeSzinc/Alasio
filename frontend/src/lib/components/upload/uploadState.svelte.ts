@@ -18,7 +18,7 @@ export type OnUploadFunction = (file: File) => Rpc;
  */
 export class UploadState {
   queue = $state<UploadItem[]>([]);
-  private onUploadCallback: OnUploadFunction;
+  onUploadCallback: OnUploadFunction;
 
   constructor(onUpload: OnUploadFunction) {
     this.onUploadCallback = onUpload;

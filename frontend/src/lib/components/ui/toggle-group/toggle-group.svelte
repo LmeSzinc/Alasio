@@ -58,9 +58,14 @@
     }
   });
 
+  // MODIFIED: use getters to make the context reactive
   setToggleGroupCtx({
-    variant,
-    size,
+    get variant() {
+      return variant;
+    },
+    get size() {
+      return size;
+    },
   });
 </script>
 

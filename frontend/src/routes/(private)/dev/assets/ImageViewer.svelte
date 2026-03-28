@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
   import { Button } from "$lib/components/ui/button";
-  import { RefreshCcw } from "@lucide/svelte";
   import { cn } from "$lib/utils";
+  import { RefreshCcw } from "@lucide/svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
 
   // --- Component Props ---
   let {
@@ -24,7 +24,7 @@
   }>();
 
   // --- Reactive State ---
-  let scale = $state(initScale);
+  let scale = $state(untrack(() => initScale));
   let translateX = $state(0);
   let translateY = $state(0);
   let isDragging = $state(false);

@@ -30,11 +30,11 @@
     onUploadClick?: () => void;
   } = $props();
 
-  const deleteRpc = topicClient.rpc();
-  const trackRpc = topicClient.rpc();
-  const untrackRpc = topicClient.rpc();
-  const resourceToAssetRpc = topicClient.rpc();
-  const createFolderRpc = topicClient.rpc();
+  const deleteRpc = $derived(topicClient.rpc());
+  const trackRpc = $derived(topicClient.rpc());
+  const untrackRpc = $derived(topicClient.rpc());
+  const resourceToAssetRpc = $derived(topicClient.rpc());
+  const createFolderRpc = $derived(topicClient.rpc());
 
   const hasSelection = $derived(resourceSelection.count > 0);
   const isSingleSelection = $derived(resourceSelection.count === 1);
@@ -166,7 +166,7 @@
 
     <!-- Resource to Asset - only for resources -->
     <ContextMenuPrimitive.Item disabled={!hasResources || hasFolders} onclick={handleResourceToAsset}>
-      <FileSymlink class="mr-2 h-4 w-4 text-primary" />
+      <FileSymlink class="text-primary mr-2 h-4 w-4" />
       <span>Resource to Asset</span>
     </ContextMenuPrimitive.Item>
 

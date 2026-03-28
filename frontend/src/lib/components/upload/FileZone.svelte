@@ -28,7 +28,7 @@
   } = $props();
 
   // Create upload state instance
-  const uploadState = new UploadState(onUpload);
+  const uploadState = $derived(new UploadState(onUpload));
 
   // File input reference (no $state needed for bind:ref)
   let fileInput: HTMLInputElement;

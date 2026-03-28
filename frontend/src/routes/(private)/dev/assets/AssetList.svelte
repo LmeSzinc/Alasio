@@ -17,7 +17,7 @@
     topicClient: TopicLifespan<FolderResponse>;
   } = $props();
 
-  const renameAssetRpc = topicClient.rpc();
+  const renameAssetRpc = $derived(topicClient.rpc());
 
   // Create a flat list of all assets for range selection
   const allItems = $derived<AssetSelectionItem[]>(assetList.map((a) => ({ type: "asset", name: a.name })));

@@ -47,9 +47,9 @@
     <div class="flex flex-1 overflow-hidden">
       <!-- Top Left: ResourceManager -->
       <div class="border-border flex w-1/2 flex-col overflow-hidden border-r">
-        <PathBreadcrumb class="bg-card flex-shrink-0" {mod_path_assets} {path} onNavigate={handleNavigate} />
+        <PathBreadcrumb class="bg-card shrink-0" {mod_path_assets} {path} onNavigate={handleNavigate} />
         <ResourceManager class="flex-1 overflow-hidden" {mod_name} {path} {topicClient} />
-        <StatusBar data={topicClient.data} class="bg-card flex-shrink-0" />
+        <StatusBar data={topicClient.data} class="bg-card shrink-0" />
       </div>
 
       <!-- Top Right: ImageViewer -->

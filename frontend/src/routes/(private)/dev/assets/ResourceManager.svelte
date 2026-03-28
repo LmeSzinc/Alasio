@@ -21,8 +21,8 @@
     class?: string;
   } = $props();
 
-  const pathRpc = topicClient.rpc();
-  const renameRpc = topicClient.rpc();
+  const pathRpc = $derived(topicClient.rpc());
+  const renameRpc = $derived(topicClient.rpc());
 
   // FileZone reference for opening file picker
   let fileZone: FileZone | null = $state(null);

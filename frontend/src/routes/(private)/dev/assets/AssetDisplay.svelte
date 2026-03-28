@@ -83,7 +83,7 @@
 >
   <!-- Left: Asset Name (full display, no truncation) -->
   <div class="min-w-0 flex-1 px-2">
-    <RenameTextarea {name} {isRenaming} selectionState={assetSelection} {gridcellElement} {onSubmit} class="!text-left">
+    <RenameTextarea {name} {isRenaming} selectionState={assetSelection} {gridcellElement} {onSubmit} class="text-left!">
       <span class={cn("break-all", selected ? "text-white" : "group-hover:text-primary transition-colors")}>
         {name}
       </span>
@@ -92,7 +92,7 @@
 
   <!-- Right: Template Image (fixed width) -->
   {#if content}
-    <div class="flex-shrink-0">
+    <div class="shrink-0">
       {@render content()}
     </div>
   {/if}

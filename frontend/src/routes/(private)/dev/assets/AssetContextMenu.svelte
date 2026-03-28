@@ -28,9 +28,9 @@
     children: Snippet;
   } = $props();
 
-  const addAssetRpc = topicClient.rpc();
-  const deleteAssetRpc = topicClient.rpc();
-  const renameAssetRpc = topicClient.rpc();
+  const addAssetRpc = $derived(topicClient.rpc());
+  const deleteAssetRpc = $derived(topicClient.rpc());
+  const renameAssetRpc = $derived(topicClient.rpc());
 
   const hasSelection = $derived(assetSelection.count > 0);
   const isSingleSelection = $derived(assetSelection.count === 1);

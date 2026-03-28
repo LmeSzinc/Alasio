@@ -27,7 +27,7 @@
     class?: string;
   } = $props();
 
-  let editValue = $state(name);
+  let editValue = $state(untrack(() => name));
   let textareaElement: HTMLTextAreaElement | null = $state(null);
   let isComposing = $state(false);
 
@@ -183,8 +183,8 @@
     oncompositionend={handleCompositionEnd}
     class={cn(
       "w-full resize-none overflow-hidden",
-      "text-card-foreground !font-consolas text-center !text-xs break-all transition-none",
-      "!border-none px-0 py-0.5 rounded-xs bg-background",
+      "text-card-foreground font-consolas! text-center text-xs! break-all transition-none",
+      "bg-background rounded-xs border-none! px-0 py-0.5",
       "min-h-0 leading-tight",
       className,
     )}
