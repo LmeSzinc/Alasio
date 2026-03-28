@@ -92,7 +92,8 @@ class EmuType:
     LDPlayer3 = 'LDPlayer3'
     LDPlayer4 = 'LDPlayer4'
     LDPlayer9 = 'LDPlayer9'
-    LDPlayerFamily = [LDPlayer3, LDPlayer4, LDPlayer9]
+    LDPlayer14 = 'LDPlayer14'
+    LDPlayerFamily = [LDPlayer3, LDPlayer4, LDPlayer9, LDPlayer14]
 
     MuMuPlayer = 'MuMuPlayer'
     MuMuPlayerX = 'MuMuPlayerX'
@@ -142,6 +143,8 @@ class EmuStr(PathStr):
                 return EmuType.LDPlayer4
             elif dir1 == 'ldplayer9':
                 return EmuType.LDPlayer9
+            elif dir1 == 'ldplayer14':
+                return EmuType.LDPlayer14
             else:
                 return EmuType.LDPlayer3
         if exe == 'nemuplayer.exe':

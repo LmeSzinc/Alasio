@@ -152,7 +152,8 @@ def iter_known_registry():
     """
     for path in [
         r'SOFTWARE\leidian\ldplayer',
-        r'SOFTWARE\leidian\ldplayer9'
+        r'SOFTWARE\leidian\ldplayer9',
+        r'SOFTWARE\leidian\ldplayer14',
     ]:
         file = get_install_dir_from_reg(path, 'InstallDir')
         if file:
