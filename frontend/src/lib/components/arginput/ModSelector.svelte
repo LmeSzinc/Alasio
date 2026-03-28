@@ -19,7 +19,7 @@
   };
 
   const topicMod = useTopic<ModOption[]>("ModList");
-  const availableMods = $derived(topicMod.data || []);
+  const availableMods = $derived(Array.isArray(topicMod.data) ? topicMod.data : []);
   const selectedMod = $derived(availableMods.find((m) => m.value === mod_name));
   const triggerContent = $derived(selectedMod?.label ?? t.Mod.SelectMod());
 

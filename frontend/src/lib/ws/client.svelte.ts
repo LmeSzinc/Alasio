@@ -64,8 +64,8 @@ export class WebsocketManager {
 
     // Initialize cache for default subscriptions.
     for (const topic of this.#options.defaultSubscriptions) {
-      if (this.topics[topic] === undefined) {
-        this.topics[topic] = this.#options.scrollTopics[topic] ? [] : {};
+      if (this.topics[topic] === undefined && this.#options.scrollTopics[topic]) {
+        this.topics[topic] = [];
       }
     }
   }
@@ -404,8 +404,8 @@ export class WebsocketManager {
     this.subscriptions[topic] = currentCount + 1;
 
     // Initialize cache for the topic if it doesn't exist.
-    if (this.topics[topic] === undefined) {
-      this.topics[topic] = this.#options.scrollTopics[topic] ? [] : {};
+    if (this.topics[topic] === undefined && this.#options.scrollTopics[topic]) {
+      this.topics[topic] = [];
     }
 
     // Ensure a connection is active or being established.
