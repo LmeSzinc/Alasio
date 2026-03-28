@@ -33,8 +33,12 @@ import { getContext, setContext, type Snippet } from "svelte";
 export function createSlotContext(name: string) {
   const key = Symbol(name);
 
+  // Use a relaxed structural type for the snippet to resolve "Two different types with this name exist"
+  // errors while still ensuring that it is a function that returns a snippet-like value.
+  type GenericSnippet = (...args: any[]) => { "{@render ...} must be called with a Snippet": any };
+
   interface ContextValue {
-    snippet: Snippet | undefined;
+    snippet: GenericSnippet | undefined;
   }
 
   function init() {
@@ -42,7 +46,7 @@ export function createSlotContext(name: string) {
     return setContext(key, context);
   }
 
-  function set(snippet: Snippet) {
+  function set(snippet: GenericSnippet) {
     const context = getContext<ContextValue>(key);
     if (!context) {
       return;
@@ -54,7 +58,7 @@ export function createSlotContext(name: string) {
     return getContext<ContextValue>(key);
   }
 
-  function clean(snippet?: Snippet) {
+  function clean(snippet?: GenericSnippet) {
     const context = getContextValue();
     if (!context) {
       return;
@@ -72,7 +76,7 @@ export function createSlotContext(name: string) {
    * @param snippet The snippet to be set in the context. Can be a reactive value.
    *                If the snippet becomes undefined, it will be cleaned from the context.
    */
-  function use(snippet: Snippet | undefined) {
+  function use(snippet: GenericSnippet | undefined) {
     $effect(() => {
       if (snippet) {
         set(snippet);
@@ -92,8 +96,9 @@ export function createSlotContext(name: string) {
      * Direct access to the current snippet stored in the context.
      * Returns undefined if the context hasn't been initialized or no snippet is set.
      */
-    get snippet() {
-      return getContextValue()?.snippet;
+    get snippet(): Snippet | undefined {
+      // Internal state is cast to Snippet for external consumption
+      return getContextValue()?.snippet as Snippet | undefined;
     },
   };
 }
