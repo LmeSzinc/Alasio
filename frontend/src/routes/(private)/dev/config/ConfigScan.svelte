@@ -133,6 +133,7 @@
         // Item dropped on another item
         const overConfig = itemMap.get(over.id) as Config;
         if (!overConfig) return;
+        if (activeConfig.id === overConfig.id) return;
 
         if (position === "top") {
           // Insert before the target item
@@ -153,6 +154,9 @@
         // Item dropped on a group (creating new group)
         const overGroup = itemMap.get(over.id) as ConfigGroupData;
         if (!overGroup) return;
+
+        // If dropping an item on its own group and it's already the only item, it's a no-op
+        if (activeConfig.gid === overGroup.gid && overGroup.items.length === 1) return;
 
         if (position === "top") {
           // Create new group before the target group
@@ -228,8 +232,11 @@
     // If for some reason the item wasn't found, abort.
     if (!movedItem || !sourceGroup) return;
 
-    // 3. If the source group is now empty, we will remove it later.
-    // We do this after insertion to simplify index calculations.
+    // 3. If dropping onto its own group and it was already the only item, it's a no-op
+    if (sourceGroup.id === over.id && sourceGroup.items.length === 0) {
+      sourceGroup.items.push(movedItem);
+      return;
+    }
 
     // 4. Create a new group for the moved item.
     const newGroup: ConfigGroupData = {
@@ -261,6 +268,7 @@
    */
   function handleDndEnd({ active, over, position }: DndEndCallbackDetail) {
     if (!active || !over || !active.data || !over.data) return;
+    if (active.id === over.id) return;
 
     const activeType = active.data?.type;
     const overType = over.data?.type;
