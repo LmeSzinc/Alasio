@@ -156,15 +156,33 @@
     background-image: radial-gradient(rgba(160, 160, 160, 0.1) 1px, transparent 0);
   }
   .header-shadow {
-    box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   }
   .dark .header-shadow {
-    box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
   }
   .aside-shadow {
-    box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 2px 0 20px rgba(0, 0, 0, 0.2);
   }
   .dark .aside-shadow {
-    box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
+    box-shadow: 3px 0 30px rgba(0, 0, 0, 0.5);
+  }
+  .area-shadow {
+    position: relative;
+  }
+  .area-shadow::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 10;
+    box-shadow:
+      inset 0 10px 10px -10px rgba(0, 0, 0, 0.1),
+      inset 10px 0 10px -10px rgba(0, 0, 0, 0.1);
+  }
+  .dark .area-shadow::after {
+    box-shadow:
+      inset 0 20px 20px -20px rgba(0, 0, 0, 0.5),
+      inset 20px 0 20px -20px rgba(0, 0, 0, 0.5);
   }
 }
