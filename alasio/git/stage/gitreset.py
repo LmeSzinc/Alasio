@@ -27,12 +27,14 @@ class GitReset(GitObjectManager):
         """
         queue = deque([sha1])
 
-        # key: file sha1, value: GitObject
-        dict_file = {}
-        # key: object sha1, value: parent sha1
+        # list of (parent_tree_sha1, EntryObject) for file entries
+        # Using a list instead of dict to correctly handle multiple files with the same sha1
+        # (e.g. multiple empty __init__.py files share the same sha1)
+        list_file = []
+        # key: tree sha1, value: parent tree sha1
         dict_parent: "dict[str, str]" = {}
-        # key: directory sha1 or submodule sha1, value: str
-        dict_path = {}
+        # key: tree sha1, value: directory name
+        dict_path: "dict[str, str]" = {}
 
         while 1:
             new_queue = deque()
@@ -44,19 +46,21 @@ class GitReset(GitObjectManager):
                 if typ == 2:
                     tree = obj.decoded
                     for entry in tree:
-                        dict_parent[entry.sha1] = sha
                         mode = entry.mode
                         # directory
                         if mode == b'40000':
+                            dict_parent[entry.sha1] = sha
                             new_queue.append(entry.sha1)
                             dict_path[entry.sha1] = entry.name
                         # submodule
                         elif mode == b'160000':
+                            dict_parent[entry.sha1] = sha
                             new_queue.append(entry.sha1)
                             dict_path[entry.sha1] = entry.name
                         # file
                         else:
-                            dict_file[entry.sha1] = entry
+                            # Record (parent_tree_sha1, entry) so each file is unique by position
+                            list_file.append((sha, entry))
                     continue
                 # commit
                 if typ == 1:
@@ -77,21 +81,21 @@ class GitReset(GitObjectManager):
                 break
 
         # build filepath
+        # key: file path, value: FileEntry
         dict_entry = {}
-        for sha, entry in dict_file.items():
+        for parent_sha, entry in list_file:
             paths = deque([entry.name])
-            parent_sha1 = sha
-            while 1:
-                parent_sha1 = dict_parent.get(parent_sha1, None)
-                if parent_sha1:
-                    path = dict_path.get(parent_sha1, None)
-                    if path:
-                        paths.appendleft(path)
-                        continue
-                break
-            paths = '/'.join(paths)
-            file = FileEntry(sha1=sha, mode=entry.mode, path=paths)
-            dict_entry[sha] = file
+            tree_sha = parent_sha
+            while True:
+                name = dict_path.get(tree_sha)
+                if name:
+                    paths.appendleft(name)
+                tree_sha = dict_parent.get(tree_sha)
+                if tree_sha is None:
+                    break
+            file_path = '/'.join(paths)
+            file = FileEntry(sha1=entry.sha1, mode=entry.mode, path=file_path)
+            dict_entry[file_path] = file
 
         return dict_entry
 
