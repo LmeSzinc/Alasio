@@ -8,6 +8,7 @@ from alasio.backend.worker.event import ConfigEvent
 from alasio.base.exception import *
 from alasio.base.scheduler.configwatcher import ConfigWatcher
 from alasio.base.scheduler.inflect import Inflection
+from alasio.base.state import TaskState
 from alasio.base.timer import now
 from alasio.config.config_generated import AlasioConfigGenerated
 from alasio.device.base import DeviceBase
@@ -193,6 +194,7 @@ class AlasioScheduler:
         Args:
             task (str | None):
         """
+        TaskState.subclasses_clear_all()
         self.device.on_task_switch()
         self._send_scheduler_running(task)
 
@@ -200,6 +202,7 @@ class AlasioScheduler:
         """
         Callback function on scheduler idle
         """
+        TaskState.subclasses_clear_all()
         # send last screenshot on idle
         self.device.backend_send_preview(flag=True)
         self.device.on_idle()
