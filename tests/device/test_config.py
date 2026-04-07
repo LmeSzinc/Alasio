@@ -1,7 +1,10 @@
+import threading
+
 import msgspec
 
 from alasio.config.base import BatchSetContext, TemporaryContext
 from alasio.device.config import DeviceConfig
+from alasio.logger import logger
 
 
 class EmulatorGroup(msgspec.Struct):
@@ -35,9 +38,9 @@ class OptimizationGroup(msgspec.Struct):
 
 class MockConfig:
     def __init__(self):
+        self.config_name = 'template'
         self.Emulator = EmulatorGroup(
             Serial='127.0.0.1:5555',
-            PackageName='com.example.game',
             ScreenshotMethod='ADB',
             ControlMethod='ADB',
             ScreenshotDedithering=True,
@@ -62,7 +65,8 @@ class MockConfig:
         )
         self.save_count = 0
         self.auto_save = True
-        self._batch_depth = 0
+        self._local = threading.local()
+        self._local.batch_depth = 0
 
     def save(self):
         self.save_count += 1
@@ -97,11 +101,9 @@ class TestDeviceConfig:
         """
         mock_config = MockConfig()
         device_config = DeviceConfig.from_config(mock_config)
-        print(mock_config.Emulator.Serial)
 
         # Check some loaded values
         assert device_config.Emulator_Serial == '127.0.0.1:5555'
-        assert device_config.Emulator_PackageName == 'com.example.game'
         assert device_config.Error_HandleError is False
         assert device_config.Optimization_ScreenshotInterval == 0.5
         assert device_config.EmulatorInfo_Emulator == 'NoxPlayer'
@@ -126,7 +128,7 @@ class TestDeviceConfig:
         device_config.Error_HandleError = True
         assert mock_config.Error.HandleError is True
 
-    def test_no_broadcast_without_config(self, capsys):
+    def test_no_broadcast_without_config(self):
         """
         Test that DeviceConfig does not broadcast if self.config is None
         """
@@ -134,13 +136,13 @@ class TestDeviceConfig:
         device_config = DeviceConfig()
 
         # device_config.config is None by default (based on current implementation)
-        device_config.Emulator_Serial = '127.0.0.1:62001'
+        with logger.mock_capture_writer() as capture:
+            device_config.Emulator_Serial = '127.0.0.1:62001'
 
-        # Value in mock_config should remain unchanged
-        assert mock_config.Emulator.Serial == '127.0.0.1:5555'
-        # Should log a warning
-        captured = capsys.readouterr()
-        assert "DeviceConfig: Failed to proxy setattr, config is None" in captured.out
+            # Value in mock_config should remain unchanged
+            assert mock_config.Emulator.Serial == '127.0.0.1:5555'
+            # Should log a warning
+            assert capture.stdout.any_contains("DeviceConfig: Failed to proxy setattr, config is None")
 
     def test_internal_attribute_no_broadcast(self):
         """
@@ -158,30 +160,30 @@ class TestDeviceConfig:
         device_config._some_internal = 123
         assert device_config._some_internal == 123
 
-    def test_missing_group_in_config(self, capsys):
+    def test_missing_group_in_config(self):
         """
         Test handling of missing groups in the provided config
         """
 
         class IncompleteConfig:
             def __init__(self):
+                self.config_name = 'template'
                 # Missing Emulator group
                 self.Error = ErrorGroup(HandleError=True)
                 self.Optimization = OptimizationGroup(ScreenshotInterval=0.3)
                 self.EmulatorInfo = EmulatorInfoGroup(Emulator='auto')
 
-        incomplete_config = IncompleteConfig()
-        device_config = DeviceConfig.from_config(incomplete_config)
+        with logger.mock_capture_writer() as capture:
+            incomplete_config = IncompleteConfig()
+            device_config = DeviceConfig.from_config(incomplete_config)
 
-        # Should log warnings during from_config
-        captured = capsys.readouterr()
-        assert 'DeviceConfig.from_config: Missing key in config "Emulator.Serial"' in captured.out
+            # Should log warnings during from_config
+            assert capture.stdout.any_contains('DeviceConfig.from_config: Missing key in config "Emulator.Serial"')
 
-        # Now test broadcast to missing group
-        device_config.Emulator_Serial = '127.0.0.1:5555'
-
-        captured = capsys.readouterr()
-        assert 'DeviceConfig: Failed to proxy setattr, missing key in config "Emulator.Serial"' in captured.out
+            # Now test broadcast to missing group
+            capture.clear()
+            device_config.Emulator_Serial = '127.0.0.1:5555'
+            assert capture.stdout.any_contains('DeviceConfig: Failed to proxy setattr, missing key in config "Emulator.Serial"')
 
     def test_batch_set(self):
         """
@@ -208,16 +210,16 @@ class TestDeviceConfig:
         assert mock_config.Emulator.Serial == '127.0.0.1:62001'
         assert mock_config.Optimization.ScreenshotInterval == 0.1
 
-    def test_batch_set_no_config(self, capsys):
+    def test_batch_set_no_config(self):
         """
         Test that DeviceConfig.batch_set handles missing config gracefully
         """
         device_config = DeviceConfig()
-        with device_config.batch_set():
-            device_config.Emulator_Serial = '127.0.0.1:62001'
+        with logger.mock_capture_writer() as capture:
+            with device_config.batch_set():
+                device_config.Emulator_Serial = '127.0.0.1:62001'
 
-        captured = capsys.readouterr()
-        assert 'DeviceConfig: Failed to proxy' in captured.out
+            assert capture.stdout.any_contains('DeviceConfig: Failed to proxy')
 
     def test_override(self):
         """
