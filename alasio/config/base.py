@@ -1,7 +1,7 @@
 import threading
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from msgspec import NODEFAULT, Struct
 
@@ -433,7 +433,7 @@ class AlasioConfigBase:
             return
         return self.register_modify(task, group, arg, value)
 
-    def __getattr__(self, item):
+    def _getattr(self, item):
         """
         A fallback to access unbound groups.
         Default values are available but set event will be ignored
@@ -443,6 +443,13 @@ class AlasioConfigBase:
                 if not item[0].isupper():
                     # not a group access
                     raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'") from None
+
+                # Reject old config style like self.config.Group_Arg
+                if '_' in item:
+                    raise AttributeError(
+                        f"'{self.__class__.__name__}' object has no attribute '{item}'. "
+                        f"Old config reference style detected, use self.config.{item.replace('_', '.')} instead."
+                    )
             except IndexError:
                 # this shouldn't happen
                 raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'") from None
@@ -774,3 +781,9 @@ class AlasioConfigBase:
         else:
             logger.info(f'Task call: {task} (skipped because disabled by user)')
             return False
+
+
+if not TYPE_CHECKING:
+    # Fool IDE type checking that config object is static (without __getattr__)
+    # so they will give warnings when accessing unknown attribute
+    AlasioConfigBase.__getattr__ = AlasioConfigBase._getattr
