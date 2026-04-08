@@ -13,7 +13,6 @@
   const topicClient = useTopic<ConfigArgData>("Dashboard");
 
   const itemList = $derived(topicClient.data ?? {});
-  $inspect(itemList);
 </script>
 
 <DashboardCard class={cn("neushadow bg-card rounded-lg", className)} items={itemList} />

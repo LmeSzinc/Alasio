@@ -18,7 +18,7 @@
 
 <div class={cn("flex flex-col justify-center gap-y-1", className)}>
   <!-- Top row: name (left) and input (right) -->
-  <div class="flex min-h-8 flex-row items-center justify-between gap-x-4">
+  <div class="flex min-h-7 flex-row items-center justify-between gap-x-4">
     <!-- Top-left: name -->
     <div class="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
       <I18nText text={displayName} class="font-medium" />

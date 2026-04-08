@@ -8,7 +8,7 @@
   import * as Card from "$lib/components/ui/card";
 
   // Subscribe to ConfigScan topic
-  const topicClient = useTopic<ConfigTopicLike | undefined>("ConfigScan");
+  const topicClient = useTopic<ConfigTopicLike>("ConfigScan");
 
   // All available state options
   const ALL_STATES: WORKER_STATE[] = [

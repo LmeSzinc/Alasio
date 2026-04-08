@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import type { WORKER_STATE } from "$lib/components/aside/types";
+  import type { ConfigTopicLike, WORKER_STATE } from "$lib/components/aside/types";
   import { Scheduler, type TaskQueueData } from "$lib/components/scheduler";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { NavContext } from "$lib/slotcontext.svelte";
@@ -16,6 +16,7 @@
   const config_name = $derived(data.config_name);
 
   // topic
+  const configClient = useTopic<ConfigTopicLike>("ConfigScan");
   const stateClient = useTopic("ConnState");
   const configRpc = stateClient.resilientRpc();
   const configResetRpc = stateClient.rpc();
@@ -32,6 +33,26 @@
       ui.nav_name = "";
       ui.card_name = "";
       ui.opened_nav = "";
+    }
+  });
+
+  // Auto redirect when config not found
+  $effect(() => {
+    if (configRpc.errorMsg && configRpc.errorMsg.startsWith("RpcValueError: No such config")) {
+      const serverData = configClient.data;
+      if (serverData === undefined) {
+        return;
+      }
+      const configs = Object.values(serverData);
+      if (configs.length > 0) {
+        configs.sort((a, b) => {
+          if (a.gid !== b.gid) return a.gid - b.gid;
+          return a.iid - b.iid;
+        });
+        goto(`/config/${configs[0].name}`, { replaceState: true });
+      } else {
+        goto("/dev/config", { replaceState: true });
+      }
     }
   });
   // Clear nav state on page leave

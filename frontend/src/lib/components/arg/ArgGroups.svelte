@@ -72,7 +72,7 @@
         <Card.Content>
           <div class="">
             {#each Object.entries(args) as [argKey]}
-              <Arg class="mt-3" bind:data={data[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} />
+              <Arg class="mt-2" bind:data={data[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} />
             {/each}
           </div>
         </Card.Content>

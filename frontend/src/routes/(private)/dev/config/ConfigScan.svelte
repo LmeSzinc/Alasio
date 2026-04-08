@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { ConfigTopicLike } from "$lib/components/aside/types";
   import { DndProvider, applyDnd, type DndEndCallbackDetail } from "$lib/components/dnd";
   import { Button } from "$lib/components/ui/button";
   import { Help } from "$lib/components/ui/help";
@@ -22,7 +23,7 @@
   const { class: className }: $$props = $props();
 
   // SINGLE SOURCE OF TRUTH (from server)
-  const topicClient = useTopic("ConfigScan");
+  const topicClient = useTopic<ConfigTopicLike>("ConfigScan");
   const rpc = topicClient.rpc();
 
   // RPC handlers for dialogs
