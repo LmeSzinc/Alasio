@@ -1,4 +1,4 @@
-import { onDestroy } from "svelte";
+import { onDestroy, untrack } from "svelte";
 import { websocketClient, WebsocketManager } from "./client.svelte";
 import { createResilientRpc, createRpc, type Rpc, type RpcOptions } from "./rpc.svelte";
 
@@ -18,12 +18,19 @@ export type TopicLifespan<T = any> = {
  */
 export function useTopic<T = any>(topic: string, client: WebsocketManager = websocketClient): TopicLifespan<T> {
   // --- Step 1: Manage Subscription Lifecycle ---
-  // On creation, tell the manager we're subscribing.
-  client.sub(topic);
-
-  // On destruction, tell the manager we're unsubscribing.
-  onDestroy(() => {
-    client.unsub(topic);
+  // Use Svelte 5 effect for subscription lifecycle.
+  // It ensures sub/unsub is strictly tied to the mount status in Svelte 5.
+  // CRITICAL: We MUST use untrack() here because client.sub modifies $state
+  // that would otherwise cause an infinite reactivity loop.
+  $effect(() => {
+    untrack(() => {
+      client.sub(topic);
+    });
+    return () => {
+      untrack(() => {
+        client.unsub(topic);
+      });
+    };
   });
 
   // --- Step 2: Build the Reactive API ---

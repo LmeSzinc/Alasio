@@ -441,13 +441,13 @@ export class WebsocketManager {
 
     if (shouldSendUnsubMessage) {
       this.#send({ t: topic, o: "unsub" });
-    }
 
-    // If the subscription count is now 0, clean up the topic data
-    if (this.subscriptions[topic] <= 0) {
-      delete this.subscriptions[topic];
-      delete this.topics[topic];
-      delete this.topicReady[topic];
+      // If the subscription count is now 0, clean up the topic data
+      if ((this.subscriptions[topic] || 0) <= 0) {
+        delete this.subscriptions[topic];
+        delete this.topics[topic];
+        delete this.topicReady[topic];
+      }
     }
   }
   unsubAll = () => {
