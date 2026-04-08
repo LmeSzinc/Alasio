@@ -439,7 +439,7 @@ class IndexGenerator(CrossNavGenerator):
                     if not group.args:
                         continue
                     # skip variants
-                    if group.base:
+                    if len(group.mro) > 1:
                         continue
                     gen.Anno(group.name, anno=f'"{nav_name}.{group.name}"')
 
@@ -463,6 +463,8 @@ class IndexGenerator(CrossNavGenerator):
             logger.warning(f'ConfigGen root not exist: {self.root}')
         if not self.path_config.exists():
             logger.warning(f'ConfigGen path_config not exist: {self.path_config}')
+
+        self.build_group_mro()
 
         # update nav configs
         for nav in self.dict_nav_config.values():

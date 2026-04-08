@@ -193,10 +193,10 @@ class ModLoader:
             except KeyError:
                 # this shouldn't happen
                 continue
-            cls_name = arg_data.get('cls', group_name)
+            i18n_group = arg_data.get('i18ngroup', group_name)
 
             # insert i18n
-            i18n_data = deep_get(i18n, [cls_name, arg_name, lang], default='')
+            i18n_data = deep_get(i18n, [i18n_group, arg_name, lang], default='')
             try:
                 arg_data.update(i18n_data)
             except TypeError:

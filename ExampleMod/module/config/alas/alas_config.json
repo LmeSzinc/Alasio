@@ -156,6 +156,7 @@
       "group": "Scheduler",
       "arg": "Enable",
       "cls": "SchedulerStatic",
+      "i18ngroup": "SchedulerStatic",
       "dt": "static",
       "value": "enabled",
       "option": ["enabled"]
@@ -164,15 +165,9 @@
       "task": "RestartDevice",
       "group": "Scheduler",
       "arg": "NextRun",
+      "cls": "SchedulerStatic",
       "dt": "datetime",
       "value": "2020-01-01T00:00:00Z"
-    },
-    "Scheduler_ServerUpdate": {
-      "task": "RestartDevice",
-      "group": "Scheduler",
-      "arg": "ServerUpdate",
-      "dt": "input",
-      "value": "00:00"
     }
   },
   "card-RestartGameDisplay-RestartGame": {
@@ -182,6 +177,7 @@
       "group": "Scheduler",
       "arg": "Enable",
       "cls": "SchedulerStatic",
+      "i18ngroup": "SchedulerStatic",
       "dt": "static",
       "value": "enabled",
       "option": ["enabled"]
@@ -190,15 +186,9 @@
       "task": "RestartGame",
       "group": "Scheduler",
       "arg": "NextRun",
+      "cls": "SchedulerStatic",
       "dt": "datetime",
       "value": "2020-01-01T00:00:00Z"
-    },
-    "Scheduler_ServerUpdate": {
-      "task": "RestartGame",
-      "group": "Scheduler",
-      "arg": "ServerUpdate",
-      "dt": "input",
-      "value": "00:00"
     }
   }
 }

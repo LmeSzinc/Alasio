@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, timezone
-from typing import Dict, Set
+from typing import Dict, Tuple
 
 import msgspec
 from msgspec import Struct, UNSET
@@ -29,19 +29,20 @@ class GroupData(Struct):
     dashboard: str = ''
     dashboard_color: str = ''
     args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
-    # base group of variant, or empty string if this group is not a variant
-    base: str = ''
+    # parent group of variant, or empty string if this group is not a variant
+    parent: Tuple[str, ...] = msgspec.field(default=tuple)
+    mro: Tuple[str, ...] = msgspec.field(default=tuple)
     # override args in variant, will be set in groups_data()
-    override_args: Set[str] = msgspec.field(default_factory=set)
+    override_args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
 
     @classmethod
     def from_group_data(cls, group: str, data: dict):
         if not data:
             data = {}
-        if type(data) != dict:
+        if not isinstance(data, dict):
             raise DefinitionError(f'Group data must be a dict', keys=[group], value=data)
-        args = data.get('args', {})
-        if type(args) != dict:
+        args: dict = data.get('args', {})
+        if not isinstance(args, dict):
             raise DefinitionError(f'Group args must be a dict', keys=[group, 'args'], value=data)
         new = {}
         for arg_name, value in args.items():
@@ -58,16 +59,32 @@ class GroupData(Struct):
                 raise
             new[arg_name] = arg
         data['args'] = new
-        # build object
         data['name'] = group
+        # convert parent to tuple
+        parent = data.get('parent', None)
+        if parent:
+            if isinstance(parent, (list, tuple)):
+                parent = tuple(parent)
+            elif isinstance(parent, str):
+                parent = (parent,)
+            else:
+                raise DefinitionError(f'Invalid group parent, expected str or list[str], got {parent}',
+                                      keys=[group, 'parent'], value=parent)
+        else:
+            parent = ()
+        data['parent'] = parent
+        # internal property, ignore input
+        data['mro'] = ()
+        # build object
         try:
             obj = msgspec.convert(data, cls)
         except msgspec.ValidationError as e:
             e = DefinitionError(e, keys=[group], value=data)
             raise e
         # validate
-        if obj.base == obj.name:
-            raise DefinitionError(f'Group variant base cannot be self', keys=[group, 'base'], value=obj.base)
+        if obj.name in obj.parent:
+            raise DefinitionError(f'Group parent cannot include group itself',
+                                  keys=[group, 'parent'], value=obj.parent)
         # validate dashboard color
         if obj.dashboard_color:
             if not re.match(r'^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{4}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{8})$', obj.dashboard_color):
@@ -213,31 +230,12 @@ class ParseGroups(ParseBase):
             output[group_name] = group
 
         # validate group variants
-        dict_variant2base = {}
         for group_name, group in output.items():
-            if not group.base:
+            if not group.parent:
                 continue
-            try:
-                base = output[group.base]
-            except KeyError:
-                raise DefinitionError(
-                    f'No such base group: "{group.base}"',
-                    file=self.file, keys=[group_name, 'base'], value=group.base)
-            dict_variant2base[group_name] = group.base
-            if group.base in dict_variant2base:
-                raise DefinitionError(
-                    f'Group variant cannot be nested',
-                    file=self.file, keys=[group.name, 'base'], value=group.base)
-            # validate arg override
-            for arg_name in group.args:
-                if arg_name not in base.args:
-                    raise DefinitionError(
-                        f'Cannot add new arg in group variant, maybe add it to base group and static in variant?',
-                        file=self.file, keys=[group_name, 'args'], value=arg_name)
 
-            group.override_args = set(group.args)
-            args = base.args.copy()
-            args.update(group.args)
-            group.args = args
+            group.override_args = group.args.copy()
+            # note that args here are just override args
+            # arg override and variant base will be validated in MRO build
 
         return output

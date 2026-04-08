@@ -2,10 +2,17 @@ Scheduler:
   args:
     Enable: false
     NextRun: 2020-01-01T00:00:00Z
-    ServerUpdate: "00:00"
+    ServerUpdate:
+      hide: true
+      dt: static
+      value: "00:00"
+
+# Scheduler is an alias of SchedulerU00
+SchedulerU00:
+  parent: Scheduler
 
 SchedulerStatic:
-  base: Scheduler
+  parent: Scheduler
   args:
     Enable:
       # TypeError: Literal may only contain None/integers/strings - typing.Literal[True] is not supported
@@ -13,27 +20,20 @@ SchedulerStatic:
       dt: static
       value: "enabled"
 
-SchedulerU00:
-  base: Scheduler
-  args:
-    ServerUpdate:
-      hide: true
-      dt: static
-      value: "00:00"
-
+# SchedulerStatic is an alias of SchedulerStaticU00
 SchedulerStaticU00:
-  base: Scheduler
+  parent: SchedulerStatic
+
+SchedulerUedit:
+  parent: Scheduler
   args:
-    Enable:
-      dt: static
-      value: "enabled"
-    ServerUpdate:
-      hide: true
-      dt: static
-      value: "00:00"
+    ServerUpdate: "00:00"
+
+SchedulerStaticUedit:
+  parent: [ SchedulerStatic, SchedulerUedit ]
 
 SchedulerU04:
-  base: Scheduler
+  parent: Scheduler
   args:
     ServerUpdate:
       hide: true
@@ -41,15 +41,7 @@ SchedulerU04:
       value: "04:00"
 
 SchedulerStaticU04:
-  base: Scheduler
-  args:
-    Enable:
-      dt: static
-      value: "enabled"
-    ServerUpdate:
-      hide: true
-      dt: static
-      value: "04:00"
+  parent: [ SchedulerStatic, SchedulerU04 ]
 
 #设备设置
 #Alas设置

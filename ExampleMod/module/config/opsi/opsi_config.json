@@ -5,6 +5,7 @@
       "task": "OpsiExplore",
       "group": "Scheduler",
       "arg": "Enable",
+      "cls": "SchedulerU00",
       "dt": "checkbox",
       "value": false
     },
@@ -12,6 +13,7 @@
       "task": "OpsiExplore",
       "group": "Scheduler",
       "arg": "NextRun",
+      "cls": "SchedulerU00",
       "dt": "datetime",
       "value": "2020-01-01T00:00:00Z"
     },
@@ -43,6 +45,7 @@
       "task": "OpsiDaily",
       "group": "Scheduler",
       "arg": "Enable",
+      "cls": "SchedulerU00",
       "dt": "checkbox",
       "value": false
     },
@@ -50,6 +53,7 @@
       "task": "OpsiDaily",
       "group": "Scheduler",
       "arg": "NextRun",
+      "cls": "SchedulerU00",
       "dt": "datetime",
       "value": "2020-01-01T00:00:00Z"
     },
@@ -173,6 +177,7 @@
       "task": "OpsiAshAssist",
       "group": "Scheduler",
       "arg": "Enable",
+      "cls": "SchedulerU00",
       "dt": "checkbox",
       "value": false
     },
@@ -180,6 +185,7 @@
       "task": "OpsiAshAssist",
       "group": "Scheduler",
       "arg": "NextRun",
+      "cls": "SchedulerU00",
       "dt": "datetime",
       "value": "2020-01-01T00:00:00Z"
     },

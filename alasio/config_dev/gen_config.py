@@ -1,7 +1,6 @@
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.config_dev.format.format_yaml import yaml_formatter
-from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.parse_args import ArgData, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
 from alasio.config_dev.parse.parse_groups import ParseGroups
 from alasio.config_dev.parse.parse_tasks import ParseTasks
@@ -250,28 +249,17 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         for group_name, group in self.groups_data.items():
             # {group}._info
             # no _info for variant group
-            if not group.base:
+            if not group.parent:
                 row = self._update_info_i18n(group_name, '_info')
                 deep_set(new, [group_name, '_info'], row)
-            # prepare base args
-            if group.base:
-                try:
-                    base = self.groups_data[group.base].args
-                except KeyError:
-                    # this shouldn't happen as variant base is already validated
-                    raise DefinitionError(
-                        f'No such base group: "{group.base}"',
-                        file=self.file, keys=[group_name, 'base'], value=group.base)
-            else:
-                base = None
             # {group}.{arg}
             if group.dashboard:
                 continue
             for arg_name, arg in group.args.items():
                 if arg.hide:
                     continue
-                # skip the same args
-                if base and base.get(arg_name) == arg:
+                # skip the base args
+                if group.parent and arg_name not in group.override_args:
                     continue
                 row = self._update_arg_i18n(group_name, arg_name, arg)
                 deep_set(new, [group_name, arg_name], row)

@@ -14,13 +14,6 @@
       "arg": "NextRun",
       "dt": "datetime",
       "value": "2020-01-01T00:00:00Z"
-    },
-    "Scheduler_ServerUpdate": {
-      "task": "Main",
-      "group": "Scheduler",
-      "arg": "ServerUpdate",
-      "dt": "input",
-      "value": "00:00"
     }
   },
   "card-Main-Campaign": {

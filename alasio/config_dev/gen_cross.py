@@ -3,6 +3,7 @@ from typing import Optional
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
+from alasio.config_dev.parse.build_mro import build_mro
 from alasio.config_dev.parse.parse_groups import GroupData
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
@@ -63,20 +64,108 @@ class CrossNavGenerator:
                 out[nav] = parser
         return out
 
+    """
+    Group variant
+    """
+
+    @cached_property
+    def groups_data(self) -> "dict[str, GroupData]":
+        out: "dict[str, GroupData]" = {}
+        if self.alasio:
+            out = self.alasio.groups_data
+        for config in self.dict_nav_config.values():
+            # iter group data
+            for group_name, group_data in config.groups_data.items():
+                # group must be unique
+                if self.alasio and group_name in self.alasio.groups_data:
+                    raise DefinitionError(
+                        f'Conflict group name: "{group_name}", which is already used in alasio',
+                        file=config.file, keys=group_name,
+                    )
+                if group_name in out:
+                    raise DefinitionError(
+                        f'Duplicate group name: "{group_name}"',
+                        file=config.file, keys=group_name,
+                    )
+                out[group_name] = group_data
+        return out
+
+    @cached_property
+    def dict_group_mro(self) -> "dict[str, tuple[str, ...]]":
+        """
+        Returns:
+            dict[str, tuple[str, ...]]:
+                key: class name
+                value: MRO chain
+        """
+        hierarchy = {}
+        for group in self.groups_data.values():
+            for parent in group.parent:
+                if parent not in self.groups_data:
+                    config = self.dict_group2configgen[group.name]
+                    raise DefinitionError(
+                        f'Invalid group parent: "{parent}", no such group',
+                        file=config.file, keys=[group.name, 'parent'], value=parent,
+                    )
+            hierarchy[group.name] = group.parent
+
+        dict_mro = build_mro(hierarchy)
+        return dict_mro
+
     @cached_property
     def dict_group_variant2base(self) -> "dict[str, str]":
         """
         Convert variant name to base name
         """
         out = {}
-        if self.alasio:
-            out = self.alasio.dict_group_variant2base
-        for config in self.dict_nav_config.values():
-            for group in config.groups_data.values():
-                if not group.base:
-                    continue
-                out[group.name] = group.base
+        for group_name, mro in self.dict_group_mro.items():
+            try:
+                base = mro[-1]
+            except IndexError:
+                # this shouldn't happen, should have at lease one parent
+                continue
+            out[group_name] = base
         return out
+
+    def build_group_mro(self):
+        # copy mro to group object
+        for group_name, mro in self.dict_group_mro.items():
+            try:
+                group = self.groups_data[group_name]
+            except KeyError:
+                continue  # this shouldn't happen
+            group.mro = mro
+
+            # check args override
+            base_name = self.dict_group_variant2base.get(group_name, group_name)
+            if base_name != group_name:
+                try:
+                    base = self.groups_data[base_name]
+                except KeyError:
+                    continue  # this shouldn't happen
+                for arg_name in group.override_args:
+                    if arg_name not in base.args:
+                        config = self.dict_group2configgen[group_name]
+                        raise DefinitionError(
+                            f'Cannot add new arg in group variant, maybe add it to base group and be static in '
+                            f'variant?',
+                            file=config.file, keys=[group_name, 'args'], value=arg_name)
+
+            # build args
+            args = {}
+            for parent_name in reversed(mro):
+                try:
+                    parent = self.groups_data[parent_name]
+                except KeyError:
+                    continue  # this shouldn't happen
+                if parent.parent:
+                    # variant group, pick overrides only
+                    args.update(parent.override_args)
+                else:
+                    # not a variant group
+                    args.update(parent.args)
+
+            group.args = args
 
     """
     Generate model.index.json
@@ -104,17 +193,6 @@ class CrossNavGenerator:
             file = to_posix(file)
             # iter group models
             for group_name in config.groups_data:
-                # group must be unique
-                if self.alasio and group_name in self.alasio.dict_group_ref:
-                    raise DefinitionError(
-                        f'Conflict group name: "{group_name}", which is already used in alasio',
-                        file=config.file, keys=group_name,
-                    )
-                if group_name in out:
-                    raise DefinitionError(
-                        f'Duplicate group name: "{group_name}"',
-                        file=config.file, keys=group_name,
-                    )
                 # build model reference
                 ref = {'file': file, 'cls': group_name}
                 out[group_name] = ref
@@ -258,21 +336,6 @@ class CrossNavGenerator:
                 out[group_name] = config
         return out
 
-    def _group_name_to_data(self, group_name: str) -> GroupData:
-        """
-        Convert group_name to group data
-        """
-        try:
-            config = self.dict_group2configgen[group_name]
-        except KeyError:
-            raise DefinitionError(f'No such group to display: {group_name}')
-        try:
-            group = config.groups_data[group_name]
-        except KeyError:
-            # this shouldn't happen, because dict_group2configgen is build from config.args_data
-            raise DefinitionError(f'Nav args "{config.file}" has no group_name={group_name}')
-        return group
-
     def _validate_task_group(self, task: str, group: str):
         try:
             return self.model_data[task][group]['cls']
@@ -301,8 +364,11 @@ class CrossNavGenerator:
         out = {}
         for task_name, task in config.tasks_data.items():
             for card in task.displays:
+                # check if card.info valid
+                if card.info not in self.groups_data:
+                    raise DefinitionError(f'No such group "{card.info}"',
+                                          file=config.file, keys=[task_name, 'displays', 'info'], value=card.info)
                 # gen _info
-                _ = self._group_name_to_data(card.info)  # check if card.info valid
                 card_info = self.dict_group_variant2base.get(card.info, card.info)
                 card_name = f'card-{card.task}-{card_info}'
                 row = {'group': card_info, 'arg': '_info'}
@@ -319,7 +385,10 @@ class CrossNavGenerator:
                         e.keys = [group.task, 'displays']
                         e.value = group
                         raise
-                    group_data = self._group_name_to_data(cls)
+                    try:
+                        group_data = self.groups_data[cls]
+                    except KeyError:
+                        continue  # this shouldn't happen
 
                     is_variant = base_name != cls
                     args = {}
@@ -328,8 +397,21 @@ class CrossNavGenerator:
                             continue
                         row = {'task': group.task, 'group': base_name, 'arg': arg_name}
                         # set cls on variant override
-                        if is_variant and arg_name in group_data.override_args:
+                        if is_variant:
                             row['cls'] = cls
+                        # i18ngroup
+                        if group_data.parent:
+                            i18ngroup = ''
+                            for parent_name in group_data.mro:
+                                try:
+                                    parent = self.groups_data[parent_name]
+                                except KeyError:
+                                    continue
+                                if arg_name in parent.override_args:
+                                    i18ngroup = parent.name
+                            if i18ngroup and i18ngroup != base_name:
+                                row['i18ngroup'] = i18ngroup
+
                         row.update(arg.to_dict())
                         # dashboard uses plain arg_name to have easier access at frontend
                         # key collision won't happen as dashboard args are wrapped in value

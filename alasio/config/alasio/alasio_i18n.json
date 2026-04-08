@@ -56,28 +56,6 @@
           "Sin embargo, puedes forzar la ejecución dejando este campo en blanco"
         ]
       }
-    },
-    "ServerUpdate": {
-      "zh-CN": {
-        "name": "服务器刷新时间",
-        "help": "一些任务运行成功后，将推迟下一次运行至服务器刷新时间。自动换算时区，一般不需要修改"
-      },
-      "en-US": {
-        "name": "Server Update",
-        "help": "Series of server refresh time(s) as to when this task will next run, this is automatically converted to respective time zone, generally do not need to modify"
-      },
-      "ja-JP": {
-        "name": "サーバー更新時間",
-        "help": "一部のタスクが成功した後、次回の実行はサーバーの更新時間まで延期されます。タイムゾーンは自動的に変換されるため、通常は変更する必要はありません"
-      },
-      "zh-TW": {
-        "name": "伺服器更新時間",
-        "help": "一些任務執行成功後，將推遲下一次執行伺服器更新的時間。自動換算時區，一般不需要修改"
-      },
-      "en-ES": {
-        "name": "Actualización de servidor",
-        "help": "Conjunto de horas a las que se actualiza el servidor (se resetea). Se convierte automáticamente a la zona horaria, y no es necesario modificarlo manualmente."
-      }
     }
   },
   "SchedulerStatic": {
@@ -119,81 +97,27 @@
       }
     }
   },
-  "SchedulerStaticU00": {
-    "Enable": {
+  "SchedulerUedit": {
+    "ServerUpdate": {
       "zh-CN": {
-        "name": "启用该功能",
-        "help": "将这个任务加入调度器",
-        "option_i18n": {
-          "enabled": "已启用"
-        }
+        "name": "服务器刷新时间",
+        "help": "一些任务运行成功后，将推迟下一次运行至服务器刷新时间。自动换算时区，一般不需要修改"
       },
       "en-US": {
-        "name": "Enable Task",
-        "help": "Join this task to scheduler.",
-        "option_i18n": {
-          "enabled": "Enabled"
-        }
+        "name": "Server Update",
+        "help": "Series of server refresh time(s) as to when this task will next run, this is automatically converted to respective time zone, generally do not need to modify"
       },
       "ja-JP": {
-        "name": "この機能を有効にする",
-        "help": "このタスクをスケジューラに追加します",
-        "option_i18n": {
-          "enabled": "有効"
-        }
+        "name": "サーバー更新時間",
+        "help": "一部のタスクが成功した後、次回の実行はサーバーの更新時間まで延期されます。タイムゾーンは自動的に変換されるため、通常は変更する必要はありません"
       },
       "zh-TW": {
-        "name": "啟用該功能",
-        "help": "將這個任務加入調度器",
-        "option_i18n": {
-          "enabled": "已啟用"
-        }
+        "name": "伺服器更新時間",
+        "help": "一些任務執行成功後，將推遲下一次執行伺服器更新的時間。自動換算時區，一般不需要修改"
       },
       "en-ES": {
-        "name": "Activar tarea",
-        "help": "Añadir tarea al Planificador.",
-        "option_i18n": {
-          "enabled": "Activado"
-        }
-      }
-    }
-  },
-  "SchedulerStaticU04": {
-    "Enable": {
-      "zh-CN": {
-        "name": "启用该功能",
-        "help": "将这个任务加入调度器",
-        "option_i18n": {
-          "enabled": "已启用"
-        }
-      },
-      "en-US": {
-        "name": "Enable Task",
-        "help": "Join this task to scheduler.",
-        "option_i18n": {
-          "enabled": "Enabled"
-        }
-      },
-      "ja-JP": {
-        "name": "この機能を有効にする",
-        "help": "このタスクをスケジューラに追加します",
-        "option_i18n": {
-          "enabled": "有効"
-        }
-      },
-      "zh-TW": {
-        "name": "啟用該功能",
-        "help": "將這個任務加入調度器",
-        "option_i18n": {
-          "enabled": "已啟用"
-        }
-      },
-      "en-ES": {
-        "name": "Activar tarea",
-        "help": "Añadir tarea al Planificador.",
-        "option_i18n": {
-          "enabled": "Activado"
-        }
+        "name": "Actualización de servidor",
+        "help": "Conjunto de horas a las que se actualiza el servidor (se resetea). Se convierte automáticamente a la zona horaria, y no es necesario modificarlo manualmente."
       }
     }
   }

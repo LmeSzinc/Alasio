@@ -11,13 +11,7 @@ import typing_extensions as e
 class Scheduler(m.Struct, omit_defaults=True):
     Enable: bool = False
     NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
-    ServerUpdate: str = '00:00'
-
-
-class SchedulerStatic(m.Struct, omit_defaults=True):
-    Enable: t.Literal['enabled'] = 'enabled'
-    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
-    ServerUpdate: str = '00:00'
+    ServerUpdate: t.Literal['00:00'] = '00:00'
 
 
 class SchedulerU00(m.Struct, omit_defaults=True):
@@ -26,10 +20,28 @@ class SchedulerU00(m.Struct, omit_defaults=True):
     ServerUpdate: t.Literal['00:00'] = '00:00'
 
 
+class SchedulerStatic(m.Struct, omit_defaults=True):
+    Enable: t.Literal['enabled'] = 'enabled'
+    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    ServerUpdate: t.Literal['00:00'] = '00:00'
+
+
 class SchedulerStaticU00(m.Struct, omit_defaults=True):
     Enable: t.Literal['enabled'] = 'enabled'
     NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
     ServerUpdate: t.Literal['00:00'] = '00:00'
+
+
+class SchedulerUedit(m.Struct, omit_defaults=True):
+    Enable: bool = False
+    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    ServerUpdate: str = '00:00'
+
+
+class SchedulerStaticUedit(m.Struct, omit_defaults=True):
+    Enable: t.Literal['enabled'] = 'enabled'
+    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    ServerUpdate: str = '00:00'
 
 
 class SchedulerU04(m.Struct, omit_defaults=True):
