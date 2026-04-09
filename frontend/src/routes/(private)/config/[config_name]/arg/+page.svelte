@@ -31,7 +31,7 @@
   }
 </script>
 
-<div class="h-full w-full overflow-auto py-4">
+<div class="min-h-full w-full py-4">
   {#if topicClient.data}
     <ArgGroups
       class="w-full px-2.5"

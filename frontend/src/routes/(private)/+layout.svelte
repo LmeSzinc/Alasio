@@ -40,6 +40,19 @@
       closeSheet();
     }
   });
+
+  // Avoid double scrollbar when dropdown expanded
+  // where scroll bar 1 is page content, scrollbar 2 is body as bits-ui dropdown is mounted on body
+  $effect(() => {
+    document.body.style.overflow = "hidden";
+    document.body.style.height = "100%";
+    document.documentElement.style.height = "100%";
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.height = "";
+      document.documentElement.style.height = "";
+    };
+  });
 </script>
 
 <svelte:window />
