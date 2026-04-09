@@ -68,13 +68,18 @@
 </script>
 
 <nav class={cn("w-full", className)} aria-label="Configuration Navigation">
-  <div class="flex flex-col space-y-1 px-3">
+  <div class="flex flex-col px-3">
     <!-- 
       Overview and Device buttons has the same style as the accordion items, 
       and active indicator like nav items.
+      Keep height h-10
     -->
-    <NavButton name="Overview" active={ui.isOverview} onclick={onOverviewClick} variant="root" />
-    <NavButton name="Device" active={ui.isDevice} onclick={onDeviceClick} variant="root" />
+    <div class="py-1">
+      <NavButton name="Overview" active={ui.isOverview} onclick={onOverviewClick} variant="root" />
+    </div>
+    <div class="py-1">
+      <NavButton name="Device" active={ui.isDevice} onclick={onDeviceClick} variant="root" />
+    </div>
   </div>
 
   {#if navItems.length}
@@ -88,7 +93,7 @@
           <AccordionTrigger class={cn("text-md px-3 py-2 pl-6 capitalize")}>
             {nav.name}
           </AccordionTrigger>
-          <AccordionContent class="bg-accent border-y pt-1 pb-1">
+          <AccordionContent class="bg-accent border-y py-2">
             <div class="flex flex-col space-y-1 px-3">
               {#each nav.cards as card (card.key)}
                 {@const active = card.key === ui.card_indicate && nav.key === ui.nav_name}

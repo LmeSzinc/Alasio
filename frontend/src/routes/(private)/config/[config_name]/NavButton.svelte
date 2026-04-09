@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SafeBold from "$lib/components/aside/SafeBold.svelte";
   import { Button } from "$lib/components/ui/button";
   import { cn } from "$lib/utils.js";
 
@@ -21,7 +22,7 @@
 <Button
   variant="ghost"
   class={cn(
-    "hover:text-primary relative h-8 w-full justify-start px-3 text-sm transition-colors",
+    "hover:text-primary relative h-auto min-h-8 w-full justify-start px-3 py-1 text-left text-sm",
     active
       ? "text-primary hover:bg-card dark:hover:bg-card font-semibold"
       : "text-foreground/80 hover:bg-card/80 dark:hover:bg-card font-medium",
@@ -33,5 +34,5 @@
   {#if active}
     <div class="bg-primary absolute top-0.5 bottom-0.5 left-0 w-1 rounded-r-full"></div>
   {/if}
-  {name}
+  <SafeBold {active} text={name}></SafeBold>
 </Button>
