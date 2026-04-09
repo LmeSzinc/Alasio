@@ -51,13 +51,20 @@
       }
     }
   });
+
+  // Dynamic card width based on content width
+  // 1. follow parent width until max-w-180
+  // 2. keep max-w-180, let margin auto increase, until card/parent <= 3/5
+  // 3. keep width ratio card/parent <= 3/5 until max-w-240
+  // 4. keep max-w-240, let margin auto increase
+  const cardClass = $derived(parentWidth < 1200 ? "max-w-180" : parentWidth < 1600 ? "w-3/5" : "max-w-240");
 </script>
 
 <div bind:this={root} use:sizeObserver={containerSize} class={cn("relative space-y-4", className)}>
   {#each Object.entries(data || {}) as [groupKey, groupData]}
     {@const { _info, ...args } = groupData}
     <div bind:this={groupElements[groupKey]} class="shadow-custom-complex scroll-mt-6">
-      <Card.Root class="neushadow mx-auto max-w-180 gap-0 border-none">
+      <Card.Root class={cn("neushadow mx-auto gap-0 border-none", cardClass)}>
         <!-- Group name and help -->
         <Card.Header>
           {#if _info?.name}
