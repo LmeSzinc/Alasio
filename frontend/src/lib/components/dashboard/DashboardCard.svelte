@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from "$lib/i18n";
-  import { sizeObserver } from "$lib/use/size.svelte";
+  import { elementSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
   import { ChevronDown, ChevronUp } from "@lucide/svelte";
   import DashboardItem from "./DashboardItem.svelte";
@@ -48,7 +48,7 @@
         "grid grid-cols-[repeat(auto-fill,minmax(8.75rem,1fr))] gap-x-2 gap-y-3 p-4",
         isExpanded ? "max-h-72.5 overflow-y-auto" : "",
       )}
-      use:sizeObserver={containerSize}
+      use:elementSize={containerSize}
     >
       {#each itemList as data}
         <DashboardItem {data} class="w-auto" />

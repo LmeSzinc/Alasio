@@ -30,13 +30,7 @@
 
 <div class="min-h-full w-full py-4">
   {#if topicClient.data}
-    <ArgGroups
-      class="w-full px-2.5"
-      bind:data={topicClient.data}
-      indicateCard={ui.card_name}
-      {handleEdit}
-      {handleReset}
-    />
+    <ArgGroups class="w-full px-2.5" bind:data={topicClient.data} {ui} {handleEdit} {handleReset} />
   {:else}
     <div class="text-muted-foreground text-center text-sm">No data</div>
   {/if}

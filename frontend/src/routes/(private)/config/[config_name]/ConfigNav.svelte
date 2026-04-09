@@ -41,6 +41,7 @@
   function handleCardClick(clickedNavKey: string, clickedCardKey: string) {
     // Update internal state to reflect the last click.
     ui.card_name = clickedCardKey;
+    ui.card_indicate = clickedCardKey;
     ui.nav_name = clickedNavKey;
 
     // Call the external callback with details.
@@ -90,7 +91,7 @@
           <AccordionContent class="bg-accent border-y pt-1 pb-1">
             <div class="flex flex-col space-y-1 px-3">
               {#each nav.cards as card (card.key)}
-                {@const active = card.key === ui.card_name && nav.key === ui.nav_name}
+                {@const active = card.key === ui.card_indicate && nav.key === ui.nav_name}
                 <NavButton name={card.name} {active} onclick={() => handleCardClick(nav.key, card.key)} />
               {/each}
             </div>
