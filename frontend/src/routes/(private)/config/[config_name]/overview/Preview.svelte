@@ -112,7 +112,7 @@
   <!-- Timestamp: Bottom Right -->
   {#if showTime && timeStr}
     <div
-      class="bg-background/40 text-foreground/80 absolute right-2 bottom-2 rounded px-1.5 py-0.5 font-mono text-xs backdrop-blur-md"
+      class="bg-background/40 text-foreground/85 absolute right-2 bottom-2 rounded px-1.5 py-0.5 font-mono text-xs backdrop-blur-md"
     >
       {timeStr}
     </div>

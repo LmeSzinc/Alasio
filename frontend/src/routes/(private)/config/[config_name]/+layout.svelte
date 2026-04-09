@@ -5,9 +5,9 @@
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { NavContext } from "$lib/slotcontext.svelte";
   import { useTopic } from "$lib/ws";
-  import { onDestroy, setContext } from "svelte";
+  import { onDestroy } from "svelte";
   import ConfigNav from "./ConfigNav.svelte";
-  import UIState from "./state.svelte";
+  import { uiState as ui } from "./state.svelte";
 
   // nav context
   NavContext.use(nav);
@@ -22,17 +22,11 @@
   const configResetRpc = stateClient.rpc();
   const navRpc = stateClient.resilientRpc();
 
-  // shared state among subpages
-  const ui = new UIState();
-  setContext("ui_state", ui);
-
   // Effect to call RPC when config_name changes.
   $effect(() => {
     if (config_name) {
       configRpc.call("set_config", { name: config_name });
-      ui.nav_name = "";
-      ui.card_name = "";
-      ui.opened_nav = "";
+      ui.setOverview();
     }
   });
 
@@ -62,24 +56,19 @@
 
   function onCardClick(nav: string, card: string) {
     navRpc.call("set_nav", { name: nav });
-    ui.nav_name = nav;
-    ui.card_name = card;
+    ui.setNav(nav, card);
     goto(`/config/${config_name}/arg`, { replaceState: true });
   }
 
   function onOverviewClick() {
     navRpc.call("set_nav", { name: "" });
-    ui.nav_name = "";
-    ui.card_name = "";
-    ui.opened_nav = "";
+    ui.setOverview();
     goto(`/config/${config_name}/overview`, { replaceState: true });
   }
 
   function onDeviceClick() {
     navRpc.call("set_nav", { name: "" });
-    ui.nav_name = "";
-    ui.card_name = "";
-    ui.opened_nav = "__nav_device__"; // special value to avoid going to overview
+    ui.setDevice();
     goto(`/config/${config_name}/device`, { replaceState: true });
   }
 
@@ -106,7 +95,7 @@
 {#snippet nav()}
   <ScrollArea class="h-full w-full">
     <Scheduler {config_name} {state} {taskRunning} {taskNext} {onOverviewClick} {onDeviceClick} />
-    <ConfigNav nav_name={ui.nav_name} card_name={ui.card_name} bind:opened_nav={ui.opened_nav} {onCardClick} />
+    <ConfigNav {onCardClick} {onOverviewClick} {onDeviceClick} />
   </ScrollArea>
 {/snippet}
 

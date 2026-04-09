@@ -2,15 +2,12 @@
   import ArgGroups from "$lib/components/arg/ArgGroups.svelte";
   import type { ArgData } from "$lib/components/arg/utils.svelte";
   import { useTopic } from "$lib/ws";
-  import { getContext } from "svelte";
-  import UIState from "../state.svelte";
+  import { uiState as ui } from "../state.svelte";
 
   // --- WebSocket & RPC Setup ---
   type ConfigArgData = Record<string, Record<string, ArgData>>;
   const topicClient = useTopic<ConfigArgData>("ConfigArg");
   const rpc = topicClient.rpc();
-
-  const ui = getContext<UIState>("ui_state");
 
   // --- Event Handlers (passed down to ArgGroups) ---
   function handleEdit(data: ArgData) {
