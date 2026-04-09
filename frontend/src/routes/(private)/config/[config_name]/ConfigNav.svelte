@@ -92,7 +92,12 @@
             <div class="flex flex-col space-y-1 px-3">
               {#each nav.cards as card (card.key)}
                 {@const active = card.key === ui.card_indicate && nav.key === ui.nav_name}
-                <NavButton name={card.name} {active} onclick={() => handleCardClick(nav.key, card.key)} />
+                <NavButton
+                  name={card.name}
+                  {active}
+                  onclick={() => handleCardClick(nav.key, card.key)}
+                  ondblclick={() => ui.triggerFlash(card.key)}
+                />
               {/each}
             </div>
           </AccordionContent>

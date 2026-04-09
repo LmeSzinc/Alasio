@@ -3,8 +3,8 @@
   import { fastSmoothScroll, findScrollParent } from "$lib/use/scroll.svelte";
   import { elementSize, elementViewportSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
-  import { untrack } from "svelte";
   import type UIState from "$private/config/[config_name]/state.svelte";
+  import { untrack } from "svelte";
   import Arg from "./Arg.svelte";
   import type { ArgData, InputProps } from "./utils.svelte";
 
@@ -23,6 +23,29 @@
 
   // A reactive store for DOM element references.
   let groupElements = $state<Record<string, HTMLElement>>({});
+  let flashingGroup = $state("");
+
+  // Effect to trigger flash
+  $effect(() => {
+    const target = ui?.flash_target;
+    ui?.flash_trigger; // subscribe to trigger
+    if (target) {
+      // Restart animation if already flashing
+      flashingGroup = "";
+      // Use requestAnimationFrame to ensure the class is removed before re-adding
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          flashingGroup = target;
+        });
+      });
+      // Clear after animation finishes (800ms)
+      const timeout = setTimeout(() => {
+        flashingGroup = "";
+      }, 800);
+      return () => clearTimeout(timeout);
+    }
+  });
+
   let root: HTMLElement | null = $state(null);
   let scrollParent = $derived(findScrollParent(root));
 
@@ -97,7 +120,13 @@
       data-group-key={groupKey}
       class="scroll-mt-6"
     >
-      <Card.Root class={cn("neushadow mx-auto gap-0 border-none", cardClass)}>
+      <Card.Root
+        class={cn(
+          "neushadow mx-auto gap-0 border-none",
+          cardClass,
+          flashingGroup === groupKey && "animate-flash-primary",
+        )}
+      >
         <!-- Group name and help -->
         <Card.Header>
           {#if _info?.name}
@@ -120,3 +149,27 @@
     </div>
   {/each}
 </div>
+
+<style>
+  @keyframes flash-primary {
+    0%,
+    40%,
+    80%,
+    100% {
+      outline-color: transparent;
+    }
+    20%,
+    60% {
+      outline-color: var(--primary);
+    }
+  }
+
+  :global(.animate-flash-primary) {
+    outline: 2px solid transparent;
+    outline-offset: -2px;
+    animation: flash-primary 0.8s ease-in-out;
+    /* Ensure it doesn't take space */
+    position: relative;
+    z-index: 10;
+  }
+</style>

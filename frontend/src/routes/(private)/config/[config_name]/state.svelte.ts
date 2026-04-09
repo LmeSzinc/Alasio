@@ -7,6 +7,8 @@ class UIState {
   card_scroll: string = $state("");
   card_indicate: string = $state("");
   opened_nav: string = $state("");
+  flash_target: string = $state("");
+  flash_trigger: number = $state(0);
 
   get isOverview() {
     return !this.opened_nav;
@@ -41,6 +43,11 @@ class UIState {
     this.card_scroll = "";
     this.card_indicate = "";
     this.opened_nav = "";
+  }
+
+  triggerFlash(target: string) {
+    this.flash_target = target;
+    this.flash_trigger += 1;
   }
 }
 

@@ -12,6 +12,7 @@
     name: string;
     active: boolean;
     onclick?: () => void;
+    ondblclick?: () => void;
     variant?: "root" | "accordin";
     class?: string;
   } = $props();
