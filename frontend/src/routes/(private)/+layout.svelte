@@ -65,7 +65,7 @@
     </div>
 
     <!-- 1.2 Desktop Aside -->
-    <div class="area-aside hidden shrink-0 md:flex">
+    <div class="area-aside hidden min-h-0 shrink-0 overflow-hidden md:flex">
       <div class="aside-container flex h-full shrink-0">
         <div class={cn("aside-item bg-card border-border border-r", screen.isXL && "neushadow")}>
           <ConfigAside class="pt-1 xl:pt-0" />
@@ -162,13 +162,20 @@
     .area-aside {
       z-index: 30;
     }
+    .aside-item {
+      height: 100%;
+      overflow: hidden;
+    }
   }
   .area-aside {
     grid-area: aside;
+    min-height: 0;
+    overflow: hidden;
   }
   .area-main {
     grid-area: main;
     z-index: 0;
+    min-height: 0;
   }
 
   .aside-container {
@@ -183,15 +190,12 @@
       height: calc(100% - 2rem);
       gap: 1rem;
       box-shadow: none;
-      overflow: visible;
+      overflow: hidden;
       background-color: transparent;
     }
     .aside-item {
-      overflow: hidden;
       border: none;
       border-radius: calc(var(--radius) + 2px);
-      height: 100%;
-      min-height: 20rem;
     }
   }
 </style>

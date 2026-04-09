@@ -21,6 +21,7 @@
     taskNext?: TaskItem[];
     onOverviewClick?: () => void;
     onDeviceClick?: () => void;
+    class?: string;
   };
   let {
     config_name,
@@ -31,12 +32,11 @@
     taskNext,
     onOverviewClick,
     onDeviceClick,
+    class: className,
   }: $$props = $props();
 
   const displayState = useWorkerState(() => stateVal);
-  const isRunning = $derived(
-    taskRunning && displayState.value !== "idle" && displayState.value !== "error",
-  );
+  const isRunning = $derived(taskRunning && displayState.value !== "idle" && displayState.value !== "error");
   const displaySerial = $derived(
     deviceSerial.startsWith("127.0.0.1:") ? deviceSerial.replace("127.0.0.1:", "") : deviceSerial,
   );
@@ -103,7 +103,7 @@
 </script>
 
 <div
-  class="border-muted-foreground/35 relative flex max-w-60 flex-col gap-1.5 p-3"
+  class={cn("border-muted-foreground/35 relative flex max-w-60 flex-col gap-1.5 p-3", className)}
   onclick={onOverviewClick}
   onkeydown={(e) => (e.key === "Enter" || e.key === " ") && onOverviewClick?.()}
   role="button"

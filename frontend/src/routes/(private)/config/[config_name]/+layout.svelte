@@ -93,10 +93,13 @@
 </script>
 
 {#snippet nav()}
-  <ScrollArea class="h-full w-full">
-    <Scheduler {config_name} {state} {taskRunning} {taskNext} {onOverviewClick} {onDeviceClick} />
-    <ConfigNav {onCardClick} {onOverviewClick} {onDeviceClick} />
-  </ScrollArea>
+  <div class="flex h-full flex-col overflow-hidden gap-2">
+    <Scheduler class="pb-0" {config_name} {state} {taskRunning} {taskNext} {onOverviewClick} {onDeviceClick} />
+    <div class="border-border mx-3 border-t"></div>
+    <ScrollArea class="min-h-0 w-full flex-1">
+      <ConfigNav {onCardClick} {onOverviewClick} {onDeviceClick} />
+    </ScrollArea>
+  </div>
 {/snippet}
 
 {@render children()}
