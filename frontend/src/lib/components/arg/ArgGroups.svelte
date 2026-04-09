@@ -4,7 +4,7 @@
   import { elementSize, elementViewportSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
   import { untrack } from "svelte";
-  import type UIState from "../../../routes/(private)/config/[config_name]/state.svelte";
+  import type UIState from "$private/config/[config_name]/state.svelte";
   import Arg from "./Arg.svelte";
   import type { ArgData, InputProps } from "./utils.svelte";
 

@@ -5,8 +5,8 @@
   import type { Lang } from "$lib/i18n/state.svelte";
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
+  import { SUPPORTED_LANGS } from "$src/i18ngen/constants";
   import { CircleCheck, Languages } from "@lucide/svelte";
-  import { SUPPORTED_LANGS } from "../../i18ngen/constants";
 
   type Props = {
     disabled?: boolean;

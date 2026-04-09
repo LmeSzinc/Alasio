@@ -69,9 +69,10 @@ const config = {
      * You can add your own custom aliases here.
      */
     alias: {
-      // Example: create an alias for a components directory
-      // '$components': 'src/lib/components',
-      // '$utils': 'src/lib/utils'
+      $src: "src",
+      $routes: "src/routes",
+      $public: "src/routes/(public)",
+      $private: "src/routes/(private)",
     },
 
     /**

@@ -2,7 +2,7 @@
 // NOTE: This file might be empty or missing on the very first run before script initialization.
 // The build script's `createEmptyEntry` ensures it exists to prevent build errors.
 // @ts-ignore
-import * as Generated from "../../i18ngen/index";
+import * as Generated from "$src/i18ngen/index";
 
 // === FALLBACK LOGIC ===
 
