@@ -100,6 +100,16 @@
     }
   });
 
+  // Effect to initialize groupViewportSizes for every group in data
+  $effect(() => {
+    if (!data) return;
+    for (const key in data) {
+      if (!groupViewportSizes[key]) {
+        groupViewportSizes[key] = { width: 0, height: 0 };
+      }
+    }
+  });
+
   // Dynamic card width based on content width
   // 1. follow parent width until max-w-180
   // 2. keep max-w-180, let margin auto increase, until card/parent <= 3/5
@@ -114,7 +124,7 @@
     <div
       bind:this={groupElements[groupKey]}
       use:elementViewportSize={{
-        state: (groupViewportSizes[groupKey] ??= { width: 0, height: 0 }),
+        state: groupViewportSizes[groupKey],
         root: scrollParent,
       }}
       data-group-key={groupKey}
