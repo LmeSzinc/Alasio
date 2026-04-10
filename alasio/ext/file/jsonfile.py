@@ -43,50 +43,73 @@ def json_dumps(obj):
     return data
 
 
-class NoIndent:
-    """
-    Wrapper class to mark value as no indent
-    """
+class ValueProxy:
     __slots__ = ('value',)
 
     def __init__(self, value):
         self.value = value
+
+    def __str__(self):
+        return str(self.value)
+
+    def __repr__(self):
+        return repr(f'{self.__class__.__name__}({self.value})')
+
+    def __bool__(self):
+        return bool(self.value)
+
+    def __getitem__(self, item):
+        return self.value[item]
+
+    def __setitem__(self, key, value):
+        self.value[key] = value
+
+    def __delitem__(self, key):
+        del self.value[key]
+
+    def __eq__(self, other):
+        return self.value == other
+
+    def __iter__(self):
+        return iter(self.value)
+
+    def __len__(self):
+        return len(self.value)
+
+    def __contains__(self, item):
+        return item in self.value
+
+    def items(self):
+        return self.value.items()
+
+    def keys(self):
+        return self.value.keys()
+
+    def values(self):
+        return self.value.values()
+
+    def get(self, key, default=None):
+        return self.value.get(key, default)
+
+
+class NoIndent(ValueProxy):
+    """
+    Wrapper class to mark value as no indent
+    """
 
     def __str__(self):
         # A magic unique placeholder, note that "τ" is U+03C4
         return f'No|1NdEnτ-{id(self)}'
 
-    def __repr__(self):
-        return repr(f'{self.__class__.__name__}({self.value})')
 
-    def __bool__(self):
-        return bool(self.value)
-
-    def __getitem__(self, item):
-        return self.value[item]
-
-
-class NoIndentNoSpace:
+class NoIndentNoSpace(ValueProxy):
     """
     Wrapper class to mark value as no indent and no space
     """
-    __slots__ = ('value',)
-
-    def __init__(self, value):
-        self.value = value
 
     def __str__(self):
         # A magic unique placeholder, note that "τ" is U+03C4, "æ" is ae
         return f'No|1NdEnτ-n0SpaCæ-{id(self)}'
-
-    def __repr__(self):
-        return repr(f'{self.__class__.__name__}({self.value})')
-
-    def __bool__(self):
-        return bool(self.value)
-
-    def __getitem__(self, item):
-        return self.value[item]
 
 
 class CustomIndentEncoder(JSONEncoder):
