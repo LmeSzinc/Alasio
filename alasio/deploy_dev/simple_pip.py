@@ -6,6 +6,7 @@ from alasio.deploy_dev.whl_record import RecordEntry, RecordManager
 from alasio.ext.backport import removeprefix, removesuffix
 from alasio.ext.cache import cached_property
 from alasio.ext.concurrent.cmd import run_cmd
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import to_posix
 
@@ -176,99 +177,105 @@ class SimplePip:
             wheel (str | PathStr): Path to the .whl file
         """
         wheel = PathStr.new(wheel)
-        with zipfile.ZipFile(wheel, 'r') as zf:
-            # 1. Find .dist-info folder
-            dist_info_folder = None
-            for name in zf.namelist():
-                if name.endswith('.dist-info/METADATA'):
-                    dist_info_folder = name.rpartition('/')[0]
-                    break
+        with THREAD_POOL.wait_jobs() as pool:
+            with zipfile.ZipFile(wheel, 'r') as zf:
+                # 1. Find .dist-info folder
+                dist_info_folder = None
+                for name in zf.namelist():
+                    if name.endswith('.dist-info/METADATA'):
+                        dist_info_folder = name.rpartition('/')[0]
+                        break
 
-            if dist_info_folder is None:
-                raise ValueError(f'Invalid wheel: missing .dist-info/METADATA in {wheel}')
+                if dist_info_folder is None:
+                    raise ValueError(f'Invalid wheel: missing .dist-info/METADATA in {wheel}')
 
-            # 2. Get package name and version
-            # dist_info_folder is like "alasio-0.1.0.dist-info"
-            package_version = removesuffix(dist_info_folder, '.dist-info')
-            package_name = package_version.partition('-')[0]
-            data_folder = package_version + '.data'
+                # 2. Get package name and version
+                # dist_info_folder is like "alasio-0.1.0.dist-info"
+                package_version = removesuffix(dist_info_folder, '.dist-info')
+                package_name = package_version.partition('-')[0]
+                data_folder = package_version + '.data'
 
-            # 3. Uninstall if exists
-            self.uninstall(package_name)
+                # 3. Uninstall if exists
+                self.uninstall(package_name)
 
-            # 4. Extract files
-            print(f'Installing {package_name} to {self.site_packages}')
-            record = RecordManager()
-            for member in zf.infolist():
-                if member.is_dir():
-                    continue
-
-                rel_path = member.filename
-                # Skip RECORD, will be updated and written at the end
-                if rel_path == f'{dist_info_folder}/RECORD':
-                    continue
-
-                if rel_path.startswith(data_folder + '/'):
-                    # Handle .data directory (PEP 427)
-                    content_path = removeprefix(rel_path, data_folder + '/')
-                    category, sep, subpath = content_path.partition('/')
-                    if not sep:
+                # 4. Extract files
+                print(f'Installing {package_name} to {self.site_packages}')
+                record = RecordManager()
+                for member in zf.infolist():
+                    if member.is_dir():
                         continue
 
-                    if category in ['purelib', 'platlib']:
-                        target = self.site_packages / subpath
-                    elif category == 'scripts':
-                        # On Windows: python_root/Scripts
-                        # On Linux: python_root/bin
-                        if os.name == 'nt':
-                            target = self.site_packages.uppath(2) / 'Scripts' / subpath
+                    rel_path = member.filename
+                    # Skip RECORD, will be updated and written at the end
+                    if rel_path == f'{dist_info_folder}/RECORD':
+                        continue
+
+                    if rel_path.startswith(data_folder + '/'):
+                        # Handle .data directory (PEP 427)
+                        content_path = removeprefix(rel_path, data_folder + '/')
+                        category, sep, subpath = content_path.partition('/')
+                        if not sep:
+                            continue
+
+                        if category in ['purelib', 'platlib']:
+                            target = self.site_packages / subpath
+                        elif category == 'scripts':
+                            # On Windows: python_root/Scripts
+                            # On Linux: python_root/bin
+                            if os.name == 'nt':
+                                target = self.site_packages.uppath(2) / 'Scripts' / subpath
+                            else:
+                                target = self.site_packages.uppath(3) / 'bin' / subpath
+                        elif category == 'headers':
+                            target = self.site_packages.uppath(2) / 'include' / subpath
+                        elif category == 'data':
+                            target = self.site_packages.uppath(2) / subpath
                         else:
-                            target = self.site_packages.uppath(3) / 'bin' / subpath
-                    elif category == 'headers':
-                        target = self.site_packages.uppath(2) / 'include' / subpath
-                    elif category == 'data':
-                        target = self.site_packages.uppath(2) / subpath
+                            continue
                     else:
-                        continue
-                else:
-                    # Normal files and .dist-info files
-                    target = self.site_packages / rel_path
+                        # Normal files and .dist-info files
+                        target = self.site_packages / rel_path
 
-                data = zf.read(member)
-                target.file_write(data)
+                    data = zf.read(member)
+                    pool.start_thread_soon(target.file_write, data)
 
-                # Add to record
-                # Path in RECORD should be relative to site-packages
-                record_rel_path = to_posix(os.path.relpath(target, self.site_packages))
-                record.add_content(record_rel_path, data)
+                    # Add to record
+                    # Path in RECORD should be relative to site-packages
+                    record_rel_path = to_posix(os.path.relpath(target, self.site_packages))
+                    record.add_content(record_rel_path, data)
 
         # 5. Compile .py files
         import py_compile
         from importlib.util import cache_from_source
         files = list(record.iter_py_files())
         print(f'Compiling {len(files)} py files')
-        for entry in files:
-            py_file = self.site_packages / entry.path
+
+        def create_pyc(path: str):
+            py_file = str(self.site_packages / path)
             try:
                 # Compile to .pyc
-                pyc_file = cache_from_source(str(py_file))
-                py_compile.compile(str(py_file), cfile=pyc_file, dfile=entry.path)
+                pyc_file = cache_from_source(py_file)
+                py_compile.compile(py_file, cfile=pyc_file, dfile=path)
                 # Add .pyc to record
                 rel_pyc = to_posix(os.path.relpath(pyc_file, self.site_packages))
-                record.add_file(rel_pyc, pyc_file)
+                record.add_content(rel_pyc, None)
             except Exception as e:
                 # Some .py files might not be compilable (e.g. templates, incomplete scripts)
-                print(f'Failed to compile {entry.path}: {e}')
+                print(f'Failed to compile {path}: {e}')
+
+        with THREAD_POOL.wait_jobs() as pool:
+            for entry in files:
+                pool.start_thread_soon(create_pyc, entry.path)
 
         # 6. Write INSTALLER
         installer_rel_path = f'{dist_info_folder}/INSTALLER'
         record.add_content(installer_rel_path, b'pip\n')
-        (self.site_packages / installer_rel_path).atomic_write(b'pip\n')
+        (self.site_packages / installer_rel_path).file_write(b'pip\n')
 
         # 7. Write updated RECORD
         record.add_content(f'{dist_info_folder}/RECORD', None)
         record_file = self.site_packages / dist_info_folder / 'RECORD'
-        record_file.atomic_write(record.dump_bytes())
+        record_file.file_write(record.dump_bytes())
         print(f'Successfully installed {package_name}')
 
 
