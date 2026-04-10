@@ -19,8 +19,8 @@ def deep_get(d, keys, default=None):
     https://stackoverflow.com/questions/25833613/safe-method-to-get-value-of-nested-dictionary
 
     Args:
-        d (dict):
-        keys (list[str], str): Such as ['Scheduler', 'NextRun', 'value']
+        d (dict | list):
+        keys (str | list): Such as ['Scheduler', 'NextRun', 'value']
         default: Default return if key not found.
 
     Returns:
@@ -51,8 +51,8 @@ def deep_get_with_error(d, keys):
     Get value from nested dict and list, raise KeyError if key not exists
 
     Args:
-        d (dict):
-        keys (list[str], str): Such as ['Scheduler', 'NextRun', 'value']
+        d (dict | list):
+        keys (str | list): Such as ['Scheduler', 'NextRun', 'value']
 
     Returns:
         Value on given keys
@@ -85,8 +85,8 @@ def deep_exist(d, keys):
     Check if keys exists in nested dict or list
 
     Args:
-        d (dict):
-        keys (str, list): Such as `Scheduler.NextRun.value`
+        d (dict | list):
+        keys (str | list): Such as `Scheduler.NextRun.value`
 
     Returns:
         bool: If key exists
@@ -115,11 +115,26 @@ def deep_set(d, keys, value):
     """
     Set value into nested dict safely, imitating deep_get().
     Can only set dict
+
+    Note that always use:
+        # This guarantee d is dict and deep_set() success
+        d = deep_set(d, keys, value)
+    don't use:
+        deep_set(d, keys, value)
+
+    Args:
+        d (dict | list):
+        keys (str | list)
+        value:
+
+    Returns:
+        dict:
     """
     # 150 * depth (ns)
     if type(keys) is str:
         keys = keys.split('.')
 
+    raw_d = d
     first = True
     exist = True
     prev_d = None
@@ -146,34 +161,67 @@ def deep_set(d, keys, value):
                 # `d` is not dict
                 exist = False
                 d = {}
-                prev_d[prev_k2] = {prev_k: d}
+                try:
+                    prev_d[prev_k2] = {prev_k: d}
+                except TypeError:
+                    # `prev_d` is not dict, usually because `raw_d` is not dict
+                    prev_d = {prev_k: d}
+                    raw_d = prev_d
 
             prev_k2 = prev_k
             prev_k = k
-            # prev_k2, prev_k = prev_k, k
-    # Input `keys` is not iterable
+
+    # Input `keys` is not iterable, treat as empty list
     except TypeError:
-        return
+        pass
+    # Input `keys` is empty list
+    if first:
+        try:
+            # test if `raw_d` is dict
+            _ = None in raw_d
+            return raw_d
+        except TypeError:
+            # `raw_d` is not dict, return a dict
+            return {}
 
     # Last key, set value
     try:
         d[prev_k] = value
-        return
+        return raw_d
     # Last value `d` is not dict
     except TypeError:
-        prev_d[prev_k2] = {prev_k: value}
-        return
+        try:
+            prev_d[prev_k2] = {prev_k: value}
+            return raw_d
+        except TypeError:
+            # `prev_d` is not dict, usually because `raw_d` is not dict
+            return {prev_k: value}
 
 
 def deep_default(d, keys, value):
     """
     Set value into nested dict safely, imitating deep_get().
     Can only set dict
+
+    Note that always use:
+        # This guarantee d is dict and deep_default() success
+        d = deep_default(d, keys, value)
+    don't use:
+        deep_default(d, keys, value)
+
+    Args:
+        d (dict | list):
+        keys (str | list)
+        value:
+
+    Returns:
+        dict:
     """
     # 150 * depth (ns)
     if type(keys) is str:
         keys = keys.split('.')
 
+    raw_d = d
     first = True
     exist = True
     prev_d = None
@@ -200,28 +248,51 @@ def deep_default(d, keys, value):
                 # `d` is not dict
                 exist = False
                 d = {}
-                prev_d[prev_k2] = {prev_k: d}
+                try:
+                    prev_d[prev_k2] = {prev_k: d}
+                except TypeError:
+                    # `prev_d` is not dict, usually because `raw_d` is not dict
+                    prev_d = {prev_k: d}
+                    raw_d = prev_d
 
             prev_k2 = prev_k
             prev_k = k
-            # prev_k2, prev_k = prev_k, k
-    # Input `keys` is not iterable
+
+    # Input `keys` is not iterable, treat as empty list
     except TypeError:
-        return
+        pass
+    # Input `keys` is empty list
+    if first:
+        try:
+            # test if `raw_d` is dict
+            _ = None in raw_d
+            return raw_d
+        except TypeError:
+            # `raw_d` is not dict, return a dict
+            return {}
 
     # Last key, set value
     try:
         d.setdefault(prev_k, value)
-        return
+        return raw_d
     # Last value `d` is not dict
     except AttributeError:
-        prev_d[prev_k2] = {prev_k: value}
-        return
+        try:
+            prev_d[prev_k2] = {prev_k: value}
+            return raw_d
+        except TypeError:
+            # `prev_d` is not dict, usually because `raw_d` is not dict
+            return {prev_k: value}
 
 
 def deep_pop(d, keys, default=None):
     """
     Pop value from nested dict and list
+
+    Args:
+        d (dict | list):
+        keys (str | list)
+        default:
     """
     if type(keys) is str:
         keys = keys.split('.')
@@ -287,6 +358,23 @@ def deep_iter_depth1(data):
         return
 
 
+def deep_keys_depth1(data):
+    """
+    Equivalent to data.keys() but suppress error if data is not a dict
+
+    Args:
+        data:
+
+    Yields:
+        Any:
+    """
+    try:
+        yield from data.keys()
+    except AttributeError:
+        # `data` is not dict
+        return
+
+
 def deep_values_depth1(data):
     """
     Equivalent to data.values() but suppress error if data is not a dict
@@ -322,7 +410,31 @@ def deep_iter_depth2(data):
                     yield k1, k2, v2
             except AttributeError:
                 # `v1` is not dict
-                return
+                continue
+    except AttributeError:
+        # `data` is not dict
+        return
+
+
+def deep_keys_depth2(data):
+    """
+    Iter key in nested dict of depth 2
+    A simplified deep_iter
+
+    Args:
+        data:
+
+    Yields:
+        Any:
+    """
+    try:
+        for k1, v1 in data.items():
+            try:
+                for k2 in v1.keys():
+                    yield k1, k2
+            except AttributeError:
+                # `v1` is not dict
+                continue
     except AttributeError:
         # `data` is not dict
         return
@@ -330,7 +442,7 @@ def deep_iter_depth2(data):
 
 def deep_values_depth2(data):
     """
-    Iter key and value in nested dict of depth 2
+    Iter value in nested dict of depth 2
     A simplified deep_iter
 
     Args:
@@ -345,7 +457,7 @@ def deep_values_depth2(data):
                 yield from v1.values()
             except AttributeError:
                 # `v1` is not dict
-                return
+                continue
     except AttributeError:
         # `data` is not dict
         return
@@ -403,12 +515,12 @@ def deep_iter(data, min_depth=None, depth=3):
         if current == depth:
             for key, data in q:
                 for k, v in data.items():
-                    yield key + [k], v
+                    yield [*key, k], v
         # in target depth
         elif min_depth <= current < depth:
             for key, data in q:
                 for k, v in data.items():
-                    subkey = key + [k]
+                    subkey = [*key, k]
                     if type(v) is dict:
                         new_q.append((subkey, v))
                     else:
@@ -417,7 +529,79 @@ def deep_iter(data, min_depth=None, depth=3):
         else:
             for key, data in q:
                 for k, v in data.items():
-                    subkey = key + [k]
+                    subkey = [*key, k]
+                    if type(v) is dict:
+                        new_q.append((subkey, v))
+        q = new_q
+        current += 1
+
+
+def deep_keys(data, min_depth=None, depth=3):
+    """
+    Iter key in nested dict
+    Can only iter dict
+
+    Args:
+        data:
+        min_depth:
+        depth:
+
+    Yields:
+        list[Any]: list[key]
+    """
+    if min_depth is None:
+        min_depth = depth
+    assert 1 <= min_depth <= depth
+
+    # Equivalent to dict.items()
+    try:
+        if depth == 1:
+            for k, v in data.items():
+                yield [k]
+            return
+        # Iter first depth
+        elif min_depth == 1:
+            q = deque()
+            for k, v in data.items():
+                key = [k]
+                if type(v) is dict:
+                    q.append((key, v))
+                else:
+                    yield key
+        # Iter target depth only
+        else:
+            q = deque()
+            for k, v in data.items():
+                key = [k]
+                if type(v) is dict:
+                    q.append((key, v))
+    except AttributeError:
+        # `data` is not dict
+        return
+
+    # Iter depths
+    current = 2
+    while current <= depth:
+        new_q = deque()
+        # max depth
+        if current == depth:
+            for key, data in q:
+                for k in data.keys():
+                    yield [*key, k]
+        # in target depth
+        elif min_depth <= current < depth:
+            for key, data in q:
+                for k, v in data.items():
+                    subkey = [*key, k]
+                    if type(v) is dict:
+                        new_q.append((subkey, v))
+                    else:
+                        yield subkey
+        # Haven't reached min depth
+        else:
+            for key, data in q:
+                for k, v in data.items():
+                    subkey = [*key, k]
                     if type(v) is dict:
                         new_q.append((subkey, v))
         q = new_q
@@ -427,7 +611,6 @@ def deep_iter(data, min_depth=None, depth=3):
 def deep_values(data, min_depth=None, depth=3):
     """
     Iter value in nested dict
-    300us on alas.json depth=3 (530+ rows)
     Can only iter dict
 
     Args:
