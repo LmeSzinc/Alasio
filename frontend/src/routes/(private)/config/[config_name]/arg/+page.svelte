@@ -1,31 +1,51 @@
 <script lang="ts">
   import ArgGroups from "$lib/components/arg/ArgGroups.svelte";
   import type { ArgData } from "$lib/components/arg/utils.svelte";
+  import { t } from "$lib/i18n";
   import { useTopic } from "$lib/ws";
+  import { toast } from "svelte-sonner";
   import { uiState as ui } from "../state.svelte";
 
   // --- WebSocket & RPC Setup ---
   type ConfigArgData = Record<string, Record<string, ArgData>>;
   const topicClient = useTopic<ConfigArgData>("ConfigArg");
-  const rpc = topicClient.rpc();
+  const setRpc = topicClient.rpc();
+  const resetRpc = topicClient.rpc();
 
   // --- Event Handlers (passed down to ArgGroups) ---
   function handleEdit(data: ArgData) {
-    rpc.call("set", {
+    setRpc.call("set", {
       task: data.task,
       group: data.group,
       arg: data.arg,
       value: data.value,
     });
   }
-
   function handleReset(data: ArgData) {
-    rpc.call("reset", {
+    resetRpc.call("reset", {
       task: data.task,
       group: data.group,
       arg: data.arg,
     });
   }
+
+  const toastOptions = {
+    duration: 2000,
+    classes: {
+      // Skip header height
+      toast: "mt-10",
+    },
+  };
+  $effect(() => {
+    if (setRpc.successMsg) {
+      toast.success(t.Input.ConfigSet(), toastOptions);
+    }
+  });
+  $effect(() => {
+    if (resetRpc.successMsg) {
+      toast.success(t.Input.ConfigReset(), toastOptions);
+    }
+  });
 </script>
 
 <div class="min-h-full w-full">

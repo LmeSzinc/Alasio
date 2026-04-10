@@ -68,5 +68,19 @@
     "ja-JP": "長さは最大 {value} である必要があります",
     "zh-TW": "長度必須最多為 {value}",
     "es-ES": "La longitud debe ser como máximo {value}"
+  },
+  "ConfigSet": {
+    "en-US": "Config saved",
+    "zh-CN": "设置已保存",
+    "ja-JP": "設定が保存されました",
+    "zh-TW": "設定已儲存",
+    "es-ES": "Configuración guardada"
+  },
+  "ConfigReset": {
+    "en-US": "Config reset",
+    "zh-CN": "设置已重置",
+    "ja-JP": "設定がリセットされました",
+    "zh-TW": "設定已重置",
+    "es-ES": "Configuración restablecida"
   }
 }
