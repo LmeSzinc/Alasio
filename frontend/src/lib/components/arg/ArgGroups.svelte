@@ -86,14 +86,17 @@
 
   // Synchronize indicateCard with groupViewportSizes
   $effect(() => {
-    if (scrollHelper.isScrolling) return;
-
+    if (!ui) return;
+    // calculate foundKey before early return of isScrolling, so groupViewportSizes[key] gets referenced in effect
     // Find the first group in the data order that has > 28px visible height
     const keys = Object.keys(data || {});
     const foundKey = keys.find((key) => (groupViewportSizes[key]?.height || 0) > 28);
 
-    if (foundKey && ui) {
-      if (foundKey !== untrack(() => ui.card_scroll)) {
+    if (untrack(() => scrollHelper.isScrolling)) return;
+
+    if (foundKey) {
+      const card_scroll = untrack(() => ui.card_scroll);
+      if (foundKey !== card_scroll) {
         ui.card_scroll = foundKey;
         ui.card_indicate = foundKey;
       }

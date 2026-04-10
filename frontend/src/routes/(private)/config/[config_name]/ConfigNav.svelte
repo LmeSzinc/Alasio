@@ -39,10 +39,8 @@
 
   // --- Event Handlers ---
   function handleCardClick(clickedNavKey: string, clickedCardKey: string) {
-    // Update internal state to reflect the last click.
-    ui.card_name = clickedCardKey;
-    ui.card_indicate = clickedCardKey;
-    ui.nav_name = clickedNavKey;
+    // Update internal state via setNav to ensure all related fields are reset.
+    ui.setNav(clickedNavKey, clickedCardKey);
 
     // Call the external callback with details.
     onCardClick?.(clickedNavKey, clickedCardKey);

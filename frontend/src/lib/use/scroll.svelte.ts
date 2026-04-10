@@ -47,10 +47,7 @@ export function fastSmoothScroll(element: HTMLElement | null | (() => HTMLElemen
       if (timeElapsed < duration) {
         requestAnimationFrame(animation);
       } else {
-        // Delay slightly before enabling observer again to ensure it doesn't snap back
-        setTimeout(() => {
-          isScrolling = false;
-        }, 50);
+        isScrolling = false;
       }
     }
 

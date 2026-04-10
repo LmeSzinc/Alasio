@@ -25,8 +25,11 @@ class UIState {
   setNav(nav_name: string, card_name: string) {
     this.nav_name = nav_name;
     this.card_name = card_name;
+    this.card_scroll = card_name;
     this.card_indicate = card_name;
     this.opened_nav = nav_name;
+    this.flash_target = "";
+    this.flash_trigger = 0;
   }
 
   setDevice() {
@@ -35,6 +38,8 @@ class UIState {
     this.card_scroll = "";
     this.card_indicate = "";
     this.opened_nav = NAV_DEVICE;
+    this.flash_target = "";
+    this.flash_trigger = 0;
   }
 
   setOverview() {
@@ -43,6 +48,8 @@ class UIState {
     this.card_scroll = "";
     this.card_indicate = "";
     this.opened_nav = "";
+    this.flash_target = "";
+    this.flash_trigger = 0;
   }
 
   triggerFlash(target: string) {
