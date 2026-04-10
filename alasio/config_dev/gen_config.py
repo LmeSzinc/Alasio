@@ -1,6 +1,7 @@
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.config_dev.format.format_yaml import yaml_formatter
+from alasio.config_dev.parse.load_alas_i18n import LoadAlasI18n
 from alasio.config_dev.parse.parse_args import ArgData, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
 from alasio.config_dev.parse.parse_groups import ParseGroups
 from alasio.config_dev.parse.parse_tasks import ParseTasks
@@ -263,7 +264,9 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                     continue
                 row = self._update_arg_i18n(group_name, arg_name, arg)
                 deep_set(new, [group_name, arg_name], row)
+
         cached_property.pop(self, '_i18n_old')
+        LoadAlasI18n().process(new)
         return new
 
     """
