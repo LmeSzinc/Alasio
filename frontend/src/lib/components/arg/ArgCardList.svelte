@@ -1,29 +1,28 @@
 <script lang="ts">
-  import * as Card from "$lib/components/ui/card";
   import { fastSmoothScroll, findScrollParent } from "$lib/use/scroll.svelte";
   import { elementSize, elementViewportSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
   import type UIState from "$private/config/[config_name]/state.svelte";
   import { untrack } from "svelte";
-  import Arg from "./Arg.svelte";
-  import type { ArgData, InputProps } from "./utils.svelte";
+  import ArgCard from "./ArgCard.svelte";
+  import type { CardData, InputProps } from "./utils.svelte";
 
-  type ArgGroupsProps = {
-    data: Record<string, Record<string, ArgData>>;
+  type $$props = {
+    data: Record<string, CardData>;
     indicateCard?: string;
     ui?: UIState;
     handleEdit?: InputProps["handleEdit"];
     handleReset?: InputProps["handleReset"];
     class?: string;
   };
-  let { data = $bindable(), indicateCard, ui, handleEdit, handleReset, class: className }: ArgGroupsProps = $props();
+  let { data = $bindable(), indicateCard, ui, handleEdit, handleReset, class: className }: $$props = $props();
 
   let containerSize = $state({ width: 0, height: 0 });
   const parentWidth = $derived(containerSize.width);
 
   // A reactive store for DOM element references.
   let groupElements = $state<Record<string, HTMLElement>>({});
-  let flashingGroup = $state("");
+  let flashingCard = $state("");
 
   // Effect to trigger flash
   $effect(() => {
@@ -31,25 +30,25 @@
     ui?.flash_trigger; // subscribe to trigger
     if (target) {
       // Restart animation if already flashing
-      flashingGroup = "";
+      flashingCard = "";
       // Use requestAnimationFrame to ensure the class is removed before re-adding
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          flashingGroup = target;
+          flashingCard = target;
         });
       });
       // Clear after animation finishes (800ms)
       const timeout = setTimeout(() => {
-        flashingGroup = "";
+        flashingCard = "";
       }, 800);
       return () => clearTimeout(timeout);
     }
   });
 
   let root: HTMLElement | null = $state(null);
-  let scrollParent = $derived(findScrollParent(root));
+  let scrollParent = $derived(findScrollParent(root) ?? undefined);
 
-  const scrollHelper = fastSmoothScroll(() => scrollParent);
+  const scrollHelper = fastSmoothScroll(() => scrollParent ?? null);
 
   // Effect to handle scrolling TO a card (when indicateCard is set from outside)
   $effect(() => {
@@ -122,67 +121,24 @@
 </script>
 
 <div bind:this={root} use:elementSize={containerSize} class={cn("relative space-y-4", className)}>
-  {#each Object.entries(data || {}) as [groupKey, groupData]}
-    {@const { _info, ...args } = groupData}
+  {#each Object.entries(data || {}) as [cardKey]}
     <div
-      bind:this={groupElements[groupKey]}
+      bind:this={groupElements[cardKey]}
       use:elementViewportSize={{
-        state: groupViewportSizes[groupKey],
+        state: groupViewportSizes[cardKey],
         root: scrollParent,
       }}
-      data-group-key={groupKey}
+      data-group-key={cardKey}
       class="scroll-mt-6"
     >
-      <Card.Root
-        class={cn(
-          "neushadow mx-auto gap-0 border-none",
-          cardClass,
-          flashingGroup === groupKey && "animate-flash-primary",
-        )}
-      >
-        <!-- Group name and help -->
-        <Card.Header>
-          {#if _info?.name}
-            <Card.Title class="text-2xl font-bold">{_info.name}</Card.Title>
-          {/if}
-          {#if _info?.help}
-            <Card.Description>{_info.help}</Card.Description>
-          {/if}
-          <hr />
-        </Card.Header>
-        <!-- Group args -->
-        <Card.Content>
-          <div class="">
-            {#each Object.entries(args) as [argKey]}
-              <Arg class="mt-2" bind:data={data[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} />
-            {/each}
-          </div>
-        </Card.Content>
-      </Card.Root>
+      <ArgCard
+        bind:cardData={data[cardKey]}
+        {parentWidth}
+        {handleEdit}
+        {handleReset}
+        flashing={flashingCard === cardKey}
+        class={cardClass}
+      />
     </div>
   {/each}
 </div>
-
-<style>
-  @keyframes flash-primary {
-    0%,
-    40%,
-    80%,
-    100% {
-      outline-color: transparent;
-    }
-    20%,
-    60% {
-      outline-color: var(--primary);
-    }
-  }
-
-  :global(.animate-flash-primary) {
-    outline: 2px solid transparent;
-    outline-offset: -2px;
-    animation: flash-primary 0.8s ease-in-out;
-    /* Ensure it doesn't take space */
-    position: relative;
-    z-index: 10;
-  }
-</style>

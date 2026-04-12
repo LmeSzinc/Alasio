@@ -60,6 +60,13 @@ export type ArgData = {
   tz?: boolean;
 };
 
+export type CardData = {
+  _info: ArgData;
+} & {
+  // {group_name: {arg_name: ArgData}}
+  [K in string as K extends "_info" ? never : K]: Record<string, ArgData>;
+};
+
 export type InputProps = {
   data: ArgData;
   class?: string;

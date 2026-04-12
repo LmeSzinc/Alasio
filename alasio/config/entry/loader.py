@@ -7,8 +7,7 @@ from alasio.config.entry.mod import ConfigSetEvent, Mod
 from alasio.config.entry.utils import validate_nav_name
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_get, deep_get_with_error, deep_iter_depth2, deep_values_depth1, \
-    deep_values_depth2
+from alasio.ext.deep import *
 from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.path import PathStr
@@ -185,42 +184,74 @@ class ModLoader:
         # prepare config
         config = mod.config_read(config_name, nav_ref.config)
 
-        for arg_data in deep_values_depth2(out):
-            try:
-                task_name = arg_data.get('task', '')
-                group_name = arg_data['group']
-                arg_name = arg_data['arg']
-            except KeyError:
-                # this shouldn't happen
-                continue
-            i18n_group = arg_data.get('i18ngroup', group_name)
+        # _info at depth2
+        # group.arg at depth3
+        for _, name, group_data in deep_iter_depth2(out):
 
-            # insert i18n
-            i18n_data = deep_get(i18n, [i18n_group, arg_name, lang], default='')
-            try:
-                arg_data.update(i18n_data)
-            except TypeError:
-                # this shouldn't happen, as i18n_data should be dict
-                continue
-
-            # insert config
-            dt = arg_data.get('dt', '')
-            try:
-                is_dashboard = dt.startswith('dashboard')
-            except (TypeError, AttributeError):
-                # this shouldn't happen
-                is_dashboard = False
-            if is_dashboard:
+            # card info
+            if name == '_info':
                 try:
-                    arg_value = deep_get_with_error(arg_data, keys=['value'])
+                    group_name = group_data['group']
+                    arg_name = group_data['arg']
                 except KeyError:
                     # this shouldn't happen
                     continue
-                for dashboard_arg_data in deep_values_depth1(arg_value):
+                # insert i18n
+                i18n_data = deep_get(i18n, [group_name, arg_name, lang], default='')
+                try:
+                    group_data.update(i18n_data)
+                except TypeError:
+                    # this shouldn't happen, as i18n_data should be dict
+                    continue
+                continue
+
+            # normal args
+            for arg_data in deep_values_depth1(group_data):
+                try:
+                    task_name = arg_data.get('task', '')
+                    group_name = arg_data['group']
+                    arg_name = arg_data['arg']
+                except KeyError:
+                    # this shouldn't happen
+                    continue
+                i18n_group = arg_data.get('i18ngroup', group_name)
+                # insert i18n
+                i18n_data = deep_get(i18n, [i18n_group, arg_name, lang], default='')
+                try:
+                    arg_data.update(i18n_data)
+                except TypeError:
+                    # this shouldn't happen, as i18n_data should be dict
+                    continue
+
+                # insert config
+                dt = arg_data.get('dt', '')
+                try:
+                    is_dashboard = dt.startswith('dashboard')
+                except (TypeError, AttributeError):
+                    # this shouldn't happen
+                    is_dashboard = False
+                if is_dashboard:
                     try:
-                        arg_name = dashboard_arg_data['arg']
+                        arg_value = deep_get_with_error(arg_data, keys=['value'])
                     except KeyError:
                         # this shouldn't happen
+                        continue
+                    for dashboard_arg_data in deep_values_depth1(arg_value):
+                        try:
+                            arg_name = dashboard_arg_data['arg']
+                        except KeyError:
+                            # this shouldn't happen
+                            continue
+                        try:
+                            value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
+                        except KeyError:
+                            # this shouldn't happen
+                            logger.warning(f'DataInconsistent: Missing config of "{task_name}.{group_name}.{arg_name}" '
+                                           f'when getting mod="{mod_name}", nav="{nav_name}"')
+                            continue
+                        dashboard_arg_data['value'] = value
+                else:
+                    if arg_name == '_info':
                         continue
                     try:
                         value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
@@ -229,18 +260,7 @@ class ModLoader:
                         logger.warning(f'DataInconsistent: Missing config of "{task_name}.{group_name}.{arg_name}" '
                                        f'when getting mod="{mod_name}", nav="{nav_name}"')
                         continue
-                    dashboard_arg_data['value'] = value
-            else:
-                if arg_name == '_info':
-                    continue
-                try:
-                    value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
-                except KeyError:
-                    # this shouldn't happen
-                    logger.warning(f'DataInconsistent: Missing config of "{task_name}.{group_name}.{arg_name}" '
-                                   f'when getting mod="{mod_name}", nav="{nav_name}"')
-                    continue
-                arg_data['value'] = value
+                    arg_data['value'] = value
 
         return out
 
