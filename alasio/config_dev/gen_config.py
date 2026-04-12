@@ -156,6 +156,8 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                 value: translation
         """
         old = deep_get(self._i18n_old, [group_name, arg_name], default={})
+        old = LoadAlasI18n().load_arg(
+            old, group_name, arg_name, languages=self.entry.gui_language, options=arg.option)
         new = {}
         for lang in self.entry.gui_language:
             # name, name must not be empty, default to {group_name}.{arg_name}
@@ -216,6 +218,8 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                 value: translation
         """
         old = deep_get(self._i18n_old, [group_name, arg_name], default={})
+        old = LoadAlasI18n().load_arg(
+            old, group_name, arg_name, languages=self.entry.gui_language)
         new = {}
         for lang in self.entry.gui_language:
             # name, name must not be empty, default to {group_name}
@@ -266,7 +270,6 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                 deep_set(new, [group_name, arg_name], row)
 
         cached_property.pop(self, '_i18n_old')
-        LoadAlasI18n().process(new)
         return new
 
     """
