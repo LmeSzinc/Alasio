@@ -371,8 +371,10 @@ class CrossNavGenerator:
                 # gen _info
                 card_info = self.dict_group_variant2base.get(card.info, card.info)
                 card_name = f'card-{card.task}-{card_info}'
-                row = {'group': card_info, 'arg': '_info'}
-                deep_set(out, keys=[card_name, '_info'], value=NoIndent(row))
+                if config.nav_name != 'dashboard':
+                    # No card._info in dashboard, for simpler data structure
+                    row = {'group': card_info, 'arg': '_info'}
+                    deep_set(out, keys=[card_name, '_info'], value=NoIndent(row))
                 # gen args
                 for group in card.groups:
                     # validate if display_group refs a task group.

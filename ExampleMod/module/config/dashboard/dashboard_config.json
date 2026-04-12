@@ -1,6 +1,5 @@
 {
   "card-Dashboard-Oil": {
-    "_info": {"group": "Oil", "arg": "_info"},
     "0": {
       "Oil": {
         "task": "Dashboard",
