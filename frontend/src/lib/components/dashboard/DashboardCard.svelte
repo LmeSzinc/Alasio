@@ -10,13 +10,15 @@
     items,
     class: className,
   }: {
-    items: Record<string, DashboardArgData>;
+    items: Record<string, Record<string, DashboardArgData>>;
     class?: string;
   } = $props();
 
   let isExpanded = $state(false);
   let containerSize = $state({ width: 0, height: 0 });
-  const itemList = $derived(Object.values(items));
+
+  const groups = $derived(Object.entries(items || {}));
+  const displayGroups = $derived(isExpanded ? groups : groups.slice(0, 1));
 
   // Auto collapse dashboard when focus is lost
   function onfocusout(e: FocusEvent) {
@@ -44,19 +46,23 @@
     )}
   >
     <div
-      class={cn(
-        "grid grid-cols-[repeat(auto-fill,minmax(8.75rem,1fr))] gap-x-2 gap-y-3 p-4",
-        isExpanded ? "max-h-72.5 overflow-y-auto" : "",
-      )}
+      class={cn("flex flex-col gap-4 p-4", isExpanded ? "max-h-72.5 overflow-y-auto" : "")}
       use:elementSize={containerSize}
     >
-      {#each itemList as data}
-        <DashboardItem {data} class="w-auto" />
+      {#each displayGroups as [groupKey, groupItems], index}
+        {#if index > 0}
+          <hr />
+        {/if}
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(8.75rem,1fr))] gap-x-2 gap-y-3">
+          {#each Object.values(groupItems) as data}
+            <DashboardItem {data} class="w-auto" />
+          {/each}
+        </div>
       {/each}
     </div>
     <!-- Toggle button -->
-    <!-- Show toggle button if the content is more than 2 rows -->
-    {#if itemList.length > 0 && containerSize.height > 128}
+    <!-- Show toggle button if there are multiple groups or the first group is large -->
+    {#if groups.length > 1 || containerSize.height > 128}
       <button
         onclick={() => (isExpanded = !isExpanded)}
         class="bg-card hover:bg-accent hover:text-accent-foreground absolute right-2 bottom-2 flex h-6 w-6 items-center justify-center rounded-full shadow-sm focus-visible:ring-2 focus-visible:outline-none"

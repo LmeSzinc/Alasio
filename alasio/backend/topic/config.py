@@ -12,7 +12,7 @@ from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.mod import ConfigSetEvent
-from alasio.ext.deep import deep_get, deep_iter_depth2, deep_set
+from alasio.ext.deep import deep_get, deep_iter, deep_set
 
 
 class ConfigNav(BaseTopic):
@@ -42,15 +42,15 @@ class ConfigNav(BaseTopic):
 class ConfigArg(BaseTopic):
     FULL_EVENT_ONLY = True
     # dict that convert config path to topic data path
-    # key: (task, group, arg), value: (card_name, arg_name)
+    # key: (task, group, arg), value: (card_name, group_name, arg_name)
     dict_config_to_topic = {}
 
     @async_reactive_nocache
     async def data(self):
         """
         Returns:
-            dict[str, dict[str, dict]]:
-                key: {card_name}.{arg_name}
+            dict[str, dict[str, dict[str, dict]]]:
+                key: {card_name}.{group_name}.{arg_name}
                 value: {
                     'task': task_name,
                     'group': group_name,
@@ -76,7 +76,10 @@ class ConfigArg(BaseTopic):
 
         # convert config path to topic data path
         dict_config_to_topic = {}
-        for card_name, arg_name, info in deep_iter_depth2(data):
+        for keys, info in deep_iter(data, depth=3):
+            card_name, group_name, arg_name = keys
+            if group_name == '_info':
+                continue
             try:
                 task = info['task']
                 group = info['group']
@@ -84,7 +87,7 @@ class ConfigArg(BaseTopic):
             except KeyError:
                 # this shouldn't happen
                 continue
-            dict_config_to_topic[(task, group, arg)] = (card_name, arg_name)
+            dict_config_to_topic[(task, group, arg)] = (card_name, group_name, arg_name)
         self.dict_config_to_topic = dict_config_to_topic
 
         return data

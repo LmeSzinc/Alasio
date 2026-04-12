@@ -9,7 +9,7 @@ from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.mod import ConfigSetEvent
-from alasio.ext.deep import deep_set, deep_values_depth1
+from alasio.ext.deep import deep_iter_depth2, deep_set, deep_values_depth1
 
 
 def get_first_card(gui_config: "dict[str, dict[str, Any]]") -> "dict[str, Any] | None":
@@ -21,15 +21,17 @@ def get_first_card(gui_config: "dict[str, dict[str, Any]]") -> "dict[str, Any] |
 class Dashboard(BaseTopic):
     FULL_EVENT_ONLY = True
     # dict that convert config path to topic data path
-    # key: (task, group, arg), value: None
+    # key: (task, group, arg), value: str
     dict_config_to_topic = {}
 
     @async_reactive_nocache
     async def data(self):
         """
         Returns:
-            dict[str, dict]:
-                key: {arg_name}
+            dict[str, dict[str, dict]]:
+                key: {index}.{arg_name}
+                    index=0 is shown by default
+                    index>0 only show if expanded
                 value: {
                     'task': task_name,
                     'group': group_name,
@@ -60,7 +62,7 @@ class Dashboard(BaseTopic):
 
         # convert config path to topic data path
         dict_config_to_topic = {}
-        for info in deep_values_depth1(data):
+        for group_name, arg_name, info in deep_iter_depth2(data):
             try:
                 task = info['task']
                 group = info['group']
@@ -74,7 +76,7 @@ class Dashboard(BaseTopic):
                 except KeyError:
                     # this shouldn't happen
                     continue
-                dict_config_to_topic[(task, group, arg)] = None
+                dict_config_to_topic[(task, group, arg)] = group_name
         self.dict_config_to_topic = dict_config_to_topic
 
         return data
@@ -87,11 +89,11 @@ class Dashboard(BaseTopic):
         # we may receive dict from worker, because it's decoded from bytes
         if type(event) is dict:
             event = ConfigSetEvent(**event)
-        key = (event.task, event.group, event.arg)
-        if key not in self.dict_config_to_topic:
+        key = self.dict_config_to_topic.get((event.task, event.group, event.arg))
+        if key is None:
             # not displaying this key
             return None
-        key = (event.group, 'value', event.arg, 'value')
+        key = (key, event.group, 'value', event.arg, 'value')
         data = await self.data
         # set to topic data
         deep_set(data, keys=key, value=event.value)

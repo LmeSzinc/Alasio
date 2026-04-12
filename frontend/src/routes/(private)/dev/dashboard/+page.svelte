@@ -3,7 +3,7 @@
   import type { DashboardArgData } from "$lib/components/dashboard/utils";
 
   // Mock data based on ExampleMod/module/config/dashboard/dashboard_config.json
-  const mockItems: Record<string, DashboardArgData> = {
+  const baseItems: Record<string, DashboardArgData> = {
     Oil: {
       task: "Dashboard",
       group: "Oil",
@@ -177,10 +177,14 @@
     } as any,
   };
 
-  const mockItemsLong: Record<string, DashboardArgData> = {
-    ...mockItems,
-    ...Object.fromEntries(Object.entries(mockItems).map(([k, v]) => [`${k}_2`, v])),
-    ...Object.fromEntries(Object.entries(mockItems).map(([k, v]) => [`${k}_3`, v])),
+  const mockItems: Record<string, Record<string, DashboardArgData>> = {
+    Default: baseItems,
+  };
+
+  const mockItemsLong: Record<string, Record<string, DashboardArgData>> = {
+    Group1: baseItems,
+    Group2: baseItems,
+    Group3: baseItems,
   };
 </script>
 
@@ -191,7 +195,7 @@
     <div class="space-y-1">
       <h2 class="text-xl font-semibold">Dashboard Overview</h2>
       <p class="text-muted-foreground text-sm">
-        Testing the Dashboard component with mock data. It should show 2 rows by default and be expandable.
+        Testing the Dashboard component with mock data. It should show the first group by default and be expandable.
       </p>
     </div>
 

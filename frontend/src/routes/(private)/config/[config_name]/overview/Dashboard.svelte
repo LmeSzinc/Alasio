@@ -9,7 +9,7 @@
   let { class: className }: $$Props = $props();
 
   // --- WebSocket & RPC Setup ---
-  type ConfigArgData = Record<string, DashboardArgData>;
+  type ConfigArgData = Record<string, Record<string, DashboardArgData>>;
   const topicClient = useTopic<ConfigArgData>("Dashboard");
 
   const itemList = $derived(topicClient.data ?? {});
