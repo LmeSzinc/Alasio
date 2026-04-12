@@ -207,7 +207,17 @@ class IndexGenerator(CrossNavGenerator):
                 raise DefinitionError(
                     f'Group "{group_name}" is not defined in any file', file=config.config_file)
             i18n[read] = None
-        return list(i18n)
+
+        # sort i18n to load, for consistent behaviour
+        # alasio first, then mod's
+        alasio_i18n = []
+        mod_i18n = []
+        for file in i18n:
+            if file.startswith('alasio/'):
+                alasio_i18n.append(file)
+            else:
+                mod_i18n.append(file)
+        return sorted(alasio_i18n) + sorted(mod_i18n)
 
     def _get_nav_config_task(self, config: ConfigGenerator):
         """

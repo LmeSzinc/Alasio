@@ -2,9 +2,9 @@
   "alas": {
     "file": "alas/alas_config.json",
     "i18n": [
-      "alas/alas_i18n.json",
+      "alasio/alasio_i18n.json",
       "alasio/device_i18n.json",
-      "alasio/alasio_i18n.json"
+      "alas/alas_i18n.json"
     ],
     "config": {
       "task": ["Alas", "Device", "RestartDevice", "RestartGame"],
