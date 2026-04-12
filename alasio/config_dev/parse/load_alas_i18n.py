@@ -61,8 +61,8 @@ class LoadAlasI18n(metaclass=Singleton):
         # Update options if they exist
         options = new.get('option_i18n', None)
         if options:
-            options = list(deep_keys(options))
-            for key in options:
+            keys = list(deep_keys_depth1(options))
+            for key in keys:
                 value = old.get(key, None)
                 if value is not None:
                     options[key] = value
