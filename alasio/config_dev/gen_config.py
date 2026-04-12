@@ -69,7 +69,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         self.entry = entry
         self.folder = ''
         # real data will be set in _generate_nav_config_json()
-        # key: {card_name}.{arg_name}
+        # key: {card_name}.{group_name}.{arg_name}
         # value:
         #     {"group": group, "arg": "_info"} for _info
         #     {"task": task, "group": group, "arg": arg, **ArgData.to_dict()} for normal args

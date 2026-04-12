@@ -355,7 +355,7 @@ class CrossNavGenerator:
 
         Returns:
             dict[str, dict[str, dict]]:
-                key: {card_name}.{arg_name}
+                key: {card_name}.{group_name}.{arg_name}
                 value:
                     {"group": group, "arg": "_info"} for _info
                     {"task": task, "group": group, "arg": arg, **ArgData.to_dict()} for normal args
@@ -363,7 +363,7 @@ class CrossNavGenerator:
         """
         out = {}
         for task_name, task in config.tasks_data.items():
-            for card in task.displays:
+            for card_index, card in enumerate(task.displays):
                 # check if card.info valid
                 if card.info not in self.groups_data:
                     raise DefinitionError(f'No such group "{card.info}"',
@@ -413,10 +413,6 @@ class CrossNavGenerator:
                                 row['i18ngroup'] = i18ngroup
 
                         row.update(arg.to_dict())
-                        # dashboard uses plain arg_name to have easier access at frontend
-                        # key collision won't happen as dashboard args are wrapped in value
-                        if not group_data.dashboard:
-                            arg_name = f'{base_name}_{arg_name}'
                         args[arg_name] = row
                         # arg data post-process
                         for key in ['value', 'option']:
@@ -432,11 +428,11 @@ class CrossNavGenerator:
                         if group_data.dashboard_color:
                             row['dashboard_color'] = group_data.dashboard_color
                         row['value'] = args
-                        deep_set(out, keys=[card_name, group.group], value=row)
+                        deep_set(out, keys=[card_name, card_index, group.group], value=row)
                     else:
                         # add args
                         for arg_name, row in args.items():
-                            deep_set(out, keys=[card_name, arg_name], value=row)
+                            deep_set(out, keys=[card_name, base_name, arg_name], value=row)
 
         # store in config object, so other methods can reuse
         config.config_data = out

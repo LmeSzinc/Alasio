@@ -34,8 +34,8 @@
   "main": {
     "file": "main/main_config.json",
     "i18n": [
-      "main/main_i18n.json",
-      "alasio/alasio_i18n.json"
+      "alasio/alasio_i18n.json",
+      "main/main_i18n.json"
     ],
     "config": {
       "task": ["Main"],
@@ -45,8 +45,8 @@
   "opsi": {
     "file": "opsi/opsi_config.json",
     "i18n": [
-      "opsi/opsi_i18n.json",
-      "alasio/alasio_i18n.json"
+      "alasio/alasio_i18n.json",
+      "opsi/opsi_i18n.json"
     ],
     "config": {
       "task": ["OpsiExplore", "OpsiDaily", "OpsiGeneral", "OpsiAshAssist"],

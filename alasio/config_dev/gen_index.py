@@ -6,7 +6,7 @@ from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.codegen import CodeGen
-from alasio.ext.deep import deep_get, deep_iter_depth2, deep_set
+from alasio.ext.deep import *
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path import PathStr
@@ -193,7 +193,8 @@ class IndexGenerator(CrossNavGenerator):
             list[str]: indicates to read {nav}_i18n.json
         """
         i18n = {}
-        for nav, card, arg in deep_iter_depth2(config.config_data):
+        for keys, arg in deep_iter(config.config_data, depth=3):
+            nav, card, group = keys
             try:
                 group_name = arg['group']
             except KeyError:
@@ -215,7 +216,8 @@ class IndexGenerator(CrossNavGenerator):
                 # indicates to read task and taskgroups in user config
         """
         all_task_groups = []
-        for _, arg_name, arg_data in deep_iter_depth2(config.config_data):
+        for keys, arg_data in deep_iter(config.config_data, depth=3):
+            _, _, arg_name = keys
             if arg_name.startswith('_'):
                 continue
             try:
