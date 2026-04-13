@@ -10,6 +10,7 @@
     handleEdit: InputProps["handleEdit"];
     handleReset: InputProps["handleReset"];
     flashing?: boolean;
+    isAdvance?: boolean;
     class?: string;
   };
   let {
@@ -18,6 +19,7 @@
     handleEdit,
     handleReset,
     flashing = false,
+    isAdvance = false,
     class: className,
   }: Props = $props();
 
@@ -44,7 +46,14 @@
       <hr class={cn(i > 0 && "mt-2")} />
       <div class="">
         {#each Object.entries(GroupData) as [argKey]}
-          <Arg class="mt-2" bind:data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} />
+          <Arg
+            class="mt-2"
+            bind:data={cardData[groupKey][argKey]}
+            {parentWidth}
+            {handleEdit}
+            {handleReset}
+            {isAdvance}
+          />
         {/each}
       </div>
     {/each}

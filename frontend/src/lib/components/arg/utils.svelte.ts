@@ -13,8 +13,20 @@ export type ArgData = {
   /**
    * Dot color if arg is dashboard arg (`dt` startswith "dashboard")
    * Might be #RGB, #RGBA, #RRGGBB, #RRGGBBAA
+   * dashboard_color is defined at group level and insert to arg level
    */
   dashboard_color?: string;
+  /**
+   * True to hide arg on UI, but still accessible in runtime config
+   */
+  hide?: boolean;
+  /**
+   * True to collapse help text by default, user need to click to expand
+   */
+  fold_help?: boolean;
+  /**
+   * Advanced settings are hide by default, user need to toggle to show advanced settings
+   */
   advanced?: boolean;
   /**
    * Layout style, layout is determined according to `dt` by frontend (see $lib/component/arg/Arg.svelte)
@@ -75,12 +87,14 @@ export type InputProps = {
 };
 
 export type LayoutProps = InputProps & {
-  parentWidth?: number;
   InputComponent: Component<InputProps>;
+  parentWidth?: number;
+  isAdvance?: boolean;
 };
 
 export type ArgProps = InputProps & {
   parentWidth?: number;
+  isAdvance?: boolean;
 };
 
 export function getArgName(arg: ArgData) {

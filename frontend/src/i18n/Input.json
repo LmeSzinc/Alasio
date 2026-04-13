@@ -82,5 +82,12 @@
     "ja-JP": "設定がリセットされました",
     "zh-TW": "設定已重置",
     "es-ES": "Configuración restablecida"
+  },
+  "ShowHelp": {
+    "en-US": "Show Help",
+    "zh-CN": "显示帮助",
+    "ja-JP": "ヘルプを表示",
+    "zh-TW": "顯示說明",
+    "es-ES": "Mostrar ayuda"
   }
 }

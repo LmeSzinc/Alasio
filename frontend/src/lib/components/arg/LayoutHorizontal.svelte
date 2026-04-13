@@ -1,12 +1,14 @@
 <script lang="ts">
   import { cn } from "$lib/utils";
   import { getArgName, type LayoutProps } from "./utils.svelte";
+  import ToggleHelp from "./ToggleHelp.svelte";
   import I18nText from "./I18nText.svelte";
 
   let {
     data = $bindable(),
     parentWidth,
     InputComponent,
+    isAdvance = false,
     handleEdit,
     handleReset,
     class: className,
@@ -14,14 +16,21 @@
 
   const isCompact = $derived(parentWidth && parentWidth < 640);
   const displayName = $derived(getArgName(data));
+
+  let helpVisible = $state(false);
+  const shouldFoldHelp = $derived(data.fold_help && !isAdvance);
+  const isHelpShown = $derived(!shouldFoldHelp || helpVisible);
 </script>
 
 <div class={cn("flex flex-col justify-center gap-y-1", className)}>
   <!-- Top row: name (left) and input (right) -->
   <div class="flex min-h-7 flex-row items-center justify-between gap-x-4">
     <!-- Top-left: name -->
-    <div class="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+    <div class="flex min-w-0 flex-1 flex-row items-center gap-x-1 overflow-hidden">
       <I18nText text={displayName} class="font-medium" />
+      {#if shouldFoldHelp}
+        <ToggleHelp bind:helpVisible />
+      {/if}
     </div>
 
     <!-- Top-right: input -->
@@ -31,7 +40,7 @@
   </div>
 
   <!-- Bottom row: help (left) and placeholder (right) -->
-  {#if data.help}
+  {#if data.help && isHelpShown}
     <div class={cn("flex flex-row gap-x-4", isCompact && "flex-col")}>
       <!-- Bottom-left: help (spans full width in compact mode) -->
       <div class={cn("flex min-w-0 flex-col justify-center gap-0.5", !isCompact && "flex-1")}>
