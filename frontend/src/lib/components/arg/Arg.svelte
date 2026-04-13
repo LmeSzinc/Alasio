@@ -5,10 +5,10 @@
   import Select from "../arginput/Select.svelte";
   import Static from "../arginput/Static.svelte";
   import Textarea from "../arginput/Textarea.svelte";
-  import HorizontalLayout from "./HorizontalLayout.svelte";
+  import LayoutHorizontal from "./LayoutHorizontal.svelte";
+  import LayoutVertical from "./LayoutVertical.svelte";
+  import LayoutVerticalReverse from "./LayoutVerticalReverse.svelte";
   import type { ArgProps, InputProps, LayoutProps } from "./utils.svelte";
-  import VerticalLayout from "./VerticalLayout.svelte";
-  import VerticalReverseLayout from "./VerticalReverseLayout.svelte";
 
   let { data = $bindable(), ...restProps }: ArgProps = $props();
 
@@ -22,12 +22,12 @@
     static: Static,
   };
   const layoutMap: Record<string, Component<LayoutProps>> = {
-    filter: VerticalLayout,
+    filter: LayoutVertical,
   };
   const layoutAliasMap: Record<string, Component<LayoutProps>> = {
-    hori: HorizontalLayout,
-    vert: VerticalLayout,
-    "vert-rev": VerticalReverseLayout,
+    hori: LayoutHorizontal,
+    vert: LayoutVertical,
+    "vert-rev": LayoutVerticalReverse,
   };
 
   // --- COMPONENT RESOLUTION ---
@@ -42,7 +42,7 @@
       return layoutMap[data.dt];
     }
     // Priority 3: As a final fallback, use the system's hardcoded default layout.
-    return HorizontalLayout;
+    return LayoutHorizontal;
   });
 </script>
 
