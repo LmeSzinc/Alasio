@@ -7,14 +7,16 @@
         "group": "Scheduler",
         "arg": "Enable",
         "dt": "checkbox",
-        "value": false
+        "value": false,
+        "fold_help": true
       },
       "NextRun": {
         "task": "Main",
         "group": "Scheduler",
         "arg": "NextRun",
         "dt": "datetime",
-        "value": "2020-01-01T00:00:00Z"
+        "value": "2020-01-01T00:00:00Z",
+        "fold_help": true
       }
     }
   },

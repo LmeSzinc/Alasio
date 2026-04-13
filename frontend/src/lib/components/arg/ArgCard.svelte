@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as Card from "$lib/components/ui/card";
   import { cn } from "$lib/utils";
+  import Static from "../arginput/Static.svelte";
   import Arg from "./Arg.svelte";
   import type { CardData, InputProps } from "./utils.svelte";
 
@@ -23,37 +24,52 @@
     class: className,
   }: Props = $props();
 
-  const _info = $derived(cardData?._info);
-  const groups = $derived.by(() => {
-    const { _info, ...rest } = cardData || {};
+  const Info = $derived(cardData?._info);
+  const SchedulerEnable = $derived(cardData?.Scheduler?.Enable);
+  const SchedulerRest = $derived.by(() => {
+    const { Enable, ...rest } = cardData?.Scheduler || {};
+    return rest;
+  });
+  const Groups = $derived.by(() => {
+    const { _info, Scheduler, ...rest } = cardData || {};
     return rest;
   });
 </script>
 
 <Card.Root class={cn("neushadow mx-auto gap-0 border-none", flashing && "animate-flash-primary", className)}>
   <!-- Group name and help -->
-  <Card.Header>
-    {#if _info?.name}
-      <Card.Title class="text-2xl font-bold">{_info.name}</Card.Title>
+  <Card.Header class="flex flex-col gap-y-1.5">
+    <!-- Group name + Scheduler Enable -->
+    {@const InfoName = Info?.name || "UnknownGroupName"}
+    {@const InfoHelp = Info?.help}
+    <div class="flex w-full items-center justify-between gap-x-4">
+      <Card.Title class="flex-1 text-2xl font-bold">{InfoName}</Card.Title>
+      {#if SchedulerEnable}
+        <div class="flex justify-end">
+          <Static bind:data={cardData.Scheduler.Enable} {handleEdit} {handleReset} />
+        </div>
+      {/if}
+    </div>
+    <!-- Other scheduler args -->
+    {#if SchedulerRest}
+      <div class=" flex w-full flex-col gap-y-1.5">
+        {#each Object.entries(SchedulerRest) as [argKey]}
+          <Arg bind:data={cardData.Scheduler[argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvance} />
+        {/each}
+      </div>
     {/if}
-    {#if _info?.help}
-      <Card.Description>{_info.help}</Card.Description>
+    <!-- Group help -->
+    {#if InfoHelp}
+      <Card.Description>{InfoHelp}</Card.Description>
     {/if}
   </Card.Header>
   <!-- Group args -->
-  <Card.Content>
-    {#each Object.entries(groups) as [groupKey, GroupData], i}
-      <hr class={cn(i > 0 && "mt-2")} />
-      <div class="">
+  <Card.Content class="flex flex-col gap-y-2 pt-2">
+    {#each Object.entries(Groups) as [groupKey, GroupData]}
+      <hr />
+      <div class="flex flex-col gap-y-1.5">
         {#each Object.entries(GroupData) as [argKey]}
-          <Arg
-            class="mt-2"
-            bind:data={cardData[groupKey][argKey]}
-            {parentWidth}
-            {handleEdit}
-            {handleReset}
-            {isAdvance}
-          />
+          <Arg bind:data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvance} />
         {/each}
       </div>
     {/each}

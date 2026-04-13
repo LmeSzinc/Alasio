@@ -170,7 +170,8 @@
         "i18ngroup": "SchedulerStatic",
         "dt": "static",
         "value": "enabled",
-        "option": ["enabled"]
+        "option": ["enabled"],
+        "fold_help": true
       },
       "NextRun": {
         "task": "RestartDevice",
@@ -178,7 +179,8 @@
         "arg": "NextRun",
         "cls": "SchedulerStatic",
         "dt": "datetime",
-        "value": "2020-01-01T00:00:00Z"
+        "value": "2020-01-01T00:00:00Z",
+        "fold_help": true
       }
     }
   },
@@ -193,7 +195,8 @@
         "i18ngroup": "SchedulerStatic",
         "dt": "static",
         "value": "enabled",
-        "option": ["enabled"]
+        "option": ["enabled"],
+        "fold_help": true
       },
       "NextRun": {
         "task": "RestartGame",
@@ -201,7 +204,8 @@
         "arg": "NextRun",
         "cls": "SchedulerStatic",
         "dt": "datetime",
-        "value": "2020-01-01T00:00:00Z"
+        "value": "2020-01-01T00:00:00Z",
+        "fold_help": true
       }
     }
   }
