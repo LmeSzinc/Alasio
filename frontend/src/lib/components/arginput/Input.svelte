@@ -5,6 +5,7 @@
     validateByDataType,
     type InputProps,
   } from "$lib/components/arg/utils.svelte";
+  import { DEFAULT_TIME, DEFAULT_TIME_DISPLAY } from "$lib/components/dashboard/utils";
   import { Help } from "$lib/components/ui/help";
   import { Input } from "$lib/components/ui/input";
   import { cn } from "$lib/utils";
@@ -13,6 +14,89 @@
 
   let { data = $bindable(), class: className, handleEdit, handleReset }: InputProps = $props();
   const arg = $derived(useArgValue<string>(data));
+
+  // --- Datetime handling ---
+  const isDatetime = $derived(data.dt === "datetime");
+  const tzOffset = (() => {
+    const offset = -new Date().getTimezoneOffset();
+    const sign = offset >= 0 ? "+" : "-";
+    const absOffset = Math.abs(offset);
+    const h = String(Math.floor(absOffset / 60)).padStart(2, "0");
+    const m = String(absOffset % 60).padStart(2, "0");
+    return `${sign}${h}:${m}`;
+  })();
+
+  function formatToLocal(isoStr: any): string {
+    if (isoStr === DEFAULT_TIME) return DEFAULT_TIME_DISPLAY;
+    if (typeof isoStr !== "string" || !isoStr) return String(isoStr || "");
+    const date = new Date(isoStr);
+    if (isNaN(date.getTime())) return isoStr;
+
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return (
+      date.getFullYear() +
+      "-" +
+      pad(date.getMonth() + 1) +
+      "-" +
+      pad(date.getDate()) +
+      " " +
+      pad(date.getHours()) +
+      ":" +
+      pad(date.getMinutes()) +
+      ":" +
+      pad(date.getSeconds())
+    );
+  }
+
+  function parseToUTC(localStr: string): string {
+    if (localStr === DEFAULT_TIME_DISPLAY || localStr === DEFAULT_TIME) return DEFAULT_TIME;
+    if (!localStr) return "";
+    const date = new Date(localStr);
+    // Remove milliseconds
+    date.setMilliseconds(0);
+    if (isNaN(date.getTime())) return localStr;
+    const iso = date.toISOString();
+
+    // Avoid redundant updates if logically equal
+    const oldVal = arg.value;
+    if (oldVal) {
+      const oldDate = new Date(oldVal);
+      if (!isNaN(oldDate.getTime()) && oldDate.getTime() === date.getTime()) {
+        return oldVal;
+      }
+    }
+    return iso;
+  }
+
+  // Local display value for datetime
+  let displayValue = $state("");
+
+  // Getter/setter for the input element to bind to
+  const inputValue = {
+    get val() {
+      return isDatetime ? displayValue : arg.value;
+    },
+    set val(newValue: string) {
+      if (isDatetime) {
+        displayValue = newValue;
+      } else {
+        arg.value = newValue;
+      }
+    },
+  };
+
+  // Sync internal value to display value
+  $effect(() => {
+    if (isDatetime) {
+      const currentArgValue = arg.value;
+      untrack(() => {
+        const local = formatToLocal(currentArgValue);
+        if (local !== displayValue) {
+          displayValue = local;
+        }
+      });
+    }
+  });
 
   let inputEl: HTMLInputElement | null = $state(null);
 
@@ -50,6 +134,10 @@
     // Hide error while typing
     showError = false;
 
+    if (isDatetime) {
+      arg.value = parseToUTC(displayValue);
+    }
+
     // Clear the previous timer on each keystroke
     clearTimeout(debounceTimer);
     // Set a new timer to trigger the edit callback after a delay
@@ -71,6 +159,10 @@
   function onBlur() {
     // To prevent double-firing, clear any pending timer
     clearTimeout(debounceTimer);
+
+    if (isDatetime) {
+      arg.value = parseToUTC(displayValue);
+    }
 
     // Show error on blur
     showError = true;
@@ -97,12 +189,13 @@
     <Input
       type="text"
       class={cn(
-        "bg-card dark:bg-card peer truncate border-0 p-1 px-2 shadow-none focus-visible:pr-6",
+        "bg-card dark:bg-card peer truncate border-0 p-1 px-2 shadow-none",
+        isDatetime ? "pr-12 focus-visible:pr-12" : "focus-visible:pr-6",
         "focus-visible:shadow-none",
         "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-5",
         errorMessage && "ring-destructive ring-2 ring-offset-5",
       )}
-      bind:value={arg.value}
+      bind:value={inputValue.val}
       bind:ref={inputEl}
       oninput={onInput}
       onblur={onBlur}
@@ -114,10 +207,19 @@
     ></div>
 
     <!-- Reset button is visible only on focus -->
-    <Reset
-      {onReset}
-      class="pointer-events-none absolute right-0 opacity-0 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
-    />
+    <div class="absolute right-1 flex items-center group-focus-within:right-0">
+      {#if isDatetime}
+        <span class="text-muted-foreground pointer-events-none text-xs select-none">{tzOffset}</span>
+      {/if}
+      <div
+        class={cn(
+          "flex items-center justify-center overflow-hidden transition-all duration-200",
+          "w-0 group-focus-within:w-4",
+        )}
+      >
+        <Reset {onReset} class="opacity-0 transition-opacity duration-200 group-focus-within:opacity-100" />
+      </div>
+    </div>
   </div>
 
   <!-- Error message display -->

@@ -13,6 +13,13 @@
     "zh-TW": "請輸入有效的數字",
     "es-ES": "Por favor ingrese un número válido"
   },
+  "InvalidDatetime": {
+    "en-US": "Please enter a valid ISO datetime",
+    "zh-CN": "请输入ISO格式的时间",
+    "ja-JP": "有効なISO形式の日時を入力してください",
+    "zh-TW": "請輸入ISO格式的時間",
+    "es-ES": "Por favor ingrese una fecha y hora en formato ISO"
+  },
   "GreaterThan": {
     "en-US": "Value must be greater than {value}",
     "zh-CN": "值必须大于 {value}",

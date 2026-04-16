@@ -229,6 +229,15 @@ export function validateByDataType(value: string, dt: string): { value: any; err
     return { value: parsedValue, error: null };
   }
 
+  // For datetime, validate if it's a valid date
+  if (dt === "datetime") {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      return { value, error: t.Input.InvalidDatetime() };
+    }
+    return { value, error: null };
+  }
+
   // For regular input, return as-is
   return { value, error: null };
 }
