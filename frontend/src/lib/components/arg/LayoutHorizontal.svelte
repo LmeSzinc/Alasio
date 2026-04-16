@@ -8,7 +8,7 @@
     data = $bindable(),
     parentWidth,
     InputComponent,
-    isAdvance = false,
+    isAdvanced = false,
     handleEdit,
     handleReset,
     class: className,
@@ -18,7 +18,7 @@
   const displayName = $derived(getArgName(data));
 
   let helpVisible = $state(false);
-  const shouldFoldHelp = $derived(data.fold_help && !isAdvance);
+  const shouldFoldHelp = $derived(data.fold_help && !isAdvanced);
   const isHelpShown = $derived(!shouldFoldHelp || helpVisible);
 </script>
 

@@ -11,7 +11,6 @@
     handleEdit: InputProps["handleEdit"];
     handleReset: InputProps["handleReset"];
     flashing?: boolean;
-    isAdvance?: boolean;
     class?: string;
   };
   let {
@@ -20,7 +19,6 @@
     handleEdit,
     handleReset,
     flashing = false,
-    isAdvance = false,
     class: className,
   }: Props = $props();
 
@@ -34,6 +32,8 @@
     const { _info, Scheduler, ...rest } = cardData || {};
     return rest;
   });
+
+  let isAdvanced = $state(false);
 </script>
 
 <Card.Root class={cn("neushadow mx-auto gap-0 border-none", flashing && "animate-flash-primary", className)}>
@@ -54,7 +54,7 @@
     {#if SchedulerRest}
       <div class=" flex w-full flex-col gap-y-1.5">
         {#each Object.entries(SchedulerRest) as [argKey]}
-          <Arg bind:data={cardData.Scheduler[argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvance} />
+          <Arg bind:data={cardData.Scheduler[argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
         {/each}
       </div>
     {/if}
@@ -69,7 +69,7 @@
       <hr />
       <div class="flex flex-col gap-y-1.5">
         {#each Object.entries(GroupData) as [argKey]}
-          <Arg bind:data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvance} />
+          <Arg bind:data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
         {/each}
       </div>
     {/each}

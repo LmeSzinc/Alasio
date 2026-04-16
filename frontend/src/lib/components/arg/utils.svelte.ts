@@ -89,12 +89,12 @@ export type InputProps = {
 export type LayoutProps = InputProps & {
   InputComponent: Component<InputProps>;
   parentWidth?: number;
-  isAdvance?: boolean;
+  isAdvanced?: boolean;
 };
 
 export type ArgProps = InputProps & {
   parentWidth?: number;
-  isAdvance?: boolean;
+  isAdvanced?: boolean;
 };
 
 export function getArgName(arg: ArgData) {
