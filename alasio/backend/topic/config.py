@@ -93,24 +93,38 @@ class ConfigArg(BaseTopic):
         return data
 
     @on_msgbus_config_event('ConfigArg')
-    async def on_config_event(self, event: "ConfigSetEvent | dict"):
+    async def on_config_event(self, event: "ConfigSetEvent | list[ConfigSetEvent] | dict | list[dict]"):
         """
         Handle config event from msgbus
         """
-        # we may receive dict from worker, because it's decoded from bytes
-        if type(event) is dict:
-            event = ConfigSetEvent(**event)
-        key = self.dict_config_to_topic.get((event.task, event.group, event.arg))
-        if key is None:
-            # not displaying this key
-            return None
-        key = (*key, 'value')
+        if isinstance(event, list):
+            events = event
+        else:
+            events = [event]
+
+        resps = []
         data = await self.data
-        # set to topic data
-        deep_set(data, keys=key, value=event.value)
-        # send to frontend
-        event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=event.value)
-        await self.server.send(event)
+        for e in events:
+            # we may receive dict from worker, because it's decoded from bytes
+            if type(e) is dict:
+                e = ConfigSetEvent(**e)
+
+            key = self.dict_config_to_topic.get((e.task, e.group, e.arg))
+            if key is None:
+                # not displaying this key
+                continue
+
+            topic_key = (*key, 'value')
+            # set to topic data
+            deep_set(data, keys=topic_key, value=e.value)
+            # collect response
+            resps.append(ResponseEvent(t=self.topic_name(), o='set', k=topic_key, v=e.value))
+
+        if resps:
+            if len(resps) == 1:
+                await self.server.send(resps[0])
+            else:
+                await self.server.send(resps)
 
     @rpc
     async def set(self, task: str, group: str, arg: str, value: Any):
@@ -145,8 +159,8 @@ class ConfigArg(BaseTopic):
             key = (*key, 'value')
             data = await self.data
             prev = deep_get(data, key, default=resp.value)
-            event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=prev)
-            await self.server.send(event)
+            resp_event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=prev)
+            await self.server.send(resp_event)
             # re-raise error, so server will treat as RPC call failed
             if resp.error is not None:
                 msg = resp.error.msg
@@ -174,6 +188,32 @@ class ConfigArg(BaseTopic):
         # resp: ConfigSetEvent | None
         if resp is None:
             # reset failed, do nothing
+            return
+
+        # broadcast to all connections
+        event = ConfigEvent(t=self.topic_name(), c=config_name, v=resp)
+        await self.msgbus_config_asend(event)
+        await self.msgbus_global_asend(self.topic_name(), event)
+
+    @rpc
+    async def group_reset(self, task: str, group: str):
+        if not task or not group:
+            return
+        # get config_name
+        state = ConnState(self.conn_id, self.server)
+        nav: NavState = await state.nav_state
+        mod_name = nav.mod_name
+        config_name = nav.config_name
+        if not config_name:
+            return
+
+        # call
+        resp = await trio.to_thread.run_sync(
+            MOD_LOADER.gui_config_group_reset,
+            mod_name, config_name, task, group
+        )
+        # resp: list[ConfigSetEvent]
+        if not resp:
             return
 
         # broadcast to all connections

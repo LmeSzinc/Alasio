@@ -648,6 +648,58 @@ class Mod:
 
         return ConfigSetEvent(task=event.task, group=event.group, arg=event.arg, value=default_value)
 
+    def config_group_reset(self, config_name, task, group):
+        """
+        Reset an entire group and return all args' reset events.
+        Reset by writing an empty msgpack map, so they will be filled
+        with default values when reading.
+
+        Args:
+            config_name (str):
+            task (str):
+            group (str):
+
+        Returns:
+            list[ConfigSetEvent]:
+                List of reset events with default values.
+        """
+        # prepare model
+        task_index_data = self.task_index_data()
+        try:
+            model_ref = task_index_data[task].group[group]
+        except KeyError:
+            logger.warning(f'Cannot reset non-exist group {task}.{group}')
+            return []
+
+        # get model
+        model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
+        if model is None:
+            return []
+
+        # construct default model to get default values
+        try:
+            default_model = model()
+        except (TypeError, Exception) as e:
+            logger.warning(
+                f'Cannot construct default model for {task}.{group}: {e}')
+            return []
+
+        # init table
+        logger.info(f'config_group_reset "{config_name}": {task}.{group}')
+        table = AlasioConfigTable(config_name)
+
+        # write
+        with table.exclusive_transaction() as c:
+            row = ConfigRow(task=task, group=group, value=b'\x80')
+            table.upsert_row([row], conflicts=('task', 'group'), updates='value', _cursor_=c)
+
+        # return events
+        default_dict = asdict(default_model)
+        return [
+            ConfigSetEvent(task=task, group=group, arg=arg, value=value)
+            for arg, value in default_dict.items()
+        ]
+
     """
     Scheduler
     """

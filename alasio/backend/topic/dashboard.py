@@ -82,21 +82,35 @@ class Dashboard(BaseTopic):
         return data
 
     @on_msgbus_config_event('ConfigArg')
-    async def on_config_event(self, event: "ConfigSetEvent | dict"):
+    async def on_config_event(self, event: "ConfigSetEvent | list[ConfigSetEvent] | dict | list[dict]"):
         """
         Handle config event from msgbus
         """
-        # we may receive dict from worker, because it's decoded from bytes
-        if type(event) is dict:
-            event = ConfigSetEvent(**event)
-        key = self.dict_config_to_topic.get((event.task, event.group, event.arg))
-        if key is None:
-            # not displaying this key
-            return None
-        key = (key, event.group, 'value', event.arg, 'value')
+        if isinstance(event, list):
+            events = event
+        else:
+            events = [event]
+
+        resps = []
         data = await self.data
-        # set to topic data
-        deep_set(data, keys=key, value=event.value)
-        # send to frontend
-        event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=event.value)
-        await self.server.send(event)
+        for e in events:
+            # we may receive dict from worker, because it's decoded from bytes
+            if type(e) is dict:
+                e = ConfigSetEvent(**e)
+
+            key = self.dict_config_to_topic.get((e.task, e.group, e.arg))
+            if key is None:
+                # not displaying this key
+                continue
+
+            topic_key = (key, e.group, 'value', e.arg, 'value')
+            # set to topic data
+            deep_set(data, keys=topic_key, value=e.value)
+            # collect response
+            resps.append(ResponseEvent(t=self.topic_name(), o='set', k=topic_key, v=e.value))
+
+        if resps:
+            if len(resps) == 1:
+                await self.server.send(resps[0])
+            else:
+                await self.server.send(resps)

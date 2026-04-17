@@ -99,11 +99,28 @@ class TaskQueue(BaseTopic):
         """
         Re-init TaskQueueSource if scheduler config changed, so frontend can receive new task queue
         """
-        resp = event.v
-        if not resp.group == 'Scheduler':
-            return
-        if resp.arg != 'Enable' and resp.arg != 'NextRun':
-            return
-        cache = TaskQueueSource(event.c)
-        if cache.subscribers:
-            await cache.reinit()
+        resps = event.v
+        if not isinstance(resps, list):
+            resps = [resps]
+
+        should_reinit = False
+        for resp in resps:
+            # handle dict from worker
+            if type(resp) is dict:
+                try:
+                    group = resp['group']
+                    arg = resp['arg']
+                except KeyError:
+                    continue
+            else:
+                group = resp.group
+                arg = resp.arg
+
+            if group == 'Scheduler' and (arg == 'Enable' or arg == 'NextRun'):
+                should_reinit = True
+                break
+
+        if should_reinit:
+            cache = TaskQueueSource(event.c)
+            if cache.subscribers:
+                await cache.reinit()

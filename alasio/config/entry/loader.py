@@ -313,5 +313,27 @@ class ModLoader:
         response = mod.config_reset(config_name, event)
         return response
 
+    def gui_config_group_reset(self, mod_name, config_name, task_name, group_name):
+        """
+        Reset an entire group and return all args' reset events.
+        See Mod.config_group_reset()
+
+        Args:
+            mod_name (str):
+            config_name (str):
+            task_name (str):
+            group_name (str):
+
+        Returns:
+            list[ConfigSetEvent]:
+        """
+        try:
+            mod = self.dict_mod[mod_name]
+        except KeyError:
+            logger.warning(f'No such mod: "{mod_name}"')
+            return []
+
+        return mod.config_group_reset(config_name, task_name, group_name)
+
 
 MOD_LOADER = ModLoader(env.PROJECT_ROOT)
