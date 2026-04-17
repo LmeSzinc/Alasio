@@ -12,7 +12,7 @@
   import { untrack } from "svelte";
   import Reset from "./_Reset.svelte";
 
-  let { data = $bindable(), class: className, handleEdit, handleReset }: InputProps = $props();
+  let { data = $bindable(), class: className, handleEdit, handleReset, isDesc = false }: InputProps = $props();
   const arg = $derived(useArgValue<string>(data));
 
   // --- Datetime handling ---
@@ -191,6 +191,7 @@
       class={cn(
         "bg-card dark:bg-card peer truncate border-0 p-1 px-2 shadow-none",
         isDatetime ? "pr-12 focus-visible:pr-12" : "focus-visible:pr-6",
+        isDesc ? "py-0 text-muted-foreground" : "",
         "focus-visible:shadow-none",
         "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-5",
         errorMessage && "ring-destructive ring-2 ring-offset-5",
@@ -203,7 +204,10 @@
 
     <!-- Draw bottom border with peer -->
     <div
-      class="border-primary peer-focus-visible:border-foreground/35 absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200"
+      class={cn(
+        "peer-focus-visible:border-foreground/35 absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200",
+        isDesc ? "group-hover:border-primary border-transparent" : "border-primary",
+      )}
     ></div>
 
     <!-- Reset button is visible only on focus -->

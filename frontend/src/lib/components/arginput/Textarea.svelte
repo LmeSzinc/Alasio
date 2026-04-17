@@ -4,7 +4,7 @@
   import { cn } from "$lib/utils";
   import Reset from "./_Reset.svelte";
 
-  let { data = $bindable(), class: className, handleEdit, handleReset }: InputProps = $props();
+  let { data = $bindable(), class: className, handleEdit, handleReset, isDesc }: InputProps = $props();
   const arg = $derived(useArgValue<string>(data));
 
   let textareaEl: HTMLTextAreaElement | null = $state(null);
@@ -37,7 +37,7 @@
 <div class={cn("group relative flex w-full items-start", className)}>
   <Textarea
     class={cn(
-      "bg-accent peer min-h-[80px] resize-y font-mono font-sm shadow-none",
+      "bg-accent peer font-sm min-h-[80px] resize-y font-mono shadow-none",
       "focus-visible:shadow-none",
       "focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-5",
     )}

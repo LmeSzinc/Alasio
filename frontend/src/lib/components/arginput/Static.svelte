@@ -2,7 +2,7 @@
   import { useArgValue, type InputProps } from "$lib/components/arg/utils.svelte";
   import { cn } from "$lib/utils";
 
-  let { data = $bindable(), class: className }: InputProps = $props();
+  let { data = $bindable(), class: className, isDesc }: InputProps = $props();
   // static component is read-only, but we still use useArgValue to handle reactive updates from parent
   const arg = $derived(useArgValue<any>(data));
 </script>

@@ -8,6 +8,7 @@
   import LayoutHorizontal from "./LayoutHorizontal.svelte";
   import LayoutVertical from "./LayoutVertical.svelte";
   import LayoutVerticalReverse from "./LayoutVerticalReverse.svelte";
+  import LayoutDescription from "./LayoutDescription.svelte";
   import type { ArgProps, InputProps, LayoutProps } from "./utils.svelte";
 
   let { data = $bindable(), ...restProps }: ArgProps = $props();
@@ -28,6 +29,7 @@
     hori: LayoutHorizontal,
     vert: LayoutVertical,
     "vert-rev": LayoutVerticalReverse,
+    desc: LayoutDescription,
   };
 
   // --- COMPONENT RESOLUTION ---

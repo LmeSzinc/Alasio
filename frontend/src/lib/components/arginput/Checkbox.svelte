@@ -3,7 +3,7 @@
   import { Checkbox } from "$lib/components/ui/checkbox";
   import { cn } from "$lib/utils";
 
-  let { data = $bindable(), class: className, handleEdit }: InputProps = $props();
+  let { data = $bindable(), class: className, handleEdit, isDesc }: InputProps = $props();
   const arg = $derived(useArgValue<boolean>(data));
 
   function onChange() {

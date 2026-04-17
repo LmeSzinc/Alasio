@@ -175,7 +175,10 @@ class ArgData(Struct, omit_defaults=True):
     # - {name}
     # - {input}
     # - {help}
-    layout: Literal['hori', 'vert', 'vert-rev'] = UNSET
+    # 4. "desc" to show arg like plain text
+    # - {name} {input}
+    # help is ignored, input follows name instead of right aligned
+    layout: Literal['hori', 'vert', 'vert-rev', 'desc'] = UNSET
 
     # Msgspec constraints
     # https://jcristharif.com/msgspec/constraints.html

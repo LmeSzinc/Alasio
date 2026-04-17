@@ -3,7 +3,7 @@
   import * as Select from "$lib/components/ui/select";
   import { cn } from "$lib/utils";
 
-  let { data = $bindable(), class: className, handleEdit }: InputProps = $props();
+  let { data = $bindable(), class: className, handleEdit, isDesc = false }: InputProps = $props();
   const arg = $derived(useArgValue<string>(data));
 
   let triggerEl: HTMLElement | null = $state(null);
@@ -67,7 +67,10 @@
       </span>
       <!-- Draw bottom border with peer -->
       <div
-        class="border-primary group-focus:border-foreground/35 absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200"
+        class={cn(
+          "group-focus:border-foreground/35 absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200",
+          isDesc ? "group-hover:border-primary border-transparent" : "border-primary",
+        )}
       ></div>
     </Select.Trigger>
 

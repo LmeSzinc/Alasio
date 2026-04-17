@@ -3,6 +3,7 @@
   import { cn } from "$lib/utils";
   import Static from "../arginput/Static.svelte";
   import Arg from "./Arg.svelte";
+  import I18nText from "./I18nText.svelte";
   import type { CardData, InputProps } from "./utils.svelte";
 
   type Props = {
@@ -50,18 +51,22 @@
         </div>
       {/if}
     </div>
-    <!-- Other scheduler args -->
-    {#if SchedulerRest}
-      <div class=" flex w-full flex-col gap-y-1.5">
-        {#each Object.entries(SchedulerRest) as [argKey]}
-          <Arg bind:data={cardData.Scheduler[argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
-        {/each}
-      </div>
-    {/if}
-    <!-- Group help -->
-    {#if InfoHelp}
-      <Card.Description>{InfoHelp}</Card.Description>
-    {/if}
+    <div class="flex w-full flex-col gap-y-1">
+      <!-- Other scheduler args -->
+      {#if SchedulerRest}
+        <div class="flex w-full flex-col gap-y-1">
+          {#each Object.entries(SchedulerRest) as [argKey]}
+            <Arg bind:data={cardData.Scheduler[argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
+          {/each}
+        </div>
+      {/if}
+      <!-- Group help -->
+      {#if InfoHelp}
+        <Card.Description>
+          <I18nText text={InfoHelp} />
+        </Card.Description>
+      {/if}
+    </div>
   </Card.Header>
   <!-- Group args -->
   <Card.Content class="flex flex-col gap-y-2 pt-2">

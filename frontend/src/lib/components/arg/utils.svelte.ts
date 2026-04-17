@@ -44,8 +44,11 @@ export type ArgData = {
    *    - {name}
    *    - {input}
    *    - {help}
+   * 4. "desc" to show arg like plain text
+   *    - {name} {input}
+   *    help is ignored, input follows name instead of right aligned
    */
-  layout?: "hori" | "vert" | "vert-rev";
+  layout?: "hori" | "vert" | "vert-rev" | "desc";
 
   option?: any[];
   option_i18n?: Record<any, string>;
@@ -84,6 +87,7 @@ export type InputProps = {
   class?: string;
   handleEdit?: (data: ArgData) => void;
   handleReset?: (data: ArgData) => void;
+  isDesc?: boolean;
 };
 
 export type LayoutProps = InputProps & {
