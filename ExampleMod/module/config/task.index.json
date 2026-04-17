@@ -47,7 +47,7 @@
   },
   "Main": {
     "group": {
-      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "Scheduler", "task": "Main"},
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerUedit", "task": "Main"},
       "Campaign": {"file": "main/main_model.py", "cls": "Campaign", "task": "Main"},
       "StopCondition": {"file": "main/main_model.py", "cls": "StopCondition", "task": "Main"},
       "Fleet1": {"file": "main/main_model.py", "cls": "Fleet1", "task": "Main"},

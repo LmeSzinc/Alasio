@@ -6,17 +6,30 @@
         "task": "Main",
         "group": "Scheduler",
         "arg": "Enable",
+        "cls": "SchedulerUedit",
         "dt": "checkbox",
         "value": false,
-        "fold_help": true
+        "fold_help": true,
+        "layout": "desc"
       },
       "NextRun": {
         "task": "Main",
         "group": "Scheduler",
         "arg": "NextRun",
+        "cls": "SchedulerUedit",
         "dt": "datetime",
         "value": "2020-01-01T00:00:00Z",
-        "fold_help": true
+        "fold_help": true,
+        "layout": "desc"
+      },
+      "ServerUpdate": {
+        "task": "Main",
+        "group": "Scheduler",
+        "arg": "ServerUpdate",
+        "cls": "SchedulerUedit",
+        "i18ngroup": "SchedulerUedit",
+        "dt": "input",
+        "value": "00:00"
       }
     }
   },

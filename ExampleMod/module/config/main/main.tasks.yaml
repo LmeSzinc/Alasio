@@ -1,6 +1,7 @@
 Main:
   groups:
-    - Scheduler
+    # with editable ServerUpdate for testing
+    - SchedulerUedit
     - Campaign
     - StopCondition
     - Fleet1

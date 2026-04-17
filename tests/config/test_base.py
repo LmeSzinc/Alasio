@@ -11,6 +11,9 @@ from alasio.config.const import DataInconsistent
 from alasio.config.entry.mod import Mod
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.scan import ScanTable
+from alasio.ext import env
+
+env.ALASIO_ROOT.chdir_here()
 
 
 # Module-level fixtures shared across all test classes
@@ -797,10 +800,10 @@ class TestConfigConcurrency:
                     config.Scheduler.Enable = (thread_id == 1)
                     # Modification should stay in memory
                     assert len(config.modified) >= 1
-                    
+
                     # Wait for other thread to enter batch_set
                     time.sleep(0.5)
-                    
+
                     # Still in batch_set
                     assert bs.depth == 1
             except Exception as e:
@@ -808,21 +811,21 @@ class TestConfigConcurrency:
 
         t1 = threading.Thread(target=thread_task, args=(1,))
         t2 = threading.Thread(target=thread_task, args=(2,))
-        
+
         t1.start()
         # Ensure t1 enters batch_set first
         time.sleep(0.1)
         t2.start()
-        
+
         t1.join()
         t2.join()
-        
+
         assert not errors, "\n".join(errors)
 
     def test_concurrent_temporary_not_isolated(self, config):
         """Test that temporary context is NOT isolated per thread"""
         errors = []
-        
+
         def thread1():
             try:
                 # Initial is False
@@ -855,13 +858,13 @@ class TestConfigConcurrency:
 
         t1 = threading.Thread(target=thread1)
         t2 = threading.Thread(target=thread2)
-        
+
         t1.start()
         t2.start()
-        
+
         t1.join()
         t2.join()
-        
+
         assert not errors, "\n".join(errors)
 
     def test_race_condition_autosave(self, config, example_mod):
@@ -872,7 +875,7 @@ class TestConfigConcurrency:
         """
         config.auto_save = True
         errors = []
-        
+
         def thread1():
             try:
                 with config.batch_set():
@@ -886,7 +889,7 @@ class TestConfigConcurrency:
 
         def thread2():
             try:
-                time.sleep(0.1) # Wait for thread1 to enter batch_set
+                time.sleep(0.1)  # Wait for thread1 to enter batch_set
                 # Thread 2 is NOT in batch_set, this should trigger immediate save
                 # But it will also save whatever is in config.modified
                 config.Scheduler.NextRun = d.datetime(2025, 1, 1, tzinfo=d.timezone.utc)
@@ -895,11 +898,11 @@ class TestConfigConcurrency:
 
         t1 = threading.Thread(target=thread1)
         t2 = threading.Thread(target=thread2)
-        
+
         t1.start()
         t2.start()
-        
+
         t1.join()
         t2.join()
-        
+
         assert not errors, "\n".join(errors)
