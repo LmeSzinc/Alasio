@@ -1,6 +1,7 @@
 Scheduler:
   args:
     Enable:
+      dt: enable
       layout: desc
       fold_help: true
       value: false

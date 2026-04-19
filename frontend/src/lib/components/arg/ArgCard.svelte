@@ -1,8 +1,8 @@
 <script lang="ts">
   import * as Card from "$lib/components/ui/card";
   import { cn } from "$lib/utils";
-  import Static from "../arginput/Static.svelte";
   import Arg from "./Arg.svelte";
+  import CardEnable from "./CardEnable.svelte";
   import I18nText from "./I18nText.svelte";
   import type { CardData, InputProps } from "./utils.svelte";
 
@@ -24,9 +24,8 @@
   }: Props = $props();
 
   const Info = $derived(cardData?._info);
-  const SchedulerEnable = $derived(cardData?.Scheduler?.Enable);
   const SchedulerRest = $derived.by(() => {
-    const { Enable, ...rest } = cardData?.Scheduler || {};
+    const { Enable, NextRun, ...rest } = cardData?.Scheduler || {};
     return rest;
   });
   const Groups = $derived.by(() => {
@@ -37,7 +36,7 @@
   let isAdvanced = $state(false);
 </script>
 
-<Card.Root class={cn("neushadow mx-auto gap-0 border-none", flashing && "animate-flash-primary", className)}>
+<Card.Root class={cn("neushadow relative mx-auto gap-0 border-none", flashing && "animate-flash-primary", className)}>
   <!-- Group name and help -->
   <Card.Header class="flex flex-col gap-y-1.5">
     <!-- Group name + Scheduler Enable -->
@@ -45,28 +44,26 @@
     {@const InfoHelp = Info?.help}
     <div class="flex w-full items-center justify-between gap-x-4">
       <Card.Title class="flex-1 text-2xl font-bold">{InfoName}</Card.Title>
-      {#if SchedulerEnable}
-        <div class="flex justify-end">
-          <Static bind:data={cardData.Scheduler.Enable} {handleEdit} {handleReset} />
-        </div>
-      {/if}
     </div>
-    <div class="flex w-full flex-col gap-y-1">
-      <!-- Other scheduler args -->
-      {#if SchedulerRest}
-        <div class="flex w-full flex-col gap-y-1">
-          {#each Object.entries(SchedulerRest) as [argKey]}
-            <Arg bind:data={cardData.Scheduler[argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
-          {/each}
-        </div>
-      {/if}
-      <!-- Group help -->
-      {#if InfoHelp}
-        <Card.Description>
-          <I18nText text={InfoHelp} />
-        </Card.Description>
-      {/if}
-    </div>
+    {#if Object.keys(SchedulerRest).length > 0 || InfoHelp}
+      <div class="flex w-full flex-col gap-y-1">
+        <!-- Other scheduler args -->
+        {#if Object.keys(SchedulerRest).length > 0}
+          <div class="flex w-full flex-col gap-y-1">
+            {#each Object.entries(SchedulerRest) as [argKey]}
+              <Arg bind:data={cardData.Scheduler[argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
+            {/each}
+          </div>
+        {/if}
+        <!-- Group help -->
+        {#if InfoHelp}
+          <Card.Description>
+            <I18nText text={InfoHelp} />
+          </Card.Description>
+        {/if}
+      </div>
+    {/if}
+    <CardEnable bind:cardData {handleEdit} {handleReset} />
   </Card.Header>
   <!-- Group args -->
   <Card.Content class="flex flex-col gap-y-2 pt-2">

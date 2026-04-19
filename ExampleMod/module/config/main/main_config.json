@@ -7,8 +7,9 @@
         "group": "Scheduler",
         "arg": "Enable",
         "cls": "SchedulerUedit",
-        "dt": "checkbox",
+        "dt": "enable",
         "value": false,
+        "option": ["true", "false"],
         "fold_help": true,
         "layout": "desc"
       },

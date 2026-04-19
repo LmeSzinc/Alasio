@@ -10,23 +10,43 @@
     "Enable": {
       "zh-CN": {
         "name": "启用该功能",
-        "help": "将这个任务加入调度器"
+        "help": "将这个任务加入调度器",
+        "option_i18n": {
+          "true": "已启用",
+          "false": "已关闭"
+        }
       },
       "en-US": {
         "name": "Enable Task",
-        "help": "Join this task to scheduler."
+        "help": "Join this task to scheduler.",
+        "option_i18n": {
+          "true": "ENABLED",
+          "false": "DISABLED"
+        }
       },
       "ja-JP": {
         "name": "この機能を有効にする",
-        "help": "このタスクをスケジューラに追加します"
+        "help": "このタスクをスケジューラに追加します",
+        "option_i18n": {
+          "true": "有効",
+          "false": "無効"
+        }
       },
       "zh-TW": {
         "name": "啟用該功能",
-        "help": "將這個任務加入調度器"
+        "help": "將這個任務加入調度器",
+        "option_i18n": {
+          "true": "已啟用",
+          "false": "已關閉"
+        }
       },
       "en-ES": {
         "name": "Activar tarea",
-        "help": "Añadir tarea al Planificador."
+        "help": "Añadir tarea al Planificador.",
+        "option_i18n": {
+          "true": "ACTIVADO",
+          "false": "DESACTIVADO"
+        }
       }
     },
     "NextRun": {

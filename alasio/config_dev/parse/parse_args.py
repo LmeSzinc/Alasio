@@ -43,6 +43,7 @@ TYPE_DT_TO_PYTHON = {
     'textarea': 'str',
     # checkbox
     'checkbox': 'bool',
+    'enable': 'bool',
     # select
     'select': 'str',
     'radio': 'str',
@@ -239,6 +240,8 @@ class ArgData(Struct, omit_defaults=True):
         if self.layout is UNSET:
             if self.dt in ['textarea', 'filter', 'filter-order']:
                 self.layout = 'vert'
+        if self.dt == 'enable':
+            self.option = ['true', 'false']
         return self
 
     def to_dict(self) -> dict:

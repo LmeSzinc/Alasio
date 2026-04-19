@@ -7,8 +7,9 @@
         "group": "Scheduler",
         "arg": "Enable",
         "cls": "SchedulerU00",
-        "dt": "checkbox",
+        "dt": "enable",
         "value": false,
+        "option": ["true", "false"],
         "fold_help": true,
         "layout": "desc"
       },
@@ -55,8 +56,9 @@
         "group": "Scheduler",
         "arg": "Enable",
         "cls": "SchedulerU00",
-        "dt": "checkbox",
+        "dt": "enable",
         "value": false,
+        "option": ["true", "false"],
         "fold_help": true,
         "layout": "desc"
       },
@@ -199,8 +201,9 @@
         "group": "Scheduler",
         "arg": "Enable",
         "cls": "SchedulerU00",
-        "dt": "checkbox",
+        "dt": "enable",
         "value": false,
+        "option": ["true", "false"],
         "fold_help": true,
         "layout": "desc"
       },

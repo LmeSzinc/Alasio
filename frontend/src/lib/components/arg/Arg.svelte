@@ -3,6 +3,7 @@
   import Checkbox from "../arginput/Checkbox.svelte";
   import Input from "../arginput/Input.svelte";
   import Select from "../arginput/Select.svelte";
+  import Enable from "../arginput/Enable.svelte";
   import Static from "../arginput/Static.svelte";
   import Textarea from "../arginput/Textarea.svelte";
   import LayoutHorizontal from "./LayoutHorizontal.svelte";
@@ -18,6 +19,7 @@
     input: Input,
     checkbox: Checkbox,
     select: Select,
+    enable: Enable,
     textarea: Textarea,
     filter: Textarea,
     static: Static,
