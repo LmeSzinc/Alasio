@@ -75,8 +75,18 @@ export type ArgData = {
   tz?: boolean;
 };
 
+export type InfoData = {
+  group: string;
+  // usually to be "_info"
+  arg: string;
+  // usually to be "card-{task}-{group}"
+  card: string;
+  name?: string;
+  help?: string;
+};
+
 export type CardData = {
-  _info: ArgData;
+  _info: InfoData;
 } & {
   // {group_name: {arg_name: ArgData}}
   [K in string as K extends "_info" ? never : K]: Record<string, ArgData>;

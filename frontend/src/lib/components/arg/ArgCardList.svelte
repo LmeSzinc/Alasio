@@ -5,7 +5,7 @@
   import type UIState from "$private/config/[config_name]/state.svelte";
   import { untrack } from "svelte";
   import ArgCard from "./ArgCard.svelte";
-  import type { CardData, InputProps } from "./utils.svelte";
+  import type { CardData, InfoData, InputProps } from "./utils.svelte";
 
   type $$props = {
     data: Record<string, CardData>;
@@ -13,7 +13,7 @@
     ui?: UIState;
     handleEdit?: InputProps["handleEdit"];
     handleReset?: InputProps["handleReset"];
-    handleGroupReset?: InputProps["handleReset"];
+    handleGroupReset?: (data: InfoData) => void;
     class?: string;
   };
   let {

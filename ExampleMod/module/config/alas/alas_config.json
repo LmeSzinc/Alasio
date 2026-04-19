@@ -1,6 +1,6 @@
 {
   "card-Alas-Game": {
-    "_info": {"group": "Game", "arg": "_info"},
+    "_info": {"group": "Game", "arg": "_info", "card": "card-Alas-Game"},
     "Game": {
       "PackageName": {
         "task": "Alas",
@@ -21,7 +21,7 @@
     }
   },
   "card-Alas-Emulator": {
-    "_info": {"group": "Emulator", "arg": "_info"},
+    "_info": {"group": "Emulator", "arg": "_info", "card": "card-Alas-Emulator"},
     "Emulator": {
       "Serial": {
         "task": "Device",
@@ -63,7 +63,7 @@
     }
   },
   "card-Alas-EmulatorInfo": {
-    "_info": {"group": "EmulatorInfo", "arg": "_info"},
+    "_info": {"group": "EmulatorInfo", "arg": "_info", "card": "card-Alas-EmulatorInfo"},
     "EmulatorInfo": {
       "Emulator": {
         "task": "Device",
@@ -92,7 +92,7 @@
     }
   },
   "card-Alas-Error": {
-    "_info": {"group": "Error", "arg": "_info"},
+    "_info": {"group": "Error", "arg": "_info", "card": "card-Alas-Error"},
     "Error": {
       "HandleError": {
         "task": "Device",
@@ -126,7 +126,7 @@
     }
   },
   "card-Alas-Optimization": {
-    "_info": {"group": "Optimization", "arg": "_info"},
+    "_info": {"group": "Optimization", "arg": "_info", "card": "card-Alas-Optimization"},
     "Optimization": {
       "ScreenshotInterval": {
         "task": "Device",
@@ -160,7 +160,7 @@
     }
   },
   "card-RestartDeviceDisplay-RestartDevice": {
-    "_info": {"group": "RestartDevice", "arg": "_info"},
+    "_info": {"group": "RestartDevice", "arg": "_info", "card": "card-RestartDeviceDisplay-RestartDevice"},
     "Scheduler": {
       "Enable": {
         "task": "RestartDevice",
@@ -183,7 +183,7 @@
     }
   },
   "card-RestartGameDisplay-RestartGame": {
-    "_info": {"group": "RestartGame", "arg": "_info"},
+    "_info": {"group": "RestartGame", "arg": "_info", "card": "card-RestartGameDisplay-RestartGame"},
     "Scheduler": {
       "Enable": {
         "task": "RestartGame",

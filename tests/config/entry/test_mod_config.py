@@ -501,7 +501,8 @@ class TestConfigReadWrite:
         assert config['Main']['Scheduler']['ServerUpdate'] == '10:00'
 
         # 2. Reset entire group
-        responses = example_mod.config_group_reset(self.TEST_CONFIG_NAME, 'Main', 'Scheduler')
+        event = ConfigSetEvent(task='Main', group='Scheduler', arg='', value=None)
+        responses = example_mod.config_group_reset(self.TEST_CONFIG_NAME, event)
 
         # 3. Verify responses
         # Should contain default values for Enable, NextRun, ServerUpdate
@@ -521,3 +522,28 @@ class TestConfigReadWrite:
         config = example_mod.config_read(self.TEST_CONFIG_NAME, config_ref)
         assert config['Main']['Scheduler']['Enable'] is False
         assert config['Main']['Scheduler']['ServerUpdate'] == '00:00'
+
+    def test_config_group_batch_reset(self, example_mod, task_index_data):
+        """Test batch resetting entire groups"""
+        # 1. Set multiple values in Scheduler
+        example_mod.config_batch_set(self.TEST_CONFIG_NAME, [
+            ConfigSetEvent(task='Main', group='Scheduler', arg='Enable', value=True),
+            ConfigSetEvent(task='Main', group='Scheduler', arg='ServerUpdate', value='10:00'),
+        ])
+
+        # 2. Reset entire group
+        events = [
+            ConfigSetEvent(task='Main', group='Scheduler', arg='', value=None),
+        ]
+        responses = example_mod.config_group_batch_reset(self.TEST_CONFIG_NAME, events)
+
+        # 3. Verify responses
+        assert len(responses) >= 3
+        dict_response = {r.arg: r.value for r in responses}
+        assert dict_response['Enable'] is False
+
+        # 4. Verify DB content
+        table = AlasioConfigTable(self.TEST_CONFIG_NAME)
+        row = table.select_one(task='Main', group='Scheduler')
+        assert row is not None
+        assert row.value == b'\x80'

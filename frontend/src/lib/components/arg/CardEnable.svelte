@@ -6,13 +6,13 @@
   import Enable from "../arginput/Enable.svelte";
   import Input from "../arginput/Input.svelte";
   import Static from "../arginput/Static.svelte";
-  import type { CardData, InputProps } from "./utils.svelte";
+  import type { CardData, InfoData, InputProps } from "./utils.svelte";
 
   type Props = {
     cardData: CardData;
     handleEdit: InputProps["handleEdit"];
     handleReset: InputProps["handleReset"];
-    handleGroupReset?: (data: any) => void;
+    handleGroupReset?: (data: InfoData) => void;
     class?: string;
   };
   let { cardData = $bindable(), handleEdit, handleReset, handleGroupReset, class: className }: Props = $props();
@@ -125,7 +125,7 @@ Z`;
       <Button
         variant="destructive"
         onclick={() => {
-          handleGroupReset?.(cardData._info);
+          handleGroupReset?.(cardData?._info);
           dialogOpen = false;
         }}
       >

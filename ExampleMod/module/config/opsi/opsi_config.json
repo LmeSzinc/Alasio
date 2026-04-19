@@ -1,6 +1,6 @@
 {
   "card-OpsiExplore-OpsiExplore": {
-    "_info": {"group": "OpsiExplore", "arg": "_info"},
+    "_info": {"group": "OpsiExplore", "arg": "_info", "card": "card-OpsiExplore-OpsiExplore"},
     "Scheduler": {
       "Enable": {
         "task": "OpsiExplore",
@@ -45,7 +45,7 @@
     }
   },
   "card-OpsiDaily-OpsiDaily": {
-    "_info": {"group": "OpsiDaily", "arg": "_info"},
+    "_info": {"group": "OpsiDaily", "arg": "_info", "card": "card-OpsiDaily-OpsiDaily"},
     "Scheduler": {
       "Enable": {
         "task": "OpsiDaily",
@@ -133,7 +133,7 @@
     }
   },
   "card-OpsiGeneral-OpsiGeneral": {
-    "_info": {"group": "OpsiGeneral", "arg": "_info"},
+    "_info": {"group": "OpsiGeneral", "arg": "_info", "card": "card-OpsiGeneral-OpsiGeneral"},
     "OpsiGeneral": {
       "UseLogger": {
         "task": "OpsiGeneral",
@@ -186,7 +186,7 @@
     }
   },
   "card-OpsiAshAssist-OpsiAshAssist": {
-    "_info": {"group": "OpsiAshAssist", "arg": "_info"},
+    "_info": {"group": "OpsiAshAssist", "arg": "_info", "card": "card-OpsiAshAssist-OpsiAshAssist"},
     "Scheduler": {
       "Enable": {
         "task": "OpsiAshAssist",

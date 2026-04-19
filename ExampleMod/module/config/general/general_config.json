@@ -1,6 +1,6 @@
 {
   "card-General-Retirement": {
-    "_info": {"group": "Retirement", "arg": "_info"},
+    "_info": {"group": "Retirement", "arg": "_info", "card": "card-General-Retirement"},
     "Retirement": {
       "RetireMode": {
         "task": "General",
@@ -13,7 +13,7 @@
     }
   },
   "card-General-OneClickRetire": {
-    "_info": {"group": "OneClickRetire", "arg": "_info"},
+    "_info": {"group": "OneClickRetire", "arg": "_info", "card": "card-General-OneClickRetire"},
     "OneClickRetire": {
       "KeepLimitBreak": {
         "task": "General",
@@ -26,7 +26,7 @@
     }
   },
   "card-General-Enhance": {
-    "_info": {"group": "Enhance", "arg": "_info"},
+    "_info": {"group": "Enhance", "arg": "_info", "card": "card-General-Enhance"},
     "Enhance": {
       "ShipToEnhance": {
         "task": "General",
@@ -53,7 +53,7 @@
     }
   },
   "card-General-OldRetire": {
-    "_info": {"group": "OldRetire", "arg": "_info"},
+    "_info": {"group": "OldRetire", "arg": "_info", "card": "card-General-OldRetire"},
     "OldRetire": {
       "N": {
         "task": "General",
@@ -94,7 +94,7 @@
     }
   },
   "card-General-DropRecord": {
-    "_info": {"group": "DropRecord", "arg": "_info"},
+    "_info": {"group": "DropRecord", "arg": "_info", "card": "card-General-DropRecord"},
     "DropRecord": {
       "SaveFolder": {
         "task": "General",

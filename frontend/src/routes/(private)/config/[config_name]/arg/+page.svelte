@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ArgData, CardData } from "$lib/components/arg/utils.svelte";
+  import type { ArgData, CardData, InfoData } from "$lib/components/arg/utils.svelte";
   import { t } from "$lib/i18n";
   import { useTopic } from "$lib/ws";
   import ArgCardList from "$src/lib/components/arg/ArgCardList.svelte";
@@ -30,10 +30,9 @@
       arg: data.arg,
     });
   }
-  function handleGroupReset(data: ArgData) {
+  function handleGroupReset(data: InfoData) {
     groupResetRpc.call("group_reset", {
-      task: data.task,
-      group: data.group,
+      card: data.card,
     });
   }
 

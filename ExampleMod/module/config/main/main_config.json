@@ -1,6 +1,6 @@
 {
   "card-Main-Main": {
-    "_info": {"group": "Main", "arg": "_info"},
+    "_info": {"group": "Main", "arg": "_info", "card": "card-Main-Main"},
     "Scheduler": {
       "Enable": {
         "task": "Main",
@@ -31,7 +31,7 @@
     }
   },
   "card-Main-Campaign": {
-    "_info": {"group": "Campaign", "arg": "_info"},
+    "_info": {"group": "Campaign", "arg": "_info", "card": "card-Main-Campaign"},
     "Campaign": {
       "Name": {
         "task": "Main",
@@ -94,7 +94,7 @@
     }
   },
   "card-Main-StopCondition": {
-    "_info": {"group": "StopCondition", "arg": "_info"},
+    "_info": {"group": "StopCondition", "arg": "_info", "card": "card-Main-StopCondition"},
     "StopCondition": {
       "OilLimit": {
         "task": "Main",
@@ -142,7 +142,7 @@
     }
   },
   "card-Main-Fleet": {
-    "_info": {"group": "Fleet", "arg": "_info"},
+    "_info": {"group": "Fleet", "arg": "_info", "card": "card-Main-Fleet"},
     "Fleet1": {
       "Fleet": {
         "task": "Main",
@@ -213,7 +213,7 @@
     }
   },
   "card-Main-Submarine": {
-    "_info": {"group": "Submarine", "arg": "_info"},
+    "_info": {"group": "Submarine", "arg": "_info", "card": "card-Main-Submarine"},
     "Submarine": {
       "Fleet": {
         "task": "Main",
@@ -250,7 +250,7 @@
     }
   },
   "card-Main-Emotion": {
-    "_info": {"group": "Emotion", "arg": "_info"},
+    "_info": {"group": "Emotion", "arg": "_info", "card": "card-Main-Emotion"},
     "Emotion": {
       "Mode": {
         "task": "Main",
@@ -337,7 +337,7 @@
     }
   },
   "card-Main-HpControl": {
-    "_info": {"group": "HpControl", "arg": "_info"},
+    "_info": {"group": "HpControl", "arg": "_info", "card": "card-Main-HpControl"},
     "HpControl": {
       "UseHpBalance": {
         "task": "Main",
@@ -398,7 +398,7 @@
     }
   },
   "card-Main-EnemyPriority": {
-    "_info": {"group": "EnemyPriority", "arg": "_info"},
+    "_info": {"group": "EnemyPriority", "arg": "_info", "card": "card-Main-EnemyPriority"},
     "EnemyPriority": {
       "EnemyScaleBalanceWeight": {
         "task": "Main",

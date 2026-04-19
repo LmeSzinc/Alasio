@@ -333,7 +333,32 @@ class ModLoader:
             logger.warning(f'No such mod: "{mod_name}"')
             return []
 
-        return mod.config_group_reset(config_name, task_name, group_name)
+        event = ConfigSetEvent(task=task_name, group=group_name, arg='', value=None)
+        return mod.config_group_reset(config_name, event)
+
+    def gui_config_group_batch_reset(self, mod_name, config_name, list_task_group):
+        """
+        Batch reset entire groups and return all args' reset events.
+        See Mod.config_group_batch_reset()
+
+        Args:
+            mod_name (str):
+            config_name (str):
+            list_task_group (list[tuple[str, str]]): list of (task_name, group_name)
+
+        Returns:
+            list[ConfigSetEvent]:
+        """
+        try:
+            mod = self.dict_mod[mod_name]
+        except KeyError:
+            logger.warning(f'No such mod: "{mod_name}"')
+            return []
+
+        # convert dict to ConfigSetEvent
+        events = [ConfigSetEvent(task=task_group[0], group=task_group[1], arg='', value=None)
+                  for task_group in list_task_group]
+        return mod.config_group_batch_reset(config_name, events)
 
 
 MOD_LOADER = ModLoader(env.PROJECT_ROOT)

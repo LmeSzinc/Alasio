@@ -4,14 +4,14 @@
   import Arg from "./Arg.svelte";
   import CardEnable from "./CardEnable.svelte";
   import I18nText from "./I18nText.svelte";
-  import type { CardData, InputProps } from "./utils.svelte";
+  import type { CardData, InfoData, InputProps } from "./utils.svelte";
 
   type Props = {
     cardData: CardData;
     parentWidth: number;
     handleEdit: InputProps["handleEdit"];
     handleReset: InputProps["handleReset"];
-    handleGroupReset?: InputProps["handleReset"];
+    handleGroupReset?: (data: InfoData) => void;
     flashing?: boolean;
     class?: string;
   };

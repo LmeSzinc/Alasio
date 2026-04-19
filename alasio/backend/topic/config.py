@@ -1,3 +1,4 @@
+from collections import deque
 from typing import Any
 
 import trio.to_thread
@@ -196,21 +197,39 @@ class ConfigArg(BaseTopic):
         await self.msgbus_global_asend(self.topic_name(), event)
 
     @rpc
-    async def group_reset(self, task: str, group: str):
-        if not task or not group:
+    async def group_reset(self, card: str):
+        if not card:
             return
         # get config_name
         state = ConnState(self.conn_id, self.server)
         nav: NavState = await state.nav_state
         mod_name = nav.mod_name
         config_name = nav.config_name
-        if not config_name:
+        nav_name = nav.nav_name
+        if not config_name or not nav_name:
             return
+
+        # get all task-group within card
+        # copy to avoid modification during iterating, group reset is rarely used so copy is acceptable
+        list_task_group = deque()
+        dict_config_to_topic = self.dict_config_to_topic.copy()
+        for key, value in dict_config_to_topic.items():
+            # dict_config_to_topic[(task, group, arg)] = (card_name, group_name, arg_name)
+            try:
+                task = key[0]
+                group = key[1]
+                card_name = value[0]
+            except (IndexError, TypeError):
+                # this shouldn't happen
+                continue
+            if card_name == card:
+                list_task_group.append((task, group))
+        # config_group_batch_reset will do de-redundancy, so no need to do here
 
         # call
         resp = await trio.to_thread.run_sync(
-            MOD_LOADER.gui_config_group_reset,
-            mod_name, config_name, task, group
+            MOD_LOADER.gui_config_group_batch_reset,
+            mod_name, config_name, list_task_group
         )
         # resp: list[ConfigSetEvent]
         if not resp:

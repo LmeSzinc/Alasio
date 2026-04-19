@@ -648,7 +648,81 @@ class Mod:
 
         return ConfigSetEvent(task=event.task, group=event.group, arg=event.arg, value=default_value)
 
-    def config_group_reset(self, config_name, task, group):
+    def config_group_batch_reset(self, config_name, events):
+        """
+        Batch reset entire groups and return all args' reset events.
+        Reset by writing an empty msgpack map, so they will be filled
+        with default values when reading.
+
+        Args:
+            config_name (str):
+            events (list[ConfigSetEvent]):
+
+        Returns:
+            list[ConfigSetEvent]:
+                List of reset events with default values.
+        """
+        # prepare model
+        task_index_data = self.task_index_data()
+
+        dict_model = {}
+        # key: (task, group), value: None
+        dict_groups = {}
+        for event in events:
+            key = (event.task, event.group)
+            if key in dict_groups:
+                continue
+            dict_groups[key] = None
+
+            try:
+                model_ref = task_index_data[event.task].group[event.group]
+            except KeyError:
+                logger.warning(f'Cannot reset non-exist group {event.task}.{event.group}')
+                continue
+            # get model
+            model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
+            if model is None:
+                continue
+            dict_model[key] = model
+
+        # init table
+        show = [f'{task}.{group}' for task, group in dict_groups]
+        logger.info(f'config_group_reset "{config_name}": {", ".join(show)}')
+        table = AlasioConfigTable(config_name)
+
+        # write
+        success = []
+        rows = []
+        for key in dict_groups:
+            try:
+                model = dict_model[key]
+            except KeyError:
+                continue
+
+            task, group = key
+            # construct default model to get default values
+            try:
+                default_model = model()
+            except (TypeError, Exception) as e:
+                logger.warning(
+                    f'Cannot construct default model for {task}.{group}: {e}')
+                continue
+
+            # return events
+            default_dict = asdict(default_model)
+            for arg, value in default_dict.items():
+                success.append(ConfigSetEvent(task=task, group=group, arg=arg, value=value))
+
+            # prepare row
+            rows.append(ConfigRow(task=task, group=group, value=b'\x80'))
+
+        if rows:
+            with table.exclusive_transaction() as c:
+                table.upsert_row(rows, conflicts=('task', 'group'), updates='value', _cursor_=c)
+
+        return success
+
+    def config_group_reset(self, config_name, event):
         """
         Reset an entire group and return all args' reset events.
         Reset by writing an empty msgpack map, so they will be filled
@@ -656,13 +730,13 @@ class Mod:
 
         Args:
             config_name (str):
-            task (str):
-            group (str):
+            event (ConfigSetEvent): Event containing task and group to reset
 
         Returns:
             list[ConfigSetEvent]:
                 List of reset events with default values.
         """
+        task, group = event.task, event.group
         # prepare model
         task_index_data = self.task_index_data()
         try:

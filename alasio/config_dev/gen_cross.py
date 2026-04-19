@@ -373,7 +373,7 @@ class CrossNavGenerator:
                 card_name = f'card-{card.task}-{card_info}'
                 if config.nav_name != 'dashboard':
                     # No card._info in dashboard, for simpler data structure
-                    row = {'group': card_info, 'arg': '_info'}
+                    row = {'group': card_info, 'arg': '_info', 'card': card_name}
                     deep_set(out, keys=[card_name, '_info'], value=NoIndent(row))
                 # gen args
                 for group in card.groups:
