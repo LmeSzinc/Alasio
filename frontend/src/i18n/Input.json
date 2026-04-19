@@ -1,4 +1,32 @@
 {
+  "GroupResetTitle": {
+    "en-US": "Reset group",
+    "zh-CN": "重置设置组",
+    "ja-JP": "設定グループのリセット",
+    "zh-TW": "重置設定組",
+    "es-ES": "Restablecer grupo"
+  },
+  "GroupResetDesc": {
+    "en-US": "Are you sure you want to reset all content in group \"{name}\"? All settings will be restored to their default values.",
+    "zh-CN": "确定要重置设置组「{name}」中的所有内容吗？所有设置都将恢复到默认值。",
+    "ja-JP": "設定グループ「{name}」のすべての内容をリセットしてもよろしいですか？すべての設定はデフォルト値に戻ります。",
+    "zh-TW": "確定要重置設定組「{name}」中的所有內容嗎？所有設定都將恢復到預設值。",
+    "es-ES": "¿Estás seguro de que deseas restablecer todo el contenido del grupo \"{name}\"? Todas las configuraciones se restaurarán a sus valores predeterminados."
+  },
+  "GroupResetConfirm": {
+    "en-US": "Reset",
+    "zh-CN": "确定重置",
+    "ja-JP": "リセット",
+    "zh-TW": "確定重置",
+    "es-ES": "Restablecer"
+  },
+  "ShowHelp": {
+    "en-US": "Show Help",
+    "zh-CN": "显示帮助",
+    "ja-JP": "ヘルプを表示",
+    "zh-TW": "顯示說明",
+    "es-ES": "Mostrar ayuda"
+  },
   "InvalidInteger": {
     "en-US": "Please enter a valid integer",
     "zh-CN": "请输入有效的整数",
@@ -89,12 +117,5 @@
     "ja-JP": "設定がリセットされました",
     "zh-TW": "設定已重置",
     "es-ES": "Configuración restablecida"
-  },
-  "ShowHelp": {
-    "en-US": "Show Help",
-    "zh-CN": "显示帮助",
-    "ja-JP": "ヘルプを表示",
-    "zh-TW": "顯示說明",
-    "es-ES": "Mostrar ayuda"
   }
 }

@@ -9,9 +9,7 @@
         "cls": "SchedulerU00",
         "dt": "enable",
         "value": false,
-        "option": ["true", "false"],
-        "fold_help": true,
-        "layout": "desc"
+        "option": ["true", "false"]
       },
       "NextRun": {
         "task": "OpsiExplore",
@@ -19,9 +17,7 @@
         "arg": "NextRun",
         "cls": "SchedulerU00",
         "dt": "datetime",
-        "value": "2020-01-01T00:00:00Z",
-        "fold_help": true,
-        "layout": "desc"
+        "value": "2020-01-01T00:00:00Z"
       }
     },
     "OpsiExplore": {
@@ -58,9 +54,7 @@
         "cls": "SchedulerU00",
         "dt": "enable",
         "value": false,
-        "option": ["true", "false"],
-        "fold_help": true,
-        "layout": "desc"
+        "option": ["true", "false"]
       },
       "NextRun": {
         "task": "OpsiDaily",
@@ -68,9 +62,7 @@
         "arg": "NextRun",
         "cls": "SchedulerU00",
         "dt": "datetime",
-        "value": "2020-01-01T00:00:00Z",
-        "fold_help": true,
-        "layout": "desc"
+        "value": "2020-01-01T00:00:00Z"
       }
     },
     "OpsiDaily": {
@@ -203,9 +195,7 @@
         "cls": "SchedulerU00",
         "dt": "enable",
         "value": false,
-        "option": ["true", "false"],
-        "fold_help": true,
-        "layout": "desc"
+        "option": ["true", "false"]
       },
       "NextRun": {
         "task": "OpsiAshAssist",
@@ -213,9 +203,7 @@
         "arg": "NextRun",
         "cls": "SchedulerU00",
         "dt": "datetime",
-        "value": "2020-01-01T00:00:00Z",
-        "fold_help": true,
-        "layout": "desc"
+        "value": "2020-01-01T00:00:00Z"
       }
     },
     "OpsiAshAssist": {

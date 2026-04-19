@@ -2,13 +2,9 @@ Scheduler:
   args:
     Enable:
       dt: enable
-      layout: desc
-      fold_help: true
       value: false
     NextRun:
       dt: datetime
-      layout: desc
-      fold_help: true
       value: 2020-01-01T00:00:00Z
     ServerUpdate:
       hide: true
@@ -26,8 +22,6 @@ SchedulerStatic:
       # TypeError: Literal may only contain None/integers/strings - typing.Literal[True] is not supported
       # msgspec does not allow Literal[True], so here's a string
       dt: static
-      layout: desc
-      fold_help: true
       value: "enabled"
 
 # SchedulerStatic is an alias of SchedulerStaticU00

@@ -9,9 +9,7 @@
         "cls": "SchedulerUedit",
         "dt": "enable",
         "value": false,
-        "option": ["true", "false"],
-        "fold_help": true,
-        "layout": "desc"
+        "option": ["true", "false"]
       },
       "NextRun": {
         "task": "Main",
@@ -19,9 +17,7 @@
         "arg": "NextRun",
         "cls": "SchedulerUedit",
         "dt": "datetime",
-        "value": "2020-01-01T00:00:00Z",
-        "fold_help": true,
-        "layout": "desc"
+        "value": "2020-01-01T00:00:00Z"
       },
       "ServerUpdate": {
         "task": "Main",
