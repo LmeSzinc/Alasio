@@ -49,11 +49,14 @@
   let scrollParent = $derived(findScrollParent(root) ?? undefined);
 
   const scrollHelper = fastSmoothScroll(() => scrollParent ?? null);
+  let lastScrollTrigger = -1;
 
   // Effect to handle scrolling TO a card (when indicateCard is set from outside)
   $effect(() => {
-    // This code runs whenever `ui.card_name`, `indicateCard` or `groupElements` changes.
+    // This code runs whenever `ui.card_name`, `ui.scroll_trigger`, `indicateCard` or `groupElements` changes.
     const target = ui ? ui.card_name : indicateCard;
+    const trigger = ui?.scroll_trigger; // subscribe to trigger
+
     if (target && groupElements[target] && root) {
       const element = groupElements[target];
       const parent = scrollParent;
@@ -66,8 +69,12 @@
          * 这里的 10 是一个阈值（Tolerance）。
          * 如果当前滚动位置与目标位置的差距在 10px 以内，就认为已经对齐了，
          * 这样可以防止微小的像素偏差导致反复触发滚动或者 UI 抖动。
+         * 如果是通过 scroll_trigger 触发的（即手动点击），则忽略阈值直接滚动。
          */
-        if (Math.abs(parent.scrollTop - top) > 10) {
+        const isManual = trigger !== undefined && trigger !== lastScrollTrigger;
+        lastScrollTrigger = trigger ?? -1;
+
+        if (isManual || Math.abs(parent.scrollTop - top) > 10) {
           scrollHelper.scrollTo(top);
         }
       } else {
@@ -87,9 +94,10 @@
   $effect(() => {
     if (!ui) return;
     // calculate foundKey before early return of isScrolling, so groupViewportSizes[key] gets referenced in effect
-    // Find the first group in the data order that has > 28px visible height
+    // Find the first group in the data order that has > 68px visible height
+    // (card gap space-y-4) + (card bottom py-6) + (last arg min-h-7) = 68px
     const keys = Object.keys(data || {});
-    const foundKey = keys.find((key) => (groupViewportSizes[key]?.height || 0) > 28);
+    const foundKey = keys.find((key) => (groupViewportSizes[key]?.height || 0) > 68);
 
     if (untrack(() => scrollHelper.isScrolling)) return;
 
