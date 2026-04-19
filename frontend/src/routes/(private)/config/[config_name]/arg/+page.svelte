@@ -11,6 +11,7 @@
   const topicClient = useTopic<ConfigArgData>("ConfigArg");
   const setRpc = topicClient.rpc();
   const resetRpc = topicClient.rpc();
+  const groupResetRpc = topicClient.rpc();
 
   // --- Event Handlers (passed down to ArgCardList) ---
   function handleEdit(data: ArgData) {
@@ -26,6 +27,12 @@
       task: data.task,
       group: data.group,
       arg: data.arg,
+    });
+  }
+  function handleGroupReset(data: ArgData) {
+    groupResetRpc.call("group_reset", {
+      task: data.task,
+      group: data.group,
     });
   }
 
@@ -46,11 +53,23 @@
       toast.success(t.Input.ConfigReset(), toastOptions);
     }
   });
+  $effect(() => {
+    if (groupResetRpc.successMsg) {
+      toast.success(t.Input.ConfigReset(), toastOptions);
+    }
+  });
 </script>
 
 <div class="min-h-full w-full">
   {#if topicClient.data}
-    <ArgCardList class="w-full px-2.5 py-4" bind:data={topicClient.data} {ui} {handleEdit} {handleReset} />
+    <ArgCardList
+      class="w-full px-2.5 py-4"
+      bind:data={topicClient.data}
+      {ui}
+      {handleEdit}
+      {handleReset}
+      {handleGroupReset}
+    />
   {:else}
     <div class="text-muted-foreground text-center text-sm">No data</div>
   {/if}

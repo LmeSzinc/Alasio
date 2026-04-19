@@ -91,7 +91,7 @@
         "name": "Enable Task",
         "help": "Join this task to scheduler.",
         "option_i18n": {
-          "enabled": "Enabled"
+          "enabled": "ENABLED"
         }
       },
       "ja-JP": {
@@ -112,7 +112,7 @@
         "name": "Activar tarea",
         "help": "Añadir tarea al Planificador.",
         "option_i18n": {
-          "enabled": "Activado"
+          "enabled": "ACTIVADO"
         }
       }
     }

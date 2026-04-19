@@ -11,6 +11,7 @@
     parentWidth: number;
     handleEdit: InputProps["handleEdit"];
     handleReset: InputProps["handleReset"];
+    handleGroupReset?: InputProps["handleReset"];
     flashing?: boolean;
     class?: string;
   };
@@ -19,6 +20,7 @@
     parentWidth,
     handleEdit,
     handleReset,
+    handleGroupReset,
     flashing = false,
     class: className,
   }: Props = $props();
@@ -39,7 +41,7 @@
 <Card.Root class={cn("neushadow relative mx-auto gap-0 border-none", flashing && "animate-flash-primary", className)}>
   <!-- Group name and help -->
   <Card.Header class="flex flex-col gap-y-1.5">
-    <!-- Group name + Scheduler Enable -->
+    <!-- Group name -->
     {@const InfoName = Info?.name || "UnknownGroupName"}
     {@const InfoHelp = Info?.help}
     <div class="flex w-full items-center justify-between gap-x-4">
@@ -63,7 +65,7 @@
         {/if}
       </div>
     {/if}
-    <CardEnable bind:cardData {handleEdit} {handleReset} />
+    <CardEnable bind:cardData {handleEdit} {handleReset} {handleGroupReset} />
   </Card.Header>
   <!-- Group args -->
   <Card.Content class="flex flex-col gap-y-2 pt-2">

@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { LockKeyhole } from "@lucide/svelte";
+  import { Button } from "$lib/components/ui/button";
+  import * as Dialog from "$lib/components/ui/dialog";
+  import { t } from "$lib/i18n";
+  import { LockKeyhole, RotateCcw } from "@lucide/svelte";
   import Enable from "../arginput/Enable.svelte";
   import Input from "../arginput/Input.svelte";
   import Static from "../arginput/Static.svelte";
@@ -9,12 +12,15 @@
     cardData: CardData;
     handleEdit: InputProps["handleEdit"];
     handleReset: InputProps["handleReset"];
+    handleGroupReset?: (data: any) => void;
     class?: string;
   };
-  let { cardData = $bindable(), handleEdit, handleReset, class: className }: Props = $props();
+  let { cardData = $bindable(), handleEdit, handleReset, handleGroupReset, class: className }: Props = $props();
 
   const SchedulerEnable = $derived(cardData?.Scheduler?.Enable);
   const SchedulerNextRun = $derived(cardData?.Scheduler?.NextRun);
+
+  let dialogOpen = $state(false);
 
   const svgW = 144;
   const svgR = 16;
@@ -55,25 +61,37 @@ Z`;
     </svg>
     <div class="absolute top-0 right-0 flex flex-col items-end gap-1">
       <!-- Enable button -->
-      <div class="flex h-8 w-32 items-center justify-center">
-        {#if SchedulerEnable?.dt === "static"}
-          <div class="flex items-center">
-            <LockKeyhole class="h-4 w-4 text-white" />
-            <Static
+      <div class="flex h-8 items-center justify-center gap-x-1">
+        <!-- Reset button -->
+        <Button
+          variant="ghost"
+          size="icon"
+          class="text-muted-foreground pointer-events-auto h-6 w-6"
+          onclick={() => (dialogOpen = true)}
+        >
+          <RotateCcw class="size-3.5" />
+        </Button>
+
+        <div class="flex h-8 w-32 items-center justify-center">
+          {#if SchedulerEnable?.dt === "static"}
+            <div class="flex items-center">
+              <LockKeyhole class="h-4 w-4 text-white" />
+              <Static
+                bind:data={cardData.Scheduler.Enable}
+                class="pointer-events-auto h-5 px-1 py-0 text-sm"
+                isRevtColor
+              />
+            </div>
+          {:else}
+            <Enable
               bind:data={cardData.Scheduler.Enable}
-              class="pointer-events-auto h-5 px-1 py-0 text-sm"
+              {handleEdit}
+              {handleReset}
+              class="pointer-events-auto mx-auto h-5 w-auto text-sm"
               isRevtColor
             />
-          </div>
-        {:else}
-          <Enable
-            bind:data={cardData.Scheduler.Enable}
-            {handleEdit}
-            {handleReset}
-            class="pointer-events-auto mx-auto h-5 w-auto text-sm"
-            isRevtColor
-          />
-        {/if}
+          {/if}
+        </div>
       </div>
       <!-- NextRun -->
       {#if SchedulerNextRun}
@@ -90,3 +108,29 @@ Z`;
     </div>
   </div>
 {/if}
+
+<!-- Dialog for resetting the group -->
+<Dialog.Root bind:open={dialogOpen}>
+  <Dialog.Content>
+    <Dialog.Header>
+      <Dialog.Title>{t.Input.GroupResetTitle()}</Dialog.Title>
+      <Dialog.Description>
+        {t.Input.GroupResetDesc({ name: cardData?._info?.name || "UnknownGroupName" })}
+      </Dialog.Description>
+    </Dialog.Header>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={() => (dialogOpen = false)}>
+        {t.ConfigScan.Cancel()}
+      </Button>
+      <Button
+        variant="destructive"
+        onclick={() => {
+          handleGroupReset?.(cardData._info);
+          dialogOpen = false;
+        }}
+      >
+        {t.Input.GroupResetConfirm()}
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

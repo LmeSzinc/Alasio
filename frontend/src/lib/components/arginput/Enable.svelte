@@ -35,6 +35,7 @@
     className,
   )}
   onclick={toggle}
+  aria-label={arg.getLabel(isEnabled)}
 >
   <span
     class={cn(

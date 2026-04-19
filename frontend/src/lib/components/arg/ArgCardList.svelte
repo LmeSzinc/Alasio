@@ -13,9 +13,18 @@
     ui?: UIState;
     handleEdit?: InputProps["handleEdit"];
     handleReset?: InputProps["handleReset"];
+    handleGroupReset?: InputProps["handleReset"];
     class?: string;
   };
-  let { data = $bindable(), indicateCard, ui, handleEdit, handleReset, class: className }: $$props = $props();
+  let {
+    data = $bindable(),
+    indicateCard,
+    ui,
+    handleEdit,
+    handleReset,
+    handleGroupReset,
+    class: className,
+  }: $$props = $props();
 
   let containerSize = $state({ width: 0, height: 0 });
   const parentWidth = $derived(containerSize.width);
@@ -144,6 +153,7 @@
         {parentWidth}
         {handleEdit}
         {handleReset}
+        {handleGroupReset}
         flashing={flashingCard === cardKey}
         class={cardClass}
       />
