@@ -3,6 +3,7 @@
   import { t } from "$lib/i18n";
   import { useTopic } from "$lib/ws";
   import ArgCardList from "$src/lib/components/arg/ArgCardList.svelte";
+  import { untrack } from "svelte";
   import { toast } from "svelte-sonner";
   import { uiState as ui } from "../state.svelte";
 
@@ -45,17 +46,23 @@
   };
   $effect(() => {
     if (setRpc.successMsg) {
-      toast.success(t.Input.ConfigSet(), toastOptions);
+      untrack(() => {
+        toast.success(t.Input.ConfigSet(), toastOptions);
+      });
     }
   });
   $effect(() => {
     if (resetRpc.successMsg) {
-      toast.success(t.Input.ConfigReset(), toastOptions);
+      untrack(() => {
+        toast.success(t.Input.ConfigReset(), toastOptions);
+      });
     }
   });
   $effect(() => {
     if (groupResetRpc.successMsg) {
-      toast.success(t.Input.ConfigReset(), toastOptions);
+      untrack(() => {
+        toast.success(t.Input.ConfigReset(), toastOptions);
+      });
     }
   });
 </script>
