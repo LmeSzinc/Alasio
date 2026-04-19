@@ -1,8 +1,8 @@
 from collections import defaultdict
 
-import trio
 from msgspec import Struct
 
+from alasio.backend.lifespan import lifespan_restart
 from alasio.backend.locale.accept_language import negotiate_accept_language
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
@@ -78,12 +78,7 @@ class ConnState(BaseTopic):
         """
         Restart the entire backend
         """
-        import builtins
-        conn = getattr(builtins, '__mpipe_conn__', None)
-        if conn is None:
-            raise PermissionError(f'Cannot restart backend running without supervisor')
-
-        await trio.to_thread.run_sync(conn.send_bytes, b'restart')
+        await lifespan_restart()
 
     @rpc
     async def set_config(self, name: str):

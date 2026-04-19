@@ -161,58 +161,6 @@ async def lifespan(app):
     logger.info('Lifespan end')
 
 
-def mpipe_recv_loop(conn, trio_token, shutdown_event):
-    """
-    Args:
-        conn (PipeConnection):
-        trio_token:
-        shutdown_event (trio.Event):
-    """
-    from alasio.logger import logger
-    while 1:
-        try:
-            msg = conn.recv_bytes()
-        except (EOFError, OSError):
-            logger.info('Backend disconnected to supervisor, shutting down backend')
-            trio.from_thread.run_sync(shutdown_event.set, trio_token=trio_token)
-            break
-
-        if msg == b'stop':
-            logger.info('Backend received stop request from supervisor, shutting down backend')
-            trio.from_thread.run_sync(shutdown_event.set, trio_token=trio_token)
-            break
-        else:
-            logger.warning(f'Backend received unknown msg from supervisor: {msg}')
-
-
-def get_shutdown_trigger():
-    """
-    Get shutdown_trigger function, or None if no daemon by supervisor.
-    When shutdown_trigger() runs ended, hypercorn will stop serving connections.
-    """
-    import builtins
-    from alasio.logger import logger
-    conn = getattr(builtins, '__mpipe_conn__', None)
-    if conn is None:
-        # no supervisor, cannot restart
-        logger.info('Backend running without supervisor')
-        return None
-
-    logger.info('Backend running with supervisor')
-    trio_token = trio.lowlevel.current_trio_token()
-    shutdown_event = trio.Event()
-
-    async def shutdown_trigger():
-        # if shutdown event is set, shutdown_trigger() will stop hypercorn
-        await shutdown_event.wait()
-
-    from threading import Thread
-    thread = Thread(target=mpipe_recv_loop, args=(conn, trio_token, shutdown_event),
-                    name='mpipe_child_recv', daemon=True)
-    thread.start()
-    return shutdown_trigger
-
-
 def create_app():
     from alasio.ext.starapi.router import StarAPI
     app = StarAPI(lifespan=lifespan)
@@ -349,6 +297,8 @@ async def serve_app(args=None):
 
     config = create_config(args)
     app = create_app()
+
+    from alasio.backend.lifespan import get_shutdown_trigger
     shutdown_trigger = get_shutdown_trigger()
 
     patch_context_cls()
