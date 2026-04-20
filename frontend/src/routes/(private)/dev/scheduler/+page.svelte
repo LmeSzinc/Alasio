@@ -79,11 +79,15 @@
 
   const taskNext = $derived.by(() => {
     if (taskListInput.value === "next-only" || taskListInput.value === "running-and-next") {
-      return [
+      const next = [
         { TaskName: "Task1", NextRun: Math.floor(Date.now() / 1000) + 3600 },
         { TaskName: "Task2", NextRun: Math.floor(Date.now() / 1000) + 7200 },
         { TaskName: "Task3", NextRun: Math.floor(Date.now() / 1000) + 100000 },
       ];
+      if (taskListInput.value === "running-and-next") {
+        return [{ TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) }, ...next];
+      }
+      return next;
     }
     if (taskListInput.value === "long-names") {
       return [
@@ -162,8 +166,10 @@
               deviceSerial="127.0.0.1:5555"
               taskRunning="CurrentTask"
               taskNext={[
+                { TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) },
                 { TaskName: "NextTask1", NextRun: Math.floor(Date.now() / 1000) + 3600 },
                 { TaskName: "NextTask2", NextRun: Math.floor(Date.now() / 1000) + 7200 },
+                { TaskName: "NextTask3", NextRun: Math.floor(Date.now() / 1000) + 10800 },
               ]}
             />
           {/each}
@@ -200,6 +206,10 @@
               deviceSerial="127.0.0.1:5555-with-very-long-serial-number"
               taskRunning="VeryLongTaskNameThatWillBeTruncated"
               taskNext={[
+                {
+                  TaskName: "VeryLongTaskNameThatWillBeTruncated",
+                  NextRun: Math.floor(Date.now() / 1000),
+                },
                 {
                   TaskName: "AnotherVeryLongTaskNameForTesting",
                   NextRun: Math.floor(Date.now() / 1000) + 1800,
@@ -247,7 +257,10 @@
               config_name="NoDevice"
               {state}
               taskRunning="Task"
-              taskNext={[{ TaskName: "Next", NextRun: Math.floor(Date.now() / 1000) + 3600 }]}
+              taskNext={[
+                { TaskName: "Task", NextRun: Math.floor(Date.now() / 1000) },
+                { TaskName: "Next", NextRun: Math.floor(Date.now() / 1000) + 3600 },
+              ]}
             />
           {/each}
         </div>

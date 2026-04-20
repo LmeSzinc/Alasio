@@ -36,15 +36,19 @@
   }: $$props = $props();
 
   const displayState = useWorkerState(() => stateVal);
-  const isRunning = $derived(taskRunning && displayState.value !== "idle" && displayState.value !== "error");
+  const isRunning = $derived(taskRunning && displayState.value !== "idle");
   const displaySerial = $derived(
     deviceSerial.startsWith("127.0.0.1:") ? deviceSerial.replace("127.0.0.1:", "") : deviceSerial,
   );
 
   // Show 3 tasks, or 2 if a task is running
   let nextTasksToShow = $derived.by(() => {
-    const limit = 3 - (taskRunning ? 1 : 0);
-    return taskNext?.slice(0, limit) || [];
+    let tasks = taskNext || [];
+    if (isRunning) {
+      tasks = tasks.filter((task) => task.TaskName !== taskRunning);
+    }
+    const limit = 3 - (isRunning ? 1 : 0);
+    return tasks.slice(0, limit);
   });
 
   let showNoTask = $state(false);
@@ -159,7 +163,7 @@
   <div class="flex h-12 flex-col text-sm">
     {#if taskRunning || nextTasksToShow.length > 0}
       <!-- Task running -->
-      {#if taskRunning}
+      {#if isRunning}
         <div class="flex items-center gap-1">
           <ConfigState state={stateVal} displayIdle={true} iconClass="h-3 w-3" class="shrink-0" />
           <span class="flex-1 truncate text-xs">{taskRunning}</span>

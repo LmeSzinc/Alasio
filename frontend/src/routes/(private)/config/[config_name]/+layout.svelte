@@ -85,15 +85,11 @@
 
   const taskQueueClient = useTopic<TaskQueueData>("TaskQueue");
   const taskRunning = $derived(taskQueueClient.data?.running || undefined);
-  const taskNext = $derived(
-    [...(taskQueueClient.data?.pending || []), ...(taskQueueClient.data?.waiting || [])].filter(
-      (task) => task.TaskName !== taskRunning,
-    ),
-  );
+  const taskNext = $derived([...(taskQueueClient.data?.pending || []), ...(taskQueueClient.data?.waiting || [])]);
 </script>
 
 {#snippet nav()}
-  <div class="flex h-full flex-col overflow-hidden gap-2">
+  <div class="flex h-full flex-col gap-2 overflow-hidden">
     <Scheduler class="pb-0" {config_name} {state} {taskRunning} {taskNext} {onOverviewClick} {onDeviceClick} />
     <div class="border-border mx-3 border-t"></div>
     <ScrollArea class="min-h-0 w-full flex-1">
