@@ -1,6 +1,7 @@
 from alasio.assets_dev.extract import AssetsExtractor
 from alasio.assets_dev.parse import AssetModule, AssetMultilang
 from alasio.config.const import Const
+from alasio.ext.backport.suppress import suppress_keyboard_interrupt
 from alasio.ext.codegen import CodeGen
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import get_name, uppath
@@ -111,6 +112,7 @@ class AssetsExtractorALAS(AssetsExtractor):
 
 
 if __name__ == '__main__':
-    self = AssetsExtractorALAS(r'E:/ProgramData/pycharm/AzurLaneAutoScript')
-    while 1:
-        self.watch_files()
+    with suppress_keyboard_interrupt():
+        self = AssetsExtractorALAS(r'E:/ProgramData/pycharm/AzurLaneAutoScript')
+        while 1:
+            self.watch_files()

@@ -1,6 +1,6 @@
 import pytest
 
-from alasio.ext.backport.subpress import _BaseExceptionGroup, suppress_keyboard_interrupt
+from alasio.ext.backport.suppress import _BaseExceptionGroup, suppress_keyboard_interrupt
 
 
 class TestSuppressKeyboardInterrupt:

@@ -2,6 +2,7 @@ from alasio.assets_dev.extract import AssetsExtractor
 from alasio.assets_dev.parse import AssetModule
 from alasio.config.const import Const
 from alasio.ext.backport import removeprefix
+from alasio.ext.backport.suppress import suppress_keyboard_interrupt
 from alasio.ext.codegen import CodeGen
 from alasio.ext.path.calc import subpath_to, uppath
 
@@ -56,7 +57,7 @@ class AssetsExtractorSRC(AssetsExtractor):
 
 
 if __name__ == '__main__':
-    self = AssetsExtractorSRC(r'E:/ProgramData/pycharm/StarRailCopilot')
-    # self.generate()
-    while 1:
-        self.watch_files()
+    with suppress_keyboard_interrupt():
+        self = AssetsExtractorSRC(r'E:/ProgramData/pycharm/StarRailCopilot')
+        while 1:
+            self.watch_files()
