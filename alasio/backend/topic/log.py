@@ -192,8 +192,7 @@ class LogCache(metaclass=SingletonNamed):
 
         # 4. 发送快照
         # 合并全部行到一个 full 事件
-        if not snapshot:
-            return
+        # 如果 snapshot 为空，仍然发送，这样可以在切换 config 的时候清除已有内容
         event = ResponseEvent(t=topic.topic_name(), o='full', v=[e.v for e in snapshot])
         try:
             # 使用 send_nowait 确保这一步不会挂起 (yield)。
