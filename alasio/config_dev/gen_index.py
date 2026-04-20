@@ -158,25 +158,9 @@ class IndexGenerator(CrossNavGenerator):
                     # drop _global_bind
                     if name.startswith('_'):
                         continue
-                    # skip tasks without scheduler
-                    if not name.startswith('_'):
-                        try:
-                            task_data = self.alasio.tasks_data[name]
-                        except KeyError:
-                            continue
-                        if not task_data.has_scheduler:
-                            continue
                     yield name, v
             # but keep _global_bind of self
             for name, v in self.model_data.items():
-                # skip tasks without scheduler
-                if not name.startswith('_'):
-                    try:
-                        task_data = self.tasks_data[name]
-                    except KeyError:
-                        continue
-                    if not task_data.has_scheduler:
-                        continue
                 yield name, v
 
         out = {}
