@@ -200,6 +200,25 @@ class CrossNavGenerator:
         return out
 
     @cached_property
+    def tasks_data(self):
+        out = {}
+        for config in self.dict_nav_config.values():
+            for task_name, task_data in config.tasks_data.items():
+                # task name must be unique
+                if self.alasio and task_name in self.alasio.model_data:
+                    raise DefinitionError(
+                        f'Conflict task name: "{task_name}", which is already used in alasio',
+                        file=config.tasks_file, keys=task_name,
+                    )
+                if task_name in out:
+                    raise DefinitionError(
+                        f'Duplicate task name: "{task_name}"',
+                        file=config.tasks_file, keys=task_name,
+                    )
+                out[task_name] = task_data
+        return out
+
+    @cached_property
     def model_data(self):
         """
         Returns:
@@ -219,6 +238,7 @@ class CrossNavGenerator:
         if self.alasio:
             global_bind = self.alasio.model_data.get('_global_bind', {})
         all_groups = set()
+        _ = self.tasks_data
         for config in self.dict_nav_config.values():
             for task_name, task in config.tasks_data.items():
                 # task name must be unique

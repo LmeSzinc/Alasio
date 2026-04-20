@@ -2,7 +2,9 @@ OpsiExplore:
   groups:
     - SchedulerU00
     - OpsiExplore
-  displays: flat
+    - { task: OpsiGeneral, group: OpsiGeneral }
+  displays:
+    - [ SchedulerU00, OpsiExplore ]
 
 #  default:
 #    Scheduler:

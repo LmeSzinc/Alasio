@@ -88,7 +88,7 @@ class DisplayCard(msgspec.Struct, dict=True):
         return cls(task=task, info=info, groups=groups)
 
 
-class TaskData(msgspec.Struct):
+class TaskData(msgspec.Struct, dict=True):
     task: str
     # groups to bind at runtime
     groups: List[TaskGroup] = field(default_factory=list)
@@ -132,6 +132,26 @@ class TaskData(msgspec.Struct):
         # build object
         return cls(task=task, groups=groups, displays=displays, global_bind=global_bind)
 
+    @cached_property
+    def has_scheduler(self):
+        scheduler = False
+        for group in self.groups:
+            if not group.group.startswith('Scheduler'):
+                continue
+            # validate task with scheduler
+            if group.task and self.task != group.task:
+                raise DefinitionError(
+                    'Task should not reference scheduler of another task',
+                    keys=[self.task, 'groups'], value=group.group
+                )
+            if self.global_bind:
+                raise DefinitionError(
+                    'Global bind task should not have group "Scheduler"',
+                    keys=[self.task, 'groups'], value=group.group
+                )
+            scheduler = True
+        return scheduler
+
 
 class ParseTasks(ParseBase):
     @cached_property
@@ -156,22 +176,10 @@ class ParseTasks(ParseBase):
             # Create TaskData object from manual arg definition
             try:
                 task = TaskData.from_task_data(task=task_name, data=data)
+                _ = task.has_scheduler
             except DefinitionError as e:
                 e.file = self.tasks_file
                 raise
-            # validate task with scheduler
-            for group in task.groups:
-                if task.task != group.task and group.group == 'Scheduler':
-                    if group.task:
-                        raise DefinitionError(
-                            'Task should not reference scheduler of another task',
-                            file=self.tasks_file, keys=[task_name, 'groups'], value='Scheduler'
-                        )
-                    if task.global_bind:
-                        raise DefinitionError(
-                            'Global bind task should not have group "Scheduler"',
-                            file=self.tasks_file, keys=[task_name, 'groups'], value='Scheduler'
-                        )
             # Set
             deep_set(output, keys=[task_name], value=task)
 

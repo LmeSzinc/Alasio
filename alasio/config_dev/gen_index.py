@@ -154,13 +154,30 @@ class IndexGenerator(CrossNavGenerator):
 
         def iter_model_data():
             if self.alasio:
-                for k, v in self.alasio.model_data.items():
+                for name, v in self.alasio.model_data.items():
                     # drop _global_bind
-                    if k.startswith('_'):
+                    if name.startswith('_'):
                         continue
-                    yield k, v
+                    # skip tasks without scheduler
+                    if not name.startswith('_'):
+                        try:
+                            task_data = self.alasio.tasks_data[name]
+                        except KeyError:
+                            continue
+                        if not task_data.has_scheduler:
+                            continue
+                    yield name, v
             # but keep _global_bind of self
-            yield from self.model_data.items()
+            for name, v in self.model_data.items():
+                # skip tasks without scheduler
+                if not name.startswith('_'):
+                    try:
+                        task_data = self.tasks_data[name]
+                    except KeyError:
+                        continue
+                    if not task_data.has_scheduler:
+                        continue
+                yield name, v
 
         out = {}
         for task_name, group_data in iter_model_data():
@@ -368,19 +385,23 @@ class IndexGenerator(CrossNavGenerator):
                 key: {task_name}.{lang}
                 value: i18n translation
         """
-        old = read_msgspec(self.nav_index_file)
+        old = read_msgspec(self.queue_index_file)
         out = {}
-        for nav_name, config in self.dict_nav_config.items():
-            # task name, which must not empty
-            for task_name, task_data in config.tasks_data.items():
-                if not task_data.groups:
-                    continue
-                for lang in self.entry.gui_language:
-                    key = [task_name, lang]
-                    value = deep_get(old, key, default='')
-                    if not value:
-                        value = task_name
-                    deep_set(out, key, value)
+
+        def iter_tasks_data():
+            if self.alasio:
+                yield from self.alasio.tasks_data.items()
+            yield from self.tasks_data.items()
+
+        for task_name, task_data in iter_tasks_data():
+            if not task_data.has_scheduler:
+                continue
+            for lang in self.entry.gui_language:
+                key = [task_name, lang]
+                value = deep_get(old, key, default='')
+                if not value:
+                    value = task_name
+                deep_set(out, key, value)
         return out
 
     """

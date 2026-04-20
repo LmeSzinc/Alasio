@@ -1,23 +1,16 @@
 {
-  "Device": {
-    "zh-CN": "Device",
-    "en-US": "Device",
-    "ja-JP": "Device",
-    "zh-TW": "Device",
-    "en-ES": "Device"
-  },
   "RestartDevice": {
-    "zh-CN": "RestartDevice",
-    "en-US": "RestartDevice",
-    "ja-JP": "RestartDevice",
-    "zh-TW": "RestartDevice",
-    "en-ES": "RestartDevice"
+    "zh-CN": "重启设备",
+    "en-US": "Restart Device",
+    "ja-JP": "デバイスを再起動",
+    "zh-TW": "重啟設備",
+    "en-ES": "Reiniciar dispositivo"
   },
   "RestartGame": {
-    "zh-CN": "RestartGame",
-    "en-US": "RestartGame",
-    "ja-JP": "RestartGame",
-    "zh-TW": "RestartGame",
-    "en-ES": "RestartGame"
+    "zh-CN": "重启游戏",
+    "en-US": "Restart Game",
+    "ja-JP": "ゲームを再起動",
+    "zh-TW": "重啟遊戲",
+    "en-ES": "Reiniciar juego"
   }
 }

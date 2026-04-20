@@ -1,34 +1,26 @@
 {
-  "Alas": {
-    "zh-CN": "Alas",
-    "en-US": "Alas"
+  "RestartDevice": {
+    "zh-CN": "重启设备",
+    "en-US": "Restart Device"
   },
-  "Dashboard": {
-    "zh-CN": "Dashboard",
-    "en-US": "Dashboard"
-  },
-  "General": {
-    "zh-CN": "General",
-    "en-US": "General"
+  "RestartGame": {
+    "zh-CN": "重启游戏",
+    "en-US": "Restart Game"
   },
   "Main": {
-    "zh-CN": "Main",
+    "zh-CN": "主线图",
     "en-US": "Main"
   },
   "OpsiExplore": {
-    "zh-CN": "OpsiExplore",
-    "en-US": "OpsiExplore"
+    "zh-CN": "大世界开荒",
+    "en-US": "Opsi Explore"
   },
   "OpsiDaily": {
-    "zh-CN": "OpsiDaily",
-    "en-US": "OpsiDaily"
-  },
-  "OpsiGeneral": {
-    "zh-CN": "OpsiGeneral",
-    "en-US": "OpsiGeneral"
+    "zh-CN": "大世界每日",
+    "en-US": "Opsi Daily"
   },
   "OpsiAshAssist": {
-    "zh-CN": "OpsiAshAssist",
-    "en-US": "OpsiAshAssist"
+    "zh-CN": "META支援",
+    "en-US": "META Assist"
   }
 }
