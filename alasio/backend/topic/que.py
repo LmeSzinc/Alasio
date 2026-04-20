@@ -10,13 +10,13 @@ from alasio.backend.topic.state import ConnState
 from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
-from alasio.config.entry.mod import Task
+from alasio.config.entry.model import TaskItem
 
 
 class TaskQueueData(TypedDict):
     running: Optional[str]
-    pending: List[Task]
-    waiting: List[Task]
+    pending: List[TaskItem]
+    waiting: List[TaskItem]
 
 
 class TaskQueueSource(ConfigEventCache):

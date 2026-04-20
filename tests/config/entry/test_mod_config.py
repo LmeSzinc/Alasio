@@ -4,7 +4,7 @@ import pytest
 from msgspec.msgpack import decode, encode
 
 from alasio.config.entry.loader import MOD_LOADER
-from alasio.config.entry.mod import ConfigSetEvent
+from alasio.config.entry.model import ConfigSetEvent
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.scan import ScanTable
 from alasio.ext import env

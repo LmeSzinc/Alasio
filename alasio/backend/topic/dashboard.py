@@ -8,7 +8,7 @@ from alasio.backend.reactive.rx_trio import async_reactive_nocache
 from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
-from alasio.config.entry.mod import ConfigSetEvent
+from alasio.config.entry.model import ConfigSetEvent
 from alasio.ext.deep import deep_iter_depth2, deep_set, deep_values_depth1
 
 

@@ -3,7 +3,8 @@ from collections import defaultdict
 from msgspec import ValidationError
 
 import alasio.config.entry.const as const
-from alasio.config.entry.mod import ConfigSetEvent, Mod
+from alasio.config.entry.mod import Mod
+from alasio.config.entry.model import ConfigSetEvent
 from alasio.config.entry.utils import validate_nav_name
 from alasio.ext import env
 from alasio.ext.cache import cached_property

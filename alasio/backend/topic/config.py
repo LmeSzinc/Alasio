@@ -12,7 +12,7 @@ from alasio.backend.topic.state import ConnState, NavState
 from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
-from alasio.config.entry.mod import ConfigSetEvent
+from alasio.config.entry.model import ConfigSetEvent
 from alasio.ext.deep import deep_get, deep_iter, deep_set
 
 

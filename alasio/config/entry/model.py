@@ -1,10 +1,13 @@
-from typing import Any, Dict, List, Tuple
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-from msgspec import Struct
+from msgspec import DecodeError, MsgspecError, Struct
 from msgspec.json import Decoder as JsonDecoder
 
 from alasio.ext.cache import cached_property
+from alasio.ext.file.msgspecfile import JsonCacheTTL
 from alasio.ext.singleton import Singleton
+from alasio.logger import logger
 
 
 class ModelConfigRef(Struct):
@@ -84,3 +87,37 @@ class DecoderCache(metaclass=Singleton):
 
 
 DECODER_CACHE = DecoderCache()
+
+
+class ConfigSetEvent(Struct):
+    task: str
+    group: str
+    arg: str
+    value: Any
+    error: Optional[MsgspecError] = None
+
+
+class TaskItem(Struct):
+    TaskName: str
+    NextRun: datetime
+
+    def __str__(self):
+        # show as str, to avoid showing a long tzinfo object
+        return f'Task(TaskName="{self.TaskName}", NextRun="{self.NextRun}")'
+
+    __repr__ = __str__
+
+
+class ModJsonCacheTTL(JsonCacheTTL):
+    def load_resource(self, file: str, decoder: JsonDecoder = None, default_factory=dict):
+        try:
+            return super().load_resource(file, decoder=decoder)
+        except (FileNotFoundError, DecodeError) as e:
+            logger.error(f'Failed to read model json: "{file}": {e}')
+            return default_factory()
+        except Exception as e:
+            logger.exception(e)
+            return default_factory()
+
+
+MOD_JSON_CACHE = ModJsonCacheTTL()

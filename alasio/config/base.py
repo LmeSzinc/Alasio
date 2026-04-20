@@ -13,7 +13,8 @@ from alasio.base.servertime import ServerTime, nearest_future, random_time
 from alasio.base.timer import now
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
-from alasio.config.entry.mod import ConfigSetEvent, Mod, Task
+from alasio.config.entry.mod import Mod
+from alasio.config.entry.model import ConfigSetEvent, TaskItem
 from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
@@ -633,7 +634,7 @@ class AlasioConfigBase:
     def get_task_schedule(self):
         """
         Returns:
-            tuple[list[Task], list[Task]]:
+            tuple[list[TaskItem], list[Task]]:
         """
         with self._lock:
             self.config_cache()
@@ -652,7 +653,7 @@ class AlasioConfigBase:
             backend.send(ConfigEvent(t='TaskQueue', v=data))
         return pending_task, waiting_task
 
-    def get_next_task(self) -> Task:
+    def get_next_task(self) -> TaskItem:
         pending_task, waiting_task = self.get_task_schedule()
         # get first task
         if pending_task:
