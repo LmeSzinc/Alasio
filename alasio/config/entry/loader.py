@@ -141,9 +141,23 @@ class ModLoader:
         data = mod.nav_index_data()
         out = defaultdict(dict)
         for nav_name, card_name, i18n_data in deep_iter_depth2(data):
+            try:
+                out[nav_name][card_name] = i18n_data[lang]
+                continue
+            except KeyError:
+                pass
             # there shouldn't be KeyError, because data is validated
-            i18n = i18n_data[lang]
-            out[nav_name][card_name] = i18n
+            # no such language, try "en-US"
+            try:
+                out[nav_name][card_name] = i18n_data['en-US']
+                continue
+            except KeyError:
+                pass
+            # no "en-US", use keypath
+            if card_name == '_info':
+                out[nav_name][card_name] = nav_name
+            else:
+                out[nav_name][card_name] = card_name
         return out
 
     def get_gui_config(self, mod_name, config_name, nav_name, lang):
