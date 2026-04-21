@@ -70,6 +70,9 @@ MODEL_TASK_INDEX = Dict[str, ModelTaskRef]
 # {nav}.index.json
 #   {component}.{field}.{lang}
 MODEL_DICT_DEPTH3_ANY = Dict[str, Dict[str, Dict[str, Any]]]
+# queue.index.json
+#   {task_name}.{lang}
+MODEL_DICT_DEPTH2_ANY = Dict[str, Dict[str, Any]]
 
 
 class DecoderCache(metaclass=Singleton):
@@ -80,6 +83,10 @@ class DecoderCache(metaclass=Singleton):
     @cached_property
     def MODEL_TASK_INDEX(self):
         return JsonDecoder(MODEL_TASK_INDEX)
+
+    @cached_property
+    def MODEL_DICT_DEPTH2_ANY(self):
+        return JsonDecoder(MODEL_DICT_DEPTH2_ANY)
 
     @cached_property
     def MODEL_DICT_DEPTH3_ANY(self):

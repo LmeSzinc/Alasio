@@ -8,3 +8,7 @@ export type TaskQueueData = {
   pending: TaskItem[];
   waiting: TaskItem[];
 };
+
+export type TaskQueueI18n = {
+  [task_name: string]: string;
+};

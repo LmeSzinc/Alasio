@@ -361,5 +361,22 @@ class ModLoader:
                   for task_group in list_task_group]
         return mod.config_group_batch_reset(config_name, events)
 
+    def get_queue_i18n(self, mod_name):
+        """
+        Args:
+            mod_name (str):
+
+        Returns:
+            dict[str, dict[str, str]]:
+                key: {task_name}.{lang}
+                value: i18n translation
+        """
+        try:
+            mod = self.dict_mod[mod_name]
+        except KeyError:
+            logger.warning(f'No such mod: "{mod_name}"')
+            return []
+        return mod.queue_index_data()
+
 
 MOD_LOADER = ModLoader(env.PROJECT_ROOT)

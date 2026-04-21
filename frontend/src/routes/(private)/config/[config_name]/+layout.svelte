@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import type { ConfigTopicLike, WORKER_STATE } from "$lib/components/aside/types";
-  import { Scheduler, type TaskQueueData } from "$lib/components/scheduler";
+  import { Scheduler, type TaskQueueData, type TaskQueueI18n } from "$lib/components/scheduler";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { NavContext } from "$lib/slotcontext.svelte";
   import { useTopic } from "$lib/ws";
@@ -84,8 +84,28 @@
   const state = $derived(workerClient.data?.[config_name] || "idle");
 
   const taskQueueClient = useTopic<TaskQueueData>("TaskQueue");
-  const taskRunning = $derived(taskQueueClient.data?.running || undefined);
-  const taskNext = $derived([...(taskQueueClient.data?.pending || []), ...(taskQueueClient.data?.waiting || [])]);
+  const taskQueueI18nClient = useTopic<TaskQueueI18n>("TaskQueueI18n");
+
+  // translate task name
+  function getTaskName(task: string | null | undefined) {
+    if (!task) {
+      return "";
+    }
+    const i18n = taskQueueI18nClient.data;
+    if (!i18n) {
+      return task;
+    }
+    return i18n[task] || task;
+  }
+  const taskRunning = $derived(getTaskName(taskQueueClient.data?.running));
+  const taskNext = $derived(
+    [...(taskQueueClient.data?.pending || []), ...(taskQueueClient.data?.waiting || [])].map((task) => {
+      return {
+        ...task,
+        TaskName: getTaskName(task.TaskName),
+      };
+    }),
+  );
 </script>
 
 {#snippet nav()}

@@ -8,7 +8,7 @@ from alasio.backend.topic.dashboard import Dashboard
 from alasio.backend.topic.log import Log
 from alasio.backend.topic.mod import ModList
 from alasio.backend.topic.preview import Preview
-from alasio.backend.topic.que import TaskQueue
+from alasio.backend.topic.que import TaskQueue, TaskQueueI18n
 from alasio.backend.topic.scan import ConfigScan
 from alasio.backend.topic.state import ConnState, DICT_CONFIG_TO_CONN
 from alasio.backend.topic.worker import Worker
@@ -44,6 +44,7 @@ class WebsocketServer(WebsocketTopicServer):
         Worker,
         Log,
         TaskQueue,
+        TaskQueueI18n,
         Dashboard,
         # DevAssetsManager,
     ])

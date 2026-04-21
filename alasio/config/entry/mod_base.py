@@ -44,6 +44,17 @@ class ModBase:
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 
+    def queue_index_data(self):
+        """
+        Returns:
+            dict[str, dict[str, str]]:
+                key: {task_name}.{lang}
+                value: i18n translation
+        """
+        file = self.path_config / 'queue.index.json'
+        decoder = DECODER_CACHE.MODEL_DICT_DEPTH2_ANY
+        return MOD_JSON_CACHE.get(file, decoder=decoder)
+
     def config_index_data(self) -> MODEL_CONFIG_INDEX:
         """
         """

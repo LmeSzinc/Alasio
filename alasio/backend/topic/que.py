@@ -1,5 +1,6 @@
 from typing import List, Optional, TypedDict
 
+import trio
 from msgspec import NODEFAULT
 
 from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
@@ -11,6 +12,7 @@ from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.model import TaskItem
+from alasio.ext.deep import deep_iter_depth1
 
 
 class TaskQueueData(TypedDict):
@@ -124,3 +126,27 @@ class TaskQueue(BaseTopic):
             cache = TaskQueueSource(event.c)
             if cache.subscribers:
                 await cache.reinit()
+
+
+class TaskQueueI18n(BaseTopic):
+    @async_reactive_nocache
+    async def data(self):
+        """
+        Returns:
+            dict[str, str]:
+                key: {task_name}
+                value: i18n translation
+        """
+        state = ConnState(self.conn_id, self.server)
+        mod_name = await state.mod_name
+        lang = await state.lang
+        if not lang or not mod_name:
+            return {}
+
+        data = await trio.to_thread.run_sync(MOD_LOADER.get_queue_i18n, mod_name)
+        # {task_name}.{lang}=i18n -> {task_name}=i18n
+        i18n_dict = {}
+        for task, i18n in deep_iter_depth1(data):
+            value = i18n.get(lang, task)
+            i18n_dict[task] = value
+        return i18n_dict
