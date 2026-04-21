@@ -5,7 +5,7 @@
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { NavContext } from "$lib/slotcontext.svelte";
   import { useTopic } from "$lib/ws";
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import ConfigNav from "./ConfigNav.svelte";
   import { uiState as ui } from "./state.svelte";
 
@@ -75,7 +75,9 @@
   // Auto select overview when opened_nav is empty
   $effect(() => {
     if (!ui.opened_nav) {
-      onOverviewClick();
+      untrack(() => {
+        onOverviewClick();
+      });
     }
   });
 
