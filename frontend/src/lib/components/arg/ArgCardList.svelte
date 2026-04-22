@@ -69,28 +69,23 @@
     if (target && groupElements[target] && root) {
       const element = groupElements[target];
       const parent = scrollParent;
+      const isNavSwitchScroll = trigger === 0;
 
       if (parent) {
         // scroll-mt-6 is 1.5rem = 24px
         const top = element.offsetTop - 24;
-
-        /**
-         * 这里的 10 是一个阈值（Tolerance）。
-         * 如果当前滚动位置与目标位置的差距在 10px 以内，就认为已经对齐了，
-         * 这样可以防止微小的像素偏差导致反复触发滚动或者 UI 抖动。
-         * 如果是通过 scroll_trigger 触发的（即手动点击），则忽略阈值直接滚动。
-         */
         const isManual = trigger !== undefined && trigger !== lastScrollTrigger;
         lastScrollTrigger = trigger ?? -1;
-
-        if (isManual || Math.abs(parent.scrollTop - top) > 10) {
-          scrollHelper.scrollTo(top);
+        if (isManual) {
+          // If nav is switched, scroll to top immediately, otherwise use smooth scroll
+          const d = isNavSwitchScroll ? 0 : 250;
+          scrollHelper.scrollTo(top, d);
         }
       } else {
         // Fallback
         element.scrollIntoView({
           block: "start",
-          behavior: "smooth",
+          behavior: isNavSwitchScroll ? "instant" : "smooth",
         });
       }
     }
@@ -102,30 +97,26 @@
   // Synchronize indicateCard with groupViewportSizes
   $effect(() => {
     if (!ui) return;
+    const keys = Object.keys(data || {});
+
     // calculate foundKey before early return of isScrolling, so groupViewportSizes[key] gets referenced in effect
     // Find the first group in the data order that has > 68px visible height
     // (card gap space-y-4) + (card bottom py-6) + (last arg min-h-7) = 68px
-    const keys = Object.keys(data || {});
     const foundKey = keys.find((key) => (groupViewportSizes[key]?.height || 0) > 68);
 
+    // MUST untrack scrollHelper.isScrolling
+    // when having multiple cards at list bottom, user clicks the last card,
+    // if tracking scrollHelper.isScrolling, card_indicate will quickly switch to the card at viewport top instead of the clicked card
     if (untrack(() => scrollHelper.isScrolling)) return;
 
     if (foundKey) {
-      const card_scroll = untrack(() => ui.card_scroll);
-      if (foundKey !== card_scroll) {
-        ui.card_scroll = foundKey;
-        ui.card_indicate = foundKey;
-      }
-    }
-  });
-
-  // Effect to initialize groupViewportSizes for every group in data
-  $effect(() => {
-    if (!data) return;
-    for (const key in data) {
-      if (!groupViewportSizes[key]) {
-        groupViewportSizes[key] = { width: 0, height: 0 };
-      }
+      untrack(() => {
+        const card_scroll = ui.card_scroll;
+        if (foundKey !== card_scroll) {
+          ui.card_scroll = foundKey;
+          ui.card_indicate = foundKey;
+        }
+      });
     }
   });
 
@@ -138,11 +129,13 @@
 </script>
 
 <div bind:this={root} use:elementSize={containerSize} class={cn("relative space-y-4", className)}>
-  {#each Object.entries(data || {}) as [cardKey]}
+  {#each Object.entries(data || {}) as [cardKey] (cardKey)}
     <div
       bind:this={groupElements[cardKey]}
       use:elementViewportSize={{
-        state: groupViewportSizes[cardKey],
+        onChange: (width, height) => {
+          groupViewportSizes[cardKey] = { width, height };
+        },
         root: scrollParent,
       }}
       data-group-key={cardKey}

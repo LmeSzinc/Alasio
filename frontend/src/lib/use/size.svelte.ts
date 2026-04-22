@@ -60,28 +60,48 @@ export function elementSize(node: HTMLElement, stateTarget: SizeState) {
     },
   };
 }
-export type ViewportSizeParams = SizeState | { state: SizeState; root?: HTMLElement | null };
+export type ViewportOnChange = (width: number, height: number) => void;
+
+export type ViewportSizeParams = {
+  size?: SizeState;
+  root?: HTMLElement | null;
+  onChange?: ViewportOnChange;
+};
 
 /**
  * A Svelte Action that observes an element's visible size in its scroll container
- * (or viewport) and directly mutates a provided Svelte 5 state object.
+ * (or viewport) and directly mutates a provided Svelte 5 state object or calls a callback.
  *
  * @param node The HTML element the action is applied to.
- * @param params The Svelte 5 state object or an options object with state and root.
+ * @param params The Svelte 5 state object, a callback, or an options object.
  */
 export function elementViewportSize(node: HTMLElement, params: ViewportSizeParams) {
-  let currentTarget = "state" in params ? params.state : params;
-  let root = "root" in params ? params.root : null;
+  let size: SizeState | null = null;
+  let onChange: ViewportOnChange | null = null;
+  let root: HTMLElement | null = null;
+
+  function setParams(p: ViewportSizeParams) {
+    size = p.size || null;
+    onChange = p.onChange || null;
+    root = p.root || null;
+  }
+
+  setParams(params);
   let observer: IntersectionObserver | null = null;
 
   function setupObserver() {
     if (observer) observer.disconnect();
     observer = new IntersectionObserver(
       (entries) => {
-        if (currentTarget && entries[0]) {
+        if (entries[0]) {
           const { width, height } = entries[0].intersectionRect;
-          currentTarget.width = width;
-          currentTarget.height = height;
+          if (size) {
+            size.width = width;
+            size.height = height;
+          }
+          if (onChange) {
+            onChange(width, height);
+          }
         }
       },
       {
@@ -97,10 +117,9 @@ export function elementViewportSize(node: HTMLElement, params: ViewportSizeParam
 
   return {
     update(newParams: ViewportSizeParams) {
-      currentTarget = "state" in newParams ? newParams.state : newParams;
-      const newRoot = "root" in newParams ? newParams.root : null;
-      if (newRoot !== root) {
-        root = newRoot;
+      const oldRoot = root;
+      setParams(newParams);
+      if (root !== oldRoot) {
         setupObserver();
       }
     },

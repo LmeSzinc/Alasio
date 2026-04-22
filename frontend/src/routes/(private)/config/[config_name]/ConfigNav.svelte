@@ -2,6 +2,7 @@
   import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "$lib/components/ui/accordion";
   import { cn } from "$lib/utils.js";
   import { useTopic } from "$lib/ws";
+  import { untrack } from "svelte";
   import NavButton from "./NavButton.svelte";
   import { uiState as ui } from "./state.svelte";
 
@@ -39,9 +40,6 @@
 
   // --- Event Handlers ---
   function handleCardClick(clickedNavKey: string, clickedCardKey: string) {
-    // Update internal state via setNav to ensure all related fields are reset.
-    ui.setNav(clickedNavKey, clickedCardKey);
-
     // Call the external callback with details.
     onCardClick?.(clickedNavKey, clickedCardKey);
   }
@@ -58,7 +56,9 @@
 
         // Only auto-select if the current card doesn't belong to this nav
         if (!currentCardInNav) {
-          handleCardClick(openedNavItem.key, openedNavItem.cards[0].key);
+          untrack(() => {
+            handleCardClick(openedNavItem.key, openedNavItem.cards[0].key);
+          });
         }
       }
     }

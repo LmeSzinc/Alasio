@@ -18,14 +18,40 @@ export function findScrollParent(node: HTMLElement | null) {
  * A reactive scroll helper that provides a fast smooth scroll implementation.
  *
  * @param element The HTML element to be scrolled.
- * @param duration Duration of the scroll animation in milliseconds.
  */
-export function fastSmoothScroll(element: HTMLElement | null | (() => HTMLElement | null), duration = 250) {
+export function fastSmoothScroll(element: HTMLElement | null | (() => HTMLElement | null)) {
   let isScrolling = $state(false);
 
-  function scrollTo(target: number) {
+  /**
+   * Scroll to a target position.
+   *
+   * @param target Target scroll position.
+   * @param duration Duration of the scroll animation in milliseconds. Defaults to 250.
+   */
+  function scrollTo(target: number, duration = 250, onScrollEnd?: () => void, tolerance = 10) {
     const el = typeof element === "function" ? element() : element;
     if (!el) return;
+
+    /**
+     * Tolerance default to 10px
+     * If the current scroll position is within 10px of the target position, it is considered aligned,
+     * which can prevent micro-pixel deviations from causing repeated scrolling or UI jitter.
+     * If triggered by scroll_trigger (i.e., manual click), the tolerance is ignored and scrolling is performed directly.
+     */
+    if (Math.abs(el.scrollTop - target) <= tolerance) {
+      return;
+    }
+
+    if (duration <= 0) {
+      requestAnimationFrame(() => {
+        if (el) el.scrollTop = target;
+        requestAnimationFrame(() => {
+          isScrolling = false;
+          onScrollEnd?.();
+        });
+      });
+      return;
+    }
 
     const start = el.scrollTop;
     const distance = target - start;
@@ -39,15 +65,17 @@ export function fastSmoothScroll(element: HTMLElement | null | (() => HTMLElemen
       // easeOutQuad
       const ease = progress * (2 - progress);
 
-      const currentEl = typeof element === "function" ? element() : element;
-      if (currentEl) {
-        currentEl.scrollTop = start + distance * ease;
+      if (el) {
+        el.scrollTop = start + distance * ease;
       }
 
       if (timeElapsed < duration) {
         requestAnimationFrame(animation);
       } else {
-        isScrolling = false;
+        requestAnimationFrame(() => {
+          isScrolling = false;
+          onScrollEnd?.();
+        });
       }
     }
 
