@@ -128,7 +128,7 @@
           <Card.Title>{t.WebsocketTest.SendCommand()}</Card.Title>
           <Card.Description>{t.WebsocketTest.SendCommandDesc()}</Card.Description>
         </Card.Header>
-        <Card.Content class="gap-4">
+        <Card.Content class="flex flex-col gap-y-2">
           <!-- Topic Management -->
           <div class="grid gap-2">
             <Label for="topic">{t.WebsocketTest.Topic()}</Label>
