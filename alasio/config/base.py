@@ -10,7 +10,7 @@ from alasio.backend.worker.event import ConfigEvent
 from alasio.base.exception import RequestHumanTakeover, ScriptError, TaskStop
 from alasio.base.pretty import dict2kv
 from alasio.base.servertime import ServerTime, nearest_future, random_time
-from alasio.base.timer import now
+from alasio.base.timer import getnow
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.mod import Mod
@@ -751,7 +751,7 @@ class AlasioConfigBase:
         futures = []
         if minute is not None:
             delay = int(random_time(minute) * 60)
-            futures.append(now().replace(microsecond=0) + timedelta(seconds=delay))
+            futures.append(getnow().replace(microsecond=0) + timedelta(seconds=delay))
         if server_update is not None:
             if server_update is True:
                 try:
@@ -806,7 +806,7 @@ class AlasioConfigBase:
                     self.cross_set(task, 'Scheduler', 'Enable', 'enabled')
                 else:
                     self.cross_set(task, 'Scheduler', 'Enable', True)
-                self.cross_set(task, 'Scheduler', 'NextRun', now().replace(microsecond=0))
+                self.cross_set(task, 'Scheduler', 'NextRun', getnow().replace(microsecond=0))
             return True
         else:
             logger.info(f'Task call: {task} (skipped because disabled by user)')

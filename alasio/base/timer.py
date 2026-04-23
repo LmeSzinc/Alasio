@@ -19,7 +19,7 @@ def timer(function):
     return function_timer
 
 
-def now(tz=True):
+def getnow(tz=True):
     """
     Get datatime now, with or without timezone
 
@@ -32,7 +32,7 @@ def now(tz=True):
     elif tz is False:
         return n
     else:
-        n.astimezone(tz)
+        return n.astimezone(tz)
 
 
 class Timer:

@@ -9,7 +9,7 @@ from alasio.base.exception import *
 from alasio.base.scheduler.configwatcher import ConfigWatcher
 from alasio.base.scheduler.inflect import Inflection
 from alasio.base.state import TaskState
-from alasio.base.timer import now
+from alasio.base.timer import getnow
 from alasio.config.config_generated import AlasioConfigGenerated
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
@@ -218,7 +218,7 @@ class AlasioScheduler:
         Returns:
             bool: True if waited to future, False if early stopped
         """
-        if future <= now():
+        if future <= getnow():
             return True
         logger.info(f'Wait until {future} for task `{task}`')
 
@@ -259,7 +259,7 @@ class AlasioScheduler:
                 logger.info('SchedulerStop: backend request scheduler-stopping')
                 raise SchedulerStop
             # check if reached future
-            if now() > future:
+            if getnow() > future:
                 reached = True
                 break
             # check if config modified every 5s
