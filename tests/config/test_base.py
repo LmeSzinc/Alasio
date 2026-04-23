@@ -165,13 +165,13 @@ class TestAlasioConfigBase:
         # Set a value without saving
         config.Scheduler.Enable = True
         assert config.Scheduler.Enable is True
-        assert len(config.modified) == 1
+        assert len(config._modified) == 1
 
         # Re-init should clear modifications and reload from DB (which has default False)
         config.release()
         config.init_task()
         assert config.Scheduler.Enable is False
-        assert len(config.modified) == 0
+        assert len(config._modified) == 0
 
     def test_init_task_with_no_task(self, config_cls):
         """Test init_task with empty task does nothing"""
@@ -181,7 +181,7 @@ class TestAlasioConfigBase:
         config.init_task()
 
         # dict_value should be empty
-        assert len(config.dict_row) == 0
+        assert len(config._dict_row) == 0
 
     def test_init_task_with_invalid_task(self, config_cls):
         """Test initialization with invalid task raises KeyError"""
@@ -211,7 +211,7 @@ class TestConfigModification:
         config.Scheduler.Enable = True
 
         # Check modified dict is cleared after auto save
-        assert len(config.modified) == 0
+        assert len(config._modified) == 0
         # Re-init and verify
         config.init_task()
         assert config.Scheduler.Enable is True
@@ -244,13 +244,13 @@ class TestConfigModification:
         config.Scheduler.Enable = True
 
         # Modified dict should contain the change
-        assert len(config.modified) == 1
+        assert len(config._modified) == 1
         key = ('Main', 'Scheduler', 'Enable')
-        assert key in config.modified
+        assert key in config._modified
 
         # Manual save
         config.save()
-        assert len(config.modified) == 0
+        assert len(config._modified) == 0
 
     def test_batch_set_context_manager(self, config):
         """Test batch_set context manager"""
@@ -258,10 +258,10 @@ class TestConfigModification:
             config.Scheduler.Enable = True
             config.Scheduler.ServerUpdate = '15:00'
             # Should not save yet
-            assert len(config.modified) == 2
+            assert len(config._modified) == 2
 
         # Should save after context exit
-        assert len(config.modified) == 0
+        assert len(config._modified) == 0
 
         # Re-init and verify
         config.init_task()
@@ -284,15 +284,15 @@ class TestConfigModification:
                 config.Scheduler.ServerUpdate = '18:00'
                 assert bs2.depth == 2
                 # Should not save yet
-                assert len(config.modified) == 2
+                assert len(config._modified) == 2
 
             # Should not save at inner exit
             assert bs.depth == 1
-            assert len(config.modified) == 2
+            assert len(config._modified) == 2
 
         # Should save after outermost exit
         assert config.batch_set().depth == 0
-        assert len(config.modified) == 0
+        assert len(config._modified) == 0
 
     def test_batch_set_without_auto_save(self, config):
         """Test batch_set when auto_save is disabled"""
@@ -303,7 +303,7 @@ class TestConfigModification:
             config.Scheduler.ServerUpdate = '20:00'
 
         # Should not save even after context exit
-        assert len(config.modified) == 2
+        assert len(config._modified) == 2
 
     def test_save_empty_modifications(self, config):
         """Test save() with no modifications does nothing"""
@@ -323,8 +323,8 @@ class TestConfigModification:
 
         # Check modified dict
         key = ('Main', 'Scheduler', 'Enable')
-        assert key in config.modified
-        event = config.modified[key]
+        assert key in config._modified
+        event = config._modified[key]
         assert event.task == 'Main'
         assert event.group == 'Scheduler'
         assert event.arg == 'Enable'
@@ -675,7 +675,7 @@ class TestModelProxy:
 
         # Should register modification
         key = ('Main', 'Scheduler', 'Enable')
-        assert key in config.modified
+        assert key in config._modified
 
     def test_proxy_repr(self, config):
         """Test ModelProxy __repr__"""
@@ -799,7 +799,7 @@ class TestConfigConcurrency:
                     # Modify config
                     config.Scheduler.Enable = (thread_id == 1)
                     # Modification should stay in memory
-                    assert len(config.modified) >= 1
+                    assert len(config._modified) >= 1
 
                     # Wait for other thread to enter batch_set
                     time.sleep(0.5)

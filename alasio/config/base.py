@@ -19,7 +19,7 @@ from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
 from alasio.ext.cache import cached_property, cached_property_threadsafe
-from alasio.ext.deep import deep_iter_depth2
+from alasio.ext.deep import deep_iter_depth1, deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.ext.msgspec_error.parse_anno import get_class_annotations
 from alasio.logger import logger
@@ -93,7 +93,7 @@ class TemporaryContext:
     def __exit__(self, exc_type, exc_val, exc_tb):
         # rollback
         with self.config._lock:
-            for key, value in self.prev_const.items():
+            for key, value in deep_iter_depth1(self.prev_const):
                 self.config._apply_override_const(key, value)
             for group, arg, value in deep_iter_depth2(self.prev_config):
                 self.config._apply_override_config(group, arg, value)
@@ -105,6 +105,31 @@ class AlasioConfigBase:
     """
     # subclasses must override this
     entry: ModEntryInfo
+
+    # __slots__ at TYPE_CHECKING only
+    # Fooling IDE to give warnings for code like `config.XXX = 1`
+    # No __slots__ at runtime because cached_property requires __dict__ which is incompatible with __slots__
+    if TYPE_CHECKING:
+        __slots__ = (
+            # initialized property
+            'config_name',
+            'mod',
+            'task',
+            '_config_cached',
+            '_dict_row',
+            '_dict_group',
+            '_modified',
+            '_override_config',
+            '_override_const',
+            'auto_save',
+            '_lock',
+            '_local',
+            'is_template_config',
+            # cached_property
+            '_annotations',
+            '_annotations_alasio',
+            'servertime',
+        )
 
     def __init__(self, config_name, task=''):
         """
@@ -128,13 +153,13 @@ class AlasioConfigBase:
         # Key: (task, group). Value: group data in messagepack
         # We don't update config realtime, otherwise things will get really complex if user modify configs
         # when task is running.
-        self.dict_row: "dict[tuple[str, str], bytes]" = {}
+        self._dict_row: "dict[tuple[str, str], bytes]" = {}
         # A cache of validated group object
         # Key: (task, group). Value: validated megspec.Struct object
-        self.dict_group: "dict[tuple[str, str], Struct]" = {}
+        self._dict_group: "dict[tuple[str, str], Struct]" = {}
         # Modified configs. Key: (task, group, arg). Value: ConfigSetEvent.
         # All variable modifications will be record here and saved in method `save()`.
-        self.modified: "dict[tuple[str, str, str], ConfigSetEvent]" = {}
+        self._modified: "dict[tuple[str, str, str], ConfigSetEvent]" = {}
         # Memory-only overrides. Key: Group.Arg. Value: value
         # These override DB values but are not saved to DB.
         self._override_config: "dict[str, dict[str, Any]]" = defaultdict(dict)
@@ -170,7 +195,7 @@ class AlasioConfigBase:
     def servertime(self) -> ServerTime:
         """
         Server time calculation may depend on user settings, mod needs to override this
-        Default to server time at UTF+8
+        Default to server time at UTC+8
         """
         return ServerTime(8)
 
@@ -187,8 +212,8 @@ class AlasioConfigBase:
             for row in rows:
                 key = (row.task, row.group)
                 dict_row[key] = row.value
-            self.dict_row = dict_row
-            self.dict_group = {}
+            self._dict_row = dict_row
+            self._dict_group = {}
             # check mod
             self._check_config_mod()
             # finish
@@ -201,10 +226,10 @@ class AlasioConfigBase:
             for key in self._annotations:
                 if key in self.__dict__:
                     self.__dict__.pop(key, None)
-            self.dict_row.clear()
-            self.dict_group.clear()
+            self._dict_row.clear()
+            self._dict_group.clear()
             self._config_cached = False
-            self.modified.clear()
+            self._modified.clear()
             # clear thread-local state
             self._local.batch_depth = 0
             cached_property_threadsafe.pop(self, 'servertime')
@@ -232,8 +257,8 @@ class AlasioConfigBase:
 
             self.config_cache()
 
-            dict_row = self.dict_row
-            dict_group = self.dict_group
+            dict_row = self._dict_row
+            dict_group = self._dict_group
             for group, group_ref in self._iter_task_groups(self.task):
                 key = (group_ref.task, group)
                 if key in dict_group:
@@ -275,7 +300,7 @@ class AlasioConfigBase:
         """
         with self._lock:
             key = (task, group)
-            obj = self.dict_group.get(key, None)
+            obj = self._dict_group.get(key, None)
             if obj is not None:
                 return obj
             # build group obj
@@ -293,12 +318,14 @@ class AlasioConfigBase:
                     if group_ref is None:
                         logger.warning(f'cross_get failed, no such group: "{task}.{group}"')
                         return NODEFAULT
+                logger.warning(f'cross_get failed, no such group: "{task}.{group}"')
+                return NODEFAULT
 
             model = self.mod.get_group_model(file=group_ref.file, cls=group_ref.cls)
             if model is None:
                 # DataInconsistent error, ignore to reduce runtime crash
                 return NODEFAULT
-            value = self.dict_row.get(key, b'\x80')
+            value = self._dict_row.get(key, b'\x80')
             obj, errors = load_msgpack_with_default(value, model=model)
             # for error in errors:
             #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
@@ -306,7 +333,7 @@ class AlasioConfigBase:
                 logger.warning(f'Class "{group_ref.cls}" in "{group_ref.file}" cannot be default constructed')
                 return NODEFAULT
             # no proxy on groups
-            self.dict_group[key] = obj
+            self._dict_group[key] = obj
             return obj
 
     def cross_get(self, task, group, arg, default=None):
@@ -397,7 +424,7 @@ class AlasioConfigBase:
         """
         event = ConfigSetEvent(task=task, group=group, arg=arg, value=value)
         with self._lock:
-            self.modified[(task, group, arg)] = event
+            self._modified[(task, group, arg)] = event
             if self.auto_save and getattr(self._local, 'batch_depth', 0) == 0:
                 self.save()
 
@@ -470,11 +497,11 @@ class AlasioConfigBase:
             config.OpsiFleet.Fleet = 1
         """
         with self._lock:
-            if not self.modified:
+            if not self._modified:
                 return False
 
-            events = list(self.modified.values())
-            self.modified.clear()
+            events = list(self._modified.values())
+            self._modified.clear()
 
         # config_set will log on success
         # messages = [f'{e.task}.{e.group}.{e.arg}={e.value}' for e in events]
@@ -643,7 +670,7 @@ class AlasioConfigBase:
                 self._cross_get_group(task, 'Scheduler')
             # calculate scheduler
             pending_task, waiting_task = self.mod.get_task_schedule(
-                self.config_name, dict_row=self.dict_row, dict_group=self.dict_group)
+                self.config_name, dict_row=self._dict_row, dict_group=self._dict_group)
         # send backend event
         backend = BackendBridge()
         if backend.inited:
@@ -691,8 +718,10 @@ class AlasioConfigBase:
             logger.info(f'Stop task {prev}, scheduler stopping')
             return True
 
+        # reload
+        self.release()
+
         # check task switch
-        self.load()
         new = self.get_next_task().TaskName
         if prev == new:
             logger.info(f'Continue task `{new}`')
