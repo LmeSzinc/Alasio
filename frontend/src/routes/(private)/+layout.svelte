@@ -65,17 +65,15 @@
     </div>
 
     <!-- 1.2 Desktop Aside -->
-    <div class="area-aside hidden min-h-0 shrink-0 overflow-hidden md:flex">
-      <div class="aside-container flex h-full shrink-0">
-        <div class={cn("aside-item bg-card border-border border-r", screen.isXL && "neushadow")}>
-          <ConfigAside class="pt-1 xl:pt-0" />
-        </div>
-        {#if NavContext.snippet}
-          <div class={cn("aside-item bg-card w-50 pt-1 xl:pt-0", screen.isXL && "neushadow w-60")}>
-            {@render NavContext.snippet()}
-          </div>
-        {/if}
+    <div class="area-aside hidden h-full min-h-0 shrink-0 md:flex">
+      <div class={cn("aside-item bg-card border-border border-r", screen.isXL && "neushadow")}>
+        <ConfigAside class="pt-1 xl:pt-0" />
       </div>
+      {#if NavContext.snippet}
+        <div class={cn("aside-item bg-card w-50 pt-1 xl:pt-0", screen.isXL && "neushadow w-60")}>
+          {@render NavContext.snippet()}
+        </div>
+      {/if}
     </div>
 
     <!-- 1.3 Layout body -->
@@ -170,7 +168,7 @@
   .area-aside {
     grid-area: aside;
     min-height: 0;
-    overflow: hidden;
+    background-color: var(--background);
   }
   .area-main {
     grid-area: main;
@@ -178,19 +176,14 @@
     min-height: 0;
   }
 
-  .aside-container {
-    background-color: var(--background);
-    overflow: hidden;
-  }
   @media (min-width: 1280px) {
-    .aside-container {
+    .area-aside {
       margin-top: 1rem;
       margin-bottom: 1rem;
       margin-left: 1rem;
       height: calc(100% - 2rem);
       gap: 1rem;
       box-shadow: none;
-      overflow: hidden;
       background-color: transparent;
     }
     .aside-item {

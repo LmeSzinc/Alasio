@@ -15,4 +15,4 @@
   const itemList = $derived(topicClient.data ?? {});
 </script>
 
-<DashboardCard class={cn("neushadow bg-card rounded-lg", className)} items={itemList} />
+<DashboardCard class={cn("bg-card rounded-lg", className)} items={itemList} />

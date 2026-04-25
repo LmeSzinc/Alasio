@@ -41,7 +41,7 @@
     role="presentation"
     tabindex="-1"
     class={cn(
-      "bg-card neushadow absolute top-0 left-0 w-full overflow-hidden rounded-xl outline-none",
+      "bg-card neushadow absolute top-0 left-0 w-full overflow-hidden rounded-lg outline-none",
       isExpanded ? "max-h-72.5 min-h-32 shadow-2xl ring-1 ring-black/5" : "h-32",
     )}
   >

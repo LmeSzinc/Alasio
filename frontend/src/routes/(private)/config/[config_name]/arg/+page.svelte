@@ -76,7 +76,5 @@
       {handleReset}
       {handleGroupReset}
     />
-  {:else}
-    <div class="text-muted-foreground text-center text-sm">No data</div>
   {/if}
 </div>
