@@ -6,7 +6,7 @@
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
   import { SUPPORTED_LANGS } from "$src/i18ngen/constants";
-  import { CircleCheck, Languages } from "@lucide/svelte";
+  import { Check, Languages } from "@lucide/svelte";
 
   type Props = {
     disabled?: boolean;
@@ -41,7 +41,7 @@
 <Popover.Root bind:open>
   <Popover.Trigger
     class={cn(
-      "focus-visible:ring-ring ring-offset-background hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+      "focus-visible:ring-ring ring-offset-background hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
       "inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium transition-colors",
       "disabled:pointer-events-none disabled:opacity-50",
       className,
@@ -56,13 +56,11 @@
     <div class="space-y-1">
       {#each SUPPORTED_LANGS as lang}
         {@const variant = i18nState.l === lang ? "default" : "ghost"}
-        <Button class="w-full" {variant} onclick={() => selectLanguage(lang)}>
+        <Button class="w-full justify-between font-normal" {variant} onclick={() => selectLanguage(lang)}>
+          {languageNames[lang]}
           {#if i18nState.l === lang}
-            <CircleCheck class="text-primary-foreground" />
+            <Check class="h-4 w-4" />
           {/if}
-          <span class="flex-1 text-left">
-            {languageNames[lang]}
-          </span>
         </Button>
       {/each}
     </div>
