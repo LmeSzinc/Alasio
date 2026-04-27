@@ -194,9 +194,6 @@ def get_name(path: str) -> str:
     """
     if '/' in path:
         _, _, path = path.rpartition('/')
-    if WINDOWS_SEP:
-        if '\\' in path:
-            _, _, path = path.rpartition('\\')
     return path
 
 
@@ -208,9 +205,6 @@ def get_stem(path: str) -> str:
     """
     if '/' in path:
         _, _, path = path.rpartition('/')
-    if WINDOWS_SEP:
-        if '\\' in path:
-            _, _, path = path.rpartition('\\')
     stem, dot, _ = path.rpartition('.')
     if dot:
         return stem
@@ -227,9 +221,6 @@ def get_rootstem(path: str) -> str:
     """
     if '/' in path:
         _, _, path = path.rpartition('/')
-    if WINDOWS_SEP:
-        if '\\' in path:
-            _, _, path = path.rpartition('\\')
     stem, dot, _ = path.partition('.')
     if dot:
         return stem
@@ -243,14 +234,11 @@ def get_suffix(path: str) -> str:
     /abc/def     -> ""
     /abc/.git    -> .git
     """
+    if '/' in path:
+        _, _, path = path.rpartition('/')
     path, dot, suffix = path.rpartition('.')
     if dot:
         return dot + suffix
-    if '/' in path:
-        _, _, path = path.rpartition('/')
-    if WINDOWS_SEP:
-        if '\\' in path:
-            _, _, path = path.rpartition('\\')
     return path
 
 
@@ -263,9 +251,6 @@ def get_multisuffix(path: str) -> str:
     """
     if '/' in path:
         _, _, path = path.rpartition('/')
-    if WINDOWS_SEP:
-        if '\\' in path:
-            _, _, path = path.rpartition('\\')
     _, dot, suffix = path.partition('.')
     if dot:
         return dot + suffix

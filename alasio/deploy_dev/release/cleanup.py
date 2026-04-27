@@ -1,5 +1,3 @@
-import os
-
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes, file_remove, folder_rmtree
 from alasio.ext.path.iter import iter_folders
@@ -169,30 +167,35 @@ def cleanup_python_packages(root: PathStr):
     rmtree(root / 'cv2/data')
 
 
-KEEP_EXT = {'py', 'pyi', 'pyd', 'dll', 'so'}
+KEEP_EXT = {'.py', '.pyi', '.pyd', '.dll', '.so'}
 
 
 def cleanup_license(root: PathStr):
     print(f'Cleanup license: {root}')
+    license_file = (
+        'license',
+        'licence',
+        'license-',
+        'license_',
+        'authors',
+        'copying',
+        'notice',
+        'readme',
+        'description',
+    )
+    DOC_SUFFIX = {
+        '.md', '.rst', '.txt', '.psf', '.html', '.htm',
+        '.mit', '.bsd', '.apache', '.apache2', '.lesser'
+    }
     for file in root.iter_files(recursive=True):
-        _, _, name = file.rpartition(os.sep)
-        _, _, ext = file.rpartition('.')
+        name = file.name.lower()
+        ext = file.suffix.lower()
         if ext in KEEP_EXT:
             continue
 
-        name = name.lower()
-        if name.startswith('license') or name.startswith('licence'):
-            rm(file)
-        if name.startswith('authors'):
-            rm(file)
-        if name.startswith('copying'):
-            rm(file)
-        if name.startswith('notice'):
-            rm(file)
-        if name.startswith('readme'):
-            rm(file)
-        if name.startswith('description'):
-            rm(file)
+        if name.startswith(license_file):
+            if not ext or ext in DOC_SUFFIX:
+                rm(file)
 
     rmtree(root / 'scipy/linalg/src/id_dist/doc')
     rm(root / 'scipy/HACKING.rst.txt')
