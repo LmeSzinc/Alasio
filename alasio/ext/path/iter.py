@@ -20,80 +20,68 @@ def iter_files(root, ext='', recursive=False, follow_symlinks=False):
     Yields:
         str: Full path
     """
+    try:
+        entries = os.scandir(root)
+    except (FileNotFoundError, NotADirectoryError):
+        return
     if ext:
-        # Iter all files with given extension
+        # Iter all files with given extension (directory not included)
         # iter_files(folder, suffix='.json')
         if recursive:
-            try:
-                with os.scandir(root) as entries:
-                    for entry in entries:
-                        # Iter files
-                        if entry.name.endswith(ext):
-                            try:
-                                if entry.is_file(follow_symlinks=follow_symlinks):
-                                    yield entry.path
-                                    continue
-                            except FileNotFoundError:
-                                continue
-                        # Iter subdirectories
-                        try:
-                            is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
-                        except FileNotFoundError:
+            for entry in entries:
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
+                except FileNotFoundError:
+                    continue
+                # Iter subdirectories
+                if is_dir:
+                    yield from iter_files(entry.path, ext, recursive, follow_symlinks)
+                    continue
+                # Iter files
+                if entry.name.endswith(ext):
+                    try:
+                        if entry.is_file(follow_symlinks=follow_symlinks):
+                            yield entry.path
                             continue
-                        if is_dir:
-                            yield from iter_files(entry.path, ext, recursive, follow_symlinks)
-                            continue
-            except (FileNotFoundError, NotADirectoryError):
-                return
+                    except FileNotFoundError:
+                        continue
         else:
-            try:
-                with os.scandir(root) as entries:
-                    for entry in entries:
-                        # Iter files
-                        if entry.name.endswith(ext):
-                            try:
-                                if entry.is_file(follow_symlinks=follow_symlinks):
-                                    yield entry.path
-                            except FileNotFoundError:
-                                continue
-            except (FileNotFoundError, NotADirectoryError):
-                return
+            for entry in entries:
+                # Iter files
+                if entry.name.endswith(ext):
+                    try:
+                        if entry.is_file(follow_symlinks=follow_symlinks):
+                            yield entry.path
+                    except FileNotFoundError:
+                        continue
     else:
         # Iter all files (directory not included)
         # iter_files(folder)
         if recursive:
-            try:
-                with os.scandir(root) as entries:
-                    for entry in entries:
-                        # Iter files
-                        try:
-                            if entry.is_file(follow_symlinks=follow_symlinks):
-                                yield entry.path
-                                continue
-                        except FileNotFoundError:
-                            continue
-                        # Iter subdirectories
-                        try:
-                            is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
-                        except FileNotFoundError:
-                            continue
-                        if is_dir:
-                            yield from iter_files(entry.path, ext, recursive, follow_symlinks)
-                            continue
-            except (FileNotFoundError, NotADirectoryError):
-                return
+            for entry in entries:
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
+                except FileNotFoundError:
+                    continue
+                # Iter subdirectories
+                if is_dir:
+                    yield from iter_files(entry.path, ext, recursive, follow_symlinks)
+                    continue
+                # Iter files
+                try:
+                    if entry.is_file(follow_symlinks=follow_symlinks):
+                        yield entry.path
+                        continue
+                except FileNotFoundError:
+                    continue
         else:
-            try:
-                with os.scandir(root) as entries:
-                    for entry in entries:
-                        # Iter files
-                        try:
-                            if entry.is_file(follow_symlinks=follow_symlinks):
-                                yield entry.path
-                        except FileNotFoundError:
-                            continue
-            except (FileNotFoundError, NotADirectoryError):
-                return
+            for entry in entries:
+                # Iter files
+                try:
+                    if entry.is_file(follow_symlinks=follow_symlinks):
+                        yield entry.path
+                except FileNotFoundError:
+                    continue
 
 
 def iter_filenames(root, ext='', follow_symlinks=False):
@@ -109,33 +97,39 @@ def iter_filenames(root, ext='', follow_symlinks=False):
     Yields:
         str: Filename
     """
+    try:
+        entries = os.scandir(root)
+    except (FileNotFoundError, NotADirectoryError):
+        return
     if ext:
         # Iter all files with given extension
         # iter_files(folder, suffix='.json')
-        try:
-            with os.scandir(root) as entries:
-                for entry in entries:
-                    if entry.name.endswith(ext):
-                        try:
-                            if entry.is_file(follow_symlinks=follow_symlinks):
-                                yield entry.name
-                        except FileNotFoundError:
-                            continue
-        except (FileNotFoundError, NotADirectoryError):
-            return
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=follow_symlinks):
+                    continue
+            except FileNotFoundError:
+                continue
+            if entry.name.endswith(ext):
+                try:
+                    if entry.is_file(follow_symlinks=follow_symlinks):
+                        yield entry.name
+                except FileNotFoundError:
+                    continue
     else:
         # Iter all files (directory not included)
         # iter_files(folder)
-        try:
-            with os.scandir(root) as entries:
-                for entry in entries:
-                    try:
-                        if entry.is_file(follow_symlinks=follow_symlinks):
-                            yield entry.name
-                    except FileNotFoundError:
-                        continue
-        except (FileNotFoundError, NotADirectoryError):
-            return
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=follow_symlinks):
+                    continue
+            except FileNotFoundError:
+                continue
+            try:
+                if entry.is_file(follow_symlinks=follow_symlinks):
+                    yield entry.name
+            except FileNotFoundError:
+                continue
 
 
 def iter_folders(root, recursive=False, follow_symlinks=False):
@@ -150,35 +144,31 @@ def iter_folders(root, recursive=False, follow_symlinks=False):
     Yields:
         str: Full path
     """
+    try:
+        entries = os.scandir(root)
+    except (FileNotFoundError, NotADirectoryError):
+        return
     # Iter all directories
     # iter_folders(folder)
     if recursive:
-        try:
-            with os.scandir(root) as entries:
-                for entry in entries:
-                    # Iter subdirectories
-                    try:
-                        is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
-                    except FileNotFoundError:
-                        continue
-                    if is_dir:
-                        yield entry.path
-                        yield from iter_folders(entry.path, recursive, follow_symlinks)
-                        continue
-        except (FileNotFoundError, NotADirectoryError):
-            return
+        for entry in entries:
+            try:
+                is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
+            except FileNotFoundError:
+                continue
+            # Iter subdirectories
+            if is_dir:
+                yield entry.path
+                yield from iter_folders(entry.path, recursive, follow_symlinks)
+                continue
     else:
-        try:
-            with os.scandir(root) as entries:
-                for entry in entries:
-                    # Iter folders
-                    try:
-                        if entry.is_dir(follow_symlinks=follow_symlinks):
-                            yield entry.path
-                    except FileNotFoundError:
-                        continue
-        except (FileNotFoundError, NotADirectoryError):
-            return
+        for entry in entries:
+            # Iter folders
+            try:
+                if entry.is_dir(follow_symlinks=follow_symlinks):
+                    yield entry.path
+            except FileNotFoundError:
+                continue
 
 
 def iter_foldernames(root, recursive=False, follow_symlinks=False):
@@ -193,41 +183,31 @@ def iter_foldernames(root, recursive=False, follow_symlinks=False):
     Yields:
         str: Folder name
     """
+    try:
+        entries = os.scandir(root)
+    except (FileNotFoundError, NotADirectoryError):
+        return
     # Iter all directories
     # iter_folders(folder)
     if recursive:
-        try:
-            with os.scandir(root) as entries:
-                for entry in entries:
-                    # Iter folders
-                    try:
-                        if entry.is_dir(follow_symlinks=follow_symlinks):
-                            yield entry.name
-                            continue
-                    except FileNotFoundError:
-                        continue
-                    # Iter subdirectories
-                    try:
-                        is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
-                    except FileNotFoundError:
-                        continue
-                    if is_dir:
-                        yield from iter_folders(entry.path, recursive, follow_symlinks)
-                        continue
-        except (FileNotFoundError, NotADirectoryError):
-            return
+        for entry in entries:
+            try:
+                is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
+            except FileNotFoundError:
+                continue
+            # Iter subdirectories
+            if is_dir:
+                yield entry.name
+                yield from iter_folders(entry.path, recursive, follow_symlinks)
+                continue
     else:
-        try:
-            with os.scandir(root) as entries:
-                for entry in entries:
-                    # Iter folders
-                    try:
-                        if entry.is_dir(follow_symlinks=follow_symlinks):
-                            yield entry.name
-                    except FileNotFoundError:
-                        continue
-        except (FileNotFoundError, NotADirectoryError):
-            return
+        for entry in entries:
+            # Iter folders
+            try:
+                if entry.is_dir(follow_symlinks=follow_symlinks):
+                    yield entry.name
+            except FileNotFoundError:
+                continue
 
 
 def iter_entry(root, recursive=False, follow_symlinks=False):
@@ -247,29 +227,24 @@ def iter_entry(root, recursive=False, follow_symlinks=False):
     Yields:
         os.DirEntry: Directory entry object with cached filesystem info
     """
+    try:
+        entries = os.scandir(root)
+    except (FileNotFoundError, NotADirectoryError):
+        return
     if recursive:
-        try:
-            with os.scandir(root) as entries:
-                for entry in entries:
-                    # Yield the entry itself
-                    yield entry
-                    # Recurse into subdirectories
-                    try:
-                        is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
-                    except FileNotFoundError:
-                        continue
-                    if is_dir:
-                        yield from iter_entry(entry.path, recursive, follow_symlinks)
-        except (FileNotFoundError, NotADirectoryError):
-            return
+        for entry in entries:
+            # Yield the entry itself
+            yield entry
+            # Recurse into subdirectories
+            try:
+                is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
+            except FileNotFoundError:
+                continue
+            if is_dir:
+                yield from iter_entry(entry.path, recursive, follow_symlinks)
     else:
-        try:
-            with os.scandir(root) as entries:
-                for entry in entries:
-                    # Yield the entry itself
-                    yield entry
-        except (FileNotFoundError, NotADirectoryError):
-            return
+        # Yield the entry itself
+        yield from entries
 
 
 _NO_CACHE = object()

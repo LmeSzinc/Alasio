@@ -532,8 +532,9 @@ class PathStr(str):
             PermissionError: (Windows only) If another process is still reading the file and all retries failed
             FileNotFoundError:
         """
+        path_to = PathStr.new(path_to)
         atomic_replace(self, path_to)
-        return PathStr.new(path_to)
+        return path_to
 
     def atomic_rename(self, path_to):
         """
@@ -550,8 +551,9 @@ class PathStr(str):
             FileNotFoundError:
             FileExistError:
         """
+        path_to = PathStr.new(path_to)
         atomic_rename(self, path_to)
-        return PathStr.new(path_to)
+        return path_to
 
     def atomic_failure_cleanup(self, recursive=False):
         """
@@ -588,7 +590,7 @@ class PathStr(str):
             PathStr: Full path
         """
         for path in iter_files(self, ext=ext, recursive=recursive, follow_symlinks=follow_symlinks):
-            yield PathStr(path)
+            yield PathStr(normpath(path))
 
     def iter_filenames(self, ext='', follow_symlinks=False):
         """
@@ -616,7 +618,7 @@ class PathStr(str):
             PathStr: Full path
         """
         for path in iter_folders(self, recursive=recursive, follow_symlinks=follow_symlinks):
-            yield PathStr(path)
+            yield PathStr(normpath(path))
 
     def iter_foldernames(self, recursive=False, follow_symlinks=False):
         """
@@ -630,6 +632,24 @@ class PathStr(str):
             str: Folder name
         """
         yield from iter_foldernames(self, recursive=recursive, follow_symlinks=follow_symlinks)
+
+    def iter_entry(self, recursive=False, follow_symlinks=False):
+        """
+        Iter DirEntry objects in folder with good performance
+
+        This yields the actual DirEntry objects from os.scandir(), which can be
+        more efficient than yielding paths since DirEntry caches filesystem info.
+        You can then call entry.path, entry.name, entry.is_file(), entry.is_dir(),
+        entry.stat(), etc. on the results without additional filesystem calls.
+
+        Args:
+            recursive (bool): True to recursively traverse subdirectories
+            follow_symlinks (bool): True to follow symlinks
+
+        Yields:
+            os.DirEntry: Directory entry object with cached filesystem info
+        """
+        yield from iter_entry(self, recursive=recursive, follow_symlinks=follow_symlinks)
 
     """
     Wrap os module, imitating Pathlib

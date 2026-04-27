@@ -5,25 +5,22 @@ WINDOWS_SEP = os.sep == '\\'
 
 def normpath(path: str) -> str:
     """
-    Equivalent to os.path.normpath(self)
+    Normalize whatever to seperator "/"
     """
     if WINDOWS_SEP:
         # In most cases just normpath('xxx.png') check '/' first to be faster
-        if '/' in path:
-            return path.rstrip('\\/').replace('/', '\\')
-        else:
-            return path.rstrip('\\')
-    else:
         if '\\' in path:
             return path.rstrip('\\/').replace('\\', '/')
         else:
-            return path.rstrip('/')
+            return path.rstrip('\\/')
+    else:
+        return path.rstrip('/')
 
 
 def joinpath(root: str, path: str) -> str:
     """
     Equivalent to os.path.join(self, path)
-    but "./" and "../" is not available, to do "../" use uppath() instead
+    Cannot handle "./" and "../", if you need "../" use uppath() instead
 
     Args:
         root: Base path, needs to be normalized first
@@ -34,7 +31,7 @@ def joinpath(root: str, path: str) -> str:
     """
     if root:
         if path:
-            return f'{root}{os.sep}{path}'
+            return f'{root}/{path}'
         else:
             return root
     else:
@@ -54,19 +51,17 @@ def joinnormpath(root: str, path: str) -> str:
         str:
     """
     if WINDOWS_SEP:
-        if '/' in path:
-            path = path.rstrip('\\/').replace('/', '\\')
-        else:
-            path = path.rstrip('\\')
-    else:
+        # In most cases just normpath('xxx.png') check '/' first to be faster
         if '\\' in path:
             path = path.rstrip('\\/').replace('\\', '/')
         else:
-            path = path.rstrip('/')
+            path = path.rstrip('\\/')
+    else:
+        path = path.rstrip('/')
 
     if root:
         if path:
-            return f'{root}{os.sep}{path}'
+            return f'{root}/{path}'
         else:
             return root
     else:
@@ -86,7 +81,7 @@ def uppath(root: str, up: int = 1) -> str:
     """
     if WINDOWS_SEP:
         for _ in range(up):
-            root, _, _ = root.rpartition(os.sep)
+            root, _, _ = root.rpartition('/')
             # Relative path can only up to empty string
             if not root:
                 return ''
@@ -95,13 +90,13 @@ def uppath(root: str, up: int = 1) -> str:
                 break
         return root
     else:
-        is_absolute = root.startswith(os.sep)
+        is_absolute = root.startswith('/')
         for _ in range(up):
-            root, _, _ = root.rpartition(os.sep)
+            root, _, _ = root.rpartition('/')
             if not root:
                 if is_absolute:
                     # Absolute path can only up to "/"
-                    return os.sep
+                    return '/'
                 else:
                     # Relative path can only up to empty string
                     return ''
@@ -158,9 +153,12 @@ def to_python_import(path):
     """
     if path.endswith('.py'):
         path = path[:-3]
-    path = path.strip('\\/')
-    if '\\' in path:
-        path = path.replace('\\', '.')
+    if WINDOWS_SEP:
+        path = path.strip('\\/')
+        if '\\' in path:
+            path = path.replace('\\', '.')
+    else:
+        path = path.strip('/')
     if '/' in path:
         path = path.replace('/', '.')
     return path
@@ -179,7 +177,11 @@ def subpath_to(path, root):
         str:
     """
     if path.startswith(root):
-        return path[len(root):].lstrip('\\/')
+        path = path[len(root):]
+        if WINDOWS_SEP:
+            return path.lstrip('\\/')
+        else:
+            return path.lstrip('/')
     else:
         return path
 
@@ -192,8 +194,9 @@ def get_name(path: str) -> str:
     """
     if '/' in path:
         _, _, path = path.rpartition('/')
-    if '\\' in path:
-        _, _, path = path.rpartition('\\')
+    if WINDOWS_SEP:
+        if '\\' in path:
+            _, _, path = path.rpartition('\\')
     return path
 
 
@@ -205,8 +208,9 @@ def get_stem(path: str) -> str:
     """
     if '/' in path:
         _, _, path = path.rpartition('/')
-    if '\\' in path:
-        _, _, path = path.rpartition('\\')
+    if WINDOWS_SEP:
+        if '\\' in path:
+            _, _, path = path.rpartition('\\')
     stem, dot, _ = path.rpartition('.')
     if dot:
         return stem
@@ -223,8 +227,9 @@ def get_rootstem(path: str) -> str:
     """
     if '/' in path:
         _, _, path = path.rpartition('/')
-    if '\\' in path:
-        _, _, path = path.rpartition('\\')
+    if WINDOWS_SEP:
+        if '\\' in path:
+            _, _, path = path.rpartition('\\')
     stem, dot, _ = path.partition('.')
     if dot:
         return stem
@@ -243,8 +248,9 @@ def get_suffix(path: str) -> str:
         return dot + suffix
     if '/' in path:
         _, _, path = path.rpartition('/')
-    if '\\' in path:
-        _, _, path = path.rpartition('\\')
+    if WINDOWS_SEP:
+        if '\\' in path:
+            _, _, path = path.rpartition('\\')
     return path
 
 
@@ -257,8 +263,9 @@ def get_multisuffix(path: str) -> str:
     """
     if '/' in path:
         _, _, path = path.rpartition('/')
-    if '\\' in path:
-        _, _, path = path.rpartition('\\')
+    if WINDOWS_SEP:
+        if '\\' in path:
+            _, _, path = path.rpartition('\\')
     _, dot, suffix = path.partition('.')
     if dot:
         return dot + suffix
@@ -272,7 +279,7 @@ def with_name(path: str, name: str) -> str:
     /abc/def     -> /abc/xxx
     /abc/.git    -> /abc/xxx
     """
-    root, sep, _ = path.rpartition(os.sep)
+    root, sep, _ = path.rpartition('/')
     if sep:
         return f'{root}{sep}{name}'
     else:
@@ -285,7 +292,7 @@ def with_stem(path: str, stem: str) -> str:
     /abc/def     -> /abc/xxx
     /abc/.git    -> /abc/xxx.git
     """
-    root, sep, name = path.rpartition(os.sep)
+    root, sep, name = path.rpartition('/')
     _, dot, suffix = name.rpartition('.')
     if sep:
         if dot:
@@ -306,7 +313,7 @@ def with_rootstem(path: str, stem: str) -> str:
     /abc/def     -> /abc/xxx
     /abc/.git    -> /abc/xxx.git
     """
-    root, sep, name = path.rpartition(os.sep)
+    root, sep, name = path.rpartition('/')
     _, dot, suffix = name.partition('.')
     if sep:
         if dot:
@@ -326,7 +333,7 @@ def with_suffix(path: str, suffix: str) -> str:
     /abc/def     -> /abc/def.xxx
     /abc/.git    -> /abc/.xxx
     """
-    root, sep, name = path.rpartition(os.sep)
+    root, sep, name = path.rpartition('/')
     stem, dot, _ = name.rpartition('.')
     if sep:
         if dot:
@@ -346,13 +353,13 @@ def with_multisuffix(path: str, suffix: str) -> str:
     /abc/def     -> /abc/def.xxx
     /abc/.git    -> /abc/.xxx
     """
-    root, sep, name = path.rpartition(os.sep)
+    root, sep, name = path.rpartition('/')
     stem, dot, _ = name.partition('.')
     if sep:
         if dot:
-            return f'{root}{os.sep}{stem}{suffix}'
+            return f'{root}{sep}{stem}{suffix}'
         else:
-            return f'{root}{os.sep}{name}{suffix}'
+            return f'{root}{sep}{name}{suffix}'
     else:
         if dot:
             return f'{stem}{suffix}'
