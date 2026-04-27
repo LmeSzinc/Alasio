@@ -1,4 +1,3 @@
-import os
 import re
 from dataclasses import dataclass
 
@@ -84,9 +83,9 @@ class EmuStr(PathStr):
         Returns:
             str: Emulator type, such as Emulator.NoxPlayer
         """
-        folder, _, exe = self.rpartition(os.sep)
-        folder, _, dir1 = folder.rpartition(os.sep)
-        folder, _, dir2 = folder.rpartition(os.sep)
+        folder, _, exe = self.rpartition('/')
+        folder, _, dir1 = folder.rpartition('/')
+        folder, _, dir2 = folder.rpartition('/')
         exe = exe.lower()
         dir1 = dir1.lower()
         dir2 = dir2.lower()
@@ -143,7 +142,7 @@ class EmuStr(PathStr):
         Yields:
             str: Path to emulator executable
         """
-        folder, _, exe = self.rpartition(os.sep)
+        folder, _, exe = self.rpartition('/')
         if exe == 'HD-MultiInstanceManager.exe':
             yield joinpath(folder, 'HD-Player.exe')
             yield joinpath(folder, 'Bluestacks.exe')
@@ -168,7 +167,7 @@ class EmuStr(PathStr):
         Returns:
             str: Path to emulator console
         """
-        folder, _, exe = self.rpartition(os.sep)
+        folder, _, exe = self.rpartition('/')
         if exe == 'MuMuPlayer.exe':
             return joinpath(folder, 'MuMuManager.exe')
         # MuMuPlayer12 5.0

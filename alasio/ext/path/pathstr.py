@@ -65,7 +65,7 @@ class PathStr(str):
         Returns:
             PathStr: Normalized path
         """
-        return PathStr(normpath(self))
+        return self.__class__(normpath(self))
 
     def uppath(self, up=1):
         """
@@ -77,7 +77,7 @@ class PathStr(str):
         Returns:
             PathStr: Path to upper directory
         """
-        return PathStr(uppath(self, up=up))
+        return self.__class__(uppath(self, up=up))
 
     def joinpath(self, path):
         """
@@ -90,7 +90,7 @@ class PathStr(str):
         Returns:
             PathStr: Joined path
         """
-        return PathStr(joinnormpath(self, path))
+        return self.__class__(joinnormpath(self, path))
 
     def __truediv__(self, other):
         """
@@ -103,7 +103,7 @@ class PathStr(str):
         Returns:
             PathStr: Joined path
         """
-        return PathStr(joinnormpath(self, other))
+        return self.__class__(joinnormpath(self, other))
 
     def abspath(self):
         """
@@ -119,7 +119,7 @@ class PathStr(str):
         Returns:
             PathStr: Absolute path
         """
-        return PathStr(abspath(self))
+        return self.__class__(abspath(self))
 
     def is_abspath(self):
         """
@@ -204,7 +204,7 @@ class PathStr(str):
         Returns:
             PathStr: Path with new filename
         """
-        return PathStr(with_name(self, name))
+        return self.__class__(with_name(self, name))
 
     def with_stem(self, name):
         """
@@ -218,7 +218,7 @@ class PathStr(str):
         Returns:
             PathStr: Path with new stem
         """
-        return PathStr(with_stem(self, name))
+        return self.__class__(with_stem(self, name))
 
     def with_rootstem(self, name):
         """
@@ -233,7 +233,7 @@ class PathStr(str):
         Returns:
             PathStr: Path with new stem
         """
-        return PathStr(with_rootstem(self, name))
+        return self.__class__(with_rootstem(self, name))
 
     def with_suffix(self, name):
         """
@@ -247,7 +247,7 @@ class PathStr(str):
         Returns:
             PathStr: Path with new extension
         """
-        return PathStr(with_suffix(self, name))
+        return self.__class__(with_suffix(self, name))
 
     def with_multisuffix(self, name):
         """
@@ -261,7 +261,7 @@ class PathStr(str):
         Returns:
             PathStr: Path with new extension
         """
-        return PathStr(with_multisuffix(self, name))
+        return self.__class__(with_multisuffix(self, name))
 
     def to_posix(self):
         """
@@ -295,7 +295,7 @@ class PathStr(str):
         Returns:
             PathStr
         """
-        return PathStr(subpath_to(self, root))
+        return self.__class__(subpath_to(self, root))
 
     @property
     def is_tmp_file(self):
@@ -315,7 +315,7 @@ class PathStr(str):
         Returns:
             PathStr: Temporary file path
         """
-        return PathStr(to_tmp_file(self))
+        return self.__class__(to_tmp_file(self))
 
     def to_nontmp_file(self):
         """
@@ -325,7 +325,7 @@ class PathStr(str):
         Returns:
             PathStr: Original file path
         """
-        return PathStr(to_nontmp_file(self))
+        return self.__class__(to_nontmp_file(self))
 
     """
     File read/write
@@ -532,7 +532,7 @@ class PathStr(str):
             PermissionError: (Windows only) If another process is still reading the file and all retries failed
             FileNotFoundError:
         """
-        path_to = PathStr.new(path_to)
+        path_to = self.__class__.new(path_to)
         atomic_replace(self, path_to)
         return path_to
 
@@ -551,7 +551,7 @@ class PathStr(str):
             FileNotFoundError:
             FileExistError:
         """
-        path_to = PathStr.new(path_to)
+        path_to = self.__class__.new(path_to)
         atomic_rename(self, path_to)
         return path_to
 
@@ -590,7 +590,7 @@ class PathStr(str):
             PathStr: Full path
         """
         for path in iter_files(self, ext=ext, recursive=recursive, follow_symlinks=follow_symlinks):
-            yield PathStr(normpath(path))
+            yield self.__class__(normpath(path))
 
     def iter_filenames(self, ext='', follow_symlinks=False):
         """
@@ -618,7 +618,7 @@ class PathStr(str):
             PathStr: Full path
         """
         for path in iter_folders(self, recursive=recursive, follow_symlinks=follow_symlinks):
-            yield PathStr(normpath(path))
+            yield self.__class__(normpath(path))
 
     def iter_foldernames(self, recursive=False, follow_symlinks=False):
         """

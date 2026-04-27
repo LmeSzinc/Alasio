@@ -1,229 +1,12 @@
-import codecs
 import os
-import re
-import winreg
-from dataclasses import dataclass
 
-from alasio.device.search.base import EmuStr, EmuType, EmulatorInstance, EmulatorSearchBase, flatten_list, \
-    remove_duplicated_path, vbox_file_to_serial
+from alasio.device.search.base import *
+from alasio.device.search.windows_reg import *
 from alasio.ext.cache import cached_property
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path import PathStr
-from alasio.ext.path.calc import normpath
-from alasio.ext.path.iter import CachePathExists, iter_files
+from alasio.ext.path.iter import CachePathExists
 from alasio.ext.proc import process_iter
-
-
-@dataclass
-class RegValue:
-    name: str
-    value: str
-    typ: int
-
-
-def list_reg(reg) -> "list[RegValue]":
-    """
-    List all reg values in a reg key
-    """
-    rows = []
-    index = 0
-    try:
-        while 1:
-            value = RegValue(*winreg.EnumValue(reg, index))
-            index += 1
-            rows.append(value)
-    except OSError:
-        pass
-    return rows
-
-
-def list_key(reg) -> "list[str]":
-    """
-    List all keys in a reg key
-    """
-    rows = []
-    index = 0
-    try:
-        while 1:
-            value = winreg.EnumKey(reg, index)
-            index += 1
-            rows.append(value)
-    except OSError:
-        pass
-    return rows
-
-
-def iter_user_assist():
-    """
-    Get recently executed programs in UserAssist
-    https://github.com/forensicmatt/MonitorUserAssist
-
-    Yields:
-        EmuStr: Path to emulator executables, may contains duplicate values
-    """
-    path = r'Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist'
-    # {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}\xxx.exe
-    regex_hash = re.compile(r'{.*}')
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as reg:
-            folders = list_key(reg)
-    except FileNotFoundError:
-        return
-
-    for folder in folders:
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f'{path}\\{folder}\\Count') as reg:
-                for key in list_reg(reg):
-                    key = codecs.decode(key.name, 'rot-13')
-                    # Skip those with hash
-                    if regex_hash.search(key):
-                        continue
-                    file = EmuStr.new(key)
-                    yield file
-                    for single in file.iter_single_from_multi():
-                        yield EmuStr(single)
-        except FileNotFoundError:
-            # FileNotFoundError: [WinError 2] 系统找不到指定的文件。
-            # Might be a random directory without "Count" subdirectory
-            continue
-
-
-def iter_mui_cache():
-    """
-    Iter emulator executables that has ever run.
-    http://what-when-how.com/windows-forensic-analysis/registry-analysis-windows-forensic-analysis-part-8/
-    https://3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Windows%E7%B3%BB%E7%BB%9F%E6%96%87%E4%BB%B6%E6
-    %89%A7%E8%A1%8C%E8%AE%B0%E5%BD%95%E7%9A%84%E8%8E%B7%E5%8F%96%E4%B8%8E%E6%B8%85%E9%99%A4
-
-    Yields:
-        EmuStr: Path to emulator executable, may contains duplicate values
-    """
-    path = r'Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache'
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as reg:
-            rows = list_reg(reg)
-    except FileNotFoundError:
-        return
-
-    # Remove app names
-    # E:\ProgramFiles\MuMu\emulator\nemu\EmulatorShell\NemuPlayer.exe.FriendlyAppName
-    regex = re.compile(r'(^.*\.exe)\.')
-    for row in rows:
-        res = regex.search(row.name)
-        if not res:
-            continue
-        file = EmuStr.new(res.group(1))
-        yield file
-        for single in file.iter_single_from_multi():
-            yield EmuStr(single)
-
-
-def get_install_dir_from_reg(path, key):
-    """
-    Args:
-        path (str): f'SOFTWARE\\leidian\\ldplayer'
-        key (str): 'InstallDir'
-
-    Returns:
-        str: Installation dir or ''
-    """
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as reg:
-            root = winreg.QueryValueEx(reg, key)[0]
-            return root
-    except FileNotFoundError:
-        pass
-    try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as reg:
-            root = winreg.QueryValueEx(reg, key)[0]
-            return root
-    except FileNotFoundError:
-        pass
-
-    return ''
-
-
-def iter_known_registry():
-    """
-    Iter emulator executables using hardcoded registry path.
-
-    Yields:
-        EmuStr: Path to emulator executable, may contains duplicate values
-    """
-    for path in [
-        r'SOFTWARE\leidian\ldplayer',
-        r'SOFTWARE\leidian\ldplayer9',
-        r'SOFTWARE\leidian\ldplayer14',
-    ]:
-        file = get_install_dir_from_reg(path, 'InstallDir')
-        if file:
-            file = EmuStr.new(file)
-            file = f'{file}{os.sep}dnplayer.exe'
-            file = EmuStr(file)
-            yield file
-
-
-def iter_uninstall_registry():
-    """
-    Iter emulator uninstaller from registry.
-
-    Yields:
-        EmuStr: Path to uninstall exe file
-    """
-    known_uninstall_registry_path = [
-        r'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
-        r'Software\Microsoft\Windows\CurrentVersion\Uninstall'
-    ]
-    known_emulator_registry_name = [
-        'Nox',
-        'Nox64',
-        'BlueStacks',
-        'BlueStacks_nxt',
-        'BlueStacks_cn',
-        'BlueStacks_nxt_cn',
-        'LDPlayer',
-        'LDPlayer4',
-        'LDPlayer9',
-        'leidian',
-        'leidian4',
-        'leidian9',
-        'Nemu',
-        'Nemu9',
-        'MuMuPlayer-12.0'
-        'MuMuPlayer',
-        'MuMuPlayer-12.0',
-        'MuMu Player 12.0',
-        'MEmu',
-    ]
-    for path in known_uninstall_registry_path:
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as reg:
-                software_list = list_key(reg)
-        except FileNotFoundError:
-            continue
-        for software in software_list:
-            if software not in known_emulator_registry_name:
-                continue
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, f'{path}\\{software}') as software_reg:
-                    uninstall = winreg.QueryValueEx(software_reg, 'UninstallString')[0]
-            except FileNotFoundError:
-                continue
-            if not uninstall:
-                continue
-            # UninstallString is like:
-            # C:\Program Files\BlueStacks_nxt\BlueStacksUninstaller.exe -tmp
-            # "E:\ProgramFiles\Microvirt\MEmu\uninstall\uninstall.exe" -u
-            # Extract path in ""
-            res = re.search('"(.*?)"', uninstall)
-            uninstall = res.group(1) if res else uninstall
-
-            # Try to remove cmd args
-            uninstall = normpath(uninstall)
-            folder, sep, file_args = uninstall.rpartition(os.sep)
-            file, space, _ = file_args.partition(' ')
-            exe = EmuStr(f'{folder}{sep}{file}')
-            yield exe
 
 
 def iter_instances(emu: EmuStr):
@@ -250,12 +33,12 @@ def iter_instances(emu: EmuStr):
         try:
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\BlueStacks_nxt") as reg:
                 folder = winreg.QueryValueEx(reg, 'UserDefinedDir')[0]
-        except FileNotFoundError:
+        except OSError:
             pass
         try:
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\BlueStacks_nxt_cn") as reg:
                 folder = winreg.QueryValueEx(reg, 'UserDefinedDir')[0]
-        except FileNotFoundError:
+        except OSError:
             pass
         if not folder:
             return
@@ -263,7 +46,7 @@ def iter_instances(emu: EmuStr):
         file = PathStr.new(folder).joinpath('bluestacks.conf')
         try:
             content = file.atomic_read_text()
-        except FileNotFoundError:
+        except OSError:
             return
         if not content:
             return
@@ -418,25 +201,30 @@ class EmulatorSearchWindows(EmulatorSearchBase, CachePathExists):
     def search_uninstall_registry():
         output = set()
         for uninstall in iter_uninstall_registry():
+            has_emulator_shell = False
+            has_shell = False
             # Find emulator executable from uninstaller
-            for file in iter_files(uninstall.uppath(), ext='.exe'):
-                file = EmuStr(file)
+            for file in uninstall.uppath().iter_files(ext='.exe'):
+                name = file.name
+                if name == 'EmulatorShell':
+                    has_emulator_shell = True
+                if name == 'shell':
+                    has_shell = True
                 if file.emutype():
                     output.add(file)
             # Find from parent directory
-            for file in iter_files(uninstall.uppath(2), ext='.exe'):
-                file = EmuStr(file)
+            for file in uninstall.uppath(2).iter_files(ext='.exe'):
                 if file.emutype():
                     output.add(file)
             # MuMu specific directory
-            for file in iter_files(uninstall.with_name('EmulatorShell'), ext='.exe'):
-                file = EmuStr(file)
-                if file.emutype():
-                    output.add(file)
-            for file in iter_files(uninstall.with_name('shell'), ext='.exe'):
-                file = EmuStr(file)
-                if file.emutype():
-                    output.add(file)
+            if has_emulator_shell:
+                for file in uninstall.with_name('EmulatorShell').iter_files(ext='.exe'):
+                    if file.emutype():
+                        output.add(file)
+            if has_shell:
+                for file in uninstall.with_name('shell').iter_files(ext='.exe'):
+                    if file.emutype():
+                        output.add(file)
 
         return output
 
