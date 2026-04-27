@@ -57,10 +57,10 @@ def test_lazy_cursor_captures_executescript(user_table):
 
     sql = 'CREATE TABLE test (id INTEGER); DROP TABLE test;'
 
-    lazy.executscript(sql)
+    lazy.executescript(sql)
 
     assert len(lazy.query) == 1
-    assert lazy.query[0][0] == 'executscript'
+    assert lazy.query[0][0] == 'executescript'
     assert lazy.query[0][1] == sql
 
 

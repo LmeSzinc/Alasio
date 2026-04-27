@@ -57,14 +57,21 @@ class LazyCursor:
     def __exit__(self, exc_type, exc_val, exc_tb):
         return
 
-    def execute(self, sql, param):
+    def execute(self, sql, param=None):
         self.query.append(('execute', sql, param))
 
-    def executemany(self, sql, param):
+    def executemany(self, sql, param=None):
         self.query.append(('executemany', sql, param))
 
-    def executscript(self, sql):
-        self.query.append(('executscript', sql, None))
+    def executescript(self, sql):
+        self.query.append(('executescript', sql, None))
+
+    def create_table(self):
+        self.query.append(('create_table', None, None))
+        return True
+
+    def rollback(self):
+        self.query.clear()
 
     def fetchone(self):
         raise RuntimeError('You should not call fetchone() in LazyCursor')
@@ -84,6 +91,8 @@ class LazyCursor:
                     cursor.executemany(sql, param)
                 elif func == 'executescript':
                     cursor.executescript(sql)
+                elif func == 'create_table':
+                    cursor.create_table()
             cursor.commit()
 
         self.query.clear()
@@ -530,6 +539,7 @@ class AlasioTable(Generic[T_model]):
                         c.commit()
                     except sqlite3.Error:
                         c.rollback()
+                        raise
             else:
                 _cursor_.executemany(sql, rows)
         else:
@@ -548,6 +558,7 @@ class AlasioTable(Generic[T_model]):
                         c.commit()
                     except sqlite3.Error:
                         c.rollback()
+                        raise
             else:
                 _cursor_.execute(sql, rows)
 
@@ -587,8 +598,8 @@ class AlasioTable(Generic[T_model]):
     def upsert_row(
             self,
             rows: "T_model | list[T_model]",
-            conflicts: "str | list[str] | | tuple[str,...]" = '',
-            updates: "str | list[str] | | tuple[str,...]" = '',
+            conflicts: "str | list[str] | tuple[str,...]" = '',
+            updates: "str | list[str] | tuple[str,...]" = '',
             _cursor_: "SqlitePoolCursor | None" = None,
     ):
         """
