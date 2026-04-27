@@ -2,6 +2,7 @@ import os
 import re
 from dataclasses import dataclass
 
+from alasio.device.serialstr import SerialStr
 from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_text
@@ -27,32 +28,6 @@ def vbox_file_to_serial(file: str) -> str:
         return f'127.0.0.1:{res.group(1)}'
     else:
         return ''
-
-
-def get_serial_pair(serial):
-    """
-    Args:
-        serial (str):
-
-    Returns:
-        str, str: `127.0.0.1:5555+{X}` and `emulator-5554+{X}`, 0 <= X <= 32
-    """
-    if serial.startswith('127.0.0.1:'):
-        try:
-            port = int(serial[10:])
-            if 5555 <= port <= 5555 + 32:
-                return f'127.0.0.1:{port}', f'emulator-{port - 1}'
-        except (ValueError, IndexError):
-            pass
-    if serial.startswith('emulator-'):
-        try:
-            port = int(serial[9:])
-            if 5554 <= port <= 5554 + 32:
-                return f'127.0.0.1:{port + 1}', f'emulator-{port}'
-        except (ValueError, IndexError):
-            pass
-
-    return None, None
 
 
 def remove_duplicated_path(paths):
@@ -319,7 +294,7 @@ class EmulatorSearchBase:
         for emulator in self.all_emulator_instances:
             out.append(emulator.serial)
             # Also add serial like `emulator-5554`
-            port_serial, emu_serial = get_serial_pair(emulator.serial)
+            port_serial, emu_serial = SerialStr.get_serial_pair(emulator.serial)
             if emu_serial:
                 out.append(emu_serial)
         return out

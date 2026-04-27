@@ -513,9 +513,9 @@ if __name__ == '__main__':
     o = EmulatorSearchWindows().all_adb_binaries
     print(time.perf_counter() - start)
 
-    start = time.perf_counter()
-    o = EmulatorSearchWindows().all_adb_binaries
-    print(time.perf_counter() - start)
+    # start = time.perf_counter()
+    # o = EmulatorSearchWindows().all_adb_binaries
+    # print(time.perf_counter() - start)
 
     for b in o:
         print(b)
