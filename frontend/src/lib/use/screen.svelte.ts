@@ -6,15 +6,21 @@ import { browser } from "$app/environment";
  */
 class Screen {
   width = $state(0);
+  isHidden = $state(false);
 
   constructor() {
     if (browser) {
       this.width = window.innerWidth;
+      this.isHidden = document.hidden;
       // Using a closure to keep 'this' context
       const onResize = () => {
         this.width = window.innerWidth;
       };
+      const onVisibilityChange = () => {
+        this.isHidden = document.hidden;
+      };
       window.addEventListener("resize", onResize);
+      document.addEventListener("visibilitychange", onVisibilityChange);
     }
   }
 

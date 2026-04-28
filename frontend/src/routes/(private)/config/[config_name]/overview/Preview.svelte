@@ -3,6 +3,7 @@
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
   import { previewClient } from "$lib/ws/preview.svelte";
+  import { screen } from "$lib/use/screen.svelte";
   import { Zap } from "@lucide/svelte";
   import { onDestroy, untrack } from "svelte";
 
@@ -20,6 +21,7 @@
   // Subscribe to Preview topic using the specialized previewClient
   const topic = useTopic<ArrayBuffer>("Preview", previewClient);
   const rpc = topic.resilientRpc();
+  const stopRpc = topic.rpc();
   globalClock.use();
 
   // Manage image object URL lifecycle
@@ -59,9 +61,14 @@
   });
 
   // RPC subscription management
+  // Use a separate non-resilient RPC for preview_stop to avoid re-sending it on reconnect.
   $effect(() => {
-    const speed = isRealtime ? "realtime" : "normal";
-    rpc.call("preview_start", { name: config_name, speed });
+    if (screen.isHidden) {
+      stopRpc.call("preview_stop");
+    } else {
+      const speed = isRealtime ? "realtime" : "normal";
+      rpc.call("preview_start", { name: config_name, speed });
+    }
   });
 
   onDestroy(() => {

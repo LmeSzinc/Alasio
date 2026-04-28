@@ -66,8 +66,9 @@ export interface Rpc {
   isOpen: boolean;
   /**
    * Sends the operation command to the server with a type-safe payload.
+   * @param args Optional arguments payload. Defaults to `{}` if not provided.
    */
-  call(func: string, args: any, callbacks?: CallCallbacks): void;
+  call(func: string, args?: any, callbacks?: CallCallbacks): void;
   /** Manually resets the operation's state. */
   reset(): void;
   /** A helper method to reset state and open a bound dialog. */
