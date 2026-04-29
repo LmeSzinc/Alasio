@@ -16,6 +16,7 @@ class PatchTime:
         self._monkeypatch = pytest.MonkeyPatch()
         # Internally use a UTC timestamp (float) as the single source of truth
         self._timestamp = 0.0
+        self._sleep_calls = []
         self.set(target_time)
 
     def set(self, target_time: Optional[Union[datetime.datetime, int, float]] = None):
@@ -46,6 +47,8 @@ class PatchTime:
 
     def __enter__(self):
         """Apply monkey patches when entering the context manager."""
+
+        self._sleep_calls = []
 
         # Use a lambda to dynamically fetch the updated timestamp inside the mocked methods
         def get_ts():
@@ -99,6 +102,11 @@ class PatchTime:
         def mock_perf_counter_ns():
             return int(get_ts() * 1_000_000_000)
 
+        # 4. Mock sleep — automatically advances time and records calls
+        def mock_sleep(seconds):
+            self._sleep_calls.append(seconds)
+            self.shift(seconds)
+
         # Apply patches to the datetime module
         self._monkeypatch.setattr(datetime, "datetime", MockDatetime)
         self._monkeypatch.setattr(datetime, "date", MockDate)
@@ -110,9 +118,19 @@ class PatchTime:
         self._monkeypatch.setattr(time, "monotonic_ns", mock_monotonic_ns)
         self._monkeypatch.setattr(time, "perf_counter", mock_perf_counter)
         self._monkeypatch.setattr(time, "perf_counter_ns", mock_perf_counter_ns)
+        self._monkeypatch.setattr(time, "sleep", mock_sleep)
 
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Undo patches when exiting the context manager."""
         self._monkeypatch.undo()
+
+    @property
+    def sleep_calls(self):
+        """Recorded sleep call arguments (in seconds)."""
+        return list(self._sleep_calls)
+
+    def clear_sleep_calls(self):
+        """Clear recorded sleep calls."""
+        self._sleep_calls.clear()

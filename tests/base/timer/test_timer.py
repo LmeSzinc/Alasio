@@ -1,6 +1,5 @@
-from unittest.mock import patch
-
 from alasio.base.timer import Timer
+from alasio.testing.patch_time import PatchTime
 
 
 class TestTimerInitialization:
@@ -38,10 +37,7 @@ class TestTimerStart:
 
     def test_start(self):
         """Test starting the timer"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.return_value = 100.0
+        with PatchTime(100.0):
             t = Timer(limit=5.0, count=10)
 
             assert not t.started()
@@ -52,14 +48,12 @@ class TestTimerStart:
 
     def test_start_multiple_times(self):
         """Test multiple starts don't reset the timer"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 105.0]
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
 
             t.start()
             first_start = t._start
+            pt.shift(5.0)  # advance time to 105.0
             t.start()  # Second start should not change _start
             assert t._start == first_start
 
@@ -79,25 +73,21 @@ class TestTimerCurrent:
 
     def test_current_time_after_start(self):
         """Test current time after starting"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 103.5]
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0)
 
             t.start()
+            pt.shift(3.5)  # advance to 103.5
             elapsed = t.current_time()
             assert elapsed == 3.5
 
     def test_current_time_negative_protection(self):
         """Test protection against time going backwards"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 95.0]  # Time goes backwards
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0)
 
             t.start()
+            pt.shift(-5.0)  # go backwards to 95.0
             elapsed = t.current_time()
             assert elapsed == 0.0  # Should return 0 instead of negative
 
@@ -123,55 +113,43 @@ class TestTimerReached:
 
     def test_reached_time_not_enough(self):
         """Test returns False when time is insufficient"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 102.0]  # Only 2 seconds elapsed
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
 
             t.start()
-            # Simulate 11 accesses (exceeds count)
-            for _ in range(10):
-                t._access += 1
+            pt.shift(2.0)  # Only 2 seconds elapsed
+            # Simulate 10 accesses (exceeds count but time not enough)
+            t._access = 10
 
             assert not t.reached()  # Time not enough
 
     def test_reached_count_not_enough(self):
         """Test returns False when access count is insufficient"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 106.0]  # 6 seconds elapsed
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
 
             t.start()
+            pt.shift(6.0)  # 6 seconds elapsed
             # Only 5 accesses
-            for _ in range(5):
-                t._access += 1
+            t._access = 5
 
             assert not t.reached()  # Count not enough
 
     def test_reached_both_conditions_met(self):
         """Test returns True when both time and count conditions are met"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 106.0]  # 6 seconds elapsed
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
 
             t.start()
+            pt.shift(6.0)  # 6 seconds elapsed
             # 10 accesses
-            for _ in range(10):
-                t._access += 1
+            t._access = 10
 
             assert t.reached()  # Both time and count are sufficient
 
     def test_reached_increments_access(self):
         """Test each reached() call increments access count"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.return_value = 100.0
+        with PatchTime(100.0):
             t = Timer(limit=5.0, count=10)
 
             t.start()
@@ -185,15 +163,13 @@ class TestTimerReset:
 
     def test_reset(self):
         """Test reset() resets the timer"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 150.0]
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
 
             t.start()
             t._access = 5
 
+            pt.shift(50.0)  # advance to 150.0
             t.reset()
             assert t._start == 150.0
             assert t._access == 0
@@ -210,14 +186,12 @@ class TestTimerReset:
 
     def test_reached_and_reset_true(self):
         """Test reached_and_reset() when condition is met"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 106.0, 106.0]
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
 
             t.start()
             t._access = 10
+            pt.shift(6.0)  # advance to 106.0
 
             result = t.reached_and_reset()
             assert result is True
@@ -225,18 +199,17 @@ class TestTimerReset:
 
     def test_reached_and_reset_false(self):
         """Test reached_and_reset() when condition is not met"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 102.0]
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
 
             t.start()
             t._access = 5
+            pt.shift(2.0)  # advance to 102.0
 
             result = t.reached_and_reset()
             assert result is False
-            assert t._access == 6  # Only incremented once (by reached() call)
+            # reached() increments _access first, so _access becomes 6
+            assert t._access == 6
 
 
 class TestTimerWait:
@@ -244,34 +217,36 @@ class TestTimerWait:
 
     def test_wait_with_remaining_time(self):
         """Test waiting when there is remaining time"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.sleep') as mock_sleep, \
-                patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 102.0]  # At start and at wait
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
 
             t.start()
+            pt.shift(2.0)  # advance to 102.0
+
+            # Capture current sleep calls before wait
+            pt.clear_sleep_calls()
             t.wait()
 
             # Should wait for 5 - 2 = 3 seconds
-            mock_sleep.assert_called_once()
-            assert abs(mock_sleep.call_args[0][0] - 3.0) < 0.001
+            assert len(pt.sleep_calls) == 1
+            assert abs(pt.sleep_calls[0] - 3.0) < 0.001
+
+            # Time should have advanced by the sleep duration
+            assert t.current_time() == 5.0
 
     def test_wait_with_no_remaining_time(self):
         """Test no waiting when time has already expired"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.sleep') as mock_sleep, \
-                patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 106.0]  # Already timed out
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
 
             t.start()
+            pt.shift(6.0)  # advance to 106.0, already timed out
+
+            pt.clear_sleep_calls()
             t.wait()
 
             # Should not call sleep
-            mock_sleep.assert_not_called()
+            assert len(pt.sleep_calls) == 0
 
 
 class TestTimerIntegration:
@@ -279,13 +254,7 @@ class TestTimerIntegration:
 
     def test_typical_usage_loop(self):
         """Test typical loop usage scenario"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            # Simulate time sequence
-            times = [100.0, 101.0, 102.0, 103.0, 106.0, 107.0]
-            mock_time.side_effect = times
-
+        with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=3)
             execution_count = 0
 
@@ -294,18 +263,15 @@ class TestTimerIntegration:
                 if t.reached():
                     execution_count += 1
                     t.reset()
+                pt.shift(1.0)  # advance by 1 second each iteration
 
             # First time: not started, returns True, executes
-            # Second time: started but not reached, doesn't execute
-            # Third time: conditions met, executes
+            # Subsequent times depend on conditions
             assert execution_count >= 1
 
     def test_chaining_methods(self):
         """Test method chaining"""
-        timer_module = Timer.__module__
-
-        with patch(f'{timer_module}.perf_counter') as mock_time:
-            mock_time.side_effect = [100.0, 100.0]
+        with PatchTime(100.0):
             t = Timer(limit=5.0, count=10)
 
             result = t.start().add_count().add_count()

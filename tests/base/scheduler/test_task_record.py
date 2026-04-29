@@ -1,4 +1,3 @@
-import time
 import threading
 
 import pytest
@@ -8,6 +7,7 @@ from alasio.base.scheduler.task_record import (
     TaskTooManyExecutionsError,
     TaskTooManyFailuresError,
 )
+from alasio.testing.patch_time import PatchTime
 
 
 class TestTaskRecord:
@@ -81,20 +81,21 @@ class TestTaskRecord:
         Test that TaskTooManyFailuresError is raised after MAX_FAILURES failures.
         Wait between calls to avoid execution frequency limit.
         """
-        record = TaskRecord()
+        with PatchTime(100.0) as pt:
+            record = TaskRecord()
 
-        record.mark_task_result(task="test_task", success=False)  # failures=1
-        time.sleep(record.EXECUTION_WINDOW + 0.1)
-        record.mark_task_result(task="test_task", success=False)  # failures=2
-        time.sleep(record.EXECUTION_WINDOW + 0.1)
+            record.mark_task_result(task="test_task", success=False)  # failures=1
+            pt.shift(record.EXECUTION_WINDOW + 0.1)
+            record.mark_task_result(task="test_task", success=False)  # failures=2
+            pt.shift(record.EXECUTION_WINDOW + 0.1)
 
-        # Third failure should raise
-        with pytest.raises(TaskTooManyFailuresError) as exc_info:
-            record.mark_task_result(task="test_task", success=False)
+            # Third failure should raise
+            with pytest.raises(TaskTooManyFailuresError) as exc_info:
+                record.mark_task_result(task="test_task", success=False)
 
-        assert exc_info.value.task == "test_task"
-        assert exc_info.value.actual == 3
-        assert exc_info.value.limit == 3
+            assert exc_info.value.task == "test_task"
+            assert exc_info.value.actual == 3
+            assert exc_info.value.limit == 3
 
     def test_task_too_many_executions_exception(self):
         """
@@ -104,9 +105,9 @@ class TestTaskRecord:
         record = TaskRecord()
 
         # Execute 4 times quickly (MAX_EXECUTIONS is 3, so 4 > 3 triggers the error)
-        record.mark_task_result(task="test_task", success=False)  # 1 execution
-        record.mark_task_result(task="test_task", success=False)  # 2 executions
-        record.mark_task_result(task="test_task", success=True)  # 3 executions
+        record.mark_task_result(task="test_task", success=False)  # 1
+        record.mark_task_result(task="test_task", success=False)  # 2
+        record.mark_task_result(task="test_task", success=True)  # 3
 
         # 4th execution should raise TaskTooManyExecutionsError
         with pytest.raises(TaskTooManyExecutionsError) as exc_info:
@@ -121,59 +122,62 @@ class TestTaskRecord:
         Test that execution count resets after EXECUTION_WINDOW seconds,
         so no error is raised for new executions outside the window.
         """
-        record = TaskRecord()
+        with PatchTime(100.0) as pt:
+            record = TaskRecord()
 
-        # Execute 4 times quickly
-        record.mark_task_result(task="test_task", success=True)  # 1
-        record.mark_task_result(task="test_task", success=True)  # 2
-        record.mark_task_result(task="test_task", success=True)  # 3
+            # Execute 4 times quickly
+            record.mark_task_result(task="test_task", success=True)  # 1
+            record.mark_task_result(task="test_task", success=True)  # 2
+            record.mark_task_result(task="test_task", success=True)  # 3
 
-        with pytest.raises(TaskTooManyExecutionsError):
-            record.mark_task_result(task="test_task", success=True)  # 4 - error
+            with pytest.raises(TaskTooManyExecutionsError):
+                record.mark_task_result(task="test_task", success=True)  # 4 - error
 
-        # Wait more than EXECUTION_WINDOW seconds
-        time.sleep(record.EXECUTION_WINDOW + 0.1)
+            # Advance time past the window
+            pt.shift(record.EXECUTION_WINDOW + 0.1)
 
-        # Now it should succeed again
-        count = record.mark_task_result(task="test_task", success=True)
-        assert count == 0  # all succeeded
+            # Now it should succeed again (old entries are pruned)
+            count = record.mark_task_result(task="test_task", success=True)
+            assert count == 0  # all succeeded
 
     def test_clear_task(self):
         """
         Test that clear_task removes records for a specific task.
         """
-        record = TaskRecord()
+        with PatchTime(100.0) as pt:
+            record = TaskRecord()
 
-        record.mark_task_result(task="task_a", success=False)  # failures=1
-        time.sleep(record.EXECUTION_WINDOW + 0.1)
-        record.mark_task_result(task="task_b", success=False)  # failures=1
-        record.clear_task("task_a")
+            record.mark_task_result(task="task_a", success=False)  # failures=1
+            pt.shift(record.EXECUTION_WINDOW + 0.1)
+            record.mark_task_result(task="task_b", success=False)  # failures=1
+            record.clear_task("task_a")
 
-        # After clearing, task_a should start fresh
-        count = record.mark_task_result(task="task_a", success=False)  # failures=1
-        assert count == 1
+            # After clearing, task_a should start fresh
+            count = record.mark_task_result(task="task_a", success=False)  # failures=1
+            assert count == 1
 
-        # task_b is unaffected
-        count = record.mark_task_result(task="task_b", success=False)  # failures=2
-        assert count == 2
+            # task_b is unaffected
+            count = record.mark_task_result(task="task_b", success=False)  # failures=2
+            assert count == 2
 
     def test_clear(self):
         """
         Test that clear removes all records.
         """
-        record = TaskRecord()
+        with PatchTime(100.0) as pt:
+            record = TaskRecord()
 
-        record.mark_task_result(task="task_a", success=False)
-        time.sleep(record.EXECUTION_WINDOW + 0.1)
-        record.mark_task_result(task="task_b", success=False)
-        record.clear()
+            record.mark_task_result(task="task_a", success=False)
+            pt.shift(record.EXECUTION_WINDOW + 0.1)
+            record.mark_task_result(task="task_b", success=False)
+            record.clear()
 
-        # Both tasks should start fresh
-        count_a = record.mark_task_result(task="task_a", success=False)
-        assert count_a == 1
+            # Both tasks should start fresh
+            count_a = record.mark_task_result(task="task_a", success=False)
+            assert count_a == 1
 
-        count_b = record.mark_task_result(task="task_b", success=False)
-        assert count_b == 1
+            count_b = record.mark_task_result(task="task_b", success=False)
+            assert count_b == 1
 
     def test_clear_failure_resets_failure_count(self):
         """
@@ -203,7 +207,7 @@ class TestTaskRecord:
         # Execute 3 times quickly (2 failures + 1 success to avoid failure limit)
         record.mark_task_result(task="test_task", success=False)  # 1: failures=1
         record.mark_task_result(task="test_task", success=False)  # 2: failures=2
-        record.mark_task_result(task="test_task", success=True)   # 3: failures reset to 0
+        record.mark_task_result(task="test_task", success=True)  # 3: failures reset to 0
 
         # Clear failures only (already 0, but just to be explicit)
         record.clear_failure("test_task")
@@ -252,44 +256,45 @@ class TestTaskRecord:
         Each thread uses a unique task name and sleeps enough between calls
         to stay within the execution frequency limit (3 calls per 2 seconds).
         """
-        record = TaskRecord()
-        errors = []
-        lock = threading.Lock()
+        with PatchTime(100.0) as pt:
+            record = TaskRecord()
+            errors = []
+            lock = threading.Lock()
 
-        def worker(thread_id):
-            try:
-                for i in range(10):
-                    # Use unique task name per thread
-                    record.mark_task_result(task=f"thread_task_{thread_id}", success=True)
-                    time.sleep(0.7)  # ~1.4 calls/sec, well within 3 calls/2s limit
-            except Exception as e:
-                with lock:
-                    errors.append(e)
+            def worker(thread_id):
+                try:
+                    for i in range(10):
+                        record.mark_task_result(task=f"thread_task_{thread_id}", success=True)
+                        pt.shift(0.7)  # ~1.4 calls/sec, well within 3 calls/2s limit
+                except Exception as e:
+                    with lock:
+                        errors.append(e)
 
-        threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
-        assert len(errors) == 0, f"Thread safety errors: {errors}"
+            assert len(errors) == 0, f"Thread safety errors: {errors}"
 
     def test_success_resets_failure_count_before_limit(self):
         """
         Test that a success after some failures resets the failure count,
         then subsequent failures start from 1 again (not reaching threshold).
         """
-        record = TaskRecord()
+        with PatchTime(100.0) as pt:
+            record = TaskRecord()
 
-        record.mark_task_result(task="test_task", success=False)  # failures=1
-        record.mark_task_result(task="test_task", success=False)  # failures=2
-        # Wait to reset execution window
-        time.sleep(record.EXECUTION_WINDOW + 0.1)
-        record.mark_task_result(task="test_task", success=True)  # failures=0
+            record.mark_task_result(task="test_task", success=False)  # failures=1
+            record.mark_task_result(task="test_task", success=False)  # failures=2
+            # Advance past execution window
+            pt.shift(record.EXECUTION_WINDOW + 0.1)
+            record.mark_task_result(task="test_task", success=True)  # failures=0
 
-        # Now fail again - should be back to 1
-        count = record.mark_task_result(task="test_task", success=False)  # failures=1
-        assert count == 1
+            # Now fail again - should be back to 1
+            count = record.mark_task_result(task="test_task", success=False)  # failures=1
+            assert count == 1
 
     def test_max_executions_custom_values(self):
         """Test with modified class constants to verify flexibility."""
@@ -302,8 +307,8 @@ class TestTaskRecord:
         record = CustomTaskRecord()
 
         # Execute 3 times (MAX_EXECUTIONS=2, so 3 > 2 triggers error)
-        record.mark_task_result(task="test_task", success=True)  # 1 execution
-        record.mark_task_result(task="test_task", success=True)  # 2 executions
+        record.mark_task_result(task="test_task", success=True)  # 1
+        record.mark_task_result(task="test_task", success=True)  # 2
 
         with pytest.raises(TaskTooManyExecutionsError) as exc_info:
             record.mark_task_result(task="test_task", success=True)  # 3rd - error
@@ -384,12 +389,12 @@ class TestTaskRecord:
         record = TaskRecord()
 
         # 3 failures in a row - 3rd one triggers failure error
-        record.mark_task_result(task="test_task", success=False)  # 1: executions=1, failures=1
-        record.mark_task_result(task="test_task", success=False)  # 2: executions=2, failures=2
+        record.mark_task_result(task="test_task", success=False)  # 1
+        record.mark_task_result(task="test_task", success=False)  # 2
 
         # 3rd: failures=3 triggers TaskTooManyFailuresError
         with pytest.raises(TaskTooManyFailuresError):
-            record.mark_task_result(task="test_task", success=False)
+            record.mark_task_result(task="test_task", success=False)  # 3
 
         # After the failure exception, the execution state still has 3 records.
         # 4th call: executions=4 > 3 -> TaskTooManyExecutionsError

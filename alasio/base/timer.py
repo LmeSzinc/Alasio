@@ -1,6 +1,6 @@
+import time
 from datetime import datetime
 from functools import wraps
-from time import perf_counter, sleep
 
 
 def timer(function):
@@ -10,9 +10,9 @@ def timer(function):
 
     @wraps(function)
     def function_timer(*args, **kwargs):
-        start = perf_counter()
+        start = time.perf_counter()
         result = function(*args, **kwargs)
-        cost = perf_counter() - start
+        cost = time.perf_counter() - start
         print(f'{function.__name__}: {cost:.10f} s')
         return result
 
@@ -74,7 +74,7 @@ class Timer:
                 pass
         """
         if self._start <= 0:
-            self._start = perf_counter()
+            self._start = time.monotonic()
             self._access = 0
 
         return self
@@ -92,7 +92,7 @@ class Timer:
             float:
         """
         if self._start > 0:
-            diff = perf_counter() - self._start
+            diff = time.monotonic() - self._start
             if diff < 0:
                 diff = 0.
             return diff
@@ -118,12 +118,12 @@ class Timer:
         if current is not None:
             if count is not None:
                 # set both
-                self._start = perf_counter() - current
+                self._start = time.monotonic() - current
                 self._access = count
             else:
                 # set current only, calculate count
                 count = int(current / speed)
-                self._start = perf_counter() - current
+                self._start = time.monotonic() - current
                 self._access = count
         else:
             if count is not None:
@@ -146,7 +146,7 @@ class Timer:
         # each reached() call is consider as an access
         self._access += 1
         if self._start > 0:
-            return self._access > self.count and perf_counter() - self._start > self.limit
+            return self._access > self.count and time.monotonic() - self._start > self.limit
         else:
             # not started, return True for fast first try
             return True
@@ -155,7 +155,7 @@ class Timer:
         """
         Reset the timer as if it just started
         """
-        self._start = perf_counter()
+        self._start = time.monotonic()
         self._access = 0
         return self
 
@@ -182,9 +182,9 @@ class Timer:
         """
         Wait until timer reached.
         """
-        diff = self._start + self.limit - perf_counter()
+        diff = self._start + self.limit - time.monotonic()
         if diff > 0:
-            sleep(diff)
+            time.sleep(diff)
 
     def show(self):
         from alasio.logger import logger
