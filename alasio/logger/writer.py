@@ -105,6 +105,22 @@ class CaptureStream:
                 return True
         return False
 
+    def any_regex(self, pattern):
+        """
+        Check if any log matches the given regex pattern
+
+        Args:
+            pattern (str): Regex pattern to search for
+
+        Returns:
+            bool: True if pattern matches any log
+        """
+        import re
+        for log in self.logs:
+            if re.search(pattern, log):
+                return True
+        return False
+
 
 class CaptureJob:
     def acquire(self):
@@ -134,6 +150,23 @@ class CaptureBackend:
         for log in self.logs:
             for value in log.values():
                 if isinstance(value, str) and text in value:
+                    return True
+        return False
+
+    def any_regex(self, pattern):
+        """
+        Check if any log entry (dict values) matches the given regex pattern
+
+        Args:
+            pattern (str): Regex pattern to search for
+
+        Returns:
+            bool: True if pattern matches any log entry value
+        """
+        import re
+        for log in self.logs:
+            for value in log.values():
+                if isinstance(value, str) and re.search(pattern, value):
                     return True
         return False
 
