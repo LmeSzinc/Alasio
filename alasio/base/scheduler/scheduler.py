@@ -1,48 +1,19 @@
-import threading
 import time
 from datetime import datetime
-from typing import Dict
 
 from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
 from alasio.base.exception import *
 from alasio.base.scheduler.configwatcher import ConfigWatcher
 from alasio.base.scheduler.inflect import Inflection
+from alasio.base.scheduler.task_record import TaskRecord, TaskTooManyExecutionsError, TaskTooManyFailuresError
 from alasio.base.state import TaskState
 from alasio.base.timer import getnow
 from alasio.config.config_generated import AlasioConfigGenerated
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
 from alasio.ext.cache import cached_property
-from alasio.ext.singleton import Singleton
 from alasio.logger import logger
-
-
-class FailureRecord(metaclass=Singleton):
-    def __init__(self):
-        self._lock = threading.Lock()
-        # Failure count of tasks
-        # Key: str, task name, value: int, failure count
-        self.record: Dict[str, int] = {}
-
-    def mark_task_result(self, task, success):
-        """
-        Args:
-            task (str):
-            success (bool):
-
-        Returns:
-            int: failure count
-        """
-        with self._lock:
-            if success:
-                self.record.pop(task, None)
-                return 0
-            else:
-                count = self.record.get(task, 0)
-                count += 1
-                self.record[task] = count
-                return count
 
 
 def interruptable_sleep(second):
@@ -306,10 +277,19 @@ class AlasioScheduler:
         logger.info(f'Scheduler: End task `{task.TaskName}`')
         self.skip_first_task.clear()
 
-        # check failure
-        failure = FailureRecord().mark_task_result(task=task.TaskName, success=success)
-        if failure >= 3:
-            logger.critical(f"Task `{task.TaskName}` failed 3 or more times.")
+        # Check task record constraints (execution frequency and failure count)
+        try:
+            TaskRecord().mark_task_result(task=task.TaskName, success=success)
+        except TaskTooManyExecutionsError as e:
+            logger.critical(e)
+            logger.critical("Possible reason #1: You haven't used it correctly. "
+                            "Please read the help text of the options.")
+            logger.critical("Possible reason #2: There is a problem with this task. "
+                            "Please contact developers or try to fix it yourself.")
+            logger.critical('Request human takeover')
+            raise SchedulerStop
+        except TaskTooManyFailuresError as e:
+            logger.critical(e)
             logger.critical("Possible reason #1: You haven't used it correctly. "
                             "Please read the help text of the options.")
             logger.critical("Possible reason #2: There is a problem with this task. "
