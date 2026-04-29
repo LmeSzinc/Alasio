@@ -61,5 +61,40 @@
     "ja-JP": "展開",
     "zh-TW": "展開",
     "es-ES": "Expandir"
+  },
+  "PreviewRealtime": {
+    "en-US": "Realtime",
+    "zh-CN": "实时",
+    "ja-JP": "リアルタイム",
+    "zh-TW": "即時",
+    "es-ES": "En tiempo real"
+  },
+  "PreviewNormal": {
+    "en-US": "Normal",
+    "zh-CN": "普通",
+    "ja-JP": "ノーマル",
+    "zh-TW": "普通",
+    "es-ES": "Normal"
+  },
+  "PreviewDisable": {
+    "en-US": "Disable",
+    "zh-CN": "禁用",
+    "ja-JP": "無効",
+    "zh-TW": "禁用",
+    "es-ES": "Desactivar"
+  },
+  "PreviewDisabled": {
+    "en-US": "Preview disabled",
+    "zh-CN": "预览已禁用",
+    "ja-JP": "プレビュー無効",
+    "zh-TW": "預覽已禁用",
+    "es-ES": "Vista previa desactivada"
+  },
+  "PreviewWaiting": {
+    "en-US": "Waiting for preview...",
+    "zh-CN": "等待预览...",
+    "ja-JP": "プレビュー待機中...",
+    "zh-TW": "等待預覽...",
+    "es-ES": "Esperando vista previa..."
   }
 }
