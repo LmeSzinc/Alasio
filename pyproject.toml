@@ -39,7 +39,8 @@ backend = [
     "PyJWT",
 ]
 test = [
-    "pytest",
+    # pytest 7 added MonkeyPatch, and pytest 7 is the last version that supports py3.7
+    "pytest>=7.4.4",
     "pytest-trio",
 ]
 all = ["alasio[image,backend,test]"]
