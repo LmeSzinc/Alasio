@@ -92,7 +92,7 @@ class AssetsExtractor:
                 server = path.joinpath(lang)
                 AssetImage.REPO_ROOT = self.root
                 AssetImage.LANG_ROOT = server
-                for file in iter_files(server, recursive=True):
+                for file in server.iter_files(recursive=True):
                     if self.is_assets_file(file):
                         file = AssetImage(file)
                         file.lang = lang

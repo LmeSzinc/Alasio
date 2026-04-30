@@ -176,7 +176,7 @@ class Watchdog:
                         yield PathEvent('D', path, prev_info[0], prev_info[1])
                         continue
                 for entry in list_entry:
-                    entry_path = entry.path
+                    entry_path = normpath(entry.path)
                     try:
                         entry_info = stat_info(entry.stat(follow_symlinks=True))
                         info_type, info_mtime = entry_info
