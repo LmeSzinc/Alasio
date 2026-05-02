@@ -1,7 +1,5 @@
 from collections import deque
 
-ESCAPE_CHAR = {'n': '\n', 't': '\t', 'r': '\r'}
-
 
 def parse_gitattributes_line(line):
     """
@@ -26,6 +24,7 @@ def parse_gitattributes_line(line):
         if '\\' in line:
             # escape inside quote
             # example: "my \"quoted\" file.txt" merge=ours
+            # Only handle \\space and \\" escapes, keep others as-is
             escape = False
             end = 0
             seen_opening = False
@@ -33,8 +32,13 @@ def parse_gitattributes_line(line):
             for char in line:
                 end += 1
                 if escape:
-                    char = ESCAPE_CHAR.get(char, char)
-                    pathspec_char.append(char)
+                    if char == '"' or char == ' ':
+                        # consume backslash, keep the quoted/escaped char
+                        pathspec_char.append(char)
+                    else:
+                        # keep escape sequence as-is
+                        pathspec_char.append('\\')
+                        pathspec_char.append(char)
                     escape = False
                 elif char == '\\':
                     escape = True
@@ -71,14 +75,27 @@ def parse_gitattributes_line(line):
         if '\\' in line:
             # escape but no quote
             # example: file\ name.txt    text eol=lf
+            # Only handle \\space and \\" escapes, keep others as-is
             escape = False
             end = 0
             pathspec_char = deque()
             for char in line:
                 end += 1
                 if escape:
-                    char = ESCAPE_CHAR.get(char, char)
-                    pathspec_char.append(char)
+                    if char == ' ':
+                        # \\space -> space (consume backslash, don't break)
+                        pathspec_char.append(' ')
+                    elif char == '"':
+                        # \\" -> " (consume backslash)
+                        pathspec_char.append('"')
+                    elif char.isspace():
+                        # e.g. \\\t, \\\n before actual separator
+                        pathspec_char.append('\\')
+                        pathspec_char.append(char)
+                    else:
+                        # keep escape sequence as-is
+                        pathspec_char.append('\\')
+                        pathspec_char.append(char)
                     escape = False
                 elif char == '\\':
                     escape = True

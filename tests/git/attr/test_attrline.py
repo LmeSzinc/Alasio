@@ -55,26 +55,26 @@ def test_plain_mixed_attrs():
 # 有转义但无引号的路径（无引号 + 有 \\）
 # ============================================================
 def test_unquoted_with_newline_escape():
-    """无引号但有 \\n 转义 — 换行符被转换为真实换行并保留在路径中"""
+    """无引号但有 \\n 转义 — 不再转换，保持原始 \\n 文本"""
     line = 'hello\\nworld text'
     pathspec, attrs = parse_gitattributes_line(line)
-    assert pathspec == 'hello\nworld'
+    assert pathspec == 'hello\\nworld'
     assert attrs == {'text': 'set'}
 
 
 def test_unquoted_with_tab_escape():
-    """无引号但有 \\t 转义 — tab 被转换"""
+    """无引号但有 \\t 转义 — 不再转换，保持原始 \\t 文本"""
     line = 'file\\tname.txt text'
     pathspec, attrs = parse_gitattributes_line(line)
-    assert pathspec == 'file\tname.txt'
+    assert pathspec == 'file\\tname.txt'
     assert attrs == {'text': 'set'}
 
 
 def test_unquoted_with_carriage_return_escape():
-    """无引号但有 \\r 转义"""
+    """无引号但有 \\r 转义 — 不再转换，保持原始 \\r 文本"""
     line = 'file\\rname.txt text'
     pathspec, attrs = parse_gitattributes_line(line)
-    assert pathspec == 'file\rname.txt'
+    assert pathspec == 'file\\rname.txt'
     assert attrs == {'text': 'set'}
 
 
@@ -90,7 +90,7 @@ def test_unquoted_escape_bare_pathspec():
     """无引号转义路径，仅有路径无属性，且 end 为真值"""
     line = 'hello\\nworld'
     pathspec, attrs = parse_gitattributes_line(line)
-    assert pathspec == 'hello\nworld'
+    assert pathspec == 'hello\\nworld'
     assert attrs == {}
 
 
@@ -103,10 +103,10 @@ def test_unquoted_escape_only_backslash():
 
 
 def test_unquoted_escape_then_text():
-    """\\n 后跟普通文本，无后续属性"""
+    """\\n 后跟普通文本，无后续属性 — 不再转换"""
     line = '\\nhello'
     pathspec, attrs = parse_gitattributes_line(line)
-    assert pathspec == '\nhello'
+    assert pathspec == '\\nhello'
     assert attrs == {}
 
 
@@ -160,18 +160,18 @@ def test_quoted_with_escaped_quote():
 
 
 def test_quoted_with_n_escape():
-    """引号内有 \\n 转义 — 正确解析为换行符"""
+    """引号内有 \\n 转义 — 不再转换，保持原始 \\n 文本"""
     line = '"hello\\nworld" text'
     pathspec, attrs = parse_gitattributes_line(line)
-    assert pathspec == 'hello\nworld'
+    assert pathspec == 'hello\\nworld'
     assert attrs == {'text': 'set'}
 
 
 def test_quoted_escape_bare_pathspec():
-    """引号内转义路径，无属性"""
+    """引号内转义路径，无属性 — 不再转换"""
     line = '"a\\tb"'
     pathspec, attrs = parse_gitattributes_line(line)
-    assert pathspec == 'a\tb'
+    assert pathspec == 'a\\tb'
     assert attrs == {}
 
 
@@ -316,21 +316,8 @@ def test_pathspec_with_spaces_inside_quotes():
 
 
 # ============================================================
-# ESCAPE_CHAR / text=auto / text=unknown_value
+# text=auto / text=unknown_value
 # ============================================================
-def test_escape_char_mapping():
-    """验证 ESCAPE_CHAR 表中所有转义映射"""
-    from alasio.git.attr.attrline import ESCAPE_CHAR
-    assert ESCAPE_CHAR == {'n': '\n', 't': '\t', 'r': '\r'}
-    assert ESCAPE_CHAR['n'] == '\n'
-    assert ESCAPE_CHAR['t'] == '\t'
-    assert ESCAPE_CHAR['r'] == '\r'
-
-    # 未知转义字符原样保留（fallback 逻辑在 get 调用中）
-    assert ESCAPE_CHAR.get('x', 'x') == 'x'
-    assert ESCAPE_CHAR.get(' ', ' ') == ' '
-
-
 def test_attr_text_auto():
     """text=auto 直接设置 text='auto'"""
     _, attrs = parse_gitattributes_line('*.txt text=auto')
@@ -391,5 +378,5 @@ def test_escape_quote_complex_end():
 
     line = r'file\\" text'
     pathspec, attrs = parse_gitattributes_line(line)
-    assert pathspec == r'file\"'
+    assert pathspec == r'file\\"'
     assert attrs == {'text': 'set'}
