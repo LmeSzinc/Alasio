@@ -166,8 +166,9 @@ class TestAggressiveRegexInjection:
     def test_malicious_unclosed_brackets_with_meta(self):
         """攻击：未闭合的字符区间内包含正则元字符"""
         # [.*+?^${}()|\] 极易由于 [ 未闭合导致正则编译失败
+        # 字符集内 \] 是转义的 ]，表示字面量 ]；未闭合回退时，语义上 ] 不保留反斜杠前缀
         malicious_spec = r"[.*+?^${}()|\]"
-        self.assert_compiles_and_matches(malicious_spec, r"[.*+?^${}()|\]")
+        self.assert_compiles_and_matches(malicious_spec, r"[.*+?^${}()|]")
 
     def test_charset_with_regex_injection(self):
         """攻击：尝试通过字符集闭合漏洞注入正则"""

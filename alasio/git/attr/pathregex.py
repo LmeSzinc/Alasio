@@ -2,10 +2,15 @@ import re
 from collections import deque
 
 
-def _split_pathspec(pattern: str) -> "list[str]":
+def _split_pathspec(pattern):
     """
     独立辅助函数：单次遍历完成路径块分割，保留转义字符供后续处理。
-    利用 deque 缓冲字符，避免字符串频次相加。
+
+    Args:
+        pattern (str):
+
+    Returns:
+        list[str]:
     """
     chunks = []
     cur = deque()
@@ -31,10 +36,16 @@ def _split_pathspec(pattern: str) -> "list[str]":
     return chunks
 
 
-def _convert_normal_chunk(chunk: str) -> str:
+def _convert_normal_chunk(chunk):
     """
     独立辅助函数：单次遍历将普通的 glob 字符转换为正则。
     使用状态标记和 deque 缓冲，消除嵌套循环与高频字符串拼接。
+
+    Args:
+        chunk (str):
+
+    Returns:
+        str:
     """
     res = deque()
     escape = False
@@ -80,6 +91,13 @@ def _convert_normal_chunk(chunk: str) -> str:
                     res.append(']')
 
                 charset_buffer.clear()
+            elif char == '[':
+                # 字符集内遇到新的 [，回退当前未闭合的字符集，重新开始
+                res.append(re.escape('['))
+                for c in charset_buffer:
+                    res.append(re.escape(c))
+                charset_buffer.clear()
+                # in_charset 保持 True，[ 不加入缓冲区，作为新字符集的开始
             elif char == '/':
                 # 丢弃未转义直接混入 [] 中的 /
                 continue
@@ -105,19 +123,34 @@ def _convert_normal_chunk(chunk: str) -> str:
 
     if in_charset:
         # 如果字符集最终没有闭合，Git将其视作普通字符，进行平滑回退
+        # 使用 re.escape 纯文本处理，避免通配符被二次解析
+        # 注意 charset_buffer 中可能含未处理的转义序列，需要重新解释
         res.append(re.escape('['))
-        res.append(_convert_normal_chunk("".join(charset_buffer)))
+        fallback_escape = False
+        for c in charset_buffer:
+            if fallback_escape:
+                res.append(re.escape(c))
+                fallback_escape = False
+            elif c == '\\':
+                fallback_escape = True
+            else:
+                res.append(re.escape(c))
+        if fallback_escape:
+            res.append(re.escape('\\'))
 
     return "".join(res)
 
 
-def gitattributes_to_regex(root: str, pathspec: str) -> str:
+def gitattributes_to_regex(root, pathspec):
     """
     将 .gitattributes 的路径规则转换为用于完整路径匹配的正则表达式。
 
-    :param root: .gitattributes 所在的目录位置 (如 "" 或 "src/")
-    :param pathspec: .gitattributes 路径规则 (如 "*.py")
-    :return: 编译就绪的正则表达式字符串
+    Args:
+        root (str): .gitattributes 所在的目录位置 (如 "" 或 "src/")
+        pathspec (str): .gitattributes 路径规则 (如 "*.py")
+
+    Returns:
+        str: 编译就绪的正则表达式字符串
     """
     if not pathspec:
         return "(?s)^$"
