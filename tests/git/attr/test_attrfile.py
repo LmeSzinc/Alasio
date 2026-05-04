@@ -13,16 +13,8 @@ Tests cover:
 
 import re
 
-import pytest
-
-from alasio.git.attr.attrfile import (
-    FileAttrs,
-    PatternBase,
-    PatternFileSuffix,
-    PatternFileName,
-    PatternRegex,
-    get_pattern,
-)
+from alasio.git.attr.attrfile import (FileAttrs, PatternBase, PatternFileName, PatternFileSuffix, PatternRegex,
+                                      get_pattern)
 
 
 # ==========================================
@@ -410,6 +402,42 @@ class TestPatternFileSuffix:
         assert files[2].pending_pattern == []
         assert files[3].pending_pattern == []
 
+    def test_match_pathspec_star_only(self):
+        """测试 match_pathspec 匹配单独的 *（匹配所有文件）"""
+        assert PatternFileSuffix.match_pathspec("*") is True
+
+    def test_apply_star_only_matches_all_files(self):
+        """测试 pathspec='*' 的 PatternFileSuffix 匹配所有文件，后缀为空字符串"""
+        ps = PatternFileSuffix(root="", suffix="", data={"text": "auto"})
+        files = [
+            FileAttrs(path="main.py"),
+            FileAttrs(path="backend/api/router.py"),
+            FileAttrs(path="frontend/src/App.svelte"),
+            FileAttrs(path="README.md"),
+            FileAttrs(path="package.json"),
+            FileAttrs(path="doc/guide/tutorial.md"),
+        ]
+        ps.apply(files)
+        for file in files:
+            assert file.pending_pattern == [ps], f"File {file.path} should match '*'"
+
+    def test_apply_star_only_with_root(self):
+        """测试 pathspec='*' 带 root 前缀的 PatternFileSuffix 匹配该 root 下所有文件"""
+        ps = PatternFileSuffix(root="frontend/", suffix="", data={"text": "frontend-default"})
+        files = [
+            FileAttrs(path="frontend/src/App.svelte"),
+            FileAttrs(path="frontend/package.json"),
+            FileAttrs(path="frontend/assets/logo.png"),
+            FileAttrs(path="backend/main.py"),
+            FileAttrs(path="README.md"),
+        ]
+        ps.apply(files)
+        assert files[0].pending_pattern == [ps]
+        assert files[1].pending_pattern == [ps]
+        assert files[2].pending_pattern == [ps]
+        assert files[3].pending_pattern == []
+        assert files[4].pending_pattern == []
+
 
 # ==========================================
 # 7. get_pattern 工厂函数测试
@@ -420,6 +448,14 @@ class TestGetPattern:
         p = get_pattern("", "*.py", {"text": "auto"})
         assert isinstance(p, PatternFileSuffix)
         assert p.suffix == ".py"
+        assert p.root == ""
+        assert p.data == {"text": "auto"}
+
+    def test_returns_pattern_filesuffix_for_star_only(self):
+        """单独的 * 应返回 PatternFileSuffix，后缀为空字符串，匹配所有文件"""
+        p = get_pattern("", "*", {"text": "auto"})
+        assert isinstance(p, PatternFileSuffix)
+        assert p.suffix == ""
         assert p.root == ""
         assert p.data == {"text": "auto"}
 
@@ -511,3 +547,59 @@ class TestGetPattern:
         p_late = PatternFileSuffix(root="", suffix=".py", data={"text": "override"})
         fa.pending_pattern = [p_early, p_late]
         assert fa.attrs_dict == {"text": "override", "eol": "lf"}
+
+    def test_star_only_matches_all_files(self):
+        """集成测试：'*' pathspec 匹配所有文件并设默认属性"""
+        files = [
+            FileAttrs(path="main.py"),
+            FileAttrs(path="backend/api/router.py"),
+            FileAttrs(path="frontend/src/App.svelte"),
+            FileAttrs(path="README.md"),
+            FileAttrs(path="package.json"),
+        ]
+        p_star = get_pattern("", "*", {"text": "auto", "eol": "lf"})
+        p_star.apply(files)
+        for file in files:
+            assert file.attrs_dict == {"text": "auto", "eol": "lf"}, \
+                f"File {file.path} should have default attrs from '*'"
+
+    def test_star_only_with_deeper_override(self):
+        """集成测试：'*' 设默认属性，更具体的 pattern 覆盖 '*' 的属性"""
+        files = [
+            FileAttrs(path="main.py"),
+            FileAttrs(path="backend/main.py"),
+            FileAttrs(path="frontend/app.ts"),
+        ]
+        # root '*' sets defaults for all files
+        p_star = get_pattern("", "*", {"text": "auto", "eol": "lf"})
+        p_star.apply(files)
+        # *.py overrides for Python files
+        p_py = get_pattern("", "*.py", {"text": "python"})
+        p_py.apply(files)
+        # *.ts overrides for TypeScript files
+        p_ts = get_pattern("", "*.ts", {"text": "typescript"})
+        p_ts.apply(files)
+        # backend/ deeper pattern overrides eol for backend Python files
+        p_backend_py = get_pattern("backend/", "*.py", {"eol": "crlf"})
+        p_backend_py.apply(files)
+        assert files[0].attrs_dict == {"text": "python", "eol": "lf"}
+        assert files[1].attrs_dict == {"text": "python", "eol": "crlf"}
+        assert files[2].attrs_dict == {"text": "typescript", "eol": "lf"}
+
+    def test_star_only_unset_then_reset(self):
+        """集成测试：'*' 全局设值 → 局部 unset → 局部重新设值"""
+        files = [
+            FileAttrs(path="main.py"),
+            FileAttrs(path="doc/readme.md"),
+        ]
+        # '*' sets global defaults
+        p_star = get_pattern("", "*", {"text": "auto", "eol": "lf", "diff": "default"})
+        p_star.apply(files)
+        # doc/* unset diff
+        p_doc = get_pattern("doc/", "*", {"diff": "-"})
+        p_doc.apply(files)
+        # doc/readme.md re-sets diff
+        p_readme = get_pattern("doc/", "readme.md", {"diff": "markdown"})
+        p_readme.apply(files)
+        assert files[0].attrs_dict == {"text": "auto", "eol": "lf", "diff": "default"}
+        assert files[1].attrs_dict == {"text": "auto", "eol": "lf", "diff": "markdown"}
