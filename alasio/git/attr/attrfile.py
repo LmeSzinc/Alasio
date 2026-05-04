@@ -15,6 +15,15 @@ class FileAttrs(msgspec.Struct, dict=True):
     pending_pattern: "List[PatternBase]" = msgspec.field(default_factory=list)
 
     @cached_property
+    def filename(self):
+        # get name
+        path = self.path
+        if '/' in path:
+            _, _, name = path.rpartition('/')
+            return name
+        return path
+
+    @cached_property
     def attrs_dict(self) -> dict:
         """Calculate final attrs dict by gitattributes override rules.
 
@@ -39,15 +48,18 @@ class FileAttrs(msgspec.Struct, dict=True):
         return result
 
 
-class PatternBase(msgspec.Struct):
+class PatternBase(msgspec.Struct, dict=True):
     # folder of .gitattributes file
     # "" for /.gitattributes, "src/" for /src/.gitattributes
     root: str
     # attrs_dict from parse_gitattributes_line()
     data: dict
 
+    def apply(self, files: "list[FileAttrs]"):
+        raise NotImplementedError
 
-class PatternRegex(PatternBase, dict=True):
+
+class PatternRegex(PatternBase):
     # fallback method for any pathspec
     pathspec: str
 
@@ -76,17 +88,20 @@ class PatternFileName(PatternBase):
     def apply(self, files: "list[FileAttrs]"):
         name = self.name
         root = self.root
-        for file in files:
-            path = file.path
-            if root and not path.startswith(root):
-                continue
-            # get name
-            if '/' in path:
-                _, _, path = path.rpartition('/')
-            if path != name:
-                continue
-            # apply
-            file.pending_pattern.append(self)
+        if root:
+            for file in files:
+                if not file.path.startswith(root):
+                    continue
+                if file.filename != name:
+                    continue
+                # apply
+                file.pending_pattern.append(self)
+        else:
+            for file in files:
+                if file.filename != name:
+                    continue
+                # apply
+                file.pending_pattern.append(self)
 
     @classmethod
     def match_pathspec(cls, pathspec: str):
@@ -107,17 +122,22 @@ class PatternFileSuffix(PatternBase):
     def apply(self, files: "list[FileAttrs]"):
         suffix = self.suffix
         root = self.root
-        for file in files:
-            path = file.path
-            if root and not path.startswith(root):
-                continue
-            # get name
-            if '/' in path:
-                _, _, path = path.rpartition('/')
-            if not path.endswith(suffix):
-                continue
-            # apply
-            file.pending_pattern.append(self)
+        if root:
+            for file in files:
+                if not file.path.startswith(root):
+                    continue
+                # get name
+                if not file.filename.endswith(suffix):
+                    continue
+                # apply
+                file.pending_pattern.append(self)
+        else:
+            for file in files:
+                # get name
+                if not file.filename.endswith(suffix):
+                    continue
+                # apply
+                file.pending_pattern.append(self)
 
     @classmethod
     def match_pathspec(cls, pathspec: str):
