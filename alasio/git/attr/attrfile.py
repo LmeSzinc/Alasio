@@ -25,7 +25,9 @@ class FileAttrs(msgspec.Struct, dict=True):
 
     @cached_property
     def attrs_dict(self) -> dict:
-        """Calculate final attrs dict by gitattributes override rules.
+        """
+        Calculate final attrs dict by gitattributes override rules.
+        See attrs_dict from parse_gitattributes_line()
 
         Patterns from deeper directories override those from parent directories.
         Within the same .gitattributes file, later patterns override earlier ones.
