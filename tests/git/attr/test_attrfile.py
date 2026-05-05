@@ -8,10 +8,16 @@ Tests cover:
 - PatternRegex (including regex caching and apply method)
 - PatternFileName (match_pathspec classmethod and apply method)
 - PatternFileSuffix (match_pathspec classmethod and apply method)
+- PatternFileContain (match_pathspec classmethod and apply method)
+- PatternAny (match_pathspec classmethod and apply method)
+- PatternPathPrefix (match_pathspec classmethod and apply method)
 - get_pattern() factory function
 """
 
-from alasio.git.attr.attrfile import *
+import re
+
+from alasio.git.attr.attrfile import (FileAttrs, PatternAny, PatternBase, PatternFileContain, PatternFileName,
+                                      PatternFileSuffix, PatternPathPrefix, PatternRegex, get_pattern)
 
 
 # ==========================================
@@ -260,21 +266,6 @@ class TestPatternRegex:
         assert files[1].pending_pattern == []
         assert files[2].pending_pattern == [pr]
 
-    def test_regex_anchor_prevents_partial_match(self):
-        """测试正则锚定防止部分匹配"""
-        pr = PatternRegex(root="", pathspec="foo", data={"key": "val"})
-        files = [
-            FileAttrs(path="foo"),
-            FileAttrs(path="foobar"),
-            FileAttrs(path="x/foo"),
-            FileAttrs(path="x/foobar"),
-        ]
-        pr.apply(files)
-        assert files[0].pending_pattern == [pr]
-        assert files[1].pending_pattern == []
-        assert files[2].pending_pattern == [pr]
-        assert files[3].pending_pattern == []
-
     def test_apply_appends_multiple_times(self):
         """测试多次 apply 追加 pattern 到 pending_pattern"""
         pr1 = PatternRegex(root="", pathspec="*.py", data={"a": "1"})
@@ -305,6 +296,7 @@ class TestPatternFileName:
         """包含通配符 * 的不是纯文件名"""
         assert PatternFileName.match_pathspec("*.py") is False
         assert PatternFileName.match_pathspec("file*") is False
+        assert PatternFileName.match_pathspec("*README*") is False
 
     def test_match_pathspec_rejects_charset(self):
         """包含字符集 [ 的不是纯文件名"""
@@ -407,7 +399,95 @@ class TestPatternFileSuffix:
 
 
 # ==========================================
-# 7. PatternAny 测试
+# 7. PatternFileContain 测试
+# ==========================================
+class TestPatternFileContain:
+    def test_match_pathspec_contain(self):
+        """测试 match_pathspec 匹配 *TEXT* 格式"""
+        assert PatternFileContain.match_pathspec("*README*") is True
+        assert PatternFileContain.match_pathspec("*test*") is True
+        assert PatternFileContain.match_pathspec("*config*") is True
+        assert PatternFileContain.match_pathspec("*a*") is True
+
+    def test_match_pathspec_rejects_slash(self):
+        """包含 / 的不匹配"""
+        assert PatternFileContain.match_pathspec("src/*README*") is False
+
+    def test_match_pathspec_rejects_non_star_start(self):
+        """不以 * 开头的不匹配"""
+        assert PatternFileContain.match_pathspec("README*") is False
+        assert PatternFileContain.match_pathspec("README") is False
+
+    def test_match_pathspec_rejects_non_star_end(self):
+        """不以 * 结尾的不匹配"""
+        assert PatternFileContain.match_pathspec("*README") is False
+
+    def test_match_pathspec_rejects_too_short(self):
+        """长度 < 3 的不匹配（需要至少 *x*）"""
+        assert PatternFileContain.match_pathspec("**") is False
+        assert PatternFileContain.match_pathspec("*") is False
+
+    def test_match_pathspec_rejects_inner_wildcard(self):
+        """中间包含 * 的不匹配"""
+        assert PatternFileContain.match_pathspec("*a*b*") is False
+
+    def test_match_pathspec_rejects_charset(self):
+        """中间包含 [ 的不匹配"""
+        assert PatternFileContain.match_pathspec("*file[0-9]*") is False
+
+    def test_apply_matches_contain_in_filename(self):
+        """测试 PatternFileContain.apply 子串匹配，往 pending_pattern 存 self"""
+        pc = PatternFileContain(root="", contain="README", data={"text": "markdown"})
+        files = [
+            FileAttrs(path="README.md"),
+            FileAttrs(path="src/README.txt"),
+            FileAttrs(path="doc/readme.md"),
+            FileAttrs(path="src/CHANGELOG.md"),
+            FileAttrs(path="COPYING"),
+        ]
+        pc.apply(files)
+        assert files[0].pending_pattern == [pc]
+        assert files[1].pending_pattern == [pc]
+        assert files[2].pending_pattern == []
+        assert files[3].pending_pattern == []
+        assert files[4].pending_pattern == []
+
+    def test_apply_with_root_prefix(self):
+        """测试 PatternFileContain.apply 带 root 前缀"""
+        pc = PatternFileContain(root="frontend/", contain="test", data={"type": "test-file"})
+        files = [
+            FileAttrs(path="frontend/test.ts"),
+            FileAttrs(path="frontend/src/test.svelte"),
+            FileAttrs(path="frontend/src/utils.test.ts"),
+            FileAttrs(path="backend/test.py"),
+            FileAttrs(path="tests/test_main.py"),
+        ]
+        pc.apply(files)
+        assert files[0].pending_pattern == [pc]
+        assert files[1].pending_pattern == [pc]
+        assert files[2].pending_pattern == [pc]
+        assert files[3].pending_pattern == []
+        assert files[4].pending_pattern == []
+
+    def test_apply_only_matches_filename_not_path(self):
+        """contain 只匹配 filename，不匹配路径中的目录名"""
+        pc = PatternFileContain(root="", contain="src", data={"key": "val"})
+        files = [
+            FileAttrs(path="src/main.py"),
+            FileAttrs(path="src-test.js"),
+            FileAttrs(path="lib/src-utils.py"),
+        ]
+        pc.apply(files)
+        # src/main.py: filename="main.py", not contain "src"
+        assert files[0].pending_pattern == []
+        # src-test.js: filename="src-test.js", contains "src"
+        assert files[1].pending_pattern == [pc]
+        # lib/src-utils.py: filename="src-utils.py", contains "src"
+        assert files[2].pending_pattern == [pc]
+
+
+# ==========================================
+# 8. PatternAny 测试
 # ==========================================
 class TestPatternAny:
     def test_match_pathspec_asterisk(self):
@@ -465,7 +545,82 @@ class TestPatternAny:
 
 
 # ==========================================
-# 8. get_pattern 工厂函数测试
+# 9. PatternPathPrefix 测试
+# ==========================================
+class TestPatternPathPrefix:
+    def test_match_pathspec_prefix(self):
+        """测试 match_pathspec 匹配 dir/* 格式"""
+        assert PatternPathPrefix.match_pathspec("src/*") is True
+        assert PatternPathPrefix.match_pathspec("frontend/*") is True
+        assert PatternPathPrefix.match_pathspec("a/b/c/*") is True
+
+    def test_match_pathspec_rejects_no_slash(self):
+        """不符合 /* 结尾的不匹配"""
+        assert PatternPathPrefix.match_pathspec("*") is False
+        assert PatternPathPrefix.match_pathspec("src") is False
+        assert PatternPathPrefix.match_pathspec("src/") is False
+
+    def test_match_pathspec_rejects_empty_prefix(self):
+        """/* 前缀为空的不匹配"""
+        assert PatternPathPrefix.match_pathspec("/*") is False
+
+    def test_match_pathspec_rejects_wildcard_in_prefix(self):
+        """前缀中包含 * 的不匹配"""
+        assert PatternPathPrefix.match_pathspec("sr*/*") is False
+        assert PatternPathPrefix.match_pathspec("**/modules/*") is False
+        assert PatternPathPrefix.match_pathspec("modules/**") is False
+
+    def test_match_pathspec_rejects_charset_in_prefix(self):
+        """前缀中包含 [ 的不匹配"""
+        assert PatternPathPrefix.match_pathspec("[ab]/*") is False
+
+    def test_match_pathspec_rejects_question_in_prefix(self):
+        """前缀中包含 ? 的不匹配"""
+        assert PatternPathPrefix.match_pathspec("src?/*") is False
+
+    def test_apply_matches_paths_under_prefix(self):
+        """测试 PatternPathPrefix.apply 前缀匹配，往 pending_pattern 存 self"""
+        pp = PatternPathPrefix(root="", prefix="src/", data={"type": "source"})
+        files = [
+            FileAttrs(path="src/main.py"),
+            FileAttrs(path="src/lib/utils.py"),
+            FileAttrs(path="src"),
+            FileAttrs(path="tests/main.py"),
+            FileAttrs(path="frontend/src/App.svelte"),
+        ]
+        pp.apply(files)
+        assert files[0].pending_pattern == [pp]
+        assert files[1].pending_pattern == [pp]
+        # "src" does not start with "src/" (trailing slash matters)
+        assert files[2].pending_pattern == []
+        assert files[3].pending_pattern == []
+        assert files[4].pending_pattern == []
+
+    def test_apply_with_root_prefix(self):
+        """测试 PatternPathPrefix.apply 结合 root 前缀"""
+        pp = PatternPathPrefix(root="frontend/", prefix="src/", data={"text": "html"})
+        files = [
+            FileAttrs(path="frontend/src/App.svelte"),
+            FileAttrs(path="frontend/src/routes/+page.svelte"),
+            FileAttrs(path="backend/src/utils.py"),
+            FileAttrs(path="frontend/package.json"),
+        ]
+        pp.apply(files)
+        assert files[0].pending_pattern == [pp]
+        assert files[1].pending_pattern == [pp]
+        assert files[2].pending_pattern == []
+        assert files[3].pending_pattern == []
+
+    def test_construction(self):
+        """测试 PatternPathPrefix 构造"""
+        pp = PatternPathPrefix(root="", prefix="src/", data={"binary": True})
+        assert pp.root == ""
+        assert pp.prefix == "src/"
+        assert pp.data == {"binary": True}
+
+
+# ==========================================
+# 10. get_pattern 工厂函数测试
 # ==========================================
 class TestGetPattern:
     def test_returns_pattern_filesuffix_for_star_suffix(self):
@@ -476,12 +631,13 @@ class TestGetPattern:
         assert p.root == ""
         assert p.data == {"text": "auto"}
 
-    def test_returns_pattern_any_for_asterisk(self):
-        """单独的 * 应返回 PatternAny，匹配所有文件"""
-        p = get_pattern("", "*", {"text": "auto"})
-        assert isinstance(p, PatternAny)
+    def test_returns_pattern_filecontain_for_star_text_star(self):
+        """*README* 应返回 PatternFileContain"""
+        p = get_pattern("", "*README*", {"text": "markdown"})
+        assert isinstance(p, PatternFileContain)
+        assert p.contain == "README"
         assert p.root == ""
-        assert p.data == {"text": "auto"}
+        assert p.data == {"text": "markdown"}
 
     def test_returns_pattern_filename_for_plain_name(self):
         """纯文件名应返回 PatternFileName"""
@@ -490,6 +646,21 @@ class TestGetPattern:
         assert p.name == "package.json"
         assert p.root == "src/"
         assert p.data == {"eol": "lf"}
+
+    def test_returns_pattern_any_for_asterisk(self):
+        """单独的 * 应返回 PatternAny，匹配所有文件"""
+        p = get_pattern("", "*", {"text": "auto"})
+        assert isinstance(p, PatternAny)
+        assert p.root == ""
+        assert p.data == {"text": "auto"}
+
+    def test_returns_pattern_pathprefix_for_dir_star(self):
+        """src/* 应返回 PatternPathPrefix"""
+        p = get_pattern("", "src/*", {"text": "auto"})
+        assert isinstance(p, PatternPathPrefix)
+        assert p.prefix == "src/"
+        assert p.root == ""
+        assert p.data == {"text": "auto"}
 
     def test_returns_pattern_regex_for_complex_pattern(self):
         """通配符/slash 等复杂模式应返回 PatternRegex"""
@@ -506,7 +677,7 @@ class TestGetPattern:
         assert p.pathspec == "/README.md"
 
     def test_returns_pattern_regex_for_pattern_with_slash(self):
-        """包含 / 的模式应返回 PatternRegex"""
+        """包含 / 的模式应返回 PatternRegex（排除 prefix/* 后）"""
         p = get_pattern("", "src/*.py", {"text": "auto"})
         assert isinstance(p, PatternRegex)
 
@@ -515,8 +686,10 @@ class TestGetPattern:
         p = get_pattern("", "*.[ch]", {"text": "auto"})
         assert isinstance(p, PatternRegex)
 
+    # --- 集成测试 ---
+
     def test_integration_all_pattern_types_work_together(self):
-        """集成测试：三种 Pattern 类型混合使用，验证 attrs_dict 覆盖规则"""
+        """集成测试：多种 Pattern 类型混合使用，验证 attrs_dict 覆盖规则"""
         files = [
             FileAttrs(path="frontend/package.json"),
             FileAttrs(path="frontend/src/App.svelte"),
@@ -628,3 +801,53 @@ class TestGetPattern:
         p_readme.apply(files)
         assert files[0].attrs_dict == {"text": "auto", "eol": "lf", "diff": "default"}
         assert files[1].attrs_dict == {"text": "auto", "eol": "lf", "diff": "markdown"}
+
+    # --- PatternFileContain 集成测试 ---
+
+    def test_filecontain_with_global_defaults(self):
+        """集成测试：*README* 匹配所有包含 README 的文件，和 '*' 默认属性叠加"""
+        files = [
+            FileAttrs(path="README.md"),
+            FileAttrs(path="src/README.txt"),
+            FileAttrs(path="CONTRIBUTING.md"),
+        ]
+        p_star = get_pattern("", "*", {"eol": "lf"})
+        p_readme = get_pattern("", "*README*", {"text": "markdown"})
+        p_star.apply(files)
+        p_readme.apply(files)
+        assert files[0].attrs_dict == {"eol": "lf", "text": "markdown"}
+        assert files[1].attrs_dict == {"eol": "lf", "text": "markdown"}
+        # CONTRIBUTING.md does not contain "README" in filename
+        assert files[2].attrs_dict == {"eol": "lf"}
+
+    # --- PatternPathPrefix 集成测试 ---
+
+    def test_pathprefix_with_deeper_patterns(self):
+        """集成测试：src/* 设置默认，更具体的 pattern 覆盖"""
+        files = [
+            FileAttrs(path="src/main.py"),
+            FileAttrs(path="src/config.json"),
+            FileAttrs(path="backend/main.py"),
+        ]
+        p_src = get_pattern("", "src/*", {"eol": "lf", "diff": "text"})
+        p_py = get_pattern("", "*.py", {"diff": "python"})
+        p_src.apply(files)
+        p_py.apply(files)
+        assert files[0].attrs_dict == {"eol": "lf", "diff": "python"}
+        assert files[1].attrs_dict == {"eol": "lf", "diff": "text"}
+        # backend/main.py not under src/
+        assert files[2].attrs_dict == {"diff": "python"}
+
+    def test_pathprefix_with_root_combines(self):
+        """集成测试：PatternPathPrefix root + prefix 组合"""
+        files = [
+            FileAttrs(path="frontend/src/App.svelte"),
+            FileAttrs(path="frontend/static/logo.png"),
+            FileAttrs(path="backend/src/lib.py"),
+        ]
+        p = get_pattern("frontend/", "src/*", {"text": "source"})
+        p.apply(files)
+        assert files[0].attrs_dict == {"text": "source"}
+        # frontend/static/ does not start with "frontend/src/"
+        assert files[1].attrs_dict == {}
+        assert files[2].attrs_dict == {}

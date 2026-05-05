@@ -142,6 +142,40 @@ class PatternFileSuffix(PatternBase):
         return True
 
 
+class PatternFileContain(PatternBase):
+    # for pathspec like "*README*"
+    contain: str
+
+    def apply(self, files: "list[FileAttrs]"):
+        contain = self.contain
+        root = self.root
+        if root:
+            for f in files:
+                if f.path.startswith(root) and contain in f.filename:
+                    f.pending_pattern.append(self)
+        else:
+            for f in files:
+                if contain in f.filename:
+                    f.pending_pattern.append(self)
+
+    @classmethod
+    def match_pathspec(cls, pathspec: str):
+        if '/' in pathspec:
+            return False
+        if not pathspec.startswith('*'):
+            return False
+        if not pathspec.endswith('*'):
+            return False
+        if len(pathspec) < 3:
+            return False
+        inner = pathspec[1:-1]
+        if '*' in inner:
+            return False
+        if '[' in inner:
+            return False
+        return True
+
+
 class PatternAny(PatternBase):
     # for pathspec="*"
 
@@ -160,6 +194,32 @@ class PatternAny(PatternBase):
         return pathspec == '*'
 
 
+class PatternPathPrefix(PatternBase):
+    # for pathspec like "src/*"
+    prefix: str
+
+    def apply(self, files: "list[FileAttrs]"):
+        prefix = self.root + self.prefix
+        for f in files:
+            if f.path.startswith(prefix):
+                f.pending_pattern.append(self)
+
+    @classmethod
+    def match_pathspec(cls, pathspec: str):
+        if not pathspec.endswith('/*'):
+            return False
+        prefix = pathspec[:-2]
+        if not prefix:
+            return False
+        if '*' in prefix:
+            return False
+        if '[' in prefix:
+            return False
+        if '?' in prefix:
+            return False
+        return True
+
+
 def get_pattern(root, pathspec, attrs_dict) -> PatternBase:
     """
     Args:
@@ -169,8 +229,12 @@ def get_pattern(root, pathspec, attrs_dict) -> PatternBase:
     """
     if PatternFileSuffix.match_pathspec(pathspec):
         return PatternFileSuffix(root=root, data=attrs_dict, suffix=pathspec[1:])
+    if PatternFileContain.match_pathspec(pathspec):
+        return PatternFileContain(root=root, data=attrs_dict, contain=pathspec[1:-1])
     if PatternFileName.match_pathspec(pathspec):
         return PatternFileName(root=root, data=attrs_dict, name=pathspec)
     if PatternAny.match_pathspec(pathspec):
         return PatternAny(root=root, data=attrs_dict)
+    if PatternPathPrefix.match_pathspec(pathspec):
+        return PatternPathPrefix(root=root, data=attrs_dict, prefix=pathspec[:-2] + "/")
     return PatternRegex(root, data=attrs_dict, pathspec=pathspec)
