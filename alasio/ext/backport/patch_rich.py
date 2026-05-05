@@ -27,10 +27,10 @@ def patch_rich_traceback_extract():
         # this shouldn't happen
         return True
 
-    if ver in ['14.1.0', '14.2.0']:
-        from alasio.ext.backport.rich_14_1 import RichTracebackBackport
-    elif ver in ['14.3.0', '14.3.1', '14.3.2', '14.3.3']:
+    if ver in ['14.3.0', '14.3.1', '14.3.2', '14.3.3', '14.3.4', '15.0.0']:
         from alasio.ext.backport.rich_14_3 import RichTracebackBackport
+    elif ver in ['14.1.0', '14.2.0']:
+        from alasio.ext.backport.rich_14_1 import RichTracebackBackport
     else:
         return False
 
