@@ -26,9 +26,7 @@ class BaseTransport:
 
     @cached_property
     def repo(self):
-        repo = GitCommit(self.arguments.repo_path)
-        repo.read_lazy()
-        return repo
+        return GitCommit(self.arguments.repo_path).read_lazy()
 
     async def fetch(self, output_file) -> int:
         """Executes the full fetch process for the specific protocol.

@@ -134,6 +134,7 @@ class GitObjectManager(GitRepoBase):
 
         self._manager_build()
         self._manager_clear_sub()
+        return self
 
     def read_lazy(self, skip_size=None):
         """
@@ -162,6 +163,7 @@ class GitObjectManager(GitRepoBase):
 
         self._manager_build()
         self._manager_clear_sub()
+        return self
 
     def cat_shallow(self, sha1):
         """
