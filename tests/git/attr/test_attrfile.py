@@ -11,10 +11,7 @@ Tests cover:
 - get_pattern() factory function
 """
 
-import re
-
-from alasio.git.attr.attrfile import (FileAttrs, PatternBase, PatternFileName, PatternFileSuffix, PatternRegex,
-                                      get_pattern)
+from alasio.git.attr.attrfile import *
 
 
 # ==========================================
@@ -297,6 +294,7 @@ class TestPatternFileName:
         assert PatternFileName.match_pathspec("package.json") is True
         assert PatternFileName.match_pathspec("README.md") is True
         assert PatternFileName.match_pathspec("Dockerfile") is True
+        assert PatternFileName.match_pathspec(".gitattributes") is True
 
     def test_match_pathspec_rejects_paths_with_slash(self):
         """包含 / 的不是纯文件名"""
@@ -353,12 +351,17 @@ class TestPatternFileSuffix:
         """测试 match_pathspec 匹配 *.ext 格式"""
         assert PatternFileSuffix.match_pathspec("*.py") is True
         assert PatternFileSuffix.match_pathspec("*.txt") is True
-        assert PatternFileSuffix.match_pathspec("*.component.svelte") is True
+
+    def test_match_pathspec_rejects_dot_in_suffix(self):
+        """后缀中包含 . 的不匹配，如 *.svelte.ts"""
+        assert PatternFileSuffix.match_pathspec("*.svelte.ts") is False
+        assert PatternFileSuffix.match_pathspec("*.comp.html") is False
 
     def test_match_pathspec_rejects_non_star_start(self):
-        """不以 * 开头的不是后缀匹配"""
+        """不以 *. 开头的不是后缀匹配"""
         assert PatternFileSuffix.match_pathspec("file*.py") is False
         assert PatternFileSuffix.match_pathspec(".gitignore") is False
+        assert PatternFileSuffix.match_pathspec("*db") is False
 
     def test_match_pathspec_rejects_slash(self):
         """包含 / 的不匹配"""
@@ -402,13 +405,23 @@ class TestPatternFileSuffix:
         assert files[2].pending_pattern == []
         assert files[3].pending_pattern == []
 
-    def test_match_pathspec_star_only(self):
-        """测试 match_pathspec 匹配单独的 *（匹配所有文件）"""
-        assert PatternFileSuffix.match_pathspec("*") is True
 
-    def test_apply_star_only_matches_all_files(self):
-        """测试 pathspec='*' 的 PatternFileSuffix 匹配所有文件，后缀为空字符串"""
-        ps = PatternFileSuffix(root="", suffix="", data={"text": "auto"})
+# ==========================================
+# 7. PatternAny 测试
+# ==========================================
+class TestPatternAny:
+    def test_match_pathspec_asterisk(self):
+        """测试 match_pathspec 仅匹配单独的 *"""
+        assert PatternAny.match_pathspec("*") is True
+        assert PatternAny.match_pathspec("**") is False
+        assert PatternAny.match_pathspec("*.py") is False
+        assert PatternAny.match_pathspec("file*") is False
+        assert PatternAny.match_pathspec("") is False
+        assert PatternAny.match_pathspec("*.") is False
+
+    def test_apply_matches_all_files_without_root(self):
+        """测试 PatternAny.apply 无 root 前缀时匹配所有文件"""
+        pa = PatternAny(root="", data={"text": "auto"})
         files = [
             FileAttrs(path="main.py"),
             FileAttrs(path="backend/api/router.py"),
@@ -417,13 +430,13 @@ class TestPatternFileSuffix:
             FileAttrs(path="package.json"),
             FileAttrs(path="doc/guide/tutorial.md"),
         ]
-        ps.apply(files)
+        pa.apply(files)
         for file in files:
-            assert file.pending_pattern == [ps], f"File {file.path} should match '*'"
+            assert file.pending_pattern == [pa], f"File {file.path} should match '*'"
 
-    def test_apply_star_only_with_root(self):
-        """测试 pathspec='*' 带 root 前缀的 PatternFileSuffix 匹配该 root 下所有文件"""
-        ps = PatternFileSuffix(root="frontend/", suffix="", data={"text": "frontend-default"})
+    def test_apply_matches_all_files_with_root(self):
+        """测试 PatternAny.apply 带 root 前缀时仅匹配该 root 下所有文件"""
+        pa = PatternAny(root="frontend/", data={"text": "frontend-default"})
         files = [
             FileAttrs(path="frontend/src/App.svelte"),
             FileAttrs(path="frontend/package.json"),
@@ -431,16 +444,28 @@ class TestPatternFileSuffix:
             FileAttrs(path="backend/main.py"),
             FileAttrs(path="README.md"),
         ]
-        ps.apply(files)
-        assert files[0].pending_pattern == [ps]
-        assert files[1].pending_pattern == [ps]
-        assert files[2].pending_pattern == [ps]
+        pa.apply(files)
+        assert files[0].pending_pattern == [pa]
+        assert files[1].pending_pattern == [pa]
+        assert files[2].pending_pattern == [pa]
         assert files[3].pending_pattern == []
         assert files[4].pending_pattern == []
 
+    def test_construction(self):
+        """测试 PatternAny 构造"""
+        pa = PatternAny(root="src/", data={"binary": True})
+        assert pa.root == "src/"
+        assert pa.data == {"binary": True}
+
+    def test_empty_root(self):
+        """root 为空字符串表示根目录"""
+        pa = PatternAny(root="", data={"text": "auto"})
+        assert pa.root == ""
+        assert pa.data == {"text": "auto"}
+
 
 # ==========================================
-# 7. get_pattern 工厂函数测试
+# 8. get_pattern 工厂函数测试
 # ==========================================
 class TestGetPattern:
     def test_returns_pattern_filesuffix_for_star_suffix(self):
@@ -451,11 +476,10 @@ class TestGetPattern:
         assert p.root == ""
         assert p.data == {"text": "auto"}
 
-    def test_returns_pattern_filesuffix_for_star_only(self):
-        """单独的 * 应返回 PatternFileSuffix，后缀为空字符串，匹配所有文件"""
+    def test_returns_pattern_any_for_asterisk(self):
+        """单独的 * 应返回 PatternAny，匹配所有文件"""
         p = get_pattern("", "*", {"text": "auto"})
-        assert isinstance(p, PatternFileSuffix)
-        assert p.suffix == ""
+        assert isinstance(p, PatternAny)
         assert p.root == ""
         assert p.data == {"text": "auto"}
 
@@ -548,7 +572,7 @@ class TestGetPattern:
         fa.pending_pattern = [p_early, p_late]
         assert fa.attrs_dict == {"text": "override", "eol": "lf"}
 
-    def test_star_only_matches_all_files(self):
+    def test_star_any_matches_all_files(self):
         """集成测试：'*' pathspec 匹配所有文件并设默认属性"""
         files = [
             FileAttrs(path="main.py"),
@@ -558,12 +582,13 @@ class TestGetPattern:
             FileAttrs(path="package.json"),
         ]
         p_star = get_pattern("", "*", {"text": "auto", "eol": "lf"})
+        assert isinstance(p_star, PatternAny)
         p_star.apply(files)
         for file in files:
             assert file.attrs_dict == {"text": "auto", "eol": "lf"}, \
                 f"File {file.path} should have default attrs from '*'"
 
-    def test_star_only_with_deeper_override(self):
+    def test_star_any_with_deeper_override(self):
         """集成测试：'*' 设默认属性，更具体的 pattern 覆盖 '*' 的属性"""
         files = [
             FileAttrs(path="main.py"),
@@ -586,7 +611,7 @@ class TestGetPattern:
         assert files[1].attrs_dict == {"text": "python", "eol": "crlf"}
         assert files[2].attrs_dict == {"text": "typescript", "eol": "lf"}
 
-    def test_star_only_unset_then_reset(self):
+    def test_star_any_unset_then_reset(self):
         """集成测试：'*' 全局设值 → 局部 unset → 局部重新设值"""
         files = [
             FileAttrs(path="main.py"),

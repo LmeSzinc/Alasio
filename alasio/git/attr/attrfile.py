@@ -71,14 +71,14 @@ class PatternRegex(PatternBase):
     def apply(self, files: "list[FileAttrs]"):
         regex = self.regex
         root = self.root
-        for file in files:
-            path = file.path
-            if root and not path.startswith(root):
-                continue
-            if not regex.match(path):
-                continue
-            # apply
-            file.pending_pattern.append(self)
+        if root:
+            for f in files:
+                if f.path.startswith(root) and regex.match(f.path):
+                    f.pending_pattern.append(self)
+        else:
+            for f in files:
+                if regex.match(f.path):
+                    f.pending_pattern.append(self)
 
 
 class PatternFileName(PatternBase):
@@ -89,19 +89,13 @@ class PatternFileName(PatternBase):
         name = self.name
         root = self.root
         if root:
-            for file in files:
-                if not file.path.startswith(root):
-                    continue
-                if file.filename != name:
-                    continue
-                # apply
-                file.pending_pattern.append(self)
+            for f in files:
+                if f.path.startswith(root) and f.filename == name:
+                    f.pending_pattern.append(self)
         else:
-            for file in files:
-                if file.filename != name:
-                    continue
-                # apply
-                file.pending_pattern.append(self)
+            for f in files:
+                if f.filename == name:
+                    f.pending_pattern.append(self)
 
     @classmethod
     def match_pathspec(cls, pathspec: str):
@@ -117,41 +111,53 @@ class PatternFileName(PatternBase):
 
 class PatternFileSuffix(PatternBase):
     # for pathspec like "*.py"
+    # pathspec like "*.svelte.ts", "*file.txt" is not included
     suffix: str
 
     def apply(self, files: "list[FileAttrs]"):
         suffix = self.suffix
         root = self.root
         if root:
-            for file in files:
-                if not file.path.startswith(root):
-                    continue
-                # get name
-                if not file.filename.endswith(suffix):
-                    continue
-                # apply
-                file.pending_pattern.append(self)
+            for f in files:
+                if f.path.startswith(root) and f.filename.endswith(suffix):
+                    f.pending_pattern.append(self)
         else:
-            for file in files:
-                # get name
-                if not file.filename.endswith(suffix):
-                    continue
-                # apply
-                file.pending_pattern.append(self)
+            for f in files:
+                if f.filename.endswith(suffix):
+                    f.pending_pattern.append(self)
 
     @classmethod
     def match_pathspec(cls, pathspec: str):
-        # pathspec should be "*abc"
         if '/' in pathspec:
             return False
-        if not pathspec.startswith('*'):
+        if not pathspec.startswith('*.'):
             return False
-        suffix = pathspec[1:]
+        suffix = pathspec[2:]
         if '*' in suffix:
+            return False
+        if '.' in suffix:
             return False
         if '[' in suffix:
             return False
         return True
+
+
+class PatternAny(PatternBase):
+    # for pathspec="*"
+
+    def apply(self, files: "list[FileAttrs]"):
+        root = self.root
+        if root:
+            for f in files:
+                if f.path.startswith(root):
+                    f.pending_pattern.append(self)
+        else:
+            for f in files:
+                f.pending_pattern.append(self)
+
+    @classmethod
+    def match_pathspec(cls, pathspec: str):
+        return pathspec == '*'
 
 
 def get_pattern(root, pathspec, attrs_dict) -> PatternBase:
@@ -165,4 +171,6 @@ def get_pattern(root, pathspec, attrs_dict) -> PatternBase:
         return PatternFileSuffix(root=root, data=attrs_dict, suffix=pathspec[1:])
     if PatternFileName.match_pathspec(pathspec):
         return PatternFileName(root=root, data=attrs_dict, name=pathspec)
+    if PatternAny.match_pathspec(pathspec):
+        return PatternAny(root=root, data=attrs_dict)
     return PatternRegex(root, data=attrs_dict, pathspec=pathspec)
