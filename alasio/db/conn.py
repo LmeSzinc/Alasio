@@ -426,6 +426,10 @@ class SqlitePool:
         Returns:
             ConnectionPool:
         """
+        if not file:
+            raise ValueError(f'File name cannot be empty, got "{file}"')
+        # but ":memory:" is allowed
+
         try:
             return self.all_pool[file]
         except KeyError:
@@ -452,7 +456,9 @@ class SqlitePool:
         costs 129us if create new connection (110us for direct sqlite3.Connection call)
 
         Args:
-            file (str): Absolute path to database file
+            file (str): Absolute filepath to database or ":memory:" for in-memory database
+                Due to connection pool, in-memory database is shared,
+                meaning every ":memory:" connect returns the same db.
 
         Returns:
             SqlitePoolCursor:
@@ -470,7 +476,7 @@ class SqlitePool:
         Commits on successful exit, rolls back on exception.
 
         Args:
-            file (str): Absolute path to database file
+            file (str):
 
         Returns:
             ExclusiveTransaction:
@@ -530,6 +536,15 @@ class SqlitePool:
         Returns:
             bool: If success
         """
+        if not old_file:
+            raise ValueError(f'Old name cannot be empty, got "{old_file}"')
+        if not new_file:
+            raise ValueError(f'Old name cannot be empty, got "{new_file}"')
+        if old_file == ':memory:':
+            raise ValueError(f'Cannot rename memory database "{old_file}" to "{new_file}"')
+        if new_file == ':memory:':
+            raise ValueError(f'Cannot rename "{old_file}" to memory database "{new_file}"')
+
         with self.create_lock:
             try:
                 pool = self.all_pool.pop(old_file)
@@ -564,7 +579,8 @@ class SqlitePool:
                 pool.release_all()
 
             # delete file
-            return atomic_remove(file)
+            if file and file != ':memory:':
+                return atomic_remove(file)
 
 
 SQLITE_POOL = SqlitePool()

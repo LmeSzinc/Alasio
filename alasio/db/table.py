@@ -125,11 +125,12 @@ class AlasioTable(Generic[T_model]):
     #   MODEL: ConfigTable
     MODEL: Type[T_model]
 
-    def __init__(self, file: str):
+    def __init__(self, file):
         """
         Args:
-            file: Absolute filepath to database
-                or :memory:
+            file (str): Absolute filepath to database or ":memory:" for in-memory database
+                Due to connection pool, in-memory database is shared,
+                meaning every ":memory:" connect returns the same db.
         """
         self.file = file
 
