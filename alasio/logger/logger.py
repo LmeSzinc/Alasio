@@ -120,17 +120,18 @@ class LoggingLevel:
 
 
 class CaptureWriterContext:
-    def __init__(self, logger):
+    def __init__(self, log):
         """
         Args:
-            logger (AlasioLogger): Logger instance
+            log (AlasioLogger): Logger instance
         """
-        self.logger = logger
-        self.writer = CaptureWriter()
+        self.logger = log
+        self.writer = None
         self.old_writer = None
 
     def __enter__(self):
         self.old_writer = self.logger._writer
+        self.writer = CaptureWriter(parent=self.old_writer)
         self.logger._writer = self.writer
         return self.writer
 
@@ -354,8 +355,19 @@ class AlasioLogger(LoggingLevel):
                     writer.stdout.flush()
 
     @staticmethod
-    def backend_event(event, timestamp: float = None, level='INFO', raw=0):
-        # create backend event directly
+    def backend_event(event, timestamp=None, level='INFO', raw=0):
+        """
+        Create backend event directly
+
+        Args:
+            event (str): Log message
+            timestamp (float): Timestamp. Defaults to None.
+            level (str): Log level name. Defaults to 'INFO'.
+            raw (int): Whether to log raw message without timestamp and level. Defaults to 0.
+
+        Returns:
+            dict: Event dictionary for backend
+        """
         if timestamp is None:
             timestamp = time.time()
         backend_event = {'t': timestamp, 'l': level, 'm': event}

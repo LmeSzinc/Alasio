@@ -1,6 +1,6 @@
 import sys
 from datetime import date
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from alasio.ext import env
 from alasio.ext.cache import cached_property_threadsafe
@@ -11,19 +11,15 @@ if TYPE_CHECKING:
     from alasio.backend.worker.bridge import BackendBridge
 
 
-class PseudoBackendBridge:
-    inited = False
-
-
 # It's a singleton because on each logger.bind() structlog.PrintLoggerFactory will create new `file` object
 # But we don't want to open multiple files
 class LogWriter(metaclass=Singleton):
     def __init__(self):
-        self.create_date: Optional[date] = None
+        self.create_date: "date | None" = None
         self.is_electron = bool(env.ELECTRON_SECRET)
 
     @cached_property_threadsafe
-    def backend(self) -> "BackendBridge":
+    def backend(self) -> "BackendBridge | PseudoBackendBridge":
         from alasio.backend.worker.bridge import BackendBridge
         backend = BackendBridge()
         if backend.inited:
@@ -80,15 +76,28 @@ class LogWriter(metaclass=Singleton):
         self.close()
 
 
+class PseudoBackendBridge:
+    inited = False
+    config_name = "mock"
+
+
 class CaptureStream:
-    def __init__(self):
-        self.logs: List[str] = []
+    def __init__(self, parent=None):
+        """
+        Args:
+            parent (CaptureStream): Parent stream to also write to. Defaults to None.
+        """
+        self.logs: "list[str]" = []
+        self.parent = parent
 
     def write(self, text):
         self.logs.append(text)
+        if self.parent:
+            self.parent.write(text)
 
     def flush(self):
-        pass
+        if self.parent:
+            self.parent.flush()
 
     def any_contains(self, text):
         """
@@ -128,13 +137,20 @@ class CaptureJob:
 
 
 class CaptureBackend:
-    def __init__(self):
-        self.logs: List[dict] = []
+    def __init__(self, parent=None):
+        """
+        Args:
+            parent (CaptureBackend): Parent backend to also send to. Defaults to None.
+        """
+        self.logs: "list[dict]" = []
         self.inited = True
         self.config_name = "mock"
+        self.parent = parent
 
     def send_log(self, event):
         self.logs.append(event)
+        if self.parent:
+            self.parent.send_log(event)
         return CaptureJob()
 
     def any_contains(self, text):
@@ -172,11 +188,20 @@ class CaptureBackend:
 
 
 class CaptureWriter:
-    def __init__(self):
+    def __init__(self, parent=None):
+        """
+        Args:
+            parent (CaptureWriter | LogWriter | None): Parent writer to chain logs to. Defaults to None.
+        """
         self.is_electron = False
-        self.stdout = CaptureStream()
-        self.fd = CaptureStream()
-        self.backend = CaptureBackend()
+        if isinstance(parent, CaptureWriter):
+            self.stdout = CaptureStream(parent=parent.stdout)
+            self.fd = CaptureStream(parent=parent.fd)
+            self.backend = CaptureBackend(parent=parent.backend)
+        else:
+            self.stdout = CaptureStream()
+            self.fd = CaptureStream()
+            self.backend = CaptureBackend()
 
     def clear(self):
         self.stdout.logs.clear()
