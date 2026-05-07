@@ -9,12 +9,10 @@ from alasio.config.table.base import AlasioConfigDB, AlasioGuiDB
 from alasio.config.table.key import AlasioKeyTable
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.ext.path.validate import validate_filename
-from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.logger import logger
-
-PROTECTED_NAMES = {'gui', 'template'}
 
 
 class ConfigFile(msgspec.Struct):
@@ -41,8 +39,13 @@ def validate_config_name(config_name):
     except ValueError as e:
         return str(e)
     # Internal names are not allowed
-    if config_name in PROTECTED_NAMES:
-        return f'Config name is protected: {config_name}'
+    # 'gui', 'webapp' are preserved for log files
+    # ':memory:' is in-memory sqlite3 database
+    if config_name in ('gui', 'webapp', ':memory:'):
+        return f'Config name is protected: "{config_name}"'
+    # "template*" are config templates for dev purpose
+    if config_name.startswith('template'):
+        return f'Config name is protected: "{config_name}"'
     return ''
 
 

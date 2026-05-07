@@ -6,6 +6,8 @@ from alasio.ext.singleton import Singleton, SingletonNamed
 class AlasioConfigDB(AlasioTable, metaclass=SingletonNamed):
     @classmethod
     def config_file(cls, config_name):
+        if config_name == ':memory:':
+            return ':memory:'
         return env.PROJECT_ROOT / f'config/{config_name}.db'
 
     def __init__(self, config_name):

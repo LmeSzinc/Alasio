@@ -10,7 +10,7 @@ from alasio.config.config_generated import AlasioConfigGenerated as AlasioConfig
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.mod import Mod
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
-from alasio.config.table.scan import ScanTable
+from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
 
 env.ALASIO_ROOT.chdir_here()
@@ -37,45 +37,19 @@ def config_cls(example_mod):
     return MyConfig
 
 
-@pytest.fixture(scope='module', autouse=True)
-def cleanup_all_configs():
-    """Clean up all test config files before and after all tests"""
-    scan_table = ScanTable()
-    test_configs = [
-        'test_config_base',
-        'test_config_modify',
-        'test_config_override',
-        'test_config_override_unbound',
-        'test_config_temporary',
-        'test_config_const',
-        'test_model_proxy',
-        'test_config_edge',
-        'test_config_edge_bad',
-        'test_config_edge_bad2',
-    ]
-
-    # Cleanup before tests
-    for config_name in test_configs:
-        try:
-            scan_table.config_del(config_name)
-        except Exception:
-            pass
-
+@pytest.fixture(autouse=True)
+def cleanup_memory_db():
+    """Clear memory database after each test"""
     yield
-
-    # Cleanup after tests
-    for config_name in test_configs:
-        try:
-            scan_table.config_del(config_name)
-        except Exception:
-            pass
+    # delete_file(':memory:') will release the pool and clear the database
+    SQLITE_POOL.delete_file(':memory:')
 
 
 class TestAlasioConfigBase:
     """Test suite for AlasioConfigBase lifecycle management"""
 
     # Use a single test config for all tests to reduce file creation
-    TEST_CONFIG_NAME = 'test_config_base'
+    TEST_CONFIG_NAME = ':memory:'
 
     def test_config_initialization(self, config_cls):
         """Test basic config initialization"""
@@ -89,6 +63,8 @@ class TestAlasioConfigBase:
 
     def test_template_config_readonly(self, config_cls):
         """Test that template config has auto_save disabled"""
+        # Note: Since we strictly use ':memory:' for in-memory DB,
+        # we still use a file for template test to trigger .startswith("template")
         config = config_cls('template_test', task='Main')
 
         assert config.is_template_config is True
@@ -193,7 +169,7 @@ class TestAlasioConfigBase:
 class TestConfigModification:
     """Test suite for config modification and saving"""
 
-    TEST_CONFIG_NAME = 'test_config_modify'
+    TEST_CONFIG_NAME = ':memory:'
 
     @pytest.fixture
     def config(self, example_mod):
@@ -334,7 +310,7 @@ class TestConfigModification:
 class TestConfigOverride:
     """Test suite for config override functionality"""
 
-    TEST_CONFIG_NAME = 'test_config_override'
+    TEST_CONFIG_NAME = ':memory:'
 
     @pytest.fixture
     def config(self, example_mod):
@@ -434,7 +410,7 @@ class TestConfigOverride:
             entry = config.mod.entry
             UnboundScheduler: "main.Campaign"
 
-        cfg = ConfigWithUnbound(self.TEST_CONFIG_NAME + '_unbound', task='Main')
+        cfg = ConfigWithUnbound(':memory:', task='Main')
 
         # Override before accessing group
         cfg.override(UnboundScheduler_Name='a3')
@@ -458,7 +434,7 @@ class TestConfigOverride:
 class TestConfigTemporary:
     """Test suite for temporary override context manager"""
 
-    TEST_CONFIG_NAME = 'test_config_temporary'
+    TEST_CONFIG_NAME = ':memory:'
 
     @pytest.fixture
     def config(self, example_mod):
@@ -580,7 +556,7 @@ class TestConfigTemporary:
 class TestConfigConstOverride:
     """Test suite for const override functionality"""
 
-    TEST_CONFIG_NAME = 'test_config_const'
+    TEST_CONFIG_NAME = ':memory:'
 
     @pytest.fixture
     def config_with_const(self, example_mod):
@@ -645,7 +621,7 @@ class TestConfigConstOverride:
 class TestModelProxy:
     """Test suite for ModelProxy wrapper"""
 
-    TEST_CONFIG_NAME = 'test_model_proxy'
+    TEST_CONFIG_NAME = ':memory:'
 
     @pytest.fixture
     def config(self, example_mod):
@@ -697,7 +673,7 @@ class TestModelProxy:
 class TestConfigEdgeCases:
     """Test suite for edge cases and error handling"""
 
-    TEST_CONFIG_NAME = 'test_config_edge'
+    TEST_CONFIG_NAME = ':memory:'
 
     @pytest.fixture
     def config(self, example_mod):
@@ -717,7 +693,7 @@ class TestConfigEdgeCases:
             # Invalid annotation without dot
             BadGroup: "scheduler"
 
-        cfg = BadConfig(self.TEST_CONFIG_NAME + '_bad', task='Main')
+        cfg = BadConfig(':memory:', task='Main')
 
         with pytest.raises(DataInconsistent):
             _ = cfg.BadGroup
@@ -730,7 +706,7 @@ class TestConfigEdgeCases:
             # Non-existent model
             BadGroup: "nonexistent.NonExistentClass"
 
-        cfg = BadConfig(self.TEST_CONFIG_NAME + '_bad2', task='Main')
+        cfg = BadConfig(':memory:', task='Main')
 
         with pytest.raises(DataInconsistent):
             _ = cfg.BadGroup
@@ -776,7 +752,7 @@ class TestConfigEdgeCases:
 class TestConfigConcurrency:
     """Test suite for concurrent config access"""
 
-    TEST_CONFIG_NAME = 'test_config_concurrency'
+    TEST_CONFIG_NAME = ':memory:'
 
     @pytest.fixture
     def config(self, example_mod):
