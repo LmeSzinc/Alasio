@@ -16,6 +16,7 @@ from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.mod import Mod
 from alasio.config.entry.model import ConfigSetEvent, TaskItem
 from alasio.config.entry.utils import validate_task_name
+from alasio.config.group_proxy import GroupProxy
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
 from alasio.ext.cache import cached_property, cached_property_threadsafe
@@ -23,34 +24,6 @@ from alasio.ext.deep import deep_iter_depth1, deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.ext.msgspec_error.parse_anno import get_class_annotations
 from alasio.logger import logger
-
-
-class ModelProxy(Struct):
-    """
-    A proxy object upon group model to capture property set event
-    So you can set property directly and trigger auto save:
-        config.Campaign.Name = "12-4"
-    """
-    _obj: Struct
-    _config: "AlasioConfigBase"
-    _task: str
-    _group: str
-
-    def __getattr__(self, item):
-        # proxy attribute access
-        return getattr(self._obj, item)
-
-    def __setattr__(self, key, value):
-        obj = self._obj
-        setattr(obj, key, value)
-        # register modify
-        self._config.register_modify(task=self._task, group=self._group, arg=key, value=value)
-
-    def __repr__(self):
-        return repr(self._obj)
-
-    def __str__(self):
-        return str(self._obj)
 
 
 class BatchSetContext:
@@ -279,7 +252,7 @@ class AlasioConfigBase:
                 dict_group[key] = obj
 
                 # create proxy on groups, so we can catch arg set
-                obj = ModelProxy(_obj=obj, _config=self, _task=group_ref.task, _group=group)
+                obj = GroupProxy(_obj=obj, _config=self, _task=group_ref.task, _group=group)
                 setattr(self, group, obj)
             # Apply config overrides
             for key, value in self._override_const.items():
@@ -443,7 +416,7 @@ class AlasioConfigBase:
             logger.warning(f'cross_set failed, no such group: "{task}.{group}"')
             return
         # unwrap proxy
-        if type(obj) is ModelProxy:
+        if type(obj) is GroupProxy:
             obj = obj._obj
         try:
             old = getattr(obj, arg)
@@ -551,7 +524,7 @@ class AlasioConfigBase:
             logger.warning(f'Trying to override {group}.{arg}={value} but no such group')
             return NODEFAULT
         # unwrap proxy
-        if type(obj) is ModelProxy:
+        if type(obj) is GroupProxy:
             obj = obj._obj
         # set arg
         try:

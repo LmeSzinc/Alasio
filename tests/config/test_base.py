@@ -5,7 +5,7 @@ import time
 import pytest
 
 from ExampleMod.module.config.const import entry
-from alasio.config.base import ModelProxy
+from alasio.config.group_proxy import GroupProxy
 from alasio.config.config_generated import AlasioConfigGenerated as AlasioConfigBase
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.mod import Mod
@@ -80,24 +80,24 @@ class TestAlasioConfigBase:
             BadConfig('test', task='Main')
 
     def test_bound_group_access(self, config_cls):
-        """Test accessing bound group returns ModelProxy"""
+        """Test accessing bound group returns GroupProxy"""
         config = config_cls(self.TEST_CONFIG_NAME, task='Main')
 
         # Scheduler is bound to Main task
         campaign = config.Campaign
-        assert type(campaign) is ModelProxy
+        assert type(campaign) is GroupProxy
         assert campaign._task == 'Main'
         assert campaign._group == 'Campaign'
 
     def test_bound_alasio_group_access(self, config_cls):
         """
-        Test accessing a group that does not define in mod, but define in alasio, should return ModelProxy
+        Test accessing a group that does not define in mod, but define in alasio, should return GroupProxy
         """
         config = config_cls(self.TEST_CONFIG_NAME, task='Main')
 
         # Scheduler is bound to Main task
         scheduler = config.Scheduler
-        assert type(scheduler) is ModelProxy
+        assert type(scheduler) is GroupProxy
         assert scheduler._task == 'Main'
         assert scheduler._group == 'Scheduler'
 
@@ -121,7 +121,7 @@ class TestAlasioConfigBase:
 
         # Access should trigger fallback, not bound to task
         group = config.UnboundGroup
-        # Should be plain Struct, not ModelProxy
+        # Should be plain Struct, not GroupProxy
         assert type(group).__name__ == 'Campaign'
         # Default values should work
         assert group.Name == '12-4'
@@ -616,58 +616,6 @@ class TestConfigConstOverride:
 
         assert prev_config['Scheduler']['Enable'] is False
         assert prev_const['TEST_CONST'] == 100
-
-
-class TestModelProxy:
-    """Test suite for ModelProxy wrapper"""
-
-    TEST_CONFIG_NAME = ':memory:'
-
-    @pytest.fixture
-    def config(self, example_mod):
-        """Create test config instance"""
-
-        class MyConfig(AlasioConfigBase):
-            entry = example_mod.entry
-            Scheduler: "scheduler.Scheduler"
-
-        return MyConfig(self.TEST_CONFIG_NAME, task='Main')
-
-    def test_proxy_getattr(self, config):
-        """Test ModelProxy attribute access"""
-        proxy = config.Scheduler
-        assert type(proxy) is ModelProxy
-
-        # Should proxy to underlying object
-        assert proxy.Enable is False
-        assert proxy.ServerUpdate == '00:00'
-
-    def test_proxy_setattr_registers_modify(self, config):
-        """Test ModelProxy attribute setting registers modification"""
-        config.auto_save = False
-
-        proxy = config.Scheduler
-        proxy.Enable = True
-
-        # Should register modification
-        key = ('Main', 'Scheduler', 'Enable')
-        assert key in config._modified
-
-    def test_proxy_repr(self, config):
-        """Test ModelProxy __repr__"""
-        proxy = config.Scheduler
-        repr_str = repr(proxy)
-
-        # Should proxy to underlying object's repr
-        assert 'Scheduler' in repr_str or 'Enable' in repr_str
-
-    def test_proxy_str(self, config):
-        """Test ModelProxy __str__"""
-        proxy = config.Scheduler
-        str_str = str(proxy)
-
-        # Should proxy to underlying object's str
-        assert 'Scheduler' in str_str or 'Enable' in str_str
 
 
 class TestConfigEdgeCases:
