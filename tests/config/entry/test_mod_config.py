@@ -8,6 +8,7 @@ from alasio.config.entry.model import ConfigSetEvent
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
+from alasio.logger import logger
 
 env.ALASIO_ROOT.chdir_here()
 
@@ -21,9 +22,10 @@ class TestConfigReadWrite:
     @pytest.fixture(autouse=True)
     def cleanup_memory_db(self):
         """Clear memory database after each test"""
-        yield
-        # delete_file(':memory:') will release the pool and clear the database
-        SQLITE_POOL.delete_file(':memory:')
+        with logger.mock_capture_writer():
+            yield
+            # delete_file(':memory:') will release the pool and clear the database
+            SQLITE_POOL.delete_file(':memory:')
 
     @pytest.fixture
     def example_mod(self):

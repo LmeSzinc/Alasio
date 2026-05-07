@@ -138,9 +138,10 @@ def example_mod():
 @pytest.fixture(autouse=True)
 def cleanup_memory_db():
     """Clear memory database after each test"""
-    yield
-    # delete_file(':memory:') will release the pool and clear the database
-    SQLITE_POOL.delete_file(':memory:')
+    with logger.mock_capture_writer():
+        yield
+        # delete_file(':memory:') will release the pool and clear the database
+        SQLITE_POOL.delete_file(':memory:')
 
 
 class TestGroupProxy:

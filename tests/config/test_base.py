@@ -5,13 +5,14 @@ import time
 import pytest
 
 from ExampleMod.module.config.const import entry
-from alasio.config.group_proxy import GroupProxy
 from alasio.config.config_generated import AlasioConfigGenerated as AlasioConfigBase
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.mod import Mod
+from alasio.config.group_proxy import GroupProxy
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
+from alasio.logger import logger
 
 env.ALASIO_ROOT.chdir_here()
 
@@ -40,9 +41,10 @@ def config_cls(example_mod):
 @pytest.fixture(autouse=True)
 def cleanup_memory_db():
     """Clear memory database after each test"""
-    yield
-    # delete_file(':memory:') will release the pool and clear the database
-    SQLITE_POOL.delete_file(':memory:')
+    with logger.mock_capture_writer():
+        yield
+        # delete_file(':memory:') will release the pool and clear the database
+        SQLITE_POOL.delete_file(':memory:')
 
 
 class TestAlasioConfigBase:
