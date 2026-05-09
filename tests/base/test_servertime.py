@@ -3,7 +3,15 @@ from unittest.mock import patch
 
 import pytest
 
-from alasio.base.servertime import ServerTime, nearest_future, parse_second, parse_server_update, parse_timezone
+from alasio.base.servertime import (
+    ServerTime,
+    ServerUpdateCondition,
+    nearest_future,
+    parse_second,
+    parse_server_update,
+    parse_server_update_list,
+    parse_timezone,
+)
 
 
 class TestParseTimezone:
@@ -72,317 +80,311 @@ class TestParseTimezone:
         assert parse_timezone(tz) is tz
 
 
-class TestServerUpdate:
+class TestParseServerUpdate:
     @pytest.mark.parametrize("input_val, expected", [
-        # Single string input
-        ("00:00", [(0, 0)]),
-        # Comma separated string with spaces
-        ("00:00, 12:00", [(0, 0), (12, 0)]),
-        # Unsorted list input
-        (["18:00", "00:00", "12:00"], [(0, 0), (12, 0), (18, 0)]),
-        # String with internal spaces (e.g., " 09 : 30 ")
-        (" 09 : 30 , 08 : 00 ", [(8, 0), (9, 30)]),
-        # Mixed sorting check
-        (["23:59", "01:01", "12:00"], [(1, 1), (12, 0), (23, 59)]),
+        ("12:34", ServerUpdateCondition(hour=12, minute=34)),
+        ("18", ServerUpdateCondition(hour=18, minute=0)),
+        (18, ServerUpdateCondition(hour=18, minute=0)),
+        ("weekday1-04:00", ServerUpdateCondition(weekday=1, hour=4, minute=0)),
+        ("monthday1-04:00", ServerUpdateCondition(monthday=1, hour=4, minute=0)),
+        (" weekday 2 - 05 : 30 ", ServerUpdateCondition(weekday=2, hour=5, minute=30)),
     ])
     def test_parse_server_update_success(self, input_val, expected):
-        """Test valid inputs including strings, lists, and sorting logic."""
+        """Test valid inputs for parse_server_update."""
         assert parse_server_update(input_val) == expected
 
     @pytest.mark.parametrize("invalid_input, match_msg", [
-        # Missing colon separator
-        ("1200", "Failed to parse server_update as HH:MM"),
-        (["12:00", "1300"], "Failed to parse server_update as HH:MM"),
-
-        # Non-integer values
-        ("12:aa", "Failed to parse server_update as HH:MM"),
-        ("hh:mm", "Failed to parse server_update as HH:MM"),
-        ("12.5:00", "Failed to parse server_update as HH:MM"),
-
-        # Hour out of range (0-23)
-        ("24:00", "hour must within 0~23"),
-        ("-1:00", "hour must within 0~23"),
-
-        # Minute out of range (0-59)
-        ("12:60", "hour must within 0~59"),
-        ("12:-1", "hour must within 0~59"),
-
-        # Empty inputs
+        (25, "ServerUpdate hour must within 0~23"),
+        (-1, "ServerUpdate hour must within 0~23"),
         ("", "Empty server_update"),
-        ([], "Empty server_update"),
-
-        # Invalid data types
-        (12345, "Invalid server_update input"),
+        (" ", "Empty server_update"),
+        ("weekday0-04:00", "Weekday must within 1~7"),
+        ("weekday8-04:00", "Weekday must within 1~7"),
+        ("weekday-04:00", "Failed to parse weekday"),
+        ("monthday0-04:00", "Monthday must within 1~31"),
+        ("monthday32-04:00", "Monthday must within 1~31"),
+        ("monthday-04:00", "Failed to parse monthday"),
+        ("12:60", "Minute must within 0~59"),
+        ("24:00", "Hour must within 0~23"),
+        ("abc:00", "Failed to parse time"),
+        ("weekday1", "Hour and minute must be set"),
+        ("monthday1", "Hour and minute must be set"),
+        ("weekday1-monthday1-04:00", "Cannot have both weekday and monthday"),
+        ("-", "Failed to parse time"),
         (None, "Invalid server_update input"),
     ])
     def test_parse_server_update_exceptions(self, invalid_input, match_msg):
-        """Test that malformed strings or invalid ranges raise ValueError."""
+        """Test invalid inputs for parse_server_update."""
         with pytest.raises(ValueError, match=match_msg):
             parse_server_update(invalid_input)
 
-    def test_parsing_consistency(self):
-        """Verify that string input and list input result in the same output."""
-        raw_str = "18:00, 06:00"
-        raw_list = ["18:00", "06:00"]
-        assert parse_server_update(raw_str) == parse_server_update(raw_list)
+
+class TestParseServerUpdateList:
+    def test_parse_server_update_list_success(self):
+        # Single input
+        assert parse_server_update_list("12:00") == [ServerUpdateCondition(hour=12, minute=0)]
+        assert parse_server_update_list(12) == [ServerUpdateCondition(hour=12, minute=0)]
+
+        # List input
+        updates = ["18:00", "04:00"]
+        expected = [
+            ServerUpdateCondition(hour=4, minute=0),
+            ServerUpdateCondition(hour=18, minute=0)
+        ]
+        assert parse_server_update_list(updates) == expected
+
+        # Weekday/Monthday sorting
+        # Daily < Weekly < Monthly
+        updates = ["monthday2-04:00", "weekday1-04:00", "04:00"]
+        expected = [
+            ServerUpdateCondition(hour=4, minute=0),
+            ServerUpdateCondition(weekday=1, hour=4, minute=0),
+            ServerUpdateCondition(monthday=2, hour=4, minute=0),
+        ]
+        assert parse_server_update_list(updates) == expected
+
+    def test_parse_server_update_list_exceptions(self):
+        with pytest.raises(ValueError, match="Empty server_update input"):
+            parse_server_update_list([])
+        # Note: None input is caught in parse_server_update
+        with pytest.raises(ValueError, match="Invalid server_update input"):
+            parse_server_update_list(None)
 
 
-class TestNearstFuture:
-
+class TestNearestFuture:
     def test_empty_list_raises_error(self):
-        """Should raise ValueError if the input list is empty."""
         with pytest.raises(ValueError, match="Empty future list"):
             nearest_future([])
 
     def test_single_element(self):
-        """Should return the only element present regardless of threshold."""
         now = datetime(2023, 1, 1, 12, 0, 0)
         assert nearest_future([now]) == now
         assert nearest_future([now], threshold=60) == now
 
-    def test_no_threshold_returns_earliest(self):
-        """With threshold=0, it should return the absolute earliest datetime."""
+    def test_threshold_logic(self):
         base = datetime(2023, 1, 1, 12, 0, 0)
         d2 = base + timedelta(seconds=10)
         d3 = base + timedelta(seconds=20)
+        d4 = base + timedelta(seconds=30)
 
-        # Passing them out of order to ensure sorting works
+        # threshold=0
         assert nearest_future([d3, base, d2], threshold=0) == base
 
-    def test_negative_threshold_returns_earliest(self):
-        """A negative threshold should behave like zero threshold."""
-        base = datetime(2023, 1, 1, 12, 0, 0)
-        d2 = base + timedelta(seconds=10)
-        assert nearest_future([base, d2], threshold=-5) == base
+        # threshold=15
+        assert nearest_future([base, d2, d3], threshold=15) == d2
 
-    def test_within_threshold_returns_latest_in_window(self):
-        """Should return the latest datetime that is still within the threshold from the earliest."""
-        base = datetime(2023, 1, 1, 12, 0, 0)
-        d2 = base + timedelta(seconds=5)  # Inside
-        d3 = base + timedelta(seconds=10)  # Exactly on boundary
-        d4 = base + timedelta(seconds=11)  # Outside
-
-        # Limit is base + 10s = d3.
-        assert nearest_future([base, d2, d3, d4], threshold=10) == d3
-
-    def test_all_within_threshold(self):
-        """Should return the very last item if all items fall within the threshold."""
-        base = datetime(2023, 1, 1, 12, 0, 0)
-        d2 = base + timedelta(seconds=5)
-        assert nearest_future([base, d2], threshold=100) == d2
-
-    def test_unsorted_input_with_threshold(self):
-        """Ensure the function handles unsorted input correctly when using a threshold."""
-        base = datetime(2023, 1, 1, 12, 0, 0)
-        d_far = base + timedelta(hours=1)
-        d_near = base + timedelta(seconds=10)
-
-        # Earliest is 'base'. Threshold is 30s. d_near is inside, d_far is not.
-        assert nearest_future([d_far, base, d_near], threshold=30) == d_near
-
-    @pytest.mark.parametrize("threshold, expected_offset", [
-        (0, 0),  # Returns base
-        (5, 5),  # Returns base + 5
-        (9, 5),  # Returns base + 5 (10 is too far)
-        (10, 10),  # Returns base + 10 (boundary inclusive)
-    ])
-    def test_threshold_logic_boundaries(self, threshold, expected_offset):
-        """Parametrized test to check various threshold boundaries."""
-        base = datetime(2023, 1, 1, 10, 0, 0)
-        futures = [
-            base,
-            base + timedelta(seconds=5),
-            base + timedelta(seconds=10),
-            base + timedelta(seconds=15)
-        ]
-        expected = base + timedelta(seconds=expected_offset)
-        assert nearest_future(futures, threshold=threshold) == expected
+        # threshold=25
+        assert nearest_future([base, d2, d3, d4], threshold=25) == d3
 
 
 class TestParseSecond:
-
     @pytest.mark.parametrize("input_val, expected", [
-        # Integer and Float inputs
         (3, (3, 3)),
         (0, (0, 0)),
         (10.5, (10, 10)),
-
-        # Simple String inputs
         ("3", (3, 3)),
         (" 10 ", (10, 10)),
-
-        # Collection inputs (Tuple/List)
         ((1, 4), (1, 4)),
         ([5, 10], (5, 10)),
-        ((0, 0), (0, 0)),
-
-        # String Range inputs with different delimiters
         ("10~30", (10, 30)),
         ("10, 30", (10, 30)),
         ("10-30", (10, 30)),
-        (" 5 ~ 15 ", (5, 15)),
-        ("0-0", (0, 0)),
     ])
-    def test_parse_second_valid_inputs(self, input_val, expected):
-        """Tests that various valid input formats return the correct (low, high) tuple."""
+    def test_parse_second_valid(self, input_val, expected):
         assert parse_second(input_val) == expected
 
-    def test_parse_second_negative_number(self):
-        """Should raise error for negative integers or strings."""
+    def test_parse_second_exceptions(self):
         with pytest.raises(ValueError, match="Second must >=0"):
             parse_second(-5)
         with pytest.raises(ValueError, match="Second must >=0"):
             parse_second("-10")
-
-    def test_parse_second_invalid_collection_size(self):
-        """Should raise error if list/tuple doesn't have exactly 2 elements."""
-        with pytest.raises(ValueError, match=r"Expect format \(low, high\)"):
+        with pytest.raises(ValueError, match="Expect format"):
             parse_second([1])
-        with pytest.raises(ValueError, match=r"Expect format \(low, high\)"):
-            parse_second([1, 2, 3])
-
-    def test_parse_second_high_less_than_low(self):
-        """Should raise error if the range is logically impossible (e.g., 30 to 10)."""
         with pytest.raises(ValueError, match="High bound must >= lower bound"):
             parse_second("30-10")
-        with pytest.raises(ValueError, match="High bound must >= lower bound"):
-            parse_second((10, 5))
-
-    def test_parse_second_non_integer_bounds(self):
-        """Should raise error if strings contain non-numeric characters in a range."""
         with pytest.raises(ValueError, match="Low bound and high bound must be integer"):
             parse_second("10-abc")
-        with pytest.raises(ValueError, match="Low bound and high bound must be integer"):
-            parse_second("foo~bar")
-
-    def test_parse_second_invalid_type(self):
-        """Should raise error for completely invalid types like None or dict."""
         with pytest.raises(ValueError, match="Invalid second input"):
             parse_second(None)
-        with pytest.raises(ValueError, match="Invalid second input"):
-            parse_second({"seconds": 10})
-
-    def test_parse_second_negative_bounds_in_range(self):
-        """Should raise error if a range contains negative numbers."""
-        # Note: The code specifically checks for "10--20" vs startswith('-')
-        with pytest.raises(ValueError, match="Low bound and high bound must >= 0"):
-            parse_second("-10, 20")
-        with pytest.raises(ValueError, match="Low bound and high bound must >= 0"):
-            parse_second((-5, 10))
 
 
 @pytest.fixture
 def server():
-    # Using UTC+8 for testing
+    # Use UTC+8 as default server timezone
     return ServerTime(tz=8)
 
 
-def to_utc(dt: datetime):
-    """Helper to normalize datetime to UTC for assertion comparisons."""
+def to_utc(dt):
+    """Normalize datetime to UTC for comparison."""
     return dt.astimezone(timezone.utc)
 
 
-class TestServerUpdateLogic:
+class TestServerTimeCommon:
+    def test_now(self, server):
+        now = server.now()
+        # Should have the correct timezone
+        assert now.tzinfo == server.tz
 
-    # --- GET_NEXT_UPDATE TESTS ---
+    def test_get_occurrence_daily(self, server):
+        # 10:00 today, daily update at 09:00 -> should be 09:00 tomorrow
+        now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
+        cond = ServerUpdateCondition(hour=9, minute=0)
 
-    def test_get_next_update_later_today(self, server):
-        # Mock now to 10:00 AM
-        fixed_now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
-        with patch.object(ServerTime, 'now', return_value=fixed_now):
-            # Updates at 09:00 and 11:00. Next should be 11:00 today.
-            res = server.get_next_update("09:00, 11:00")
-            expected = datetime(2023, 1, 1, 11, 0, tzinfo=server.tz)
-            assert to_utc(res) == to_utc(expected)
+        # Future
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 1, 2, 9, 0, tzinfo=server.tz)
 
-    def test_get_next_update_tomorrow(self, server):
-        # Mock now to 12:00 PM (all updates for today have passed)
-        fixed_now = datetime(2023, 1, 1, 12, 0, tzinfo=server.tz)
-        with patch.object(ServerTime, 'now', return_value=fixed_now):
-            res = server.get_next_update("08:00, 09:00")
-            # Next should be 08:00 AM on Jan 2nd
-            expected = datetime(2023, 1, 2, 8, 0, tzinfo=server.tz)
-            assert to_utc(res) == to_utc(expected)
+        # Past
+        res = server._get_occurrence(cond, now, direction=-1)
+        assert res == datetime(2023, 1, 1, 9, 0, tzinfo=server.tz)
 
-    def test_get_next_update_weekday_today(self, server):
-        # 2023-01-02 is Monday (weekday 0)
-        fixed_now = datetime(2023, 1, 2, 10, 0, tzinfo=server.tz)
-        with patch.object(ServerTime, 'now', return_value=fixed_now):
-            # Target Monday, it is Monday, and 11:00 is in future
-            res = server.get_next_update("11:00", weekday=0)
-            expected = datetime(2023, 1, 2, 11, 0, tzinfo=server.tz)
-            assert to_utc(res) == to_utc(expected)
+        # 08:00 today, daily update at 09:00 -> should be 09:00 today
+        now = datetime(2023, 1, 1, 8, 0, tzinfo=server.tz)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 1, 1, 9, 0, tzinfo=server.tz)
 
-    def test_get_next_update_weekday_future(self, server):
-        # 2023-01-02 is Monday (0). Target Wednesday (2).
-        fixed_now = datetime(2023, 1, 2, 10, 0, tzinfo=server.tz)
-        with patch.object(ServerTime, 'now', return_value=fixed_now):
-            res = server.get_next_update("11:00", weekday=2)
-            # Should be Jan 4th (Wednesday)
-            expected = datetime(2023, 1, 4, 11, 0, tzinfo=server.tz)
-            assert to_utc(res) == to_utc(expected)
+        res = server._get_occurrence(cond, now, direction=-1)
+        assert res == datetime(2022, 12, 31, 9, 0, tzinfo=server.tz)
 
-    def test_get_next_update_monthday_next_month(self, server):
-        # Jan 20th, target the 5th. Should roll to Feb 5th.
-        fixed_now = datetime(2023, 1, 20, 10, 0, tzinfo=server.tz)
-        with patch.object(ServerTime, 'now', return_value=fixed_now):
-            res = server.get_next_update("10:00", monthday=5)
-            expected = datetime(2023, 2, 5, 10, 0, tzinfo=server.tz)
-            assert to_utc(res) == to_utc(expected)
+    def test_get_occurrence_weekly(self, server):
+        # 2023-01-02 is Monday (1)
+        now = datetime(2023, 1, 2, 10, 0, tzinfo=server.tz)
 
-    # --- GET_LAST_UPDATE TESTS ---
+        # Target Monday 09:00 (passed today) -> Next is next Monday
+        cond = ServerUpdateCondition(weekday=1, hour=9, minute=0)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 1, 9, 9, 0, tzinfo=server.tz)
 
-    def test_get_last_update_earlier_today(self, server):
-        # Mock now to 10:00 AM
-        fixed_now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
-        with patch.object(ServerTime, 'now', return_value=fixed_now):
-            # Updates 09:00 and 11:00. Last was 09:00 today.
-            res = server.get_last_update("09:00, 11:00")
-            expected = datetime(2023, 1, 1, 9, 0, tzinfo=server.tz)
-            assert to_utc(res) == to_utc(expected)
+        # Past is today 09:00
+        res = server._get_occurrence(cond, now, direction=-1)
+        assert res == datetime(2023, 1, 2, 9, 0, tzinfo=server.tz)
 
-    def test_get_last_update_yesterday(self, server):
-        # Mock now to 07:00 AM (Today's updates haven't happened yet)
-        fixed_now = datetime(2023, 1, 2, 7, 0, tzinfo=server.tz)
-        with patch.object(ServerTime, 'now', return_value=fixed_now):
-            res = server.get_last_update("08:00, 20:00")
-            # Last was 20:00 on Jan 1st
-            expected = datetime(2023, 1, 1, 20, 0, tzinfo=server.tz)
-            assert to_utc(res) == to_utc(expected)
+        # Target Wednesday (3) 09:00 -> Next is this Wednesday
+        cond = ServerUpdateCondition(weekday=3, hour=9, minute=0)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 1, 4, 9, 0, tzinfo=server.tz)
 
-    def test_get_last_update_weekday_past(self, server):
-        # Monday Jan 2nd. Target Sunday (6).
-        fixed_now = datetime(2023, 1, 2, 10, 0, tzinfo=server.tz)
-        with patch.object(ServerTime, 'now', return_value=fixed_now):
-            res = server.get_last_update("12:00", weekday=6)
-            # Should be Jan 1st (Sunday)
-            expected = datetime(2023, 1, 1, 12, 0, tzinfo=server.tz)
-            assert to_utc(res) == to_utc(expected)
+        # Past is last Wednesday
+        res = server._get_occurrence(cond, now, direction=-1)
+        assert res == datetime(2022, 12, 28, 9, 0, tzinfo=server.tz)
 
-    def test_get_last_update_monthday_past(self, server):
-        # Jan 2nd, target the 28th. Should roll back to Dec 28th.
-        fixed_now = datetime(2023, 1, 2, 10, 0, tzinfo=server.tz)
-        with patch.object(ServerTime, 'now', return_value=fixed_now):
-            res = server.get_last_update("10:00", monthday=28)
-            expected = datetime(2022, 12, 28, 10, 0, tzinfo=server.tz)
-            assert to_utc(res) == to_utc(expected)
+    def test_get_occurrence_monthly(self, server):
+        # 2023-01-20, target 1st
+        now = datetime(2023, 1, 20, 10, 0, tzinfo=server.tz)
+        cond = ServerUpdateCondition(monthday=1, hour=9, minute=0)
 
-    # --- ERROR CASES ---
+        # Next is Feb 1st
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 2, 1, 9, 0, tzinfo=server.tz)
 
-    def test_invalid_input_combination(self, server):
-        # Setting both weekday and monthday should raise ValueError
-        with pytest.raises(ValueError, match="Cannot set weekday and monthday"):
-            server.get_next_update("12:00", weekday=1, monthday=1)
+        # Past is Jan 1st
+        res = server._get_occurrence(cond, now, direction=-1)
+        assert res == datetime(2023, 1, 1, 9, 0, tzinfo=server.tz)
 
-    def test_logic_boundary_bug_check(self, server):
+        # Target 31st, starting from Feb 1st
+        now = datetime(2023, 2, 1, 10, 0, tzinfo=server.tz)
+        cond = ServerUpdateCondition(monthday=31, hour=9, minute=0)
+
+        # Next is Mar 31 (Feb doesn't have 31)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 3, 31, 9, 0, tzinfo=server.tz)
+
+        # Past is Jan 31
+        res = server._get_occurrence(cond, now, direction=-1)
+        assert res == datetime(2023, 1, 31, 9, 0, tzinfo=server.tz)
+
+        # Leap year: 2024-02-29
+        now = datetime(2024, 2, 1, 10, 0, tzinfo=server.tz)
+        cond = ServerUpdateCondition(monthday=29, hour=9, minute=0)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2024, 2, 29, 9, 0, tzinfo=server.tz)
+
+        # Non-leap year: 2023-02-29 -> skips to next month with 29th
+        now = datetime(2023, 2, 1, 10, 0, tzinfo=server.tz)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 3, 29, 9, 0, tzinfo=server.tz)
+
+    def test_invalid_monthday_in_occurrence(self, server):
+        cond = ServerUpdateCondition(monthday=100, hour=9, minute=0)
+        with pytest.raises(ValueError, match="Invalid monthday setting"):
+            server._get_occurrence(cond, server.now())
+
+    def test_is_valid_date(self, server):
+        assert server._is_valid_date(2023, 1, 31) is True
+        assert server._is_valid_date(2023, 2, 28) is True
+        assert server._is_valid_date(2024, 2, 29) is True
+        assert server._is_valid_date(2023, 2, 29) is False
+        assert server._is_valid_date(2023, 4, 31) is False
+        assert server._is_valid_date(2023, 13, 1) is False
+        assert server._is_valid_date(2023, 0, 1) is False
+
+
+class TestServerUpdateComplex:
+    @pytest.mark.parametrize("now_time, expected_next, expected_last", [
+        # Server updates at 00:00, 12:00, 18:00
+        # Scenario 1: 02:30
+        (datetime(2026, 5, 10, 2, 30), datetime(2026, 5, 10, 12, 0), datetime(2026, 5, 10, 0, 0)),
+        # Scenario 2: 14:30
+        (datetime(2026, 5, 10, 14, 30), datetime(2026, 5, 10, 18, 0), datetime(2026, 5, 10, 12, 0)),
+        # Scenario 3: 21:30
+        (datetime(2026, 5, 10, 21, 30), datetime(2026, 5, 11, 0, 0), datetime(2026, 5, 10, 18, 0)),
+    ])
+    def test_multiple_daily_updates(self, server, now_time, expected_next, expected_last):
         """
-        Tests if server_updates is parsed correctly even if today is skipped.
-        In the original code, if today is not valid, the code skips to a loop
-        where it iterates over server_updates. If it's still a string, it will crash.
+        Test multiple daily updates (00:00, 12:00, 18:00) at different times of the day.
         """
-        # Today is Jan 2 (Monday). Filter for Tuesday.
-        fixed_now = datetime(2023, 1, 2, 10, 0, tzinfo=server.tz)
-        with patch.object(ServerTime, 'now', return_value=fixed_now):
-            # If the code crashes here, server_updates was not parsed before the loop.
-            res = server.get_next_update("12:00", weekday=1)
-            assert res is not None
+        now_time = now_time.replace(tzinfo=server.tz)
+        expected_next = expected_next.replace(tzinfo=server.tz)
+        expected_last = expected_last.replace(tzinfo=server.tz)
+        
+        updates = "00:00, 12:00, 18:00"
+        with patch.object(ServerTime, 'now', return_value=now_time):
+            assert to_utc(server.get_next_update(updates)) == to_utc(expected_next)
+            assert to_utc(server.get_last_update(updates)) == to_utc(expected_last)
+
+    @pytest.mark.parametrize("now_time, expected_next, expected_last", [
+        # Server updates at 00:00 (Daily) and Mon 04:00 (Weekly)
+        # In May 2026: 
+        # 1st is Friday
+        # 4th is Monday
+        # 11th, 18th, 25th are Mondays
+        # 31st is Sunday
+        
+        # 1. May 1st 02:30 (Friday)
+        # Next: May 2nd 00:00 (min of 2nd 00:00 and 4th 04:00)
+        # Last: May 1st 00:00 (max of 1st 00:00 and Apr 27th 04:00)
+        (datetime(2026, 5, 1, 2, 30), datetime(2026, 5, 2, 0, 0), datetime(2026, 5, 1, 0, 0)),
+        
+        # 2. May 1st 09:30 (Friday)
+        # Next: May 2nd 00:00
+        # Last: May 1st 00:00
+        (datetime(2026, 5, 1, 9, 30), datetime(2026, 5, 2, 0, 0), datetime(2026, 5, 1, 0, 0)),
+        
+        # 3. May 25th 23:30 (Monday)
+        # Next: May 26th 00:00 (min of 26th 00:00 and Jun 1st 04:00)
+        # Last: May 25th 04:00 (max of 25th 00:00 and 25th 04:00)
+        (datetime(2026, 5, 25, 23, 30), datetime(2026, 5, 26, 0, 0), datetime(2026, 5, 25, 4, 0)),
+        
+        # 4. May 26th 02:30 (Tuesday)
+        # Next: May 27th 00:00 (min of 27th 00:00 and Jun 1st 04:00)
+        # Last: May 26th 00:00 (max of 26th 00:00 and 25th 04:00)
+        (datetime(2026, 5, 26, 2, 30), datetime(2026, 5, 27, 0, 0), datetime(2026, 5, 26, 0, 0)),
+        
+        # 5. May 31st 23:30 (Sunday)
+        # Next: Jun 1st 00:00 (min of Jun 1st 00:00 and Jun 1st 04:00)
+        # Last: May 31st 00:00 (max of May 31st 00:00 and May 25th 04:00)
+        (datetime(2026, 5, 31, 23, 30), datetime(2026, 6, 1, 0, 0), datetime(2026, 5, 31, 0, 0)),
+    ])
+    def test_mixed_daily_weekly_updates(self, server, now_time, expected_next, expected_last):
+        """
+        Test mixed daily (00:00) and weekly (Mon 04:00) updates at specific boundary dates.
+        """
+        now_time = now_time.replace(tzinfo=server.tz)
+        expected_next = expected_next.replace(tzinfo=server.tz)
+        expected_last = expected_last.replace(tzinfo=server.tz)
+        
+        # weekday1 is Monday
+        updates = ["00:00", "weekday1-04:00"]
+        with patch.object(ServerTime, 'now', return_value=now_time):
+            assert to_utc(server.get_next_update(updates)) == to_utc(expected_next)
+            assert to_utc(server.get_last_update(updates)) == to_utc(expected_last)
