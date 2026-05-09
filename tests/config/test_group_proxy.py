@@ -330,3 +330,59 @@ class TestModelProxyBatchSet:
         assert config.TestGroup.class_batch() == "class"
         assert config.TestGroup.static_batch() == "static"
         assert config.save_count == 0
+
+    def test_9_no_config_direct_group(self):
+        """
+        When creating a group directly without config (no GroupProxy),
+        batch_set decorated methods should simply set attributes without any extra effects.
+        The _alasio_batch_set flag is only consumed by GroupProxy.__getattr__,
+        so calling methods on a raw struct has no batching/save behavior.
+        """
+        group = ProxyTestGroup()
+
+        # 1. simple_batch: sets Value1=1, Value2=2
+        group.simple_batch()
+        assert group.Value1 == 1
+        assert group.Value2 == 2
+
+        # 2. nested_batch: sets Value1=3, then simple_batch sets Value1=1, Value2=2
+        group.nested_batch()
+        assert group.Value1 == 1
+        assert group.Value2 == 2
+
+        # 3. no_batch: sets Value1=4, Value2=5 (no decorator at all)
+        group.no_batch()
+        assert group.Value1 == 4
+        assert group.Value2 == 5
+
+        # 4. property_batch: @property @batch_set, accessing property sets values and returns 0
+        result = group.property_batch
+        assert result == 0
+        assert group.Value1 == 6
+        assert group.Value2 == 7
+
+        # 5. functools_cached_batch: @functools.cached_property @batch_set
+        result = group.functools_cached_batch
+        assert result == 1
+        assert group.Value1 == 8
+        assert group.Value2 == 9
+
+        # 5. alasio_cached_batch: @alasio_cached_property @batch_set
+        result = group.alasio_cached_batch
+        assert result == 2
+        assert group.Value1 == 10
+        assert group.Value2 == 11
+
+        # 6. custom_wrapped_batch: @custom_deco_wrapped @batch_set
+        group.custom_wrapped_batch()
+        assert group.Value1 == 12
+        assert group.Value2 == 13
+
+        # 7. custom_unwrapped_batch: @custom_deco_unwrapped @batch_set
+        group.custom_unwrapped_batch()
+        assert group.Value1 == 14
+        assert group.Value2 == 15
+
+        # 8. classmethod and staticmethod: should work normally
+        assert group.class_batch() == "class"
+        assert group.static_batch() == "static"
