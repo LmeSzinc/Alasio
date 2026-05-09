@@ -101,6 +101,34 @@ class ProxyTestGroup(Struct, dict=True):
         """8. staticmethod should not enter context"""
         return "static"
 
+    @alasio_cached_property
+    def side_effect_cached(self):
+        """9. A cached property with side effect to track calculation"""
+        # Ensure 'self' is the underlying Struct, not the GroupProxy
+        if type(self) is not ProxyTestGroup:
+            raise TypeError(f"Expected ProxyTestGroup, got {type(self)}")
+        self.Value1 += 1
+        return self.Value1 + 100
+
+    @batch_set
+    def batch_call_cached(self):
+        """10. Access another cached property within a batch_set method"""
+        return self.side_effect_cached
+
+    @functools_cached_property
+    def side_effect_functools_cached(self):
+        """11. A functools cached property with side effect to track calculation"""
+        # Ensure 'self' is the underlying Struct, not the GroupProxy
+        if type(self) is not ProxyTestGroup:
+            raise TypeError(f"Expected ProxyTestGroup, got {type(self)}")
+        self.Value2 += 1
+        return self.Value2 + 200
+
+    @batch_set
+    def batch_call_functools_cached(self):
+        """12. Access another functools cached property within a batch_set method"""
+        return self.side_effect_functools_cached
+
 
 class MockMod:
     def __init__(self):
@@ -304,6 +332,7 @@ class TestModelProxyBatchSet:
         config.TestGroup.custom_wrapped_batch()
         assert config.TestGroup.Value1 == 12
         assert config.TestGroup.Value2 == 13
+        # One save for the batch
         assert config.save_count == 1
 
     def test_7_custom_unwrapped_batch(self, config):
@@ -386,3 +415,55 @@ class TestModelProxyBatchSet:
         # 8. classmethod and staticmethod: should work normally
         assert group.class_batch() == "class"
         assert group.static_batch() == "static"
+
+    def test_10_cached_property_on_proxy(self, config):
+        """
+        If a cached_property is accessed within a @batch_set method,
+        it should be cached on the underlying Struct, not the GroupProxy.
+        """
+        proxy = config.TestGroup
+        obj = proxy._obj
+
+        # Ensure it's not yet cached
+        assert 'side_effect_cached' not in obj.__dict__
+
+        # Call the batch method which accesses the cached property
+        # Value1 starts at 0. side_effect_cached increments it to 1 and returns 101.
+        res = proxy.batch_call_cached()
+        assert res == 101
+        assert proxy.Value1 == 1
+
+        # It should be cached on the underlying object
+        assert 'side_effect_cached' in obj.__dict__
+        assert obj.__dict__['side_effect_cached'] == 101
+
+        # Subsequent access should not recalculate
+        res2 = proxy.batch_call_cached()
+        assert res2 == 101
+        assert proxy.Value1 == 1  # Still 1
+
+    def test_11_functools_cached_property_on_proxy(self, config):
+        """
+        If a functools.cached_property is accessed within a @batch_set method,
+        it should be cached on the underlying Struct, not the GroupProxy.
+        """
+        proxy = config.TestGroup
+        obj = proxy._obj
+
+        # Ensure it's not yet cached
+        assert 'side_effect_functools_cached' not in obj.__dict__
+
+        # Call the batch method which accesses the cached property
+        # Value2 starts at 0. side_effect_functools_cached increments it to 1 and returns 201.
+        res = proxy.batch_call_functools_cached()
+        assert res == 201
+        assert proxy.Value2 == 1
+
+        # It should be cached on the underlying object
+        assert 'side_effect_functools_cached' in obj.__dict__
+        assert obj.__dict__['side_effect_functools_cached'] == 201
+
+        # Subsequent access should not recalculate
+        res2 = proxy.batch_call_functools_cached()
+        assert res2 == 201
+        assert proxy.Value2 == 1  # Still 1
