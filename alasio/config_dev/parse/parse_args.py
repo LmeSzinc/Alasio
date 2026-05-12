@@ -213,6 +213,32 @@ class ArgData(Struct, omit_defaults=True):
     # Any additional user-defined metadata.
     # extra: Union[Dict, UnsetType] = UNSET
 
+    def merge(self, other: "ArgData") -> "ArgData":
+        """
+        Merge with another ArgData.
+        The other one's values override this one's.
+
+        Args:
+            other (ArgData): Another ArgData object
+
+        Returns:
+            ArgData: A new ArgData object
+        """
+        kwargs = {}
+        for field in self.__struct_fields__:
+            val = getattr(other, field)
+            if val is UNSET:
+                val = getattr(self, field)
+
+            if isinstance(val, list):
+                val = val[:]
+            elif isinstance(val, dict):
+                val = val.copy()
+
+            kwargs[field] = val
+
+        return msgspec.structs.replace(self, **kwargs)
+
     @classmethod
     def from_arg_data(cls, data) -> "ArgData":
         try:

@@ -92,6 +92,56 @@ class GroupData(Struct):
                                       keys=[group, 'dashboard_color'], value=obj.dashboard_color)
         return obj
 
+    def merge(self, other: "GroupData") -> "GroupData":
+        """
+        Merge with another GroupData.
+        The other one's values override this one's.
+        For simple attributes, always replace with other's value.
+        For args and override_args, perform deep merging.
+
+        Args:
+            other (GroupData): Another GroupData object
+
+        Returns:
+            GroupData: A new GroupData object
+        """
+        # Deep merge args
+        all_arg_keys = set(self.args.keys()) | set(other.args.keys())
+        new_args = {}
+        for key in all_arg_keys:
+            arg_self = self.args.get(key)
+            arg_other = other.args.get(key)
+            if arg_self is not None and arg_other is not None:
+                new_args[key] = arg_self.merge(arg_other)
+            elif arg_self is not None:
+                new_args[key] = arg_self.merge(arg_self)
+            elif arg_other is not None:
+                new_args[key] = arg_other.merge(arg_other)
+
+        # Deep merge override_args
+        all_override_keys = set(self.override_args.keys()) | set(other.override_args.keys())
+        new_override = {}
+        for key in all_override_keys:
+            arg_self = self.override_args.get(key)
+            arg_other = other.override_args.get(key)
+            if arg_self is not None and arg_other is not None:
+                new_override[key] = arg_self.merge(arg_other)
+            elif arg_self is not None:
+                new_override[key] = arg_self.merge(arg_self)
+            elif arg_other is not None:
+                new_override[key] = arg_other.merge(arg_other)
+
+        return msgspec.structs.replace(
+            self,
+            name=other.name,
+            dashboard=other.dashboard,
+            dashboard_color=other.dashboard_color,
+            args=new_args,
+            parent=other.parent,
+            mro=other.mro,
+            override_args=new_override,
+        )
+
     def __post_init__(self):
         if not self.dashboard:
             return
