@@ -72,6 +72,33 @@ class LogWriter(metaclass=Singleton):
             except Exception:
                 pass
 
+    def mute(self, stdout=False, fd=False, backend=False, all=False):
+        """
+        Mute logging outputs.
+
+        Args:
+            stdout (bool): Mute stdout. Defaults to False.
+            fd (bool): Mute file writing. Defaults to False.
+            backend (bool): Mute backend. Defaults to False.
+            all (bool): Mute all outputs. Defaults to False.
+        """
+        if all:
+            stdout = fd = backend = True
+        if stdout:
+            cached_property_threadsafe.set(self, 'stdout', PseudoStream())
+        if fd:
+            cached_property_threadsafe.set(self, 'fd', PseudoStream())
+        if backend:
+            cached_property_threadsafe.set(self, 'backend', PseudoBackendBridge())
+
+    def mute_clear(self):
+        """
+        Clear all mutes.
+        """
+        cached_property_threadsafe.pop(self, 'stdout')
+        cached_property_threadsafe.pop(self, 'fd')
+        cached_property_threadsafe.pop(self, 'backend')
+
     def __del__(self):
         self.close()
 
@@ -79,6 +106,17 @@ class LogWriter(metaclass=Singleton):
 class PseudoBackendBridge:
     inited = False
     config_name = "mock"
+
+    def send_log(self, event):
+        return CaptureJob()
+
+
+class PseudoStream:
+    def write(self, text):
+        pass
+
+    def flush(self):
+        pass
 
 
 class CaptureStream:

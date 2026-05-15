@@ -5,6 +5,7 @@ from alasio.logger import logger
 
 if __name__ == '__main__':
     set_project_root(__file__, up=4)
+    logger.mute(fd=True)
     # generate
     logger.info(f'ModEntry: {entry}')
     self = IndexGenerator(entry)

@@ -3,6 +3,7 @@ from alasio.config_dev.gen_index import IndexGenerator
 from alasio.config_dev.parse.base import ParseBase, i18n_json_postprocess
 from alasio.ext import env
 from alasio.ext.deep import deep_get, deep_keys_depth1, deep_set
+from alasio.logger import logger
 
 ParseBase.alasio_nav.clear()
 
@@ -31,6 +32,9 @@ class Generator(IndexGenerator):
 
 if __name__ == '__main__':
     env.set_project_root(env.ALASIO_ROOT)
-    alasio = ModEntryInfo.alasio()
-    self = IndexGenerator(alasio)
+    logger.mute(fd=True)
+    # generate
+    entry = ModEntryInfo.alasio()
+    logger.info(f'ModEntry: {entry}')
+    self = IndexGenerator(entry)
     self.generate()

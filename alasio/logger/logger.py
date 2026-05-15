@@ -204,6 +204,24 @@ class AlasioLogger(LoggingLevel):
         """
         return CaptureWriterContext(self)
 
+    def mute(self, stdout=False, fd=False, backend=False, all=False):
+        """
+        Mute logging outputs.
+
+        Args:
+            stdout (bool): Mute stdout. Defaults to False.
+            fd (bool): Mute file writing. Defaults to False.
+            backend (bool): Mute backend. Defaults to False.
+            all (bool): Mute all outputs. Defaults to False.
+        """
+        self._writer.mute(stdout=stdout, fd=fd, backend=backend, all=all)
+
+    def mute_clear(self):
+        """
+        Clear all mutes.
+        """
+        self._writer.mute_clear()
+
     def _process_event(self, level, event, event_dict, exc_info=None):
         """
         Internal method that emulates structlog processors chain
