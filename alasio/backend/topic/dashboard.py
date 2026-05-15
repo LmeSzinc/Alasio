@@ -12,12 +12,6 @@ from alasio.config.entry.model import ConfigSetEvent
 from alasio.ext.deep import deep_iter_depth2, deep_set, deep_values_depth1
 
 
-def get_first_card(gui_config: "dict[str, dict[str, Any]]") -> "dict[str, Any] | None":
-    for card in deep_values_depth1(gui_config):
-        return card
-    return None
-
-
 class Dashboard(BaseTopic):
     FULL_EVENT_ONLY = True
     # dict that convert config path to topic data path
@@ -28,18 +22,11 @@ class Dashboard(BaseTopic):
     async def data(self):
         """
         Returns:
-            dict[str, dict[str, dict]]:
-                key: {index}.{arg_name}
-                    index=0 is shown by default
-                    index>0 only show if expanded
-                value: {
-                    'task': task_name,
-                    'group': group_name,
-                    'arg': arg_name,
-                    'dt': data_type, # see TYPE_DT_TO_PYTHON
-                    'value': Any,
-                    ...  # any others
-                }
+            dict[str, dict[str, dict[str, Any]]]:
+                key: {card_name}.{group_name}.{arg_name}
+                    first card is shown by default
+                    rest of the cards only show if expanded
+                {group_name}._info.dashboard is the dashboard type
         """
         state = ConnState(self.conn_id, self.server)
         mod_name = await state.mod_name
@@ -53,12 +40,6 @@ class Dashboard(BaseTopic):
             MOD_LOADER.get_gui_config,
             mod_name, config_name, 'dashboard', lang
         )
-
-        # get first card and remote info
-        data = get_first_card(data)
-        if data is None:
-            return {}
-        data.pop('_info', None)
 
         # convert config path to topic data path
         dict_config_to_topic = {}

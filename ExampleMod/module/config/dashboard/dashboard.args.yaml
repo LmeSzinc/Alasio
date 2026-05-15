@@ -1,5 +1,5 @@
 Oil:
-  parent: DashboardAmount
+  parent: DashboardTotal
   dashboard_color: "#7f7f7f"
   args:
     Value:

@@ -4,13 +4,13 @@
   import { cn } from "$lib/utils";
   import { ChevronDown, ChevronUp } from "@lucide/svelte";
   import DashboardItem from "./DashboardItem.svelte";
-  import type { DashboardArgData } from "./utils";
+  import type { DashboardGroupData } from "./utils";
 
   let {
     items,
     class: className,
   }: {
-    items: Record<string, Record<string, DashboardArgData>>;
+    items: Record<string, Record<string, DashboardGroupData>>;
     class?: string;
   } = $props();
 
@@ -49,7 +49,8 @@
       class={cn("flex flex-col gap-4 p-4", isExpanded ? "max-h-72.5 overflow-y-auto" : "")}
       use:elementSize={containerSize}
     >
-      {#each displayGroups as [groupKey, groupItems], index}
+      <!-- Keep groupKey to have key tracking by svelte -->
+      {#each displayGroups as [groupKey, groupItems], index (groupKey)}
         {#if index > 0}
           <hr />
         {/if}

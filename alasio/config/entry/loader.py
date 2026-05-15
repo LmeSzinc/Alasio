@@ -239,43 +239,16 @@ class ModLoader:
                     continue
 
                 # insert config
-                dt = arg_data.get('dt', '')
+                if arg_name == '_info':
+                    continue
                 try:
-                    is_dashboard = dt.startswith('dashboard')
-                except (TypeError, AttributeError):
+                    value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
+                except KeyError:
                     # this shouldn't happen
-                    is_dashboard = False
-                if is_dashboard:
-                    try:
-                        arg_value = deep_get_with_error(arg_data, keys=['value'])
-                    except KeyError:
-                        # this shouldn't happen
-                        continue
-                    for dashboard_arg_data in deep_values_depth1(arg_value):
-                        try:
-                            arg_name = dashboard_arg_data['arg']
-                        except KeyError:
-                            # this shouldn't happen
-                            continue
-                        try:
-                            value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
-                        except KeyError:
-                            # this shouldn't happen
-                            logger.warning(f'DataInconsistent: Missing config of "{task_name}.{group_name}.{arg_name}" '
-                                           f'when getting mod="{mod_name}", nav="{nav_name}"')
-                            continue
-                        dashboard_arg_data['value'] = value
-                else:
-                    if arg_name == '_info':
-                        continue
-                    try:
-                        value = deep_get_with_error(config, keys=[task_name, group_name, arg_name])
-                    except KeyError:
-                        # this shouldn't happen
-                        logger.warning(f'DataInconsistent: Missing config of "{task_name}.{group_name}.{arg_name}" '
-                                       f'when getting mod="{mod_name}", nav="{nav_name}"')
-                        continue
-                    arg_data['value'] = value
+                    logger.warning(f'DataInconsistent: Missing config of "{task_name}.{group_name}.{arg_name}" '
+                                   f'when getting mod="{mod_name}", nav="{nav_name}"')
+                    continue
+                arg_data['value'] = value
 
         return out
 

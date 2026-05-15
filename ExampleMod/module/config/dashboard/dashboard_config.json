@@ -1,8 +1,7 @@
 {
   "card-Dashboard-Oil": {
-    "_info": {"group": "Oil", "arg": "_info", "card": "card-Dashboard-Oil"},
     "Oil": {
-      "_info": {"group": "Oil", "arg": "_info", "dashboard": "Amount"},
+      "_info": {"group": "Oil", "arg": "_info", "dashboard": "Total", "dashboard_color": "#7f7f7f"},
       "Time": {
         "task": "Dashboard",
         "group": "Oil",
@@ -22,7 +21,7 @@
       }
     },
     "Gems": {
-      "_info": {"group": "Gems", "arg": "_info", "dashboard": "Amount"},
+      "_info": {"group": "Gems", "arg": "_info", "dashboard": "Amount", "dashboard_color": "#eb8efe"},
       "Time": {
         "task": "Dashboard",
         "group": "Gems",

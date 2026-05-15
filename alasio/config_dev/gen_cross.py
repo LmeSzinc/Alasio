@@ -375,14 +375,19 @@ class CrossNavGenerator:
                     raise DefinitionError(f'No such group "{card.info}"',
                                           file=config.file, keys=[task_name, 'displays'], value=card)
                 # gen _info
-                row = {'group': card.info, 'arg': '_info', 'card': card_name}
-                deep_set(out, keys=[card_name, '_info'], value=NoIndent(row))
+                if config.nav_name != 'dashboard':
+                    # No card._info in dashboard, for simpler data structure
+                    row = {'group': card.info, 'arg': '_info', 'card': card_name}
+                    deep_set(out, keys=[card_name, '_info'], value=NoIndent(row))
                 # gen args
                 for group_name, ref in card.groups.items():
                     group = self.groups_data[ref.model]
                     args = {}
                     if group.dashboard:
-                        args['_info'] = NoIndent({'group': group_name, 'arg': '_info', 'dashboard': group.dashboard})
+                        info = {'group': group_name, 'arg': '_info', 'dashboard': group.dashboard}
+                        if group.dashboard_color:
+                            info['dashboard_color'] = group.dashboard_color
+                        args['_info'] = NoIndent(info)
                     for arg_name, arg in group.args.items():
                         if arg.hide:
                             continue

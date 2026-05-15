@@ -111,7 +111,7 @@ export type ArgProps = InputProps & {
   isAdvanced?: boolean;
 };
 
-export function getArgName(arg: ArgData) {
+export function getArgName(arg: ArgData | InfoData) {
   // Show name if available
   if (arg.name) {
     return arg.name;
