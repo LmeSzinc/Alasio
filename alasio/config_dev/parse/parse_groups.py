@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, timezone
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import msgspec
 from msgspec import Struct, UNSET
@@ -26,14 +26,23 @@ TYPE_DASHBOARD = [
 
 class GroupData(Struct):
     name: str
-    dashboard: str = ''
-    dashboard_color: str = ''
     args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
     # parent group of variant, or empty string if this group is not a variant
     parent: Tuple[str, ...] = msgspec.field(default=tuple)
+    # color of the dot on frontend dashboard component, #RGB #RGBA #RRGGBB #RRGGBBAA
+    dashboard_color: str = ''
+
+    parser: "Optional[ParseGroups]" = None
+    # MRO inherit chain like python class
     mro: Tuple[str, ...] = msgspec.field(default=tuple)
-    # override args in variant, will be set in groups_data()
+    # override args in variant
+    # - equals input args if is a variant (having `parent`)
+    # - empty dict if not a variant
     override_args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
+    # dashboard group name without "Dashboard" prefix, e.g. "Amount", "Count"
+    # real value will be set in MRO build
+    # if parent or any ancestor is dashboard group, `dashboard` will be set
+    dashboard: str = ''
 
     @classmethod
     def from_group_data(cls, group: str, data: dict):
@@ -74,7 +83,9 @@ class GroupData(Struct):
             parent = ()
         data['parent'] = parent
         # internal property, ignore input
-        data['mro'] = ()
+        data.pop('mro', None)
+        data.pop('override_args', None)
+        data.pop('dashboard', None)
         # build object
         try:
             obj = msgspec.convert(data, cls)
@@ -247,8 +258,6 @@ class GroupData(Struct):
 
 
 class ParseGroups(ParseBase):
-    # Convert variant name to base name
-    # dict_variant2base: "dict[str, str]"
 
     @cached_property
     def groups_data(self) -> "dict[str, GroupData]":
@@ -273,6 +282,8 @@ class ParseGroups(ParseBase):
             # Keep empty group in args, so they can be empty group to display on GUI
             try:
                 group = GroupData.from_group_data(group_name, group_value)
+                # self.populate_dashboard_group(group)
+                group.parser = self
             except DefinitionError as e:
                 e.file = self.file
                 raise
@@ -281,11 +292,8 @@ class ParseGroups(ParseBase):
 
         # validate group variants
         for group_name, group in output.items():
-            if not group.parent:
-                continue
-
-            group.override_args = group.args.copy()
             # note that args here are just override args
             # arg override and variant base will be validated in MRO build
+            group.override_args = group.args.copy()
 
         return output

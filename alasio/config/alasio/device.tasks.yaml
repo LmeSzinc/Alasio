@@ -1,20 +1,20 @@
 Device:
   global_bind: true
   groups:
-    - Emulator
-    - EmulatorInfo
-    - Error
-    - Optimization
+    Emulator:
+    EmulatorInfo:
+    Error:
+    Optimization:
   displays: null
 
 RestartDevice:
   groups:
-    - SchedulerStatic
+    Scheduler: SchedulerStatic
   displays: null
 
 RestartGame:
   groups:
-    - SchedulerStatic
+    Scheduler: SchedulerStatic
   displays: null
 
 #TestMergeDisplayGroup:

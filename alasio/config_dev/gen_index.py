@@ -54,7 +54,7 @@ class IndexGenerator(CrossNavGenerator):
         self.queue_index_file = self.path_config.joinpath('queue.index.json')
 
     """
-    Generate model.index.json
+    Generate tasks.index.json
     """
 
     @cached_property
@@ -196,9 +196,10 @@ class IndexGenerator(CrossNavGenerator):
         i18n = {}
         for keys, arg in deep_iter(config.config_data, depth=3):
             nav, card, group = keys
-            try:
-                group_name = arg['group']
-            except KeyError:
+            group_name = arg.get('i18ngroup', '')
+            if not group_name:
+                group_name = arg.get('group', '')
+            if not group_name:
                 # this shouldn't happen, because dict is build at above
                 raise DefinitionError(f'Missing "group" in {nav}.{card}', file=config.config_file)
             try:
@@ -291,7 +292,6 @@ class IndexGenerator(CrossNavGenerator):
 
         for config in iter_configs():
             for group_name, group_data in config.i18n_data.items():
-                group_name = self.dict_group_variant2base.get(group_name, group_name)
                 # get "name" from a nested i18n dict
                 for lang in self.entry.gui_language:
                     name = deep_get(group_data, keys=['_info', lang, 'name'], default=group_name)
@@ -340,12 +340,6 @@ class IndexGenerator(CrossNavGenerator):
                     group_name = info['group']
                 except KeyError:
                     raise DefinitionError(f'Card "{nav_name}.{card_name}._info" has no "group"')
-                group_name = self.dict_group_variant2base.get(group_name, group_name)
-                # if self.alasio and group_name in self.alasio.dict_group_name_i18n:
-                #     raise DefinitionError(
-                #         f'Card "{nav_name}.{card_name}._info" reference a group from alasio: "{group_name}". '
-                #         f'Maybe define a dedicated group for info?'
-                #     )
                 try:
                     name = self.dict_group_name_i18n[group_name]
                 except KeyError:
@@ -442,6 +436,7 @@ class IndexGenerator(CrossNavGenerator):
 
             # Generate group attributes organized by nav
             # Sort nav names for stable output, but keep group order as defined
+            collected_groups = defaultdict(set)
             for nav_name, config in self.dict_nav_config.items():
                 # groups defined but not used in task, they should be generated
                 # if not config.config_data:
@@ -451,14 +446,21 @@ class IndexGenerator(CrossNavGenerator):
                 gen.Comment(nav_name)
 
                 # Generate type hints for each group (keep definition order)
-                for group_name, group in config.groups_data.items():
-                    # skip groups without args (inforef groups)
-                    if not group.args:
-                        continue
-                    # skip variants
-                    if len(group.mro) > 1:
-                        continue
-                    gen.Anno(group.name, anno=f'"{nav_name}.{group.name}"')
+                for task in config.tasks_data.values():
+                    for group_name, ref in task.groups.items():
+                        group = self.groups_data[ref.model]
+                        # skip groups without args (inforef groups)
+                        if not group.args:
+                            continue
+                        # skip variants
+                        if len(group.mro) > 1:
+                            continue
+                        anno = f'{nav_name}.{group.name}'
+                        gen.Anno(group_name, anno=f'"{anno}"')
+                        collected_groups[group_name].add(anno)
+                        if len(collected_groups[group_name]) > 1:
+                            logger.warning(f'Multiple validation model bound on group "{group_name}", '
+                                           f'might cause unexpected behaviour, models: {collected_groups[group_name]}')
 
                 gen.Empty()
 

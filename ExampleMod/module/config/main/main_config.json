@@ -148,6 +148,8 @@
         "task": "Main",
         "group": "Fleet1",
         "arg": "Fleet",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
         "dt": "select",
         "value": 1,
         "option": [1, 2, 3, 4, 5, 6]
@@ -156,6 +158,8 @@
         "task": "Main",
         "group": "Fleet1",
         "arg": "Formation",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
         "dt": "select",
         "value": "double_line",
         "option": ["line_ahead", "double_line", "diamond"]
@@ -164,6 +168,8 @@
         "task": "Main",
         "group": "Fleet1",
         "arg": "FleetMode",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
         "dt": "select",
         "value": "combat_auto",
         "option": ["combat_auto", "combat_manual", "stand_still_in_the_middle", "hide_in_bottom_left"]
@@ -172,6 +178,8 @@
         "task": "Main",
         "group": "Fleet1",
         "arg": "FleetStep",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
         "dt": "select",
         "value": 3,
         "option": [2, 3, 4, 5]
@@ -182,6 +190,8 @@
         "task": "Main",
         "group": "Fleet2",
         "arg": "Fleet",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
         "dt": "select",
         "value": 1,
         "option": [1, 2, 3, 4, 5, 6]
@@ -190,6 +200,8 @@
         "task": "Main",
         "group": "Fleet2",
         "arg": "Formation",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
         "dt": "select",
         "value": "double_line",
         "option": ["line_ahead", "double_line", "diamond"]
@@ -198,6 +210,8 @@
         "task": "Main",
         "group": "Fleet2",
         "arg": "FleetMode",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
         "dt": "select",
         "value": "combat_auto",
         "option": ["combat_auto", "combat_manual", "stand_still_in_the_middle", "hide_in_bottom_left"]
@@ -206,6 +220,8 @@
         "task": "Main",
         "group": "Fleet2",
         "arg": "FleetStep",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
         "dt": "select",
         "value": 3,
         "option": [2, 3, 4, 5]
@@ -407,6 +423,85 @@
         "dt": "select",
         "value": "default_mode",
         "option": ["default_mode", "S3_enemy_first", "S1_enemy_first"]
+      }
+    }
+  },
+  "card-Main-Hard": {
+    "_info": {"group": "CampaignHard", "arg": "_info", "card": "card-Main-Hard"},
+    "Hard": {
+      "Name": {
+        "task": "Main",
+        "group": "Hard",
+        "arg": "Name",
+        "cls": "CampaignHard",
+        "i18ngroup": "Campaign",
+        "dt": "input",
+        "value": "12-4"
+      },
+      "Event": {
+        "task": "Main",
+        "group": "Hard",
+        "arg": "Event",
+        "cls": "CampaignHard",
+        "i18ngroup": "CampaignHard",
+        "dt": "static",
+        "value": "campaign_main",
+        "option": ["campaign_main"]
+      },
+      "Mode": {
+        "task": "Main",
+        "group": "Hard",
+        "arg": "Mode",
+        "cls": "CampaignHard",
+        "i18ngroup": "CampaignHard",
+        "dt": "static",
+        "value": "normal",
+        "option": ["normal"]
+      },
+      "UseClearMode": {
+        "task": "Main",
+        "group": "Hard",
+        "arg": "UseClearMode",
+        "cls": "CampaignHard",
+        "i18ngroup": "Campaign",
+        "dt": "checkbox",
+        "value": true
+      },
+      "UseFleetLock": {
+        "task": "Main",
+        "group": "Hard",
+        "arg": "UseFleetLock",
+        "cls": "CampaignHard",
+        "i18ngroup": "Campaign",
+        "dt": "checkbox",
+        "value": true
+      },
+      "UseAutoSearch": {
+        "task": "Main",
+        "group": "Hard",
+        "arg": "UseAutoSearch",
+        "cls": "CampaignHard",
+        "i18ngroup": "Campaign",
+        "dt": "checkbox",
+        "value": true
+      },
+      "Use2xBook": {
+        "task": "Main",
+        "group": "Hard",
+        "arg": "Use2xBook",
+        "cls": "CampaignHard",
+        "i18ngroup": "Campaign",
+        "dt": "checkbox",
+        "value": false
+      },
+      "AmbushEvade": {
+        "task": "Main",
+        "group": "Hard",
+        "arg": "AmbushEvade",
+        "cls": "CampaignHard",
+        "i18ngroup": "Campaign",
+        "dt": "checkbox",
+        "value": true
       }
     }
   }

@@ -9,24 +9,19 @@ import typing_extensions as e
 # ``` python -m alasio.config.dev.configgen ```
 
 class Oil(m.Struct, omit_defaults=True):
-    Value: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
-    Total: t.Literal[25000] = 25000
     Time: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    Value: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
 
 
 class Gems(m.Struct, omit_defaults=True):
-    Value: e.Annotated[int, m.Meta(ge=0)] = 0
     Time: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    Value: e.Annotated[int, m.Meta(ge=0)] = 0
 
 
 class Progress(m.Struct, omit_defaults=True):
-    Value: e.Annotated[float, m.Meta(ge=0)] = 0
-    Time: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    Value: int = 0
 
 
 class Planner(m.Struct, omit_defaults=True):
-    Progress: e.Annotated[int, m.Meta(ge=0)] = 0
-    Eta: str = ''
-    GreenValue: e.Annotated[int, m.Meta(ge=0)] = 0
-    GreenTotal: e.Annotated[int, m.Meta(ge=0)] = 0
-    Time: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    GreenValue: int = 0
+    GreenTotal: int = 0

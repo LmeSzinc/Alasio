@@ -19,6 +19,17 @@ class Campaign(m.Struct, omit_defaults=True):
     AmbushEvade: bool = True
 
 
+class CampaignHard(m.Struct, omit_defaults=True):
+    Name: str = '12-4'
+    Event: t.Literal['campaign_main'] = 'campaign_main'
+    Mode: t.Literal['normal'] = 'normal'
+    UseClearMode: bool = True
+    UseFleetLock: bool = True
+    UseAutoSearch: bool = True
+    Use2xBook: bool = False
+    AmbushEvade: bool = True
+
+
 class StopCondition(m.Struct, omit_defaults=True):
     OilLimit: int = 1000
     RunCount: int = 0
@@ -34,19 +45,7 @@ class StopCondition(m.Struct, omit_defaults=True):
     ReachLevel: int = 0
 
 
-class Fleet1(m.Struct, omit_defaults=True):
-    Fleet: t.Literal[1, 2, 3, 4, 5, 6] = 1
-    Formation: t.Literal['line_ahead', 'double_line', 'diamond'] = 'double_line'
-    FleetMode: t.Literal[
-        'combat_auto',
-        'combat_manual',
-        'stand_still_in_the_middle',
-        'hide_in_bottom_left',
-    ] = 'combat_auto'
-    FleetStep: t.Literal[2, 3, 4, 5] = 3
-
-
-class Fleet2(m.Struct, omit_defaults=True):
+class Fleet(m.Struct, omit_defaults=True):
     Fleet: t.Literal[1, 2, 3, 4, 5, 6] = 1
     Formation: t.Literal['line_ahead', 'double_line', 'diamond'] = 'double_line'
     FleetMode: t.Literal[

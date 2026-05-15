@@ -15,6 +15,16 @@ Campaign:
     Use2xBook: false
     AmbushEvade: true
 
+CampaignHard:
+  parent: Campaign
+  args:
+    Event:
+      dt: static
+      value: campaign_main
+    Mode:
+      dt: static
+      value: normal
+
 StopCondition:
   args:
     OilLimit: 1000
@@ -27,23 +37,6 @@ StopCondition:
     ReachLevel: 0
 
 Fleet:
-
-Fleet1:
-  args:
-    Fleet:
-      value: 1
-      option: [ 1, 2, 3, 4, 5, 6 ]
-    Formation:
-      value: double_line
-      option: [ line_ahead, double_line, diamond ]
-    FleetMode:
-      value: combat_auto
-      option: [ combat_auto, combat_manual, stand_still_in_the_middle, hide_in_bottom_left ]
-    FleetStep:
-      value: 3
-      option: [ 2, 3, 4, 5 ]
-
-Fleet2:
   args:
     Fleet:
       value: 1

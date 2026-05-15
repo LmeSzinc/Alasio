@@ -1,19 +1,14 @@
 Oil:
-  dashboard: total
+  parent: DashboardAmount
   dashboard_color: "#7f7f7f"
   args:
     Value:
       value: 0
       range: "0~25000"
-    Total:
-      dt: static
-      value: 25000
 
 Gems:
-  dashboard: value
+  parent: DashboardAmount
   dashboard_color: "#eb8efe"
-  args:
-    Value: 0
 
 Progress:
   dashboard: progress

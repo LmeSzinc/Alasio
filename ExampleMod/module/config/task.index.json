@@ -50,12 +50,13 @@
       "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerUedit", "task": "Main"},
       "Campaign": {"file": "main/main_model.py", "cls": "Campaign", "task": "Main"},
       "StopCondition": {"file": "main/main_model.py", "cls": "StopCondition", "task": "Main"},
-      "Fleet1": {"file": "main/main_model.py", "cls": "Fleet1", "task": "Main"},
-      "Fleet2": {"file": "main/main_model.py", "cls": "Fleet2", "task": "Main"},
+      "Fleet1": {"file": "main/main_model.py", "cls": "Fleet", "task": "Main"},
+      "Fleet2": {"file": "main/main_model.py", "cls": "Fleet", "task": "Main"},
       "Submarine": {"file": "main/main_model.py", "cls": "Submarine", "task": "Main"},
       "Emotion": {"file": "main/main_model.py", "cls": "Emotion", "task": "Main"},
       "HpControl": {"file": "main/main_model.py", "cls": "HpControl", "task": "Main"},
-      "EnemyPriority": {"file": "main/main_model.py", "cls": "EnemyPriority", "task": "Main"}
+      "EnemyPriority": {"file": "main/main_model.py", "cls": "EnemyPriority", "task": "Main"},
+      "Hard": {"file": "main/main_model.py", "cls": "CampaignHard", "task": "Main"}
     },
     "config": {"task": ["Main"], "group": []}
   },

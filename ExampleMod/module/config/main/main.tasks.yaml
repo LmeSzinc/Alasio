@@ -1,15 +1,16 @@
 Main:
   groups:
     # with editable ServerUpdate for testing
-    - SchedulerUedit
-    - Campaign
-    - StopCondition
-    - Fleet1
-    - Fleet2
-    - Submarine
-    - Emotion
-    - HpControl
-    - EnemyPriority
+    Scheduler: SchedulerUedit
+    Campaign:
+    StopCondition:
+    Fleet1: Fleet
+    Fleet2: Fleet
+    Submarine:
+    Emotion:
+    HpControl:
+    EnemyPriority:
+    Hard: CampaignHard
   displays:
     - info: Main
       groups: Scheduler
@@ -21,3 +22,4 @@ Main:
     - Emotion
     - HpControl
     - EnemyPriority
+    - Hard

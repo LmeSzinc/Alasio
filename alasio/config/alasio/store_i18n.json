@@ -1,0 +1,68 @@
+{
+  "DashboardBase": {
+    "_info": {
+      "zh-CN": {"name": "DashboardBase", "help": ""},
+      "en-US": {"name": "DashboardBase", "help": ""},
+      "ja-JP": {"name": "DashboardBase", "help": ""},
+      "zh-TW": {"name": "DashboardBase", "help": ""},
+      "en-ES": {"name": "DashboardBase", "help": ""}
+    },
+    "Time": {
+      "zh-CN": {"name": "DashboardBase.Time", "help": ""},
+      "en-US": {"name": "DashboardBase.Time", "help": ""},
+      "ja-JP": {"name": "DashboardBase.Time", "help": ""},
+      "zh-TW": {"name": "DashboardBase.Time", "help": ""},
+      "en-ES": {"name": "DashboardBase.Time", "help": ""}
+    }
+  },
+  "DashboardAmount": {
+    "_info": {
+      "zh-CN": {"name": "DashboardAmount", "help": ""},
+      "en-US": {"name": "DashboardAmount", "help": ""},
+      "ja-JP": {"name": "DashboardAmount", "help": ""},
+      "zh-TW": {"name": "DashboardAmount", "help": ""},
+      "en-ES": {"name": "DashboardAmount", "help": ""}
+    },
+    "Value": {
+      "zh-CN": {"name": "DashboardAmount.Value", "help": ""},
+      "en-US": {"name": "DashboardAmount.Value", "help": ""},
+      "ja-JP": {"name": "DashboardAmount.Value", "help": ""},
+      "zh-TW": {"name": "DashboardAmount.Value", "help": ""},
+      "en-ES": {"name": "DashboardAmount.Value", "help": ""}
+    }
+  },
+  "DashboardTotal": {
+    "_info": {
+      "zh-CN": {"name": "DashboardTotal", "help": ""},
+      "en-US": {"name": "DashboardTotal", "help": ""},
+      "ja-JP": {"name": "DashboardTotal", "help": ""},
+      "zh-TW": {"name": "DashboardTotal", "help": ""},
+      "en-ES": {"name": "DashboardTotal", "help": ""}
+    }
+  },
+  "DashboardRemain": {
+    "_info": {
+      "zh-CN": {"name": "DashboardRemain", "help": ""},
+      "en-US": {"name": "DashboardRemain", "help": ""},
+      "ja-JP": {"name": "DashboardRemain", "help": ""},
+      "zh-TW": {"name": "DashboardRemain", "help": ""},
+      "en-ES": {"name": "DashboardRemain", "help": ""}
+    }
+  },
+  "DashboardDynamicTotal": {
+    "_info": {
+      "zh-CN": {"name": "DashboardDynamicTotal", "help": ""},
+      "en-US": {"name": "DashboardDynamicTotal", "help": ""},
+      "ja-JP": {"name": "DashboardDynamicTotal", "help": ""},
+      "zh-TW": {"name": "DashboardDynamicTotal", "help": ""},
+      "en-ES": {"name": "DashboardDynamicTotal", "help": ""}
+    },
+    "Total": {
+      "zh-CN": {"name": "DashboardDynamicTotal.Total", "help": ""},
+      "en-US": {"name": "DashboardDynamicTotal.Total", "help": ""},
+      "ja-JP": {"name": "DashboardDynamicTotal.Total", "help": ""},
+      "zh-TW": {"name": "DashboardDynamicTotal.Total", "help": ""},
+      "en-ES": {"name": "DashboardDynamicTotal.Total", "help": ""}
+    }
+  }
+}

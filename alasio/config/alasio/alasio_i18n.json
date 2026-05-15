@@ -78,7 +78,23 @@
       }
     }
   },
+  "SchedulerU00": {
+    "_info": {
+      "zh-CN": {"name": "任务设置", "help": ""},
+      "en-US": {"name": "Scheduler", "help": ""},
+      "ja-JP": {"name": "タスク設定", "help": ""},
+      "zh-TW": {"name": "任務設定", "help": ""},
+      "en-ES": {"name": "Planificador", "help": ""}
+    }
+  },
   "SchedulerStatic": {
+    "_info": {
+      "zh-CN": {"name": "任务设置", "help": ""},
+      "en-US": {"name": "Scheduler", "help": ""},
+      "ja-JP": {"name": "タスク設定", "help": ""},
+      "zh-TW": {"name": "任務設定", "help": ""},
+      "en-ES": {"name": "Planificador", "help": ""}
+    },
     "Enable": {
       "zh-CN": {
         "name": "启用该功能",
@@ -117,7 +133,23 @@
       }
     }
   },
+  "SchedulerStaticU00": {
+    "_info": {
+      "zh-CN": {"name": "任务设置", "help": ""},
+      "en-US": {"name": "Scheduler", "help": ""},
+      "ja-JP": {"name": "タスク設定", "help": ""},
+      "zh-TW": {"name": "任務設定", "help": ""},
+      "en-ES": {"name": "Planificador", "help": ""}
+    }
+  },
   "SchedulerUedit": {
+    "_info": {
+      "zh-CN": {"name": "任务设置", "help": ""},
+      "en-US": {"name": "Scheduler", "help": ""},
+      "ja-JP": {"name": "タスク設定", "help": ""},
+      "zh-TW": {"name": "任務設定", "help": ""},
+      "en-ES": {"name": "Planificador", "help": ""}
+    },
     "ServerUpdate": {
       "zh-CN": {
         "name": "服务器刷新时间",
@@ -139,6 +171,33 @@
         "name": "Actualización de servidor",
         "help": "Conjunto de horas a las que se actualiza el servidor (se resetea). Se convierte automáticamente a la zona horaria, y no es necesario modificarlo manualmente."
       }
+    }
+  },
+  "SchedulerStaticUedit": {
+    "_info": {
+      "zh-CN": {"name": "任务设置", "help": ""},
+      "en-US": {"name": "Scheduler", "help": ""},
+      "ja-JP": {"name": "タスク設定", "help": ""},
+      "zh-TW": {"name": "任務設定", "help": ""},
+      "en-ES": {"name": "Planificador", "help": ""}
+    }
+  },
+  "SchedulerU04": {
+    "_info": {
+      "zh-CN": {"name": "任务设置", "help": ""},
+      "en-US": {"name": "Scheduler", "help": ""},
+      "ja-JP": {"name": "タスク設定", "help": ""},
+      "zh-TW": {"name": "任務設定", "help": ""},
+      "en-ES": {"name": "Planificador", "help": ""}
+    }
+  },
+  "SchedulerStaticU04": {
+    "_info": {
+      "zh-CN": {"name": "任务设置", "help": ""},
+      "en-US": {"name": "Scheduler", "help": ""},
+      "ja-JP": {"name": "タスク設定", "help": ""},
+      "zh-TW": {"name": "任務設定", "help": ""},
+      "en-ES": {"name": "Planificador", "help": ""}
     }
   }
 }

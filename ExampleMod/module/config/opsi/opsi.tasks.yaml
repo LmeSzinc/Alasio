@@ -1,10 +1,11 @@
 OpsiExplore:
   groups:
-    - SchedulerU00
-    - OpsiExplore
-    - { task: OpsiGeneral, group: OpsiGeneral }
+    Scheduler: SchedulerU00
+    OpsiExplore:
+    OpsiGeneral:
+      task: OpsiGeneral
   displays:
-    - [ SchedulerU00, OpsiExplore ]
+    - [ Scheduler, OpsiExplore ]
 
 #  default:
 #    Scheduler:
@@ -20,18 +21,18 @@ OpsiExplore:
 
 OpsiDaily:
   groups:
-    - SchedulerU00
-    - OpsiDaily
-    - task: OpsiGeneral
-      group: OpsiGeneral
+    Scheduler: SchedulerU00
+    OpsiDaily:
+    OpsiGeneral:
+      task: OpsiGeneral
   displays: flat
 
 OpsiGeneral:
   groups:
-    - OpsiGeneral
+    OpsiGeneral:
 
 OpsiAshAssist:
   groups:
-    - SchedulerU00
-    - OpsiAshAssist
+    Scheduler: SchedulerU00
+    OpsiAshAssist:
   displays: flat

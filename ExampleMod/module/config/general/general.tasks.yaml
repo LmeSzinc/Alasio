@@ -1,8 +1,8 @@
 General:
   global_bind: true
   groups:
-    - Retirement
-    - OneClickRetire
-    - Enhance
-    - OldRetire
-    - DropRecord
+    Retirement:
+    OneClickRetire:
+    Enhance:
+    OldRetire:
+    DropRecord:

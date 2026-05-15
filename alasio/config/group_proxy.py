@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from msgspec import Struct
 
+from alasio.base.servertime import ServerTime
 from alasio.logger import logger
 
 if TYPE_CHECKING:
@@ -76,6 +77,11 @@ class GroupProxy(Struct):
             return functools.update_wrapper(wrapped_method, underlying_func)
 
         return attr
+
+    @property
+    def servertime(self) -> ServerTime:
+        # see DashboardBase.get_servertime()
+        return self._config.servertime
 
     def __setattr__(self, key, value):
         obj = self._obj

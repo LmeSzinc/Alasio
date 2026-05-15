@@ -69,6 +69,44 @@
       "en-US": {"name": "Campaign.AmbushEvade", "help": ""}
     }
   },
+  "CampaignHard": {
+    "_info": {
+      "zh-CN": {"name": "CampaignHard", "help": ""},
+      "en-US": {"name": "CampaignHard", "help": ""}
+    },
+    "Event": {
+      "zh-CN": {
+        "name": "CampaignHard.Event",
+        "help": "",
+        "option_i18n": {
+          "campaign_main": "campaign_main"
+        }
+      },
+      "en-US": {
+        "name": "CampaignHard.Event",
+        "help": "",
+        "option_i18n": {
+          "campaign_main": "campaign_main"
+        }
+      }
+    },
+    "Mode": {
+      "zh-CN": {
+        "name": "CampaignHard.Mode",
+        "help": "",
+        "option_i18n": {
+          "normal": "normal"
+        }
+      },
+      "en-US": {
+        "name": "CampaignHard.Mode",
+        "help": "",
+        "option_i18n": {
+          "normal": "normal"
+        }
+      }
+    }
+  },
   "StopCondition": {
     "_info": {
       "zh-CN": {"name": "StopCondition", "help": ""},
@@ -123,28 +161,22 @@
     "_info": {
       "zh-CN": {"name": "Fleet", "help": ""},
       "en-US": {"name": "Fleet", "help": ""}
-    }
-  },
-  "Fleet1": {
-    "_info": {
-      "zh-CN": {"name": "Fleet1", "help": ""},
-      "en-US": {"name": "Fleet1", "help": ""}
     },
     "Fleet": {
       "zh-CN": {
-        "name": "Fleet1.Fleet",
+        "name": "Fleet.Fleet",
         "help": "",
         "option_i18n": {"1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6"}
       },
       "en-US": {
-        "name": "Fleet1.Fleet",
+        "name": "Fleet.Fleet",
         "help": "",
         "option_i18n": {"1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6"}
       }
     },
     "Formation": {
       "zh-CN": {
-        "name": "Fleet1.Formation",
+        "name": "Fleet.Formation",
         "help": "",
         "option_i18n": {
           "line_ahead": "line_ahead",
@@ -153,7 +185,7 @@
         }
       },
       "en-US": {
-        "name": "Fleet1.Formation",
+        "name": "Fleet.Formation",
         "help": "",
         "option_i18n": {
           "line_ahead": "line_ahead",
@@ -164,7 +196,7 @@
     },
     "FleetMode": {
       "zh-CN": {
-        "name": "Fleet1.FleetMode",
+        "name": "Fleet.FleetMode",
         "help": "",
         "option_i18n": {
           "combat_auto": "combat_auto",
@@ -174,7 +206,7 @@
         }
       },
       "en-US": {
-        "name": "Fleet1.FleetMode",
+        "name": "Fleet.FleetMode",
         "help": "",
         "option_i18n": {
           "combat_auto": "combat_auto",
@@ -186,84 +218,12 @@
     },
     "FleetStep": {
       "zh-CN": {
-        "name": "Fleet1.FleetStep",
+        "name": "Fleet.FleetStep",
         "help": "",
         "option_i18n": {"2": "2", "3": "3", "4": "4", "5": "5"}
       },
       "en-US": {
-        "name": "Fleet1.FleetStep",
-        "help": "",
-        "option_i18n": {"2": "2", "3": "3", "4": "4", "5": "5"}
-      }
-    }
-  },
-  "Fleet2": {
-    "_info": {
-      "zh-CN": {"name": "Fleet2", "help": ""},
-      "en-US": {"name": "Fleet2", "help": ""}
-    },
-    "Fleet": {
-      "zh-CN": {
-        "name": "Fleet2.Fleet",
-        "help": "",
-        "option_i18n": {"1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6"}
-      },
-      "en-US": {
-        "name": "Fleet2.Fleet",
-        "help": "",
-        "option_i18n": {"1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6"}
-      }
-    },
-    "Formation": {
-      "zh-CN": {
-        "name": "Fleet2.Formation",
-        "help": "",
-        "option_i18n": {
-          "line_ahead": "line_ahead",
-          "double_line": "double_line",
-          "diamond": "diamond"
-        }
-      },
-      "en-US": {
-        "name": "Fleet2.Formation",
-        "help": "",
-        "option_i18n": {
-          "line_ahead": "line_ahead",
-          "double_line": "double_line",
-          "diamond": "diamond"
-        }
-      }
-    },
-    "FleetMode": {
-      "zh-CN": {
-        "name": "Fleet2.FleetMode",
-        "help": "",
-        "option_i18n": {
-          "combat_auto": "combat_auto",
-          "combat_manual": "combat_manual",
-          "stand_still_in_the_middle": "stand_still_in_the_middle",
-          "hide_in_bottom_left": "hide_in_bottom_left"
-        }
-      },
-      "en-US": {
-        "name": "Fleet2.FleetMode",
-        "help": "",
-        "option_i18n": {
-          "combat_auto": "combat_auto",
-          "combat_manual": "combat_manual",
-          "stand_still_in_the_middle": "stand_still_in_the_middle",
-          "hide_in_bottom_left": "hide_in_bottom_left"
-        }
-      }
-    },
-    "FleetStep": {
-      "zh-CN": {
-        "name": "Fleet2.FleetStep",
-        "help": "",
-        "option_i18n": {"2": "2", "3": "3", "4": "4", "5": "5"}
-      },
-      "en-US": {
-        "name": "Fleet2.FleetStep",
+        "name": "Fleet.FleetStep",
         "help": "",
         "option_i18n": {"2": "2", "3": "3", "4": "4", "5": "5"}
       }

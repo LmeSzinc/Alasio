@@ -253,13 +253,9 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         new = {}
         for group_name, group in self.groups_data.items():
             # {group}._info
-            # no _info for variant group
-            if not group.parent:
-                row = self._update_info_i18n(group_name, '_info')
-                deep_set(new, [group_name, '_info'], row)
+            row = self._update_info_i18n(group_name, '_info')
+            deep_set(new, [group_name, '_info'], row)
             # {group}.{arg}
-            if group.dashboard:
-                continue
             for arg_name, arg in group.args.items():
                 if arg.hide:
                     continue

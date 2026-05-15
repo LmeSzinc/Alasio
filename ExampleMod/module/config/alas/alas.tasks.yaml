@@ -1,7 +1,7 @@
 Alas:
   global_bind: true
   groups:
-    - Game
+    Game:
   displays:
     - Game
     - { task: Device, group: Emulator }

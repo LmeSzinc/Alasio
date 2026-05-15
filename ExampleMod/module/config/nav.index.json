@@ -95,6 +95,10 @@
     "card-Main-EnemyPriority": {
       "zh-CN": "EnemyPriority",
       "en-US": "EnemyPriority"
+    },
+    "card-Main-Hard": {
+      "zh-CN": "CampaignHard",
+      "en-US": "CampaignHard"
     }
   },
   "opsi": {
