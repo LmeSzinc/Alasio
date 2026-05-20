@@ -13,7 +13,8 @@ class TestObjSet:
 my_set = {
     1,
     'two',
-}"""
+}
+"""
         # Note: Set in codeobj uses { } always if name is provided and items exist.
         assert code == expected
 
@@ -26,7 +27,8 @@ my_set = {
         code = gen.write()
         expected = """\
 empty_set = set()
-set()"""
+set()
+"""
         assert code == expected
 
     def test_nested_set(self):
@@ -45,5 +47,6 @@ outer = {
         \"\"\"
         10,
     },
-}"""
+}
+"""
         assert code == expected

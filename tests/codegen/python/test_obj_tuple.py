@@ -13,7 +13,8 @@ class TestObjTuple:
 my_tuple = (
     1,
     'two',
-)"""
+)
+"""
         assert code == expected
 
     def test_empty_tuple(self):
@@ -25,7 +26,8 @@ my_tuple = (
         code = gen.write()
         expected = """\
 empty = ()
-()"""
+()
+"""
         assert code == expected
 
     def test_nested_tuple(self):
@@ -42,5 +44,6 @@ outer = (
         # inner tuple
         1.1,
     ),
-)"""
+)
+"""
         assert code == expected

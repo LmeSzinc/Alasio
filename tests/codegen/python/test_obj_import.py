@@ -10,7 +10,8 @@ class TestObjImport:
         code = gen.write()
         expected = """\
 import typing
-import os as std_os"""
+import os as std_os
+"""
         assert code == expected
 
     def test_from_import(self):
@@ -18,7 +19,7 @@ import os as std_os"""
         gen.FromImport('pydantic').Import('BaseModel')
 
         code = gen.write()
-        assert code == "from pydantic import BaseModel"
+        assert code == "from pydantic import BaseModel\n"
 
     def test_multi_from_import_sorted(self):
         gen = CodeGenerator()
@@ -34,7 +35,8 @@ from typing import (
     Any,
     Dict as TDict,
     List,
-)"""
+)
+"""
         assert code == expected
 
     def test_raw_content(self):
@@ -49,7 +51,8 @@ from typing import (
         expected = """\
 class MyClass:
     def __init__(self):
-        self.x = 1"""
+        self.x = 1
+"""
         assert code == expected
 
     def test_lazy_import(self):
@@ -62,14 +65,15 @@ class MyClass:
 
         # Use typing
         imp_typing.use()
-        assert gen.write() == "import typing"
+        assert gen.write() == "import typing\n"
 
         # Use os via gen name
         gen.use_import('os')
         code = gen.write()
         expected = """\
 import typing
-import os"""
+import os
+"""
         assert code == expected
 
     def test_lazy_from_import(self):
@@ -79,7 +83,7 @@ import os"""
             f.Import('Dict')
 
         # Only Dict should be generated
-        assert gen.write() == "from typing import Dict"
+        assert gen.write() == "from typing import Dict\n"
 
         # Use List
         gen.use_import('List')
@@ -87,5 +91,6 @@ import os"""
 from typing import (
     Dict,
     List,
-)"""
+)
+"""
         assert gen.write() == expected

@@ -15,7 +15,8 @@ my_dict = {
     'a': 1,
     'b': 'two',
     3: 'c',
-}"""
+}
+"""
         assert code == expected
 
     def test_empty_dict(self):
@@ -27,7 +28,8 @@ my_dict = {
         code = gen.write()
         expected = """\
 empty = {}
-{}"""
+{}
+"""
         assert code == expected
 
     def test_nested_dict(self):
@@ -44,7 +46,8 @@ outer = {
         # val part
         'key': 'val',
     },
-}"""
+}
+"""
         assert code == expected
 
     def test_list_nested_in_dict(self):
@@ -63,5 +66,6 @@ my_dict = {
         \"\"\"
         10,
     ],
-}"""
+}
+"""
         assert code == expected

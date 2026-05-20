@@ -8,7 +8,7 @@ class TestObjClass:
             gen.Var('x', 10)
 
         code = gen.write()
-        assert code == "class MyClass:\n    x = 10"
+        assert code == "class MyClass:\n    x = 10\n"
 
     def test_empty_class(self):
         gen = CodeGenerator()
@@ -16,7 +16,7 @@ class TestObjClass:
             pass
 
         code = gen.write()
-        assert code == "class Empty:\n    pass"
+        assert code == "class Empty:\n    pass\n"
 
     def test_class_inheritance(self):
         gen = CodeGenerator()
@@ -28,7 +28,8 @@ class TestObjClass:
         expected = """\
 class Child(Base, metaclass=Singleton):
     # member
-    y: int"""
+    y: int
+"""
         assert code == expected
 
     def test_class_nesting(self):
@@ -41,7 +42,8 @@ class Child(Base, metaclass=Singleton):
         expected = """\
 class Outer:
     class Inner:
-        z = 30"""
+        z = 30
+"""
         assert code == expected
 
     def test_class_complex_content(self):
@@ -65,5 +67,6 @@ class Complex:
     c = [
         # items
         1,
-    ]"""
+    ]
+"""
         assert code == expected

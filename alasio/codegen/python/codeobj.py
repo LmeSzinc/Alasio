@@ -13,6 +13,20 @@ class Pass(CodeObject):
         yield f'{self.indent_str}pass'
 
 
+class Empty(CodeObject):
+    """
+    Generate blank lines
+    """
+
+    def __init__(self, gen, lines=1):
+        super().__init__(gen)
+        self.lines = lines
+
+    def generate(self):
+        for _ in range(self.lines):
+            yield ''
+
+
 class Raw(CodeObject):
     """
     Raw string content
@@ -136,6 +150,54 @@ class ClosureObject(CodeObject):
     def __init__(self, gen):
         super().__init__(gen)
         self.items: "list[CodeObject]" = []
+
+    def generate_items(self):
+        """
+        Generate items with automatic blank lines
+        """
+        prev_item = None
+        for item in self.items:
+            # Auto blank lines
+            if prev_item is not None:
+                lines = self._get_auto_blank_lines(prev_item, item)
+                for _ in range(lines):
+                    yield ''
+
+            yield from item.generate()
+            prev_item = item
+
+    def _get_auto_blank_lines(self, prev, curr):
+        """
+        Calculate how many blank lines needed between prev and curr
+        """
+        # If manual empty lines, skip auto
+        if isinstance(prev, Empty) or isinstance(curr, Empty):
+            return 0
+
+        indent = curr._indent
+        # PEP8: 2 blank lines between top-level definitions
+        if indent == 0:
+            # 2 lines before Class/Def
+            if isinstance(curr, (Class, Def)):
+                return 2
+            # 2 lines after Class/Def
+            if isinstance(prev, (Class, Def)) and not isinstance(curr, (Comment, MultilineComment, Import, FromImport)):
+                return 2
+            # 1 line after Import block or between top-level variables
+            if isinstance(prev, (Import, FromImport)) and not isinstance(curr, (Import, FromImport)):
+                return 1
+
+        # PEP8: 1 blank line between methods in a class
+        else:
+            if isinstance(curr, Def):
+                return 1
+            if isinstance(prev, Def) and not isinstance(curr, (Comment, MultilineComment)):
+                return 1
+
+        return 0
+
+    def generate(self):
+        yield from self.generate_items()
 
 
 class Import(CodeObject):
@@ -367,8 +429,7 @@ class Class(ClosureObject):
             yield f'{self.indent_str}class {self.name}:'
         # content
         if self.items:
-            for item in self.items:
-                yield from item.generate()
+            yield from self.generate_items()
         else:
             with self:
                 yield from Pass(self.gen).generate()
@@ -408,8 +469,7 @@ class Def(ClosureObject):
         yield f'{self.indent_str}def {self.name}({args.get_inline()}):'
         # content
         if self.items:
-            for item in self.items:
-                yield from item.generate()
+            yield from self.generate_items()
         else:
             with self:
                 yield from Pass(self.gen).generate()

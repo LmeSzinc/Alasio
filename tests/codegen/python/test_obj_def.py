@@ -12,7 +12,8 @@ class TestObjDef:
         expected = """\
 def hello(name):
     # say hello
-    msg = 'hello'"""
+    msg = 'hello'
+"""
         assert code == expected
 
     def test_empty_def(self):
@@ -23,7 +24,8 @@ def hello(name):
         code = gen.write()
         expected = """\
 def nop(self):
-    pass"""
+    pass
+"""
         assert code == expected
 
     def test_def_with_kwargs(self):
@@ -38,5 +40,6 @@ def search(query, timeout=10, retry=True):
     \"\"\"
     search something
     \"\"\"
-    found = []"""
+    found = []
+"""
         assert code == expected

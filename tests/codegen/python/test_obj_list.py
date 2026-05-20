@@ -13,7 +13,8 @@ class TestObjList:
 my_list = [
     1,
     'two',
-]"""
+]
+"""
         assert code == expected
 
     def test_empty_list(self):
@@ -25,7 +26,8 @@ my_list = [
         code = gen.write()
         expected = """\
 empty = []
-[]"""
+[]
+"""
         assert code == expected
 
     def test_nested_list(self):
@@ -53,7 +55,8 @@ outer = [
         \"\"\"
         3,
     ],
-]"""
+]
+"""
         assert code == expected
 
     def test_dict_nested_in_list(self):
@@ -68,5 +71,6 @@ my_list = [
     {
         'a': 1,
     },
-]"""
+]
+"""
         assert code == expected

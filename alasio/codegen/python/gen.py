@@ -3,16 +3,16 @@ from alasio.codegen.python.codeobj import *
 from alasio.ext.path import PathStr
 
 
-class CodeGenerator:
+class CodeGenerator(ClosureObject):
     """
     A python code generator
     """
 
     def __init__(self):
-        self.indent = 0
-        self.items: "list[CodeObject]" = []
         self.context: "t.Any | None" = None
         self.context_name = ''
+        self.indent = 0
+        super().__init__(self)
         self._import_registry: "dict[str, Import]" = {}
 
     def _add_item(self, item: CodeObject):
@@ -226,9 +226,22 @@ class CodeGenerator:
             pass
         return self
 
-    def generate(self):
-        for item in self.items:
-            yield from item.generate()
+    def Empty(self, lines=1):
+        """
+        Generate blank lines
+        """
+        item = Empty(self, lines)
+        self._add_item(item)
+        return item
+
+    def Pass(self):
+        """
+        Define a pass
+        """
+        item = Pass(self)
+        self._add_item(item)
+        return item
+
 
     def print(self):
         for row in self.generate():
@@ -247,6 +260,8 @@ class CodeGenerator:
         """
         content = [row for row in self.generate()]
         data = '\n'.join(content)
+        if data:
+            data += '\n'
         if file:
             PathStr.new(file).atomic_write(data)
         return data
