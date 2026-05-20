@@ -7,11 +7,13 @@ class CodeGenerator:
     """
     A python code generator
     """
+
     def __init__(self):
-        self.items = []
         self.indent = 0
-        self.context: "CodeObject | None" = None
-        self.context_name: str = ''
+        self.items: "list[CodeObject]" = []
+        self.context: "t.Any | None" = None
+        self.context_name = ''
+        self._import_registry: "dict[str, Import]" = {}
 
     def _add_item(self, item: CodeObject):
         if isinstance(self.context, ClosureObject):
@@ -186,6 +188,44 @@ class CodeGenerator:
         self._add_item(item)
         return item
 
+    def Import(self, module):
+        """
+        import {module}
+        """
+        if module in self._import_registry:
+            return self._import_registry[module]
+
+        item = Import(self, module)
+        self._add_item(item)
+        self._import_registry[module] = item
+        return item
+
+    def FromImport(self, module):
+        """
+        from {module} import {items}
+        """
+        item = FromImport(self, module)
+        self._add_item(item)
+        return item
+
+    def Raw(self, text):
+        """
+        Raw string content
+        """
+        item = Raw(self, text)
+        self._add_item(item)
+        return item
+
+    def use_import(self, module):
+        """
+        Mark a lazy import as used
+        """
+        try:
+            self._import_registry[module].use()
+        except KeyError:
+            pass
+        return self
+
     def generate(self):
         for item in self.items:
             yield from item.generate()
@@ -194,7 +234,7 @@ class CodeGenerator:
         for row in self.generate():
             print(row)
 
-    def write(self, file = ''):
+    def write(self, file=''):
         """
         Write generated code to file
         if file not provided, output code only

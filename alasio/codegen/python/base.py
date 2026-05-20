@@ -50,6 +50,7 @@ class CodeObject:
         self.gen.indent = self.indent_prev + self.tab
         self.gen.context = self
         self.gen.context_name = self.context_name
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # restore
