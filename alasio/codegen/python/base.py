@@ -1,0 +1,172 @@
+import typing as t
+
+from alasio.ext.cache import cached_property
+
+if t.TYPE_CHECKING:
+    from .gen import CodeGenerator
+    from .codeobj import Item, Var, Anno
+
+
+class CodeDefinitionError(Exception):
+    pass
+
+
+class ApplyContextName:
+    def __init__(self, gen: "CodeGenerator", context_name: str):
+        self.gen = gen
+        self.context_name = context_name
+
+    def __enter__(self):
+        # store context
+        self.context_name_prev = self.gen.context_name
+        # enter context
+        self.gen.context_name = self.context_name
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # restore context
+        self.gen.context_name = self.context_name_prev
+
+
+class CodeObject:
+    """
+    Base class of all objects
+    """
+
+    def __init__(self, gen: "CodeGenerator"):
+        self.gen = gen
+        self._indent = gen.indent
+        self._context_name = gen.context_name
+        self._anno = ''
+
+        self.context_name = self.__class__.__name__
+        self.tab = 1
+
+    def __enter__(self):
+        # store indent and context
+        self.indent_prev = self.gen.indent
+        self.context_name_prev = self.gen.context_name
+        self.context_prev = self.gen.context
+        # enter indent and context
+        self.gen.indent = self.indent_prev + self.tab
+        self.gen.context = self
+        self.gen.context_name = self.context_name
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # restore
+        self.gen.indent = self.indent_prev
+        self.gen.context = self.context_prev
+        self.gen.context_name = self.context_name_prev
+
+    def apply_context_name(self, context_name: str):
+        """
+        Temporarily enter a sub context name
+        """
+        return ApplyContextName(self.gen, context_name)
+
+    def set_anno(self, text: str):
+        self._anno = f': {text}'
+        return self
+
+    @cached_property
+    def indent_str(self) -> str:
+        return "    " * self._indent
+
+    @cached_property
+    def line_ending(self) -> str:
+        if self._context_name in ['Dict', 'List', 'Tuple', 'Set']:
+            return ','
+        return ''
+
+    @cached_property
+    def between_kv(self):
+        if self._context_name in ['Dict']:
+            return ': '
+        if self._context_name in ['FuncArgs', 'ClassInherit']:
+            return '='
+        return ' = '
+
+    def generate(self):
+        raise NotImplementedError
+
+
+class GatherItems:
+    """
+    Gather Item/Var and convert to str
+    item1, item2, key1=value1, key2=value2
+    """
+
+    def __init__(self, max_width: "bool | int" = False):
+        self.items: "list[Item | Var]" = []
+        self.max_width = max_width
+
+    def add(self, items: "t.Union[Item, Var, Anno, t.Iterable[t.Union[Item, Var, Anno]]]"):
+        if isinstance(items, (list, tuple, set)):
+            for item in items:
+                self.items.append(item)
+            return self
+        # Item | Var, but avoid recursive import
+        try:
+            name = items.__class__.__name__
+            if name in ['Item', 'Var', 'Anno']:
+                self.items.append(items)
+                return self
+        except AttributeError:
+            pass
+        # any iterable
+        for item in items:
+            self.items.append(item)
+        return self
+
+    def get_inline(self):
+        if not self.items:
+            return ''
+        item_str = [item.item_str for item in self.items]
+        return ', '.join(item_str)
+
+    def iter_multiline(self):
+        """
+        Generate compact lines with max width like:
+        {indent_str}item1, item2, item3, item4, item5,
+        {indent_str}item6, item7, item8, item9, item10,
+        {indent_str}item11, item12,
+
+        Yields:
+            str:
+        """
+        if not self.max_width:
+            yield self.get_inline()
+            return
+        if not self.items:
+            return
+        max_width = self.max_width
+        if max_width is True:
+            max_width = 120
+        buffer = []
+        indent_str = self.items[0].indent_str
+        indent_width = len(indent_str)
+        remain_width = max_width - indent_width
+        for item in self.items:
+            if buffer:
+                # adding f' item,' the +1 is the <space> prefix
+                add_length = len(item.item_str) + 1
+                if add_length <= remain_width:
+                    # enough width to add
+                    buffer.append(item.item_str)
+                    remain_width -= add_length
+                else:
+                    # not enough width, add to new row
+                    yield ' '.join(buffer)
+                    buffer = [item.item_str]
+                    remain_width = max_width - indent_width - len(item.item_str)
+            else:
+                # add first item, no matter how long
+                buffer = [item.item_str]
+                remain_width = max_width - indent_width - len(item.item_str)
+            # check if line full
+            if remain_width <= 0:
+                yield ' '.join(buffer)
+                buffer = []
+                remain_width = max_width - indent_width
+        
+        if buffer:
+            yield ' '.join(buffer)
