@@ -1,39 +1,74 @@
 import sys
-from typing import Generator
+from typing import Generator, overload
+
+
+@overload
+def removeprefix(s: str, prefix: str) -> str: ...
+
+
+@overload
+def removeprefix(s: bytes, prefix: bytes) -> bytes: ...
+
+
+@overload
+def removesuffix(s: str, suffix: str) -> str: ...
+
+
+@overload
+def removesuffix(s: bytes, suffix: bytes) -> bytes: ...
+
 
 if sys.version_info >= (3, 9):
     def removeprefix(s, prefix):
+        """
+        Args:
+            s (str | bytes):
+            prefix (str | bytes):
+
+        Returns:
+            str | bytes:
+        """
         return s.removeprefix(prefix)
 
 
-    def removesuffix(s, prefix):
-        return s.removesuffix(prefix)
-
-else:
-    # Backport `string.removeprefix(prefix)`, which is on Python>=3.9
-    def removeprefix(s, prefix):
+    def removesuffix(s, suffix):
         """
         Args:
-            s (T):
-            prefix (T):
+            s (str | bytes):
+            suffix (str | bytes):
 
         Returns:
-            T:
+            str | bytes:
+        """
+        return s.removesuffix(suffix)
+
+else:
+    def removeprefix(s, prefix):
+        """
+        Backport `string.removeprefix(prefix)`, which is on Python>=3.9
+
+        Args:
+            s (str | bytes):
+            prefix (str | bytes):
+
+        Returns:
+            str | bytes:
         """
         if s.startswith(prefix):
             return s[len(prefix):]
         return s
 
 
-    # Backport `string.removesuffix(suffix)`, which is on Python>=3.9
     def removesuffix(s, suffix):
         """
+        Backport `string.removesuffix(suffix)`, which is on Python>=3.9
+
         Args:
-            s (T):
-            suffix (T):
+            s (str | bytes):
+            suffix (str | bytes):
 
         Returns:
-            T:
+            str | bytes:
         """
         # s[:-0] is empty string, so we need to check if suffix is empty
         if suffix and s.endswith(suffix):
