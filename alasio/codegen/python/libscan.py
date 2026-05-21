@@ -1,8 +1,4 @@
-from __future__ import annotations
-
-import importlib.util
 import os
-import pkgutil
 import site
 import sys
 import sysconfig
@@ -61,11 +57,13 @@ class EnvLibraryScanner:
             pass
 
         # Extra scan of sys.path for site-packages as a double guarantee
+        # (Exclude paths that are already classified as standard library paths)
         for path in sys.path:
             if path:
                 real_p = os.path.realpath(path)
-                if 'site-packages' in real_p or 'dist-packages' in real_p:
-                    self.site_paths.add(real_p)
+                if real_p not in self.stdlib_paths:
+                    if 'site-packages' in real_p or 'dist-packages' in real_p:
+                        self.site_paths.add(real_p)
 
     def _is_subpath(self, path, base_paths):
         """
@@ -86,6 +84,24 @@ class EnvLibraryScanner:
                 continue
         return False
 
+    def _get_path_category(self, path):
+        """
+        Determine the classification category of a directory path
+
+        Args:
+            path (str): Real path of the directory
+
+        Returns:
+            ModuleType: Classification category
+        """
+        if self._is_subpath(path, self.site_paths):
+            return ModuleType.THIRD_PARTY
+        if self._is_subpath(path, self.stdlib_paths):
+            return ModuleType.STANDARD_LIBRARY
+        if self._is_subpath(path, [self.project_root]):
+            return ModuleType.LOCAL_PROJECT
+        return ModuleType.UNKNOWN
+
     def _classify_single_module(self, name):
         """
         Classify a single module name by its path
@@ -100,6 +116,7 @@ class EnvLibraryScanner:
         if name in sys.builtin_module_names:
             return ModuleType.STANDARD_LIBRARY
 
+        import importlib.util
         try:
             spec = importlib.util.find_spec(name)
             if spec is None:
@@ -144,7 +161,10 @@ class EnvLibraryScanner:
             dict[str, ModuleType]: Mapping of module name to its type
         """
         classified = {}
-        raw_names = set(sys.builtin_module_names)
+
+        # 1. Built-in C modules (highest precedence, no physical path)
+        for name in sys.builtin_module_names:
+            classified[name] = ModuleType.STANDARD_LIBRARY
 
         # Use warnings context to block UserWarning from setuptools
         with warnings.catch_warnings():
@@ -154,28 +174,30 @@ class EnvLibraryScanner:
                 message=".*Setuptools is replacing distutils.*"
             )
 
-            # 1. Accurately and explicitly scan standard library physical directories
-            # (ensures capturing low-level C libraries like _lzma, _ssl)
-            for path in self.stdlib_paths:
-                if os.path.isdir(path):
-                    # pkgutil.iter_modules([path]) scans only the specified directory,
-                    # effectively finding missing C libraries
-                    for module_info in pkgutil.iter_modules([path]):
-                        raw_names.add(module_info.name)
+            # 2. Scan and classify modules folder by folder in sys.path
+            import pkgutil
+            for path in sys.path:
+                if not path:
+                    real_path = self.project_root
+                else:
+                    real_path = os.path.realpath(path)
 
-            # 2. Explicitly scan third-party library physical directories
-            for path in self.site_paths:
-                if os.path.isdir(path):
-                    for module_info in pkgutil.iter_modules([path]):
-                        raw_names.add(module_info.name)
+                if not os.path.exists(real_path):
+                    continue
 
-            # 3. Fallback scan of global modules
-            for module_info in pkgutil.iter_modules():
-                raw_names.add(module_info.name)
+                # Pre-determine the category of this path
+                path_category = self._get_path_category(real_path)
 
-            # 4. Classify all scanned names
-            for name in raw_names:
-                classified[name] = self._classify_single_module(name)
+                try:
+                    # Fast directory listing using pkgutil.iter_modules
+                    for module_info in pkgutil.iter_modules([real_path]):
+                        name = module_info.name
+                        # Shadowing: first module found in sys.path takes precedence
+                        if name not in classified:
+                            classified[name] = path_category
+                except Exception:
+                    # Gracefully skip inaccessible paths or broken zip files in sys.path
+                    continue
 
         return classified
 
