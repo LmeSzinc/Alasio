@@ -1,5 +1,6 @@
 from alasio.codegen.python.base import CodeDefinitionError
 from alasio.codegen.python.codeobj import *
+from alasio.codegen.python.libscan import EnvLibraryScanner, ModuleType
 from alasio.ext.path import PathStr
 
 
@@ -14,6 +15,13 @@ class CodeGenerator(ClosureObject):
         self.indent = 0
         super().__init__(self)
         self._import_registry: "dict[str, Import]" = {}
+        self._scanner = None
+
+    @property
+    def scanner(self) -> EnvLibraryScanner:
+        if self._scanner is None:
+            self._scanner = EnvLibraryScanner()
+        return self._scanner
 
     def _add_item(self, item: CodeObject):
         if isinstance(self.context, ClosureObject):
@@ -245,6 +253,74 @@ class CodeGenerator(ClosureObject):
         self._add_item(item)
         return item
 
+    def sort_import(self):
+        """
+        Sort imports in PEP8 order
+        """
+        # Find header imports
+        header_end = 0
+        imports = []
+        for i, item in enumerate(self.items):
+            if isinstance(item, (Import, FromImport)):
+                imports.append(item)
+                header_end = i + 1
+            elif isinstance(item, (Comment, MultilineComment, Empty)):
+                # Still in header if followed by imports
+                continue
+            else:
+                # Code started
+                header_end = i
+                break
+
+        if not imports:
+            return self
+
+        # Extract all items in header
+        header_items = self.items[:header_end]
+        remaining_items = self.items[header_end:]
+
+        # Classify imports
+        std_lib = []
+        third_party = []
+        local_project = []
+
+        # Collect all Import/FromImport objects from the header.
+        real_imports = [item for item in header_items if isinstance(item, (Import, FromImport))]
+
+        for imp in real_imports:
+            mtype = imp.module_type
+            if mtype == ModuleType.STANDARD_LIBRARY:
+                std_lib.append(imp)
+            elif mtype == ModuleType.THIRD_PARTY:
+                third_party.append(imp)
+            else:
+                local_project.append(imp)
+
+        # Sort each group by module name
+        def sort_key(imp):
+            return imp.module.lower()
+
+        std_lib.sort(key=sort_key)
+        third_party.sort(key=sort_key)
+        local_project.sort(key=sort_key)
+
+        # Assemble new items
+        new_items = []
+        if std_lib:
+            new_items.extend(std_lib)
+        if third_party:
+            if new_items:
+                new_items.append(Empty(self, 1))
+            new_items.extend(third_party)
+        if local_project:
+            if new_items:
+                new_items.append(Empty(self, 1))
+            new_items.extend(local_project)
+
+        # Auto blank lines from _get_auto_blank_lines will handle
+        # the spacing between imports and subsequent code.
+        self.items = new_items + remaining_items
+        return self
 
     def print(self):
         for row in self.generate():

@@ -67,7 +67,7 @@ class TestGatherItems:
 
         # Context is None, so line_ending is ''
         # between_kv is ' = '
-        assert gather.get_inline() == "1, a = 2"
+        assert gather.get_inline() == "1 a = 2"
 
 
 class TestIterMultiline:
@@ -75,7 +75,7 @@ class TestIterMultiline:
         gen = CodeGenerator()
         gather = GatherItems(max_width=False)
         gather.add([Item(gen, 1), Item(gen, 2)])
-        assert list(gather.iter_multiline()) == ["1, 2"]
+        assert list(gather.iter_multiline()) == ["1 2"]
 
     def test_empty_items(self):
         gather = GatherItems(max_width=40)

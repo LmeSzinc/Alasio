@@ -4,7 +4,7 @@ from alasio.ext.cache import cached_property
 
 if t.TYPE_CHECKING:
     from .gen import CodeGenerator
-    from .codeobj import Item, Var, Anno
+    from .codeobj import Item, Var
 
 
 class CodeDefinitionError(Exception):
@@ -40,6 +40,19 @@ class CodeObject:
 
         self.context_name = self.__class__.__name__
         self.tab = 1
+        self._wrap: "bool | int | str" = 'always'
+
+    def wrap(self, wrap: "bool | int | str"):
+        """
+        Wrap items in collection
+        False: no wrap
+        True | 120: wrap at 120
+        always: wrap each item on newline
+        """
+        if wrap is True:
+            wrap = 120
+        self._wrap = wrap
+        return self
 
     def __enter__(self):
         # store indent and context
@@ -84,7 +97,7 @@ class CodeObject:
 
     @cached_property
     def line_ending(self) -> str:
-        if self._context_name in ['Dict', 'List', 'Tuple', 'Set']:
+        if self._context_name in ['Dict', 'List', 'Tuple', 'Set', 'ClassInherit', 'FuncArgs']:
             return ','
         return ''
 
@@ -102,8 +115,9 @@ class CodeObject:
 
 class GatherItems:
     """
-    Gather Item/Var and convert to str
-    item1, item2, key1=value1, key2=value2
+    Gather Item/Var and convert to str.
+    Each item's item_str already carries its own line_ending.
+    Tokens are joined with a single space.
     """
 
     def __init__(self, max_width: "bool | int" = False):
@@ -131,8 +145,7 @@ class GatherItems:
     def get_inline(self):
         if not self.items:
             return ''
-        item_str = [item.item_str for item in self.items]
-        return ', '.join(item_str)
+        return ' '.join(item.item_str for item in self.items)
 
     def iter_multiline(self):
         """
@@ -140,6 +153,9 @@ class GatherItems:
         {indent_str}item1, item2, item3, item4, item5,
         {indent_str}item6, item7, item8, item9, item10,
         {indent_str}item11, item12,
+
+        Each item_str carries its own line_ending.
+        Tokens are joined with a single space.
 
         Yields:
             str:
@@ -157,27 +173,24 @@ class GatherItems:
         indent_width = len(indent_str)
         remain_width = max_width - indent_width
         for item in self.items:
+            token = item.item_str
             if buffer:
-                # adding f' item,' the +1 is the <space> prefix
-                add_length = len(item.item_str) + 1
+                # +1 for the space between tokens
+                add_length = len(token) + 1
                 if add_length <= remain_width:
-                    # enough width to add
-                    buffer.append(item.item_str)
+                    buffer.append(token)
                     remain_width -= add_length
                 else:
-                    # not enough width, add to new row
                     yield ' '.join(buffer)
-                    buffer = [item.item_str]
-                    remain_width = max_width - indent_width - len(item.item_str)
+                    buffer = [token]
+                    remain_width = max_width - indent_width - len(token)
             else:
-                # add first item, no matter how long
-                buffer = [item.item_str]
-                remain_width = max_width - indent_width - len(item.item_str)
-            # check if line full
+                buffer = [token]
+                remain_width = max_width - indent_width - len(token)
             if remain_width <= 0:
                 yield ' '.join(buffer)
                 buffer = []
                 remain_width = max_width - indent_width
-        
+
         if buffer:
             yield ' '.join(buffer)
