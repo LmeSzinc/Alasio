@@ -19,9 +19,9 @@ class AutoBlankLineMixin(CodeObject):
             if isinstance(curr, (Class, Def)):
                 return 2
             # 2 lines after Class/Def
-            from alasio.codegen.python.obj_import import Import, FromImport
             if isinstance(prev, (Class, Def)) and not isinstance(curr, (Comment, MultilineComment)):
                 return 2
+            from alasio.codegen.python.obj_import import Import, FromImport
             # 1 line after Import block or between top-level variables
             if isinstance(prev, (Import, FromImport)) and not isinstance(curr, (Import, FromImport)):
                 return 1

@@ -34,164 +34,74 @@ class ClosureObject(CodeObject):
 
 
 class ClosureWithName(ClosureObject):
+    # Subclasses override these class attributes for different bracket types.
+    closure_start = ''
+    closure_end = ''
+    closure_empty = ''
+
     def __init__(self, gen, name):
         super().__init__(gen)
         if self._context_name in ['Dict']:
             name = repr(name)
         self.name = name
 
-
-class List(ClosureWithName):
     @cached_property
     def item_str(self):
-        # Inline representation, used when nested in another collection
+        """Inline representation, used when nested in another collection."""
         ending = self.line_ending
         if not self.items:
-            return f'[]{ending}'
+            return f'{self.closure_empty}{ending}'
         items = GatherItems().add(self.items).get_inline()
-        return f'[{items}]{ending}'
+        return f'{self.closure_start}{items}{self.closure_end}{ending}'
 
     def generate(self):
         ending = self.line_ending
         prefix = f'{self.name}{self._anno}{self.between_kv}' if self.name else ''
 
         if not self.items:
-            yield f'{self.indent_str}{prefix}[]{ending}'
+            yield f'{self.indent_str}{prefix}{self.closure_empty}{ending}'
             return
 
         if self._wrap == 'always':
-            yield f'{self.indent_str}{prefix}['
+            yield f'{self.indent_str}{prefix}{self.closure_start}'
             for item in self.items:
                 yield from item.generate()
-            yield f'{self.indent_str}]{ending}'
+            yield f'{self.indent_str}{self.closure_end}{ending}'
             return
 
         # wrap=False or wrap=int: use GatherItems for width-aware compact output
         items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
         rows = list(items.iter_multiline())
         if len(rows) == 1:
-            yield f'{self.indent_str}{prefix}[{rows[0]}]{ending}'
+            yield f'{self.indent_str}{prefix}{self.closure_start}{rows[0]}{self.closure_end}{ending}'
             return
 
         # Multi row
-        yield f'{self.indent_str}{prefix}['
+        yield f'{self.indent_str}{prefix}{self.closure_start}'
         for row in rows:
             yield f'{self.indent_str}    {row}'
-        yield f'{self.indent_str}]{ending}'
+        yield f'{self.indent_str}{self.closure_end}{ending}'
+
+
+class List(ClosureWithName):
+    closure_start = '['
+    closure_end = ']'
+    closure_empty = '[]'
 
 
 class Dict(ClosureWithName):
-    @cached_property
-    def item_str(self):
-        # Inline representation, used when nested in another collection
-        ending = self.line_ending
-        if not self.items:
-            return f'{{}}{ending}'
-        items = GatherItems().add(self.items).get_inline()  # type: ignore
-        return f'{{{items}}}{ending}'
-
-    def generate(self):
-        ending = self.line_ending
-        prefix = f'{self.name}{self._anno}{self.between_kv}' if self.name else ''
-
-        if not self.items:
-            yield f'{self.indent_str}{prefix}{{}}{ending}'
-            return
-
-        if self._wrap == 'always':
-            yield f'{self.indent_str}{prefix}{{'
-            for item in self.items:
-                yield from item.generate()
-            yield f'{self.indent_str}}}{ending}'
-            return
-
-        # wrap=False or wrap=int: use GatherItems for width-aware compact output
-        items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
-        rows = list(items.iter_multiline())
-        if len(rows) == 1:
-            yield f'{self.indent_str}{prefix}{{{rows[0]}}}{ending}'
-            return
-
-        # Multi row
-        yield f'{self.indent_str}{prefix}{{'
-        for row in rows:
-            yield f'{self.indent_str}    {row}'
-        yield f'{self.indent_str}}}{ending}'
+    closure_start = '{'
+    closure_end = '}'
+    closure_empty = '{}'
 
 
 class Tuple(ClosureWithName):
-    @cached_property
-    def item_str(self):
-        # Inline representation, used when nested in another collection
-        ending = self.line_ending
-        if not self.items:
-            return f'(){ending}'
-        items = GatherItems().add(self.items).get_inline()  # type: ignore
-        return f'({items}){ending}'
-
-    def generate(self):
-        ending = self.line_ending
-        prefix = f'{self.name}{self._anno}{self.between_kv}' if self.name else ''
-
-        if not self.items:
-            yield f'{self.indent_str}{prefix}(){ending}'
-            return
-
-        if self._wrap == 'always':
-            yield f'{self.indent_str}{prefix}('
-            for item in self.items:
-                yield from item.generate()
-            yield f'{self.indent_str}){ending}'
-            return
-
-        # wrap=False or wrap=int: use GatherItems for width-aware compact output
-        items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
-        rows = list(items.iter_multiline())
-        if len(rows) == 1:
-            yield f'{self.indent_str}{prefix}({rows[0]}){ending}'
-            return
-
-        # Multi row
-        yield f'{self.indent_str}{prefix}('
-        for row in rows:
-            yield f'{self.indent_str}    {row}'
-        yield f'{self.indent_str}){ending}'
+    closure_start = '('
+    closure_end = ')'
+    closure_empty = '()'
 
 
 class Set(ClosureWithName):
-    @cached_property
-    def item_str(self):
-        # Inline representation, used when nested in another collection
-        ending = self.line_ending
-        if not self.items:
-            return f'set(){ending}'
-        items = GatherItems().add(self.items).get_inline()  # type: ignore
-        return f'{{{items}}}{ending}'
-
-    def generate(self):
-        ending = self.line_ending
-        prefix = f'{self.name}{self._anno}{self.between_kv}' if self.name else ''
-
-        if not self.items:
-            yield f'{self.indent_str}{prefix}set(){ending}'
-            return
-
-        if self._wrap == 'always':
-            yield f'{self.indent_str}{prefix}{{'  # noqa: E123
-            for item in self.items:
-                yield from item.generate()
-            yield f'{self.indent_str}}}{ending}'
-            return
-
-        # wrap=False or wrap=int: use GatherItems for width-aware compact output
-        items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
-        rows = list(items.iter_multiline())
-        if len(rows) == 1:
-            yield f'{self.indent_str}{prefix}{{{rows[0]}}}{ending}'
-            return
-
-        # Multi row
-        yield f'{self.indent_str}{prefix}{{'  # noqa: E123
-        for row in rows:
-            yield f'{self.indent_str}    {row}'
-        yield f'{self.indent_str}}}{ending}'
+    closure_start = '{'
+    closure_end = '}'
+    closure_empty = 'set()'
