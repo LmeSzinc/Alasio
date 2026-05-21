@@ -76,6 +76,14 @@ import os
 """
         assert code == expected
 
+    def test_lazy_import_with_alias(self):
+        gen = CodeGenerator()
+        gen.Import('typing').as_('t').lazy()
+        
+        # Use alias
+        gen.use_import('t')
+        assert gen.write() == "import typing as t\n"
+
     def test_lazy_from_import(self):
         gen = CodeGenerator()
         with gen.FromImport('typing') as f:

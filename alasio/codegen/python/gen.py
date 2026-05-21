@@ -30,7 +30,7 @@ class CodeGenerator(ClosureObject):
         Examples:
             gen.Var(name='john')
             # name = 'john'
-            gen.Var(name='john').set_anno('str')
+            gen.Var(name='john').Anno('str')
             # name: str = 'john'
         """
         item = Var(self, name, value)
@@ -45,6 +45,8 @@ class CodeGenerator(ClosureObject):
         Examples:
             gen.Anno('id', 'str')
             # id: str
+            gen.Anno('id', 'str').Var('john')
+            # id: str = 'john'
         """
         item = Anno(self, name, anno)
         self._add_item(item)
@@ -197,7 +199,7 @@ class CodeGenerator(ClosureObject):
 
         item = Import(self, module)
         self._add_item(item)
-        self._import_registry[module] = item
+        self._import_registry[item.varname] = item
         return item
 
     def FromImport(self, module):
@@ -216,12 +218,13 @@ class CodeGenerator(ClosureObject):
         self._add_item(item)
         return item
 
-    def use_import(self, module):
+    def use_import(self, varname):
         """
         Mark a lazy import as used
+        See Import.use()
         """
         try:
-            self._import_registry[module].use()
+            self._import_registry[varname].use()
         except KeyError:
             pass
         return self

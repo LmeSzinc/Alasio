@@ -141,3 +141,20 @@ class TestIterMultiline:
             # 1, (len 2)
             # 2, (len 2)
             assert lines == ["1,", "2,"]
+
+
+class TestVarAnnoFluent:
+    def test_var_anno_fluent(self):
+        gen = CodeGenerator()
+        
+        # gen.Var(name, value).Anno(anno)
+        gen.Var('x', 1).Anno('int')
+        # gen.Anno(name, anno).Var(value)
+        gen.Anno('y', 'str').Var('hello')
+        
+        code = gen.write()
+        expected = """\
+x: int = 1
+y: str = 'hello'
+"""
+        assert code == expected

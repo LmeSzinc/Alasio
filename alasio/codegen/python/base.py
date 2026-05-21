@@ -64,8 +64,18 @@ class CodeObject:
         """
         return ApplyContextName(self.gen, context_name)
 
-    def set_anno(self, text: str):
+    def Anno(self, text: str):
         self._anno = f': {text}'
+        return self
+
+    def Var(self, value: t.Any):
+        """
+        Define a value for this object (Var or Anno)
+        """
+        if self.gen.context_name in ['ClassInherit', 'FuncArgs']:
+            self.value = value
+        else:
+            self.value = repr(value)
         return self
 
     @cached_property
@@ -100,21 +110,21 @@ class GatherItems:
         self.items: "list[Item | Var]" = []
         self.max_width = max_width
 
-    def add(self, items: "t.Union[Item, Var, Anno, t.Iterable[t.Union[Item, Var, Anno]]]"):
+    def add(self, items: "t.Iterable[Item | Var | Anno] | Item | Var | Anno"):
         if isinstance(items, (list, tuple, set)):
             for item in items:
                 self.items.append(item)
             return self
-        # Item | Var, but avoid recursive import
+        # Item | Var | Anno
         try:
             name = items.__class__.__name__
             if name in ['Item', 'Var', 'Anno']:
-                self.items.append(items)
+                self.items.append(items)  # type: ignore
                 return self
         except AttributeError:
             pass
-        # any iterable
-        for item in items:
+        # any other iterable
+        for item in items:  # type: ignore
             self.items.append(item)
         return self
 

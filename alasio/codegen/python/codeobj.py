@@ -83,17 +83,13 @@ class Var(CodeObject):
         if self._context_name in ['Dict']:
             name = repr(name)
         self.name = name
-        if self.gen.context_name in ['ClassInherit', 'FuncArgs']:
-            self.value = value
-        else:
-            self.value = repr(value)
+        self.value = ''
+        self.Var(value)
 
     @cached_property
     def item_str(self):
-        anno = ''
         name = self.name
-        if self._context_name in ['FuncArg']:
-            anno = self._anno
+        anno = self._anno
         # name: anno = value,
         return f'{name}{anno}{self.between_kv}{self.value}{self.line_ending}'
 
@@ -101,28 +97,26 @@ class Var(CodeObject):
         yield f'{self.indent_str}{self.item_str}'
 
 
-class Anno(CodeObject):
+class Anno(Var):
     """
     Define a annotation in line
     {name}: {anno}
     """
 
     def __init__(self, gen, name, anno):
-        super().__init__(gen)
-        if self._context_name in ['Dict']:
-            name = repr(name)
-        self.name = name
-        self.set_anno(anno)
+        super().__init__(gen, name, None)
+        self.Anno(anno)
+        self.value = None
 
     @cached_property
     def item_str(self):
-        anno = self._anno
         name = self.name
+        anno = self._anno
+        if self.value is not None:
+            # name: anno = value,
+            return f'{name}{anno}{self.between_kv}{self.value}{self.line_ending}'
         # name: anno
         return f'{name}{anno}'
-
-    def generate(self):
-        yield f'{self.indent_str}{self.item_str}'
 
 
 class Item(CodeObject):
@@ -211,31 +205,78 @@ class Import(CodeObject):
         self.alias = alias
         self._lazy = False
         self._used = False
-        self._is_from_item = False
+        self.import_from = ''
 
     def as_(self, alias):
+        prev_name = self.varname
         self.alias = alias
+        # Clear cached property
+        cached_property.pop(self, 'varname')
+        cached_property.pop(self, 'item_str')
+
+        # Update registry
+        if self.gen._import_registry.get(prev_name) is self:
+            del self.gen._import_registry[prev_name]
+        self.gen._import_registry[self.varname] = self
         return self
 
     def lazy(self):
+        """
+        Mark import object as lazy generate
+
+        imp = gen.Import('typing').lazy()
+        # this won't be generated, unless you call `imp.use()` or `gen.use_import('typing')`
+        imp = gen.Import('typing').as_('t').lazy()
+        # this won't be generated, unless you call `imp.use()` or `gen.use_import('t')`
+        imp = gen.FromImport('typing').Import('List').lazy()
+        # this won't be generated, unless you call `imp.use()` or `gen.use_import('List')`
+        """
         self._lazy = True
         return self
 
     def use(self):
+        """
+        Mark import object as used
+        """
         self._used = True
         return self
 
-    @property
-    def item_str(self):
-        res = self.module
+    @cached_property
+    def lib(self):
+        """
+        Get library of module
+        import lzma -> "lzma"
+        from pydantic import BaseModel -> "pydantic"
+        from module.xxx import Class -> "module"  # local module
+        from .relative import func -> ""  # relative import
+        """
+        if self.import_from:
+            return self.import_from.partition('.')[0]
+        return self.module.partition('.')[0]
+
+    @cached_property
+    def varname(self):
+        """
+        Get variable name of import result
+        import lzma -> "lzma"
+        import typing as t -> "t"
+        from pydantic import BaseModel -> "BaseModel"
+        from .relative import func -> "func"
+        """
         if self.alias:
-            res += f' as {self.alias}'
-        return res
+            return self.alias
+        return self.module
+
+    @cached_property
+    def item_str(self):
+        if self.alias:
+            return f'{self.module} as {self.alias}'
+        return self.module
 
     def generate(self):
         if self._lazy and not self._used:
             return
-        if self._is_from_item or self._context_name == 'FromImport':
+        if self.import_from or self._context_name == 'FromImport':
             yield f'{self.indent_str}{self.item_str}{self.line_ending}'
         else:
             yield f'{self.indent_str}import {self.item_str}'
@@ -257,7 +298,7 @@ class FromImport(ClosureObject):
 
     def Import(self, name, alias=None):
         item = Import(self.gen, name, alias=alias)
-        item._is_from_item = True
+        item.import_from = self.module
         self.items.append(item)
         self.gen._import_registry[name] = item
         return item
