@@ -219,6 +219,8 @@ import os
 
 class Foo:
     pass
+
+
 import alasio
 """
         assert code == expected

@@ -4,7 +4,7 @@ from alasio.ext.cache import cached_property
 
 if t.TYPE_CHECKING:
     from .gen import CodeGenerator
-    from .codeobj import Item, Var
+    from .obj_class import Item, Var
 
 
 class CodeDefinitionError(Exception):

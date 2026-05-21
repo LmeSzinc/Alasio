@@ -1,6 +1,6 @@
 from alasio.codegen.python.base import ApplyContextName, GatherItems
 from alasio.codegen.python.gen import CodeGenerator
-from alasio.codegen.python.codeobj import Item, Var
+from alasio.codegen.python.obj_class import Item, Var
 
 
 class TestApplyContextName:

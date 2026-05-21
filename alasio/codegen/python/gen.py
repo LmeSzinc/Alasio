@@ -1,10 +1,12 @@
 from alasio.codegen.python.base import CodeDefinitionError
-from alasio.codegen.python.codeobj import *
 from alasio.codegen.python.libscan import EnvLibraryScanner, ModuleType
+from alasio.codegen.python.obj_class import *
+from alasio.codegen.python.obj_closure import *
+from alasio.codegen.python.obj_import import *
 from alasio.ext.path import PathStr
 
 
-class CodeGenerator(ClosureObject):
+class CodeGenerator(AutoBlankLineMixin, ClosureObject):
     """
     A python code generator
     """
