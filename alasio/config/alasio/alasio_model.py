@@ -8,6 +8,7 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
+
 class Scheduler(m.Struct, omit_defaults=True):
     Enable: bool = False
     NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)

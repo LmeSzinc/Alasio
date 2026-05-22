@@ -1,3 +1,4 @@
+from alasio.codegen.python import CodeGen
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.config_dev.format.format_yaml import yaml_formatter
@@ -6,7 +7,6 @@ from alasio.config_dev.parse.parse_args import ArgData, TYPE_ARG_LITERAL, TYPE_A
 from alasio.config_dev.parse.parse_groups import ParseGroups
 from alasio.config_dev.parse.parse_tasks import ParseTasks
 from alasio.ext.cache import cached_property
-from alasio.ext.codegen import CodeGen
 from alasio.ext.deep import deep_get, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.yamlfile import format_yaml
@@ -89,14 +89,10 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             CodeGen | None:
         """
         gen = CodeGen()
-        gen.RawImport("""
-        import datetime as d
-        import typing as t
-
-        import msgspec as m
-        import typing_extensions as e
-        """)
-        gen.Empty()
+        gen.Import('datetime').as_('d')
+        gen.Import('typing').as_('t')
+        gen.Import('msgspec').as_('m')
+        gen.Import('typing_extensions').as_('e')
         gen.CommentCodeGen('alasio.config.dev.configgen')
         has_content = False
         for group_name, group in self.groups_data.items():
@@ -105,28 +101,21 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                 continue
             has_content = True
             # Define model class
-            with gen.Class(group_name, inherit='m.Struct, omit_defaults=True'):
+            with gen.Class(group_name).set_inherit('m.Struct', omit_defaults=True):
                 for arg_name, arg in group.args.items():
                     arg: ArgData
                     # Expand list
                     if arg.dt in TYPE_ARG_TUPLE:
-                        gen.Var(arg_name, anno=arg.get_anno(), value=arg.value, auto_multiline=120)
+                        gen.Anno(arg_name, arg.get_anno()).Var(arg.value)
                         continue
                     # Expand literal
                     if arg.dt in TYPE_ARG_LITERAL:
-                        anno = arg.get_anno()
-                        if len(anno) > 60:
-                            # {name}: t.Literal[
-                            #     ...
-                            # } = ...
-                            with gen.tab(prefix=f'{arg_name}: t.Literal[', suffix=f'] = {repr(arg.value)}',
-                                         line_ending=',', tab_type='list'):
-                                for option in arg.option:
-                                    gen.Item(option)
-                            continue
+                        with gen.Literal(arg_name).set_literal('t.Literal').Var(arg.value).wrap(True):
+                            for option in arg.option:
+                                gen.Item(option)
+                        continue
                     # inline
-                    gen.Anno(arg_name, anno=arg.get_anno(), value=arg.get_value())
-            gen.Empty(2)
+                    gen.Anno(arg_name, arg.get_anno()).Var(arg.get_value())
 
         # gen.print()
         if has_content:

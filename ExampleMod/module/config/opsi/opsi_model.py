@@ -8,6 +8,7 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
+
 class OpsiAshAssist(m.Struct, omit_defaults=True):
     Tier: e.Annotated[int, m.Meta(ge=1, le=15)] = 15
 
@@ -45,20 +46,8 @@ class OpsiExplore(m.Struct, omit_defaults=True):
 
 
 class OpsiShop(m.Struct, omit_defaults=True):
-    PresetFilter: t.Literal[
-        'max_benefit',
-        'max_benefit_meta',
-        'no_meta',
-        'all',
-        'custom',
-    ] = 'max_benefit_meta'
-    CustomFilter: t.Tuple[str, ...] = (
-        'LoggerAbyssalT6', 'LoggerAbyssalT5', 'LoggerObscure', 'LoggerAbyssalT4', 'ActionPoint', 'PurpleCoins',
-        'GearDesignPlanT3', 'PlateRandomT4', 'DevelopmentMaterialT3', 'GearDesignPlanT2', 'GearPart',
-        'OrdnanceTestingReportT3', 'OrdnanceTestingReportT2', 'DevelopmentMaterialT2', 'OrdnanceTestingReportT1',
-        'METARedBook', 'CrystallizedHeatResistantSteel', 'NanoceramicAlloy', 'NeuroplasticProstheticArm',
-        'SupercavitationGenerator',
-    )
+    PresetFilter: t.Literal['max_benefit', 'max_benefit_meta', 'no_meta', 'all', 'custom'] = 'max_benefit_meta'
+    CustomFilter: t.Tuple[str, ...] = ('LoggerAbyssalT6', 'LoggerAbyssalT5', 'LoggerObscure', 'LoggerAbyssalT4', 'ActionPoint', 'PurpleCoins', 'GearDesignPlanT3', 'PlateRandomT4', 'DevelopmentMaterialT3', 'GearDesignPlanT2', 'GearPart', 'OrdnanceTestingReportT3', 'OrdnanceTestingReportT2', 'DevelopmentMaterialT2', 'OrdnanceTestingReportT1', 'METARedBook', 'CrystallizedHeatResistantSteel', 'NanoceramicAlloy', 'NeuroplasticProstheticArm', 'SupercavitationGenerator')
 
 
 class OpsiVoucher(m.Struct, omit_defaults=True):
