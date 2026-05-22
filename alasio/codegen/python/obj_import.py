@@ -1,4 +1,3 @@
-from alasio.codegen.python.base import CodeObject
 from alasio.codegen.python.obj_class import AutoBlankLineMixin, ClosureObject
 from alasio.ext.cache import cached_property
 

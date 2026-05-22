@@ -42,15 +42,20 @@ class CodeObject:
         self.tab = 1
         self._wrap: "bool | int | str" = 'always'
 
-    def wrap(self, wrap: "bool | int | str"):
+    def wrap(self, wrap: "bool | int | str" = True):
         """
         Wrap items in collection
         False: no wrap
-        True | 120: wrap at 120
-        always: wrap each item on newline
+        True | 'auto': wrap at 120 if exceeds line width, inline otherwise
+        120 (int): wrap at given width
+        'always' | 'expand': wrap each item on newline
         """
         if wrap is True:
             wrap = 120
+        elif wrap == 'auto':
+            wrap = True
+        elif wrap == 'expand':
+            wrap = 'always'
         self._wrap = wrap
         return self
 
@@ -120,8 +125,13 @@ class GatherItems:
     Tokens are joined with a single space.
     """
 
-    def __init__(self, max_width: "bool | int" = False):
+    def __init__(self, max_width: "bool | int | str" = False):
         self.items: "list[Item | Var]" = []
+        # Normalise string aliases
+        if max_width == 'auto':
+            max_width = True
+        elif max_width == 'expand':
+            max_width = 'always'
         self.max_width = max_width
 
     def add(self, items: "t.Iterable[Item | Var | Anno] | Item | Var | Anno"):
@@ -168,6 +178,8 @@ class GatherItems:
         max_width = self.max_width
         if max_width is True:
             max_width = 120
+        elif max_width == 'always':
+            max_width = 1  # force each item to its own line
         buffer = []
         indent_str = self.items[0].indent_str
         indent_width = len(indent_str)
