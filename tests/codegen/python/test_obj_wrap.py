@@ -9,11 +9,11 @@ class TestListWrap:
             gen.Item(2)
             gen.Item(3)
         code = gen.generate_str()
-        assert code == "items = [1, 2, 3,]\n"
+        assert code == "items = [1, 2, 3]\n"
 
     def test_wrap_always_explicit(self):
         gen = CodeGen()
-        with gen.List('items').wrap('always'):
+        with gen.List('items').wrap('newline'):
             gen.Item(1)
             gen.Item(2)
         code = gen.generate_str()
@@ -48,7 +48,7 @@ items = [
             gen.Item(1)
             gen.Item(2)
         code = gen.generate_str()
-        assert code == "items = [1, 2,]\n"
+        assert code == "items = [1, 2]\n"
 
     def test_wrap_int_multiline(self):
         # Width small enough to force wrapping
@@ -76,7 +76,7 @@ items = [
             gen.Item('fit_in_line')
         code = gen.generate_str()
         # All fit within 120, so inline
-        assert code == "items = ['short', 'items', 'fit_in_line',]\n"
+        assert code == "items = ['short', 'items', 'fit_in_line']\n"
 
     def test_empty_list_wrap_false(self):
         gen = CodeGen()
@@ -95,7 +95,31 @@ items = [
         code = gen.generate_str()
         expected = """\
 outer = [
-    [1, 2,],
+    [1, 2],
+]
+"""
+        assert code == expected
+
+    def test_wrap_expand_single_row(self):
+        """All items fit on one line inside expanded brackets."""
+        gen = CodeGen()
+        with gen.List('items').wrap('expand'):
+            gen.Item(1)
+            gen.Item(2)
+            gen.Item(3)
+        code = gen.generate_str()
+        assert code == "items = [\n    1, 2, 3,\n]\n"
+
+    def test_wrap_expand_multi_row(self):
+        """Too many items force wrapping inside expanded brackets."""
+        gen = CodeGen()
+        with gen.List('items').wrap('expand'):
+            for i in range(15):
+                gen.Item(i)
+        code = gen.generate_str()
+        expected = """\
+items = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
 ]
 """
         assert code == expected
@@ -108,7 +132,7 @@ class TestDictWrap:
             gen.Var('a', 1)
             gen.Var('b', 2)
         code = gen.generate_str()
-        assert code == "items = {'a': 1, 'b': 2,}\n"
+        assert code == "items = {'a': 1, 'b': 2}\n"
 
     def test_wrap_always_default(self):
         gen = CodeGen()
@@ -150,8 +174,22 @@ items = {
         with gen.Dict('single').wrap(False):
             gen.Var('key', 42)
         code = gen.generate_str()
-        assert code == "single = {'key': 42,}\n"
+        assert code == "single = {'key': 42}\n"
 
+
+    def test_wrap_expand(self):
+        gen = CodeGen()
+        with gen.Dict('d').wrap('expand'):
+            gen.Var('a', 1)
+            gen.Var('b', 2)
+            gen.Var('keyword', 'desc')
+        code = gen.generate_str()
+        expected = """\
+d = {
+    'a': 1, 'b': 2, 'keyword': 'desc',
+}
+"""
+        assert code == expected
 
 class TestTupleWrap:
     def test_wrap_false_inline(self):
@@ -160,7 +198,7 @@ class TestTupleWrap:
             gen.Item(1)
             gen.Item(2)
         code = gen.generate_str()
-        assert code == "items = (1, 2,)\n"
+        assert code == "items = (1, 2)\n"
 
     def test_wrap_always_default(self):
         gen = CodeGen()
@@ -198,6 +236,19 @@ items = (
         assert code == "empty = ()\n"
 
 
+    def test_wrap_expand(self):
+        gen = CodeGen()
+        with gen.Tuple('t').wrap('expand'):
+            gen.Item(1)
+            gen.Item(2)
+        code = gen.generate_str()
+        expected = """\
+t = (
+    1, 2,
+)
+"""
+        assert code == expected
+
 class TestSetWrap:
     def test_wrap_false_inline(self):
         gen = CodeGen()
@@ -205,7 +256,7 @@ class TestSetWrap:
             gen.Item(1)
             gen.Item(2)
         code = gen.generate_str()
-        assert code == "items = {1, 2,}\n"
+        assert code == "items = {1, 2}\n"
 
     def test_wrap_always_default(self):
         gen = CodeGen()
@@ -243,6 +294,19 @@ items = {
         assert code == "empty_set = set()\n"
 
 
+    def test_wrap_expand(self):
+        gen = CodeGen()
+        with gen.Set('s').wrap('expand'):
+            gen.Item(1)
+            gen.Item(2)
+        code = gen.generate_str()
+        expected = """\
+s = {
+    1, 2,
+}
+"""
+        assert code == expected
+
 class TestWrapMixedCollections:
     def test_list_of_dicts_with_wrap_false(self):
         gen = CodeGen()
@@ -252,7 +316,7 @@ class TestWrapMixedCollections:
             with gen.Dict('').wrap(False):
                 gen.Var('b', 2)
         code = gen.generate_str()
-        assert code == "data = [{'a': 1,}, {'b': 2,},]\n"
+        assert code == "data = [{'a': 1}, {'b': 2}]\n"
 
     def test_dict_of_lists_with_wrap_always(self):
         gen = CodeGen()
@@ -263,7 +327,7 @@ class TestWrapMixedCollections:
         code = gen.generate_str()
         expected = """\
 data = {
-    'key_a': [1, 2,],
+    'key_a': [1, 2],
 }
 """
         assert code == expected
@@ -274,7 +338,7 @@ data = {
         with gen.List('items').wrap(False):
             gen.Item(1)
         code = gen.generate_str()
-        assert code == "items = [1,]\n"
+        assert code == "items = [1]\n"
 
     def test_gatheritems_inline_with_dict_vars(self):
         # Verify GatherItems.get_inline() handles Var trailing comma correctly
@@ -289,4 +353,21 @@ data = {
         gather = GatherItems()
         gather.add(gen.items[0].items)
         result = gather.get_inline()
-        assert result == "'key': 42, 'other': 'value',"
+        assert result == "'key': 42, 'other': 'value'"
+
+    def test_expand_inside_newline(self):
+        """Expand inside newline-wrapped outer collection."""
+        gen = CodeGen()
+        with gen.Dict('data'):
+            with gen.List('numbers').wrap('expand'):
+                gen.Item(1)
+                gen.Item(2)
+        code = gen.generate_str()
+        expected = """\
+data = {
+    'numbers': [
+        1, 2,
+    ],
+}
+"""
+        assert code == expected

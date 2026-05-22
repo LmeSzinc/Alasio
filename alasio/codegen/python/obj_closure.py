@@ -61,10 +61,20 @@ class ClosureWithName(ClosureObject):
             yield f'{self.indent_str}{prefix}{self.closure_empty}{ending}'
             return
 
-        if self._wrap == 'always':
+        if self._wrap == 'newline':
+            # Each item on its own line
             yield f'{self.indent_str}{prefix}{self.closure_start}'
             for item in self.items:
                 yield from item.generate()
+            yield f'{self.indent_str}{self.closure_end}{ending}'
+            return
+
+        if self._wrap == 'expand':
+            # Brackets on separate lines, items wrapped inline
+            yield f'{self.indent_str}{prefix}{self.closure_start}'
+            items = GatherItems(max_width=True).add(self.items)
+            for row in items.iter_multiline():
+                yield f'{self.indent_str}    {row}'
             yield f'{self.indent_str}{self.closure_end}{ending}'
             return
 
@@ -72,7 +82,9 @@ class ClosureWithName(ClosureObject):
         items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
         rows = list(items.iter_multiline())
         if len(rows) == 1:
-            yield f'{self.indent_str}{prefix}{self.closure_start}{rows[0]}{self.closure_end}{ending}'
+            # Strip trailing comma in inline single-row output
+            row = rows[0].rstrip(',')
+            yield f'{self.indent_str}{prefix}{self.closure_start}{row}{self.closure_end}{ending}'
             return
 
         # Multi row
@@ -120,18 +132,21 @@ class Literal(ClosureWithName):
         gen.Literal('color').set_literal('t.Literal').Var('red')
         # color: t.Literal[] = 'red'
 
-        gen.Literal('status').wrap('always')
+        gen.Literal('status').wrap('newline')
         # status: Literal[
         #     'active',
         #     'inactive',
         # ]
+
+        gen.Literal('mode').wrap('expand')
+        # mode: Literal['a', 'b']
     """
 
     def __init__(self, gen, name):
         super().__init__(gen, name)
         self._literal_module = 'Literal'
         self.value = None
-        self._wrap = False  # Default to inline, unlike List/Dict which default to always
+        self._wrap = False  # Default to inline, unlike List/Dict which default to 'newline'
 
     def set_literal(self, module):
         """
@@ -191,10 +206,21 @@ class Literal(ClosureWithName):
             yield f'{self.indent_str}{prefix}[]{suffix}{ending}'
             return
 
-        if self._wrap == 'always':
+        if self._wrap == 'newline':
+            # Each item on its own line
             yield f'{self.indent_str}{prefix}['
             for item in self.items:
                 yield from item.generate()
+            yield f'{self.indent_str}]{suffix}{ending}'
+            return
+
+        if self._wrap == 'expand':
+            # Brackets on separate lines, items wrapped inline
+            yield f'{self.indent_str}{prefix}['
+            items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
+            rows = list(items.iter_multiline())
+            for row in rows:
+                yield f'{self.indent_str}    {row}'
             yield f'{self.indent_str}]{suffix}{ending}'
             return
 

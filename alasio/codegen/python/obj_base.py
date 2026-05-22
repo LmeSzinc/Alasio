@@ -62,7 +62,7 @@ class CodeObject:
 
         self.context_name = self.__class__.__name__
         self._indent_tab = 1
-        self._wrap: "bool | int | str" = 'always'
+        self._wrap: "bool | int | str" = 'newline'
 
     def wrap(self, wrap: "bool | int | str" = True):
         """
@@ -70,14 +70,18 @@ class CodeObject:
         False: no wrap
         True | 'auto': wrap at 120 if exceeds line width, inline otherwise
         120 (int): wrap at given width
-        'always' | 'expand': wrap each item on newline
+        'newline': each item on its own line
+        'expand': brackets on separate lines, items wrapped inline
+        'always': legacy alias for 'newline'
         """
         if wrap is True:
             wrap = 120
         elif wrap == 'auto':
             wrap = True
+        elif wrap in ('always', 'newline'):
+            wrap = 'newline'
         elif wrap == 'expand':
-            wrap = 'always'
+            wrap = 'expand'
         self._wrap = wrap
         return self
 
@@ -152,8 +156,13 @@ class GatherItems:
         # Normalise string aliases
         if max_width == 'auto':
             max_width = True
+        elif max_width in ('always', 'newline'):
+            max_width = 'newline'
         elif max_width == 'expand':
-            max_width = 'always'
+            # expand: use True (120) as default width for wrapping
+            max_width = True
+        elif max_width == 'newline':
+            max_width = 'newline'
         self.max_width = max_width
 
     def add(self, items: "t.Iterable[Item | Var | Anno] | Item | Var | Anno"):
@@ -177,7 +186,12 @@ class GatherItems:
     def get_inline(self):
         if not self.items:
             return ''
-        return ' '.join(item.item_str for item in self.items)
+        result = ' '.join(item.item_str for item in self.items)
+        # Remove trailing comma for inline generation;
+        # multi-line output (iter_multiline with max_width) keeps per-row commas.
+        if result.endswith(','):
+            result = result[:-1]
+        return result
 
     def iter_multiline(self):
         """
@@ -200,8 +214,8 @@ class GatherItems:
         max_width = self.max_width
         if max_width is True:
             max_width = 120
-        elif max_width == 'always':
-            max_width = 1  # force each item to its own line
+        elif max_width == 'newline':
+            max_width = 1  # force each item to its own line, used via GatherItems('newline')
         buffer = []
         indent_str = self.items[0].indent_str
         indent_width = len(indent_str)

@@ -113,7 +113,7 @@ class TestLiteralChaining:
 class TestLiteralWrap:
     def test_wrap_always(self):
         gen = CodeGen()
-        with gen.Literal('color').wrap('always'):
+        with gen.Literal('color').wrap('newline'):
             gen.Item('red')
             gen.Item('green')
             gen.Item('blue')
@@ -129,7 +129,7 @@ color: Literal[
 
     def test_wrap_always_with_default(self):
         gen = CodeGen()
-        with gen.Literal('color').Var('red').wrap('always'):
+        with gen.Literal('color').Var('red').wrap('newline'):
             gen.Item('red')
             gen.Item('green')
         code = gen.generate_str()
@@ -178,7 +178,7 @@ fruit: Literal[
     def test_wrap_always_in_class(self):
         gen = CodeGen()
         with gen.Class('Config'):
-            with gen.Literal('env').wrap('always'):
+            with gen.Literal('env').wrap('newline'):
                 gen.Item('dev')
                 gen.Item('prod')
                 gen.Item('staging')
@@ -191,4 +191,23 @@ class Config:
         'staging',
     ]
 """
+        assert code == expected
+
+    def test_wrap_expand_single_row(self):
+        """All items fit on one line inside expanded brackets."""
+        gen = CodeGen()
+        with gen.Literal('mode').wrap('expand'):
+            gen.Item('a')
+            gen.Item('b')
+        code = gen.generate_str()
+        expected = "mode: Literal[\n    'a', 'b',\n]\n"
+        assert code == expected
+
+    def test_wrap_expand_with_default(self):
+        gen = CodeGen()
+        with gen.Literal('color').Var('red').wrap('expand'):
+            gen.Item('red')
+            gen.Item('green')
+        code = gen.generate_str()
+        expected = "color: Literal[\n    'red', 'green',\n] = 'red'\n"
         assert code == expected
