@@ -175,7 +175,8 @@ import alasio
 class TestSortImportHeaderBoundary:
     """Test that header detection stops at first code object."""
 
-    def test_comment_before_imports_lost(self):
+    def test_comment_before_imports_preserved(self):
+        """Comment before the first import is kept before imports."""
         gen = CodeGen()
         gen.Comment('stdlib imports')
         gen.Import('os')
@@ -184,9 +185,49 @@ class TestSortImportHeaderBoundary:
         gen.sort_import()
         code = gen.generate_str()
         expected = """\
+# stdlib imports
 import json
 import os
 
+x = 1
+"""
+        assert code == expected
+
+    def test_comment_between_imports_moved_after(self):
+        """Comment between imports is moved after the import block (2 blank lines before it)."""
+        gen = CodeGen()
+        gen.Import('os')
+        gen.Comment('third-party imports')
+        gen.Import('pytest')
+        gen.Var('x', 1)
+        gen.sort_import()
+        code = gen.generate_str()
+        expected = """\
+import os
+
+import pytest
+
+
+# third-party imports
+x = 1
+"""
+        assert code == expected
+
+    def test_comment_after_imports_moved_after(self):
+        """Comment after the last import (before code) is moved after the import block (2 blank lines before it)."""
+        gen = CodeGen()
+        gen.Import('os')
+        gen.Import('json')
+        gen.Comment('end of imports')
+        gen.Var('x', 1)
+        gen.sort_import()
+        code = gen.generate_str()
+        expected = """\
+import json
+import os
+
+
+# end of imports
 x = 1
 """
         assert code == expected

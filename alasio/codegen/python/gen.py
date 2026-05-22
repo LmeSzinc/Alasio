@@ -281,13 +281,15 @@ class CodeGen(AutoBlankLineMixin, ClosureObject):
     def sort_import(self):
         """
         Sort imports in PEP8 order
+
+        Comments before the first import are preserved before the import block.
+        Comments between or after imports are moved after the entire import block.
+        Empty lines in the header are discarded.
         """
-        # Find header imports
+        # Find header boundary: where code (non-header) starts
         header_end = 0
-        imports = []
         for i, item in enumerate(self.items):
             if isinstance(item, (Import, FromImport)):
-                imports.append(item)
                 header_end = i + 1
             elif isinstance(item, (Comment, MultilineComment, Empty)):
                 # Still in header if followed by imports
@@ -297,20 +299,19 @@ class CodeGen(AutoBlankLineMixin, ClosureObject):
                 header_end = i
                 break
 
-        if not imports:
-            return self
-
-        # Extract all items in header
+        # Capture all header items
         header_items = self.items[:header_end]
         remaining_items = self.items[header_end:]
+
+        # If no imports found, return early — header items (comments etc.) stay as-is
+        real_imports = [item for item in header_items if isinstance(item, (Import, FromImport))]
+        if not real_imports:
+            return self
 
         # Classify imports
         std_lib = []
         third_party = []
         local_project = []
-
-        # Collect all Import/FromImport objects from the header.
-        real_imports = [item for item in header_items if isinstance(item, (Import, FromImport))]
 
         for imp in real_imports:
             mtype = imp.module_type
@@ -329,23 +330,55 @@ class CodeGen(AutoBlankLineMixin, ClosureObject):
         third_party.sort(key=sort_key)
         local_project.sort(key=sort_key)
 
+        # Separate comments: pre-import vs post-import
+        #   pre-import: comments before the first Import/FromImport
+        #   post-import: comments at or after the first Import/FromImport
+        pre_import_comments = []
+        post_import_comments = []
+        found_first_import = False
+
+        for item in header_items:
+            if isinstance(item, (Import, FromImport)):
+                found_first_import = True
+            elif isinstance(item, (Comment, MultilineComment)):
+                if found_first_import:
+                    post_import_comments.append(item)
+                else:
+                    pre_import_comments.append(item)
+            # Empty items are dropped (existing behavior)
+
         # Assemble new items
         new_items = []
+        new_items.extend(pre_import_comments)
+
+        has_imports = False
         if std_lib:
             new_items.extend(std_lib)
+            has_imports = True
         if third_party:
-            if new_items:
+            if has_imports:
                 new_items.append(Empty(self, 1))
             new_items.extend(third_party)
+            has_imports = True
         if local_project:
-            if new_items:
+            if has_imports:
                 new_items.append(Empty(self, 1))
             new_items.extend(local_project)
+            has_imports = True
+
+        if post_import_comments:
+            # 2 blank lines between the import block and post-import comments
+            new_items.append(Empty(self, 2))
+            new_items.extend(post_import_comments)
 
         # Auto blank lines from _get_auto_blank_lines will handle
         # the spacing between imports and subsequent code.
         self.items = new_items + remaining_items
         return self
+
+    def generate(self):
+        self.sort_import()
+        yield from super().generate()
 
     def print(self):
         for row in self.generate():
