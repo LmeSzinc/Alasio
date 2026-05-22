@@ -2,6 +2,7 @@ from alasio.codegen.python.gen_base import CodeGenBase
 from alasio.codegen.python.obj_base import ApplyTab, CodeDefinitionError
 from alasio.codegen.python.obj_class import *
 from alasio.codegen.python.obj_closure import *
+from alasio.codegen.python.obj_if import *
 from alasio.codegen.python.obj_import import *
 
 
@@ -257,6 +258,54 @@ class CodeGen(CodeGenBase):
         Define a pass
         """
         item = Pass(self)
+        self._add_item(item)
+        return item
+
+    def If(self, condition):
+        """
+        Define an if block.
+        if {condition}:
+            # content
+
+        Examples:
+            with gen.If('x > 0'):
+                gen.Var('result', 'positive')
+            # if x > 0:
+            #     result = 'positive'
+        """
+        item = If(self, condition)
+        self._add_item(item)
+        return item
+
+    def Elif(self, condition):
+        """
+        Define an elif block.
+        elif {condition}:
+            # content
+
+        Examples:
+            with gen.Elif('x == 0'):
+                gen.Var('result', 'zero')
+            # elif x == 0:
+            #     result = 'zero'
+        """
+        item = Elif(self, condition)
+        self._add_item(item)
+        return item
+
+    def Else(self):
+        """
+        Define an else block.
+        else:
+            # content
+
+        Examples:
+            with gen.Else():
+                gen.Var('result', 'negative')
+            # else:
+            #     result = 'negative'
+        """
+        item = Else(self)
         self._add_item(item)
         return item
 
