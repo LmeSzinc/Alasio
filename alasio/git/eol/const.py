@@ -21,17 +21,13 @@ SET_TEXT_SUFFIX = {
     'mkd', 'mkdn', 'mdtxt', 'mdtext', 'txt', 'dot', 'ejs', 'erb', 'haml', 'handlebars', 'hbs', 'hbt', 'jade', 'latte',
     'mustache', 'njk', 'tmpl', 'tpl', 'cnf', 'conf', 'config', 'env', 'lock', 'yaml', 'yml', 'svg',
 }
-SET_LF_SUFFIX = {
-    'phpt', 'ipynb', 'vim', 'bash', 'sh',
-}
+SET_LF_SUFFIX = {'phpt', 'ipynb', 'vim', 'bash', 'sh'}
 SET_CRLF_SUFFIX = {
     'sln', 'csproj', 'vbproj', 'vcxproj', 'vcproj', 'dbproj', 'fsproj', 'lsproj', 'wixproj', 'modelproj', 'sqlproj',
     'wwaproj', 'xproj', 'props', 'filters', 'vcxitems', 'bat', 'msh', 'msh1', 'msh2', 'mshxml', 'msh1xml', 'msh2xml',
     'mcf', 'ps1', 'ps1x', 'psm1', 'psd1', 'ps1xml', 'pssc', 'psrc', 'cdxml', 'cmd',
 }
-SET_BINARY_NAME = {
-    
-}
+SET_BINARY_NAME = set()
 SET_TEXT_NAME = {
     'mvnw', 'gradlew', 'phpcs.xml', 'phpunit.xml', 'phpstan.neon', 'psalm.xml', 'Cargo.lock', '.vimrc', '.gvimrc',
     'Dockerfile', 'AUTHORS', 'CHANGELOG', 'CHANGES', 'CONTRIBUTING', 'COPYING', 'copyright', 'INSTALL', 'license',
@@ -44,6 +40,4 @@ SET_LF_NAME = {
     'mvnw', 'gradlew', 'phpcs.xml', 'phpunit.xml', 'phpstan.neon', 'psalm.xml', '.vimrc', '.gvimrc', 'package.json',
     'package-lock.json', 'pnpm-lock.yaml',
 }
-SET_CRLF_NAME = {
-    
-}
+SET_CRLF_NAME = set()
