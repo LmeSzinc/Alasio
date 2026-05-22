@@ -94,12 +94,10 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         gen.Import('msgspec').as_('m')
         gen.Import('typing_extensions').as_('e')
         gen.CommentCodeGen('alasio.config.dev.configgen')
-        has_content = False
         for group_name, group in self.groups_data.items():
             # Skip empty group
             if not group.args:
                 continue
-            has_content = True
             # Define model class
             with gen.Class(group_name).set_inherit('m.Struct', omit_defaults=True):
                 for arg_name, arg in group.args.items():
@@ -118,7 +116,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                     gen.Anno(arg_name, arg.get_anno()).Var(arg.get_value())
 
         # gen.print()
-        if has_content:
+        if gen.has_content:
             return gen
         else:
             return None

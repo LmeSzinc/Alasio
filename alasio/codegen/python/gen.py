@@ -259,3 +259,15 @@ class CodeGen(CodeGenBase):
         item = Pass(self)
         self._add_item(item)
         return item
+
+    @property
+    def has_content(self):
+        """
+        Return True if generator contains any meaningful code object.
+        Imports, empty lines, and comments are not considered meaningful content.
+        """
+        non_content_types = (Import, FromImport, Empty, Comment, MultilineComment)
+        for item in self.items:
+            if not isinstance(item, non_content_types):
+                return True
+        return False

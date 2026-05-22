@@ -305,3 +305,71 @@ class TestSortImportEdgeCases:
         gen.sort_import()
         code2 = gen.generate_str()
         assert code1 == code2
+
+
+class TestCodeGenHasContent:
+    """has_content property: meaningful code vs non-content types."""
+
+    def test_empty_gen_has_no_content(self):
+        gen = CodeGen()
+        assert gen.has_content is False
+
+    def test_only_imports_has_no_content(self):
+        gen = CodeGen()
+        gen.Import('os')
+        gen.Import('json')
+        assert gen.has_content is False
+
+    def test_only_empty_lines_has_no_content(self):
+        gen = CodeGen()
+        gen.Empty(2)
+        assert gen.has_content is False
+
+    def test_only_comment_has_no_content(self):
+        gen = CodeGen()
+        gen.Comment('just a comment')
+        assert gen.has_content is False
+
+    def test_only_multiline_comment_has_no_content(self):
+        gen = CodeGen()
+        gen.MultilineComment('docstring')
+        assert gen.has_content is False
+
+    def test_mixed_non_content_has_no_content(self):
+        gen = CodeGen()
+        gen.Import('os')
+        gen.Empty(1)
+        gen.Comment('header')
+        gen.MultilineComment('doc')
+        assert gen.has_content is False
+
+    def test_var_is_content(self):
+        gen = CodeGen()
+        gen.Var('x', 1)
+        assert gen.has_content is True
+
+    def test_class_is_content(self):
+        gen = CodeGen()
+        gen.Class('Foo')
+        assert gen.has_content is True
+
+    def test_def_is_content(self):
+        gen = CodeGen()
+        gen.Def('run')
+        assert gen.has_content is True
+
+    def test_pass_is_content(self):
+        gen = CodeGen()
+        gen.Pass()
+        assert gen.has_content is True
+
+    def test_raw_is_content(self):
+        gen = CodeGen()
+        gen.Raw('print("hello")')
+        assert gen.has_content is True
+
+    def test_imports_and_var_is_content(self):
+        gen = CodeGen()
+        gen.Import('os')
+        gen.Var('x', 1)
+        assert gen.has_content is True
