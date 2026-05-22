@@ -113,6 +113,10 @@ class EnvLibraryScanner(metaclass=SingletonOptionalNamed):
         Returns:
             ModuleType: Classification of the module
         """
+        # Mark self as third-party
+        if name == 'alasio':
+            return ModuleType.THIRD_PARTY
+
         # 1. Built-in C modules are directly classified as standard library
         if name in sys.builtin_module_names:
             return ModuleType.STANDARD_LIBRARY

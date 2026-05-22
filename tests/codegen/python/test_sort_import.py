@@ -27,7 +27,8 @@ import os
         gen = CodeGen()
         gen.Import('pytest')  # third-party
         gen.Import('os')  # stdlib
-        gen.Import('alasio')  # local project
+        gen.Import('alasio')  # mark self as third-party
+        gen.Import('tests')  # local project
         gen.Import('json')  # stdlib
         gen.sort_import()
         code = gen.generate_str()
@@ -35,9 +36,10 @@ import os
 import json
 import os
 
+import alasio
 import pytest
 
-import alasio
+import tests
 """
         assert code == expected
 
@@ -158,16 +160,18 @@ import os
         gen.Import('pytest')  # third-party
         gen.FromImport('typing').Import('List')  # stdlib
         gen.Import('json')  # stdlib
-        gen.Import('alasio')  # local
+        gen.Import('alasio')  # mark self as third-party
+        gen.Import('tests')  # local
         gen.sort_import()
         code = gen.generate_str()
         expected = """\
 import json
 from typing import List
 
+import alasio
 import pytest
 
-import alasio
+import tests
 """
         assert code == expected
 
