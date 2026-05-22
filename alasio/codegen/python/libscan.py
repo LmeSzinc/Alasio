@@ -3,9 +3,9 @@ import site
 import sys
 import sysconfig
 import warnings
-from functools import cached_property
 
 from alasio.ext.backport.strenum import StrEnum
+from alasio.ext.cache import cached_property
 from alasio.ext.singleton import SingletonOptionalNamed
 
 
@@ -79,7 +79,7 @@ class EnvLibraryScanner(metaclass=SingletonOptionalNamed):
         """
         for base in base_paths:
             try:
-                if os.path.commonpath([path, base]) == base:
+                if os.path.normcase(os.path.commonpath([path, base])) == os.path.normcase(base):
                     return True
             except ValueError:
                 continue

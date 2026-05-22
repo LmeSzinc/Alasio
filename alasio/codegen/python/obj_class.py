@@ -8,11 +8,18 @@ class AutoBlankLineMixin(CodeObject):
         """
         Calculate how many blank lines needed between prev and curr
         """
+        indent = curr._indent
+
+        if prev is None:
+            # Leading blank lines before the first item
+            if indent == 0 and isinstance(curr, (Class, Def)):
+                return 0
+            return 0
+
         # If manual empty lines, skip auto
         if isinstance(prev, Empty) or isinstance(curr, Empty):
             return 0
 
-        indent = curr._indent
         # PEP8: 2 blank lines between top-level definitions
         if indent == 0:
             # 2 lines before Class/Def
@@ -26,11 +33,11 @@ class AutoBlankLineMixin(CodeObject):
             if isinstance(prev, (Import, FromImport)) and not isinstance(curr, (Import, FromImport)):
                 return 1
 
-        # PEP8: 1 blank line between methods in a class
+        # PEP8: 1 blank line between definitions in a class
         else:
-            if isinstance(curr, Def):
+            if isinstance(curr, (Class, Def)):
                 return 1
-            if isinstance(prev, Def) and not isinstance(curr, (Comment, MultilineComment)):
+            if isinstance(prev, (Class, Def)) and not isinstance(curr, (Comment, MultilineComment)):
                 return 1
 
         return 0

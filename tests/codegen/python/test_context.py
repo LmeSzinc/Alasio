@@ -1,4 +1,3 @@
-"""Tests for context managers used by CodeGen and CodeObject."""
 from alasio.codegen.python.obj_base import ApplyContextName
 from alasio.codegen.python.gen import CodeGen
 
@@ -48,8 +47,6 @@ after = 2
         # Both x and y end up in their respective class bodies
         code = gen.generate_str()
         expected = """\
-
-
 class Foo:
     x = 1
 
@@ -97,8 +94,6 @@ def run():
         gen.Var('y', 2)
         code = gen.generate_str()
         expected = """\
-
-
 class Foo:
     x = 1
 
@@ -117,8 +112,6 @@ y = 2
         gen.Var('d', 4)
         code = gen.generate_str()
         expected = """\
-
-
 class Outer:
     a = 1
 

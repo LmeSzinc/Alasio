@@ -1,3 +1,4 @@
+import importlib.util
 import os
 
 from alasio.codegen.python.libscan import EnvLibraryScanner, ModuleType
@@ -57,8 +58,12 @@ class TestEnvLibraryScanner:
         # Verify project dependencies are classified as third-party
         assert 'pytest' in third_party
         assert 'rich' in third_party
-        assert 'msgspec' in third_party
-        assert 'starlette' in third_party
+
+        # Only check optional dependencies if they are installed
+        for mod_name in ('msgspec', 'starlette'):
+            if importlib.util.find_spec(mod_name) is not None:
+                assert mod_name in third_party, \
+                    f"Installed dependency '{mod_name}' should be classified as third_party"
 
     def test_no_overlap(self):
         """

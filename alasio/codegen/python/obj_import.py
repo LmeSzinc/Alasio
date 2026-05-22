@@ -146,7 +146,7 @@ class FromImport(ClosureObject, AutoBlankLineMixin):
             with self.apply_context_name('List'):
                 for item in items:
                     # Items already have _is_from_item=True, but we need to ensure correct indent
-                    item._indent = self.gen.indent + self.tab
+                    item._indent = self.gen.indent + self._indent_tab
                     # In multiline from-import, we need commas
                     yield f'{item.indent_str}{item.item_str},'
             # )

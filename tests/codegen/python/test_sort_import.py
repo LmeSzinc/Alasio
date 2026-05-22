@@ -25,10 +25,10 @@ import os
 
     def test_basic_pep8_order(self):
         gen = CodeGen()
-        gen.Import('pytest')     # third-party
-        gen.Import('os')         # stdlib
-        gen.Import('alasio')     # local project
-        gen.Import('json')       # stdlib
+        gen.Import('pytest')  # third-party
+        gen.Import('os')  # stdlib
+        gen.Import('alasio')  # local project
+        gen.Import('json')  # stdlib
         gen.sort_import()
         code = gen.generate_str()
         expected = """\
@@ -140,9 +140,9 @@ class TestSortImportMixed:
 
     def test_import_and_fromimport_sorted_together(self):
         gen = CodeGen()
-        gen.FromImport('os').Import('path')       # stdlib
-        gen.Import('json')                         # stdlib
-        gen.Import('os')                           # stdlib
+        gen.FromImport('os').Import('path')  # stdlib
+        gen.Import('json')  # stdlib
+        gen.Import('os')  # stdlib
         gen.sort_import()
         code = gen.generate_str()
         # Alphabetical by module: json < os
@@ -155,10 +155,10 @@ import os
 
     def test_mixed_all_groups(self):
         gen = CodeGen()
-        gen.Import('pytest')                       # third-party
-        gen.FromImport('typing').Import('List')    # stdlib
-        gen.Import('json')                         # stdlib
-        gen.Import('alasio')                       # local
+        gen.Import('pytest')  # third-party
+        gen.FromImport('typing').Import('List')  # stdlib
+        gen.Import('json')  # stdlib
+        gen.Import('alasio')  # local
         gen.sort_import()
         code = gen.generate_str()
         expected = """\
@@ -178,8 +178,8 @@ class TestSortImportHeaderBoundary:
     def test_var_ends_header(self):
         gen = CodeGen()
         gen.Import('os')
-        gen.Var('x', 1)          # code starts here
-        gen.Import('json')       # this is after code, NOT in header
+        gen.Var('x', 1)  # code starts here
+        gen.Import('json')  # this is after code, NOT in header
         gen.sort_import()
         code = gen.generate_str()
         expected = """\

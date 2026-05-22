@@ -19,13 +19,13 @@ class ApplyTab:
 
     def __init__(self, gen: "CodeGenBase", tab: int = 1):
         self.gen = gen
-        self.tab = tab
+        self._tab = tab
 
     def __enter__(self):
         # store indent
         self.indent_prev = self.gen.indent
         # enter indent
-        self.gen.indent = self.indent_prev + self.tab
+        self.gen.indent = self.indent_prev + self._tab
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -61,7 +61,7 @@ class CodeObject:
         self._anno = ''
 
         self.context_name = self.__class__.__name__
-        self.tab = 1
+        self._indent_tab = 1
         self._wrap: "bool | int | str" = 'always'
 
     def wrap(self, wrap: "bool | int | str" = True):
@@ -87,7 +87,7 @@ class CodeObject:
         self.context_name_prev = self.gen.context_name
         self.context_prev = self.gen.context
         # enter indent and context
-        self.gen.indent = self.indent_prev + self.tab
+        self.gen.indent = self.indent_prev + self._indent_tab
         self.gen.context = self
         self.gen.context_name = self.context_name
         return self

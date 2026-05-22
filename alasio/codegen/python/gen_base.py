@@ -127,6 +127,7 @@ class CodeGenBase(AutoBlankLineMixin, ClosureObject):
 
     def generate(self):
         self.sort_import()
+        self.newline_ending()
         yield from super().generate()
 
     def print(self):
@@ -143,9 +144,93 @@ class CodeGenBase(AutoBlankLineMixin, ClosureObject):
         """
         content = [row for row in self.generate()]
         data = '\n'.join(content)
-        if data:
-            data += '\n'
         return data
+
+    def newline_ending(self):
+        """
+        Ensure the items list ends with exactly one Empty line (a blank line).
+
+        Traces the chain of last non-Empty items (using reversed iteration)
+        and cleans trailing Empty items at each level along that chain.
+        CodeGenBase itself is a ClosureObject, so the same _clean_last_item_trailing
+        function handles both root and nested levels.
+        This prevents double trailing newlines when a nested
+        Class/Def already ends with Empty items, while not touching sibling
+        items outside the last-item chain.
+
+        Returns:
+            CodeGenBase: self for chaining
+        """
+        if not self.items:
+            return self
+
+        # Reuse _clean_last_item_trailing to clean root and nested levels.
+        # CodeGenBase is a ClosureObject, so the same logic applies.
+        self._clean_last_item_trailing(self.items)
+
+        # Add exactly one empty line
+        self.items.append(Empty(self, 1))
+
+        return self
+
+    @staticmethod
+    def _clean_last_item_trailing(items):
+        """
+        Trace the chain of last non-Empty items and remove trailing Empties
+        at each level along that chain, including the current level.
+        Uses reversed iteration for performance.
+
+        Args:
+            items (list[CodeObject]): Items list to clean
+        """
+        if not items:
+            return
+
+        # Find the last non-Empty item using reversed iteration
+        last_item = None
+        for item in reversed(items):
+            if not isinstance(item, Empty):
+                last_item = item
+                break
+
+        if last_item is not None:
+            # Recurse into the last item if it's a ClosureObject
+            if isinstance(last_item, ClosureObject):
+                CodeGenBase._clean_last_item_trailing(last_item.items)
+
+        # Now clean trailing Empties at THIS level
+        while items and isinstance(items[-1], Empty):
+            items.pop()
+        # Clean trailing empty objects
+        while items and CodeGenBase._is_empty_object(items[-1]):
+            items.pop()
+            while items and isinstance(items[-1], Empty):
+                items.pop()
+
+    @staticmethod
+    def _is_empty_object(item):
+        """
+        Check if an item is an empty object (AutoBlankLineMixin + ClosureObject
+        with only Empty or empty-object items).
+
+        Args:
+            item (CodeObject): Item to check
+
+        Returns:
+            bool: True if the item is an empty object
+        """
+        if not isinstance(item, AutoBlankLineMixin) or not isinstance(item, ClosureObject):
+            return False
+        if not item.items:
+            return False
+        for sub_item in item.items:
+            if isinstance(sub_item, Empty):
+                continue
+            if isinstance(sub_item, AutoBlankLineMixin) and isinstance(sub_item, ClosureObject) \
+                    and CodeGenBase._is_empty_object(sub_item):
+                continue
+            return False
+        return True
 
     def write(self, file='', gitadd=None, skip_same=True):
         """

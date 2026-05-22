@@ -13,11 +13,10 @@ class ClosureObject(CodeObject):
         """
         prev_item = None
         for item in self.items:
-            # Auto blank lines
-            if prev_item is not None:
-                lines = self._get_auto_blank_lines(prev_item, item)
-                for _ in range(lines):
-                    yield ''
+            # Auto blank lines (including leading blanks for the first item)
+            lines = self._get_auto_blank_lines(prev_item, item)
+            for _ in range(lines):
+                yield ''
 
             yield from item.generate()
             prev_item = item
@@ -25,7 +24,7 @@ class ClosureObject(CodeObject):
     def _get_auto_blank_lines(self, prev, curr):
         """
         Calculate how many blank lines needed between prev and curr
-        Default to 0, will be override in ClosureWithAutoBlankLine
+        Default to 0, will be override in AutoBlankLineMixin
         """
         return 0
 
