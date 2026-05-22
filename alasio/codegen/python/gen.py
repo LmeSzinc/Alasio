@@ -3,10 +3,10 @@ from alasio.codegen.python.libscan import EnvLibraryScanner, ModuleType
 from alasio.codegen.python.obj_class import *
 from alasio.codegen.python.obj_closure import *
 from alasio.codegen.python.obj_import import *
-from alasio.ext.path import PathStr
+from alasio.ext.path.atomic import atomic_read_text, atomic_write
 
 
-class CodeGenerator(AutoBlankLineMixin, ClosureObject):
+class CodeGen(AutoBlankLineMixin, ClosureObject):
     """
     A python code generator
     """
@@ -184,6 +184,14 @@ class CodeGenerator(AutoBlankLineMixin, ClosureObject):
         self._add_item(item)
         return item
 
+    def CommentCodeGen(self, file):
+        """
+        Args:
+            file (str): Path to code generator, such as "dev_tools.button_extract"
+        """
+        self.Comment('This file was auto-generated, do not modify it manually. To generate:')
+        self.Comment(f'``` python -m {file} ```')
+
     def Class(self, name):
         """
         Define a class.
@@ -346,13 +354,10 @@ class CodeGenerator(AutoBlankLineMixin, ClosureObject):
         for row in self.generate():
             print(row)
 
-    def write(self, file=''):
+    def generate_str(self):
         """
         Write generated code to file
         if file not provided, output code only
-
-        Args:
-            file (str):
 
         Returns:
             str:
@@ -361,6 +366,33 @@ class CodeGenerator(AutoBlankLineMixin, ClosureObject):
         data = '\n'.join(content)
         if data:
             data += '\n'
-        if file:
-            PathStr.new(file).atomic_write(data)
         return data
+
+    def write(self, file='', gitadd=None, skip_same=True):
+        """
+        Write generated code to file
+
+        Args:
+            file (str):
+            gitadd (GitAdd): Input a GitAdd object to track the generated files
+            skip_same (bool):
+                True to skip writing if existing content is the same as content to write.
+                This would reduce disk write but add disk read
+
+        Returns:
+            bool: if write
+        """
+        data = self.generate_str()
+        if skip_same:
+            try:
+                old = atomic_read_text(file)
+                old = old.replace('\r\n', '\n')
+                if data == old:
+                    return False
+            except FileNotFoundError:
+                pass
+
+        atomic_write(file, data)
+        if gitadd:
+            gitadd.stage_add(file)
+        return True

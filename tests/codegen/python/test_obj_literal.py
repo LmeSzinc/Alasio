@@ -1,72 +1,72 @@
-from alasio.codegen.python.gen import CodeGenerator
+from alasio.codegen.python.gen import CodeGen
 
 
 class TestLiteralBasic:
     def test_literal_with_items(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('fruit'):
             gen.Item('apple')
             gen.Item('banana')
-        code = gen.write()
+        code = gen.generate_str()
         expected = "fruit: Literal['apple', 'banana']\n"
         assert code == expected
 
     def test_literal_single_item(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('mode'):
             gen.Item('auto')
-        code = gen.write()
+        code = gen.generate_str()
         expected = "mode: Literal['auto']\n"
         assert code == expected
 
     def test_literal_var_default(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('fruit').Var('banana'):
             gen.Item('apple')
             gen.Item('banana')
-        code = gen.write()
+        code = gen.generate_str()
         expected = "fruit: Literal['apple', 'banana'] = 'banana'\n"
         assert code == expected
 
     def test_literal_set_literal_module(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('color').set_literal('t.Literal'):
             gen.Item('red')
             gen.Item('green')
-        code = gen.write()
+        code = gen.generate_str()
         expected = "color: t.Literal['red', 'green']\n"
         assert code == expected
 
     def test_literal_set_literal_typing(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gen.Literal('status').set_literal('typing.Literal')
-        code = gen.write()
+        code = gen.generate_str()
         expected = "status: typing.Literal[]\n"
         assert code == expected
 
     def test_literal_no_items(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gen.Literal('flag')
-        code = gen.write()
+        code = gen.generate_str()
         expected = "flag: Literal[]\n"
         assert code == expected
 
     def test_literal_integer_items(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('code'):
             gen.Item(200)
             gen.Item(404)
-        code = gen.write()
+        code = gen.generate_str()
         expected = "code: Literal[200, 404]\n"
         assert code == expected
 
     def test_literal_inside_class(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Class('Config'):
             with gen.Literal('env'):
                 gen.Item('dev')
                 gen.Item('prod')
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 class Config:
     env: Literal['dev', 'prod']
@@ -74,10 +74,10 @@ class Config:
         assert code == expected
 
     def test_literal_inside_def(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Def('setup'):
             gen.Literal('mode').Var('fast')
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 def setup():
     mode: Literal[] = 'fast'
@@ -87,37 +87,37 @@ def setup():
 
 class TestLiteralChaining:
     def test_chaining_set_literal_and_var(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gen.Literal('size').set_literal('t.Literal').Var('medium')
-        code = gen.write()
+        code = gen.generate_str()
         expected = "size: t.Literal[] = 'medium'\n"
         assert code == expected
 
     def test_var_overrides(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('direction'):
             gen.Item('north')
             gen.Item('south')
-        code1 = gen.write()
+        code1 = gen.generate_str()
         assert "= 'north'" not in code1
 
-        gen2 = CodeGenerator()
+        gen2 = CodeGen()
         with gen2.Literal('direction').Var('south'):
             gen2.Item('north')
             gen2.Item('south')
-        code2 = gen2.write()
+        code2 = gen2.generate_str()
         assert "= 'south'" in code2
         assert code1 != code2
 
 
 class TestLiteralWrap:
     def test_wrap_always(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('color').wrap('always'):
             gen.Item('red')
             gen.Item('green')
             gen.Item('blue')
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 color: Literal[
     'red',
@@ -128,11 +128,11 @@ color: Literal[
         assert code == expected
 
     def test_wrap_always_with_default(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('color').Var('red').wrap('always'):
             gen.Item('red')
             gen.Item('green')
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 color: Literal[
     'red',
@@ -142,21 +142,21 @@ color: Literal[
         assert code == expected
 
     def test_wrap_int_single_line(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('fruit').wrap(80):
             gen.Item('apple')
             gen.Item('banana')
-        code = gen.write()
+        code = gen.generate_str()
         expected = "fruit: Literal['apple', 'banana']\n"
         assert code == expected
 
     def test_wrap_int_multiline(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('fruit').wrap(20):
             gen.Item('short')
             gen.Item('medium')
             gen.Item('another')
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 fruit: Literal[
     'short',
@@ -167,22 +167,22 @@ fruit: Literal[
         assert code == expected
 
     def test_wrap_false_inline(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Literal('mode').wrap(False):
             gen.Item('auto')
             gen.Item('manual')
-        code = gen.write()
+        code = gen.generate_str()
         expected = "mode: Literal['auto', 'manual']\n"
         assert code == expected
 
     def test_wrap_always_in_class(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Class('Config'):
             with gen.Literal('env').wrap('always'):
                 gen.Item('dev')
                 gen.Item('prod')
                 gen.Item('staging')
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 class Config:
     env: Literal[

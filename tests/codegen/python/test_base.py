@@ -1,11 +1,11 @@
 from alasio.codegen.python.base import ApplyContextName, GatherItems
-from alasio.codegen.python.gen import CodeGenerator
+from alasio.codegen.python.gen import CodeGen
 from alasio.codegen.python.obj_class import Item, Var
 
 
 class TestApplyContextName:
     def test_context_restoration(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gen.context_name = 'Initial'
 
         with ApplyContextName(gen, 'NewContext'):
@@ -19,7 +19,7 @@ class TestApplyContextName:
 
 class TestGatherItems:
     def test_add_list_tuple_set(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gather = GatherItems()
         item1 = Item(gen, 1)
         item2 = Var(gen, 'a', 2)
@@ -36,7 +36,7 @@ class TestGatherItems:
         assert item3 in gather.items
 
     def test_add_single_item_var(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gather = GatherItems()
         item = Item(gen, 1)
         var = Var(gen, 'a', 2)
@@ -48,7 +48,7 @@ class TestGatherItems:
         assert gather.items == [item, var]
 
     def test_add_iterable(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gather = GatherItems()
         items = [Item(gen, i) for i in range(3)]
 
@@ -60,7 +60,7 @@ class TestGatherItems:
         assert gather.items == items
 
     def test_get_inline(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gather = GatherItems()
         gather.add(Item(gen, 1))
         gather.add(Var(gen, 'a', 2))
@@ -72,7 +72,7 @@ class TestGatherItems:
 
 class TestIterMultiline:
     def test_no_max_width(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gather = GatherItems(max_width=False)
         gather.add([Item(gen, 1), Item(gen, 2)])
         assert list(gather.iter_multiline()) == ["1 2"]
@@ -87,7 +87,7 @@ class TestIterMultiline:
         pass
 
     def test_compact_lines(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         # Item(gen, 1) -> '1' (len 1)
         # Context is None, so item_str is f'{val}' (no comma)
         # Wait, if context is None, line_ending is ''.
@@ -122,7 +122,7 @@ class TestIterMultiline:
             assert lines == ["1, 2, 3, 4,", "5, 6, 7, 8,", "9,"]
 
     def test_single_long_item(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.List('l'):
             gather = GatherItems(max_width=10)  # indent 4, remain 6
             item = Item(gen, "very_long_item")  # 'very_long_item,' (15 chars)
@@ -132,7 +132,7 @@ class TestIterMultiline:
             assert lines == ["'very_long_item',"]
 
     def test_line_full_exactly(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.List('l'):
             # indent 4, remain 4. '1,' is 2 chars. ' 2,' is 3 chars. 2+3=5 > 4.
             gather = GatherItems(max_width=8)
@@ -145,14 +145,14 @@ class TestIterMultiline:
 
 class TestVarAnnoFluent:
     def test_var_anno_fluent(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         
         # gen.Var(name, value).Anno(anno)
         gen.Var('x', 1).Anno('int')
         # gen.Anno(name, anno).Var(value)
         gen.Anno('y', 'str').Var('hello')
         
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 x: int = 1
 y: str = 'hello'

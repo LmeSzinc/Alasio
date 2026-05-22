@@ -1,30 +1,30 @@
-from alasio.codegen.python.gen import CodeGenerator
+from alasio.codegen.python.gen import CodeGen
 
 
 class TestObjClass:
     def test_simple_class(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Class('MyClass'):
             gen.Var('x', 10)
 
-        code = gen.write()
+        code = gen.generate_str()
         assert code == "class MyClass:\n    x = 10\n"
 
     def test_empty_class(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Class('Empty'):
             pass
 
-        code = gen.write()
+        code = gen.generate_str()
         assert code == "class Empty:\n    pass\n"
 
     def test_class_inheritance(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Class('Child').set_inherit('Base', metaclass='Singleton'):
             gen.Comment('member')
             gen.Anno('y', 'int')
 
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 class Child(Base, metaclass=Singleton):
     # member
@@ -33,12 +33,12 @@ class Child(Base, metaclass=Singleton):
         assert code == expected
 
     def test_class_nesting(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Class('Outer'):
             with gen.Class('Inner'):
                 gen.Var('z', 30)
 
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 class Outer:
     class Inner:
@@ -47,7 +47,7 @@ class Outer:
         assert code == expected
 
     def test_class_complex_content(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Class('Complex'):
             gen.MultilineComment('docstring')
             gen.Anno('a', 'int')
@@ -56,7 +56,7 @@ class Outer:
                 gen.Comment('items')
                 gen.Item(1)
 
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 class Complex:
     \"\"\"

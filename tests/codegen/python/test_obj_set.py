@@ -1,14 +1,14 @@
-from alasio.codegen.python.gen import CodeGenerator
+from alasio.codegen.python.gen import CodeGen
 
 
 class TestObjSet:
     def test_simple_set(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Set('my_set'):
             gen.Item(1)
             gen.Item('two')
 
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 my_set = {
     1,
@@ -19,12 +19,12 @@ my_set = {
         assert code == expected
 
     def test_empty_set(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Set('empty_set'):
             pass
         gen.Set()
 
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 empty_set = set()
 set()
@@ -32,13 +32,13 @@ set()
         assert code == expected
 
     def test_nested_set(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Set('outer'):
             with gen.Set():
                 gen.MultilineComment('inner set')
                 gen.Item(10)
 
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 outer = {
     {

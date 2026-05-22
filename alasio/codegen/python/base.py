@@ -3,7 +3,7 @@ import typing as t
 from alasio.ext.cache import cached_property
 
 if t.TYPE_CHECKING:
-    from .gen import CodeGenerator
+    from .gen import CodeGen
     from .obj_class import Item, Var
 
 
@@ -12,7 +12,7 @@ class CodeDefinitionError(Exception):
 
 
 class ApplyContextName:
-    def __init__(self, gen: "CodeGenerator", context_name: str):
+    def __init__(self, gen: "CodeGen", context_name: str):
         self.gen = gen
         self.context_name = context_name
 
@@ -32,7 +32,7 @@ class CodeObject:
     Base class of all objects
     """
 
-    def __init__(self, gen: "CodeGenerator"):
+    def __init__(self, gen: "CodeGen"):
         self.gen = gen
         self._indent = gen.indent
         self._context_name = gen.context_name

@@ -1,13 +1,13 @@
-from alasio.codegen.python.gen import CodeGenerator
+from alasio.codegen.python.gen import CodeGen
 
 
 class TestObjImport:
     def test_simple_import(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gen.Import('typing')
         gen.Import('os').as_('std_os')
 
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 import typing
 import os as std_os
@@ -15,20 +15,20 @@ import os as std_os
         assert code == expected
 
     def test_from_import(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gen.FromImport('pydantic').Import('BaseModel')
 
-        code = gen.write()
+        code = gen.generate_str()
         assert code == "from pydantic import BaseModel\n"
 
     def test_multi_from_import_sorted(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.FromImport('typing'):
             gen.Import('List')
             gen.Import('Dict').as_('TDict')
             gen.Import('Any')
 
-        code = gen.write()
+        code = gen.generate_str()
         # Should be sorted: Any, Dict as TDict, List
         expected = """\
 from typing import (
@@ -40,14 +40,14 @@ from typing import (
         assert code == expected
 
     def test_raw_content(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.Class('MyClass'):
             gen.Raw("""
             def __init__(self):
                 self.x = 1
             """)
 
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 class MyClass:
     def __init__(self):
@@ -56,20 +56,20 @@ class MyClass:
         assert code == expected
 
     def test_lazy_import(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         imp_typing = gen.Import('typing').lazy()
         gen.Import('os').lazy()
 
         # None should be generated yet
-        assert gen.write() == ""
+        assert gen.generate_str() == ""
 
         # Use typing
         imp_typing.use()
-        assert gen.write() == "import typing\n"
+        assert gen.generate_str() == "import typing\n"
 
         # Use os via gen name
         gen.use_import('os')
-        code = gen.write()
+        code = gen.generate_str()
         expected = """\
 import typing
 import os
@@ -77,21 +77,21 @@ import os
         assert code == expected
 
     def test_lazy_import_with_alias(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         gen.Import('typing').as_('t').lazy()
         
         # Use alias
         gen.use_import('t')
-        assert gen.write() == "import typing as t\n"
+        assert gen.generate_str() == "import typing as t\n"
 
     def test_lazy_from_import(self):
-        gen = CodeGenerator()
+        gen = CodeGen()
         with gen.FromImport('typing') as f:
             f.Import('List').lazy()
             f.Import('Dict')
 
         # Only Dict should be generated
-        assert gen.write() == "from typing import Dict\n"
+        assert gen.generate_str() == "from typing import Dict\n"
 
         # Use List
         gen.use_import('List')
@@ -101,4 +101,4 @@ from typing import (
     List,
 )
 """
-        assert gen.write() == expected
+        assert gen.generate_str() == expected
