@@ -11,6 +11,28 @@ class CodeDefinitionError(Exception):
     pass
 
 
+class ApplyTab:
+    """
+    Context manager that temporarily adds indentation without changing context.
+    Items inside the with block are indented by `tab` levels.
+    """
+
+    def __init__(self, gen: "CodeGenBase", tab: int = 1):
+        self.gen = gen
+        self.tab = tab
+
+    def __enter__(self):
+        # store indent
+        self.indent_prev = self.gen.indent
+        # enter indent
+        self.gen.indent = self.indent_prev + self.tab
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # restore indent
+        self.gen.indent = self.indent_prev
+
+
 class ApplyContextName:
     def __init__(self, gen: "CodeGenBase", context_name: str):
         self.gen = gen

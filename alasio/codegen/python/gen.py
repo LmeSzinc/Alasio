@@ -1,5 +1,5 @@
 from alasio.codegen.python.gen_base import CodeGenBase
-from alasio.codegen.python.obj_base import CodeDefinitionError
+from alasio.codegen.python.obj_base import ApplyTab, CodeDefinitionError
 from alasio.codegen.python.obj_class import *
 from alasio.codegen.python.obj_closure import *
 from alasio.codegen.python.obj_import import *
@@ -271,3 +271,18 @@ class CodeGen(CodeGenBase):
             if not isinstance(item, non_content_types):
                 return True
         return False
+
+    def tab(self, tab: int = 1):
+        """
+        Context manager that adds indentation to content inside the block.
+
+        Examples:
+            with gen.tab():
+                gen.Var('x', 1)
+            #     x = 1
+
+            with gen.tab(2):
+                gen.Var('x', 1)
+            #         x = 1
+        """
+        return ApplyTab(self, tab)

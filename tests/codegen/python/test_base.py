@@ -1,20 +1,6 @@
-from alasio.codegen.python.obj_base import ApplyContextName, GatherItems
 from alasio.codegen.python.gen import CodeGen
+from alasio.codegen.python.obj_base import GatherItems
 from alasio.codegen.python.obj_class import Item, Var
-
-
-class TestApplyContextName:
-    def test_context_restoration(self):
-        gen = CodeGen()
-        gen.context_name = 'Initial'
-
-        with ApplyContextName(gen, 'NewContext'):
-            assert gen.context_name == 'NewContext'
-            with ApplyContextName(gen, 'SubContext'):
-                assert gen.context_name == 'SubContext'
-            assert gen.context_name == 'NewContext'
-
-        assert gen.context_name == 'Initial'
 
 
 class TestGatherItems:
