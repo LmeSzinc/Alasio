@@ -5,7 +5,7 @@ from alasio.config_dev.gen_cross import CrossNavGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.codegen import CodeGen
+from alasio.codegen.python import CodeGen
 from alasio.ext.deep import *
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
@@ -403,35 +403,29 @@ class IndexGenerator(CrossNavGenerator):
         gen = CodeGen()
 
         # Basic imports
-        gen.Import('typing')
-        gen.Empty()
+        gen.Import('typing').as_('t')
         if self.alasio:
-            gen.FromImport('alasio.config.config_generated', 'AlasioConfigGenerated')
-            gen.Empty()
-            gen.FromImport('.const', 'entry')
+            gen.FromImport('alasio.config.config_generated').Import('AlasioConfigGenerated')
+            gen.FromImport('.const').Import('entry')
         else:
-            gen.FromImport('alasio.config.base', 'AlasioConfigBase')
-        gen.Empty()
+            gen.FromImport('alasio.config.base').Import('AlasioConfigBase')
 
         # TYPE_CHECKING block - imports only used for type hints
-        gen.add('if typing.TYPE_CHECKING:')
-        with gen.tab():
+        with gen.If('t.TYPE_CHECKING'):
             # Sort nav names for stable output
             for nav_name, config in self.dict_nav_config.items():
                 # from .{nav} import {nav}_model as {nav}
-                gen.add(f'from .{config.folder} import {nav_name}_model as {nav_name}')
-
-        gen.Empty(2)
+                gen.FromImport(f'.{config.folder}').Import(f'{nav_name}_model').as_(nav_name)
 
         # Class definition
         if self.alasio:
-            cls = gen.Class('ConfigGenerated', inherit='AlasioConfigGenerated')
+            cls = gen.Class('ConfigGenerated').set_inherit('AlasioConfigGenerated')
         else:
-            cls = gen.Class('AlasioConfigGenerated', inherit='AlasioConfigBase')
+            cls = gen.Class('AlasioConfigGenerated').set_inherit('AlasioConfigBase')
         with cls:
             gen.Comment('A generated config struct to fool IDE\'s type-predict and auto-complete')
             if self.alasio:
-                gen.add('entry = entry')
+                gen.Raw('entry = entry')
             gen.Empty()
 
             # Generate group attributes organized by nav

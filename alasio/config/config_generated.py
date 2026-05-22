@@ -1,8 +1,8 @@
-import typing
+import typing as t
 
 from alasio.config.base import AlasioConfigBase
 
-if typing.TYPE_CHECKING:
+if t.TYPE_CHECKING:
     from .alasio import alasio_model as alasio
     from .alasio import device_model as device
     from .alasio import store_model as store

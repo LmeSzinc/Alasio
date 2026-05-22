@@ -1,10 +1,10 @@
-import typing
+import typing as t
 
 from alasio.config.config_generated import AlasioConfigGenerated
 
 from .const import entry
 
-if typing.TYPE_CHECKING:
+if t.TYPE_CHECKING:
     from .alas import alas_model as alas
     from .dashboard import dashboard_model as dashboard
     from .general import general_model as general
