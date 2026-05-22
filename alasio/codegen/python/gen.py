@@ -17,13 +17,10 @@ class CodeGen(AutoBlankLineMixin, ClosureObject):
         self.indent = 0
         super().__init__(self)
         self._import_registry: "dict[str, Import]" = {}
-        self._scanner = None
 
     @property
     def scanner(self) -> EnvLibraryScanner:
-        if self._scanner is None:
-            self._scanner = EnvLibraryScanner()
-        return self._scanner
+        return EnvLibraryScanner()
 
     def _add_item(self, item: CodeObject):
         if isinstance(self.context, ClosureObject):

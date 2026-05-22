@@ -6,6 +6,7 @@ import warnings
 from functools import cached_property
 
 from alasio.ext.backport.strenum import StrEnum
+from alasio.ext.singleton import SingletonOptionalNamed
 
 
 # Module type classification Enum
@@ -19,7 +20,7 @@ class ModuleType(StrEnum):
 # ==========================================
 # 2. Environment Library Scanner and Classifier
 # ==========================================
-class EnvLibraryScanner:
+class EnvLibraryScanner(metaclass=SingletonOptionalNamed):
     def __init__(self, project_root=None):
         """
         Initialize the library scanner
