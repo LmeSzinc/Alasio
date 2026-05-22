@@ -278,7 +278,7 @@ data = {
 
     def test_gatheritems_inline_with_dict_vars(self):
         # Verify GatherItems.get_inline() handles Var trailing comma correctly
-        from alasio.codegen.python.base import GatherItems
+        from alasio.codegen.python.obj_base import GatherItems
         gen = CodeGen()
         with gen.Dict('my_dict'):
             gen.Var('key', 42)

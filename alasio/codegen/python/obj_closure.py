@@ -1,4 +1,4 @@
-from alasio.codegen.python.base import CodeObject, GatherItems
+from alasio.codegen.python.obj_base import CodeObject, GatherItems
 from alasio.ext.cache import cached_property
 
 

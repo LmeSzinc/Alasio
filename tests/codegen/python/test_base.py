@@ -1,4 +1,4 @@
-from alasio.codegen.python.base import ApplyContextName, GatherItems
+from alasio.codegen.python.obj_base import ApplyContextName, GatherItems
 from alasio.codegen.python.gen import CodeGen
 from alasio.codegen.python.obj_class import Item, Var
 

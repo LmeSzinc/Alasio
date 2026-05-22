@@ -1,4 +1,4 @@
-from alasio.codegen.python.base import GatherItems
+from alasio.codegen.python.obj_base import GatherItems
 from alasio.codegen.python.obj_closure import ClosureObject
 from alasio.codegen.python.obj_simple import *
 

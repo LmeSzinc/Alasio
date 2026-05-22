@@ -1,6 +1,6 @@
 import inspect
 
-from alasio.codegen.python.base import CodeObject
+from alasio.codegen.python.obj_base import CodeObject
 from alasio.ext.cache import cached_property
 
 

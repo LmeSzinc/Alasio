@@ -64,6 +64,7 @@ class MyClass:
         expected = """\
 import os
 
+
 class MyClass:
     pass
 """

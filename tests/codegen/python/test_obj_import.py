@@ -9,8 +9,8 @@ class TestObjImport:
 
         code = gen.generate_str()
         expected = """\
-import typing
 import os as std_os
+import typing
 """
         assert code == expected
 
@@ -71,8 +71,8 @@ class MyClass:
         gen.use_import('os')
         code = gen.generate_str()
         expected = """\
-import typing
 import os
+import typing
 """
         assert code == expected
 
