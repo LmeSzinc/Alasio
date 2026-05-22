@@ -97,7 +97,7 @@ class CodeObject:
 
     @cached_property
     def line_ending(self) -> str:
-        if self._context_name in ['Dict', 'List', 'Tuple', 'Set', 'ClassInherit', 'FuncArgs']:
+        if self._context_name in ['Dict', 'List', 'Tuple', 'Set', 'Literal', 'ClassInherit', 'FuncArgs']:
             return ','
         return ''
 

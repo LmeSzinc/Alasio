@@ -105,3 +105,107 @@ class Set(ClosureWithName):
     closure_start = '{'
     closure_end = '}'
     closure_empty = 'set()'
+
+
+class Literal(ClosureWithName):
+    """
+    Define a variable with a Literal type annotation.
+    A default value is only emitted when explicitly set via .Var().
+
+    Examples:
+        with gen.Literal('fruit'):
+            gen.Item('apple')
+            gen.Item('banana')
+        # fruit: Literal['apple', 'banana']
+
+        gen.Literal('color').set_literal('t.Literal').Var('red')
+        # color: t.Literal[] = 'red'
+
+        gen.Literal('status').wrap('always')
+        # status: Literal[
+        #     'active',
+        #     'inactive',
+        # ]
+    """
+
+    def __init__(self, gen, name):
+        super().__init__(gen, name)
+        self._literal_module = 'Literal'
+        self.value = None
+        self._wrap = False  # Default to inline, unlike List/Dict which default to always
+
+    def set_literal(self, module):
+        """
+        Set the Literal type module prefix.
+
+        Args:
+            module (str): Module prefix, e.g. 't.Literal' or 'typing.Literal'
+
+        Returns:
+            Literal: self for chaining
+        """
+        self._literal_module = module
+        return self
+
+    def _get_default_value(self):
+        """Return the explicit default value, or None."""
+        return self.value
+
+    def _build_items_str(self):
+        """
+        Build comma-separated items string for the Literal type annotation.
+        """
+        items = GatherItems().add(self.items)
+        inline = items.get_inline()
+        return inline.rstrip(',')
+
+    @cached_property
+    def item_str(self):
+        """Inline representation."""
+        ending = self.line_ending
+        items_str = self._build_items_str()
+
+        if self.name:
+            value = f'{self.name}: {self._literal_module}[{items_str}]'
+        else:
+            value = f'{self._literal_module}[{items_str}]'
+
+        default_val = self._get_default_value()
+        if default_val is not None:
+            value += f' = {default_val}'
+        return f'{value}{ending}'
+
+    def generate(self):
+        ending = self.line_ending
+
+        if self.name:
+            prefix = f'{self.name}: {self._literal_module}'
+        else:
+            prefix = self._literal_module
+
+        suffix = ''
+        default_val = self._get_default_value()
+        if default_val is not None:
+            suffix = f' = {default_val}'
+
+        if not self.items:
+            yield f'{self.indent_str}{prefix}[]{suffix}{ending}'
+            return
+
+        if self._wrap == 'always':
+            yield f'{self.indent_str}{prefix}['
+            for item in self.items:
+                yield from item.generate()
+            yield f'{self.indent_str}]{suffix}{ending}'
+            return
+
+        items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
+        rows = list(items.iter_multiline())
+        if len(rows) == 1:
+            yield f'{self.indent_str}{prefix}[{rows[0].rstrip(",")}]{suffix}{ending}'
+            return
+
+        yield f'{self.indent_str}{prefix}['
+        for row in rows:
+            yield f'{self.indent_str}    {row}'
+        yield f'{self.indent_str}]{suffix}{ending}'

@@ -62,6 +62,24 @@ class CodeGenerator(AutoBlankLineMixin, ClosureObject):
         self._add_item(item)
         return item
 
+    def Literal(self, name=''):
+        """
+        Define a variable with a Literal type annotation.
+        {name}: Literal['item1', 'item2'] = 'item1'
+
+        Examples:
+            with gen.Literal('fruit'):
+                gen.Item('apple')
+                gen.Item('banana')
+            # fruit: Literal['apple', 'banana'] = 'apple'
+
+            gen.Literal('color').set_literal('t.Literal')
+            # color: t.Literal[...] = ...
+        """
+        item = Literal(self, name)
+        self._add_item(item)
+        return item
+
     def List(self, name: str = ''):
         """
         Define a list with each item on newline
@@ -81,14 +99,14 @@ class CodeGenerator(AutoBlankLineMixin, ClosureObject):
 
     def Item(self, value):
         """
-        Define an item in List/Tuple/Set
+        Define an item in List/Tuple/Set/Literal
         {value},
         """
-        if isinstance(self.context, (List, Tuple, Set)):
+        if isinstance(self.context, (List, Tuple, Set, Literal)):
             obj = Item(self, value)
             self.context.items.append(obj)
         else:
-            raise CodeDefinitionError(f'Item can only be used in List/Tuple/Set')
+            raise CodeDefinitionError(f'Item can only be used in List/Tuple/Set/Literal')
 
     def Dict(self, name):
         """
