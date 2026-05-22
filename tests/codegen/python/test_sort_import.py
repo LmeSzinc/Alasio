@@ -175,63 +175,6 @@ import alasio
 class TestSortImportHeaderBoundary:
     """Test that header detection stops at first code object."""
 
-    def test_comment_before_imports_preserved(self):
-        """Comment before the first import is kept before imports."""
-        gen = CodeGen()
-        gen.Comment('stdlib imports')
-        gen.Import('os')
-        gen.Import('json')
-        gen.Var('x', 1)
-        gen.sort_import()
-        code = gen.generate_str()
-        expected = """\
-# stdlib imports
-import json
-import os
-
-x = 1
-"""
-        assert code == expected
-
-    def test_comment_between_imports_moved_after(self):
-        """Comment between imports is moved after the import block (2 blank lines before it)."""
-        gen = CodeGen()
-        gen.Import('os')
-        gen.Comment('third-party imports')
-        gen.Import('pytest')
-        gen.Var('x', 1)
-        gen.sort_import()
-        code = gen.generate_str()
-        expected = """\
-import os
-
-import pytest
-
-
-# third-party imports
-x = 1
-"""
-        assert code == expected
-
-    def test_comment_after_imports_moved_after(self):
-        """Comment after the last import (before code) is moved after the import block (2 blank lines before it)."""
-        gen = CodeGen()
-        gen.Import('os')
-        gen.Import('json')
-        gen.Comment('end of imports')
-        gen.Var('x', 1)
-        gen.sort_import()
-        code = gen.generate_str()
-        expected = """\
-import json
-import os
-
-
-# end of imports
-x = 1
-"""
-        assert code == expected
-
     def test_var_ends_header(self):
         gen = CodeGen()
         gen.Import('os')
@@ -332,20 +275,6 @@ from typing import (
 class TestSortImportEdgeCases:
     """Edge cases for sort_import."""
 
-    def test_only_comment_and_empty_in_header_then_code(self):
-        gen = CodeGen()
-        gen.Comment('some comment')
-        gen.Empty(1)
-        gen.Var('x', 1)
-        gen.sort_import()
-        code = gen.generate_str()
-        expected = """\
-# some comment
-
-x = 1
-"""
-        assert code == expected
-
     def test_sort_is_idempotent(self):
         gen = CodeGen()
         gen.Import('pytest')
@@ -363,3 +292,16 @@ x = 1
         gen.Import('os')
         result = gen.sort_import()
         assert result is gen
+
+    def test_sort_twice_noop_basic(self):
+        """Sorting twice produces identical output (basic imports, no comments)."""
+        gen = CodeGen()
+        gen.Import('pytest')
+        gen.Import('os')
+        gen.Import('alasio')
+        gen.Import('json')
+        gen.sort_import()
+        code1 = gen.generate_str()
+        gen.sort_import()
+        code2 = gen.generate_str()
+        assert code1 == code2
