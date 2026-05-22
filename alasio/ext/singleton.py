@@ -132,3 +132,87 @@ class SingletonNamed(type):
         Access all instances directly
         """
         return cls.__instances
+
+
+class SingletonOptionalNamed(SingletonNamed):
+    """
+    A metaclass combining global singleton and named singleton behavior.
+
+    When a name is provided, it acts as a named singleton (like SingletonNamed).
+    When no name is provided (or None), it acts as a global singleton (like Singleton).
+    This implementation is thread-safe.
+
+    Usage:
+        class MyService(metaclass=SingletonOptionalNamed):
+            def __init__(self, name=None, value=0):
+                self.name = name
+                self.value = value
+
+        # unnamed: global singleton
+        s1 = MyService()
+        s2 = MyService()
+        assert s1 is s2
+
+        # named: named singleton
+        s3 = MyService("a")
+        s4 = MyService("a")
+        assert s3 is s4
+        s5 = MyService("b")
+        assert s3 is not s5
+    """
+
+    def __init__(cls, name, bases, dct):
+        super().__init__(name, bases, dct)
+        cls.__unnamed_instance = None
+        cls.__unnamed_lock = threading.Lock()
+
+    def __call__(cls, name=None, *args, **kwargs):
+        """
+        Return a singleton instance.
+
+        Args:
+            name: Optional name for named singleton behavior.
+                When None, behaves as a global singleton.
+
+        Returns:
+            The singleton instance.
+        """
+        if name is not None:
+            return super().__call__(name, *args, **kwargs)
+
+        # unnamed: global singleton behavior
+        instance = cls.__unnamed_instance
+        if instance is not None:
+            return instance
+
+        with cls.__unnamed_lock:
+            instance = cls.__unnamed_instance
+            if instance is not None:
+                return instance
+
+            instance = super().__call__(name, *args, **kwargs)
+            cls.__unnamed_instance = instance
+            return instance
+
+    def singleton_clear(cls):
+        """
+        Remove all instances, both named and unnamed.
+        """
+        SingletonNamed.singleton_clear(cls)
+        with cls.__unnamed_lock:
+            cls.__unnamed_instance = None
+
+    def singleton_remove(cls, name):
+        """
+        Remove a specific instance, handling unnamed (None) case.
+
+        Args:
+            name: Name of the instance to remove, or None for unnamed.
+
+        Returns:
+            bool: If removed
+        """
+        result = SingletonNamed.singleton_remove(cls, name)
+        if name is None and result:
+            cls.__unnamed_instance = None
+        return result

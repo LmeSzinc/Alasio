@@ -2,7 +2,7 @@ import pytest
 import threading
 from typing import List
 
-from alasio.ext.singleton import Singleton, SingletonNamed
+from alasio.ext.singleton import Singleton, SingletonNamed, SingletonOptionalNamed
 
 
 # ==============================================================================
@@ -36,6 +36,19 @@ class SubNamedService(NamedService):
     pass
 
 
+class OptionalNamedService(metaclass=SingletonOptionalNamed):
+    """A standard class using the SingletonOptionalNamed metaclass."""
+
+    def __init__(self, name=None, value=0):
+        self.name = name
+        self.value = value
+
+
+class SubOptionalNamedService(OptionalNamedService):
+    """A subclass to test that it has its own separate optional named instance cache."""
+    pass
+
+
 # --- Pytest fixture for automatic cleanup ---
 
 @pytest.fixture(autouse=True)
@@ -50,6 +63,8 @@ def cleanup_singletons():
     SubService.singleton_clear()
     NamedService.singleton_clear()
     SubNamedService.singleton_clear()
+    OptionalNamedService.singleton_clear()
+    SubOptionalNamedService.singleton_clear()
 
 
 # ==============================================================================
@@ -258,5 +273,152 @@ class TestSingletonNamed:
         SlowInitNamedService.singleton_clear()  # Cleanup
 
         assert init_call_count == 1, "The __init__ method was called more than once for the same name."
+        assert len(instances_from_threads) == 2, "Both threads should have returned an instance."
+        assert instances_from_threads[0] is instances_from_threads[1], "Threads received different instances."
+
+
+# ==============================================================================
+# Tests for the `SingletonOptionalNamed` metaclass
+# ==============================================================================
+
+class TestSingletonOptionalNamed:
+    """Tests for the optional named Singleton pattern."""
+
+    def test_unnamed_instance_is_singleton(self):
+        """Verify that calls without a name return the same instance."""
+        instance1 = OptionalNamedService()
+        instance2 = OptionalNamedService()
+        assert instance1 is instance2
+
+    def test_same_name_is_singleton(self):
+        """Verify that the same name returns the same instance."""
+        instance_a1 = OptionalNamedService("A")
+        instance_a2 = OptionalNamedService("A")
+        assert instance_a1 is instance_a2
+
+    def test_different_names_are_different_instances(self):
+        """Verify that different names return different instances."""
+        instance_a = OptionalNamedService("A")
+        instance_b = OptionalNamedService("B")
+        assert instance_a is not instance_b
+
+    def test_unnamed_and_named_are_separate(self):
+        """Verify that the unnamed instance and named instances are distinct."""
+        unnamed = OptionalNamedService()
+        named_a = OptionalNamedService("A")
+        named_b = OptionalNamedService("B")
+
+        assert unnamed is not named_a
+        assert unnamed is not named_b
+        assert named_a is not named_b
+
+    def test_init_called_once_for_unnamed(self):
+        """Verify that __init__ is called only once for the unnamed instance."""
+        instance1 = OptionalNamedService(value=100)
+        assert instance1.value == 100
+
+        instance2 = OptionalNamedService(value=200)
+        assert instance2.value == 100, "Value should not have been updated for unnamed."
+
+    def test_init_called_once_per_name(self):
+        """Verify that __init__ is called only once per name."""
+        instance_a1 = OptionalNamedService("A", value=123)
+        assert instance_a1.value == 123
+
+        instance_a2 = OptionalNamedService("A", value=456)
+        assert instance_a2.value == 123, "Value should not have been updated for name 'A'."
+
+        instance_b = OptionalNamedService("B", value=789)
+        assert instance_b.value == 789, "New name 'B' should have its value set."
+
+    def test_unnamed_called_with_none_name(self):
+        """Verify that explicitly passing None behaves as unnamed singleton."""
+        instance1 = OptionalNamedService(None)
+        instance2 = OptionalNamedService(None)
+        instance3 = OptionalNamedService()
+
+        assert instance1 is instance2
+        assert instance1 is instance3
+        assert instance1.name is None
+
+    def test_subclasses_have_separate_caches(self):
+        """Verify that subclasses have their own separate caches (both unnamed and named)."""
+        base_unnamed = OptionalNamedService()
+        sub_unnamed = SubOptionalNamedService()
+
+        assert base_unnamed is not sub_unnamed
+
+        base_a = OptionalNamedService("A")
+        sub_a = SubOptionalNamedService("A")
+
+        assert base_a is not sub_a
+
+    def test_singleton_clear_clears_unnamed(self):
+        """Verify that singleton_clear() clears the unnamed instance."""
+        instance1 = OptionalNamedService()
+        OptionalNamedService.singleton_clear()
+        instance2 = OptionalNamedService()
+
+        assert instance1 is not instance2
+
+    def test_singleton_clear_clears_named(self):
+        """Verify that singleton_clear() also clears named instances."""
+        instance_a1 = OptionalNamedService("A")
+        OptionalNamedService.singleton_clear()
+        instance_a2 = OptionalNamedService("A")
+
+        assert instance_a1 is not instance_a2
+
+    def test_singleton_clear_clears_both(self):
+        """Verify that after clear, both unnamed and named instances are new."""
+        unnamed1 = OptionalNamedService()
+        named_a1 = OptionalNamedService("A")
+        named_b1 = OptionalNamedService("B")
+
+        OptionalNamedService.singleton_clear()
+
+        unnamed2 = OptionalNamedService()
+        named_a2 = OptionalNamedService("A")
+        named_b2 = OptionalNamedService("B")
+
+        assert unnamed1 is not unnamed2
+        assert named_a1 is not named_a2
+        assert named_b1 is not named_b2
+
+    def test_thread_safety_for_unnamed_is_deterministic(self):
+        """A deterministic test for thread-safety when creating the unnamed instance."""
+        init_call_count = 0
+        instances_from_threads = []
+
+        thread1_inside_init = threading.Event()
+        main_thread_can_unblock_thread1 = threading.Event()
+
+        class SlowInitOptionalNamedService(metaclass=SingletonOptionalNamed):
+            def __init__(self, name=None):
+                nonlocal init_call_count
+                init_call_count += 1
+                self.name = name
+                thread1_inside_init.set()
+                main_thread_can_unblock_thread1.wait()
+
+        def thread_target(results_list: List):
+            instance = SlowInitOptionalNamedService()
+            results_list.append(instance)
+
+        t1 = threading.Thread(target=thread_target, args=(instances_from_threads,))
+        t1.start()
+
+        assert thread1_inside_init.wait(timeout=1), "Thread 1 did not enter __init__ in time."
+
+        t2 = threading.Thread(target=thread_target, args=(instances_from_threads,))
+        t2.start()
+
+        main_thread_can_unblock_thread1.set()
+        t1.join(timeout=1)
+        t2.join(timeout=1)
+
+        SlowInitOptionalNamedService.singleton_clear()  # Cleanup
+
+        assert init_call_count == 1, "The __init__ method was called more than once for the unnamed instance."
         assert len(instances_from_threads) == 2, "Both threads should have returned an instance."
         assert instances_from_threads[0] is instances_from_threads[1], "Threads received different instances."
