@@ -4,8 +4,7 @@ from alasio.base.exception import ScriptError
 from alasio.config.config_generated import AlasioConfigGenerated
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
-from alasio.ext.cache import cached_property
-from alasio.ext.msgspec_error.parse_anno import get_class_annotations
+from alasio.ext.msgspec_error.parse_anno import get_class_annotation
 from alasio.logger import logger
 
 
@@ -13,10 +12,6 @@ class ModuleBase:
     # subclasses may override these
     config: AlasioConfigGenerated
     device: DeviceBase
-
-    @cached_property
-    def _annotations(self):
-        return get_class_annotations(self.__class__)
 
     def __init__(
             self,
@@ -42,8 +37,8 @@ class ModuleBase:
                 self.config.task = task
         elif isinstance(config, str):
             try:
-                cls = self._annotations['config']
-            except KeyError:
+                cls = get_class_annotation(self.__class__, 'config')
+            except AttributeError:
                 raise ScriptError(f'Missing "config" annotation in module') from None
             self.config = cls(config, task=task)
         else:
@@ -57,19 +52,19 @@ class ModuleBase:
             self.device = device
         elif device is None:
             try:
-                cls = self._annotations['device']
-            except KeyError:
+                cls = get_class_annotation(self.__class__, 'device')
+            except AttributeError:
                 raise ScriptError(f'Missing "config" annotation in module') from None
             device_config = DeviceConfig.from_config(self.config)
             self.device = cls(device_config)
         elif isinstance(device, str):
             try:
-                cls = self._annotations['device']
-            except KeyError:
+                cls = get_class_annotation(self.__class__, 'device')
+            except AttributeError:
                 raise ScriptError(f'Missing "config" annotation in module') from None
             self.config.override(Emulator_Serial=device)
             device_config = DeviceConfig.from_config(self.config)
             self.device = cls(device_config)
         else:
-            logger.warning('ModuleBase received an unknown device, using it anywa')
+            logger.warning('ModuleBase received an unknown device, using it anyway')
             self.device = device

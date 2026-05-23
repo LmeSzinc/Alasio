@@ -9,7 +9,7 @@ from alasio.base.timer import getnow
 from alasio.config.const import DataInconsistent
 from alasio.config.group_proxy import batch_set
 from alasio.ext.cache import cached_property
-from alasio.ext.msgspec_error.parse_anno import get_msgspec_annotations
+from alasio.ext.msgspec_error.parse_anno import get_msgspec_annotation_dict
 
 
 class DashboardBase(m.Struct):
@@ -36,7 +36,7 @@ class DashboardBase(m.Struct):
     @classmethod
     def get_meta(cls, attr: str):
         try:
-            anno = get_msgspec_annotations(cls)
+            anno = get_msgspec_annotation_dict(cls)
         except AttributeError:
             raise DataInconsistent(f'Group model {cls} does not have __annotations__')
         try:

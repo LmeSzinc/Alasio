@@ -1,8 +1,10 @@
 from typing import Any, Optional
 
 import msgspec
+import pytest
 
-from alasio.ext.msgspec_error.parse_anno import get_class_annotations, get_msgspec_annotations
+from alasio.ext.msgspec_error.parse_anno import (get_class_annotation, get_class_annotation_dict,
+                                                 get_msgspec_annotation, get_msgspec_annotation_dict)
 
 
 class TestGetAnnotations:
@@ -16,7 +18,7 @@ class TestGetAnnotations:
             age: int = 0
             active: bool = True
 
-        annotations = get_class_annotations(SimpleClass)
+        annotations = get_class_annotation_dict(SimpleClass)
 
         assert len(annotations) == 3
         assert annotations["name"] == str
@@ -30,7 +32,7 @@ class TestGetAnnotations:
             name: str
             age: int
 
-        annotations = get_class_annotations(NoDefaultClass)
+        annotations = get_class_annotation_dict(NoDefaultClass)
 
         assert len(annotations) == 2
         assert annotations["name"] == str
@@ -46,7 +48,7 @@ class TestGetAnnotations:
         class Child(Parent):
             child_field: str = "child"
 
-        annotations = get_class_annotations(Child)
+        annotations = get_class_annotation_dict(Child)
 
         assert len(annotations) == 3
         assert annotations["parent_field"] == str
@@ -63,7 +65,7 @@ class TestGetAnnotations:
             value: str = "20"  # Different type
             name: str = "child"
 
-        annotations = get_class_annotations(Child)
+        annotations = get_class_annotation_dict(Child)
 
         # Child's annotation should override parent's
         assert annotations["value"] == str
@@ -82,7 +84,7 @@ class TestGetAnnotations:
         class Child(Parent):
             c_field: str = "child"
 
-        annotations = get_class_annotations(Child)
+        annotations = get_class_annotation_dict(Child)
 
         assert len(annotations) == 4
         assert annotations["gp_field1"] == str
@@ -96,7 +98,7 @@ class TestGetAnnotations:
         class EmptyClass:
             pass
 
-        annotations = get_class_annotations(EmptyClass)
+        annotations = get_class_annotation_dict(EmptyClass)
 
         assert len(annotations) == 0
 
@@ -108,7 +110,7 @@ class TestGetAnnotations:
             value = 10
             name = "test"
 
-        annotations = get_class_annotations(NoAnnotations)
+        annotations = get_class_annotation_dict(NoAnnotations)
 
         assert len(annotations) == 0
 
@@ -121,7 +123,7 @@ class TestGetAnnotations:
             optional_value: Optional[int] = None
             mapping: Dict[str, Any] = {}
 
-        annotations = get_class_annotations(ComplexTypes)
+        annotations = get_class_annotation_dict(ComplexTypes)
 
         assert len(annotations) == 3
         assert annotations["items"] == List[str]
@@ -140,7 +142,7 @@ class TestGetAnnotations:
         class Child(Mixin1, Mixin2):
             child_field: bool = True
 
-        annotations = get_class_annotations(Child)
+        annotations = get_class_annotation_dict(Child)
 
         assert len(annotations) == 3
         assert annotations["mixin1_field"] == str
@@ -159,7 +161,7 @@ class TestGetAnnotations:
         class Child(Parent):
             pass
 
-        annotations = get_class_annotations(Child)
+        annotations = get_class_annotation_dict(Child)
 
         # Parent's annotation should override GrandParent's
         assert annotations["field"] == str
@@ -172,7 +174,7 @@ class TestGetAnnotations:
             excluded: int = msgspec.UNSET
             also_included: bool = False
 
-        annotations = get_class_annotations(UnsetClass)
+        annotations = get_class_annotation_dict(UnsetClass)
 
         # annotation_get should include all annotated fields
         assert len(annotations) == 3
@@ -185,10 +187,10 @@ class TestGetAnnotations:
         import pytest
 
         with pytest.raises(TypeError):
-            get_class_annotations("not a class")
+            get_class_annotation_dict("not a class")
 
         with pytest.raises(TypeError):
-            get_class_annotations(42)
+            get_class_annotation_dict(42)
 
 
 class TestGetMsgspecAnnotation:
@@ -202,7 +204,7 @@ class TestGetMsgspecAnnotation:
             age: int = 0
             active: bool = True
 
-        annotations = get_msgspec_annotations(SimpleClass)
+        annotations = get_msgspec_annotation_dict(SimpleClass)
 
         assert len(annotations) == 3
         assert annotations["name"] == str
@@ -216,7 +218,7 @@ class TestGetMsgspecAnnotation:
             name: str
             age: int
 
-        annotations = get_msgspec_annotations(NoDefaultClass)
+        annotations = get_msgspec_annotation_dict(NoDefaultClass)
 
         # Fields without defaults should still be included
         assert len(annotations) == 2
@@ -231,7 +233,7 @@ class TestGetMsgspecAnnotation:
             age: int = 25
             email: str
 
-        annotations = get_msgspec_annotations(MixedClass)
+        annotations = get_msgspec_annotation_dict(MixedClass)
 
         assert len(annotations) == 3
         assert annotations["name"] == str
@@ -248,7 +250,7 @@ class TestGetMsgspecAnnotation:
         class Child(Parent):
             child_field: str = "child"
 
-        annotations = get_msgspec_annotations(Child)
+        annotations = get_msgspec_annotation_dict(Child)
 
         assert len(annotations) == 3
         assert annotations["parent_field"] == str
@@ -265,7 +267,7 @@ class TestGetMsgspecAnnotation:
             value: int = 20
             name: str = "child"
 
-        annotations = get_msgspec_annotations(Child)
+        annotations = get_msgspec_annotation_dict(Child)
 
         # Child's value should override parent's
         assert annotations["value"] == int
@@ -285,7 +287,7 @@ class TestGetMsgspecAnnotation:
             # Keep other fields and add new one
             city: str = "New York"
 
-        annotations = get_msgspec_annotations(Child)
+        annotations = get_msgspec_annotation_dict(Child)
 
         # age should not be in the results
         assert "age" not in annotations
@@ -314,7 +316,7 @@ class TestGetMsgspecAnnotation:
             # Add new field
             phone: str = "123-456-7890"
 
-        annotations = get_msgspec_annotations(Child)
+        annotations = get_msgspec_annotation_dict(Child)
 
         # name should not be in the results
         assert "name" not in annotations
@@ -341,7 +343,7 @@ class TestGetMsgspecAnnotation:
             # Add new field
             new_field: str = "new"
 
-        annotations = get_msgspec_annotations(Child)
+        annotations = get_msgspec_annotation_dict(Child)
 
         # Removed fields should not be present
         assert "field1" not in annotations
@@ -369,7 +371,7 @@ class TestGetMsgspecAnnotation:
         class Child(Parent):
             c_field: str = "child"
 
-        annotations = get_msgspec_annotations(Child)
+        annotations = get_msgspec_annotation_dict(Child)
 
         # gp_field1 was removed in Parent, should not appear in Child
         assert "gp_field1" not in annotations
@@ -394,7 +396,7 @@ class TestGetMsgspecAnnotation:
             # Restore field with new value
             field: str = "restored"
 
-        annotations = get_msgspec_annotations(Child)
+        annotations = get_msgspec_annotation_dict(Child)
 
         # Field should be present with the restored value
         assert "field" in annotations
@@ -414,7 +416,7 @@ class TestGetMsgspecAnnotation:
             # Only have child field
             child_field: str = "child"
 
-        annotations = get_msgspec_annotations(Child)
+        annotations = get_msgspec_annotation_dict(Child)
 
         assert len(annotations) == 1
         assert annotations["child_field"] == str
@@ -433,7 +435,7 @@ class TestGetMsgspecAnnotation:
             mixin1_field: str = msgspec.UNSET
             child_field: bool = True
 
-        annotations = get_msgspec_annotations(Child)
+        annotations = get_msgspec_annotation_dict(Child)
 
         # mixin1_field should be removed
         assert "mixin1_field" not in annotations
@@ -451,7 +453,7 @@ class TestGetMsgspecAnnotation:
             excluded: int = msgspec.UNSET
             also_included: bool = False
 
-        annotations = get_msgspec_annotations(UnsetClass)
+        annotations = get_msgspec_annotation_dict(UnsetClass)
 
         assert len(annotations) == 2
         assert annotations["included"] == str
@@ -465,7 +467,7 @@ class TestGetMsgspecAnnotation:
         class EmptyClass:
             pass
 
-        annotations = get_msgspec_annotations(EmptyClass)
+        annotations = get_msgspec_annotation_dict(EmptyClass)
 
         assert len(annotations) == 0
 
@@ -477,7 +479,7 @@ class TestGetMsgspecAnnotation:
             value = 10
             name = "test"
 
-        annotations = get_msgspec_annotations(NoAnnotations)
+        annotations = get_msgspec_annotation_dict(NoAnnotations)
 
         assert len(annotations) == 0
 
@@ -490,7 +492,7 @@ class TestGetMsgspecAnnotation:
             optional_value: Optional[int] = None
             mapping: Dict[str, Any] = {}
 
-        annotations = get_msgspec_annotations(ComplexTypes)
+        annotations = get_msgspec_annotation_dict(ComplexTypes)
 
         assert len(annotations) == 3
         assert annotations["items"] == List[str]
@@ -504,7 +506,7 @@ class TestGetMsgspecAnnotation:
             value: Optional[str] = None
             number: Optional[int] = None
 
-        annotations = get_msgspec_annotations(NoneDefault)
+        annotations = get_msgspec_annotation_dict(NoneDefault)
 
         assert len(annotations) == 2
         assert annotations["value"] == Optional[str]
@@ -518,7 +520,7 @@ class TestGetMsgspecAnnotation:
             # This won't be included (no annotation)
             another_var = 20
 
-        annotations = get_msgspec_annotations(TestClass)
+        annotations = get_msgspec_annotation_dict(TestClass)
 
         assert len(annotations) == 1
         assert annotations["class_var"] == int
@@ -528,7 +530,160 @@ class TestGetMsgspecAnnotation:
         import pytest
 
         with pytest.raises(TypeError):
-            get_msgspec_annotations("not a class")
+            get_msgspec_annotation_dict("not a class")
 
         with pytest.raises(TypeError):
-            get_msgspec_annotations(42)
+            get_msgspec_annotation_dict(42)
+
+
+class TestGetClassAnnotation:
+    """Test suite for get_class_annotation function"""
+
+    def test_simple_class(self):
+        """Test getting annotation by key from a simple class"""
+
+        class SimpleClass:
+            name: str = "default_name"
+            age: int = 0
+
+        assert get_class_annotation(SimpleClass, "name") == str
+        assert get_class_annotation(SimpleClass, "age") == int
+
+    def test_key_not_found_raises_attribute_error(self):
+        """Test that missing key raises AttributeError"""
+
+        class SimpleClass:
+            name: str = "default_name"
+
+        with pytest.raises(AttributeError):
+            get_class_annotation(SimpleClass, "nonexistent")
+
+    def test_inheritance_returns_most_derived(self):
+        """Test that MRO sequential order returns the most derived class's annotation"""
+
+        class Parent:
+            value: int = 10
+
+        class Child(Parent):
+            value: str = "20"
+
+        assert get_class_annotation(Child, "value") == str
+
+    def test_inheritance_falls_back_to_parent(self):
+        """Test that annotation from parent class is returned when child doesn't define it"""
+
+        class Parent:
+            parent_field: str = "parent"
+
+        class Child(Parent):
+            child_field: str = "child"
+
+        assert get_class_annotation(Child, "parent_field") == str
+        assert get_class_annotation(Child, "child_field") == str
+
+    def test_multiple_inheritance(self):
+        """Test annotation lookup with multiple inheritance"""
+
+        class Mixin1:
+            mixin1_field: str = "mixin1"
+
+        class Mixin2:
+            mixin2_field: int = 42
+
+        class Child(Mixin1, Mixin2):
+            child_field: bool = True
+
+        assert get_class_annotation(Child, "mixin1_field") == str
+        assert get_class_annotation(Child, "mixin2_field") == int
+        assert get_class_annotation(Child, "child_field") == bool
+
+    def test_non_class_input_raises_type_error(self):
+        """Test that non-class input raises TypeError"""
+
+        with pytest.raises(TypeError):
+            get_class_annotation("not a class", "field")
+
+        with pytest.raises(TypeError):
+            get_class_annotation(42, "field")
+
+
+class TestGetMsgspecAnnotation:
+    """Test suite for get_msgspec_annotation function"""
+
+    def test_simple_class(self):
+        """Test getting annotation by key from a simple class"""
+
+        class SimpleClass:
+            name: str = "default_name"
+            age: int = 0
+
+        assert get_msgspec_annotation(SimpleClass, "name") == str
+        assert get_msgspec_annotation(SimpleClass, "age") == int
+
+    def test_unset_field_in_child_raises_attribute_error(self):
+        """Test that UNSET field in child class raises AttributeError"""
+
+        class Parent:
+            field: str = "parent"
+            other: int = 42
+
+        class Child(Parent):
+            field: str = msgspec.UNSET
+
+        with pytest.raises(AttributeError):
+            get_msgspec_annotation(Child, "field")
+
+    def test_unset_field_not_found_raises_attribute_error(self):
+        """Test that a field which is UNSET everywhere raises AttributeError"""
+
+        class Parent:
+            field: str = msgspec.UNSET
+
+        class Child(Parent):
+            pass
+
+        with pytest.raises(AttributeError):
+            get_msgspec_annotation(Child, "field")
+
+    def test_key_not_found_raises_attribute_error(self):
+        """Test that missing key raises AttributeError"""
+
+        class SimpleClass:
+            name: str = "default_name"
+
+        with pytest.raises(AttributeError):
+            get_msgspec_annotation(SimpleClass, "nonexistent")
+
+    def test_inheritance_returns_most_derived(self):
+        """Test that MRO sequential order returns the most derived class's annotation"""
+
+        class Parent:
+            value: int = 10
+
+        class Child(Parent):
+            value: str = "20"
+
+        assert get_msgspec_annotation(Child, "value") == str
+
+    def test_restored_field_after_unset(self):
+        """Test that a field restored after being UNSET in parent is found"""
+
+        class GrandParent:
+            field: str = "original"
+
+        class Parent(GrandParent):
+            field: str = msgspec.UNSET
+
+        class Child(Parent):
+            field: str = "restored"
+
+        assert get_msgspec_annotation(Child, "field") == str
+
+    def test_non_class_input_raises_type_error(self):
+        """Test that non-class input raises TypeError"""
+
+        with pytest.raises(TypeError):
+            get_msgspec_annotation("not a class", "field")
+
+        with pytest.raises(TypeError):
+            get_msgspec_annotation(42, "field")

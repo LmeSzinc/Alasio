@@ -22,7 +22,7 @@ from alasio.config.table.key import AlasioKeyTable
 from alasio.ext.cache import cached_property, cached_property_threadsafe
 from alasio.ext.deep import deep_iter_depth1, deep_iter_depth2
 from alasio.ext.msgspec_error import load_msgpack_with_default
-from alasio.ext.msgspec_error.parse_anno import get_class_annotations
+from alasio.ext.msgspec_error.parse_anno import get_class_annotation_dict
 from alasio.logger import logger
 
 
@@ -157,12 +157,12 @@ class AlasioConfigBase:
 
     @cached_property
     def _annotations(self):
-        return get_class_annotations(self.__class__)
+        return get_class_annotation_dict(self.__class__)
 
     @cached_property
     def _annotations_alasio(self):
         from .config_generated import AlasioConfigGenerated
-        return get_class_annotations(AlasioConfigGenerated)
+        return get_class_annotation_dict(AlasioConfigGenerated)
 
     @cached_property
     def servertime(self) -> ServerTime:
