@@ -10,7 +10,7 @@ class TestObjObject:
         code = gen.generate_str()
         expected = """\
 btn = Button(
-    Click me,
+    'Click me',
     timeout=10,
 )
 """
@@ -23,7 +23,7 @@ btn = Button(
         code = gen.generate_str()
         expected = """\
 btn: BtnType = Button(
-    Click me,
+    'Click me',
 )
 """
         assert code == expected
@@ -36,7 +36,7 @@ btn: BtnType = Button(
         code = gen.generate_str()
         expected = """\
 Button(
-    submit,
+    'submit',
     delay=5,
 )
 """
@@ -49,7 +49,7 @@ Button(
             gen.Item('data')
             gen.Var('count', 42)
         code = gen.generate_str()
-        assert code == "obj = MyClass(data, count=42)\n"
+        assert code == "obj = MyClass('data', count=42)\n"
 
     def test_expand_wrap(self):
         gen = CodeGen()
@@ -60,7 +60,126 @@ Button(
         code = gen.generate_str()
         expected = """\
 dialog = Dialog(
-    Confirm, width=400, height=300,
+    'Confirm', width=400, height=300,
+)
+"""
+        assert code == expected
+
+    # ── Nested Object tests ──────────────────────────────────────────────
+
+    def test_nested_object(self):
+        """Object nested inside another Object."""
+        gen = CodeGen()
+        with gen.Object('outer', 'OuterClass'):
+            gen.Item('simple_arg')
+            gen.Var('simple_kw', 1)
+            with gen.Object('inner', 'InnerClass'):
+                gen.Item('inner_arg')
+        code = gen.generate_str()
+        expected = """\
+outer = OuterClass(
+    'simple_arg',
+    simple_kw=1,
+    inner=InnerClass(
+        'inner_arg',
+    ),
+)
+"""
+        assert code == expected
+
+    def test_nested_object_with_anno(self):
+        """Nested object with type annotation on the child."""
+        gen = CodeGen()
+        with gen.Object('outer', 'OuterClass'):
+            gen.Item('item1')
+            with gen.Object('inner', 'InnerClass').Anno('InnerType'):
+                gen.Item('inner_arg')
+                gen.Var('x', 99)
+        code = gen.generate_str()
+        expected = """\
+outer = OuterClass(
+    'item1',
+    inner: InnerType = InnerClass(
+        'inner_arg',
+        x=99,
+    ),
+)
+"""
+        assert code == expected
+
+    def test_nested_object_without_name(self):
+        """Nested object without a variable name (just the class)."""
+        gen = CodeGen()
+        with gen.Object('outer', 'OuterClass'):
+            with gen.Object('', 'InnerClass'):
+                gen.Item('inner_arg')
+        code = gen.generate_str()
+        expected = """\
+outer = OuterClass(
+    InnerClass(
+        'inner_arg',
+    ),
+)
+"""
+        assert code == expected
+
+    def test_nested_object_inline_wrap(self):
+        """Nested object with inline wrapping."""
+        gen = CodeGen()
+        with gen.Object('outer', 'OuterClass'):
+            with gen.Object('inner', 'InnerClass').wrap('inline'):
+                gen.Item('data')
+                gen.Var('count', 42)
+        code = gen.generate_str()
+        expected = """\
+outer = OuterClass(
+    inner=InnerClass('data', count=42),
+)
+"""
+        assert code == expected
+
+    def test_triple_nested_objects(self):
+        """Three levels of nested Object."""
+        gen = CodeGen()
+        with gen.Object('level1', 'L1'):
+            gen.Var('a', 1)
+            with gen.Object('level2', 'L2'):
+                gen.Var('b', 2)
+                with gen.Object('level3', 'L3'):
+                    gen.Var('c', 3)
+        code = gen.generate_str()
+        expected = """\
+level1 = L1(
+    a=1,
+    level2=L2(
+        b=2,
+        level3=L3(
+            c=3,
+        ),
+    ),
+)
+"""
+        assert code == expected
+
+    def test_sibling_nested_objects(self):
+        """Multiple nested objects at the same level inside a parent."""
+        gen = CodeGen()
+        with gen.Object('outer', 'OuterClass'):
+            gen.Var('name', 'test')
+            with gen.Object('child_a', 'ChildA'):
+                gen.Item('a')
+            with gen.Object('child_b', 'ChildB'):
+                gen.Item('b')
+        code = gen.generate_str()
+        expected = """\
+outer = OuterClass(
+    name='test',
+    child_a=ChildA(
+        'a',
+    ),
+    child_b=ChildB(
+        'b',
+    ),
 )
 """
         assert code == expected
@@ -81,7 +200,7 @@ dialog = Dialog(
         code = gen.generate_str()
         expected = """\
 buttons = [
-    Button(ok),
+    Button('ok'),
 ]
 """
         assert code == expected
@@ -95,7 +214,7 @@ buttons = [
         code = gen.generate_str()
         expected = """\
 func(
-    x,
+    'x',
     y=1,
 )
 """

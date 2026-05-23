@@ -134,7 +134,7 @@ class CodeObject:
 
     @cached_property
     def line_ending(self) -> str:
-        if self._context_name in ['Dict', 'List', 'Tuple', 'Set', 'Literal', 'ClassInherit', 'FuncArgs']:
+        if self._context_name in ['Dict', 'List', 'Tuple', 'Set', 'Literal', 'ClassInherit', 'FuncArgs', 'Object']:
             return ','
         return ''
 
@@ -142,8 +142,11 @@ class CodeObject:
     def between_kv(self):
         if self._context_name in ['Dict']:
             return ': '
-        if self._context_name in ['FuncArgs', 'ClassInherit']:
-            return '='
+        if self._context_name in ['FuncArgs', 'ClassInherit', 'Object']:
+            if self._anno:
+                return ' = '
+            else:
+                return '='
         return ' = '
 
     def generate(self):

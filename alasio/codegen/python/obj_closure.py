@@ -162,14 +162,14 @@ class Object(ClosureWithName):
         self.cls = cls
         # Items inside Object use FuncArgs context for correct line_ending=','
         # and between_kv='='
-        self.context_name = 'FuncArgs'
+        self.context_name = 'Object'
 
     def _get_prefix(self):
         """Build prefix: name: Anno = cls  or  name = cls  or just cls."""
         if self.name:
             if self._anno:
-                return f'{self.name}{self._anno} = {self.cls}'
-            return f'{self.name} = {self.cls}'
+                return f'{self.name}{self._anno}{self.between_kv}{self.cls}'
+            return f'{self.name}{self.between_kv}{self.cls}'
         return self.cls
 
 
@@ -231,7 +231,7 @@ class Literal(ClosureWithName):
         """Optional default value suffix."""
         default_val = self._get_default_value()
         if default_val is not None:
-            return f' = {default_val}'
+            return f'{self.between_kv}{default_val}'
         return ''
 
     def _get_default_value(self):
