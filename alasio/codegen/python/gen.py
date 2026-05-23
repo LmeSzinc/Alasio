@@ -77,6 +77,29 @@ class CodeGen(CodeGenBase):
         self._add_item(item)
         return item
 
+    def Repr(self, name):
+        """
+        Define a raw Python expression value (no repr wrapping).
+        The value is rendered verbatim, useful for referencing
+        variables inside Object() calls.
+
+        {name},
+
+        Example:
+            with gen.Object('dialog', 'Dialog'):
+                gen.Item('static text')
+                gen.Repr('my_var')
+            # dialog = Dialog(
+            #     'static text',
+            #     my_var,
+            # )
+        """
+        if isinstance(self.context, (List, Tuple, Set, Literal, Object)):
+            obj = Repr(self, name)
+            self.context.items.append(obj)
+        else:
+            raise CodeDefinitionError(f'Repr can only be used in List/Tuple/Set/Literal/Object')
+
     def Item(self, value):
         """
         Define an item in List/Tuple/Set/Literal

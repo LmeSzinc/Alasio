@@ -1,4 +1,5 @@
 from alasio.codegen.python.gen import CodeGen
+from alasio.codegen.python.obj_base import CodeDefinitionError
 
 
 class TestObjObject:
@@ -219,3 +220,68 @@ func(
 )
 """
         assert code == expected
+
+    # ── Repr tests ───────────────────────────────────────────────────────
+
+    def test_repr_in_object(self):
+        """Repr renders a raw expression (no quotes) inside Object."""
+        gen = CodeGen()
+        with gen.Object('dialog', 'Dialog'):
+            gen.Item('static text')
+            gen.Repr('my_var')
+            gen.Repr('obj.method()')
+        code = gen.generate_str()
+        expected = """\
+dialog = Dialog(
+    'static text',
+    my_var,
+    obj.method(),
+)
+"""
+        assert code == expected
+
+    def test_repr_vs_item(self):
+        """Repr vs Item: Item quotes strings, Repr does not."""
+        gen = CodeGen()
+        with gen.Object('cfg', 'Config'):
+            gen.Item('my_var')
+            gen.Repr('my_var')
+        code = gen.generate_str()
+        expected = """\
+cfg = Config(
+    'my_var',
+    my_var,
+)
+"""
+        assert code == expected
+
+    def test_repr_in_list(self):
+        """Repr inside a List context."""
+        gen = CodeGen()
+        with gen.List('items'):
+            gen.Item('static')
+            gen.Repr('dynamic_var')
+        code = gen.generate_str()
+        expected = """\
+items = [
+    'static',
+    dynamic_var,
+]
+"""
+        assert code == expected
+
+    def test_repr_inline_object(self):
+        """Repr with inline-wrapped Object."""
+        gen = CodeGen()
+        with gen.Object('obj', 'MyClass').wrap('inline'):
+            gen.Repr('x')
+            gen.Repr('y')
+        code = gen.generate_str()
+        assert code == "obj = MyClass(x, y)\n"
+
+    def test_repr_outside_container_raises(self):
+        """Repr outside a list/tuple/set/object context raises."""
+        import pytest
+        gen = CodeGen()
+        with pytest.raises(CodeDefinitionError, match='Repr can only be used in'):
+            gen.Repr('bad')

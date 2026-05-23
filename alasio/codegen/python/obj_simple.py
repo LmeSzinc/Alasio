@@ -119,6 +119,36 @@ class Anno(Var):
         return f'{name}{anno}'
 
 
+class Repr(CodeObject):
+    """
+    Define a raw Python expression value (no repr wrapping).
+    The value is rendered verbatim, useful for referencing
+    variables inside Object() calls.
+
+    Example:
+        with gen.Object('dialog', 'Dialog'):
+            gen.Item('static text')
+            gen.Repr('my_var')       # variable reference, not quoted
+            gen.Repr('obj.method()') # method call expression
+        # dialog = Dialog(
+        #     'static text',
+        #     my_var,
+        #     obj.method(),
+        # )
+    """
+
+    def __init__(self, gen, name):
+        super().__init__(gen)
+        self.name = name
+
+    @cached_property
+    def item_str(self):
+        return f'{self.name}{self.line_ending}'
+
+    def generate(self):
+        yield f'{self.indent_str}{self.item_str}'
+
+
 class Item(CodeObject):
     """
     Define an item in List/Tuple/Set
