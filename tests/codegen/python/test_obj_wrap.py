@@ -4,7 +4,7 @@ from alasio.codegen.python.gen import CodeGen
 class TestListWrap:
     def test_wrap_false_inline(self):
         gen = CodeGen()
-        with gen.List('items').wrap(False):
+        with gen.List('items').wrap('inline'):
             gen.Item(1)
             gen.Item(2)
             gen.Item(3)
@@ -68,9 +68,9 @@ items = [
         assert code == expected
 
     def test_wrap_true_defaults_to_120(self):
-        # wrap(True) is equivalent to wrap(120)
+        # wrap('auto') is equivalent to wrap(120)
         gen = CodeGen()
-        with gen.List('items').wrap(True):
+        with gen.List('items').wrap('auto'):
             gen.Item('short')
             gen.Item('items')
             gen.Item('fit_in_line')
@@ -80,16 +80,16 @@ items = [
 
     def test_empty_list_wrap_false(self):
         gen = CodeGen()
-        with gen.List('empty').wrap(False):
+        with gen.List('empty').wrap('inline'):
             pass
         code = gen.generate_str()
         assert code == "empty = []\n"
 
     def test_nested_list_inner_wrap_false(self):
-        # Inner list with wrap(False) stays inline inside outer always-wrap
+        # Inner list with wrap('inline') stays inline inside outer always-wrap
         gen = CodeGen()
         with gen.List('outer'):
-            with gen.List().wrap(False):
+            with gen.List().wrap('inline'):
                 gen.Item(1)
                 gen.Item(2)
         code = gen.generate_str()
@@ -128,7 +128,7 @@ items = [
 class TestDictWrap:
     def test_wrap_false_inline(self):
         gen = CodeGen()
-        with gen.Dict('items').wrap(False):
+        with gen.Dict('items').wrap('inline'):
             gen.Var('a', 1)
             gen.Var('b', 2)
         code = gen.generate_str()
@@ -164,18 +164,17 @@ items = {
 
     def test_empty_dict_wrap_false(self):
         gen = CodeGen()
-        with gen.Dict('empty').wrap(False):
+        with gen.Dict('empty').wrap('inline'):
             pass
         code = gen.generate_str()
         assert code == "empty = {}\n"
 
     def test_single_item_dict_wrap_false(self):
         gen = CodeGen()
-        with gen.Dict('single').wrap(False):
+        with gen.Dict('single').wrap('inline'):
             gen.Var('key', 42)
         code = gen.generate_str()
         assert code == "single = {'key': 42}\n"
-
 
     def test_wrap_expand(self):
         gen = CodeGen()
@@ -191,10 +190,11 @@ d = {
 """
         assert code == expected
 
+
 class TestTupleWrap:
     def test_wrap_false_inline(self):
         gen = CodeGen()
-        with gen.Tuple('items').wrap(False):
+        with gen.Tuple('items').wrap('inline'):
             gen.Item(1)
             gen.Item(2)
         code = gen.generate_str()
@@ -230,11 +230,10 @@ items = (
 
     def test_empty_tuple_wrap_false(self):
         gen = CodeGen()
-        with gen.Tuple('empty').wrap(False):
+        with gen.Tuple('empty').wrap('inline'):
             pass
         code = gen.generate_str()
         assert code == "empty = ()\n"
-
 
     def test_wrap_expand(self):
         gen = CodeGen()
@@ -249,10 +248,11 @@ t = (
 """
         assert code == expected
 
+
 class TestSetWrap:
     def test_wrap_false_inline(self):
         gen = CodeGen()
-        with gen.Set('items').wrap(False):
+        with gen.Set('items').wrap('inline'):
             gen.Item(1)
             gen.Item(2)
         code = gen.generate_str()
@@ -288,11 +288,10 @@ items = {
 
     def test_empty_set_wrap_false(self):
         gen = CodeGen()
-        with gen.Set('empty_set').wrap(False):
+        with gen.Set('empty_set').wrap('inline'):
             pass
         code = gen.generate_str()
         assert code == "empty_set = set()\n"
-
 
     def test_wrap_expand(self):
         gen = CodeGen()
@@ -307,13 +306,14 @@ s = {
 """
         assert code == expected
 
+
 class TestWrapMixedCollections:
     def test_list_of_dicts_with_wrap_false(self):
         gen = CodeGen()
-        with gen.List('data').wrap(False):
-            with gen.Dict('').wrap(False):
+        with gen.List('data').wrap('inline'):
+            with gen.Dict('').wrap('inline'):
                 gen.Var('a', 1)
-            with gen.Dict('').wrap(False):
+            with gen.Dict('').wrap('inline'):
                 gen.Var('b', 2)
         code = gen.generate_str()
         assert code == "data = [{'a': 1}, {'b': 2}]\n"
@@ -321,7 +321,7 @@ class TestWrapMixedCollections:
     def test_dict_of_lists_with_wrap_always(self):
         gen = CodeGen()
         with gen.Dict('data'):
-            with gen.List('key_a').wrap(False):
+            with gen.List('key_a').wrap('inline'):
                 gen.Item(1)
                 gen.Item(2)
         code = gen.generate_str()
@@ -333,9 +333,9 @@ data = {
         assert code == expected
 
     def test_override_default_always_with_false(self):
-        # Default 'always' should be overrideable by wrap(False)
+        # Default 'always' should be overrideable by wrap('inline')
         gen = CodeGen()
-        with gen.List('items').wrap(False):
+        with gen.List('items').wrap('inline'):
             gen.Item(1)
         code = gen.generate_str()
         assert code == "items = [1]\n"

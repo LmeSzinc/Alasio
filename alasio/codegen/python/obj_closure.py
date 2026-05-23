@@ -99,8 +99,8 @@ class ClosureWithName(ClosureObject):
             yield f'{self.indent_str}{self.closure_end}{suffix}{ending}'
             return
 
-        # wrap=False or wrap=int: use GatherItems for width-aware compact output
-        items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
+        # wrap() values: 'inline', 'auto' (True), or int: use GatherItems
+        items = GatherItems(max_width=self._wrap if self._wrap != 'inline' else False).add(self.items)
         rows = list(items.iter_multiline())
 
         if len(rows) == 1:
@@ -163,7 +163,6 @@ class Object(ClosureWithName):
         # Items inside Object use FuncArgs context for correct line_ending=','
         # and between_kv='='
         self.context_name = 'FuncArgs'
-        self._wrap = 'newline'
 
     def _get_prefix(self):
         """Build prefix: name: Anno = cls  or  name = cls  or just cls."""
@@ -206,7 +205,8 @@ class Literal(ClosureWithName):
         super().__init__(gen, name)
         self._literal_module = 'Literal'
         self.value = None
-        self._wrap = False  # Default to inline, unlike List/Dict which default to 'newline'
+        # Literal type annotations are typically inline, even in with blocks
+        self._wrap_explicit = True
 
     def set_literal(self, module):
         """

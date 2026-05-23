@@ -168,7 +168,7 @@ fruit: Literal[
 
     def test_wrap_false_inline(self):
         gen = CodeGen()
-        with gen.Literal('mode').wrap(False):
+        with gen.Literal('mode').wrap('inline'):
             gen.Item('auto')
             gen.Item('manual')
         code = gen.generate_str()

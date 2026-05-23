@@ -43,9 +43,9 @@ Button(
         assert code == expected
 
     def test_inline_wrap_false(self):
-        """All args fit on one line with wrap(False)."""
+        """All args fit on one line with wrap('inline')."""
         gen = CodeGen()
-        with gen.Object('obj', 'MyClass').wrap(False):
+        with gen.Object('obj', 'MyClass').wrap('inline'):
             gen.Item('data')
             gen.Var('count', 42)
         code = gen.generate_str()
@@ -76,7 +76,7 @@ dialog = Dialog(
         """Object inside a List context."""
         gen = CodeGen()
         with gen.List('buttons'):
-            with gen.Object('', 'Button').wrap(False):
+            with gen.Object('', 'Button').wrap('inline'):
                 gen.Item('ok')
         code = gen.generate_str()
         expected = """\

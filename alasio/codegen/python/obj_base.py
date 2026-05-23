@@ -62,23 +62,26 @@ class CodeObject:
 
         self.context_name = self.__class__.__name__
         self._indent_tab = 1
-        self._wrap: "bool | int | str" = 'newline'
+        self._wrap: "int | str" = 'inline'
+        # True when wrap() was explicitly called; __enter__ won't auto-override
+        self._wrap_explicit = False
 
-    def wrap(self, wrap: "bool | int | str" = True):
+    def wrap(self, wrap: "int | str" = 'auto'):
         """
         Wrap items in collection
-        False: no wrap
-        True | 'auto': wrap at 120 if exceeds line width, inline otherwise
         120 (int): wrap at given width
+        'inline': no wrap, all items on one line
+        'auto': wrap at 120 if exceeds line width, inline otherwise
         'newline': each item on its own line
         'expand': brackets on separate lines, items wrapped inline
-        'always': legacy alias for 'newline'
+        'always': legacy alias for 'newline' (deprecated)
         """
-        if wrap is True:
-            wrap = 120
-        elif wrap == 'auto':
-            wrap = True
-        elif wrap in ('always', 'newline'):
+        self._wrap_explicit = True
+        if wrap == 'auto':
+            wrap = True  # internal: True means auto at 120
+        elif wrap == 'inline':
+            wrap = 'inline'
+        elif wrap in ('newline', 'always'):
             wrap = 'newline'
         elif wrap == 'expand':
             wrap = 'expand'
@@ -86,6 +89,9 @@ class CodeObject:
         return self
 
     def __enter__(self):
+        # When used as a context manager, default to newline unless explicitly set
+        if not self._wrap_explicit and self._wrap == 'inline':
+            self._wrap = 'newline'
         # store indent and context
         self.indent_prev = self.gen.indent
         self.context_name_prev = self.gen.context_name
@@ -156,13 +162,12 @@ class GatherItems:
         # Normalise string aliases
         if max_width == 'auto':
             max_width = True
-        elif max_width in ('always', 'newline'):
+        elif max_width == 'inline':
+            max_width = False
+        elif max_width in ('newline', 'always'):
             max_width = 'newline'
         elif max_width == 'expand':
-            # expand: use True (120) as default width for wrapping
             max_width = True
-        elif max_width == 'newline':
-            max_width = 'newline'
         self.max_width = max_width
 
     def add(self, items: "t.Iterable[Item | Var | Anno] | Item | Var | Anno"):
@@ -184,9 +189,10 @@ class GatherItems:
         return self
 
     def get_inline(self):
-        if not self.items:
+        items = [i for i in self.items if hasattr(i, 'item_str')]
+        if not items:
             return ''
-        result = ' '.join(item.item_str for item in self.items)
+        result = ' '.join(item.item_str for item in items)
         # Remove trailing comma for inline generation;
         # multi-line output (iter_multiline with max_width) keeps per-row commas.
         if result.endswith(','):
@@ -217,10 +223,14 @@ class GatherItems:
         elif max_width == 'newline':
             max_width = 1  # force each item to its own line, used via GatherItems('newline')
         buffer = []
-        indent_str = self.items[0].indent_str
+        # Filter to items that have item_str (skip Comment, Empty, etc.)
+        gather_items = [i for i in self.items if hasattr(i, 'item_str')]
+        if not gather_items:
+            return
+        indent_str = gather_items[0].indent_str
         indent_width = len(indent_str)
         remain_width = max_width - indent_width
-        for item in self.items:
+        for item in gather_items:
             token = item.item_str
             if buffer:
                 # +1 for the space between tokens
