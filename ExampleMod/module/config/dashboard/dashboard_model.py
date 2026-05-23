@@ -8,7 +8,6 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
-
 class Oil(m.Struct, omit_defaults=True):
     Time: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
     Value: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0

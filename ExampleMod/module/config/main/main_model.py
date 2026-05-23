@@ -8,7 +8,6 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
-
 class Campaign(m.Struct, omit_defaults=True):
     Name: str = '12-4'
     Event: t.Literal['campaign_main'] = 'campaign_main'

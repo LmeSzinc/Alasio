@@ -8,7 +8,6 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
-
 class DropRecord(m.Struct, omit_defaults=True):
     SaveFolder: str = './screenshots'
     AzurStatsID: str = ''

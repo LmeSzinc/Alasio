@@ -8,7 +8,6 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
-
 class OpsiAshAssist(m.Struct, omit_defaults=True):
     Tier: e.Annotated[int, m.Meta(ge=1, le=15)] = 15
 
