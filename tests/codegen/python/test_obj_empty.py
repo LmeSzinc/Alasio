@@ -60,7 +60,7 @@ class MyClass:
             gen.Pass()
 
         code = gen.generate_str()
-        # Should have only 1 line, not 2
+        # PEP8: 2 blank lines between imports and top-level class
         expected = """\
 import os
 

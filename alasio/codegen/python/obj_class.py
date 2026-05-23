@@ -22,8 +22,10 @@ class AutoBlankLineMixin(CodeObject):
 
         # PEP8: 2 blank lines between top-level definitions
         if indent == 0:
-            # 2 lines before Class/Def
+            # 2 lines before Class/Def; 1 line if prev is a Comment (associated with the definition)
             if isinstance(curr, (Class, Def)):
+                if isinstance(prev, (Comment, MultilineComment)):
+                    return 1
                 return 2
             # 2 lines after Class/Def
             if isinstance(prev, (Class, Def)) and not isinstance(curr, (Comment, MultilineComment)):

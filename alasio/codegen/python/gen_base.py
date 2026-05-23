@@ -45,7 +45,6 @@ class CodeGenBase(AutoBlankLineMixin, ClosureObject):
                 continue
             else:
                 # Code started
-                header_end = i
                 break
 
         # Capture all header items
@@ -119,6 +118,23 @@ class CodeGenBase(AutoBlankLineMixin, ClosureObject):
             # 2 blank lines between the import block and post-import comments
             new_items.append(Empty(self, 2))
             new_items.extend(post_import_comments)
+
+        # Strip leading Empty items from remaining so auto blank lines can work.
+        while remaining_items and isinstance(remaining_items[0], Empty):
+            remaining_items.pop(0)
+
+        # Detect Comment(s) + [Empty*] + Class/Def at the start of remaining:
+        # the 2 PEP8 blanks go before the first comment (associated with the definition),
+        # and manual Empty items between comment and definition are preserved.
+        if remaining_items and isinstance(remaining_items[0], (Comment, MultilineComment)):
+            for j in range(1, len(remaining_items)):
+                if isinstance(remaining_items[j], (Comment, MultilineComment, Empty)):
+                    continue
+                if isinstance(remaining_items[j], (Class, Def)):
+                    new_items.append(Empty(self, 2))
+                    while remaining_items and isinstance(remaining_items[0], (Comment, MultilineComment)):
+                        new_items.append(remaining_items.pop(0))
+                break
 
         # Auto blank lines from _get_auto_blank_lines will handle
         # the spacing between imports and subsequent code.
