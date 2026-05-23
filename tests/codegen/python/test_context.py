@@ -190,3 +190,139 @@ back = 3
         code = gen.generate_str()
         expected = "x = 1\n"
         assert code == expected
+
+
+class TestCustomTab:
+    """CustomTab context manager: prefix/suffix/line_ending on gen.tab()."""
+
+    def test_custom_tab_basic(self):
+        """CustomTab emits prefix, indented items with line_ending, and suffix."""
+        gen = CodeGen()
+        with gen.tab(prefix='lambda: (', suffix=')', line_ending=','):
+            gen.Item('x')
+            gen.Item('y')
+        code = gen.generate_str()
+        expected = """\
+lambda: (
+    'x',
+    'y',
+)
+"""
+        assert code == expected
+
+    def test_custom_tab_custom_line_ending(self):
+        """CustomTab with non-comma line_ending."""
+        gen = CodeGen()
+        with gen.tab(prefix='begin', suffix='end', line_ending=';'):
+            gen.Repr('a')
+            gen.Repr('b')
+        code = gen.generate_str()
+        expected = """\
+begin
+    a;
+    b;
+end
+"""
+        assert code == expected
+
+    def test_custom_tab_with_var(self):
+        """CustomTab with Var items."""
+        gen = CodeGen()
+        with gen.tab(prefix='args:', suffix='', line_ending=','):
+            gen.Var('x', 1)
+            gen.Var('y', 2)
+        code = gen.generate_str()
+        expected = """\
+args:
+    x = 1,
+    y = 2,
+"""
+        assert code == expected
+
+    def test_custom_tab_empty(self):
+        """Empty CustomTab renders prefix and suffix only."""
+        gen = CodeGen()
+        with gen.tab(prefix='try:', suffix='except:', line_ending=''):
+            pass
+        code = gen.generate_str()
+        expected = """\
+try:
+except:
+"""
+        assert code == expected
+
+    def test_custom_tab_no_suffix(self):
+        """CustomTab with prefix only, no suffix."""
+        gen = CodeGen()
+        with gen.tab(prefix='# region', suffix='', line_ending=''):
+            gen.Var('x', 1)
+        code = gen.generate_str()
+        expected = """\
+# region
+    x = 1
+"""
+        assert code == expected
+
+    def test_custom_tab_custom_indent(self):
+        """CustomTab with indent > 1."""
+        gen = CodeGen()
+        with gen.tab(indent=2, prefix='start', suffix='end', line_ending=','):
+            gen.Item('deep')
+        code = gen.generate_str()
+        expected = """\
+start
+        'deep',
+end
+"""
+        assert code == expected
+
+    def test_custom_tab_inside_list(self):
+        """CustomTab nested inside another container."""
+        gen = CodeGen()
+        with gen.List('items'):
+            gen.Item('first')
+            with gen.tab(prefix='# extra', suffix='# end', line_ending=','):
+                gen.Repr('dynamic')
+        code = gen.generate_str()
+        expected = """\
+items = [
+    'first',
+    # extra
+        dynamic,
+    # end
+]
+"""
+        assert code == expected
+
+    def test_custom_tab_inside_object(self):
+        """CustomTab nested inside Object."""
+        gen = CodeGen()
+        with gen.Object('dialog', 'Dialog'):
+            gen.Item('hello')
+            with gen.tab(prefix='# computed', suffix='# done', line_ending=','):
+                gen.Repr('user_var')
+        code = gen.generate_str()
+        expected = """\
+dialog = Dialog(
+    'hello',
+    # computed
+        user_var,
+    # done
+)
+"""
+        assert code == expected
+
+    def test_plain_tab_still_works(self):
+        """Backward compat: tab() with no args still indents without capturing."""
+        gen = CodeGen()
+        gen.Var('a', 1)
+        with gen.tab():
+            gen.Var('x', 1)
+        gen.Var('b', 2)
+        code = gen.generate_str()
+        expected = """\
+a = 1
+    x = 1
+b = 2
+"""
+        assert code == expected

@@ -113,6 +113,68 @@ class ClosureWithName(ClosureObject):
             yield f'{self.indent_str}{self.closure_end}{suffix}{ending}'
 
 
+class CustomTab(ClosureObject):
+    """
+    Context manager that generates a prefix line, indented items, and suffix line.
+    Items inside the block use the specified line_ending.
+
+    When no prefix/suffix/line_ending is given, passthrough-mode is used:
+    items flow into the parent context (backward compatible with the old ApplyTab).
+
+    Examples:
+        with gen.tab():                     # simple indent (passthrough)
+            gen.Var('x', 1)
+
+        with gen.tab(prefix='lambda: (', suffix=')', line_ending=','):
+            gen.Item('x')
+            gen.Item('y')
+        # lambda: (
+        #     'x',
+        #     'y',
+        # )
+    """
+
+    def __init__(self, gen, indent, prefix, suffix, line_ending):
+        super().__init__(gen)
+        self._indent_tab = indent
+        self._custom_prefix = prefix
+        self._custom_suffix = suffix
+        self._custom_line_ending = line_ending
+        self.context_name = 'CustomTab'
+        # Passthrough mode: no prefix/suffix/line_ending → items go to parent context
+        self._passthrough = not (prefix or suffix or line_ending)
+
+    def __enter__(self):
+        self.indent_prev = self.gen.indent
+        self.gen.indent = self.indent_prev + self._indent_tab
+        if not self._passthrough:
+            # Capture items
+            self.context_name_prev = self.gen.context_name
+            self.context_prev = self.gen.context
+            self.gen.context = self
+            self.gen.context_name = self.context_name
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.gen.indent = self.indent_prev
+        if not self._passthrough:
+            self.gen.context = self.context_prev
+            self.gen.context_name = self.context_name_prev
+
+    @cached_property
+    def line_ending(self):
+        return self._custom_line_ending or ','
+
+    def generate(self):
+        if self._passthrough:
+            return
+        if self._custom_prefix:
+            yield f'{self.indent_str}{self._custom_prefix}'
+        yield from self.generate_items()
+        if self._custom_suffix:
+            yield f'{self.indent_str}{self._custom_suffix}'
+
+
 class List(ClosureWithName):
     closure_start = '['
     closure_end = ']'

@@ -11,28 +11,6 @@ class CodeDefinitionError(Exception):
     pass
 
 
-class ApplyTab:
-    """
-    Context manager that temporarily adds indentation without changing context.
-    Items inside the with block are indented by `tab` levels.
-    """
-
-    def __init__(self, gen: "CodeGenBase", tab: int = 1):
-        self.gen = gen
-        self._tab = tab
-
-    def __enter__(self):
-        # store indent
-        self.indent_prev = self.gen.indent
-        # enter indent
-        self.gen.indent = self.indent_prev + self._tab
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        # restore indent
-        self.gen.indent = self.indent_prev
-
-
 class ApplyContextName:
     def __init__(self, gen: "CodeGenBase", context_name: str):
         self.gen = gen
@@ -59,6 +37,12 @@ class CodeObject:
         self._indent = gen.indent
         self._context_name = gen.context_name
         self._anno = ''
+        # Capture custom line_ending from enclosing context (e.g. CustomTab)
+        ctx = gen.context
+        if ctx is not self:
+            self._custom_line_ending = getattr(ctx, '_custom_line_ending', '')
+        else:
+            self._custom_line_ending = ''
 
         self.context_name = self.__class__.__name__
         self._indent_tab = 1
@@ -134,6 +118,9 @@ class CodeObject:
 
     @cached_property
     def line_ending(self) -> str:
+        # Use custom line_ending captured from enclosing context (e.g. CustomTab)
+        if self._custom_line_ending:
+            return self._custom_line_ending
         if self._context_name in ['Dict', 'List', 'Tuple', 'Set', 'Literal', 'ClassInherit', 'FuncArgs', 'Object']:
             return ','
         return ''

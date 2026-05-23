@@ -1,5 +1,5 @@
 from alasio.codegen.python.gen_base import CodeGenBase
-from alasio.codegen.python.obj_base import ApplyTab, CodeDefinitionError
+from alasio.codegen.python.obj_base import CodeDefinitionError
 from alasio.codegen.python.obj_class import *
 from alasio.codegen.python.obj_closure import *
 from alasio.codegen.python.obj_if import *
@@ -94,7 +94,7 @@ class CodeGen(CodeGenBase):
             #     my_var,
             # )
         """
-        if isinstance(self.context, (List, Tuple, Set, Literal, Object)):
+        if isinstance(self.context, (List, Tuple, Set, Literal, Object, CustomTab)):
             obj = Repr(self, name)
             self.context.items.append(obj)
         else:
@@ -105,7 +105,7 @@ class CodeGen(CodeGenBase):
         Define an item in List/Tuple/Set/Literal
         {value},
         """
-        if isinstance(self.context, (List, Tuple, Set, Literal, Object)):
+        if isinstance(self.context, (List, Tuple, Set, Literal, Object, CustomTab)):
             obj = Item(self, value)
             self.context.items.append(obj)
         else:
@@ -365,9 +365,11 @@ class CodeGen(CodeGenBase):
                 return True
         return False
 
-    def tab(self, tab: int = 1):
+    def tab(self, indent: int = 1, prefix: str = '', suffix: str = '', line_ending: str = ''):
         """
         Context manager that adds indentation to content inside the block.
+        When prefix/suffix/line_ending are provided, it creates a CustomTab that
+        emits prefix/suffix lines and applies line_ending to items inside.
 
         Examples:
             with gen.tab():
@@ -377,5 +379,16 @@ class CodeGen(CodeGenBase):
             with gen.tab(2):
                 gen.Var('x', 1)
             #         x = 1
+
+            with gen.tab(prefix='lambda: (', suffix=')', line_ending=','):
+                gen.Item('x')
+                gen.Item('y')
+            # lambda: (
+            #     'x',
+            #     'y',
+            # )
         """
-        return ApplyTab(self, tab)
+        item = CustomTab(self, indent, prefix, suffix, line_ending)
+        if not item._passthrough:
+            self._add_item(item)
+        return item
