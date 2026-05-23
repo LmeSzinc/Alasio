@@ -4,10 +4,10 @@ from typing import Any, Literal, Union
 import msgspec
 from msgspec import Struct, UNSET, UnsetType
 
+from alasio.codegen.python import ReprWrapper
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.parse_range import parse_range
 from alasio.ext.backport import to_literal
-from alasio.ext.codegen import ReprWrapper
 
 """
 The following dicts require manual maintain
