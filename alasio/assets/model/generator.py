@@ -5,10 +5,10 @@ from alasio.base.op import Area
 from alasio.config.entry.const import DICT_MOD_ENTRY, ModEntryInfo
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.codegen import CodeGen, ReprWrapper
+from alasio.codegen.python import CodeGen, ReprWrapper
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_remove
-from alasio.ext.path.calc import to_posix, uppath
+from alasio.ext.path.calc import to_posix
 from alasio.logger import logger
 
 
@@ -96,6 +96,7 @@ class AssetFolderBase:
         self.gitadd = gitadd
         self.root = PathStr.new(entry.root)
         self.folder = self.root / path
+        print(entry)
         self.asset_file = self.folder / 'asset.py'
         self.resource_file = self.folder / 'resource.json'
 
@@ -263,7 +264,7 @@ class AssetGenerator(AssetFolderBase):
         return out
 
     def _template_codegen(self, gen: CodeGen, template: MetaTemplate):
-        with gen.Object('Template'):
+        with gen.Object(cls='Template'):
             # lang='en', frame=2, area=(100, 100, 200, 200), color=(234, 245, 248),
             attrs = []
             if template.lang:
@@ -273,7 +274,7 @@ class AssetGenerator(AssetFolderBase):
             attrs.append(f'area={repr(template.area)}')
             attrs.append(f'color={repr(template.color)}')
             row = ', '.join(attrs)
-            gen.add(row)
+            gen.Raw(row)
 
             # additional properties
             # button=(200, 200, 300, 300),
@@ -299,9 +300,7 @@ class AssetGenerator(AssetFolderBase):
             return
 
         gen = CodeGen()
-        gen.RawImport("""
-        from alasio.assets.template import Asset, Template
-        """)
+        gen.FromImport('alasio.assets.template').Import('Asset, Template')
         gen.CommentCodeGen('dev_tools.button_extract')
         gen.Var(name='_path_', value=self.path)
         gen.Empty()
@@ -311,7 +310,7 @@ class AssetGenerator(AssetFolderBase):
                 for line in asset.doc.split('\n'):
                     gen.Comment(line)
             with gen.Object(name=asset.name, cls='Asset'):
-                gen.add(f'path=_path_, name={repr(asset.name)}')
+                gen.Item(ReprWrapper(f'path=_path_, name={repr(asset.name)}'))
                 # additional properties
                 # button=(200, 200, 300, 300),
                 if asset.search is not None:
@@ -346,7 +345,8 @@ class AssetGenerator(AssetFolderBase):
 
 
 if __name__ == '__main__':
+    logger.mute(fd=True)
     _entry = DICT_MOD_ENTRY['example_mod'].copy()
-    _entry.root = env.PROJECT_ROOT.joinpath('ExampleMod')
+    _entry.root = env.ALASIO_ROOT.joinpath('ExampleMod')
     self = AssetGenerator(_entry, 'assets/combat')
     self.asset_codegen()
