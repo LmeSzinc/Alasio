@@ -1,9 +1,9 @@
 from alasio.assets_dev.extract import AssetsExtractor
 from alasio.assets_dev.parse import AssetModule
+from alasio.codegen.python import CodeGen
 from alasio.config.const import Const
 from alasio.ext.backport import removeprefix
 from alasio.ext.backport.suppress import suppress_keyboard_interrupt
-from alasio.ext.codegen import CodeGen
 from alasio.ext.path.calc import subpath_to, uppath
 
 
@@ -34,10 +34,9 @@ class AssetsExtractorSRC(AssetsExtractor):
             module (AssetModule):
         """
         # header
-        gen.RawImport("""
-        from module.base.button import Button, ButtonWrapper
-        """)
+        gen.FromImport('module.base.button').Import('Button, ButtonWrapper')
         gen.CommentCodeGen('dev_tools.button_extract')
+        gen.Empty()
 
         # assets
         for asset in module:
@@ -59,5 +58,4 @@ class AssetsExtractorSRC(AssetsExtractor):
 if __name__ == '__main__':
     with suppress_keyboard_interrupt():
         self = AssetsExtractorSRC(r'E:/ProgramData/pycharm/StarRailCopilot')
-        while 1:
-            self.watch_files()
+        self.generate()

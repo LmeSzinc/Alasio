@@ -5,12 +5,11 @@ from alasio.base.image.imfile import image_fixup
 from alasio.config.const import Const
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.codegen import CodeGen
+from alasio.codegen.python import CodeGen
 from alasio.ext.file.watchdog import PathEvent, Watchdog
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_remove
 from alasio.ext.path.calc import get_rootstem, get_suffix, subpath_to, uppath
-from alasio.ext.path.iter import iter_files
 from alasio.git.stage.gitadd import GitAdd
 from alasio.logger import logger
 
@@ -166,9 +165,7 @@ class AssetsExtractor:
             module (AssetModule):
         """
         # header
-        gen.RawImport("""
-        from module.base.button import Button, ButtonWrapper
-        """)
+        gen.FromImport('module.base.button').Import('Button, ButtonWrapper')
         gen.CommentCodeGen('dev_tools.button_extract')
 
         # assets
@@ -251,6 +248,8 @@ class AssetsExtractor:
             if write:
                 logger.info(f'Write file {file}')
         # iter input modules, to record empty asset folders
+        if modules is None:
+            modules = list(self.assets.dict_module)
         for module in modules:
             file = self.get_output_file(module)
             if file not in keep:
