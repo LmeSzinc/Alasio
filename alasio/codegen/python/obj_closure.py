@@ -44,6 +44,25 @@ class ClosureWithName(ClosureObject):
             name = repr(name)
         self.name = name
 
+    def _get_prefix(self):
+        """
+        Build the prefix before closure brackets.
+        For name=obj, anno=': Type' this returns 'obj: Type = '.
+        Override in subclasses (e.g. Object) for a different prefix format.
+        """
+        if self.name:
+            return f'{self.name}{self._anno}{self.between_kv}'
+        return ''
+
+    def _get_suffix(self):
+        """
+        Optional suffix appended after closure_end.
+        Override in subclasses (e.g. Literal with default value) for extra content.
+        Returns:
+            str: Empty string by default.
+        """
+        return ''
+
     @cached_property
     def item_str(self):
         """Inline representation, used when nested in another collection."""
@@ -55,10 +74,11 @@ class ClosureWithName(ClosureObject):
 
     def generate(self):
         ending = self.line_ending
-        prefix = f'{self.name}{self._anno}{self.between_kv}' if self.name else ''
+        suffix = self._get_suffix()
+        prefix = self._get_prefix()
 
         if not self.items:
-            yield f'{self.indent_str}{prefix}{self.closure_empty}{ending}'
+            yield f'{self.indent_str}{prefix}{self.closure_empty}{suffix}{ending}'
             return
 
         if self._wrap == 'newline':
@@ -66,32 +86,31 @@ class ClosureWithName(ClosureObject):
             yield f'{self.indent_str}{prefix}{self.closure_start}'
             for item in self.items:
                 yield from item.generate()
-            yield f'{self.indent_str}{self.closure_end}{ending}'
+            yield f'{self.indent_str}{self.closure_end}{suffix}{ending}'
             return
 
+        # expand: brackets on separate lines, items wrapped inline
         if self._wrap == 'expand':
-            # Brackets on separate lines, items wrapped inline
-            yield f'{self.indent_str}{prefix}{self.closure_start}'
             items = GatherItems(max_width=True).add(self.items)
-            for row in items.iter_multiline():
+            rows = list(items.iter_multiline())
+            yield f'{self.indent_str}{prefix}{self.closure_start}'
+            for row in rows:
                 yield f'{self.indent_str}    {row}'
-            yield f'{self.indent_str}{self.closure_end}{ending}'
+            yield f'{self.indent_str}{self.closure_end}{suffix}{ending}'
             return
 
         # wrap=False or wrap=int: use GatherItems for width-aware compact output
         items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
         rows = list(items.iter_multiline())
-        if len(rows) == 1:
-            # Strip trailing comma in inline single-row output
-            row = rows[0].rstrip(',')
-            yield f'{self.indent_str}{prefix}{self.closure_start}{row}{self.closure_end}{ending}'
-            return
 
-        # Multi row
-        yield f'{self.indent_str}{prefix}{self.closure_start}'
-        for row in rows:
-            yield f'{self.indent_str}    {row}'
-        yield f'{self.indent_str}{self.closure_end}{ending}'
+        if len(rows) == 1:
+            row = rows[0].rstrip(',')
+            yield f'{self.indent_str}{prefix}{self.closure_start}{row}{self.closure_end}{suffix}{ending}'
+        else:
+            yield f'{self.indent_str}{prefix}{self.closure_start}'
+            for row in rows:
+                yield f'{self.indent_str}    {row}'
+            yield f'{self.indent_str}{self.closure_end}{suffix}{ending}'
 
 
 class List(ClosureWithName):
@@ -118,6 +137,43 @@ class Set(ClosureWithName):
     closure_empty = 'set()'
 
 
+class Object(ClosureWithName):
+    """
+    Define an object instantiation, e.g. Button('text', key=value).
+
+    Items are function arguments (positional via Item, keyword via Var).
+
+    Examples:
+        with gen.Object('button', 'Button'):
+            gen.Item('Click me')
+            gen.Var('timeout', 10)
+        # button = Button(
+        #     'Click me',
+        #     timeout=10,
+        # )
+    """
+
+    closure_start = '('
+    closure_end = ')'
+    closure_empty = '()'
+
+    def __init__(self, gen, name, cls):
+        super().__init__(gen, name)
+        self.cls = cls
+        # Items inside Object use FuncArgs context for correct line_ending=','
+        # and between_kv='='
+        self.context_name = 'FuncArgs'
+        self._wrap = 'newline'
+
+    def _get_prefix(self):
+        """Build prefix: name: Anno = cls  or  name = cls  or just cls."""
+        if self.name:
+            if self._anno:
+                return f'{self.name}{self._anno} = {self.cls}'
+            return f'{self.name} = {self.cls}'
+        return self.cls
+
+
 class Literal(ClosureWithName):
     """
     Define a variable with a Literal type annotation.
@@ -142,6 +198,10 @@ class Literal(ClosureWithName):
         # mode: Literal['a', 'b']
     """
 
+    closure_start = '['
+    closure_end = ']'
+    closure_empty = '[]'
+
     def __init__(self, gen, name):
         super().__init__(gen, name)
         self._literal_module = 'Literal'
@@ -160,6 +220,19 @@ class Literal(ClosureWithName):
         """
         self._literal_module = module
         return self
+
+    def _get_prefix(self):
+        """Literal prefix: name: module  or just module."""
+        if self.name:
+            return f'{self.name}: {self._literal_module}'
+        return self._literal_module
+
+    def _get_suffix(self):
+        """Optional default value suffix."""
+        default_val = self._get_default_value()
+        if default_val is not None:
+            return f' = {default_val}'
+        return ''
 
     def _get_default_value(self):
         """Return the explicit default value, or None."""
@@ -188,49 +261,3 @@ class Literal(ClosureWithName):
         if default_val is not None:
             value += f' = {default_val}'
         return f'{value}{ending}'
-
-    def generate(self):
-        ending = self.line_ending
-
-        if self.name:
-            prefix = f'{self.name}: {self._literal_module}'
-        else:
-            prefix = self._literal_module
-
-        suffix = ''
-        default_val = self._get_default_value()
-        if default_val is not None:
-            suffix = f' = {default_val}'
-
-        if not self.items:
-            yield f'{self.indent_str}{prefix}[]{suffix}{ending}'
-            return
-
-        if self._wrap == 'newline':
-            # Each item on its own line
-            yield f'{self.indent_str}{prefix}['
-            for item in self.items:
-                yield from item.generate()
-            yield f'{self.indent_str}]{suffix}{ending}'
-            return
-
-        if self._wrap == 'expand':
-            # Brackets on separate lines, items wrapped inline
-            yield f'{self.indent_str}{prefix}['
-            items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
-            rows = list(items.iter_multiline())
-            for row in rows:
-                yield f'{self.indent_str}    {row}'
-            yield f'{self.indent_str}]{suffix}{ending}'
-            return
-
-        items = GatherItems(max_width=self._wrap if self._wrap is not False else False).add(self.items)
-        rows = list(items.iter_multiline())
-        if len(rows) == 1:
-            yield f'{self.indent_str}{prefix}[{rows[0].rstrip(",")}]{suffix}{ending}'
-            return
-
-        yield f'{self.indent_str}{prefix}['
-        for row in rows:
-            yield f'{self.indent_str}    {row}'
-        yield f'{self.indent_str}]{suffix}{ending}'

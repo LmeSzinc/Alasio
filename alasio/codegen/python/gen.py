@@ -82,11 +82,32 @@ class CodeGen(CodeGenBase):
         Define an item in List/Tuple/Set/Literal
         {value},
         """
-        if isinstance(self.context, (List, Tuple, Set, Literal)):
+        if isinstance(self.context, (List, Tuple, Set, Literal, Object)):
             obj = Item(self, value)
             self.context.items.append(obj)
         else:
-            raise CodeDefinitionError(f'Item can only be used in List/Tuple/Set/Literal')
+            raise CodeDefinitionError(f'Item can only be used in List/Tuple/Set/Literal/Object')
+
+    def Object(self, name: str = '', cls: str = ''):
+        """
+        Define an object instantiation.
+        {name} = {cls}({args})
+        {name}: {anno} = {cls}({args})
+
+        Items are function arguments (positional via Item, keyword via Var).
+
+        Examples:
+            with gen.Object('button', 'Button'):
+                gen.Item('Click me')
+                gen.Var('timeout', 10)
+            # button = Button(
+            #     'Click me',
+            #     timeout=10,
+            # )
+        """
+        item = Object(self, name, cls)
+        self._add_item(item)
+        return item
 
     def Dict(self, name):
         """
