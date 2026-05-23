@@ -1,4 +1,4 @@
-from alasio.codegen.python.obj_base import ApplyContextName
+from alasio.codegen.python.obj_base import ApplyContextName, ReprWrapper
 from alasio.codegen.python.gen import CodeGen
 
 
@@ -214,8 +214,8 @@ lambda: (
         """CustomTab with non-comma line_ending."""
         gen = CodeGen()
         with gen.tab(prefix='begin', suffix='end', line_ending=';'):
-            gen.Repr('a')
-            gen.Repr('b')
+            gen.Item(ReprWrapper('a'))
+            gen.Item(ReprWrapper('b'))
         code = gen.generate_str()
         expected = """\
 begin
@@ -282,7 +282,7 @@ end
         with gen.List('items'):
             gen.Item('first')
             with gen.tab(prefix='# extra', suffix='# end', line_ending=','):
-                gen.Repr('dynamic')
+                gen.Item(ReprWrapper('dynamic'))
         code = gen.generate_str()
         expected = """\
 items = [
@@ -300,7 +300,7 @@ items = [
         with gen.Object('dialog', 'Dialog'):
             gen.Item('hello')
             with gen.tab(prefix='# computed', suffix='# done', line_ending=','):
-                gen.Repr('user_var')
+                gen.Item(ReprWrapper('user_var'))
         code = gen.generate_str()
         expected = """\
 dialog = Dialog(

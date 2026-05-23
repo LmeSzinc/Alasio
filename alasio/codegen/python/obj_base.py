@@ -11,6 +11,30 @@ class CodeDefinitionError(Exception):
     pass
 
 
+class ReprWrapper:
+    """
+    Wrap a string so that ``repr(ReprWrapper(value))`` returns *value* verbatim
+    instead of a quoted string.
+
+    Use this to inject bare variable/expression references into ``Item``,
+    ``Var``, or any other code-gen call that calls ``repr()`` on its arguments.
+
+    Examples::
+
+        # Before:  gen.Item('my_var')   →  'my_var',
+        # After:
+        gen.Item(ReprWrapper('my_var'))  →  my_var,
+
+        gen.Var('x', ReprWrapper('some_ref'))  →  x=some_ref,
+    """
+
+    def __init__(self, value: str):
+        self.value = value
+
+    def __repr__(self):
+        return self.value
+
+
 class ApplyContextName:
     def __init__(self, gen: "CodeGenBase", context_name: str):
         self.gen = gen

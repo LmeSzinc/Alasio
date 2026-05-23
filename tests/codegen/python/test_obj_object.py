@@ -1,5 +1,5 @@
 from alasio.codegen.python.gen import CodeGen
-from alasio.codegen.python.obj_base import CodeDefinitionError
+from alasio.codegen.python.obj_base import ReprWrapper
 
 
 class TestObjObject:
@@ -221,15 +221,15 @@ func(
 """
         assert code == expected
 
-    # ── Repr tests ───────────────────────────────────────────────────────
+    # ── ReprWrapper tests ────────────────────────────────────────────────
 
-    def test_repr_in_object(self):
-        """Repr renders a raw expression (no quotes) inside Object."""
+    def test_reprwrapper_in_object(self):
+        """Item(ReprWrapper) renders a bare expression (no quotes) inside Object."""
         gen = CodeGen()
         with gen.Object('dialog', 'Dialog'):
             gen.Item('static text')
-            gen.Repr('my_var')
-            gen.Repr('obj.method()')
+            gen.Item(ReprWrapper('my_var'))
+            gen.Item(ReprWrapper('obj.method()'))
         code = gen.generate_str()
         expected = """\
 dialog = Dialog(
@@ -240,12 +240,12 @@ dialog = Dialog(
 """
         assert code == expected
 
-    def test_repr_vs_item(self):
-        """Repr vs Item: Item quotes strings, Repr does not."""
+    def test_reprwrapper_vs_item(self):
+        """Item+ReprWrapper vs plain Item."""
         gen = CodeGen()
         with gen.Object('cfg', 'Config'):
             gen.Item('my_var')
-            gen.Repr('my_var')
+            gen.Item(ReprWrapper('my_var'))
         code = gen.generate_str()
         expected = """\
 cfg = Config(
@@ -255,12 +255,12 @@ cfg = Config(
 """
         assert code == expected
 
-    def test_repr_in_list(self):
-        """Repr inside a List context."""
+    def test_reprwrapper_in_list(self):
+        """ReprWrapper inside a List context."""
         gen = CodeGen()
         with gen.List('items'):
             gen.Item('static')
-            gen.Repr('dynamic_var')
+            gen.Item(ReprWrapper('dynamic_var'))
         code = gen.generate_str()
         expected = """\
 items = [
@@ -270,18 +270,41 @@ items = [
 """
         assert code == expected
 
-    def test_repr_inline_object(self):
-        """Repr with inline-wrapped Object."""
+    def test_reprwrapper_inline_object(self):
+        """ReprWrapper with inline-wrapped Object."""
         gen = CodeGen()
         with gen.Object('obj', 'MyClass').wrap('inline'):
-            gen.Repr('x')
-            gen.Repr('y')
+            gen.Item(ReprWrapper('x'))
+            gen.Item(ReprWrapper('y'))
         code = gen.generate_str()
         assert code == "obj = MyClass(x, y)\n"
 
-    def test_repr_outside_container_raises(self):
-        """Repr outside a list/tuple/set/object context raises."""
-        import pytest
+    def test_reprwrapper_in_var(self):
+        """ReprWrapper as a Var value."""
         gen = CodeGen()
-        with pytest.raises(CodeDefinitionError, match='Repr can only be used in'):
-            gen.Repr('bad')
+        with gen.Object('cfg', 'Config'):
+            gen.Var('name', ReprWrapper('SOME_CONST'))
+            gen.Var('count', 42)
+        code = gen.generate_str()
+        expected = """\
+cfg = Config(
+    name=SOME_CONST,
+    count=42,
+)
+"""
+        assert code == expected
+
+    def test_reprwrapper_in_custom_tab(self):
+        """ReprWrapper inside a CustomTab."""
+        gen = CodeGen()
+        with gen.tab(prefix='lambda: (', suffix=')', line_ending=','):
+            gen.Item('x')
+            gen.Item(ReprWrapper('y'))
+        code = gen.generate_str()
+        expected = """\
+lambda: (
+    'x',
+    y,
+)
+"""
+        assert code == expected
