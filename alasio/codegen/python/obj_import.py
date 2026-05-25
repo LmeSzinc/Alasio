@@ -1,3 +1,4 @@
+from alasio.codegen.python.obj_base import GatherItems
 from alasio.codegen.python.obj_class import AutoBlankLineMixin, ClosureObject
 from alasio.ext.cache import cached_property
 
@@ -102,6 +103,10 @@ class FromImport(ClosureObject, AutoBlankLineMixin):
     from {module} import {items}
     """
 
+    closure_start = '('
+    closure_end = ')'
+    closure_empty = ''
+
     def __init__(self, gen, module):
         super().__init__(gen)
         self.module = module
@@ -110,6 +115,13 @@ class FromImport(ClosureObject, AutoBlankLineMixin):
     def __enter__(self):
         self._is_with = True
         return super().__enter__()
+
+    def _get_prefix(self):
+        """
+        Build the prefix before closure brackets.
+        Returns 'from {module} import '.
+        """
+        return f'from {self.module} import '
 
     @cached_property
     def module_type(self):
@@ -135,19 +147,32 @@ class FromImport(ClosureObject, AutoBlankLineMixin):
         # Sort items by name
         items.sort(key=lambda x: x.module)
 
+        # Determine wrap mode
+        wrap = self._wrap
+        prefix = self._get_prefix()
+
+        # auto mode: decide inline vs newline based on total line length
+        if wrap == 'auto':
+            inline_str = ', '.join(item.item_str for item in items)
+            total_len = len(self.indent_str) + len(prefix) + len(inline_str)
+            if total_len <= GatherItems.DEFAULT_WIDTH:
+                wrap = 'inline'
+            else:
+                wrap = 'newline'
+
+        if wrap == 'inline':
+            items_str = ', '.join(item.item_str for item in items)
+            yield f'{self.indent_str}{prefix}{items_str}'
+            return
+
+        # newline: parens with each item on its own line (default for context manager)
         if len(items) == 1:
             # from module import item
-            yield f'{self.indent_str}from {self.module} import {items[0].item_str}'
+            yield f'{self.indent_str}{prefix}{items[0].item_str}'
         else:
-            # from module import (
-            yield f'{self.indent_str}from {self.module} import ('
-            #     item1,
-            #     item2,
+            yield f'{self.indent_str}{prefix}{self.closure_start}'
             with self.apply_context_name('List'):
                 for item in items:
-                    # Items already have _is_from_item=True, but we need to ensure correct indent
                     item._indent = self.gen.indent + self._indent_tab
-                    # In multiline from-import, we need commas
                     yield f'{item.indent_str}{item.item_str},'
-            # )
-            yield f'{self.indent_str})'
+            yield f'{self.indent_str}{self.closure_end}'

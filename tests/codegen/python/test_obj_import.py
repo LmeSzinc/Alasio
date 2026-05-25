@@ -102,3 +102,81 @@ from typing import (
 )
 """
         assert gen.generate_str() == expected
+
+
+class TestFromImportWrap:
+    """Tests for FromImport.wrap() behavior."""
+
+    def test_from_import_wrap_inline(self):
+        """FromImport.wrap('inline') renders multiple items inline."""
+        gen = CodeGen()
+        with gen.FromImport('typing').wrap('inline'):
+            gen.Import('List')
+            gen.Import('Dict')
+        code = gen.generate_str()
+        expected = """\
+from typing import Dict, List
+"""
+        assert code == expected
+
+    def test_from_import_wrap_auto_short(self):
+        """FromImport.wrap() with short items stays inline (auto)."""
+        gen = CodeGen()
+        with gen.FromImport('typing').wrap():
+            gen.Import('List')
+            gen.Import('Dict')
+        code = gen.generate_str()
+        # "from typing import Dict, List" is short enough (<120) -> inline
+        expected = """\
+from typing import Dict, List
+"""
+        assert code == expected
+
+    def test_from_import_wrap_auto_long(self):
+        """FromImport.wrap() with long items uses newline (auto)."""
+        gen = CodeGen()
+        long_name1 = "x" * 55
+        long_name2 = "y" * 55
+        with gen.FromImport('typing').wrap():
+            gen.Import(long_name1)
+            gen.Import(long_name2)
+        code = gen.generate_str()
+        # "from typing import xxx...xxx, yyy...yyy" > 120 chars -> newline
+        expected = f"""\
+from typing import (
+    {long_name1},
+    {long_name2},
+)
+"""
+        assert code == expected
+
+    def test_from_import_wrap_default_newline(self):
+        """FromImport without .wrap() defaults to newline for multiple items."""
+        gen = CodeGen()
+        with gen.FromImport('typing'):
+            gen.Import('List')
+            gen.Import('Dict')
+        code = gen.generate_str()
+        expected = """\
+from typing import (
+    Dict,
+    List,
+)
+"""
+        assert code == expected
+
+    def test_from_import_wrap_inline_single_item(self):
+        """FromImport.wrap('inline') with single item."""
+        gen = CodeGen()
+        with gen.FromImport('typing').wrap('inline'):
+            gen.Import('List')
+        code = gen.generate_str()
+        assert code == "from typing import List\n"
+
+    def test_from_import_wrap_auto_single_item(self):
+        """FromImport.wrap() with single item stays inline."""
+        gen = CodeGen()
+        with gen.FromImport('typing').wrap():
+            gen.Import('List')
+        code = gen.generate_str()
+        assert code == "from typing import List\n"
