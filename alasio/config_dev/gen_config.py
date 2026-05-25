@@ -75,6 +75,8 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         #     {"task": task, "group": group, "arg": arg, **ArgData.to_dict()} for normal args
         #         which is arg path appended with ArgData
         self.config_data: "dict[str, dict[str, dict]]" = {}
+        # real data will be set in CrossNavGenerator.__init__
+        self.is_alasio = False
 
     """
     Generate model
@@ -105,9 +107,13 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         gen.Import('typing').as_('t')
         gen.Import('msgspec').as_('m')
         gen.Import('typing_extensions').as_('e')
-        gen.Import('alasio.config.group_base').as_('a')
+        if self.is_alasio:
+            gen.Import('alasio.config.alasio.group_base').as_('a')
+            gen.CommentCodeGen('alasio.config_dev.gen_alasio')
+        else:
+            gen.Import('alasio.config.alasio.group_export').as_('a')
+            gen.CommentCodeGen('module.config.gen')
 
-        gen.CommentCodeGen('alasio.config.dev.configgen')
         for group_name, group in self.groups_data.items():
             # Skip empty group
             if not group.args:

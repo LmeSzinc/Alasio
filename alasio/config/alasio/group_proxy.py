@@ -4,10 +4,8 @@ from typing import TYPE_CHECKING
 
 from msgspec import Struct
 
-from alasio.base.servertime import ServerTime
-from alasio.logger import logger
-
 if TYPE_CHECKING:
+    from alasio.base.servertime import ServerTime
     from alasio.config.base import AlasioConfigBase
 
 
@@ -61,6 +59,7 @@ class GroupProxy(Struct):
 
             # If user forgot to wrap by @functools.wrap(), give a warning
             if underlying_func.__name__ != item and not hasattr(underlying_func, "__wrapped__"):
+                from alasio.logger import logger
                 logger.warning(
                     f"Un-wrapped decorator detected on '{self._group}.{item}'. "
                     f"This may hide @batch_set marker and break self-redirection."
@@ -79,7 +78,7 @@ class GroupProxy(Struct):
         return attr
 
     @property
-    def servertime(self) -> ServerTime:
+    def servertime(self) -> "ServerTime":
         # see DashboardBase.get_servertime()
         return self._config.servertime
 

@@ -1,11 +1,13 @@
+import importlib
+import inspect
 from collections import defaultdict
 
+from alasio.codegen.python import CodeGen
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.gen_cross import CrossNavGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.codegen.python import CodeGen
 from alasio.ext.deep import *
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.msgspecfile import read_msgspec
@@ -467,6 +469,51 @@ class IndexGenerator(CrossNavGenerator):
                 gitadd.stage_add(file)
 
     """
+    Generate alasio/config/alasio/group_export.py
+    """
+
+    def generate_group_export(self, gitadd=None):
+        gen = CodeGen()
+        for module_name in [
+            'alasio.config.alasio.group_base',
+            'alasio.config.alasio.store_model',
+        ]:
+            module = importlib.import_module(module_name)
+            with gen.FromImport(module_name).wrap():
+                for name in dir(module):
+                    if name.startswith('_'):
+                        continue
+                    # skip imported modules
+                    value = getattr(module, name)
+                    if inspect.ismodule(value):
+                        continue
+                    # Only class, function, annotation alias
+                    if not name[0].isupper():
+                        continue
+                    gen.Import(name)
+        gen.FromImport('alasio.config.alasio.group_proxy').Import('batch_set')
+
+        # group models
+        for nav in self.dict_nav_config.values():
+            with gen.FromImport(f'alasio.config.alasio.{nav.model_file.rootstem}').wrap():
+                for group_name, group in nav.groups_data.items():
+                    # _info group has no model
+                    if not group.args:
+                        continue
+                    gen.Import(group_name)
+
+        gen.CommentCodeGen('alasio.config_dev.gen_alasio')
+
+
+        # Write to file
+        file = self.path_config.joinpath('alasio/group_export.py')
+        op = gen.write(file, skip_same=True)
+        if op:
+            logger.info(f'Write file {file}')
+            if gitadd:
+                gitadd.stage_add(file)
+
+    """
     Generate all
     """
 
@@ -519,6 +566,10 @@ class IndexGenerator(CrossNavGenerator):
 
         # config_generated.py
         self.generate_config_generated_file(gitadd=gitadd)
+
+        # generate alasio/config/alasio/group_export.py
+        if not self.alasio:
+            self.generate_group_export(gitadd=gitadd)
 
     def generate(self):
         with GitAdd(env.PROJECT_ROOT) as gitadd:

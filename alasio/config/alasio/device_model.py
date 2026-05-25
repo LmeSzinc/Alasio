@@ -1,13 +1,13 @@
 import datetime as d
 import typing as t
 
-import alasio.config.group_base as a
+import alasio.config.alasio.group_base as a
 import msgspec as m
 import typing_extensions as e
 
 
 # This file was auto-generated, do not modify it manually. To generate:
-# ``` python -m alasio.config.dev.configgen ```
+# ``` python -m alasio.config_dev.gen_alasio ```
 
 class Emulator(a.GroupBase):
     Serial: str = 'auto'

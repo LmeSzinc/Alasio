@@ -1,13 +1,13 @@
 import datetime as d
 import typing as t
 
-import alasio.config.group_base as a
+import alasio.config.alasio.group_export as a
 import msgspec as m
 import typing_extensions as e
 
 
 # This file was auto-generated, do not modify it manually. To generate:
-# ``` python -m alasio.config.dev.configgen ```
+# ``` python -m module.config.gen ```
 
 class OpsiAshAssist(a.GroupBase):
     Tier: e.Annotated[int, m.Meta(ge=1, le=15)] = 15

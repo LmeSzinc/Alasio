@@ -29,8 +29,13 @@ class CrossNavGenerator:
         # Alasio global
         alasio = ModEntryInfo.alasio()
         self.alasio: "Optional[CrossNavGenerator]" = None
-        if entry.root != alasio.root:
+        if entry.root == alasio.root:
+            for nav in self.dict_nav_config.values():
+                nav.is_alasio = True
+        else:
             self.alasio = self.__class__(alasio)
+            for nav in self.alasio.dict_nav_config.values():
+                nav.is_alasio = True
 
     @cached_property
     def dict_nav_config(self):
