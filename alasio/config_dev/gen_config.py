@@ -80,6 +80,18 @@ class ConfigGenerator(ParseGroups, ParseTasks):
     Generate model
     """
 
+    def get_inherit_name(self, parent):
+        """
+        Args:
+            parent (str):
+
+        Returns:
+            str:
+        """
+        if parent.startswith('Dashboard'):
+            return f'a.{parent}'
+        return parent
+
     @cached_property
     def model_gen(self):
         """
@@ -93,14 +105,22 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         gen.Import('typing').as_('t')
         gen.Import('msgspec').as_('m')
         gen.Import('typing_extensions').as_('e')
+        gen.Import('alasio.config.group_base').as_('a')
+
         gen.CommentCodeGen('alasio.config.dev.configgen')
         for group_name, group in self.groups_data.items():
             # Skip empty group
             if not group.args:
                 continue
             # Define model class
-            with gen.Class(group_name).set_inherit('m.Struct', omit_defaults=True):
-                for arg_name, arg in group.args.items():
+            cls = gen.Class(group_name)
+            if group.parent:
+                parent = [self.get_inherit_name(p) for p in group.parent]
+                cls.set_inherit(*parent)
+            else:
+                cls.set_inherit('a.GroupBase')
+            with cls:
+                for arg_name, arg in group.override_args.items():
                     arg: ArgData
                     # Expand list
                     if arg.dt in TYPE_ARG_TUPLE:
@@ -108,7 +128,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                         continue
                     # Expand literal
                     if arg.dt in TYPE_ARG_LITERAL:
-                        with gen.Literal(arg_name).set_literal('t.Literal').Var(arg.value).wrap(True):
+                        with gen.Literal(arg_name).set_literal('t.Literal').Var(arg.value).wrap():
                             for option in arg.option:
                                 gen.Item(option)
                         continue

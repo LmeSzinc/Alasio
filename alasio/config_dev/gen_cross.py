@@ -83,17 +83,34 @@ class CrossNavGenerator:
         for config in self.dict_nav_config.values():
             # iter group data
             for group_name, group_data in config.groups_data.items():
+                # group name cannot be GroupBase
+                if group_name == 'GroupBase':
+                    raise DefinitionError(
+                        f'Group name cannot be "GroupBase"',
+                        file=config.file, keys=[group_name],
+                    )
                 # group must be unique
                 if self.alasio and group_name in self.alasio.groups_data:
                     raise DefinitionError(
                         f'Conflict group name: "{group_name}", which is already used in alasio',
-                        file=config.file, keys=group_name,
+                        file=config.file, keys=[group_name],
                     )
                 if group_name in out:
                     raise DefinitionError(
                         f'Duplicate group name: "{group_name}"',
-                        file=config.file, keys=group_name,
+                        file=config.file, keys=[group_name],
                     )
+                # group parent can only be the group defined above in the same file, or in alasio
+                if self.alasio:
+                    for parent in group_data.parent:
+                        if parent in self.alasio.groups_data:
+                            continue
+                        if parent in out and parent in config.groups_data:
+                            continue
+                        raise DefinitionError(
+                            f'Group {group_name} parent {parent} must be defined in alasio or above in the same file',
+                            file=config.file, keys=[group_name, 'parent'], value=parent,
+                        )
                 out[group_name] = group_data
         return out
 

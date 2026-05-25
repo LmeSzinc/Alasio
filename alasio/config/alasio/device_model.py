@@ -1,6 +1,7 @@
 import datetime as d
 import typing as t
 
+import alasio.config.group_base as a
 import msgspec as m
 import typing_extensions as e
 
@@ -8,7 +9,7 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
-class Emulator(m.Struct, omit_defaults=True):
+class Emulator(a.GroupBase):
     Serial: str = 'auto'
     ScreenshotMethod: t.Literal[
         'auto', 'ADB', 'ADB_nc', 'uiautomator2', 'aScreenCap', 'aScreenCap_nc', 'DroidCast', 'DroidCast_raw',
@@ -19,7 +20,7 @@ class Emulator(m.Struct, omit_defaults=True):
     AdbRestart: bool = False
 
 
-class EmulatorInfo(m.Struct, omit_defaults=True):
+class EmulatorInfo(a.GroupBase):
     Emulator: t.Literal[
         'auto', 'NoxPlayer', 'NoxPlayer64', 'BlueStacks4', 'BlueStacks5', 'BlueStacks4HyperV', 'BlueStacks5HyperV',
         'LDPlayer3', 'LDPlayer4', 'LDPlayer9', 'MuMuPlayer', 'MuMuPlayerX', 'MuMuPlayer12', 'MEmuPlayer',
@@ -28,14 +29,14 @@ class EmulatorInfo(m.Struct, omit_defaults=True):
     Path: str = ''
 
 
-class Error(m.Struct, omit_defaults=True):
+class Error(a.GroupBase):
     HandleError: bool = True
     SaveError: bool = True
     OnePushConfig: str = 'provider: null'
     ScreenshotLength: int = 1
 
 
-class Optimization(m.Struct, omit_defaults=True):
+class Optimization(a.GroupBase):
     ScreenshotInterval: float = 0.3
     CombatScreenshotInterval: float = 1.0
     TaskHoardingDuration: int = 0

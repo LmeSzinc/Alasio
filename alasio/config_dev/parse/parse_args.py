@@ -329,9 +329,17 @@ class ArgData(Struct, omit_defaults=True):
         python_type = self.get_python_type()
         meta = self.get_meta()
         if meta:
-            return f"e.Annotated[{python_type}, {meta}]"
+            anno = f"e.Annotated[{python_type}, {meta}]"
         else:
-            return python_type
+            anno = python_type
+        # reuse alias
+        if anno == 'e.Annotated[d.datetime, m.Meta(tz=True)]':
+            anno = 'a.T_DATETIME'
+        if anno == 'e.Annotated[int, m.Meta(ge=0)]':
+            anno = 'a.T_INT_GE0'
+        if anno == 't.Tuple[str, ...]':
+            anno = 'a.T_TUPLE_STR'
+        return anno
 
     def get_value(self):
         """
@@ -341,9 +349,11 @@ class ArgData(Struct, omit_defaults=True):
             d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
         """
         if type(self.value) is datetime:
-            value = repr(self.value)
-            value = value.replace('datetime.datetime', 'd.datetime')
-            value = value.replace('datetime.timezone', 'd.timezone')
-            return ReprWrapper(value)
+            # use DEFAULT_TIME
+            return ReprWrapper('a.DEFAULT_TIME')
+            # value = repr(self.value)
+            # value = value.replace('datetime.datetime', 'd.datetime')
+            # value = value.replace('datetime.timezone', 'd.timezone')
+            # return ReprWrapper(value)
         # others
         return self.value

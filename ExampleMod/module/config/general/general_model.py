@@ -1,6 +1,7 @@
 import datetime as d
 import typing as t
 
+import alasio.config.group_base as a
 import msgspec as m
 import typing_extensions as e
 
@@ -8,7 +9,7 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
-class DropRecord(m.Struct, omit_defaults=True):
+class DropRecord(a.GroupBase):
     SaveFolder: str = './screenshots'
     AzurStatsID: str = ''
     API: t.Literal['default', 'cn_gz_reverse_proxy'] = 'default'
@@ -20,21 +21,21 @@ class DropRecord(m.Struct, omit_defaults=True):
     MeowfficerTalent: t.Literal['do_not', 'save', 'upload', 'save_and_upload'] = 'do_not'
 
 
-class Retirement(m.Struct, omit_defaults=True):
+class Retirement(a.GroupBase):
     RetireMode: t.Literal['one_click_retire', 'enhance', 'old_retire'] = 'one_click_retire'
 
 
-class OneClickRetire(m.Struct, omit_defaults=True):
+class OneClickRetire(a.GroupBase):
     KeepLimitBreak: t.Literal['keep_limit_break', 'do_not_keep'] = 'keep_limit_break'
 
 
-class Enhance(m.Struct, omit_defaults=True):
+class Enhance(a.GroupBase):
     ShipToEnhance: t.Literal['all', 'favourite'] = 'all'
     Filter: str = ''
     CheckPerCategory: int = 5
 
 
-class OldRetire(m.Struct, omit_defaults=True):
+class OldRetire(a.GroupBase):
     N: bool = True
     R: bool = True
     SR: bool = False

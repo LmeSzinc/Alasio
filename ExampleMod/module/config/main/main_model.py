@@ -1,6 +1,7 @@
 import datetime as d
 import typing as t
 
+import alasio.config.group_base as a
 import msgspec as m
 import typing_extensions as e
 
@@ -8,7 +9,7 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
-class Campaign(m.Struct, omit_defaults=True):
+class Campaign(a.GroupBase):
     Name: str = '12-4'
     Event: t.Literal['campaign_main'] = 'campaign_main'
     Mode: t.Literal['normal', 'hard'] = 'normal'
@@ -19,18 +20,12 @@ class Campaign(m.Struct, omit_defaults=True):
     AmbushEvade: bool = True
 
 
-class CampaignHard(m.Struct, omit_defaults=True):
-    Name: str = '12-4'
+class CampaignHard(Campaign):
     Event: t.Literal['campaign_main'] = 'campaign_main'
     Mode: t.Literal['normal'] = 'normal'
-    UseClearMode: bool = True
-    UseFleetLock: bool = True
-    UseAutoSearch: bool = True
-    Use2xBook: bool = False
-    AmbushEvade: bool = True
 
 
-class StopCondition(m.Struct, omit_defaults=True):
+class StopCondition(a.GroupBase):
     OilLimit: int = 1000
     RunCount: int = 0
     MapAchievement: t.Literal['non_stop', '100_percent_clear', 'map_3_stars', 'threat_safe', 'threat_safe_without_3_stars'] = 'non_stop'
@@ -39,35 +34,35 @@ class StopCondition(m.Struct, omit_defaults=True):
     ReachLevel: int = 0
 
 
-class Fleet(m.Struct, omit_defaults=True):
+class Fleet(a.GroupBase):
     Fleet: t.Literal[1, 2, 3, 4, 5, 6] = 1
     Formation: t.Literal['line_ahead', 'double_line', 'diamond'] = 'double_line'
     FleetMode: t.Literal['combat_auto', 'combat_manual', 'stand_still_in_the_middle', 'hide_in_bottom_left'] = 'combat_auto'
     FleetStep: t.Literal[2, 3, 4, 5] = 3
 
 
-class Submarine(m.Struct, omit_defaults=True):
+class Submarine(a.GroupBase):
     Fleet: t.Literal[0, 1, 2] = 0
     Mode: t.Literal['do_not_use', 'hunt_only', 'boss_only', 'hunt_and_boss', 'every_combat'] = 'do_not_use'
     AutoSearchMode: t.Literal['sub_standby', 'sub_auto_call'] = 'sub_standby'
     DistanceToBoss: t.Literal['to_boss_position', '1_grid_to_boss', '2_grid_to_boss', 'use_open_ocean_support'] = '2_grid_to_boss'
 
 
-class Emotion(m.Struct, omit_defaults=True):
+class Emotion(a.GroupBase):
     Mode: t.Literal['calculate', 'ignore', 'calculate_ignore'] = 'calculate'
     Fleet1Value: int = 119
-    Fleet1Record: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    Fleet1Record: a.T_DATETIME = a.DEFAULT_TIME
     Fleet1Control: t.Literal['keep_exp_bonus', 'prevent_green_face', 'prevent_yellow_face', 'prevent_red_face'] = 'prevent_yellow_face'
     Fleet1Recover: t.Literal['not_in_dormitory', 'dormitory_floor_1', 'dormitory_floor_2'] = 'not_in_dormitory'
     Fleet1Oath: bool = False
     Fleet2Value: int = 119
-    Fleet2Record: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    Fleet2Record: a.T_DATETIME = a.DEFAULT_TIME
     Fleet2Control: t.Literal['keep_exp_bonus', 'prevent_green_face', 'prevent_yellow_face', 'prevent_red_face'] = 'prevent_yellow_face'
     Fleet2Recover: t.Literal['not_in_dormitory', 'dormitory_floor_1', 'dormitory_floor_2'] = 'not_in_dormitory'
     Fleet2Oath: bool = False
 
 
-class HpControl(m.Struct, omit_defaults=True):
+class HpControl(a.GroupBase):
     UseHpBalance: bool = False
     UseEmergencyRepair: bool = False
     UseLowHpRetreat: bool = False
@@ -78,11 +73,11 @@ class HpControl(m.Struct, omit_defaults=True):
     LowHpRetreatThreshold: float = 0.3
 
 
-class EnemyPriority(m.Struct, omit_defaults=True):
+class EnemyPriority(a.GroupBase):
     EnemyScaleBalanceWeight: t.Literal['default_mode', 'S3_enemy_first', 'S1_enemy_first'] = 'default_mode'
 
 
-class GemsFarming(m.Struct, omit_defaults=True):
+class GemsFarming(a.GroupBase):
     ChangeFlagship: t.Literal['ship', 'ship_equip'] = 'ship'
     CommonCV: t.Literal['any', 'langley', 'bogue', 'ranger', 'hermes'] = 'any'
     ChangeVanguard: t.Literal['disabled', 'ship', 'ship_equip'] = 'ship'

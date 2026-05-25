@@ -1,6 +1,7 @@
 import datetime as d
 import typing as t
 
+import alasio.config.group_base as a
 import msgspec as m
 import typing_extensions as e
 
@@ -8,20 +9,18 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
-class Oil(m.Struct, omit_defaults=True):
-    Time: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+class Oil(a.DashboardTotal):
     Value: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
 
 
-class Gems(m.Struct, omit_defaults=True):
-    Time: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
-    Value: e.Annotated[int, m.Meta(ge=0)] = 0
+class Gems(a.DashboardAmount):
+    pass
 
 
-class Progress(m.Struct, omit_defaults=True):
+class Progress(a.GroupBase):
     Value: int = 0
 
 
-class Planner(m.Struct, omit_defaults=True):
+class Planner(a.GroupBase):
     GreenValue: int = 0
     GreenTotal: int = 0

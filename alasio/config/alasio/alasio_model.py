@@ -1,6 +1,7 @@
 import datetime as d
 import typing as t
 
+import alasio.config.group_base as a
 import msgspec as m
 import typing_extensions as e
 
@@ -8,49 +9,35 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config.dev.configgen ```
 
-class Scheduler(m.Struct, omit_defaults=True):
+class Scheduler(a.GroupBase):
     Enable: bool = False
-    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+    NextRun: a.T_DATETIME = a.DEFAULT_TIME
     ServerUpdate: t.Literal['00:00'] = '00:00'
 
 
-class SchedulerU00(m.Struct, omit_defaults=True):
-    Enable: bool = False
-    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
-    ServerUpdate: t.Literal['00:00'] = '00:00'
+class SchedulerU00(Scheduler):
+    pass
 
 
-class SchedulerStatic(m.Struct, omit_defaults=True):
+class SchedulerStatic(Scheduler):
     Enable: t.Literal['enabled'] = 'enabled'
-    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
-    ServerUpdate: t.Literal['00:00'] = '00:00'
 
 
-class SchedulerStaticU00(m.Struct, omit_defaults=True):
-    Enable: t.Literal['enabled'] = 'enabled'
-    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
-    ServerUpdate: t.Literal['00:00'] = '00:00'
+class SchedulerStaticU00(SchedulerStatic):
+    pass
 
 
-class SchedulerUedit(m.Struct, omit_defaults=True):
-    Enable: bool = False
-    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+class SchedulerUedit(Scheduler):
     ServerUpdate: str = '00:00'
 
 
-class SchedulerStaticUedit(m.Struct, omit_defaults=True):
-    Enable: t.Literal['enabled'] = 'enabled'
-    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
-    ServerUpdate: str = '00:00'
+class SchedulerStaticUedit(SchedulerStatic, SchedulerUedit):
+    pass
 
 
-class SchedulerU04(m.Struct, omit_defaults=True):
-    Enable: bool = False
-    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+class SchedulerU04(Scheduler):
     ServerUpdate: t.Literal['04:00'] = '04:00'
 
 
-class SchedulerStaticU04(m.Struct, omit_defaults=True):
-    Enable: t.Literal['enabled'] = 'enabled'
-    NextRun: e.Annotated[d.datetime, m.Meta(tz=True)] = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
-    ServerUpdate: t.Literal['04:00'] = '04:00'
+class SchedulerStaticU04(SchedulerStatic, SchedulerU04):
+    pass
