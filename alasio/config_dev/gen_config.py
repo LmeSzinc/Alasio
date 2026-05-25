@@ -122,9 +122,11 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             with cls:
                 for arg_name, arg in group.override_args.items():
                     arg: ArgData
-                    # Expand list
+                    # Expand tuple
                     if arg.dt in TYPE_ARG_TUPLE:
-                        gen.Anno(arg_name, arg.get_anno()).Var(arg.value)
+                        with gen.Tuple(arg_name).Anno(arg.get_anno()).wrap():
+                            for item in arg.value:
+                                gen.Item(item)
                         continue
                     # Expand literal
                     if arg.dt in TYPE_ARG_LITERAL:

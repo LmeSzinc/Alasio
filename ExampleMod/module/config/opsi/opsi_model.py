@@ -47,7 +47,13 @@ class OpsiExplore(a.GroupBase):
 
 class OpsiShop(a.GroupBase):
     PresetFilter: t.Literal['max_benefit', 'max_benefit_meta', 'no_meta', 'all', 'custom'] = 'max_benefit_meta'
-    CustomFilter: a.T_TUPLE_STR = ('LoggerAbyssalT6', 'LoggerAbyssalT5', 'LoggerObscure', 'LoggerAbyssalT4', 'ActionPoint', 'PurpleCoins', 'GearDesignPlanT3', 'PlateRandomT4', 'DevelopmentMaterialT3', 'GearDesignPlanT2', 'GearPart', 'OrdnanceTestingReportT3', 'OrdnanceTestingReportT2', 'DevelopmentMaterialT2', 'OrdnanceTestingReportT1', 'METARedBook', 'CrystallizedHeatResistantSteel', 'NanoceramicAlloy', 'NeuroplasticProstheticArm', 'SupercavitationGenerator')
+    CustomFilter: a.T_TUPLE_STR = (
+        'LoggerAbyssalT6', 'LoggerAbyssalT5', 'LoggerObscure', 'LoggerAbyssalT4', 'ActionPoint', 'PurpleCoins',
+        'GearDesignPlanT3', 'PlateRandomT4', 'DevelopmentMaterialT3', 'GearDesignPlanT2', 'GearPart',
+        'OrdnanceTestingReportT3', 'OrdnanceTestingReportT2', 'DevelopmentMaterialT2', 'OrdnanceTestingReportT1',
+        'METARedBook', 'CrystallizedHeatResistantSteel', 'NanoceramicAlloy', 'NeuroplasticProstheticArm',
+        'SupercavitationGenerator',
+    )
 
 
 class OpsiVoucher(a.GroupBase):
