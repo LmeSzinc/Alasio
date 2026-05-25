@@ -2,6 +2,7 @@ from alasio.codegen.python import CodeGen
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.config_dev.format.format_yaml import yaml_formatter
+from alasio.config_dev.parse.cache_alasio import CacheAlasio
 from alasio.config_dev.parse.load_alas_i18n import LoadAlasI18n
 from alasio.config_dev.parse.parse_args import ArgData, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
 from alasio.config_dev.parse.parse_groups import ParseGroups
@@ -75,8 +76,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         #     {"task": task, "group": group, "arg": arg, **ArgData.to_dict()} for normal args
         #         which is arg path appended with ArgData
         self.config_data: "dict[str, dict[str, dict]]" = {}
-        # real data will be set in CrossNavGenerator.__init__
-        self.is_alasio = False
+        self.alasio = CacheAlasio().get(entry)
 
     """
     Generate model
@@ -90,7 +90,11 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         Returns:
             str:
         """
+        # a dashboard group
         if parent.startswith('Dashboard'):
+            return f'a.{parent}'
+        # an alasio group
+        if self.alasio and parent in self.alasio.groups_data:
             return f'a.{parent}'
         return parent
 
@@ -107,12 +111,12 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         gen.Import('typing').as_('t')
         gen.Import('msgspec').as_('m')
         gen.Import('typing_extensions').as_('e')
-        if self.is_alasio:
-            gen.Import('alasio.config.alasio.group_base').as_('a')
-            gen.CommentCodeGen('alasio.config_dev.gen_alasio')
-        else:
+        if self.alasio:
             gen.Import('alasio.config.alasio.group_export').as_('a')
             gen.CommentCodeGen('module.config.gen')
+        else:
+            gen.Import('alasio.config.alasio.group_base').as_('a')
+            gen.CommentCodeGen('alasio.config_dev.gen_alasio')
 
         for group_name, group in self.groups_data.items():
             # Skip empty group

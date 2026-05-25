@@ -4,6 +4,7 @@ from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.build_mro import build_mro
+from alasio.config_dev.parse.cache_alasio import CacheAlasio
 from alasio.config_dev.parse.parse_groups import GroupData
 from alasio.config_dev.parse.parse_store import ParseStore
 from alasio.ext.backport import removeprefix
@@ -27,15 +28,7 @@ class CrossNavGenerator:
         self.path_config: PathStr = self.root.joinpath(entry.path_config)
 
         # Alasio global
-        alasio = ModEntryInfo.alasio()
-        self.alasio: "Optional[CrossNavGenerator]" = None
-        if entry.root == alasio.root:
-            for nav in self.dict_nav_config.values():
-                nav.is_alasio = True
-        else:
-            self.alasio = self.__class__(alasio)
-            for nav in self.alasio.dict_nav_config.values():
-                nav.is_alasio = True
+        self.alasio: "Optional[CrossNavGenerator]" = CacheAlasio().get(entry)
 
     @cached_property
     def dict_nav_config(self):

@@ -36,5 +36,5 @@ if __name__ == '__main__':
     # generate
     entry = ModEntryInfo.alasio()
     logger.info(f'ModEntry: {entry}')
-    self = IndexGenerator(entry)
+    self = Generator(entry)
     self.generate()
