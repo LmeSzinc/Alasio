@@ -414,10 +414,11 @@ class IndexGenerator(CrossNavGenerator):
 
         # TYPE_CHECKING block - imports only used for type hints
         with gen.If('t.TYPE_CHECKING'):
+            gen.Import('alasio.config.alasio.group_export').as_('alasio').lazy()
             # Sort nav names for stable output
             for nav_name, config in self.dict_nav_config.items():
                 # from .{nav} import {nav}_model as {nav}
-                gen.FromImport(f'.{config.folder}').Import(f'{nav_name}_model').as_(nav_name)
+                gen.FromImport(f'.{config.folder}').Import(f'{nav_name}_model').as_(nav_name).lazy()
 
         # Class definition
         if self.alasio:
@@ -439,23 +440,39 @@ class IndexGenerator(CrossNavGenerator):
                 #     continue
 
                 # Nav comment
-                gen.Comment(nav_name)
+                gen.MultilineComment(f'========== nav: {nav_name} ==========')
 
                 # Generate type hints for each group (keep definition order)
-                for task in config.tasks_data.values():
+                for index, (task_name, task) in enumerate(config.tasks_data.items()):
+                    if not task.groups:
+                        continue
+                    if index:
+                        gen.Empty()
+                    gen.Comment(f'----- {task_name} -----')
                     for group_name, ref in task.groups.items():
                         group = self.groups_data[ref.model]
                         # skip groups without args (inforef groups)
                         if not group.args:
                             continue
-                        # skip variants
-                        if len(group.mro) > 1:
-                            continue
-                        anno = f'{nav_name}.{group.name}'
-                        gen.Anno(group_name, anno=f'"{anno}"')
+                        # special match that convert any Scheduler child group to Scheduler
+                        # because we maintain the consistency between them
+                        if 'Scheduler' in group.mro:
+                            cls_name = 'Scheduler'
+                        else:
+                            cls_name = group.name
+                        anno = f'{group.parser.nav_name}.{cls_name}'
+                        if group_name in collected_groups:
+                            gen.Comment(f'{group_name}: "{anno}"')
+                        elif self.alasio and cls_name == 'Scheduler':
+                            # scheduler: Scheduler is defined in alasio ConfigGenerated
+                            gen.Comment(f'{group_name}: "{anno}"')
+                        else:
+                            gen.use_import(group.parser.nav_name)
+                            gen.Anno(group_name, anno=f'"{anno}"')
+                        # validate if Multiple validation model bound on the same group
                         collected_groups[group_name].add(anno)
                         if len(collected_groups[group_name]) > 1:
-                            logger.warning(f'Multiple validation model bound on group "{group_name}", '
+                            logger.warning(f'Multiple validation model bound on group {task_name}.{group_name}, '
                                            f'might cause unexpected behaviour, models: {collected_groups[group_name]}')
 
                 gen.Empty()

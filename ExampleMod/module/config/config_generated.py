@@ -16,21 +16,36 @@ class ConfigGenerated(AlasioConfigGenerated):
     # A generated config struct to fool IDE's type-predict and auto-complete
     entry = entry
 
-    # alas
+    """
+    ========== nav: alas ==========
+    """
+    # ----- Alas -----
     Game: "alas.Game"
 
-    # dashboard
+    """
+    ========== nav: dashboard ==========
+    """
+    # ----- Dashboard -----
+    Oil: "dashboard.Oil"
+    Gems: "dashboard.Gems"
     Progress: "dashboard.Progress"
     Planner: "dashboard.Planner"
 
-    # general
+    """
+    ========== nav: general ==========
+    """
+    # ----- General -----
     Retirement: "general.Retirement"
     OneClickRetire: "general.OneClickRetire"
     Enhance: "general.Enhance"
     OldRetire: "general.OldRetire"
     DropRecord: "general.DropRecord"
 
-    # main
+    """
+    ========== nav: main ==========
+    """
+    # ----- Main -----
+    # Scheduler: "alasio.Scheduler"
     Campaign: "main.Campaign"
     StopCondition: "main.StopCondition"
     Fleet1: "main.Fleet"
@@ -39,11 +54,24 @@ class ConfigGenerated(AlasioConfigGenerated):
     Emotion: "main.Emotion"
     HpControl: "main.HpControl"
     EnemyPriority: "main.EnemyPriority"
+    Hard: "main.CampaignHard"
 
-    # opsi
+    """
+    ========== nav: opsi ==========
+    """
+    # ----- OpsiExplore -----
+    # Scheduler: "alasio.Scheduler"
     OpsiExplore: "opsi.OpsiExplore"
     OpsiGeneral: "opsi.OpsiGeneral"
+
+    # ----- OpsiDaily -----
+    # Scheduler: "alasio.Scheduler"
     OpsiDaily: "opsi.OpsiDaily"
-    OpsiGeneral: "opsi.OpsiGeneral"
-    OpsiGeneral: "opsi.OpsiGeneral"
+    # OpsiGeneral: "opsi.OpsiGeneral"
+
+    # ----- OpsiGeneral -----
+    # OpsiGeneral: "opsi.OpsiGeneral"
+
+    # ----- OpsiAshAssist -----
+    # Scheduler: "alasio.Scheduler"
     OpsiAshAssist: "opsi.OpsiAshAssist"

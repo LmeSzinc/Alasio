@@ -1,4 +1,3 @@
-import datetime as d
 import typing as t
 
 import alasio.config.alasio.group_base as a

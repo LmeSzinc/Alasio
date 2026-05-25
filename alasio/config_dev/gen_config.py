@@ -107,7 +107,8 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             CodeGen | None:
         """
         gen = CodeGen()
-        gen.Import('datetime').as_('d')
+        # no datetime because we have alias: a.T_DATETIME, a.DEFAULT_TIME
+        # gen.Import('datetime').as_('d')
         gen.Import('typing').as_('t')
         gen.Import('msgspec').as_('m')
         gen.Import('typing_extensions').as_('e')
