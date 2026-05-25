@@ -81,7 +81,19 @@ class ClosureWithName(ClosureObject):
             yield f'{self.indent_str}{prefix}{self.closure_empty}{suffix}{ending}'
             return
 
-        if self._wrap == 'newline':
+        # auto mode: decide inline vs expand based on total length
+        wrap = self._wrap
+        if wrap == 'auto':
+            inline_items = GatherItems(wrap='inline').add(self.items).get_inline()
+            total_len = (len(self.indent_str) + len(prefix) + len(self.closure_start)
+                         + len(inline_items) + len(self.closure_end) + len(suffix))
+            if total_len > GatherItems.DEFAULT_WIDTH:
+                wrap = 'expand'
+            else:
+                yield f'{self.indent_str}{prefix}{self.closure_start}{inline_items}{self.closure_end}{suffix}{ending}'
+                return
+
+        if wrap == 'newline':
             # Each item on its own line
             yield f'{self.indent_str}{prefix}{self.closure_start}'
             for item in self.items:
@@ -90,8 +102,8 @@ class ClosureWithName(ClosureObject):
             return
 
         # expand: brackets on separate lines, items wrapped inline
-        if self._wrap == 'expand':
-            items = GatherItems(max_width=True).add(self.items)
+        if wrap == 'expand':
+            items = GatherItems(wrap='expand').add(self.items)
             rows = list(items.iter_multiline())
             yield f'{self.indent_str}{prefix}{self.closure_start}'
             for row in rows:
@@ -99,8 +111,8 @@ class ClosureWithName(ClosureObject):
             yield f'{self.indent_str}{self.closure_end}{suffix}{ending}'
             return
 
-        # wrap() values: 'inline', 'auto' (True), or int: use GatherItems
-        items = GatherItems(max_width=self._wrap if self._wrap != 'inline' else False).add(self.items)
+        # int or 'inline': use GatherItems
+        items = GatherItems(wrap=wrap).add(self.items)
         rows = list(items.iter_multiline())
 
         if len(rows) == 1:

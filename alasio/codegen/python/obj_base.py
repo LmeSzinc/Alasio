@@ -79,20 +79,14 @@ class CodeObject:
         Wrap items in collection
         120 (int): wrap at given width
         'inline': no wrap, all items on one line
-        'auto': wrap at 120 if exceeds line width, inline otherwise
+        'auto': decide between inline and expand based on GatherItems.DEFAULT_WIDTH
         'newline': each item on its own line
         'expand': brackets on separate lines, items wrapped inline
         'always': legacy alias for 'newline' (deprecated)
         """
         self._wrap_explicit = True
-        if wrap == 'auto':
-            wrap = True  # internal: True means auto at 120
-        elif wrap == 'inline':
-            wrap = 'inline'
-        elif wrap in ('newline', 'always'):
+        if wrap in ('newline', 'always'):
             wrap = 'newline'
-        elif wrap == 'expand':
-            wrap = 'expand'
         self._wrap = wrap
         return self
 
@@ -171,18 +165,20 @@ class GatherItems:
     Tokens are joined with a single space.
     """
 
-    def __init__(self, max_width: "bool | int | str" = False):
+    DEFAULT_WIDTH = 120
+
+    def __init__(self, wrap="inline"):
+        """
+        Args:
+            wrap (str | int): Wrapping mode.
+                'inline': no wrap, all items on one line.
+                'newline': each item on its own line.
+                'expand': brackets on separate lines, items wrapped at DEFAULT_WIDTH.
+                'auto': same as 'expand' (auto decision is in ClosureWithName).
+                int: wrap at the given width.
+        """
         self.items: "list[Item | Var]" = []
-        # Normalise string aliases
-        if max_width == 'auto':
-            max_width = True
-        elif max_width == 'inline':
-            max_width = False
-        elif max_width in ('newline', 'always'):
-            max_width = 'newline'
-        elif max_width == 'expand':
-            max_width = True
-        self.max_width = max_width
+        self.wrap = wrap
 
     def add(self, items: "t.Iterable[Item | Var | Anno] | Item | Var | Anno"):
         if isinstance(items, (list, tuple, set)):
@@ -226,16 +222,19 @@ class GatherItems:
         Yields:
             str:
         """
-        if not self.max_width:
+        if self.wrap == 'inline':
             yield self.get_inline()
             return
         if not self.items:
             return
-        max_width = self.max_width
-        if max_width is True:
-            max_width = 120
-        elif max_width == 'newline':
-            max_width = 1  # force each item to its own line, used via GatherItems('newline')
+        if self.wrap == 'newline':
+            max_width = 1  # force each item to its own line
+        elif self.wrap in ('expand', 'auto'):
+            max_width = self.DEFAULT_WIDTH
+        elif isinstance(self.wrap, int):
+            max_width = self.wrap
+        else:
+            max_width = self.DEFAULT_WIDTH
         buffer = []
         # Filter to items that have item_str (skip Comment, Empty, etc.)
         gather_items = [i for i in self.items if hasattr(i, 'item_str')]

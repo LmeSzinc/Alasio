@@ -28,7 +28,9 @@ class CampaignHard(Campaign):
 class StopCondition(a.GroupBase):
     OilLimit: int = 1000
     RunCount: int = 0
-    MapAchievement: t.Literal['non_stop', '100_percent_clear', 'map_3_stars', 'threat_safe', 'threat_safe_without_3_stars'] = 'non_stop'
+    MapAchievement: t.Literal[
+        'non_stop', '100_percent_clear', 'map_3_stars', 'threat_safe', 'threat_safe_without_3_stars',
+    ] = 'non_stop'
     StageIncrease: bool = False
     GetNewShip: bool = False
     ReachLevel: int = 0
@@ -37,7 +39,9 @@ class StopCondition(a.GroupBase):
 class Fleet(a.GroupBase):
     Fleet: t.Literal[1, 2, 3, 4, 5, 6] = 1
     Formation: t.Literal['line_ahead', 'double_line', 'diamond'] = 'double_line'
-    FleetMode: t.Literal['combat_auto', 'combat_manual', 'stand_still_in_the_middle', 'hide_in_bottom_left'] = 'combat_auto'
+    FleetMode: t.Literal[
+        'combat_auto', 'combat_manual', 'stand_still_in_the_middle', 'hide_in_bottom_left',
+    ] = 'combat_auto'
     FleetStep: t.Literal[2, 3, 4, 5] = 3
 
 
@@ -45,19 +49,25 @@ class Submarine(a.GroupBase):
     Fleet: t.Literal[0, 1, 2] = 0
     Mode: t.Literal['do_not_use', 'hunt_only', 'boss_only', 'hunt_and_boss', 'every_combat'] = 'do_not_use'
     AutoSearchMode: t.Literal['sub_standby', 'sub_auto_call'] = 'sub_standby'
-    DistanceToBoss: t.Literal['to_boss_position', '1_grid_to_boss', '2_grid_to_boss', 'use_open_ocean_support'] = '2_grid_to_boss'
+    DistanceToBoss: t.Literal[
+        'to_boss_position', '1_grid_to_boss', '2_grid_to_boss', 'use_open_ocean_support',
+    ] = '2_grid_to_boss'
 
 
 class Emotion(a.GroupBase):
     Mode: t.Literal['calculate', 'ignore', 'calculate_ignore'] = 'calculate'
     Fleet1Value: int = 119
     Fleet1Record: a.T_DATETIME = a.DEFAULT_TIME
-    Fleet1Control: t.Literal['keep_exp_bonus', 'prevent_green_face', 'prevent_yellow_face', 'prevent_red_face'] = 'prevent_yellow_face'
+    Fleet1Control: t.Literal[
+        'keep_exp_bonus', 'prevent_green_face', 'prevent_yellow_face', 'prevent_red_face',
+    ] = 'prevent_yellow_face'
     Fleet1Recover: t.Literal['not_in_dormitory', 'dormitory_floor_1', 'dormitory_floor_2'] = 'not_in_dormitory'
     Fleet1Oath: bool = False
     Fleet2Value: int = 119
     Fleet2Record: a.T_DATETIME = a.DEFAULT_TIME
-    Fleet2Control: t.Literal['keep_exp_bonus', 'prevent_green_face', 'prevent_yellow_face', 'prevent_red_face'] = 'prevent_yellow_face'
+    Fleet2Control: t.Literal[
+        'keep_exp_bonus', 'prevent_green_face', 'prevent_yellow_face', 'prevent_red_face',
+    ] = 'prevent_yellow_face'
     Fleet2Recover: t.Literal['not_in_dormitory', 'dormitory_floor_1', 'dormitory_floor_2'] = 'not_in_dormitory'
     Fleet2Oath: bool = False
 

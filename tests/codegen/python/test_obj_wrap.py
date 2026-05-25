@@ -371,3 +371,138 @@ data = {
 }
 """
         assert code == expected
+
+
+class TestAutoWrap:
+    """Tests for wrap('auto') -- decide inline vs expand based on GatherItems.DEFAULT_WIDTH.
+    All expected outputs use multiline strings to verify the entire generated code."""
+
+    def test_auto_short_stays_inline(self):
+        """Auto mode: items that fit within DEFAULT_WIDTH stay inline."""
+        gen = CodeGen()
+        with gen.List('items').wrap('auto'):
+            gen.Item(1)
+            gen.Item(2)
+        code = gen.generate_str()
+        expected = """\
+items = [1, 2]
+"""
+        assert code == expected
+
+    def test_auto_long_becomes_expand(self):
+        """Auto mode: items exceeding DEFAULT_WIDTH switch to expand."""
+        x = "x" * 55
+        y = "y" * 54
+        gen = CodeGen()
+        with gen.List('items').wrap('auto'):
+            gen.Item(x)
+            gen.Item(y)
+        code = gen.generate_str()
+        expected = f"""\
+items = [
+    '{x}', '{y}',
+]
+"""
+        assert code == expected
+
+    def test_auto_empty_list(self):
+        """Auto mode with no items produces empty brackets."""
+        gen = CodeGen()
+        with gen.List('empty').wrap('auto'):
+            pass
+        code = gen.generate_str()
+        expected = """\
+empty = []
+"""
+        assert code == expected
+
+    def test_auto_dict_short_stays_inline(self):
+        """Auto mode: short Dict items stay inline."""
+        gen = CodeGen()
+        with gen.Dict('d').wrap('auto'):
+            gen.Var('a', 1)
+            gen.Var('b', 2)
+        code = gen.generate_str()
+        expected = """\
+d = {'a': 1, 'b': 2}
+"""
+        assert code == expected
+
+    def test_auto_dict_long_becomes_expand(self):
+        """Auto mode: Dict items exceeding DEFAULT_WIDTH switch to expand."""
+        gen = CodeGen()
+        k = "k" * 50
+        v = "v" * 60
+        with gen.Dict('d').wrap('auto'):
+            gen.Var(k, v)
+            gen.Var(k, v)
+        code = gen.generate_str()
+        expected = f"""\
+d = {{
+    '{k}': '{v}',
+    '{k}': '{v}',
+}}
+"""
+        assert code == expected
+
+    def test_auto_tuple_long_becomes_expand(self):
+        """Auto mode: Tuple items exceeding DEFAULT_WIDTH switch to expand."""
+        x = "x" * 55
+        y = "y" * 55
+        gen = CodeGen()
+        with gen.Tuple('t').wrap('auto'):
+            gen.Item(x)
+            gen.Item(y)
+        code = gen.generate_str()
+        expected = f"""\
+t = (
+    '{x}',
+    '{y}',
+)
+"""
+        assert code == expected
+
+    def test_auto_set_long_becomes_expand(self):
+        """Auto mode: Set items exceeding DEFAULT_WIDTH switch to expand."""
+        x = "x" * 55
+        y = "y" * 54
+        gen = CodeGen()
+        with gen.Set('s').wrap('auto'):
+            gen.Item(x)
+            gen.Item(y)
+        code = gen.generate_str()
+        expected = f"""\
+s = {{
+    '{x}', '{y}',
+}}
+"""
+        assert code == expected
+
+    def test_auto_list_very_long_single_item(self):
+        """Auto mode: single item longer than DEFAULT_WIDTH switches to expand."""
+        x = "x" * 120
+        gen = CodeGen()
+        with gen.List('items').wrap('auto'):
+            gen.Item(x)
+        code = gen.generate_str()
+        expected = f"""\
+items = [
+    '{x}',
+]
+"""
+        assert code == expected
+
+    def test_auto_nested_inline_outer_default(self):
+        """Auto-wrap inside default (newline) outer."""
+        gen = CodeGen()
+        with gen.List('outer'):
+            with gen.List('').wrap('auto'):
+                gen.Item(1)
+                gen.Item(2)
+        code = gen.generate_str()
+        expected = """\
+outer = [
+    [1, 2],
+]
+"""
+        assert code == expected

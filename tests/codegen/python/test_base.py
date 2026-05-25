@@ -59,16 +59,16 @@ class TestGatherItems:
 class TestIterMultiline:
     def test_no_max_width(self):
         gen = CodeGen()
-        gather = GatherItems(max_width=False)
+        gather = GatherItems(wrap='inline')
         gather.add([Item(gen, 1), Item(gen, 2)])
         assert list(gather.iter_multiline()) == ["1 2"]
 
     def test_empty_items(self):
-        gather = GatherItems(max_width=40)
+        gather = GatherItems(wrap=40)
         assert list(gather.iter_multiline()) == []
 
     def test_default_max_width(self):
-        # max_width=True -> 120
+        # wrap='expand' -> DEFAULT_WIDTH=120
         # For simplicity, we test a small width instead
         pass
 
@@ -81,7 +81,7 @@ class TestIterMultiline:
 
         # Let's test with items that have commas
         with gen.List('l'):
-            gather = GatherItems(max_width=15)  # indent is 4
+            gather = GatherItems(wrap=15)  # indent is 4
             # Item chars: '1,' (2) + ' ' (1) + '2,' (2) = 5.
             # Next '3,' (2) -> 5 + 1 + 2 = 8.
             # Next '4,' (2) -> 8 + 1 + 2 = 11.
@@ -110,7 +110,7 @@ class TestIterMultiline:
     def test_single_long_item(self):
         gen = CodeGen()
         with gen.List('l'):
-            gather = GatherItems(max_width=10)  # indent 4, remain 6
+            gather = GatherItems(wrap=10)  # indent 4, remain 6
             item = Item(gen, "very_long_item")  # 'very_long_item,' (15 chars)
             gather.add(item)
             lines = list(gather.iter_multiline())
@@ -121,7 +121,7 @@ class TestIterMultiline:
         gen = CodeGen()
         with gen.List('l'):
             # indent 4, remain 4. '1,' is 2 chars. ' 2,' is 3 chars. 2+3=5 > 4.
-            gather = GatherItems(max_width=8)
+            gather = GatherItems(wrap=8)
             gather.add([Item(gen, 1), Item(gen, 2)])
             lines = list(gather.iter_multiline())
             # 1, (len 2)
@@ -132,12 +132,12 @@ class TestIterMultiline:
 class TestVarAnnoFluent:
     def test_var_anno_fluent(self):
         gen = CodeGen()
-        
+
         # gen.Var(name, value).Anno(anno)
         gen.Var('x', 1).Anno('int')
         # gen.Anno(name, anno).Var(value)
         gen.Anno('y', 'str').Var('hello')
-        
+
         code = gen.generate_str()
         expected = """\
 x: int = 1
