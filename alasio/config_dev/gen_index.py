@@ -456,24 +456,26 @@ class IndexGenerator(CrossNavGenerator):
                             continue
                         # special match that convert any Scheduler child group to Scheduler
                         # because we maintain the consistency between them
-                        if 'Scheduler' in group.mro:
-                            cls_name = 'Scheduler'
-                        else:
-                            cls_name = group.name
+                        cls_name = group.name
+                        is_scheduler = 'Scheduler' in group.mro
                         anno = f'{group.parser.nav_name}.{cls_name}'
                         if group_name in collected_groups:
                             gen.Comment(f'{group_name}: "{anno}"')
-                        elif self.alasio and cls_name == 'Scheduler':
+                        elif is_scheduler:
                             # scheduler: Scheduler is defined in alasio ConfigGenerated
-                            gen.Comment(f'{group_name}: "{anno}"')
+                            if self.alasio:
+                                gen.Comment(f'{group_name}: "{anno}"')
+                            else:
+                                gen.Comment(f'{group_name}: "Scheduler"')
                         else:
                             gen.use_import(group.parser.nav_name)
                             gen.Anno(group_name, anno=f'"{anno}"')
-                        # validate if Multiple validation model bound on the same group
-                        collected_groups[group_name].add(anno)
-                        if len(collected_groups[group_name]) > 1:
-                            logger.warning(f'Multiple validation model bound on group {task_name}.{group_name}, '
-                                           f'might cause unexpected behaviour, models: {collected_groups[group_name]}')
+                            # validate if Multiple validation model bound on the same group
+                            collected_groups[group_name].add(anno)
+                            if len(collected_groups[group_name]) > 1:
+                                logger.warning(
+                                    f'Multiple validation model bound on group {task_name}.{group_name}, '
+                                    f'might cause unexpected behaviour, models: {collected_groups[group_name]}')
 
                 gen.Empty()
 

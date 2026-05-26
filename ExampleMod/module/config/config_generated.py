@@ -45,7 +45,7 @@ class ConfigGenerated(AlasioConfigGenerated):
     ========== nav: main ==========
     """
     # ----- Main -----
-    # Scheduler: "alasio.Scheduler"
+    # Scheduler: "alasio.SchedulerUedit"
     Campaign: "main.Campaign"
     StopCondition: "main.StopCondition"
     Fleet1: "main.Fleet"
@@ -60,12 +60,12 @@ class ConfigGenerated(AlasioConfigGenerated):
     ========== nav: opsi ==========
     """
     # ----- OpsiExplore -----
-    # Scheduler: "alasio.Scheduler"
+    # Scheduler: "alasio.SchedulerU00"
     OpsiExplore: "opsi.OpsiExplore"
     OpsiGeneral: "opsi.OpsiGeneral"
 
     # ----- OpsiDaily -----
-    # Scheduler: "alasio.Scheduler"
+    # Scheduler: "alasio.SchedulerU00"
     OpsiDaily: "opsi.OpsiDaily"
     # OpsiGeneral: "opsi.OpsiGeneral"
 
@@ -73,5 +73,5 @@ class ConfigGenerated(AlasioConfigGenerated):
     # OpsiGeneral: "opsi.OpsiGeneral"
 
     # ----- OpsiAshAssist -----
-    # Scheduler: "alasio.Scheduler"
+    # Scheduler: "alasio.SchedulerU00"
     OpsiAshAssist: "opsi.OpsiAshAssist"
