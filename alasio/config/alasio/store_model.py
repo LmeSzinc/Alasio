@@ -75,6 +75,15 @@ class DashboardAmount(DashboardBase, dict=True):
             raise DataInconsistent(f'Class {self.__class__.__name__} does not have le defined')
         return self.Value >= self.meta.le
 
+    def pretty(self):
+        """
+        Return human-readable representation
+
+        Returns:
+            str:
+        """
+        return f'{self.Value}'
+
     @batch_set
     def set(self, value, raise_error=False):
         """
@@ -151,7 +160,18 @@ class DashboardTotal(DashboardAmount):
                     range: "0~14000"
                 ServerUpdate: "weekday1-04:00"
     """
-    pass
+
+    def pretty(self):
+        """
+        Return human-readable representation
+
+        Returns:
+            str:
+        """
+        if self.meta.le is not None:
+            return f'{self.Value}/{self.meta.le}'
+        else:
+            return f'{self.Value}/<Unknown_meta_le>'
 
 
 class DashboardRemain(DashboardAmount):
@@ -171,6 +191,18 @@ class DashboardRemain(DashboardAmount):
                     range: "0~3"
                 ServerUpdate: "00:00"
     """
+
+    def pretty(self):
+        """
+        Return human-readable representation
+
+        Returns:
+            str:
+        """
+        if self.meta.le is not None:
+            return f'{self.Value}/{self.meta.le}'
+        else:
+            return f'{self.Value}/<Unknown_meta_le>'
 
     @batch_set
     def reset(self):
@@ -273,3 +305,12 @@ class DashboardDynamicTotal(DashboardAmount):
         Check if value is full
         """
         return self.Value >= self.Total
+
+    def pretty(self):
+        """
+        Return human-readable representation
+
+        Returns:
+            str:
+        """
+        return f'{self.Value}/{self.Total}'
