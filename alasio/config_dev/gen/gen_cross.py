@@ -1,7 +1,7 @@
 from typing import Optional
 
 from alasio.config.entry.const import ModEntryInfo
-from alasio.config_dev.gen_config import ConfigGenerator
+from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.build_mro import build_mro
 from alasio.config_dev.parse.cache_alasio import CacheAlasio
@@ -341,34 +341,8 @@ class CrossNavGenerator:
         return out
 
     """
-    Generate {nav}_i18n.json
+    Generate {nav}_config.json
     """
-
-    @cached_property
-    def dict_group2file(self):
-        """
-        Convert group name to {nav}.config.json to read
-
-        Returns:
-            dict[str, str]:
-                key: {group_name}
-                value: relative path to {nav}.config.json
-        """
-        out = {}
-        if self.alasio:
-            out = self.alasio.dict_group2file
-        for config in self.dict_nav_config.values():
-            # calculate module file
-            file = config.i18n_file.subpath_to(self.path_config)
-            if file == config.model_file:
-                raise DefinitionError(
-                    f'gui_file is not a subpath of root, model_file={config.i18n_file}, root={self.root}')
-            # iter group models
-            file = to_posix(file)
-            for group_name in config.i18n_data.keys():
-                # no need to check if group is unique, dict_group_ref checked it already
-                out[group_name] = file
-        return out
 
     def _generate_nav_config_json(self, config: ConfigGenerator):
         """

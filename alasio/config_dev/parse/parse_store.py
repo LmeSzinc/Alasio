@@ -1,5 +1,5 @@
 from alasio.config_dev.format.format_yaml import yaml_formatter
-from alasio.config_dev.gen_config import ConfigGenerator
+from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext.file.jsonfile import write_json_custom_indent
 from alasio.ext.file.yamlfile import format_yaml, read_yaml
