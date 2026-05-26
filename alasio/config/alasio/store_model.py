@@ -131,7 +131,7 @@ class DashboardAmount(DashboardBase, dict=True):
         """
         Reset value if record is expired
         """
-        if self.is_expired:
+        if self.is_expired():
             self.reset()
 
 
@@ -206,6 +206,22 @@ class DashboardDynamicTotal(DashboardAmount):
     @cached_property
     def meta_total(self):
         return self.get_meta('Total')
+
+    @batch_set
+    def add(self, value=1, raise_error=False):
+        """
+        Add value to current value
+        Total remains unchanged
+        """
+        return self.set(self.Value + value, self.Total, raise_error)
+
+    @batch_set
+    def sub(self, value=1, raise_error=False):
+        """
+        Subtract value from current value
+        Total remains unchanged
+        """
+        return self.set(self.Value - value, self.Total, raise_error)
 
     @batch_set
     def set(self, value, total, raise_error=False):

@@ -1,11 +1,17 @@
+import datetime as d
 import functools
+import typing as t
 from functools import cached_property as functools_cached_property
 
+import msgspec as m
 import pytest
+import typing_extensions as e
 from msgspec import Struct
 
 from ExampleMod.module.config.const import entry
+from alasio.base.timer import getnow
 from alasio.config.alasio.group_proxy import GroupProxy, batch_set
+from alasio.config.alasio.store_model import DashboardAmount, DashboardBase
 from alasio.config.base import AlasioConfigBase
 from alasio.config.entry.mod import Mod
 from alasio.db.conn import SQLITE_POOL
@@ -467,3 +473,129 @@ class TestModelProxyBatchSet:
         res2 = proxy.batch_call_functools_cached()
         assert res2 == 201
         assert proxy.Value2 == 1  # Still 1
+
+
+# ---- Test struct for dashboard expiration ----
+
+class DashboardExpireTestGroup(DashboardAmount):
+    """
+    DashboardAmount with ge=0, le=100 and ServerUpdate set to '00:00'
+    """
+    Value: e.Annotated[int, m.Meta(ge=0, le=100)] = 0
+    ServerUpdate: t.Literal['00:00'] = '00:00'
+
+
+class MockDashboardMod:
+    """Mock mod that returns DashboardExpireTestGroup"""
+    def __init__(self):
+        self.name = "MockDashboardMod"
+        self.entry = None
+
+    def get_group_model(self, file, cls):
+        return DashboardExpireTestGroup
+
+    def config_set(self, name, event):
+        return None, type('Response', (), {'error': None})
+
+    def config_batch_set(self, name, events):
+        return None, [type('Response', (), {'error': None}) for _ in events]
+
+    def task_index_data(self):
+        return {
+            'Main': type('TaskRef', (), {
+                'group': {
+                    'DashboardExpireTestGroup': type('GroupRef', (), {
+                        'task': 'Main', 'file': 'test.py', 'cls': 'DashboardExpireTestGroup'
+                    })
+                }
+            })
+        }
+
+
+class TestDashboardExpire:
+    """Test is_expired() and update() through GroupProxy"""
+
+    TEST_CONFIG_NAME = ':memory:'
+
+    @pytest.fixture
+    def config(self):
+        """Create test config with DashboardExpireTestGroup"""
+        class Entry:
+            name = 'MockDashboardMod'
+            root = '.'
+            path_config = '.'
+            path_assets = '.'
+            @staticmethod
+            def alasio():
+                return Entry
+
+        class MyConfig(AlasioConfigBase):
+            entry = Entry
+            DashboardExpireTestGroup: "test.DashboardExpireTestGroup"
+
+        cfg = MyConfig(self.TEST_CONFIG_NAME, task='')
+        cfg.mod = MockDashboardMod()
+        cfg.mod.entry = cfg.entry
+        cfg.task = 'Main'
+        cfg.init_task()
+        cfg.save_count = 0
+        return cfg
+
+    def test_is_expired_not_expired(self, config):
+        """
+        is_expired() returns False when Time is before the next update.
+        Current time (now) is before tomorrow's 00:00 (UTC+8), so not expired.
+        """
+        obj = config.DashboardExpireTestGroup._obj
+        now = getnow()
+        # Set Time to now — not expired
+        obj.Time = now
+        assert not config.DashboardExpireTestGroup.is_expired()
+
+    def test_is_expired_expired(self, config):
+        """
+        is_expired() returns True when Time is after the next update.
+        Time set to well in the future (now + 2 days) is after the next 00:00.
+        """
+        obj = config.DashboardExpireTestGroup._obj
+        now = getnow()
+        future = now + d.timedelta(days=2)
+        obj.Time = future
+        assert config.DashboardExpireTestGroup.is_expired()
+
+    def test_update_resets_when_expired(self, config):
+        """
+        update() calls reset() when is_expired() returns True.
+        Value is reset to meta.ge (0).
+        """
+        obj = config.DashboardExpireTestGroup._obj
+        now = getnow()
+        future = now + d.timedelta(days=2)
+        obj.Value = 50
+        obj.Time = future
+        config.DashboardExpireTestGroup.update()
+        assert obj.Value == 0
+        # Total is not relevant for DashboardAmount
+
+    def test_update_does_nothing_when_not_expired(self, config):
+        """
+        update() does NOT call reset() when is_expired() returns False.
+        Value remains unchanged.
+        """
+        obj = config.DashboardExpireTestGroup._obj
+        now = getnow()
+        obj.Value = 50
+        obj.Time = now
+        config.DashboardExpireTestGroup.update()
+        assert obj.Value == 50
+
+    def test_is_expired_empty_server_update(self, config):
+        """
+        When ServerUpdate is changed to '', is_expired() returns False
+        without calling get_servertime().
+        """
+        obj = config.DashboardExpireTestGroup._obj
+        obj.ServerUpdate = ''
+        future = getnow() + d.timedelta(days=365)
+        obj.Time = future
+        assert not config.DashboardExpireTestGroup.is_expired()
