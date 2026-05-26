@@ -69,7 +69,7 @@
     if (target && groupElements[target] && root) {
       const element = groupElements[target];
       const parent = scrollParent;
-      const isNavSwitchScroll = trigger === 0;
+      const isNavSwitchScroll = trigger < 0;
 
       if (parent) {
         // scroll-mt-6 is 1.5rem = 24px

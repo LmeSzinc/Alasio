@@ -12,8 +12,8 @@ class UIState {
   flash_target: string = $state("");
   flash_trigger: number = $state(0);
   // scroll_trigger value has meaning
-  // 0: the first time opening a nav
-  // >0: switching to another card within nav
+  // <0: nav switch (scroll to top immediately, unique negative value each time)
+  // >0: switching to another card within same nav (smooth scroll)
   scroll_trigger: number = $state(0);
 
   get isOverview() {
@@ -33,7 +33,9 @@ class UIState {
       if (this.nav_name === nav_name) {
         this.scroll_trigger += 1;
       } else {
-        this.scroll_trigger = 0;
+        // Use unique negative values so ArgCardList sees a new trigger every nav switch
+        if (this.scroll_trigger > 0) this.scroll_trigger = 0;
+        this.scroll_trigger -= 1;
       }
       this.nav_name = nav_name;
       this.card_name = card_name;
