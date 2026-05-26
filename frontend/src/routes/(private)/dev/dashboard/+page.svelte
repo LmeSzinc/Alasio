@@ -3,178 +3,174 @@
   import DashboardCard from "$lib/components/dashboard/DashboardCard.svelte";
 
   // Mock data based on ExampleMod/module/config/dashboard/dashboard_config.json
+  // Format: groupName -> argName -> ArgData
   const baseItems: Record<string, Record<string, ArgData>> = {
     Oil: {
-      task: "Dashboard",
-      group: "Oil",
-      arg: "_info",
-      dt: "dashboard-total",
-      dashboard_color: "#7f7f7f",
-      name: "Oil",
-      value: {
-        Value: {
-          task: "Dashboard",
-          group: "Oil",
-          arg: "Value",
-          dt: "input-int",
-          value: 1234,
-        },
-        Total: {
-          task: "Dashboard",
-          group: "Oil",
-          arg: "Total",
-          dt: "static",
-          value: 25000,
-        },
-        Time: {
-          task: "Dashboard",
-          group: "Oil",
-          arg: "Time",
-          dt: "datetime",
-          value: new Date(Date.now() - 5 * 60 * 1000).toISOString().replace("Z", ""), // 5 min ago
-        },
+      _info: {
+        group: "Oil", arg: "_info",
+        task: "Dashboard", dt: "dashboard-total",
+        dashboard: "Total", dashboard_color: "#7f7f7f",
+        name: "Oil",
+        value: "",
       },
-    } as any,
+      Value: {
+        task: "Dashboard", group: "Oil", arg: "Value",
+        dt: "input-int", value: 1234, ge: 0, le: 25000,
+      },
+      Time: {
+        task: "Dashboard", group: "Oil", arg: "Time",
+        dt: "datetime", value: new Date(Date.now() - 5 * 60 * 1000).toISOString().replace("Z", ""),
+      },
+    },
     Gems: {
-      task: "Dashboard",
-      group: "Gems",
-      arg: "_info",
-      dt: "dashboard-value",
-      dashboard_color: "#eb8efe",
-      name: "Gems",
-      value: {
-        Value: {
-          task: "Dashboard",
-          group: "Gems",
-          arg: "Value",
-          dt: "input-int",
-          value: 500,
-        },
-        Time: {
-          task: "Dashboard",
-          group: "Gems",
-          arg: "Time",
-          dt: "datetime",
-          value: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString().replace("Z", ""), // 2 hours ago
-        },
+      _info: {
+        group: "Gems", arg: "_info",
+        task: "Dashboard", dt: "dashboard-value",
+        dashboard: "Amount", dashboard_color: "#eb8efe",
+        name: "Gems",
+        value: "",
       },
-    } as any,
+      Value: {
+        task: "Dashboard", group: "Gems", arg: "Value",
+        dt: "input-int", value: 500, ge: 0,
+      },
+      Time: {
+        task: "Dashboard", group: "Gems", arg: "Time",
+        dt: "datetime", value: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString().replace("Z", ""),
+      },
+    },
     Progress: {
-      task: "Dashboard",
-      group: "Progress",
-      arg: "_info",
-      dt: "dashboard-progress",
-      name: "Campaign",
-      value: {
-        Value: {
-          task: "Dashboard",
-          group: "Progress",
-          arg: "Value",
-          dt: "input-float",
-          value: 45.67,
-        },
-        Time: {
-          task: "Dashboard",
-          group: "Progress",
-          arg: "Time",
-          dt: "datetime",
-          value: new Date(Date.now() - 10 * 1000).toISOString().replace("Z", ""), // 10s ago
-        },
+      _info: {
+        group: "Progress", arg: "_info",
+        task: "Dashboard", dt: "dashboard-progress",
+        dashboard: "Progress",
+        name: "Campaign",
+        value: "",
       },
-    } as any,
+      Value: {
+        task: "Dashboard", group: "Progress", arg: "Value",
+        dt: "input-float", value: 45.67,
+      },
+      Time: {
+        task: "Dashboard", group: "Progress", arg: "Time",
+        dt: "datetime", value: new Date(Date.now() - 10 * 1000).toISOString().replace("Z", ""),
+      },
+    },
     Planner: {
-      task: "Dashboard",
-      group: "Planner",
-      arg: "_info",
-      dt: "dashboard-planner",
-      name: "Research",
-      value: {
-        Progress: {
-          task: "Dashboard",
-          group: "Planner",
-          arg: "Progress",
-          dt: "input-int",
-          value: 80,
-        },
-        Eta: {
-          task: "Dashboard",
-          group: "Planner",
-          arg: "Eta",
-          dt: "input",
-          value: "01:23:45",
-        },
-        Time: {
-          task: "Dashboard",
-          group: "Planner",
-          arg: "Time",
-          dt: "datetime",
-          value: new Date(Date.now() - 30 * 1000).toISOString().replace("Z", ""), // 30s ago
-        },
+      _info: {
+        group: "Planner", arg: "_info",
+        task: "Dashboard", dt: "dashboard-planner",
+        dashboard: "Planner",
+        name: "Research",
+        value: "",
       },
-    } as any,
-    // Add more items to test expansion
+      Progress: {
+        task: "Dashboard", group: "Planner", arg: "Progress",
+        dt: "input-int", value: 80,
+      },
+      Eta: {
+        task: "Dashboard", group: "Planner", arg: "Eta",
+        dt: "input", value: "01:23:45",
+      },
+      Time: {
+        task: "Dashboard", group: "Planner", arg: "Time",
+        dt: "datetime", value: new Date(Date.now() - 30 * 1000).toISOString().replace("Z", ""),
+      },
+    },
+    // Additional items to test expansion (simple Amount type)
     Coins: {
-      task: "Dashboard",
-      group: "Coins",
-      arg: "_info",
-      dt: "dashboard-value",
-      name: "Coins",
-      dashboard_color: "#ffd700",
-      value: {
-        Value: { value: 154321 },
-        Time: { value: new Date(Date.now() - 15 * 60 * 1000).toISOString() },
+      _info: {
+        group: "Coins", arg: "_info",
+        task: "Dashboard", dt: "dashboard-value",
+        dashboard: "Amount", dashboard_color: "#ffd700",
+        name: "Coins",
+        value: "",
       },
-    } as any,
+      Value: {
+        task: "Dashboard", group: "Coins", arg: "Value",
+        dt: "input-int", value: 154321,
+      },
+      Time: {
+        task: "Dashboard", group: "Coins", arg: "Time",
+        dt: "datetime", value: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+      },
+    },
     Exp: {
-      task: "Dashboard",
-      group: "Exp",
-      arg: "_info",
-      dt: "dashboard-value",
-      name: "Exp",
-      dashboard_color: "#4caf50",
-      value: {
-        Value: { value: 9999 },
-        Time: { value: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString() },
+      _info: {
+        group: "Exp", arg: "_info",
+        task: "Dashboard", dt: "dashboard-value",
+        dashboard: "Amount", dashboard_color: "#4caf50",
+        name: "Exp",
+        value: "",
       },
-    } as any,
+      Value: {
+        task: "Dashboard", group: "Exp", arg: "Value",
+        dt: "input-int", value: 9999,
+      },
+      Time: {
+        task: "Dashboard", group: "Exp", arg: "Time",
+        dt: "datetime", value: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+      },
+    },
     Medals: {
-      task: "Dashboard",
-      group: "Medals",
-      arg: "_info",
-      dt: "dashboard-value",
-      name: "Medals",
-      dashboard_color: "#f44336",
-      value: {
-        Value: { value: 42 },
-        Time: { value: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() },
+      _info: {
+        group: "Medals", arg: "_info",
+        task: "Dashboard", dt: "dashboard-value",
+        dashboard: "Amount", dashboard_color: "#f44336",
+        name: "Medals",
+        value: "",
       },
-    } as any,
+      Value: {
+        task: "Dashboard", group: "Medals", arg: "Value",
+        dt: "input-int", value: 42,
+      },
+      Time: {
+        task: "Dashboard", group: "Medals", arg: "Time",
+        dt: "datetime", value: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      },
+    },
     Dorm: {
-      task: "Dashboard",
-      group: "Dorm",
-      arg: "_info",
-      dt: "dashboard-total",
-      name: "Dorm Food",
-      dashboard_color: "#ff9800",
-      value: {
-        Value: { value: 5000 },
-        Total: { value: 40000 },
-        Time: { value: new Date(Date.now() - 30 * 60 * 1000).toISOString() },
+      _info: {
+        group: "Dorm", arg: "_info",
+        task: "Dashboard", dt: "dashboard-total",
+        dashboard: "DynamicTotal", dashboard_color: "#ff9800",
+        name: "Dorm Food",
+        value: "",
       },
-    } as any,
+      Value: {
+        task: "Dashboard", group: "Dorm", arg: "Value",
+        dt: "input-int", value: 5000,
+      },
+      Total: {
+        task: "Dashboard", group: "Dorm", arg: "Total",
+        dt: "static", value: 40000,
+      },
+      Time: {
+        task: "Dashboard", group: "Dorm", arg: "Time",
+        dt: "datetime", value: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      },
+    },
     Commission: {
-      task: "Dashboard",
-      group: "Commission",
-      arg: "_info",
-      dt: "dashboard-planner",
-      name: "Commission",
-      dashboard_color: "#2196f3",
-      value: {
-        Progress: { value: 50 },
-        Eta: { value: "02:15:00" },
-        Time: { value: new Date(Date.now() - 5 * 1000).toISOString() },
+      _info: {
+        group: "Commission", arg: "_info",
+        task: "Dashboard", dt: "dashboard-planner",
+        dashboard: "Planner", dashboard_color: "#2196f3",
+        name: "Commission",
+        value: "",
       },
-    } as any,
+      Progress: {
+        task: "Dashboard", group: "Commission", arg: "Progress",
+        dt: "input-int", value: 50,
+      },
+      Eta: {
+        task: "Dashboard", group: "Commission", arg: "Eta",
+        dt: "input", value: "02:15:00",
+      },
+      Time: {
+        task: "Dashboard", group: "Commission", arg: "Time",
+        dt: "datetime", value: new Date(Date.now() - 5 * 1000).toISOString(),
+      },
+    },
   };
 
   const mockItems: Record<string, Record<string, Record<string, ArgData>>> = {

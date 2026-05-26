@@ -18,7 +18,7 @@ export type ArgData = {
    * Dashboard type if arg is dashboard arg (`dt` startswith "dashboard")
    * Might be "Amount", "Total", "DynamicTotal", "Progress", "Planner"
    */
-  dashboard: string;
+  dashboard?: string;
   /**
    * Dot color if arg is dashboard arg (`dt` startswith "dashboard")
    * Might be #RGB, #RGBA, #RRGGBB, #RRGGBBAA
