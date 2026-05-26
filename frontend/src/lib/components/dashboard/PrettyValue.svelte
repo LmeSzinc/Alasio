@@ -4,9 +4,11 @@
 
   let {
     data,
+    variant = "default",
     class: className,
   }: {
     data: Record<string, ArgData>;
+    variant?: "default" | "primary";
     class?: string;
   } = $props();
 
@@ -20,7 +22,7 @@
 </script>
 
 {#snippet valueTotal(val: string | number | undefined, denom: string | number | undefined)}
-  <span class="font-medium">
+  <span class={cn("font-medium", variant === "primary" && "font-bold")}>
     {val ?? "NaN"}
   </span>
   <span class="text-muted-foreground text-[0.8em]">
@@ -31,7 +33,7 @@
 <div class={cn("relative flex h-6 min-w-0 flex-row items-baseline gap-1", className)}>
   {#if dashboardType === "Amount"}
     <!-- 8654 -->
-    <span class="truncate font-medium">
+    <span class={cn("truncate font-medium", variant === "primary" && "font-bold")}>
       {data.Value?.value ?? "NaN"}
     </span>
   {:else if dashboardType === "Total" || dashboardType === "Remain"}
@@ -42,14 +44,14 @@
     {@render valueTotal(data.Value?.value, data.Total?.value)}
   {:else if dashboardType === "Progress"}
     <!-- 86.54% -->
-    <span class="font-medium">
+    <span class={cn("font-medium", variant === "primary" && "font-bold")}>
       {formattedProgress(data.Value?.value)}%
     </span>
   {:else if dashboardType === "Planner"}
     <!-- 86.54% >2.3d -->
-    <span class="font-medium">
+    <span class={cn("font-medium", variant === "primary" && "font-bold")}>
       {formattedProgress(data.Progress?.value)}%
     </span>
-    <span class="text-muted-foreground truncate text-[0.8em]">&gt;{data.Eta?.value ?? "NaN"}</span>
+    <span class={cn("text-muted-foreground truncate text-[0.8em]")}>&gt;{data.Eta?.value ?? "NaN"}</span>
   {/if}
 </div>

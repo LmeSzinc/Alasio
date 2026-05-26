@@ -5,7 +5,7 @@
     validateByDataType,
     type InputProps,
   } from "$lib/components/arg/utils.svelte";
-  import { DEFAULT_TIME, DEFAULT_TIME_DISPLAY } from "$lib/components/arg/utils.svelte";
+  import { formatToLocal, parseToUTC, tzOffset } from "./dateutils.svelte";
   import { Help } from "$lib/components/ui/help";
   import { Input } from "$lib/components/ui/input";
   import { cn } from "$lib/utils";
@@ -17,56 +17,6 @@
 
   // --- Datetime handling ---
   const isDatetime = $derived(data.dt === "datetime");
-  const tzOffset = (() => {
-    const offset = -new Date().getTimezoneOffset();
-    const sign = offset >= 0 ? "+" : "-";
-    const absOffset = Math.abs(offset);
-    const h = String(Math.floor(absOffset / 60)).padStart(2, "0");
-    const m = String(absOffset % 60).padStart(2, "0");
-    return `${sign}${h}:${m}`;
-  })();
-
-  function formatToLocal(isoStr: any): string {
-    if (isoStr === DEFAULT_TIME) return DEFAULT_TIME_DISPLAY;
-    if (typeof isoStr !== "string" || !isoStr) return String(isoStr || "");
-    const date = new Date(isoStr);
-    if (isNaN(date.getTime())) return isoStr;
-
-    const pad = (n: number) => n.toString().padStart(2, "0");
-    return (
-      date.getFullYear() +
-      "-" +
-      pad(date.getMonth() + 1) +
-      "-" +
-      pad(date.getDate()) +
-      " " +
-      pad(date.getHours()) +
-      ":" +
-      pad(date.getMinutes()) +
-      ":" +
-      pad(date.getSeconds())
-    );
-  }
-
-  function parseToUTC(localStr: string): string {
-    if (localStr === DEFAULT_TIME_DISPLAY || localStr === DEFAULT_TIME) return DEFAULT_TIME;
-    if (!localStr) return "";
-    const date = new Date(localStr);
-    // Remove milliseconds
-    date.setMilliseconds(0);
-    if (isNaN(date.getTime())) return localStr;
-    const iso = date.toISOString();
-
-    // Avoid redundant updates if logically equal
-    const oldVal = arg.value;
-    if (oldVal) {
-      const oldDate = new Date(oldVal);
-      if (!isNaN(oldDate.getTime()) && oldDate.getTime() === date.getTime()) {
-        return oldVal;
-      }
-    }
-    return iso;
-  }
 
   // Local display value for datetime
   let displayValue = $state("");

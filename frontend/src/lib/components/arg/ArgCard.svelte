@@ -2,10 +2,12 @@
   import * as Card from "$lib/components/ui/card";
   import { cn } from "$lib/utils";
   import Arg from "./Arg.svelte";
-  import ArgGroup from "./ArgGroup.svelte";
   import CardEnable from "./CardEnable.svelte";
   import I18nText from "./I18nText.svelte";
-  import type { CardData, InfoData, InputProps } from "./utils.svelte";
+  import LayoutHorizontalLike from "./LayoutHorizontalLike.svelte";
+  import PrettyValue from "../dashboard/PrettyValue.svelte";
+  import StaticDatetime from "../arginput/StaticDatetime.svelte";
+  import type { ArgData, CardData, InfoData, InputProps } from "./utils.svelte";
 
   type Props = {
     cardData: CardData;
@@ -70,9 +72,27 @@
   </Card.Header>
   <!-- Group args -->
   <Card.Content class="flex flex-col gap-y-2 pt-2">
-    {#each Object.entries(Groups) as [, GroupData]}
+    {#each Object.entries(Groups) as [groupKey, groupData]}
       <hr />
-      <ArgGroup groupData={GroupData} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
+      {@const dashboardType = (groupData._info as ArgData | undefined)?.dashboard ?? ""}
+      {#if dashboardType}
+        <LayoutHorizontalLike data={groupData._info as ArgData}>
+          {#snippet InputSnippet()}
+            <PrettyValue data={groupData} variant="primary" class="w-full text-left" />
+          {/snippet}
+          {#snippet PlaceholderSnippet()}
+            {#if groupData.Time}
+              <StaticDatetime data={groupData.Time} class="justify-start" />
+            {/if}
+          {/snippet}
+        </LayoutHorizontalLike>
+      {:else}
+        <div class="flex flex-col gap-y-1.5">
+          {#each Object.entries(groupData) as [argKey]}
+            <Arg data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
+          {/each}
+        </div>
+      {/if}
     {/each}
   </Card.Content>
 </Card.Root>
