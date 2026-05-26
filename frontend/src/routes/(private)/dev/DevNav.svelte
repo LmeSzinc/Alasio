@@ -25,10 +25,10 @@
     { path: "/dev/workerstatus", name: "Worker Status" },
     { path: "/dev/scheduler", name: "Scheduler" },
     { path: "/dev/dashboard", name: "Dashboard" },
+    { path: "/dev/dashboardgroup", name: "Dashboard Group" },
   ]);
 
   // --- Derived State ---
-  // Get current pathname to determine active item
   const currentPath = $derived(page.url.pathname);
 
   // --- Event Handlers ---
@@ -42,7 +42,7 @@
     <h2 class="px-3 text-lg font-semibold">{title}</h2>
     <div class="border-border border-t"></div>
     {#each items as item (item.path)}
-      {@const isActive = currentPath.startsWith(item.path)}
+      {@const isActive = currentPath === item.path || currentPath.startsWith(item.path + "/")}
       <Button
         variant={isActive ? "default" : "ghost"}
         class="h-9 w-full justify-start px-3"

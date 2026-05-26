@@ -14,11 +14,11 @@
     "es-ES": "Herramientas Alasio"
   },
   "DevTool": {
-    "en-US": "Development Tools",
+    "en-US": "Dev Tools",
     "zh-CN": "开发工具",
     "ja-JP": "開発ツール",
     "zh-TW": "開發工具",
-    "es-ES": "Herramientas de Desarrollo"
+    "es-ES": "Herramientas Dev"
   },
   "DebugTool": {
     "en-US": "DebugTool",
