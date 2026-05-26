@@ -161,7 +161,7 @@ class AlasioConfigBase:
 
     @cached_property
     def _annotations_alasio(self):
-        from .config_generated import AlasioConfigGenerated
+        from ._index.config_generated import AlasioConfigGenerated
         return get_class_annotation_dict(AlasioConfigGenerated)
 
     @cached_property

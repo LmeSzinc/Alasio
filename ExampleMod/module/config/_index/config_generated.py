@@ -1,15 +1,15 @@
 import typing as t
 
-from alasio.config.config_generated import AlasioConfigGenerated
+from alasio.config._index.config_generated import AlasioConfigGenerated
 
-from .const import entry
+from ..const import entry
 
 if t.TYPE_CHECKING:
-    from .alas import alas_model as alas
-    from .dashboard import dashboard_model as dashboard
-    from .general import general_model as general
-    from .main import main_model as main
-    from .opsi import opsi_model as opsi
+    from ..alas import alas_model as alas
+    from ..dashboard import dashboard_model as dashboard
+    from ..general import general_model as general
+    from ..main import main_model as main
+    from ..opsi import opsi_model as opsi
 
 
 class ConfigGenerated(AlasioConfigGenerated):

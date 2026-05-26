@@ -3,7 +3,7 @@ import typing as t
 from alasio.config.base import AlasioConfigBase
 
 if t.TYPE_CHECKING:
-    from .alasio import device_model as device
+    from ..alasio import device_model as device
 
 
 class AlasioConfigGenerated(AlasioConfigBase):

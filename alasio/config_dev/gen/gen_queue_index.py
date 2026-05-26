@@ -9,7 +9,7 @@ class GenQueueIndex(CrossNavGenerator):
 
     @cached_property
     def queue_index_file(self):
-        return self.path_config.joinpath('queue.index.json')
+        return self.path_config.joinpath('_index/queue.index.json')
 
     @cached_property
     def queue_index_data(self):

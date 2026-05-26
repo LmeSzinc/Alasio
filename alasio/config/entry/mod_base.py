@@ -40,7 +40,7 @@ class ModBase:
                 key: {nav_name}.{card_name}.{lang}
                 value: i18n translation
         """
-        file = self.path_config / 'nav.index.json'
+        file = self.path_config.joinpath('_index/nav.index.json')
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 
@@ -51,21 +51,21 @@ class ModBase:
                 key: {task_name}.{lang}
                 value: i18n translation
         """
-        file = self.path_config / 'queue.index.json'
+        file = self.path_config.joinpath('_index/queue.index.json')
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH2_ANY
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 
     def config_index_data(self) -> MODEL_CONFIG_INDEX:
         """
         """
-        file = self.path_config / 'config.index.json'
+        file = self.path_config.joinpath('_index/config.index.json')
         decoder = DECODER_CACHE.MODEL_CONFIG_INDEX
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 
     def task_index_data(self) -> MODEL_TASK_INDEX:
         """
         """
-        file = self.path_config / 'task.index.json'
+        file = self.path_config.joinpath('_index/task.index.json')
         decoder = DECODER_CACHE.MODEL_TASK_INDEX
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 

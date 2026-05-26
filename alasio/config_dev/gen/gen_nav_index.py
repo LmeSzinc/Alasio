@@ -10,7 +10,7 @@ class GenNavIndex(CrossNavGenerator):
 
     @cached_property
     def nav_index_file(self):
-        return self.path_config.joinpath('nav.index.json')
+        return self.path_config.joinpath('_index/nav.index.json')
 
     @cached_property
     def dict_group_name_i18n(self):

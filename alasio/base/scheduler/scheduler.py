@@ -9,7 +9,7 @@ from alasio.base.scheduler.inflect import Inflection
 from alasio.base.scheduler.task_record import TaskRecord, TaskTooManyExecutionsError, TaskTooManyFailuresError
 from alasio.base.state import TaskState
 from alasio.base.timer import getnow
-from alasio.config.config_generated import AlasioConfigGenerated
+from alasio.config._index.config_generated import AlasioConfigGenerated
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
 from alasio.ext.cache import cached_property

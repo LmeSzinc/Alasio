@@ -14,11 +14,11 @@ class GenConfigIndex(CrossNavGenerator):
 
     @cached_property
     def task_index_file(self):
-        return self.path_config.joinpath('task.index.json')
+        return self.path_config.joinpath('_index/task.index.json')
 
     @cached_property
     def config_index_file(self):
-        return self.path_config.joinpath('config.index.json')
+        return self.path_config.joinpath('_index/config.index.json')
 
     @cached_property
     def dict_intask_group(self):

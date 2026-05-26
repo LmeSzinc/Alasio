@@ -1,4 +1,4 @@
-from ExampleMod.module.config.config_generated import ConfigGenerated
+from ExampleMod.module.config._index.config_generated import ConfigGenerated
 
 
 class Config(ConfigGenerated):

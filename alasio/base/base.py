@@ -1,7 +1,7 @@
 from typing import Union
 
 from alasio.base.exception import ScriptError
-from alasio.config.config_generated import AlasioConfigGenerated
+from alasio.config._index.config_generated import AlasioConfigGenerated
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
 from alasio.ext.msgspec_error.parse_anno import get_class_annotation

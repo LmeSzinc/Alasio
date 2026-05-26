@@ -29,8 +29,8 @@ class GenConfigGenerated(CrossNavGenerator):
         # Basic imports
         gen.Import('typing').as_('t')
         if self.alasio:
-            gen.FromImport('alasio.config.config_generated').Import('AlasioConfigGenerated')
-            gen.FromImport('.const').Import('entry')
+            gen.FromImport('alasio.config._index.config_generated').Import('AlasioConfigGenerated')
+            gen.FromImport('..const').Import('entry')
         else:
             gen.FromImport('alasio.config.base').Import('AlasioConfigBase')
 
@@ -40,7 +40,7 @@ class GenConfigGenerated(CrossNavGenerator):
             # Sort nav names for stable output
             for nav_name, config in self.dict_nav_config.items():
                 # from .{nav} import {nav}_model as {nav}
-                gen.FromImport(f'.{config.folder}').Import(f'{nav_name}_model').as_(nav_name).lazy()
+                gen.FromImport(f'..{config.folder}').Import(f'{nav_name}_model').as_(nav_name).lazy()
 
         # Class definition
         if self.alasio:
@@ -98,7 +98,7 @@ class GenConfigGenerated(CrossNavGenerator):
                 gen.Empty()
 
         # Write to file
-        file = self.path_config.joinpath('config_generated.py')
+        file = self.path_config.joinpath('_index/config_generated.py')
         op = gen.write(file, skip_same=True)
         if op:
             logger.info(f'Write file {file}')

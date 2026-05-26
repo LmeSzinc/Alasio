@@ -47,7 +47,7 @@ class ModEntryInfo(Struct):
         """
         # Mod must have config.index.json
         file = joinnormpath(self.root, self.path_config)
-        file = joinnormpath(file, 'config.index.json')
+        file = joinnormpath(file, '_index/config.index.json')
         return os.path.exists(file)
 
     def iter_asset_lang(self):
