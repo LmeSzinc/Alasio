@@ -5,9 +5,9 @@ import pytest
 from msgspec import Struct
 
 from ExampleMod.module.config.const import entry
+from alasio.config.alasio.group_proxy import GroupProxy, batch_set
 from alasio.config.base import AlasioConfigBase
 from alasio.config.entry.mod import Mod
-from alasio.config.group_proxy import GroupProxy, batch_set
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext.cache import cached_property as alasio_cached_property
 from alasio.logger import logger

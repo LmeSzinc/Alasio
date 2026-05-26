@@ -11,12 +11,12 @@ from alasio.base.exception import RequestHumanTakeover, ScriptError, TaskStop
 from alasio.base.pretty import dict2kv
 from alasio.base.servertime import ServerTime, nearest_future, random_time
 from alasio.base.timer import getnow
+from alasio.config.alasio.group_proxy import GroupProxy
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.mod import Mod
 from alasio.config.entry.model import ConfigSetEvent, TaskItem
 from alasio.config.entry.utils import validate_task_name
-from alasio.config.group_proxy import GroupProxy
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
 from alasio.ext.cache import cached_property, cached_property_threadsafe

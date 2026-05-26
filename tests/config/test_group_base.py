@@ -1,16 +1,12 @@
+import typing as t
+
 import msgspec as m
 import pytest
 
+from alasio.config.alasio.group_base import (
+    DEFAULT_TIME, GroupBase, T_DATETIME, T_INT_GE0, _parse_literal_arg, _parse_literal_string)
+from alasio.config.alasio.store_model import cap_value
 from alasio.config.const import DataInconsistent
-from alasio.config.group_base import (
-    GroupBase,
-    DEFAULT_TIME,
-    T_INT_GE0,
-    T_TIME,
-    cap_value,
-    parse_literal_arg,
-    parse_literal_string,
-)
 
 
 # ---- Test models ----
@@ -21,7 +17,7 @@ class MetaTestModel(GroupBase):
     """Model with various msgspec meta annotations for testing BaseModel.get_meta"""
     count: T_INT_GE0 = 0
     name: str = 'default'
-    scheduled: T_TIME = DEFAULT_TIME
+    scheduled: T_DATETIME = DEFAULT_TIME
 
 
 class NoMetaModel(GroupBase):
@@ -46,22 +42,22 @@ class TestParseLiteralArg:
 
     def test_plain_string(self):
         """Test a plain string without quotes returns as-is"""
-        result = parse_literal_arg('normal')
+        result = _parse_literal_arg('normal')
         assert result == 'normal'
 
     def test_quoted_string(self):
         """Test a string wrapped in single quotes"""
-        result = parse_literal_arg("'normal'")
+        result = _parse_literal_arg("'normal'")
         assert result == 'normal'
 
     def test_quoted_with_underscore(self):
         """Test a quoted string with underscore"""
-        result = parse_literal_arg("'hard_mode'")
+        result = _parse_literal_arg("'hard_mode'")
         assert result == 'hard_mode'
 
     def test_quoted_numeric(self):
         """Test a quoted numeric string"""
-        result = parse_literal_arg("'123'")
+        result = _parse_literal_arg("'123'")
         assert result == '123'
 
 
@@ -80,7 +76,7 @@ class TestParseLiteralString:
     ])
     def test_valid_literal(self, anno, expected):
         """Test valid literal annotations are parsed correctly"""
-        result = parse_literal_string(anno)
+        result = _parse_literal_string(anno)
         assert result == expected
 
     @pytest.mark.parametrize('anno', [
@@ -91,7 +87,7 @@ class TestParseLiteralString:
     def test_not_literal_raises(self, anno):
         """Test non-literal strings raise ValueError"""
         with pytest.raises(ValueError, match='Annotation is not a literal'):
-            parse_literal_string(anno)
+            _parse_literal_string(anno)
 
     # ---- Attack / edge-case tests ----
     # These document how parse_literal_string handles malformed inputs.
@@ -100,28 +96,28 @@ class TestParseLiteralString:
 
     def test_unclosed_bracket(self):
         """Missing ] causes args extraction to return empty string"""
-        result = parse_literal_string("t.Literal['normal'")
+        result = _parse_literal_string("t.Literal['normal'")
         assert result == ['']
 
     def test_empty_brackets(self):
         """Empty [] yields a single empty option"""
-        result = parse_literal_string("t.Literal[]")
+        result = _parse_literal_string("t.Literal[]")
         assert result == ['']
 
     def test_unclosed_quote(self):
         """Unclosed single quote leaks the ' prefix into the option"""
-        result = parse_literal_string("t.Literal['normal, hard]")
+        result = _parse_literal_string("t.Literal['normal, hard]")
         assert result == ["'normal", "hard"]
 
     def test_double_quotes(self):
         """Double-quoted options are stripped by parse_literal_arg"""
-        result = parse_literal_string('t.Literal["normal", "hard"]')
+        result = _parse_literal_string('t.Literal["normal", "hard"]')
         assert result == ['normal', 'hard']
 
     def test_single_quote_inside_option(self):
         """Option containing a single quote like \"it's\" handled with double-quote delimiters"""
         anno = 't.Literal["it\'s", "that\'s"]'
-        result = parse_literal_string(anno)
+        result = _parse_literal_string(anno)
         # parse_literal_arg handles both  single and double quotes
         assert result == ["it's", "that's"]
 
