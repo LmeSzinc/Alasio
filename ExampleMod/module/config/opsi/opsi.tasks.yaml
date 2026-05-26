@@ -25,7 +25,6 @@ OpsiDaily:
     OpsiDaily:
     OpsiGeneral:
       task: OpsiGeneral
-  displays: flat
 
 OpsiGeneral:
   groups:
@@ -35,4 +34,3 @@ OpsiAshAssist:
   groups:
     Scheduler: SchedulerU00
     OpsiAshAssist:
-  displays: flat

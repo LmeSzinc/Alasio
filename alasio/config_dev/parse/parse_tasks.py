@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import msgspec
 from msgspec import field
@@ -199,7 +199,7 @@ class TaskData(msgspec.Struct, dict=True):
         # - "group" to show each group as standalone card
         # - "flat" to show all groups in one card
         # - A list of values that satisfy DisplayCard.from_card()
-        raw_displays = data.get('displays', 'group')
+        raw_displays = data.get('displays', 'flat')
         cards: "list[DisplayCard]"
         if type(raw_displays) is list:
             cards = [DisplayCard.from_card(task, r) for r in raw_displays]
