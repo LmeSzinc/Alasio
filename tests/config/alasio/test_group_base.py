@@ -1,10 +1,14 @@
+import threading
 import typing as t
 
 import msgspec as m
 import pytest
 
+from alasio.base.servertime import ServerTime
 from alasio.config.alasio.group_base import (
     DEFAULT_TIME, GroupBase, T_DATETIME, T_INT_GE0, _parse_literal_arg, _parse_literal_string)
+from alasio.config.alasio.group_proxy import GroupProxy
+from alasio.config.base import BatchSetContext
 from alasio.config.const import DataInconsistent
 
 
@@ -202,3 +206,86 @@ class TestBaseModelGetOption:
         """Test get_option on non-literal field raises DataInconsistent"""
         with pytest.raises(DataInconsistent, match='Arg has no literal|Arg is not a literal'):
             NoLiteralTestModel.get_option('count')
+
+
+# ---- Test models for get_servertime ----
+
+class ServertimeTestModel(GroupBase):
+    """Model for testing get_servertime injection magic"""
+    value: int = 0
+
+
+# ---- Tests: GroupBase.get_servertime ----
+
+class _MockConfig:
+    """
+    Minimal config-like object that provides the required interface
+    for GroupProxy.__getattr__ / __setattr__ and the batch_set context.
+    """
+    def __init__(self):
+        self.servertime = ServerTime(8)
+        self.auto_save = False
+        self._local = threading.local()
+        self._local.batch_depth = 0
+        self._modified = {}
+        self.save_called = False
+
+    def batch_set(self):
+        return BatchSetContext(self)
+
+    def register_modify(self, task, group, arg, value):
+        key = (task, group, arg)
+        self._modified[key] = value
+
+
+class TestGetServertime:
+    """Test suite for GroupBase.get_servertime"""
+
+    def test_raw_struct_raises(self):
+        """
+        Calling get_servertime on a raw GroupBase struct (not wrapped in GroupProxy)
+        raises DataInconsistent because there is no servertime property on the struct.
+        """
+        model = ServertimeTestModel()
+        with pytest.raises(DataInconsistent, match='Missing servertime injection'):
+            model.get_servertime()
+
+    def test_via_proxy_returns_config_servertime(self):
+        """
+        When wrapped in GroupProxy with a proper config, get_servertime() accesses
+        the proxy's .servertime property which delegates to config.servertime.
+        This validates the "injection magic" described in group_base.py.
+        """
+        config = _MockConfig()
+        obj = ServertimeTestModel()
+        proxy = GroupProxy(_obj=obj, _config=config, _task='Main', _group='TestGroup')
+
+        result = proxy.get_servertime()
+
+        assert result is config.servertime
+        assert isinstance(result, ServerTime)
+
+    def test_via_proxy_equals_direct_servertime(self):
+        """
+        The servertime obtained via get_servertime() on the proxy should
+        be identical to accessing config.servertime directly.
+        """
+        config = _MockConfig()
+        obj = ServertimeTestModel()
+        proxy = GroupProxy(_obj=obj, _config=config, _task='Main', _group='TestGroup')
+
+        proxy_st = proxy.get_servertime()
+        direct_st = config.servertime
+
+        assert proxy_st is direct_st  # same object
+
+    def test_proxy_servertime_property(self):
+        """
+        Accessing proxy.servertime directly (not through get_servertime)
+        returns the config's servertime via GroupProxy's servertime property.
+        """
+        config = _MockConfig()
+        obj = ServertimeTestModel()
+        proxy = GroupProxy(_obj=obj, _config=config, _task='Main', _group='TestGroup')
+
+        assert proxy.servertime is config.servertime

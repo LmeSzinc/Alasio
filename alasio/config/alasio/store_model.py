@@ -118,8 +118,7 @@ class DashboardAmount(DashboardBase, dict=True):
     @batch_set
     def reset(self):
         """
-        Reset value
-        Count object will reset to the minimum of range
+        Force reset DashboardAmount to the minimum of range
         """
         meta = self.meta
         if meta.ge is None:
@@ -177,7 +176,7 @@ class DashboardRemain(DashboardAmount):
     def reset(self):
         """
         Force reset value
-        Remain object will reset to the maximum of range
+        Reset DashboardRemain to the maximum of range
         """
         meta = self.meta
         if meta.le is None:
