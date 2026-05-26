@@ -1,4 +1,3 @@
-import re
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
@@ -8,6 +7,7 @@ from msgspec import Struct, UNSET
 from alasio.config.entry.utils import validate_task_name
 from alasio.config_dev.parse.base import DefinitionError, ParseBase
 from alasio.config_dev.parse.parse_args import ArgData
+from alasio.config_dev.format.validate_color import validate_dashboard_color
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1
 
@@ -97,10 +97,11 @@ class GroupData(Struct):
             raise DefinitionError(f'Group parent cannot include group itself',
                                   keys=[group, 'parent'], value=obj.parent)
         # validate dashboard color
-        if obj.dashboard_color:
-            if not re.match(r'^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{4}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{8})$', obj.dashboard_color):
-                raise DefinitionError(f'Invalid dashboard_color, expects #RGB #RGBA #RRGGBB #RRGGBBAA',
-                                      keys=[group, 'dashboard_color'], value=obj.dashboard_color)
+        try:
+            validate_dashboard_color(obj.dashboard_color)
+        except DefinitionError as e:
+            e.keys = [group, 'dashboard_color']
+            raise
         return obj
 
     def merge(self, other: "GroupData") -> "GroupData":
