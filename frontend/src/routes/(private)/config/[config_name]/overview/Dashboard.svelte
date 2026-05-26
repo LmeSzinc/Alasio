@@ -1,6 +1,6 @@
 <script lang="ts">
+  import type { ArgData } from "$lib/components/arg/utils.svelte";
   import DashboardCard from "$lib/components/dashboard/DashboardCard.svelte";
-  import type { DashboardGroupData } from "$lib/components/dashboard/utils";
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
   type $$Props = {
@@ -9,7 +9,7 @@
   let { class: className }: $$Props = $props();
 
   // --- WebSocket & RPC Setup ---
-  type ConfigArgData = Record<string, Record<string, DashboardGroupData>>;
+  type ConfigArgData = Record<string, Record<string, Record<string, ArgData>>>;
   const topicClient = useTopic<ConfigArgData>("Dashboard");
 
   const itemList = $derived(topicClient.data ?? {});

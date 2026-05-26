@@ -2,7 +2,7 @@
   import { t } from "$lib/i18n";
   import { globalClock } from "$lib/use/clock.svelte";
   import { cn } from "$lib/utils";
-  import { DEFAULT_TIME_MS } from "./utils";
+  import { DEFAULT_TIME_MS } from "../arg/utils.svelte";
 
   let { time, class: className }: { time: string; class?: string } = $props();
 

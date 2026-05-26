@@ -2,6 +2,7 @@
   import * as Card from "$lib/components/ui/card";
   import { cn } from "$lib/utils";
   import Arg from "./Arg.svelte";
+  import ArgGroup from "./ArgGroup.svelte";
   import CardEnable from "./CardEnable.svelte";
   import I18nText from "./I18nText.svelte";
   import type { CardData, InfoData, InputProps } from "./utils.svelte";
@@ -69,13 +70,9 @@
   </Card.Header>
   <!-- Group args -->
   <Card.Content class="flex flex-col gap-y-2 pt-2">
-    {#each Object.entries(Groups) as [groupKey, GroupData]}
+    {#each Object.entries(Groups) as [, GroupData]}
       <hr />
-      <div class="flex flex-col gap-y-1.5">
-        {#each Object.entries(GroupData) as [argKey]}
-          <Arg bind:data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
-        {/each}
-      </div>
+      <ArgGroup groupData={GroupData} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
     {/each}
   </Card.Content>
 </Card.Root>

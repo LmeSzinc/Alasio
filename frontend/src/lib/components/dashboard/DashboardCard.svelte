@@ -3,14 +3,14 @@
   import { elementSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
   import { ChevronDown, ChevronUp } from "@lucide/svelte";
+  import type { ArgData } from "../arg/utils.svelte";
   import DashboardItem from "./DashboardItem.svelte";
-  import type { DashboardGroupData } from "./utils";
 
   let {
     items,
     class: className,
   }: {
-    items: Record<string, Record<string, DashboardGroupData>>;
+    items: Record<string, Record<string, Record<string, ArgData>>>;
     class?: string;
   } = $props();
 

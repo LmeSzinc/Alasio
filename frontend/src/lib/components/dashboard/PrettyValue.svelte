@@ -1,12 +1,12 @@
 <script lang="ts">
   import { cn } from "$lib/utils";
-  import type { DashboardGroupData } from "./utils";
+  import type { ArgData } from "../arg/utils.svelte";
 
   let {
     data,
     class: className,
   }: {
-    data: DashboardGroupData;
+    data: Record<string, ArgData>;
     class?: string;
   } = $props();
 

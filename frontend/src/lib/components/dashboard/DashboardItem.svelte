@@ -1,14 +1,13 @@
 <script lang="ts">
   import { cn } from "$lib/utils";
-  import { getArgName } from "../arg/utils.svelte";
+  import { getArgName, type ArgData } from "../arg/utils.svelte";
   import ColorDot from "./ColorDot.svelte";
   import PrettyValue from "./PrettyValue.svelte";
   import ReadableTime from "./ReadableTime.svelte";
-  import type { DashboardGroupData, DashboardGroupInfo } from "./utils";
 
-  let { data, class: className }: { data: DashboardGroupData; class?: string } = $props();
+  let { data, class: className }: { data: Record<string, ArgData>; class?: string } = $props();
 
-  const info = $derived(data._info ?? {}) as DashboardGroupInfo;
+  const info = $derived(data._info ?? {}) as ArgData;
   const time = $derived(data.Time?.value ?? "");
 </script>
 

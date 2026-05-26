@@ -1,6 +1,10 @@
 import { t } from "$lib/i18n";
 import type { Component } from "svelte";
 
+export const DEFAULT_TIME = "2020-01-01T00:00:00Z";
+export const DEFAULT_TIME_DISPLAY = "2020-01-01 00:00:00";
+export const DEFAULT_TIME_MS = new Date(DEFAULT_TIME).getTime();
+
 export type ArgData = {
   task: string;
   group: string;
@@ -10,6 +14,11 @@ export type ArgData = {
   name?: string;
   help?: string;
 
+  /**
+   * Dashboard type if arg is dashboard arg (`dt` startswith "dashboard")
+   * Might be "Amount", "Total", "DynamicTotal", "Progress", "Planner"
+   */
+  dashboard: string;
   /**
    * Dot color if arg is dashboard arg (`dt` startswith "dashboard")
    * Might be #RGB, #RGBA, #RRGGBB, #RRGGBBAA

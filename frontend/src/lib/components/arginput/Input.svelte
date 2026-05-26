@@ -5,7 +5,7 @@
     validateByDataType,
     type InputProps,
   } from "$lib/components/arg/utils.svelte";
-  import { DEFAULT_TIME, DEFAULT_TIME_DISPLAY } from "$lib/components/dashboard/utils";
+  import { DEFAULT_TIME, DEFAULT_TIME_DISPLAY } from "$lib/components/arg/utils.svelte";
   import { Help } from "$lib/components/ui/help";
   import { Input } from "$lib/components/ui/input";
   import { cn } from "$lib/utils";

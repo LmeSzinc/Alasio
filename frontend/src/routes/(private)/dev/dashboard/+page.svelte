@@ -1,9 +1,9 @@
 <script lang="ts">
+  import type { ArgData } from "$lib/components/arg/utils.svelte";
   import DashboardCard from "$lib/components/dashboard/DashboardCard.svelte";
-  import type { DashboardArgData } from "$lib/components/dashboard/utils";
 
   // Mock data based on ExampleMod/module/config/dashboard/dashboard_config.json
-  const baseItems: Record<string, DashboardArgData> = {
+  const baseItems: Record<string, Record<string, ArgData>> = {
     Oil: {
       task: "Dashboard",
       group: "Oil",
@@ -177,11 +177,11 @@
     } as any,
   };
 
-  const mockItems: Record<string, Record<string, DashboardArgData>> = {
+  const mockItems: Record<string, Record<string, Record<string, ArgData>>> = {
     Default: baseItems,
   };
 
-  const mockItemsLong: Record<string, Record<string, DashboardArgData>> = {
+  const mockItemsLong: Record<string, Record<string, Record<string, ArgData>>> = {
     Group1: baseItems,
     Group2: baseItems,
     Group3: baseItems,
