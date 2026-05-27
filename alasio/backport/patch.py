@@ -37,7 +37,6 @@ def patch_std():
         bool: if success
     """
     # note that reconfigure() requires python>=3.7
-    import sys
     try:
         sys.stdin.reconfigure(encoding='utf-8', errors='replace')
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -195,10 +194,10 @@ def fix_py37_subprocess_communicate():
         https://bugs.python.org/issue43423
         https://github.com/python/cpython/pull/24777
     """
-    import subprocess
-
     if sys.platform != 'win32' or sys.version_info[:2] != (3, 7):
         return
+
+    import subprocess
 
     def _communicate_fixed(self, input, endtime, orig_timeout):
         # Start reader threads feeding into a list hanging off of this
