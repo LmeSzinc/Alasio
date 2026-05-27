@@ -1,6 +1,6 @@
 import sys
 
-from alasio.ext.backport.once import patch_once
+from alasio.backport.once import patch_once
 
 
 @patch_once
@@ -28,9 +28,9 @@ def patch_rich_traceback_extract():
         return True
 
     if ver in ['14.3.0', '14.3.1', '14.3.2', '14.3.3', '14.3.4', '15.0.0']:
-        from alasio.ext.backport.rich_14_3 import RichTracebackBackport
+        from alasio.backport.rich.rich_14_3 import RichTracebackBackport
     elif ver in ['14.1.0', '14.2.0']:
-        from alasio.ext.backport.rich_14_1 import RichTracebackBackport
+        from alasio.backport.rich.rich_14_1 import RichTracebackBackport
     else:
         return False
 

@@ -1,9 +1,9 @@
 from alasio.assets_dev.extract import AssetsExtractor
 from alasio.assets_dev.parse import AssetModule
+from alasio.backport import removeprefix
+from alasio.backport.suppress import suppress_keyboard_interrupt
 from alasio.codegen.python import CodeGen
 from alasio.config.const import Const
-from alasio.ext.backport import removeprefix
-from alasio.ext.backport.suppress import suppress_keyboard_interrupt
 from alasio.ext.path.calc import subpath_to, uppath
 
 

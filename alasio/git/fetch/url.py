@@ -2,7 +2,7 @@ from typing import Optional
 
 from msgspec import Struct
 
-from alasio.ext.backport import removesuffix
+from alasio.backport import removesuffix
 
 
 # from urllib.parse

@@ -1,5 +1,5 @@
+from alasio.backport import removesuffix
 from alasio.config.entry.utils import validate_nav_name
-from alasio.ext.backport import removesuffix
 from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.file.yamlfile import read_yaml
 from alasio.ext.path import PathStr

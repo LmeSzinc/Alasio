@@ -2,7 +2,7 @@ from enum import auto
 
 import pytest
 
-from alasio.ext.backport.strenum import StrEnum
+from alasio.backport.strenum import StrEnum
 
 
 class TestStrEnum:

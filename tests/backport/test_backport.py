@@ -3,7 +3,7 @@ from typing import get_args
 import msgspec
 import pytest
 
-from alasio.ext.backport import batched, process_cpu_count, removeprefix, removesuffix, to_literal
+from alasio.backport import batched, process_cpu_count, removeprefix, removesuffix, to_literal
 
 
 class TestRemovePrefix:

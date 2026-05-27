@@ -3,7 +3,7 @@ import threading
 import uuid
 from collections import deque
 
-from alasio.ext.backport import process_cpu_count
+from alasio.backport import process_cpu_count
 from alasio.ext.concurrent.processworker import worker_loop
 
 

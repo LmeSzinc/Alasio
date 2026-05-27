@@ -2,8 +2,8 @@ import json
 import os
 import zipfile
 
+from alasio.backport import removeprefix, removesuffix
 from alasio.deploy_dev.whl_record import RecordEntry, RecordManager
-from alasio.ext.backport import removeprefix, removesuffix
 from alasio.ext.cache import cached_property
 from alasio.ext.concurrent.cmd import run_cmd
 from alasio.ext.concurrent.threadpool import THREAD_POOL

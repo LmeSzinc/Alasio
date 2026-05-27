@@ -92,18 +92,18 @@ git diff v15.0.1 v15.1.0 -- rich/traceback.py
 
 ## 更新步骤
 
-### 1. 更新 `alasio/ext/backport/patch_rich.py`
+### 1. 更新 `alasio/backport/rich/__init__.py`
 
 在 `patch_rich_traceback_extract()` 函数的版本白名单中添加新版本：
 
 ```python
 # 如果新版无变化，直接复用现有 backport
 elif ver in ['14.3.0', '14.3.1', '14.3.2', '14.3.3', '14.3.4', '15.0.0', '15.1.0']:
-    from alasio.ext.backport.rich_14_3 import RichTracebackBackport
+    from alasio.backport.rich.rich_14_3 import RichTracebackBackport
 
 # 如果新版需要新的 backport
 elif ver in ['15.1.0']:
-    from alasio.ext.backport.rich_15_1 import RichTracebackBackport
+    from alasio.backport.rich.rich_15_1 import RichTracebackBackport
 ```
 
 注意：`patch_rich_traceback_links()` 无需随版本更新，它直接 monkeypatch 运行时类，不依赖版本特定的代码。

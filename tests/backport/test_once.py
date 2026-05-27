@@ -1,7 +1,7 @@
 import threading
 import time
 
-from alasio.ext.backport.once import patch_once, run_once
+from alasio.backport.once import patch_once, run_once
 
 
 class TestPatchOnce:

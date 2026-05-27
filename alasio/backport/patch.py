@@ -2,8 +2,8 @@
 import sys
 import threading
 
-from alasio.ext.backport import process_cpu_count
-from alasio.ext.backport.once import patch_once
+from alasio.backport import process_cpu_count
+from alasio.backport.once import patch_once
 
 
 @patch_once

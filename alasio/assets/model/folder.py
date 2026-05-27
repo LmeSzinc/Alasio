@@ -7,16 +7,16 @@ from alasio.assets.model.generator import AssetGenerator
 from alasio.assets.model.name import to_asset_name, to_resource_name, validate_asset_name, validate_resource_name
 from alasio.assets.model.parser import MetaAsset, MetaTemplate
 from alasio.assets.model.resource import ResourceManager
+from alasio.backport import removeprefix
 from alasio.base.image.color import get_color
 from alasio.base.image.draw import get_bbox
 from alasio.base.image.imfile import ImageBroken, crop, image_load, image_size
 from alasio.base.op import Area, RGB, random_id
 from alasio.config.entry.const import DICT_MOD_ENTRY
 from alasio.ext import env
-from alasio.ext.backport import removeprefix
 from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_replace
-from alasio.ext.path.calc import get_name, get_rootstem, get_suffix, uppath
+from alasio.ext.path.calc import get_name, get_rootstem, get_suffix
 from alasio.ext.path.iter import iter_entry
 from alasio.ext.path.validate import validate_filename
 from alasio.logger import logger

@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from alasio.ext.backport.patch import fix_py37_subprocess_communicate
+from alasio.backport.patch import fix_py37_subprocess_communicate
 
 pytestmark = pytest.mark.skipif(
     sys.platform != 'win32' or sys.version_info[:2] != (3, 7),

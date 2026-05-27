@@ -2,7 +2,7 @@ import sys
 
 from exceptiongroup import ExceptionGroup
 
-from alasio.ext.backport.patch_rich import (
+from alasio.backport.rich import (
     parse_rich_traceback_header, patch_rich_traceback_extract, patch_rich_traceback_links
 )
 from alasio.logger.logger import rich_formatter

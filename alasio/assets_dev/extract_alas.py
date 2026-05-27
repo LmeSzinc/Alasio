@@ -1,8 +1,8 @@
 from alasio.assets_dev.extract import AssetsExtractor
 from alasio.assets_dev.parse import AssetModule, AssetMultilang
-from alasio.config.const import Const
-from alasio.ext.backport.suppress import suppress_keyboard_interrupt
+from alasio.backport.suppress import suppress_keyboard_interrupt
 from alasio.codegen.python import CodeGen
+from alasio.config.const import Const
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import get_name, uppath
 

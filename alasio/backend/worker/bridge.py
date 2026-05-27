@@ -6,7 +6,7 @@ from typing import Literal
 from msgspec.msgpack import Encoder, decode
 
 from alasio.backend.worker.event import CommandEvent, ConfigEvent
-from alasio.ext.backport.threading_ext import PreemptiveEvent
+from alasio.backport.threading_ext import PreemptiveEvent
 from alasio.ext.cache import cached_property
 from alasio.ext.singleton import Singleton
 

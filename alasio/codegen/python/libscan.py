@@ -4,7 +4,7 @@ import sys
 import sysconfig
 import warnings
 
-from alasio.ext.backport.strenum import StrEnum
+from alasio.backport.strenum import StrEnum
 from alasio.ext.cache import cached_property
 from alasio.ext.singleton import SingletonOptionalNamed
 

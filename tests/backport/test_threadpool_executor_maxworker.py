@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from alasio.ext.backport.patch import patch_threadpool_executor_maxworker
+from alasio.backport.patch import patch_threadpool_executor_maxworker
 
 
 @pytest.fixture(scope="module", autouse=True)

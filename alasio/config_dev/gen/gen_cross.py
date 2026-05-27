@@ -1,5 +1,6 @@
 from typing import Optional
 
+from alasio.backport import removeprefix
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
@@ -7,7 +8,6 @@ from alasio.config_dev.parse.build_mro import build_mro
 from alasio.config_dev.parse.cache_alasio import CacheAlasio
 from alasio.config_dev.parse.parse_groups import GroupData
 from alasio.config_dev.parse.parse_store import ParseStore
-from alasio.ext.backport import removeprefix
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
