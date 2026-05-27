@@ -1,8 +1,11 @@
+from alasio.config_dev.format.format_yaml import yaml_formatter
 from alasio.config_dev.gen.gen_cross import CrossNavGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_get, deep_set
+from alasio.ext.deep import deep_get, deep_keys_depth1, deep_set
 from alasio.ext.file.msgspecfile import read_msgspec
+from alasio.ext.file.yamlfile import read_yaml, write_yaml
+from alasio.logger import logger
 
 
 class GenNavIndex(CrossNavGenerator):
@@ -37,6 +40,62 @@ class GenNavIndex(CrossNavGenerator):
         return out
 
     @cached_property
+    def nav_order_file(self):
+        return self.path_config.joinpath('_index/nav.order.yaml')
+
+    @cached_property
+    def nav_order_data(self):
+        """
+        data of nav.order.yaml
+
+        nav.order.yaml defines the order of nav.
+        GenNavIndex will maintain its data structure, adding new nav and removing old nav,
+        then write to file if content changed.
+
+        File content is like:
+            alas:
+            general:
+            reward:
+            daily:
+
+        Returns:
+            dict[str, None]:
+                key: nav_name, ordered by existing file order then new navs appended
+        """
+        old = read_yaml(self.nav_order_file)
+        current_navs = {k for k in self.dict_nav_config if k != 'dashboard'}
+        out = {}
+        for nav_name in deep_keys_depth1(old):
+            if nav_name in current_navs:
+                # respect pre-defined nav order
+                out[nav_name] = None
+            # else: drop old nav
+        # add new nav
+        for nav_name in sorted(current_navs):
+            if nav_name not in out:
+                out[nav_name] = None
+        return out
+
+    def generate_nav_order(self, gitadd=None):
+        """
+        Write nav.order.yaml if content changed, then format with yaml_formatter.
+        """
+        data = self.nav_order_data
+        file = self.nav_order_file
+        if data:
+            op = write_yaml(file, data, skip_same=True, formatter=yaml_formatter)
+            if op:
+                logger.info(f'Write file {file}')
+                if gitadd:
+                    gitadd.stage_add(file)
+        else:
+            if file.exists():
+                logger.info(f'Delete file {file}')
+                file.atomic_remove()
+                if gitadd:
+                    gitadd.stage_add(file)
+
+    @cached_property
     def nav_index_data(self):
         """
         data of nav.index.json
@@ -48,10 +107,8 @@ class GenNavIndex(CrossNavGenerator):
         """
         old = read_msgspec(self.nav_index_file)
         out = {}
-        for nav_name, config in self.dict_nav_config.items():
-            # skip dashboard on nav
-            if nav_name == 'dashboard':
-                continue
+        for nav_name in self.nav_order_data:
+            config = self.dict_nav_config[nav_name]
             # nav name, which must not empty
             empty = True
             for group in config.tasks_data.values():

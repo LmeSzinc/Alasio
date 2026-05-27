@@ -99,6 +99,76 @@ class GitReset(GitObjectManager):
 
         return dict_entry
 
+    def get_file(self, sha1, filepath):
+        """
+        Get a single FileEntry by filepath from the given commit/tree/tag sha1.
+        Only traverses the specific path, avoiding full tree enumeration.
+
+        Args:
+            sha1 (str): commit sha1, or tree sha1, or tag sha1
+            filepath (str): file path relative to repo root, e.g. 'alasio/git/stage/gitreset.py'
+
+        Returns:
+            FileEntry | None: FileEntry if found, None otherwise
+        """
+        # Resolve commit/tag to tree sha1
+        while 1:
+            obj = self.cat(sha1)
+            typ = obj.type
+            if typ == 1:
+                # commit -> tree
+                sha1 = obj.decoded.tree
+            elif typ == 4:
+                # tag -> object
+                sha1 = obj.decoded.object
+            else:
+                break
+
+        # Now sha1 should be a tree sha1 (type 2)
+        if typ == 3:
+            raise ValueError('Object is a file, cannot get file in it')
+        if typ != 2:
+            return None
+
+        parts = filepath.split('/')
+        if not parts:
+            return None
+
+        # Walk down the tree hierarchy along the specific path
+        for idx, name in enumerate(parts):
+            obj = self.cat(sha1)
+            if obj.type != 2:
+                return None
+            tree = obj.decoded
+
+            # Find the entry matching the current path component
+            found = None
+            for entry in tree:
+                if entry.name == name:
+                    found = entry
+                    break
+
+            if found is None:
+                return None
+
+            is_last = idx == len(parts) - 1
+
+            if is_last:
+                # We reached the target file
+                if found.mode in (b'40000', b'160000'):
+                    # path points to a directory or submodule, not a file
+                    return None
+                return FileEntry(sha1=found.sha1, mode=found.mode, path=filepath)
+
+            # Not the last component, must be a directory to continue
+            if found.mode != b'40000':
+                # Not a directory, can't descend
+                return None
+            sha1 = found.sha1
+
+        # Should not reach here
+        return None
+
     @staticmethod
     def _reset_task_iter(dict_file):
         """

@@ -86,6 +86,8 @@ class IndexGenerator(
         # config.index.json
         write(self.config_index_file, self.config_index_data)
 
+        # nav.order.yaml
+        self.generate_nav_order(gitadd=gitadd)
         # nav.index.json
         write(self.nav_index_file, self.nav_index_data)
 
