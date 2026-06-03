@@ -18,6 +18,11 @@ The method uses a three-level fallback strategy:
   2. Fallback: match within the same suffix (any char).
   3. Fallback: match across all buckets (any suffix, any char).
 
+The optional ``min_length``, ``max_length``, and ``max_lookback`` parameters
+filter candidates at every level.  ``min_length`` defaults to 1, meaning
+zero-length LCS matches (e.g. comparing two completely different strings)
+are excluded by default.
+
 At each level the innermost sub-bucket is iterated in **reverse insertion
 order**.  Ties are kept in favour of the entry that appeared first in the
 iteration (i.e. earliest sub-bucket, most recent within sub-bucket).
@@ -288,10 +293,9 @@ class TestGetLcsEdgeCases:
         lcs = PathLookbackLCS()
         lcs.add_path("noext")
         lookback, length = lcs.get_lcs("")
-        # Empty string has path_length=0, LCS with any string is 0,
-        # so the exact-match short-circuit triggers at Level 1.
-        # self.index = 1, matched index 0 -> lookback = 1
-        assert lookback == 1
+        # Empty query has LCS=0 with any stored path, so with default
+        # min_length=1 it is filtered at every level -> (0, 0).
+        assert lookback == 0
         assert length == 0
 
     def test_no_extension_stored_and_query(self):
@@ -338,6 +342,117 @@ class TestGetLcsEdgeCases:
 # ---------------------------------------------------------------------------
 
 
+class TestGetLcsFilters:
+    """Optional filter parameters on get_lcs(): min_length, max_length, max_lookback."""
+
+    def test_no_filter_backward_compat(self):
+        """Calling get_lcs without filters works identically to before."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("aaaa.py")
+        lcs.add_path("bbbb.py")
+        lookback, length = lcs.get_lcs("xxxx.py")
+        assert lookback == 2
+        assert length == 3
+
+    def test_min_length_skip_short(self):
+        """min_length filters out candidates with LCS shorter than the cutoff."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("aaaaa.py")        # index 0, LCS = ".py" (len 3)
+        lcs.add_path("bbbbb.py")        # index 1, LCS = ".py" (len 3)
+        # No candidate has LCS >= 5
+        lookback, length = lcs.get_lcs("xxxxx.py", min_length=5)
+        assert lookback == 0
+        assert length == 0
+
+    def test_min_length_accept_long_enough(self):
+        """min_length keeps candidates that meet the threshold."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("aaaaa.py")        # index 0
+        lookback, length = lcs.get_lcs("xxxxx.py", min_length=3)
+        assert lookback == 1
+        assert length == 3
+
+    def test_max_length_skip_long(self):
+        """max_length filters out candidates with LCS longer than the cutoff."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("abc_common.py")   # index 0, LCS = 10
+        lcs.add_path("other.py")        # index 1, LCS = 3
+        lookback, length = lcs.get_lcs("xyz_common.py", max_length=5)
+        # "other.py" (index 1) has LCS=3 <= 5 -> found
+        assert lookback == 1
+        assert length == 3
+
+    def test_max_length_allow_at_cutoff(self):
+        """max_length keeps candidates at or below the cutoff."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("abc_common.py")   # index 0, LCS = 10
+        lookback, length = lcs.get_lcs("xyz_common.py", max_length=10)
+        assert lookback == 1
+        assert length == 10
+
+    def test_max_lookback_filter_old(self):
+        """max_lookback filters out candidates whose lookback > max."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("aaaaa.py")        # index 0, lookback=3
+        lcs.add_path("bbbbb.py")        # index 1, lookback=2
+        lcs.add_path("ccccc.py")        # index 2, lookback=1
+        # max_lookback=1: only ccccc.py qualifies -> lookback=1
+        lookback, length = lcs.get_lcs("xxxxx.py", max_lookback=1)
+        assert lookback == 1
+        assert length == 3
+
+    def test_max_lookback_exact_match_filtered(self):
+        """Exact match is skipped when its lookback exceeds max_lookback."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("exact.py")        # index 0, lookback=2
+        lcs.add_path("other.py")        # index 1, lookback=1
+        # max_lookback=1: exact.py filtered out (lookback 2 > 1)
+        # Falls back to other.py -> LCS(".py")=3
+        lookback, length = lcs.get_lcs("exact.py", max_lookback=1)
+        assert lookback == 1
+        assert length == 3
+
+    def test_max_lookback_exact_match_allowed(self):
+        """Exact match passes when its lookback is within max_lookback."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("exact.py")        # index 0, lookback=2
+        lcs.add_path("other.py")        # index 1, lookback=1
+        lookback, length = lcs.get_lcs("exact.py", max_lookback=2)
+        assert lookback == 2
+        assert length == len("exact.py")
+
+    def test_min_and_max_length(self):
+        """Both min_length and max_length applied simultaneously."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("aaaaa.py")            # index 0, char 'a', LCS = ".py" (len 3)
+        lcs.add_path("abc_xcommon.py")      # index 1, char 'n', LCS = 11 (> 10)
+        # Level 1: abc_xcommon.py filtered by max_length
+        # Level 2: aaaaa.py filtered by min_length
+        lookback, length = lcs.get_lcs("xyz_xcommon.py", min_length=5, max_length=10)
+        assert lookback == 0
+        assert length == 0
+
+    def test_combined_min_and_max_lookback(self):
+        """min_length and max_lookback combined."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("abc_common.py")   # index 0, lookback=3, LCS=10
+        lcs.add_path("def_common.py")   # index 1, lookback=2, LCS=10
+        lcs.add_path("ghi.py")          # index 2, lookback=1, LCS=3
+        lookback, length = lcs.get_lcs("xyz_common.py", min_length=5, max_lookback=1)
+        # ghi.py has LCS=3 < 5 filtered; no other with lookback <= 1
+        assert lookback == 0
+        assert length == 0
+
+    def test_all_filters_exclude_everything(self):
+        """When all candidates are filtered out, returns (0, 0)."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("a.py")
+        lcs.add_path("b.py")
+        lookback, length = lcs.get_lcs("c.py", min_length=10, max_length=1, max_lookback=0)
+        assert lookback == 0
+        assert length == 0
+
+
 class TestRegression:
     """Edge cases found during development, testing new fallback behavior."""
 
@@ -375,6 +490,58 @@ class TestRegression:
         lookback, length = lcs.get_lcs("y")
         assert lookback == 0
         assert length == 0
+
+    def test_empty_path_as_key(self):
+        """Adding an empty string as a path does not cause errors."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("")                           # index 0, suffix='', char=''
+        assert lcs.index == 1
+        assert lcs.dict_suffix[""] == {"": {"": 0}}
+
+    def test_query_after_empty_path_added(self):
+        """Querying after an empty path was added works normally."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("normal.py")                  # index 0
+        lcs.add_path("")                           # index 1
+        lcs.add_path("other.py")                   # index 2
+        # Query matching first path -> should work
+        lookback, length = lcs.get_lcs("normal.py")
+        assert lookback == 3
+        assert length == len("normal.py")
+
+    def test_empty_path_as_only_entry(self):
+        """Only an empty path is stored, query against it."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("")
+        lookback, length = lcs.get_lcs("something.py")
+        # Level 1: dict_suffix['.py']['y'] empty (different suffix)
+        # Level 2: dict_suffix['.py'] empty
+        # Level 3: finds "" in dict_suffix['']['']
+        # LCS("something.py", "") = 0, filtered by min_length=1
+        assert lookback == 0
+        assert length == 0
+
+    def test_empty_path_many_empty_paths(self):
+        """Multiple empty paths don't corrupt internal state."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("")
+        lcs.add_path("")
+        assert lcs.index == 2
+        assert lcs.dict_suffix[""][""] == {"": 1}
+
+    def test_mixed_normal_and_empty_paths(self):
+        """Normal operations interleaved with empty paths."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("a.py")
+        lcs.add_path("")
+        lcs.add_path("b.py")
+        lcs.add_path("")
+        lcs.add_path("c.py")
+        assert lcs.index == 5
+        # Query finds most recent "c.py" exactly
+        lookback, length = lcs.get_lcs("c.py")
+        assert lookback == 1
+        assert length == len("c.py")
 
     def test_path_with_dot_in_directory_name(self):
         lcs = PathLookbackLCS()

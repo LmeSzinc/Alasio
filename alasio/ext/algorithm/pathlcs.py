@@ -26,10 +26,13 @@ class PathLookbackLCS:
         char = path[-1] if path else ''
         return suffix, char
 
-    def get_lcs(self, path):
+    def get_lcs(self, path, min_length=1, max_length=None, max_lookback=None):
         """
         Args:
             path (str):
+            min_length (int): Minimum LCS length for a candidate.
+            max_length (int | None): Maximum LCS length for a candidate.
+            max_lookback (int | None): Maximum lookback distance.
 
         Returns:
             tuple[int, int]: lookback, lcs_length
@@ -39,44 +42,63 @@ class PathLookbackLCS:
         best_index = 0
         best_length = 0
         path_length = len(path)
+        current_index = self.index
 
         # match suffix and char
         dict_path = self.dict_suffix[suffix][char]
-        for prev, index in reversed(list(dict_path.items())):
+        for prev, prev_index in reversed(list(dict_path.items())):
             length = get_lcs_length(path, prev)
+            if length < min_length:
+                continue
+            if max_length is not None and length > max_length:
+                continue
+            if max_lookback is not None and current_index - prev_index > max_lookback:
+                continue
             if length == path_length:
-                return self.index - index, length
+                return current_index - prev_index, length
             if length > best_length:
-                best_index = index
+                best_index = prev_index
                 best_length = length
         if best_length:
-            return self.index - best_index, best_length
+            return current_index - best_index, best_length
 
         # match suffix
         for dict_path in self.dict_suffix[suffix].values():
-            for prev, index in reversed(list(dict_path.items())):
+            for prev, prev_index in reversed(list(dict_path.items())):
                 length = get_lcs_length(path, prev)
+                if length < min_length:
+                    continue
+                if max_length is not None and length > max_length:
+                    continue
+                if max_lookback is not None and current_index - prev_index > max_lookback:
+                    continue
                 if length == path_length:
-                    return self.index - index, length
+                    return current_index - prev_index, length
                 if length > best_length:
-                    best_index = index
+                    best_index = prev_index
                     best_length = length
         if best_length:
-            return self.index - best_index, best_length
+            return current_index - best_index, best_length
 
         # match any
         for dict_suffix in self.dict_suffix.values():
             for dict_path in dict_suffix.values():
-                for prev, index in reversed(list(dict_path.items())):
+                for prev, prev_index in reversed(list(dict_path.items())):
                     length = get_lcs_length(path, prev)
+                    if length < min_length:
+                        continue
+                    if max_length is not None and length > max_length:
+                        continue
+                    if max_lookback is not None and current_index - prev_index > max_lookback:
+                        continue
                     if length == path_length:
-                        return self.index - index, length
+                        return current_index - prev_index, length
                     if length > best_length:
-                        best_index = index
+                        best_index = prev_index
                         best_length = length
 
         if best_length:
-            return self.index - best_index, best_length
+            return current_index - best_index, best_length
         return 0, 0
 
     def add_path(self, path):
