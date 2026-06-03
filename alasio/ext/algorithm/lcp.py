@@ -35,6 +35,33 @@ def get_lcp(s1, s2):
 
 
 @overload
+def get_lcp_length(s1: str, s2: str) -> int: ...
+
+
+@overload
+def get_lcp_length(s1: bytes, s2: bytes) -> int: ...
+
+
+def get_lcp_length(s1, s2):
+    """
+    Get LCP length of two strings
+
+    Args:
+        s1 (str | bytes): First string or bytes
+        s2 (str | bytes): Second string or bytes
+
+    Returns:
+        int: Length of the longest common prefix
+    """
+    i = 0
+    for char1, char2 in zip(s1, s2):
+        if char1 != char2:
+            return i
+        i += 1
+    return i
+
+
+@overload
 def get_lcs(s1: str, s2: str) -> str: ...
 
 
@@ -65,3 +92,30 @@ def get_lcs(s1, s2):
     else:
         # slice end to return empty thingy with the same type
         return s1[len(s1):]
+
+
+@overload
+def get_lcs_length(s1: str, s2: str) -> int: ...
+
+
+@overload
+def get_lcs_length(s1: bytes, s2: bytes) -> int: ...
+
+
+def get_lcs_length(s1, s2):
+    """
+    Get LCS length of two strings
+
+    Args:
+        s1 (str | bytes): First string or bytes
+        s2 (str | bytes): Second string or bytes
+
+    Returns:
+        int: Length of the longest common suffix
+    """
+    i = 0
+    for char1, char2 in zip(reversed(s1), reversed(s2)):
+        if char1 != char2:
+            break
+        i += 1
+    return i
