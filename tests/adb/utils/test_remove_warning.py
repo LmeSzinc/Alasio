@@ -19,6 +19,36 @@ class TestRemoveWarning:
             'data'
         ) == 'data'
 
+    def test_remove_shell_warning_no_newline(self):
+        """
+        When data starts with WARNING: linker: but has no \n after the warning line,
+        remove_shell_warning caps everything up to and including the next \n.
+        Since there is no \n, the whole string is removed (partition returns empty after-part).
+        """
+        # Bytes: just the warning, no trailing newline
+        assert remove_shell_warning(b'WARNING: linker: [vdso]') == b''
+
+        # Bytes: warning directly followed by data, no newline separator
+        assert remove_shell_warning(b'WARNING: linker: [vdso]\x89PNG') == b''
+
+        # Str: just the warning, no trailing newline
+        assert remove_shell_warning('WARNING: linker: [vdso]') == ''
+
+        # Str: warning directly followed by data, no newline separator
+        assert remove_shell_warning('WARNING: linker: [vdso]data') == ''
+
+        # Mixed: first warning has newline, second has none -> second warning consumes everything
+        assert remove_shell_warning(
+            b'WARNING: linker: [vdso]\n'
+            b'WARNING: linker: [vdso]\x89PNG'
+        ) == b''
+
+        # Mixed: first warning has no newline, consumes until the next \n
+        assert remove_shell_warning(
+            b'WARNING: linker: [vdso]'
+            b'WARNING: linker: [vdso]\n\x89PNG'
+        ) == b'\x89PNG'
+
     def test_remove_screenshot_warning(self):
         # Bytes
         assert remove_screenshot_warning(b'\x89PNG') == b'\x89PNG'
@@ -37,6 +67,12 @@ class TestRemoveWarning:
         # Situation 4
         assert remove_screenshot_warning(
             b'long long=8 fun*=10\n'
+            b'\x89PNG'
+        ) == b'\x89PNG'
+        # Situation 5
+        assert remove_screenshot_warning(
+            b'amdgpu: os_same_file_description couldn\'t determine if two DRM fds reference the same file description.\n'
+            b'If they do, bad things may happen!\n'
             b'\x89PNG'
         ) == b'\x89PNG'
 
@@ -59,6 +95,12 @@ class TestRemoveWarning:
             'long long=8 fun*=10\n'
             'data'
         ) == 'data'
+        # Situation 5
+        assert remove_screenshot_warning(
+            'amdgpu: os_same_file_description couldn\'t determine if two DRM fds reference the same file description.\n'
+            'If they do, bad things may happen!\n'
+            'data'
+        ) == 'data'
 
     def test_remove_screenshot_warning_partial(self):
         # Only [Warning] Multiple displays matches
@@ -72,6 +114,12 @@ class TestRemoveWarning:
             b'A display id should be specified.\n' \
             b'\x89PNG'
         assert remove_screenshot_warning(s) == b'\x89PNG'
+
+        # amdgpu: only first line matches, second line doesn't start with "If they do"
+        s = b'amdgpu: os_same_file_description couldn\'t determine if two DRM fds reference the same file description.\n' \
+            b'Something else\n' \
+            b'\x89PNG'
+        assert remove_screenshot_warning(s) == b'Something else\n\x89PNG'
 
     def test_other_types(self):
         # Should return as-is
