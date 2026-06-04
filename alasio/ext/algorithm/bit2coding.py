@@ -1,5 +1,4 @@
-from alasio.ext.algorithm.lz77 import match_lz77
-from alasio.ext.algorithm.matchrun import match_run
+from alasio.ext.algorithm.lz77 import match_lz77, match_run
 
 
 def encode_bit2_opcode_iter(data):

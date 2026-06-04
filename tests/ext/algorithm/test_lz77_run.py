@@ -1,5 +1,5 @@
 """
-Tests for alasio.ext.algorithm.matchrun.match_run().
+Tests for alasio.ext.algorithm.lz77.match_run().
 
 ``match_run(data, index, min_length=1, max_length=0)`` finds the longest run
 of identical bytes starting from ``index`` in a memoryview of bytes.
@@ -10,7 +10,7 @@ value (0-255) and ``run_length`` is at least ``min_length``.
 
 import pytest
 
-from alasio.ext.algorithm.matchrun import match_run
+from alasio.ext.algorithm.lz77 import match_run
 
 
 # ==============================================================================
