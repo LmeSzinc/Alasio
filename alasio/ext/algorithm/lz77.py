@@ -1,4 +1,4 @@
-def match_lz77(data, index, window=0, min_length=3):
+def match_lz77(data, index, window=0, min_length=3, max_length=0):
     """
     An optimized LZ77 match
 
@@ -8,6 +8,7 @@ def match_lz77(data, index, window=0, min_length=3):
         index (int):
         window (int): Default to 0 for full match
         min_length (int):
+        max_length (int): Maximum copy length. 0 (default) means no limit.
 
     Returns:
         tuple[int, int]: offset, length
@@ -21,8 +22,10 @@ def match_lz77(data, index, window=0, min_length=3):
             start = 0
     else:
         start = 0
-    max_length = len(data) - index
-    if max_length < min_length:
+    avail = len(data) - index
+    if 0 < max_length < avail:
+        avail = max_length
+    if avail < min_length:
         return 0, 0
 
     # 1. quick failure, no match
@@ -38,10 +41,10 @@ def match_lz77(data, index, window=0, min_length=3):
     best_idx = idx
 
     # 理论上，匹配起点为 best_idx 时，在历史区间内的最大可能匹配长度
-    # limit_len = min(max_length, index - best_idx)
+    # limit_len = min(avail, index - best_idx)
     limit_len = index - best_idx
-    if limit_len > max_length:
-        limit_len = max_length
+    if limit_len > avail:
+        limit_len = avail
 
     curr_len = min_length * 2
     while curr_len <= limit_len:
@@ -53,10 +56,10 @@ def match_lz77(data, index, window=0, min_length=3):
             # 倍增
             curr_len *= 2
             # 更新限制
-            # limit_len = min(max_length, index - best_idx)
+            # limit_len = min(avail, index - best_idx)
             limit_len = index - best_idx
-            if limit_len > max_length:
-                limit_len = max_length
+            if limit_len > avail:
+                limit_len = avail
         else:
             break
 
@@ -78,8 +81,8 @@ def match_lz77(data, index, window=0, min_length=3):
             # (bounded by history depth) increases. Expand the search upper
             # bound so binary search can reach the longer match.
             new_limit = index - best_idx
-            if new_limit > max_length:
-                new_limit = max_length
+            if new_limit > avail:
+                new_limit = avail
             if new_limit > high:
                 high = new_limit
             low = mid + 1
@@ -91,7 +94,7 @@ def match_lz77(data, index, window=0, min_length=3):
     offset = index - best_idx
     if offset == best_len:
         match_idx = index - best_len
-        while best_len < max_length and data[match_idx + best_len] == data[index + best_len]:
+        while best_len < avail and data[match_idx + best_len] == data[index + best_len]:
             best_len += 1
 
     return offset, best_len

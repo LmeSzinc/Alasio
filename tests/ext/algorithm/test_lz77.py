@@ -420,6 +420,161 @@ class TestMatchLz77EdgeCases:
         assert length == 27
 
 
+class TestMatchLz77MaxLength:
+    """Tests for the max_length parameter that caps the maximum copy length."""
+
+    # ── simple match capped ──────────────────────────────────────────────
+
+    def test_max_length_caps_simple_match(self):
+        """max_length shorter than the natural match length should cap it."""
+        # "abcdef" repeats at offset 6; natural match length = 6
+        data = memoryview(b'abcdefabcdef')
+        offset, length = match_lz77(data, 6, max_length=4)
+        assert offset == 6
+        assert length == 4, f"Expected 4, got {length}"
+
+    def test_max_length_larger_than_natural(self):
+        """max_length larger than the natural match has no effect."""
+        data = memoryview(b'abcdefabcdef')
+        offset, length = match_lz77(data, 6, max_length=100)
+        assert offset == 6
+        assert length == 6, f"Expected 6, got {length}"
+
+    # ── rolling copy capped ──────────────────────────────────────────────
+
+    def test_max_length_caps_rolling_copy(self):
+        """Rolling copy must not exceed max_length."""
+        data = memoryview(b'abc' * 10)           # 30 bytes
+        offset, length = match_lz77(data, 3, max_length=7)
+        # natural rolling would reach 27, but capped at 7
+        assert offset == 3
+        assert length == 7, f"Expected 7, got {length}"
+
+    def test_max_length_caps_rolling_copy_exact(self):
+        """Rolling copy stops exactly at max_length boundary."""
+        data = memoryview(b'ab' * 20)            # 40 bytes
+        offset, length = match_lz77(data, 4, max_length=10)
+        # natural rolling reaches 36, capped at 10
+        assert offset == 4
+        assert length == 10, f"Expected 10, got {length}"
+
+    def test_max_length_one_above_min_length(self):
+        """max_length just above min_length allows rolling to extend a bit."""
+        # Use data with plenty of room after index so max_length is the binding cap
+        data = memoryview(b'abc' * 10)           # 30 bytes
+        offset, length = match_lz77(data, 3, max_length=4, min_length=3)
+        # natural rolling would reach 27, but capped at 4
+        assert offset == 3
+        assert length == 4, f"Expected 4, got {length}"
+
+    # ── binary search capped ─────────────────────────────────────────────
+
+    def test_max_length_caps_binary_search(self):
+        """Binary search phase must not exceed max_length."""
+        # "ABCDEFGHIJ" repeats at offset 10, natural match = 8
+        data = memoryview(b'ABCDEFGHIJABCDEFGHXY')
+        offset, length = match_lz77(data, 10, max_length=5)
+        assert offset == 10
+        assert length == 5, f"Expected 5, got {length}"
+
+    def test_max_length_caps_exponential_then_binary(self):
+        """Exponential + binary search both capped by max_length."""
+        data = memoryview(b'abcdefghijklmnopqrstabcdefghijklmnopqrst')
+        # index=20, natural match on all 20 chars
+        offset, length = match_lz77(data, 20, max_length=8)
+        assert offset == 20
+        assert length == 8, f"Expected 8, got {length}"
+
+    # ── zero / no-limit ──────────────────────────────────────────────────
+
+    def test_max_length_zero_no_limit(self):
+        """max_length=0 (default) imposes no limit."""
+        data = memoryview(b'abc' * 10)
+        offset, length = match_lz77(data, 3)
+        assert offset == 3
+        assert length == 27, f"Expected 27 (no limit), got {length}"
+
+    # ── below min_length ─────────────────────────────────────────────────
+
+    def test_max_length_below_min_length_returns_no_match(self):
+        """When max_length < min_length, no match is possible."""
+        data = memoryview(b'abcabc')
+        offset, length = match_lz77(data, 3, max_length=2)
+        assert offset == 0
+        assert length == 0
+
+    def test_max_length_equal_min_length(self):
+        """max_length == min_length allows exactly a min_length match."""
+        data = memoryview(b'abcabc')
+        offset, length = match_lz77(data, 3, max_length=3)
+        assert offset == 3
+        assert length == 3, f"Expected 3, got {length}"
+
+    # ── with window ─────────────────────────────────────────────────────
+
+    def test_max_length_with_window(self):
+        """max_length and window work together: the tighter bound wins."""
+        # "abc" at offset 0, index=8, window=8 allows the match
+        # avail=7, max_length=3 caps the match tighter than avail
+        data = memoryview(b'abc_123_abc456')
+        offset, length = match_lz77(data, 8, window=8, max_length=3)
+        assert offset == 8, f"Expected offset 8, got {offset}"
+        assert length == 3, f"Expected length 3, got {length}"
+
+    # ── invariant with max_length ────────────────────────────────────────
+
+    @pytest.mark.parametrize("data_bytes, index, max_len", [
+        (b'abcabc', 3, 3),
+        (b'abcabc', 3, 4),
+        (b'abcabc', 3, 5),
+        (b'abcdefabcdef', 6, 4),
+        (b'abcdefabcdef', 6, 5),
+        (b'ab' * 10, 4, 6),
+        (b'ab' * 10, 4, 10),
+        (b'abc' * 10, 3, 8),
+        (b'ABCDEFGHIJABCDEFGHXY', 10, 6),
+        (b'ABCDEFGHIJABCDEFGHXY', 10, 9),
+        (b'abc_abc_abc', 4, 3),
+        (b'\x00\x01\x02\x00\x01\x02', 3, 2),
+    ])
+    def test_max_length_invariant(self, data_bytes, index, max_len):
+        """With max_length set, the invariant holds AND length never exceeds max_len."""
+        data = memoryview(data_bytes)
+        offset, length = match_lz77(data, index, max_length=max_len)
+        # length must never exceed max_len
+        assert length <= max_len, \
+            f"length ({length}) exceeds max_length ({max_len})"
+        if length > 0:
+            match = data[index - offset: index - offset + length]
+            target = data[index: index + length]
+            assert match == target, \
+                f"Invariant failed with max_length={max_len}"
+            assert offset > 0
+            assert index - offset >= 0
+
+    # ── stress: many random-like patterns ──────────────────────────────
+
+    @pytest.mark.parametrize("pattern, repeat, index, max_len", [
+        (b'abc', 12, 3, 5),
+        (b'abc', 12, 3, 10),
+        (b'abc', 12, 3, 15),
+        (b'xyz', 8, 3, 4),
+        (b'xyz', 8, 3, 12),
+        (b'\x00\x01\x02', 10, 3, 6),
+        (b'\x00\x01\x02', 10, 3, 20),
+    ])
+    def test_max_length_rolling_stress(self, pattern, repeat, index, max_len):
+        """Rolling copy with various max_length values never exceeds the cap."""
+        data = memoryview(pattern * repeat)
+        offset, length = match_lz77(data, index, max_length=max_len)
+        assert length <= max_len, \
+            f"Rolling copy exceeded max_length: {length} > {max_len}"
+        if length > 0:
+            match = data[index - offset: index - offset + length]
+            target = data[index: index + length]
+            assert match == target
+
+
 class TestMatchLz77Property:
     """Property-like tests that verify the match invariant."""
 
