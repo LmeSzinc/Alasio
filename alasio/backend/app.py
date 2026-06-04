@@ -187,12 +187,14 @@ def create_app():
     from alasio.backend.dev.assets import NoCacheStaticFiles, SPANoCacheStaticFiles
     from alasio.config.entry.loader import MOD_LOADER
     from alasio.ext.starapi.router import APIRouter
+    from alasio.ext.path.calc import joinnormpath
 
     # Mount all mod assets
     assets_router = APIRouter('/dev_assets')
     for mod in MOD_LOADER.dict_mod.values():
         path = f'/{mod.name}/{mod.entry.path_assets}'
-        NoCacheStaticFiles.mount(assets_router, path, directory=dict, check_dir=False)
+        NoCacheStaticFiles.mount(
+            assets_router, path, directory=joinnormpath(mod.entry.root, mod.entry.path_assets), check_dir=False)
     app.add_router('/api', assets_router)
 
     # Mount mod APIs
