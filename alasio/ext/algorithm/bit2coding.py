@@ -8,7 +8,7 @@ def encode_bit2_opcode_iter(data):
     将输入的 2-bit 数据流转换为操作元组列表
 
     Args:
-        data (list[int]): value must be 0, 1, 2, 3
+        data (list[int] | deque[int]): value must be 0, 1, 2, 3
 
     Yields:
         tuple: operation code
@@ -19,8 +19,9 @@ def encode_bit2_opcode_iter(data):
     pending_literals = []
 
     i = 0
-    n = len(data)
     mv = memoryview(bytes(data))
+    # get length later so no need to iter deque twice
+    n = len(mv)
 
     while i < n:
         # 1. 检测连续重复 (Run)
@@ -365,3 +366,39 @@ def decode_bit2_stream_iter(data, total):
             break
 
     return opcodes, read
+
+
+def encode_bit2(data):
+    """
+    Encode data to bit2 format
+
+    Args:
+        data (list[int] | deque[int]): Data to encode
+
+    Returns:
+        bytes: Encoded data
+    """
+    opcodes = encode_bit2_opcode_iter(data)
+    stream = encode_bit2_stream_iter(opcodes)
+    return bytes(stream)
+
+
+def decode_bit2(data, total):
+    """
+    Decode bit2 format data to list[int]
+
+    Args:
+        data (memoryview | bytes): Encoded data
+        total (int): Total numbers
+
+    Returns:
+        tuple[list[int], int]: (list of opcodes, read bytes count)
+
+    Raises:
+        ValueError: If data is truncated or contains invalid opcodes
+    """
+    if isinstance(data, bytes):
+        data = memoryview(data)
+    opcodes, read = decode_bit2_stream_iter(data, total)
+    data = decode_bit2_opcode(opcodes)
+    return data, read
