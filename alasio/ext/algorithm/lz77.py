@@ -113,6 +113,7 @@ def match_run(data, index, min_length=1, max_length=0):
     Returns:
         tuple[int, int]: (run_bytes_in_uint8, run_length)
             run_length is always >= min_length
+            run_length is 0 if no match or match_len < min_length
 
     Raises:
         IndexError: If start index is out of data
@@ -131,5 +132,5 @@ def match_run(data, index, min_length=1, max_length=0):
             length += 1
     # not match min_length
     if length < min_length:
-        return start, min_length
+        return start, 0
     return start, length
