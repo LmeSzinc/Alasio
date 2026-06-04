@@ -26,6 +26,7 @@
     { path: "/dev/scheduler", name: "Scheduler" },
     { path: "/dev/dashboard", name: "Dashboard" },
     { path: "/dev/dashboardgroup", name: "Dashboard Group" },
+    { path: "/dev/log", name: "Log Viewer" },
   ]);
 
   // --- Derived State ---
