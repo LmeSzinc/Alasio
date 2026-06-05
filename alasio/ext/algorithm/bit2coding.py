@@ -400,6 +400,31 @@ def decode_bit2_stream_iter(data, total, ext8=False):
     return opcodes, read
 
 
+def _encode_value_check(data, ext8=False):
+    """
+    Check if the values are valid for bit2 encoding
+
+    Args:
+        data (list[int] | deque[int]): Data to encode
+        ext8 (bool): True to enable ext8 support to allow 4/5/6/7 as literal values
+
+    Raises:
+        ValueError: If the values are invalid
+    """
+    if not data:
+        return
+    min_val = min(data)
+    max_val = max(data)
+    if min_val < 0:
+        raise ValueError(f"Invalid value: {min_val}, value must be >= 0")
+    if ext8:
+        if max_val > 7:
+            raise ValueError(f"Invalid value: {max_val}, value must be <= 7 if ext8 is enabled")
+    else:
+        if max_val > 3:
+            raise ValueError(f"Invalid value: {max_val}, value must be <= 3 if ext8 is disabled")
+
+
 def encode_bit2(data, ext8=False):
     """
     Encode data to bit2 format
@@ -411,6 +436,7 @@ def encode_bit2(data, ext8=False):
     Returns:
         bytes: Encoded data
     """
+    _encode_value_check(data, ext8)
     opcodes = encode_bit2_opcode_iter(data)
     stream = encode_bit2_stream_iter(opcodes, ext8=ext8)
     return bytes(stream)
