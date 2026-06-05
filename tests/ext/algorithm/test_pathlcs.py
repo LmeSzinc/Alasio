@@ -841,3 +841,23 @@ class TestRegression:
         lookback, length = lcs.get_lcs("newbash.py")
         assert lookback == 1
         assert length == 4
+
+    def test_defaultdict_side_effect_dotfile_lcs(self):
+        """Regression: V1's ``get_lcs`` must not auto-create a defaultdict entry
+        for the query suffix.  Level 1 accesses ``self.dict_suffix[suffix]`` which
+        creates an empty bucket for dotfiles like ``.prettierignore``.  Level 3's
+        suffix-LCS loop then picks this empty bucket (LCS = len(suffix)) over a
+        real bucket such as ``.gitignore`` / ``ignore`` → (0, 0) instead of a valid
+        match.
+
+        Reference (V3) result for the same inputs is ``lookback=1, length=6``.
+        """
+        lcs = PathLookbackLCS()
+        lcs.add_path('.gitignore')          # idx 0, suffix='.gitignore'
+        lcs.add_path('some_other.py')       # idx 1
+        lcs.add_path('webapp/.gitignore')   # idx 2, suffix='.gitignore'
+
+        lookback, length = lcs.get_lcs('.prettierignore', min_length=3, max_length=63)
+        # Must match V3 behaviour: LCS('.prettierignore', '.gitignore') = 6
+        assert lookback == 1
+        assert length == 6

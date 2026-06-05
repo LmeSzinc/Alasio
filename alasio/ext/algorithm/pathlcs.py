@@ -96,6 +96,17 @@ class PathLookbackLCS:
             if max_length is not None and length > max_length:
                 continue
             if length > best_length:
+                # Skip suffix buckets that have no file entries (e.g. auto-created
+                # by a prior ``get_lcs`` call).  An empty bucket can never yield a
+                # valid indexed match.
+                # Note: check ``paths`` dict non-empty, not ``any(paths.values())``,
+                # because the first file in a bucket has index 0 (falsy).
+                if not any(
+                        paths
+                        for _last_dict in dict_suffix.values()
+                        for paths in _last_dict.values()
+                ):
+                    continue
                 best_dict_suffix = dict_suffix
                 best_length = length
 
