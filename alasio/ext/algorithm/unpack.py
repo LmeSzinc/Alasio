@@ -4,6 +4,10 @@ UINT8_unpacker = struct.Struct('<B').unpack_from
 UINT16_unpacker = struct.Struct('<H').unpack_from
 UINT32_unpacker = struct.Struct('<I').unpack_from
 UINT64_unpacker = struct.Struct('<Q').unpack_from
+UINT8_packer = struct.Struct('<B').pack
+UINT16_packer = struct.Struct('<H').pack
+UINT32_packer = struct.Struct('<I').pack
+UINT64_packer = struct.Struct('<Q').pack
 
 
 def unpack_little_int(data, index, length):
@@ -45,3 +49,20 @@ def unpack_little_int(data, index, length):
     except (IndexError, struct.error):
         raise ValueError(
             f"Data truncated, expected {length} bytes of little-endian integer, got {len(data) - index} bytes")
+
+
+def pack_little_int(data):
+    if data < 0:
+        raise ValueError(f"Value is negative: {data}")
+    if data <= 255:
+        return UINT8_packer(data)
+    elif data <= 65535:
+        return UINT16_packer(data)
+    elif data <= 16777215:
+        return UINT32_packer(data)[:3]
+    elif data <= 4294967295:
+        return UINT32_packer(data)
+    elif data <= 9223372036854775807:
+        return UINT64_packer(data)
+    else:
+        raise ValueError(f"Value is too large: {data}")

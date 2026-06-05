@@ -2,7 +2,7 @@ import struct
 
 import pytest
 
-from alasio.ext.algorithm.unpack import unpack_little_int
+from alasio.ext.algorithm.unpack import pack_little_int, unpack_little_int
 
 
 class TestUnpackLittleInt:
@@ -305,3 +305,222 @@ class TestUnpackLittleInt:
         data = memoryview(buf[:50] + packed_42 + buf[54:])
         result = unpack_little_int(data, 50, 4)
         assert result == 42
+
+
+class TestPackLittleInt:
+    """Tests for pack_little_int()."""
+
+    # ------------------------------------------------------------------ #
+    #  Size-branch: verify output length for each range
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.parametrize("value, expected_len", [
+        (0, 1),
+        (1, 1),
+        (255, 1),
+        (256, 2),
+        (65535, 2),
+        (65536, 3),
+        (16777215, 3),           # 2^24 - 1
+        (16777216, 4),
+        (4294967295, 4),          # 2^32 - 1
+        (4294967296, 8),
+        (2**63 - 1, 8),           # 9223372036854775807 — max accepted
+    ])
+    def test_output_length(self, value, expected_len):
+        """pack_little_int returns the correct number of bytes for each range.
+
+        The function uses the *minimum* number of bytes needed:
+          0 … 255        → 1 byte
+          256 … 65535    → 2 bytes
+          65536 … 16777215   → 3 bytes
+          16777216 … 4294967295  → 4 bytes
+          4294967296 … 2^63-1    → 8 bytes
+        """
+        result = pack_little_int(value)
+        assert isinstance(result, bytes), f"Expected bytes, got {type(result)}"
+        assert len(result) == expected_len, (
+            f"Value {value} should produce {expected_len} bytes, "
+            f"got {len(result)}"
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Byte-exact: known output for each branch
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.parametrize("value, expected_bytes", [
+        (0, b"\x00"),
+        (1, b"\x01"),
+        (127, b"\x7f"),
+        (128, b"\x80"),
+        (255, b"\xff"),
+    ])
+    def test_uint8_values(self, value, expected_bytes):
+        """Values ≤ 255 pack to a single byte (uint8)."""
+        assert pack_little_int(value) == expected_bytes
+
+    @pytest.mark.parametrize("value, expected_bytes", [
+        (256, b"\x00\x01"),
+        (65535, b"\xff\xff"),
+        (0x1234, b"\x34\x12"),
+        (0xABCD, b"\xcd\xab"),
+    ])
+    def test_uint16_values(self, value, expected_bytes):
+        """Values in [256, 65535] pack as 2 little-endian bytes."""
+        assert pack_little_int(value) == expected_bytes
+
+    @pytest.mark.parametrize("value, expected_bytes", [
+        (65536, b"\x00\x00\x01"),
+        (16777215, b"\xff\xff\xff"),   # 2^24 - 1
+        (0x345678, b"\x78\x56\x34"),
+        (0xABCDEF, b"\xef\xcd\xab"),
+    ])
+    def test_uint24_values(self, value, expected_bytes):
+        """Values in [65536, 16777215] pack as 3 little-endian bytes.
+
+        The implementation packs as a uint32 then drops the leading null byte.
+        """
+        assert pack_little_int(value) == expected_bytes
+
+    @pytest.mark.parametrize("value, expected_bytes", [
+        (16777216, b"\x00\x00\x00\x01"),
+        (4294967295, b"\xff\xff\xff\xff"),  # 2^32 - 1
+        (0xDEADBEEF, b"\xef\xbe\xad\xde"),
+    ])
+    def test_uint32_values(self, value, expected_bytes):
+        """Values in [16777216, 4294967295] pack as 4 little-endian bytes."""
+        assert pack_little_int(value) == expected_bytes
+
+    @pytest.mark.parametrize("value, expected_bytes", [
+        (4294967296, b"\x00\x00\x00\x00\x01\x00\x00\x00"),
+        (2**63 - 1, b"\xff\xff\xff\xff\xff\xff\xff\x7f"),  # 9223372036854775807
+        (0x1234567890ABCDEF, b"\xef\xcd\xab\x90\x78\x56\x34\x12"),
+    ])
+    def test_uint64_values(self, value, expected_bytes):
+        """Values in [4294967296, 2^63-1] pack as 8 little-endian bytes."""
+        assert pack_little_int(value) == expected_bytes
+
+    # ------------------------------------------------------------------ #
+    #  Round-trip: pack then unpack (uses unpack_little_int)
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.parametrize("value", [0, 1, 127, 128, 255])
+    def test_round_trip_uint8(self, value):
+        """pack then unpack for 1-byte values."""
+        packed = pack_little_int(value)
+        assert len(packed) == 1
+        assert unpack_little_int(memoryview(packed), 0, 1) == value
+
+    @pytest.mark.parametrize("value", [
+        256, 65535, 0x1234, 0xABCD,
+    ])
+    def test_round_trip_uint16(self, value):
+        """pack then unpack for 2-byte values."""
+        packed = pack_little_int(value)
+        assert len(packed) == 2
+        assert unpack_little_int(memoryview(packed), 0, 2) == value
+
+    @pytest.mark.parametrize("value", [
+        65536, 16777215, 0x123456, 0xABCDEF,
+    ])
+    def test_round_trip_uint24(self, value):
+        """pack then unpack for 3-byte values."""
+        packed = pack_little_int(value)
+        assert len(packed) == 3
+        assert unpack_little_int(memoryview(packed), 0, 3) == value
+
+    @pytest.mark.parametrize("value", [
+        16777216, 4294967295, 0xDEADBEEF,
+    ])
+    def test_round_trip_uint32(self, value):
+        """pack then unpack for 4-byte values."""
+        packed = pack_little_int(value)
+        assert len(packed) == 4
+        assert unpack_little_int(memoryview(packed), 0, 4) == value
+
+    @pytest.mark.parametrize("value", [
+        4294967296,
+        2**63 - 1,   # 9223372036854775807
+        0x1234567890ABCDEF,
+    ])
+    def test_round_trip_uint64(self, value):
+        """pack then unpack for 8-byte values."""
+        packed = pack_little_int(value)
+        assert len(packed) == 8
+        assert unpack_little_int(memoryview(packed), 0, 8) == value
+
+    # ------------------------------------------------------------------ #
+    #  Cross-boundary: values at each threshold ±1
+    # ------------------------------------------------------------------ #
+
+    def test_boundary_255_256(self):
+        """255 → 1 byte, 256 → 2 bytes."""
+        assert len(pack_little_int(255)) == 1
+        assert len(pack_little_int(256)) == 2
+
+    def test_boundary_65535_65536(self):
+        """65535 → 2 bytes, 65536 → 3 bytes."""
+        assert len(pack_little_int(65535)) == 2
+        assert len(pack_little_int(65536)) == 3
+
+    def test_boundary_16777215_16777216(self):
+        """16777215 → 3 bytes, 16777216 → 4 bytes."""
+        assert len(pack_little_int(16777215)) == 3
+        assert len(pack_little_int(16777216)) == 4
+
+    def test_boundary_4294967295_4294967296(self):
+        """4294967295 → 4 bytes, 4294967296 → 8 bytes."""
+        assert len(pack_little_int(4294967295)) == 4
+        assert len(pack_little_int(4294967296)) == 8
+
+    # ------------------------------------------------------------------ #
+    #  3-byte path: verify the UINT32_packer(data)[1:] slicing strategy
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.parametrize("value", [
+        0x010000,      #  65536  (smallest 3-byte value)
+        0x100000,      # 1048576
+        0xFFFFFF,      # 16777215 (max 3-byte value)
+    ])
+    def test_uint24_via_uint32_slice(self, value):
+        """The 3-byte path packs as uint32 and takes the first 3 bytes.
+
+        struct.pack('<I', value) yields 4 bytes in little-endian order:
+            [LSB, byte1, byte2, MSB]
+        For values < 2^24, the MSB (full_4[3]) is zero; pack_little_int
+        returns full_4[:3], which drops the null MSB and keeps the
+        correct 3-byte little-endian representation.
+        """
+        full_4 = struct.pack("<I", value)
+        assert full_4[3] == 0, "MSB should be 0 for uint24 values"
+        expected_3 = full_4[:3]
+        assert len(expected_3) == 3
+        assert pack_little_int(value) == expected_3
+
+    # ------------------------------------------------------------------ #
+    #  Error cases
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.parametrize("value", [-1, -128, -2**63])
+    def test_negative_value_raises(self, value):
+        """Negative integers raise ValueError (unsigned packing only)."""
+        with pytest.raises(ValueError, match="Value is negative"):
+            pack_little_int(value)
+
+    @pytest.mark.parametrize("value", [
+        2**63,                        # 9223372036854775808 — past signed i64 max
+        2**64 - 1,                    # 18446744073709551615 — max uint64
+        2**64,
+        2**128,
+    ])
+    def test_overflow_value_raises(self, value):
+        """Values exceeding 2^63-1 raise ValueError."""
+        with pytest.raises(ValueError, match="Value is too large"):
+            pack_little_int(value)
+
+    def test_non_integer_raises_type_error(self):
+        """Non-integer types (float, str) raise TypeError from struct."""
+        with pytest.raises((TypeError, struct.error)):
+            pack_little_int(3.14)
+        with pytest.raises((TypeError, struct.error)):
+            pack_little_int("abc")
