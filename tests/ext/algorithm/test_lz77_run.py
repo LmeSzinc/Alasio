@@ -85,9 +85,9 @@ class TestMinLength:
         (_mv(b"abc"),  0, 1,  (97, 1)),  # default-equivalent
         (_mv(b"aaaa"), 0, 2,  (97, 4)),  # actual run > min
         (_mv(b"aabc"), 0, 2,  (97, 2)),  # actual run == min
-        (_mv(b"abc"),  0, 5,  (97, 5)),  # actual run < min
+        (_mv(b"abc"),  0, 5,  (97, 0)),  # actual run < min
         (_mv(b"ab"),   0, 1,  (97, 1)),  # min=1 on a short run
-        (_mv(b"ab"),   1, 10, (98, 10)), # min larger than remaining data
+        (_mv(b"ab"),   1, 10, (98, 0)),  # min larger than remaining data
         (_mv(b"abc"),  0, 0,  (97, 1)),  # min=0
         (_mv(b"ab"),   0, 0,  (97, 1)),  # min=0 on run of 1
         (_mv(b"zzzz"), 0, 2,  (122, 4)), # entire run with min satisfied
@@ -145,9 +145,9 @@ class TestCombinedMinMaxLength:
         (_mv(b"aaaaa"),  0, 2, 10, (97, 5)),  # actual between min and max
         (_mv(b"aaaaaa"), 0, 3, 3,  (97, 3)),  # min == max
 
-        # Run shorter than min (min wins)
-        (_mv(b"abc"),    0, 5, 10, (97, 5)),  # run < min < max
-        (_mv(b"abc"),    0, 5, 3,  (97, 5)),  # min > max, min wins
+        # Run shorter than min → length 0
+        (_mv(b"abc"),    0, 5, 10, (97, 0)),  # run < min < max
+        (_mv(b"abc"),    0, 5, 3,  (97, 0)),  # min > max, match_len < min
 
         # Run capped by max
         (_mv(b"aaaaaaa"), 0, 2, 4, (97, 4)),  # min < max < actual
@@ -263,10 +263,28 @@ class TestIndexError:
 class TestRegression:
     """Regression tests for specific bugs or edge conditions."""
 
+    def test_no_match_returns_zero(self):
+        """No match (min_length > remaining data) returns length 0."""
+        # Single byte with min_length > 1 — only possible run is too short
+        assert match_run(memoryview(b"z"), 0, min_length=10) == (122, 0)
+        # Two different bytes — actual run is 1, min_length requires more
+        assert match_run(memoryview(b"ab"), 0, min_length=5) == (97, 0)
+        # Entire data is one run but min_length exceeds data length
+        assert match_run(memoryview(b"aaaa"), 0, min_length=10) == (97, 0)
+
+    def test_matched_length_less_than_min_length(self):
+        """Actual run shorter than min_length returns length 0."""
+        # Run of 2 at start (b"aa"bc), min_length=3
+        assert match_run(memoryview(b"aabc"), 0, min_length=3) == (97, 0)
+        # Run of 3 at start (b"aaa"bc), min_length=5
+        assert match_run(memoryview(b"aaabc"), 0, min_length=5) == (97, 0)
+        # Run of 1 at non-zero index (b"ab"c), min_length=2
+        assert match_run(memoryview(b"abc"), 2, min_length=2) == (99, 0)
+
     def test_min_length_returns_correct_byte_value(self):
-        """min_length padding does not corrupt the returned byte value."""
+        """Byte value is preserved even when length is 0."""
         result = match_run(memoryview(b"ab"), 0, min_length=5)
-        assert result == (97, 5)
+        assert result == (97, 0)
 
     def test_max_length_does_not_affect_byte_value(self):
         """max_length truncation does not corrupt the returned byte value."""
