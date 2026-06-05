@@ -386,6 +386,19 @@ class TestLargeData:
         decoded = decode_bit2_opcode(encoded)
         assert decoded == data
 
+    def test_no_run_opcode_for_values_ge4(self):
+        """Values >= 4 should never be encoded as run opcodes.
+
+        The run opcode format only supports 2-bit values (0-3).
+        Runs of values 4-7 must fall through to the literal/copy path.
+        """
+        for val in [4, 5, 6, 7]:
+            data = [val] * 5
+            opcodes = list(encode_bit2_opcode_iter(data))
+            assert not any(op[0] == 1 for op in opcodes), (
+                f"Value {val} should not produce a run opcode; got {opcodes}"
+            )
+
     def test_compression_ratio_non_trivial(self):
         """Compressed output should be smaller than input for repetitive data."""
         data = [0, 1, 2, 3] * 1000

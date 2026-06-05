@@ -146,51 +146,51 @@ class TestEncodeStreamLiteral:
 class TestEncodeStreamRun:
     """Encoding run opcodes (op_type=1)."""
 
-    # -- Short run: 1XXNNNNN, run length 4..35 --------------------------------
+    # -- Short run: 1XXNNNNN, run length 3..34 --------------------------------
 
     @pytest.mark.parametrize("val, run, expected", [
-        (0, 4, 128),     # 128 + 0*32 + 0
-        (0, 10, 134),    # 128 + 0*32 + 6
-        (0, 35, 159),    # 128 + 0*32 + 31
-        (1, 4, 160),     # 128 + 1*32 + 0
-        (1, 35, 191),    # 128 + 1*32 + 31
-        (2, 4, 192),     # 128 + 2*32 + 0
-        (2, 20, 208),    # 128 + 2*32 + 16
-        (2, 35, 223),    # 128 + 2*32 + 31
-        (3, 4, 224),     # 128 + 3*32 + 0
-        (3, 35, 255),    # 128 + 3*32 + 31
+        (0, 3, 128),     # 128 + 0*32 + 0
+        (0, 10, 135),    # 128 + 0*32 + 7
+        (0, 34, 159),    # 128 + 0*32 + 31
+        (1, 3, 160),     # 128 + 1*32 + 0
+        (1, 34, 191),    # 128 + 1*32 + 31
+        (2, 3, 192),     # 128 + 2*32 + 0
+        (2, 20, 209),    # 128 + 2*32 + 17
+        (2, 34, 223),    # 128 + 2*32 + 31
+        (3, 3, 224),     # 128 + 3*32 + 0
+        (3, 34, 255),    # 128 + 3*32 + 31
     ])
     def test_short_run_values(self, val, run, expected):
-        """Short run encoding: 128 + val*32 + (run-4)."""
+        """Short run encoding: 128 + val*32 + (run-3)."""
         result = list(encode_bit2_stream_iter([(1, val, run)]))
         assert result == [expected]
 
     # -- Long run: 0110XXDD + length bytes, run >= 36 -------------------------
 
     def test_long_run_min(self):
-        """Long run, length=36: N=0, D=0, 1 byte."""
-        result = list(encode_bit2_stream_iter([(1, 0, 36)]))
+        """Long run, length=35: N=0, D=0, 1 byte."""
+        result = list(encode_bit2_stream_iter([(1, 0, 35)]))
         # encode_length_int(0) → (0, 0)
         # header: 96 + 0*4 + 0 = 96
         assert result == [96, 0]
 
-    def test_long_run_val_3_len_36(self):
-        """Long run, value=3, length=36."""
-        result = list(encode_bit2_stream_iter([(1, 3, 36)]))
+    def test_long_run_val_3_len_35(self):
+        """Long run, value=3, length=35."""
+        result = list(encode_bit2_stream_iter([(1, 3, 35)]))
         # encode_length_int(0) → (0, 0)
         # header: 96 + 3*4 + 0 = 108 (fits in long-run range 96-111)
         assert result == [108, 0]
 
-    def test_long_run_len_291(self):
-        """Long run, length=291: N=255, D=0, 1 byte."""
-        result = list(encode_bit2_stream_iter([(1, 1, 291)]))
+    def test_long_run_len_290(self):
+        """Long run, length=290: N=255, D=0, 1 byte."""
+        result = list(encode_bit2_stream_iter([(1, 1, 290)]))
         # encode_length_int(255) → (0, 255)
         # header: 96 + 1*4 + 0 = 100
         assert result == [100, 255]
 
-    def test_long_run_len_292(self):
-        """Long run, length=292: N=256, D=1, 2 bytes LE."""
-        result = list(encode_bit2_stream_iter([(1, 2, 292)]))
+    def test_long_run_len_291(self):
+        """Long run, length=291: N=256, D=1, 2 bytes LE."""
+        result = list(encode_bit2_stream_iter([(1, 2, 291)]))
         # encode_length_int(256) → (1, 0, 1)
         # header: 96 + 2*4 + 1 = 105
         assert result == [105, 0, 1]
@@ -199,7 +199,7 @@ class TestEncodeStreamRun:
         """Long run with large length."""
         length = 100000
         result = list(encode_bit2_stream_iter([(1, 0, length)]))
-        d, *length_bytes = encode_length_int(length - 36)
+        d, *length_bytes = encode_length_int(length - 35)
         expected = [96 + 0 * 4 + d] + length_bytes
         assert result == expected
 
@@ -207,22 +207,22 @@ class TestEncodeStreamRun:
         """Long run at 2^32 boundary."""
         length = 4294967296
         result = list(encode_bit2_stream_iter([(1, 3, length)]))
-        d, *length_bytes = encode_length_int(length - 36)
+        d, *length_bytes = encode_length_int(length - 35)
         expected = [96 + 3 * 4 + d] + length_bytes
         assert result == expected
 
     def test_short_run_boundary(self):
-        """Boundary at run=35 (max short) and run=36 (min long)."""
-        short = list(encode_bit2_stream_iter([(1, 0, 35)]))
+        """Boundary at run=34 (max short) and run=35 (min long)."""
+        short = list(encode_bit2_stream_iter([(1, 0, 34)]))
         assert short == [159]  # 128 + 0 + 31
 
-        long_v = list(encode_bit2_stream_iter([(1, 0, 36)]))
+        long_v = list(encode_bit2_stream_iter([(1, 0, 35)]))
         assert long_v[0] == 96  # long run header
 
     def test_all_values_long_run_d0(self):
         """All 4 values with D=0 produce unique long-run headers."""
         for val in range(4):
-            result = list(encode_bit2_stream_iter([(1, val, 36)]))
+            result = list(encode_bit2_stream_iter([(1, val, 35)]))
             # header: 96 + val*4 + 0, all in range 96-111
             expected_header = 96 + val * 4
             assert expected_header < 112, f"val={val} header should be <112"
@@ -332,11 +332,11 @@ class TestEncodeStreamMixed:
         """Sequence with all three opcode types."""
         opcodes = [
             (0, [0]),        # 1-item literal → [0]
-            (1, 2, 5),       # short run → 128 + 2*32 + 1 = 193
+            (1, 2, 5),       # short run → 128 + 2*32 + 2 = 194
             (2, 10, 3),      # short copy → [63+3=66, 10-1=9]
         ]
         result = list(encode_bit2_stream_iter(opcodes))
-        assert result == [0, 193, 66, 9]
+        assert result == [0, 194, 66, 9]
 
     def test_invalid_opcode_type(self):
         """Invalid opcode type raises ValueError."""
@@ -441,15 +441,15 @@ class TestDecodeStreamShortRun:
     """Decoding short run (byte 128-255 → run)."""
 
     @pytest.mark.parametrize("byte, expected_val, expected_run", [
-        (128, 0, 4),
-        (129, 0, 5),
-        (159, 0, 35),
-        (160, 1, 4),
-        (191, 1, 35),
-        (192, 2, 4),
-        (208, 2, 20),
-        (224, 3, 4),
-        (255, 3, 35),
+        (128, 0, 3),
+        (129, 0, 4),
+        (159, 0, 34),
+        (160, 1, 3),
+        (191, 1, 34),
+        (192, 2, 3),
+        (208, 2, 19),
+        (224, 3, 3),
+        (255, 3, 34),
     ])
     def test_short_run(self, byte, expected_val, expected_run):
         """Short run decoding."""
@@ -463,10 +463,10 @@ class TestDecodeStreamLongRun:
     """Decoding long run (byte 96-111 → run with length bytes)."""
 
     def test_long_run_min(self):
-        """Long run, D=0, N=0 → run=36."""
+        """Long run, D=0, N=0 → run=35."""
         data = memoryview(bytes([96, 0]))
-        opcodes, read = decode_bit2_stream_iter(data, 36)
-        assert opcodes == [(1, 0, 36)]
+        opcodes, read = decode_bit2_stream_iter(data, 35)
+        assert opcodes == [(1, 0, 35)]
         assert read == 2
 
     def test_long_run_val_nibble(self):
@@ -474,45 +474,45 @@ class TestDecodeStreamLongRun:
         for val in range(4):
             byte = 96 + val * 4  # D=0
             data = memoryview(bytes([byte, 0]))
-            opcodes, read = decode_bit2_stream_iter(data, 36)
-            assert opcodes == [(1, val, 36)]
+            opcodes, read = decode_bit2_stream_iter(data, 35)
+            assert opcodes == [(1, val, 35)]
             assert read == 2
 
     def test_long_run_n_255(self):
-        """Long run, N=255, D=0 → run=291."""
+        """Long run, N=255, D=0 → run=290."""
         data = memoryview(bytes([96, 255]))
-        opcodes, read = decode_bit2_stream_iter(data, 291)
-        assert opcodes == [(1, 0, 291)]
+        opcodes, read = decode_bit2_stream_iter(data, 290)
+        assert opcodes == [(1, 0, 290)]
         assert read == 2
 
     def test_long_run_n_256(self):
-        """Long run, N=256, D=1, 2 bytes LE → run=292."""
+        """Long run, N=256, D=1, 2 bytes LE → run=291."""
         data = memoryview(bytes([97, 0, 1]))
-        opcodes, read = decode_bit2_stream_iter(data, 292)
-        assert opcodes == [(1, 0, 292)]
+        opcodes, read = decode_bit2_stream_iter(data, 291)
+        assert opcodes == [(1, 0, 291)]
         assert read == 3
 
     def test_long_run_n_65535(self):
-        """Long run, N=65535, D=1, 2 bytes LE → run=65571."""
+        """Long run, N=65535, D=1, 2 bytes LE → run=65570."""
         data = memoryview(bytes([97, 255, 255]))
-        opcodes, read = decode_bit2_stream_iter(data, 65571)
-        assert opcodes == [(1, 0, 65571)]
+        opcodes, read = decode_bit2_stream_iter(data, 65570)
+        assert opcodes == [(1, 0, 65570)]
         assert read == 3
 
     def test_long_run_n_65536(self):
-        """Long run, N=65536, D=2, 3 bytes LE → run=65572."""
+        """Long run, N=65536, D=2, 3 bytes LE → run=65571."""
         d_bytes = struct.pack('<I', 65536)[:3]
         data = memoryview(bytes([98]) + d_bytes)
-        opcodes, read = decode_bit2_stream_iter(data, 65572)
-        assert opcodes == [(1, 0, 65572)]
+        opcodes, read = decode_bit2_stream_iter(data, 65571)
+        assert opcodes == [(1, 0, 65571)]
         assert read == 4
 
     def test_long_run_n_100000(self):
         """Long run, N=100000, D=2, 3 bytes LE."""
         d_bytes = struct.pack('<I', 100000)[:3]
         data = memoryview(bytes([98]) + d_bytes)
-        opcodes, read = decode_bit2_stream_iter(data, 100036)
-        assert opcodes == [(1, 0, 100036)]
+        opcodes, read = decode_bit2_stream_iter(data, 100035)
+        assert opcodes == [(1, 0, 100035)]
         assert read == 4
 
     def test_long_run_d3(self):
@@ -520,8 +520,8 @@ class TestDecodeStreamLongRun:
         n = 1000000
         d_bytes = struct.pack('<I', n)
         data = memoryview(bytes([99]) + d_bytes)
-        opcodes, read = decode_bit2_stream_iter(data, n + 36)
-        assert opcodes == [(1, 0, n + 36)]
+        opcodes, read = decode_bit2_stream_iter(data, n + 35)
+        assert opcodes == [(1, 0, n + 35)]
         assert read == 5
 
 
@@ -646,15 +646,15 @@ class TestDecodeStreamMixed:
     def test_literal_then_run(self):
         """Literal then run."""
         data = memoryview(bytes([0, 128]))
-        opcodes, read = decode_bit2_stream_iter(data, 5)
-        assert opcodes == [(0, [0]), (1, 0, 4)]
+        opcodes, read = decode_bit2_stream_iter(data, 4)
+        assert opcodes == [(0, [0]), (1, 0, 3)]
         assert read == 2
 
     def test_run_then_copy(self):
         """Run then short copy."""
         data = memoryview(bytes([160, 64, 0]))
-        opcodes, read = decode_bit2_stream_iter(data, 5)
-        assert opcodes == [(1, 1, 4), (2, 1, 1)]
+        opcodes, read = decode_bit2_stream_iter(data, 4)
+        assert opcodes == [(1, 1, 3), (2, 1, 1)]
         assert read == 3
 
     def test_all_three_types_via_encode(self):
@@ -673,15 +673,15 @@ class TestDecodeStreamTotal:
     def test_stop_at_total_exact(self):
         """Decoding stops when count reaches total exactly."""
         data = memoryview(bytes([128, 160]))
-        opcodes, read = decode_bit2_stream_iter(data, 8)
-        assert opcodes == [(1, 0, 4), (1, 1, 4)]
+        opcodes, read = decode_bit2_stream_iter(data, 6)
+        assert opcodes == [(1, 0, 3), (1, 1, 3)]
         assert read == 2
 
     def test_stop_at_total_partial(self):
         """Decoding stops mid-stream when total reached."""
         data = memoryview(bytes([128, 160]))
-        opcodes, read = decode_bit2_stream_iter(data, 4)
-        assert opcodes == [(1, 0, 4)]
+        opcodes, read = decode_bit2_stream_iter(data, 3)
+        assert opcodes == [(1, 0, 3)]
         assert read == 1
 
     def test_total_exceeds_available(self):
@@ -715,9 +715,9 @@ def _build_roundtrip_cases():
     for v in range(4):
         cases.append([(1, v, 4)])
         cases.append([(1, v, 20)])
-        cases.append([(1, v, 35)])
+        cases.append([(1, v, 34)])
     # Long runs
-    cases.append([(1, 0, 36)])
+    cases.append([(1, 0, 35)])
     cases.append([(1, 1, 100)])
     cases.append([(1, 2, 291)])
     cases.append([(1, 3, 1000)])

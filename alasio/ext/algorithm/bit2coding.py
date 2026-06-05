@@ -31,7 +31,7 @@ def encode_bit2_opcode_iter(data):
         copy_offset, copy_len = match_lz77(mv, i, min_length=3)
 
         # 3. 决策：Run vs Copy vs Literal
-        if run_len >= 3:
+        if run_len >= 3 and run_val <= 3:
             # 如果 Copy 的长度远大于 Run 长度，才优先考虑 Copy
             if copy_len > run_len + 2:
                 # flush_literals
@@ -145,7 +145,47 @@ def encode_length_int(length):
         raise ValueError(f"Length is too large: {length}")
 
 
-def encode_bit2_stream_iter(opcodes):
+def _encode_literal_iter(items):
+    """
+    Encode a list of 2bits to bytes in literal
+    
+    Args:
+        items (Iterable[int]): list of 2bits value, value must be 0, 1, 2, 3
+    
+    Yields:
+        int: compressed data in uint8
+    """
+    for item_batch in batched(items, 32):
+        n = len(item_batch)
+        # Use compact formats for small trailing batches
+        # 000000XX: 1 item
+        if n == 1:
+            yield item_batch[0]
+            continue
+        # 0001XXYY: 2 item
+        if n == 2:
+            yield 16 + item_batch[0] * 4 + item_batch[1]
+            continue
+        # 001NNNNN: pack N+1 items, N (0~31)
+        yield 31 + n
+        stack_count = 0
+        stack_val = 0
+        for item in item_batch:
+            stack_val = stack_val * 4 + item
+            stack_count += 1
+            # each following bytes are AABBCCDD
+            if stack_count == 4:
+                yield stack_val
+                stack_val = 0
+                stack_count = 0
+        # trailing 00 to fill up to a full byte, e.g. AABB0000
+        if stack_count > 0:
+            trailing = (4 - stack_count) * 2
+            trailing = 2 ** trailing
+            yield stack_val * trailing
+
+
+def encode_bit2_stream_iter(opcodes, ext8=False):
     """
     Compress operations to store a list of 2bits
     1. literal operations, op=(0, data), e.g. (0, [1, 2, 3, 4, ...])
@@ -153,10 +193,13 @@ def encode_bit2_stream_iter(opcodes):
     0001XXYY: 2 item
     001NNNNN: pack N+1 items, N (0~31), indicates to read 1~8 bytes, each following bytes are AABBCCDD
               last byte may have trailing 00 to fill up to a full byte, e.g. AABB0000
-    000001DD: pack N+16 items, N (0~2^32), D (0~3) indicates to read D+1 bytes of N, N is packed in little-endian
+    (NOT PLANNED) 000001DD: pack N+16 items, N (0~2^32),
+              D (0~3) indicates to read D+1 bytes of N, N is packed in little-endian
+    000001XX: 1 item, item is 4/5/6/7
+              This is available when ext8 is enabled
     2. run operations, op=(1, item, run), e.g. (1, 2, 35)
-    1XXNNNNN: run XX for N+4 times, N (0~31)
-    0110XXDD: run XX for N+36 times, N (0~2^32),
+    1XXNNNNN: run XX for N+3 times, N (0~31)
+    0110XXDD: run XX for N+35 times, N (0~2^32),
               D (0~3) indicates to read D+1 bytes of N, N is packed in little-endian
     3. copy operations, op=(2, offset, length), e.g. (2, 28, 5)
     010LLLLL: Copy from offset=F+1 length=L+1
@@ -167,7 +210,8 @@ def encode_bit2_stream_iter(opcodes):
               F (0~3) indicates to read F+1 bytes of F (0~2^32), F is packed in little-endian
 
     Args:
-        opcodes (Iterable[tuple]): 
+        opcodes (Iterable[tuple]):
+        ext8 (bool): True to enable ext8 support to allow 4/5/6/7 as literal values
 
     Yields:
         int: compressed data in uint8
@@ -178,54 +222,35 @@ def encode_bit2_stream_iter(opcodes):
         # 0: literal values (list[int])
         if op_type == 0:
             items = opcode[1]
-            literal_len = len(items)
-            # 000000XX: 1 item
-            if literal_len == 1:
-                yield items[0]
-                continue
-            # 0001XXYY: 2 item
-            if literal_len == 2:
-                yield 16 + items[0] * 4 + items[1]
-                continue
-            # pack multiple items
-            for item_batch in batched(items, 32):
-                n = len(item_batch)
-                # Use compact formats for small trailing batches
-                if n == 1:
-                    yield item_batch[0]
-                    continue
-                if n == 2:
-                    yield 16 + item_batch[0] * 4 + item_batch[1]
-                    continue
-                # 001NNNNN: pack N+1 items, N (0~31)
-                yield 31 + n
-                stack_count = 0
-                stack_val = 0
-                for item in item_batch:
-                    stack_val = stack_val * 4 + item
-                    stack_count += 1
-                    # each following bytes are AABBCCDD
-                    if stack_count == 4:
-                        yield stack_val
-                        stack_val = 0
-                        stack_count = 0
-                # trailing 00 to fill up to a full byte, e.g. AABB0000
-                if stack_count > 0:
-                    trailing = (4 - stack_count) * 2
-                    trailing = 2 ** trailing
-                    yield stack_val * trailing
+            if ext8:
+                int4 = []
+                for item in items:
+                    if item <= 3:
+                        int4.append(item)
+                    else:
+                        # flush int4
+                        if int4:
+                            yield from _encode_literal_iter(int4)
+                            int4 = []
+                        # 000001XX: 1 item, item is 4/5/6/7
+                        yield item
+                # flush int4
+                if int4:
+                    yield from _encode_literal_iter(int4)
+            else:
+                yield from _encode_literal_iter(items)
 
         # 1: run value and length
         elif op_type == 1:
             item = opcode[1]
             run = opcode[2]
-            # 1XXNNNNN: run XX for N+4 times, N (0~31)
-            if run < 36:
-                yield 128 + item * 32 + (run - 4)
+            # 1XXNNNNN: run XX for N+3 times, N (0~31)
+            if run < 35:
+                yield 128 + item * 32 + (run - 3)
                 continue
-            # 0110XXDD: run XX for N+36 times, N (0~2^32),
+            # 0110XXDD: run XX for N+35 times, N (0~2^32),
             #           D (0~3) indicates to read D+1 bytes of N, N is packed in little-endian
-            d, *length_bytes = encode_length_int(run - 36)
+            d, *length_bytes = encode_length_int(run - 35)
             yield 96 + item * 4 + d
             yield from length_bytes
 
@@ -254,7 +279,7 @@ def encode_bit2_stream_iter(opcodes):
             raise ValueError(f"Invalid opcode: {opcode}")
 
 
-def decode_bit2_stream_iter(data, total):
+def decode_bit2_stream_iter(data, total, ext8=False):
     """
     Decode compressed operations to opcodes list
     See encode_bit2_stream_iter for more information
@@ -262,6 +287,7 @@ def decode_bit2_stream_iter(data, total):
     Args:
         data (memoryview): compressed data
         total (int): Total numbers
+        ext8 (bool): True to enable ext8 support to allow 4/5/6/7 as literal values
 
     Returns:
         tuple[list[int], int]: (list of opcodes, read bytes count)
@@ -277,10 +303,10 @@ def decode_bit2_stream_iter(data, total):
         except IndexError:
             raise ValueError(f"Data truncated, expected {total} numbers, got {count}")
         read += 1
-        # 1XXNNNNN: run XX for N+4 times, N (0~31)
+        # 1XXNNNNN: run XX for N+3 times, N (0~31)
         if byte >= 128:
             item = (byte // 32) % 4
-            run = (byte % 32) + 4
+            run = (byte % 32) + 3
             opcodes.append((1, item, run))
             count += run
         # 0111LLFF: copy offset and length
@@ -294,12 +320,12 @@ def decode_bit2_stream_iter(data, total):
             read += f_d + 1
             opcodes.append((2, offset, length))
             count += length
-        # 0110XXDD: run XX for N+36 times, N (0~2^32),
+        # 0110XXDD: run XX for N+35 times, N (0~2^32),
         #           D (0~3) indicates to read D+1 bytes of N, N is packed in little-endian
         elif byte >= 96:
             item = (byte % 16) // 4
             d = byte % 4 + 1
-            length = unpack_little_int(data, read, d) + 36
+            length = unpack_little_int(data, read, d) + 35
             opcodes.append((1, item, length))
             count += length
             read += d
@@ -353,9 +379,15 @@ def decode_bit2_stream_iter(data, total):
             second = byte % 4
             opcodes.append((0, [first, second]))
             count += 2
-        # invalid: byte>=000000XX
         elif byte >= 4:
-            raise ValueError(f"Invalid opcode: {byte}")
+            # 000001XX: 1 item, item is 4/5/6/7
+            #           This is available when ext8 is enabled
+            if ext8 and byte < 8:
+                opcodes.append((0, [byte]))
+                count += 1
+            # invalid: byte>=000000XX
+            else:
+                raise ValueError(f"Invalid opcode: {byte}")
         # 000000XX: 1 item
         elif byte >= 0:
             opcodes.append((0, [byte]))
@@ -368,28 +400,30 @@ def decode_bit2_stream_iter(data, total):
     return opcodes, read
 
 
-def encode_bit2(data):
+def encode_bit2(data, ext8=False):
     """
     Encode data to bit2 format
 
     Args:
         data (list[int] | deque[int]): Data to encode
+        ext8 (bool): True to enable ext8 support to allow 4/5/6/7 as literal values
 
     Returns:
         bytes: Encoded data
     """
     opcodes = encode_bit2_opcode_iter(data)
-    stream = encode_bit2_stream_iter(opcodes)
+    stream = encode_bit2_stream_iter(opcodes, ext8=ext8)
     return bytes(stream)
 
 
-def decode_bit2(data, total):
+def decode_bit2(data, total, ext8=False):
     """
     Decode bit2 format data to list[int]
 
     Args:
         data (memoryview | bytes): Encoded data
         total (int): Total numbers
+        ext8 (bool): True to enable ext8 support to allow 4/5/6/7 as literal values
 
     Returns:
         tuple[list[int], int]: (list of opcodes, read bytes count)
@@ -399,6 +433,6 @@ def decode_bit2(data, total):
     """
     if isinstance(data, bytes):
         data = memoryview(data)
-    opcodes, read = decode_bit2_stream_iter(data, total)
+    opcodes, read = decode_bit2_stream_iter(data, total, ext8=ext8)
     data = decode_bit2_opcode(opcodes)
     return data, read
