@@ -452,7 +452,7 @@ def decode_bit2(data, total, ext8=False):
         ext8 (bool): True to enable ext8 support to allow 4/5/6/7 as literal values
 
     Returns:
-        tuple[list[int], int]: (list of opcodes, read bytes count)
+        tuple[list[int], int]: (list of values, bytes consumed)
 
     Raises:
         ValueError: If data is truncated or contains invalid opcodes
