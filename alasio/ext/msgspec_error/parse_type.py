@@ -6,7 +6,7 @@ import uuid
 from typing import Any, TypeVar, Union
 
 import msgspec
-from msgspec import NODEFAULT, Struct, UnsetType, convert
+from msgspec import NODEFAULT, UnsetType, convert
 from msgspec._utils import _CONCRETE_TYPES
 from msgspec.inspect import _is_enum
 from typing_extensions import Literal
@@ -131,6 +131,13 @@ def origin_args(t):
     return origin, args
 
 
+try:
+    is_struct_type = msgspec.inspect._is_struct
+except AttributeError:
+    # since 0.20.0, Struct-like check utilities are moved
+    is_struct_type = msgspec.inspect.is_struct_type
+
+
 def is_struct_like(t):
     """
     Equivalent to the followings, functions are from msgspec.inspect
@@ -142,7 +149,7 @@ def is_struct_like(t):
     or _is_namedtuple(t)
     """
     # _is_struct()
-    if type(t) is type(Struct):
+    if is_struct_type(t):
         return True
     # _is_dataclass()
     if hasattr(t, "__dataclass_fields__"):

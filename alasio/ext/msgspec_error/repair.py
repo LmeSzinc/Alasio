@@ -2,14 +2,13 @@ from collections import deque
 from typing import Any, Dict, Literal, Type
 
 from msgspec import DecodeError, NODEFAULT, ValidationError, convert
-from msgspec.inspect import _is_struct
 from msgspec.json import Decoder as JsonDecoder, decode as decode_json
 from msgspec.msgpack import Decoder as MsgpackDecoder, decode as decode_msgpack
 
 from alasio.ext.msgspec_error.const import ErrorType
 from alasio.ext.msgspec_error.error import MsgspecError, parse_msgspec_error
 from alasio.ext.msgspec_error.parse_struct import get_field_default, get_field_typehint
-from alasio.ext.msgspec_error.parse_type import get_default, origin_args
+from alasio.ext.msgspec_error.parse_type import get_default, is_struct_type, origin_args
 
 
 def _repair_once(
@@ -165,7 +164,7 @@ def _repair_once(
                 continue
 
         # 4. Invalid object field
-        if _is_struct(model):
+        if is_struct_type(model):
             if type(obj) is not dict:
                 # Error path like `0` implies a list, but obj doesn't match.
                 return NODEFAULT, error
