@@ -24,17 +24,19 @@ class MsgspecError(Struct, omit_defaults=True):
 
 def get_error_type(error):
     """
+    Parse error message and return MsgspecError with type and context set.
+
     Args:
         error (str):
 
     Returns:
-        (error_type, context)
+        MsgspecError: Result with type and ctx set, loc is an empty tuple.
     """
     # Group 2: Structural Errors
     if error.startswith('Object missing required field '):
-        return ErrorType.MISSING_FIELD, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.MISSING_FIELD)
     if error.startswith('Object contains unknown field '):
-        return ErrorType.UNKNOWN_FIELD, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.UNKNOWN_FIELD)
 
     # Group 1: Expected ... errors
     if error.startswith('Expected'):
@@ -43,102 +45,118 @@ def get_error_type(error):
         if error.startswith('Expected `array` '):
             remaining = error[17:]
             ctx = get_length_ctx(remaining)
-            return ErrorType.ARRAY_LENGTH_CONSTRAINT, ctx
+            if ctx is not NODEFAULT:
+                return MsgspecError(msg=error, type=ErrorType.ARRAY_LENGTH_CONSTRAINT, ctx=ctx)
+            return MsgspecError(msg=error, type=ErrorType.ARRAY_LENGTH_CONSTRAINT)
 
         # Expected `int`, got `str`
         if KEY_got in error:
-            return ErrorType.TYPE_MISMATCH, NODEFAULT
+            return MsgspecError(msg=error, type=ErrorType.TYPE_MISMATCH)
 
         # Expected datetime with (a|no) timezone component
         if error.startswith('Expected datetime with a timezone'):
-            return ErrorType.TIMEZONE_CONSTRAINT, ErrorCtx(tz=True)
+            return MsgspecError(msg=error, type=ErrorType.TIMEZONE_CONSTRAINT, ctx=ErrorCtx(tz=True))
         if error.startswith('Expected datetime with no timezone'):
-            return ErrorType.TIMEZONE_CONSTRAINT, ErrorCtx(tz=False)
+            return MsgspecError(msg=error, type=ErrorType.TIMEZONE_CONSTRAINT, ctx=ErrorCtx(tz=False))
 
         # Expected str matching regex `<pattern>` - at `<Path>`
         if error.startswith('Expected str matching regex '):
             _, _, remaining = error.partition('matching regex ')
             ctx = get_pattern_ctx(remaining)
-            return ErrorType.PATTERN_CONSTRAINT, ctx
+            if ctx is not NODEFAULT:
+                return MsgspecError(msg=error, type=ErrorType.PATTERN_CONSTRAINT, ctx=ctx)
+            return MsgspecError(msg=error, type=ErrorType.PATTERN_CONSTRAINT)
 
         # Expected `object` of length
         if error.startswith('Expected `object` '):
             remaining = error[18:]
             ctx = get_length_ctx(remaining)
-            return ErrorType.OBJECT_LENGTH_CONSTRAINT, ctx
+            if ctx is not NODEFAULT:
+                return MsgspecError(msg=error, type=ErrorType.OBJECT_LENGTH_CONSTRAINT, ctx=ctx)
+            return MsgspecError(msg=error, type=ErrorType.OBJECT_LENGTH_CONSTRAINT)
 
         # Expected `str` of length <= 32
         if error.startswith('Expected `str` of length '):
             remaining = error[25:]
             ctx = get_length_ctx(remaining)
-            return ErrorType.LENGTH_CONSTRAINT, ctx
+            if ctx is not NODEFAULT:
+                return MsgspecError(msg=error, type=ErrorType.LENGTH_CONSTRAINT, ctx=ctx)
+            return MsgspecError(msg=error, type=ErrorType.LENGTH_CONSTRAINT)
 
         # Expected `bytes` of length
         if error.startswith('Expected `bytes` of length '):
             remaining = error[27:]
             ctx = get_length_ctx(remaining)
-            return ErrorType.LENGTH_CONSTRAINT, ctx
+            if ctx is not NODEFAULT:
+                return MsgspecError(msg=error, type=ErrorType.LENGTH_CONSTRAINT, ctx=ctx)
+            return MsgspecError(msg=error, type=ErrorType.LENGTH_CONSTRAINT)
 
         # Expected `int` >= 0
         if error.startswith('Expected `int` '):
             remaining = error[15:]
             ctx = get_number_ctx(remaining, expected=int)
-            return ErrorType.NUMERIC_CONSTRAINT, ctx
+            if ctx is not NODEFAULT:
+                return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT, ctx=ctx)
+            return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT)
 
         # Expected `float`
         if error.startswith('Expected `float` '):
             remaining = error[17:]
             ctx = get_number_ctx(remaining, expected=float)
-            return ErrorType.NUMERIC_CONSTRAINT, ctx
+            if ctx is not NODEFAULT:
+                return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT, ctx=ctx)
+            return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT)
 
         # Expected `decimal`
         if error.startswith('Expected `decimal` '):
             remaining = error[19:]
             ctx = get_number_ctx(remaining, expected=float)
-            return ErrorType.NUMERIC_CONSTRAINT, ctx
+            if ctx is not NODEFAULT:
+                return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT, ctx=ctx)
+            return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT)
 
     # Group 4: Invalid Value Errors
     if error.startswith('Invalid enum value '):
-        return ErrorType.INVALID_ENUM_VALUE, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_ENUM_VALUE)
     if error.startswith('Invalid value '):
-        return ErrorType.INVALID_TAG_VALUE, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_TAG_VALUE)
 
     if error.startswith('Invalid RFC3339 encoded datetime'):
-        return ErrorType.INVALID_DATETIME, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_DATETIME)
     if error.startswith('Invalid RFC3339 encoded date'):
-        return ErrorType.INVALID_DATE, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_DATE)
     if error.startswith('Invalid RFC3339 encoded time'):
-        return ErrorType.INVALID_TIME, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_TIME)
     if error.startswith('Invalid ISO8601 duration'):
-        return ErrorType.INVALID_DURATION, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_DURATION)
     if error.startswith("Only units"):
-        return ErrorType.UNSUPPORTED_DURATION_UNITS, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.UNSUPPORTED_DURATION_UNITS)
 
     if error.startswith('Invalid MessagePack timestamp'):
-        return ErrorType.INVALID_MSGPACK_TIMESTAMP, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_MSGPACK_TIMESTAMP)
     if error.startswith('Invalid epoch timestamp'):
-        return ErrorType.INVALID_EPOCH_TIMESTAMP, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_EPOCH_TIMESTAMP)
 
     if error.startswith('Invalid UUID'):
-        return ErrorType.INVALID_UUID, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_UUID)
     if error.startswith('Invalid base64 encoded string'):
-        return ErrorType.INVALID_BASE64_STRING, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_BASE64_STRING)
     if error.startswith('Invalid decimal string'):
-        return ErrorType.INVALID_DECIMAL_STRING, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INVALID_DECIMAL_STRING)
 
     # Group 5: Out of Range Errors
     if error.startswith('Timestamp is out of range'):
-        return ErrorType.TIMESTAMP_OUT_OF_RANGE, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.TIMESTAMP_OUT_OF_RANGE)
     if error.startswith('Duration is out of range'):
-        return ErrorType.DURATION_OUT_OF_RANGE, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.DURATION_OUT_OF_RANGE)
     if error.startswith('Integer value out of range'):
-        return ErrorType.INTEGER_OUT_OF_RANGE, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.INTEGER_OUT_OF_RANGE)
     if error.startswith('Number out of range'):
-        return ErrorType.NUMBER_OUT_OF_RANGE, NODEFAULT
+        return MsgspecError(msg=error, type=ErrorType.NUMBER_OUT_OF_RANGE)
 
     # Group 6: Other Errors - Wrapped Error (fallback)
     # Any other error message that doesn't match above patterns
-    return ErrorType.WRAPPED_ERROR, NODEFAULT
+    return MsgspecError(msg=error, type=ErrorType.WRAPPED_ERROR)
 
 
 def parse_msgspec_error(error):
@@ -154,9 +172,6 @@ def parse_msgspec_error(error):
         MsgspecError:
     """
     msg = str(error)
-    typ, ctx = get_error_type(msg)
-    loc = get_error_path(msg)
-    if ctx is NODEFAULT:
-        return MsgspecError(msg=msg, type=typ, loc=loc)
-    else:
-        return MsgspecError(msg=msg, type=typ, loc=loc, ctx=ctx)
+    result = get_error_type(msg)
+    result.loc = get_error_path(msg)
+    return result

@@ -6,7 +6,7 @@ import pytest
 from typing_extensions import Annotated
 
 from alasio.ext.msgspec_error.const import ErrorType
-from alasio.ext.msgspec_error.parse_error import NODEFAULT, get_error_path, get_error_type
+from alasio.ext.msgspec_error.parse_error import NODEFAULT, MsgspecError, get_error_path, get_error_type
 from alasio.ext.msgspec_error.parse_ctx import ErrorCtx
 
 
@@ -39,18 +39,19 @@ def check_error(
         pytest.fail(f"ValidationError was not raised for type {model_type} with data {invalid_data}")
     except msgspec.ValidationError as e:
         error_str = str(e)
-        error_type, ctx = get_error_type(error_str)
+        parsed = get_error_type(error_str)
         path = get_error_path(error_str)
 
         assert path == expected_loc, f"get_error_path failed. Expected {expected_loc}, got {path}"
-        assert error_type == expected_type, (f"get_error_type returned wrong type. Expected {expected_type}, "
-                                             f"got {error_type}")
+        assert parsed.type == expected_type, (f"get_error_type returned wrong type. Expected {expected_type}, "
+                                              f"got {parsed.type}")
 
         if isinstance(expected_ctx, ErrorCtx):
-            assert ctx == expected_ctx, (f"get_error_type returned wrong context. Expected {expected_ctx}, "
-                                         f"got {ctx}")
+            assert parsed.ctx == expected_ctx, (f"get_error_type returned wrong context. Expected {expected_ctx}, "
+                                                f"got {parsed.ctx}")
         else:
-            assert ctx is expected_ctx, "get_error_type should return NODEFAULT"
+            # expected_ctx is NODEFAULT sentinel -> expect empty default context
+            assert parsed.ctx == ErrorCtx(), "get_error_type should return default empty context"
 
 
 # --- Parametrization Scenarios for Nested Paths ---
