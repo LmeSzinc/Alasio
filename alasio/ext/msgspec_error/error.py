@@ -4,7 +4,7 @@ from msgspec import NODEFAULT, Struct, field
 
 from .const import ErrorType
 from .parse_ctx import ErrorCtx, get_length_ctx, get_number_ctx, get_pattern_ctx
-from .path import KEY_got, get_error_path
+from .parse_path import KEY_got, get_error_path
 
 
 class MsgspecError(Struct, omit_defaults=True):

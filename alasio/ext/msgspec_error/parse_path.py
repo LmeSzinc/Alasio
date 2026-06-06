@@ -130,7 +130,7 @@ def get_error_path(error):
         error (str):
 
     Returns:
-        tuple[Union[int, str]]
+        tuple[Union[int, str], ...]:
     """
     field = get_error_field(error)
     if KEY_at in error:

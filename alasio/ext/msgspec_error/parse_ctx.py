@@ -1,6 +1,6 @@
 from msgspec import NODEFAULT, Struct
 
-from .path import KEY_at, KEY_got
+from .parse_path import KEY_at, KEY_got
 
 
 class ErrorCtx(Struct, omit_defaults=True):

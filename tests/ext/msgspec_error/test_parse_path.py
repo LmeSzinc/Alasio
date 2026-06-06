@@ -111,6 +111,31 @@ class TestGetErrorPathDirectly:
                 id="dict_key"
             ),
 
+            # === String Digits as Field Names ===
+            # Dot-separated path parts composed only of digits are preserved
+            # as strings, while bracket indices [...] are parsed as integers.
+            pytest.param(
+                "Expected `int`, got `str` - at `$.123`",
+                ('123',),
+                id="string_digit_root"
+            ),
+            pytest.param(
+                "Expected `int`, got `str` - at `$.data.456.name`",
+                ('data', '456', 'name'),
+                id="string_digit_nested"
+            ),
+            pytest.param(
+                "Expected `int`, got `str` - at `$.0.1.2`",
+                ('0', '1', '2'),
+                id="string_digit_all_levels"
+            ),
+            # Mixed: dot-separated string digits coexist with bracket int indices
+            pytest.param(
+                "Expected `int`, got `str` - at `$.data.456[0].name`",
+                ('data', '456', 0, 'name'),
+                id="string_digit_with_bracket_index"
+            ),
+
             # === Edge Cases ===
             pytest.param(
                 "Expected `int`, got `str`",
