@@ -22,7 +22,7 @@ class ErrorType(str, Enum):
 
     TYPE_MISMATCH = "TYPE_MISMATCH"
     """
-    Format: "Expected <A>, got <B> - at <Path>"
+    Format: "Expected `<A>`, got `<B>` - at <Path>"
 
     This is the most common category of error, triggered when a decoded value's
     type is incompatible with the expected schema type.
@@ -90,8 +90,8 @@ class ErrorType(str, Enum):
 
     LENGTH_CONSTRAINT = "LENGTH_CONSTRAINT"
     """
-    Format: "Expected <type> of length <op> <value> - at <Path>"
-    Example: "Expected str of length <= 32 - at $.name"
+    Format: "Expected `<type>` of length <op> <value> - at <Path>"
+    Example: "Expected `str` of length <= 32 - at $.name"
     Triggered by: A variable-length sequence (`list`, `set`, `frozenset`) or a sized
                  scalar (`str`, `bytes`) violates a `min_length` or `max_length`
                  constraint defined in a `Meta` object.
@@ -99,16 +99,16 @@ class ErrorType(str, Enum):
 
     PATTERN_CONSTRAINT = "PATTERN_CONSTRAINT"
     """
-    Format: "Expected str matching regex <pattern> - at <Path>"
-    Example: "Expected str matching regex '\\d{4}-\\d{2}-\\d{2}' - at $.date_str"
+    Format: "Expected `str` matching regex <pattern> - at <Path>"
+    Example: "Expected `str` matching regex '\\d{4}-\\d{2}-\\d{2}' - at $.date_str"
     Triggered by: A string value does not match the regex `pattern` constraint from
                  a `Meta` object.
     """
 
     NUMERIC_CONSTRAINT = "NUMERIC_CONSTRAINT"
     """
-    Format: "Expected <type> <op> <value> - at <Path>"
-            "Expected <type> that's a multiple of <value> - at <Path>"
+    Format: "Expected `<type>` <op> <value> - at <Path>"
+            "Expected `<type>` that's a multiple of <value> - at <Path>"
     Example: "Expected `int` >= 0 - at $.age"
              "Expected `int` that's a multiple of 6"
     Triggered by: A numeric value violates a constraint from a `Meta` object (e.g.,
@@ -118,6 +118,7 @@ class ErrorType(str, Enum):
     TIMEZONE_CONSTRAINT = "TIMEZONE_CONSTRAINT"
     """
     Format: "Expected datetime with (a|no) timezone component - at <Path>"
+            "Expected time with (a|no) timezone component - at <Path>"
     Triggered by: A datetime/time object does not satisfy the `tz=True` (aware) or
                  `tz=False` (naive) constraint from a `Meta` object.
     """
