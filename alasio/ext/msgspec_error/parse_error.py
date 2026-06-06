@@ -1,10 +1,11 @@
 from typing import Tuple, Union
 
+import msgspec
 from msgspec import NODEFAULT, Struct, field
 
 from .const import ErrorType
 from .parse_ctx import ErrorCtx, get_length_ctx, get_number_ctx, get_pattern_ctx
-from .parse_path import KEY_got, get_error_path
+from .parse_path import KEY_at, KEY_at_check, KEY_got, get_error_path
 
 
 class MsgspecError(Struct, omit_defaults=True):
@@ -59,8 +60,8 @@ def get_error_type(error):
         if error.startswith('Expected datetime with no timezone'):
             return MsgspecError(msg=error, type=ErrorType.TIMEZONE_CONSTRAINT, ctx=ErrorCtx(tz=False))
 
-        # Expected str matching regex `<pattern>` - at `<Path>`
-        if error.startswith('Expected str matching regex '):
+        # Expected `str` matching regex `<pattern>` - at `<Path>`
+        if error.startswith('Expected `str` matching regex '):
             _, _, remaining = error.partition('matching regex ')
             ctx = get_pattern_ctx(remaining)
             if ctx is not NODEFAULT:
@@ -77,7 +78,8 @@ def get_error_type(error):
 
         # Expected `str` of length <= 32
         if error.startswith('Expected `str` of length '):
-            remaining = error[25:]
+            # Strip "Expected `str` " (15 chars), keep "of length ..." prefix
+            remaining = error[15:]
             ctx = get_length_ctx(remaining)
             if ctx is not NODEFAULT:
                 return MsgspecError(msg=error, type=ErrorType.LENGTH_CONSTRAINT, ctx=ctx)
@@ -85,7 +87,8 @@ def get_error_type(error):
 
         # Expected `bytes` of length
         if error.startswith('Expected `bytes` of length '):
-            remaining = error[27:]
+            # Strip "Expected `bytes` " (17 chars), keep "of length ..." prefix
+            remaining = error[17:]
             ctx = get_length_ctx(remaining)
             if ctx is not NODEFAULT:
                 return MsgspecError(msg=error, type=ErrorType.LENGTH_CONSTRAINT, ctx=ctx)
@@ -94,26 +97,34 @@ def get_error_type(error):
         # Expected `int` >= 0
         if error.startswith('Expected `int` '):
             remaining = error[15:]
-            ctx = get_number_ctx(remaining, expected=int)
-            if ctx is not NODEFAULT:
-                return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT, ctx=ctx)
-            return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT)
+            if not remaining.startswith(KEY_at_check):
+                ctx = get_number_ctx(remaining, expected=int)
+                if ctx is not NODEFAULT:
+                    return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT, ctx=ctx)
+                return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT)
 
         # Expected `float`
         if error.startswith('Expected `float` '):
             remaining = error[17:]
-            ctx = get_number_ctx(remaining, expected=float)
-            if ctx is not NODEFAULT:
-                return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT, ctx=ctx)
-            return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT)
+            if not remaining.startswith(KEY_at_check):
+                ctx = get_number_ctx(remaining, expected=float)
+                if ctx is not NODEFAULT:
+                    return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT, ctx=ctx)
+                return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT)
 
         # Expected `decimal`
         if error.startswith('Expected `decimal` '):
             remaining = error[19:]
-            ctx = get_number_ctx(remaining, expected=float)
-            if ctx is not NODEFAULT:
-                return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT, ctx=ctx)
-            return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT)
+            if not remaining.startswith(KEY_at_check):
+                ctx = get_number_ctx(remaining, expected=float)
+                if ctx is not NODEFAULT:
+                    return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT, ctx=ctx)
+                return MsgspecError(msg=error, type=ErrorType.NUMERIC_CONSTRAINT)
+
+        # UNEXPECTED_TOKEN: "Expected `<type>` - at <Path>" without ", got"
+        # Must be after all specific Expected patterns to avoid false matches.
+        if KEY_at in error:
+            return MsgspecError(msg=error, type=ErrorType.UNEXPECTED_TOKEN)
 
     # Group 4: Invalid Value Errors
     if error.startswith('Invalid enum value '):
@@ -166,10 +177,43 @@ def parse_msgspec_error(error):
     This makes msgspec more pydantic.
 
     Args:
-        error (str | msgspec.ValidationError):
+        error (str | msgspec.ValidationError): The raw error message or a
+            msgspec.ValidationError instance.
 
     Returns:
-        MsgspecError:
+        MsgspecError: Structured error with type, location, and context.
+
+    Examples:
+        Basic usage with a raw error string::
+
+            >>> err = parse_msgspec_error(
+            ...     "Expected `int`, got `str` - at `$.user.age`")
+            >>> print(err)
+            MsgspecError(msg='Expected `int`, got `str` - at `$.user.age`',
+                         type=<ErrorType.TYPE_MISMATCH>,
+                         loc=('user', 'age'))
+
+        With a caught msgspec.ValidationError::
+
+            >>> try:
+            ...     msgspec.json.Decoder(int).decode(b'"not_an_int"')
+            ... except msgspec.ValidationError as e:
+            ...     err = parse_msgspec_error(e)
+            ...     print(err.type)
+            <ErrorType.TYPE_MISMATCH>
+            ...     print(err.loc)
+            ()
+
+        Constraint errors carry context::
+
+            >>> from typing_extensions import Annotated
+            >>> T = Annotated[int, msgspec.Meta(ge=18)]
+            >>> try:
+            ...     msgspec.json.Decoder(T).decode(b'15')
+            ... except msgspec.ValidationError as e:
+            ...     err = parse_msgspec_error(e)
+            ...     print(f"type={err.type}, ge={err.ctx.ge}")
+            type=<ErrorType.NUMERIC_CONSTRAINT>, ge=18
     """
     msg = str(error)
     result = get_error_type(msg)
