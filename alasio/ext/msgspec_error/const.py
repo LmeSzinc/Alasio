@@ -11,13 +11,17 @@ class ErrorType(str, Enum):
     the various conditions that can trigger it. The placeholder `<Path>`
     represents a JSONPath-like string (e.g., "$.field") indicating the
     error's location.
+
+    Note that when extracting error formats from msgspec source code, it must
+    be exactly matched, e.g. there might be error message like:
+    "Expected str ..." and "Expected `str`"
     """
 
     def __repr__(self):
         return f'<{self.__class__.__name__}.{self.name}>'
 
     # ======================================================================
-    # Group 1: Type Mismatch Errors (Format: "Expected ..., got ...")
+    # Group 1: Type Mismatch Errors
     # ======================================================================
 
     TYPE_MISMATCH = "TYPE_MISMATCH"
@@ -43,6 +47,30 @@ class ErrorType(str, Enum):
         instance of the expected custom type.
     4.  **Tag Type Mismatch**: The tag field in a tagged union has an incorrect
         type (e.g., an `int` was found when a `str` was expected).
+    """
+
+    UNEXPECTED_TOKEN = "UNEXPECTED_TOKEN"
+    """
+    Format: "Expected `<type>` - at <Path>"
+
+    A type mismatch where the decoder encounters a syntactically valid but
+    structurally incompatible token, but the actual type cannot be included
+    in the error message. This always lacks the ", got `<B>`" portion that
+    distinguishes it from TYPE_MISMATCH.
+
+    Examples:
+    - "Expected `str` - at `$.kind`" (JSON: tag field value is non-string)
+    - "Expected `int` - at `$.kind`" (JSON: tag field value is non-int)
+    - "Expected `str` - at `key` in `$`" (convert: dict key is non-string)
+
+    Triggered by:
+    1.  **Tag Value Mismatch** (JSON): The tag field value in a tagged union
+        has the wrong JSON token type (e.g., a number where a string tag
+        is expected, or vice versa).
+    2.  **Map Key Mismatch** (convert): A dict key in `msgspec.convert()` or
+        equivalent path is not a string.
+    3.  **Token Type Mismatch** (JSON): A JSON token (parsed as int/str/...)
+        has the wrong type for the decoder position.
     """
 
     # ======================================================================
@@ -71,12 +99,19 @@ class ErrorType(str, Enum):
 
     ARRAY_LENGTH_CONSTRAINT = "ARRAY_LENGTH_CONSTRAINT"
     """
-    Format: "Expected `array` of at (least|most) length <expected>, got <actual> - at <Path>"
-            "Expected `array` of length <min> to <max>, got <actual> - at <Path>"
-            "Expected `array` of length <expected> - at <Path>"
+    Format: "Expected `array` of at (least|most) length <expected>, got <actual>[ - at <Path>]"
+            "Expected `array` of length <min> to <max>, got <actual>[ - at <Path>]"
+            "Expected `array` of length <expected>[ - at <Path>]"
     Example: "Expected `array` of length 2, got 3 - at $.coordinates"
     Triggered by: Decoding a fixed-size tuple (e.g., tuple[int, int]) or a NamedTuple,
                  and the array in the message has a different number of elements.
+
+    === Added in 0.19.0 ===
+    Format: "Expected `array` of at most length <expected>" (without path suffix)
+    Example: "Expected `array` of at most length 2" (msgspec bug: path suffix omitted)
+    Triggered by:
+         Note: the variant without "- at <Path>" is a known msgspec bug
+         (missing %U format specifier) where the error location is lost.
     """
 
     OBJECT_LENGTH_CONSTRAINT = "OBJECT_LENGTH_CONSTRAINT"
