@@ -1,23 +1,13 @@
-# test_error_parser.py
+from datetime import datetime
+from typing import Any, Dict, List, Tuple, Union
 
-import pytest
 import msgspec
-from datetime import datetime, date, time, timedelta
-from decimal import Decimal
-from enum import Enum
-from typing import Union, Tuple, List, Dict, Any
+import pytest
 from typing_extensions import Annotated
-from uuid import UUID
 
-# Import the code to be tested from local files
 from alasio.ext.msgspec_error.const import ErrorType
-from alasio.ext.msgspec_error.error import (
-    ErrorCtx,
-    MsgspecError,
-    get_error_path,
-    get_error_type,
-    NODEFAULT,
-)
+from alasio.ext.msgspec_error.error import (NODEFAULT, get_error_path, get_error_type)
+from alasio.ext.msgspec_error.parse_ctx import ErrorCtx
 
 
 def check_error(
