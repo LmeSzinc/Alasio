@@ -17,7 +17,7 @@ class MsgspecError(Struct, omit_defaults=True):
     # ('...', 'RepairThreshold')
     # ('matrix', 0, 1, 'value')
     # note that dict keys are shown as [...] in msgspec, so they are parsed as "..."
-    loc: Tuple[Union[int, str]]
+    loc: Tuple[Union[int, str]] = ()
     # Additional info
     ctx: ErrorCtx = field(default_factory=ErrorCtx)
 

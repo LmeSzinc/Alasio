@@ -1,6 +1,6 @@
 import pytest
 
-from alasio.ext.msgspec_error.error import get_error_path
+from alasio.ext.msgspec_error.parse_error import get_error_path
 
 
 class TestGetErrorPathDirectly:

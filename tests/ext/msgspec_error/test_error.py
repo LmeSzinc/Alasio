@@ -6,7 +6,7 @@ import pytest
 from typing_extensions import Annotated
 
 from alasio.ext.msgspec_error.const import ErrorType
-from alasio.ext.msgspec_error.error import (NODEFAULT, get_error_path, get_error_type)
+from alasio.ext.msgspec_error.parse_error import NODEFAULT, get_error_path, get_error_type
 from alasio.ext.msgspec_error.parse_ctx import ErrorCtx
 
 
