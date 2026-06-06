@@ -82,19 +82,19 @@ def get_error_type(error):
         # Expected `int` >= 0
         if error.startswith('Expected `int` '):
             remaining = error[15:]
-            ctx = get_number_ctx(remaining)
+            ctx = get_number_ctx(remaining, expected=int)
             return ErrorType.NUMERIC_CONSTRAINT, ctx
 
         # Expected `float`
         if error.startswith('Expected `float` '):
             remaining = error[17:]
-            ctx = get_number_ctx(remaining)
+            ctx = get_number_ctx(remaining, expected=float)
             return ErrorType.NUMERIC_CONSTRAINT, ctx
 
         # Expected `decimal`
         if error.startswith('Expected `decimal` '):
             remaining = error[19:]
-            ctx = get_number_ctx(remaining)
+            ctx = get_number_ctx(remaining, expected=float)
             return ErrorType.NUMERIC_CONSTRAINT, ctx
 
     # Group 4: Invalid Value Errors

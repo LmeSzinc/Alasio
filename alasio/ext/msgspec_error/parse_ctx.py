@@ -1,5 +1,3 @@
-from collections import deque
-
 from msgspec import NODEFAULT, Struct
 
 from .path import KEY_at, KEY_got
@@ -19,21 +17,17 @@ class ErrorCtx(Struct, omit_defaults=True):
     max_length: "int | None" = None
     tz: "bool | None" = None
 
-    def __repr__(self):
+    def _iter_repr_fields(self):
         # show non-None fields only
         field_names = ['gt', 'ge', 'lt', 'le', 'multiple_of', 'pattern', 'min_length', 'max_length', 'tz']
-
-        attrs = deque()
         for key in field_names:
             value = getattr(self, key, None)
             if value is not None:
-                attrs.append(f'{key}={value!r}')
+                yield f'{key}={value!r}'
 
-        if attrs:
-            attrs_str = ', '.join(attrs)
-            return f'{self.__class__.__name__}({attrs_str})'
-        else:
-            return f'{self.__class__.__name__}()'
+    def __repr__(self):
+        attrs_str = ', '.join(self._iter_repr_fields())
+        return f'{self.__class__.__name__}({attrs_str})'
 
 
 KEY_to = ' to '
@@ -54,7 +48,9 @@ def get_pattern_ctx(msg):
         ErrorCtx | Type[NODEFAULT]:
     """
     # remove path and leave regex
-    msg, _, _ = msg.rpartition(KEY_at)
+    left, sep, _ = msg.rpartition(KEY_at)
+    if sep:
+        msg = left
     # remove paired ``
     if len(msg) >= 2 and msg.startswith("'") and msg.endswith("'"):
         msg = msg[1:-1]
@@ -127,46 +123,51 @@ def get_length_ctx(msg):
         return NODEFAULT
 
 
-def get_number_ctx(msg):
+def get_number_ctx(msg, expected=int):
     """
     Args:
         msg (str): Error message with reason removed
             ">= 3"
             "<= 32"
             "that's a multiple of 6"
+        expected (callable): Parser for constraint values.
+            int (default), float, etc. Used to convert the extracted
+            value string into the appropriate type.
 
     Returns:
         ErrorCtx | Type[NODEFAULT]:
     """
     msg, _, _ = msg.partition(KEY_at)
+    # Remove trailing ", got <actual>" if present
+    msg, _, _ = msg.partition(KEY_got)
     if msg.startswith(KEY_ge):
         msg = msg[3:]
         try:
-            return ErrorCtx(ge=int(msg))
+            return ErrorCtx(ge=expected(msg))
         except ValueError:
             return NODEFAULT
     if msg.startswith(KEY_le):
         msg = msg[3:]
         try:
-            return ErrorCtx(le=int(msg))
+            return ErrorCtx(le=expected(msg))
         except ValueError:
             return NODEFAULT
     if msg.startswith(KEY_gt):
         msg = msg[2:]
         try:
-            return ErrorCtx(gt=int(msg))
+            return ErrorCtx(gt=expected(msg))
         except ValueError:
             return NODEFAULT
     if msg.startswith(KEY_lt):
         msg = msg[2:]
         try:
-            return ErrorCtx(lt=int(msg))
+            return ErrorCtx(lt=expected(msg))
         except ValueError:
             return NODEFAULT
     if KEY_multiple_of in msg:
         _, _, msg = msg.rpartition(KEY_multiple_of)
         try:
-            return ErrorCtx(multiple_of=int(msg))
+            return ErrorCtx(multiple_of=expected(msg))
         except ValueError:
             return NODEFAULT
     # unknown
