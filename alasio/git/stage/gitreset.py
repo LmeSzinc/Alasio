@@ -35,11 +35,15 @@ class GitReset(GitObjectManager):
         dict_parent: "dict[str, str]" = {}
         # key: tree sha1, value: directory name
         dict_path: "dict[str, str]" = {}
+        # all collected submodule sha1, we can't look into submodules
+        set_submodule_sha1 = set()
 
         while 1:
             new_queue = deque()
             # iter tree objects
             for sha in queue:
+                if sha in set_submodule_sha1:
+                    continue
                 obj = self.cat(sha)
                 typ = obj.type
                 # tree
@@ -57,6 +61,7 @@ class GitReset(GitObjectManager):
                             dict_parent[entry.sha1] = sha
                             new_queue.append(entry.sha1)
                             dict_path[entry.sha1] = entry.name
+                            set_submodule_sha1.add(entry.sha1)
                         # file
                         else:
                             # Record (parent_tree_sha1, entry) so each file is unique by position
