@@ -3,13 +3,13 @@ from collections import defaultdict
 from msgspec import NODEFAULT, ValidationError, convert
 from msgspec.msgpack import encode
 from msgspec.structs import asdict
+from msgspecerror import get_field_default, load_msgpack_with_default, parse_msgspec_error
 
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.mod_base import ModBase
 from alasio.config.entry.model import ConfigSetEvent, ModelConfigRef
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.deep import deep_set
-from alasio.ext.msgspec_error import get_field_default, load_msgpack_with_default, parse_msgspec_error
 from alasio.logger import logger
 
 
@@ -60,7 +60,7 @@ class ModConfig(ModBase):
                         continue
                 else:
                     # validate value
-                    data, errors = load_msgpack_with_default(value, model=model)
+                    data, errors = load_msgpack_with_default(value, model)
                     # for error in errors:
                     #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
                     if data is NODEFAULT:
@@ -181,7 +181,7 @@ class ModConfig(ModBase):
                 except KeyError:
                     # this shouldn't happen, as dict_model is paired with dict_value
                     continue
-                data, errors = load_msgpack_with_default(old, model=model)
+                data, errors = load_msgpack_with_default(old, model)
                 # for error in errors:
                 #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
                 if data is NODEFAULT:
@@ -272,7 +272,7 @@ class ModConfig(ModBase):
                 break
 
             # parse existing value
-            data, errors = load_msgpack_with_default(old, model=model)
+            data, errors = load_msgpack_with_default(old, model)
             if data is NODEFAULT:
                 raise DataInconsistent(f'Failed to load existing config for {event.task}.{event.group}')
 
@@ -351,7 +351,7 @@ class ModConfig(ModBase):
                 except KeyError:
                     # this shouldn't happen, as dict_model is paired with dict_args
                     continue
-                data, errors = load_msgpack_with_default(old, model=model)
+                data, errors = load_msgpack_with_default(old, model)
                 if data is NODEFAULT:
                     # Failed to convert, skip this group
                     continue
@@ -440,7 +440,7 @@ class ModConfig(ModBase):
                 break
 
             # parse existing value
-            data, errors = load_msgpack_with_default(old, model=model)
+            data, errors = load_msgpack_with_default(old, model)
             if data is NODEFAULT:
                 # Failed to convert, skip
                 return None

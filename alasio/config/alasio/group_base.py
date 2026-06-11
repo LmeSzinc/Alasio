@@ -3,10 +3,10 @@ import typing as t
 
 import msgspec as m
 import typing_extensions as e
+from msgspecerror import get_msgspec_annotation
 
 from alasio.config.alasio.group_proxy import batch_set
 from alasio.config.const import DataInconsistent
-from alasio.ext.msgspec_error.parse_anno import get_msgspec_annotation
 
 if t.TYPE_CHECKING:
     from alasio.base.servertime import ServerTime

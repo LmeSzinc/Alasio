@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from msgspec import NODEFAULT, Struct
+from msgspecerror import load_msgpack_with_default
 
 from alasio.base.filter import parse_filter
 from alasio.config.entry.mod_base import ModBase
@@ -8,7 +9,6 @@ from alasio.config.entry.model import TaskItem
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.cache import cached_property
 from alasio.ext.file.loadpy import LOADPY_CACHE
-from alasio.ext.msgspec_error import load_msgpack_with_default
 from alasio.logger import logger
 
 
@@ -126,7 +126,7 @@ class ModScheduler(ModBase):
                         continue
                 else:
                     # validate value
-                    data, errors = load_msgpack_with_default(value, model=model)
+                    data, errors = load_msgpack_with_default(value, model)
                     # for error in errors:
                     #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
                     if data is NODEFAULT:

@@ -3,10 +3,10 @@ from typing import Generic, Type, TypeVar
 
 import msgspec
 from msgspec.structs import asdict
+from msgspecerror import get_class_annotation_dict
 
 from alasio.db.conn import SQLITE_POOL, SqlitePoolCursor
 from alasio.ext.cache import cached_property
-from alasio.ext.msgspec_error.parse_anno import get_class_annotation_dict
 
 T_model = TypeVar('T_model', bound=msgspec.Struct)
 

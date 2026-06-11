@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any, TYPE_CHECKING
 
 from msgspec import NODEFAULT, Struct
+from msgspecerror import get_class_annotation_dict, load_msgpack_with_default
 
 from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
@@ -21,8 +22,6 @@ from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
 from alasio.ext.cache import cached_property, cached_property_threadsafe
 from alasio.ext.deep import deep_iter_depth1, deep_iter_depth2
-from alasio.ext.msgspec_error import load_msgpack_with_default
-from alasio.ext.msgspec_error.parse_anno import get_class_annotation_dict
 from alasio.logger import logger
 
 
@@ -243,7 +242,7 @@ class AlasioConfigBase:
                 # using dict.get() as user config is more likely to be the same as default
                 # b'\x80' is {} in messagepack
                 value = dict_row.get(key, b'\x80')
-                obj, errors = load_msgpack_with_default(value, model=model)
+                obj, errors = load_msgpack_with_default(value, model)
                 # for error in errors:
                 #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
                 if obj is NODEFAULT:
@@ -299,7 +298,7 @@ class AlasioConfigBase:
                 # DataInconsistent error, ignore to reduce runtime crash
                 return NODEFAULT
             value = self._dict_row.get(key, b'\x80')
-            obj, errors = load_msgpack_with_default(value, model=model)
+            obj, errors = load_msgpack_with_default(value, model)
             # for error in errors:
             #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
             if obj is NODEFAULT:
