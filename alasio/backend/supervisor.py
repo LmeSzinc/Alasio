@@ -88,6 +88,15 @@ class Supervisor:
         self.restart_times.append(now)
         return True
 
+    def multiprocessing_freeze_support(self):
+        """
+        For multiprocessing to work correctly on all platforms
+        Wrap as method so entry file can be simplified
+        """
+        import multiprocessing
+        multiprocessing.freeze_support()
+        return self
+
     @staticmethod
     def backend_entry(args):
         """
@@ -109,8 +118,6 @@ class Supervisor:
         import builtins
         builtins.__mpipe_conn__ = conn
 
-        import signal
-        import sys
         # ignore SIGINT on windows because signal is send to the entire process group
         # Supervisor should receive SIGINT and backend should ignore, then supervisor tell backend to stop
         if sys.platform == "win32":
