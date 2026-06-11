@@ -59,6 +59,10 @@ class GenConfigGenerated(CrossNavGenerator):
             for nav_name, config in self.dict_nav_config.items():
                 # Nav comment
                 gen.MultilineComment(f'========== nav: {nav_name} ==========')
+                # having at lease one Scheduler group
+                if nav_name == 'alasio' and not self.alasio:
+                    gen.Anno('Scheduler', anno=f'"{nav_name}.Scheduler"')
+                    gen.use_import(nav_name)
 
                 # Generate type hints for each group (keep definition order)
                 for index, (task_name, task) in enumerate(config.tasks_data.items()):
@@ -72,19 +76,18 @@ class GenConfigGenerated(CrossNavGenerator):
                         # skip groups without args (inforef groups)
                         if not group.args:
                             continue
+                        cls_name = group.name
+                        anno = f'{group.parser.nav_name}.{cls_name}'
                         # special match that convert any Scheduler child group to Scheduler
                         # because we maintain the consistency between them
-                        cls_name = group.name
                         is_scheduler = 'Scheduler' in group.mro
-                        anno = f'{group.parser.nav_name}.{cls_name}'
+                        if is_scheduler:
+                            # scheduler: Scheduler is defined in alasio ConfigGenerated
+                            gen.Comment(f'{group_name}: "{anno}"')
+                            continue
+                        # generate group_name: anno
                         if group_name in collected_groups:
                             gen.Comment(f'{group_name}: "{anno}"')
-                        elif is_scheduler:
-                            # scheduler: Scheduler is defined in alasio ConfigGenerated
-                            if self.alasio:
-                                gen.Comment(f'{group_name}: "{anno}"')
-                            else:
-                                gen.Comment(f'{group_name}: "Scheduler"')
                         else:
                             gen.use_import(group.parser.nav_name)
                             gen.Anno(group_name, anno=f'"{anno}"')

@@ -3,6 +3,7 @@ import typing as t
 from alasio.config.base import AlasioConfigBase
 
 if t.TYPE_CHECKING:
+    from ..alasio import alasio_model as alasio
     from ..alasio import device_model as device
 
 
@@ -12,6 +13,7 @@ class AlasioConfigGenerated(AlasioConfigBase):
     """
     ========== nav: alasio ==========
     """
+    Scheduler: "alasio.Scheduler"
 
     """
     ========== nav: device ==========
@@ -23,10 +25,10 @@ class AlasioConfigGenerated(AlasioConfigBase):
     Optimization: "device.Optimization"
 
     # ----- RestartDevice -----
-    # Scheduler: "Scheduler"
+    # Scheduler: "alasio.SchedulerStatic"
 
     # ----- RestartGame -----
-    # Scheduler: "Scheduler"
+    # Scheduler: "alasio.SchedulerStatic"
 
     """
     ========== nav: store ==========
