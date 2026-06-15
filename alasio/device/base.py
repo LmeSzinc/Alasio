@@ -1,6 +1,5 @@
 import time
-from threading import Lock
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
@@ -68,7 +67,7 @@ class DeviceBase:
             pass
         return self.screenshot()
 
-    def backend_send_preview(self, force=None) -> "Optional[Lock]":
+    def backend_send_preview(self, force=None):
         """
         Send image preview to backend if preview requested and same config
 
@@ -99,11 +98,28 @@ class DeviceBase:
             return
 
         # local import to avoid importing opencv globally
-        from alasio.base.image.imfile import image_preview
+        from alasio.base.image.impreview import image_preview
         now = self._image_time
         if now <= 0:
             # this shouldn't happen
             now = time.time()
         data = image_preview(image, now=now)
         self._last_preview_time = now
-        return backend.send(ConfigEvent(t='Preview', v=data))
+        return backend.send(ConfigEvent(t='Preview', v=data)).acquire()
+
+    def backend_send_preview_stop(self):
+        """
+        Send preview stopped signal to backend
+        """
+        if not self.config.config_name:
+            return
+        backend = BackendBridge()
+        if not backend.inited or not backend.config_name:
+            return
+
+        # local import to avoid importing opencv globally
+        from alasio.base.image.impreview import image_preview_stop
+        data = image_preview_stop()
+        backend.send(ConfigEvent(t='Preview', v=data)).acquire()
+        # clear image cache, so it never sends again until next screenshot call
+        self.on_idle()

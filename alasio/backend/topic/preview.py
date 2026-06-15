@@ -171,7 +171,7 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
         else:
             if state in PREVIEW_IDLE and self._preview:
                 # send last screenshot on idle
-                header = self._preview[:15]
+                header = self._preview[:16]
                 for topic, topic_speed in self._subscribers.items():
                     if topic_speed == 'realtime' and header != self._last_realtime_header:
                         topic.server.send_lossy(self._preview)
@@ -189,7 +189,7 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
 
         Args:
             preview (bytes):
-                b'Preview' + big-endian millisecond timestamp + JPG image in bytes
+                b'Preview_' + big-endian millisecond timestamp + JPG image in bytes
         """
         _subscribers = self._subscribers
         _normal_lastsend = self._normal_lastsend
@@ -199,7 +199,7 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
         now = current_time()
         normal_outdated = (now - _normal_lastsend) >= self.recurrence
         self._preview = preview
-        header = preview[:15]
+        header = preview[:16]
         self._last_realtime_header = header
         if normal_outdated:
             self._normal_lastsend = now

@@ -18,10 +18,12 @@
   let { class: className, config_name }: Props = $props();
 
   type PreviewMode = "realtime" | "normal" | "disable";
+  type PreviewState = "preview" | "stopped" | "error";
 
   // State for image display
   let imageUrl = $state<string | null>(null);
   let imageTime = $state<number | null>(null);
+  let previewState = $state<PreviewState>("preview");
 
   // Global preview mode stored in localStorage (not per-config)
   const previewMode = useLocalStorage<PreviewMode>("preview_mode", "normal");
@@ -39,6 +41,7 @@
       imageUrl = null;
       imageTime = null;
     }
+    previewState = "preview";
   }
 
   // Handle incoming preview data
@@ -47,25 +50,53 @@
     if (!data) return;
     if (!(data instanceof ArrayBuffer)) return;
 
-    // The data format: b'Preview' (7 bytes) + BigEndian Milliseconds (8 bytes) + JPG Bytes
+    // The data format: 8 bytes header + BigEndian Milliseconds (8 bytes) + optional JPG Bytes
+    // Header: b'Preview_' or b'PreviewS' (8-byte ASCII, both start with Preview)
     const view = new DataView(data);
-    if (data.byteLength < 15) return;
+    if (data.byteLength < 16) return;
 
-    // Extract timestamp (BigInt64 at index 7)
-    // We convert it to number (milliseconds)
-    const timestamp = Number(view.getBigUint64(7));
+    // Decode full 8-byte header as text
+    const header = new TextDecoder().decode(data.slice(0, 8));
+    // Extract timestamp (BigInt64 at index 8)
+    const timestamp = Number(view.getBigUint64(8));
 
-    // Extract JPG data
-    const imgBlob = new Blob([data.slice(15)], { type: "image/jpeg" });
-    const newUrl = URL.createObjectURL(imgBlob);
+    switch (header) {
+      case 'PreviewS': {
+        // Stop signal received
+        previewState = "stopped";
+        const oldUrl = untrack(() => imageUrl);
+        if (oldUrl) {
+          URL.revokeObjectURL(oldUrl);
+        }
+        imageUrl = null;
+        imageTime = timestamp;
+        return;
+      }
+      case 'Preview_': {
+        // Preview signal
+        previewState = "preview";
+        const imgBlob = new Blob([data.slice(16)], { type: "image/jpeg" });
+        const newUrl = URL.createObjectURL(imgBlob);
 
-    // Update state and cleanup old URL
-    const oldUrl = untrack(() => imageUrl);
-    imageUrl = newUrl;
-    imageTime = timestamp;
+        const oldUrl = untrack(() => imageUrl);
+        imageUrl = newUrl;
+        imageTime = timestamp;
 
-    if (oldUrl) {
-      URL.revokeObjectURL(oldUrl);
+        if (oldUrl) {
+          URL.revokeObjectURL(oldUrl);
+        }
+        return;
+      }
+      default:
+        // Unknown header
+        previewState = "error";
+        const oldUrlErr = untrack(() => imageUrl);
+        if (oldUrlErr) {
+          URL.revokeObjectURL(oldUrlErr);
+        }
+        imageUrl = null;
+        imageTime = timestamp;
+        return;
     }
   });
 
@@ -124,7 +155,15 @@
     className,
   )}
 >
-  {#if imageUrl && isPreviewActive}
+  {#if previewState === "error"}
+    <div class="text-destructive flex h-full items-center justify-center text-sm italic">
+      {t.Dashboard.PreviewError()}
+    </div>
+  {:else if previewState === "stopped"}
+    <div class="text-muted-foreground flex h-full items-center justify-center text-sm italic">
+      {t.Dashboard.PreviewStopped()}
+    </div>
+  {:else if imageUrl && isPreviewActive}
     <img src={imageUrl} alt="Preview" class="h-full w-full rounded-md object-contain" />
   {:else if !isPreviewActive}
     <div class="text-muted-foreground flex h-full items-center justify-center text-sm italic">

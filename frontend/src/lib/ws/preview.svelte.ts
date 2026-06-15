@@ -15,14 +15,15 @@ export class PreviewManager extends WebsocketManager {
 
   /**
    * Overrides the default message handling to catch raw binary preview messages.
-   * If a message starts with the "Preview" header bytes, it is treated as a direct update to the "Preview" topic.
+   * If a message starts with the "Preview" bytes (all known headers share this prefix),
+   * it is treated as a direct update to the "Preview" topic.
    * Otherwise, it delegates to the base implementation.
    */
   protected onMessage(event: MessageEvent<ArrayBuffer>) {
     const data = event.data;
     const view = new Uint8Array(data);
 
-    // Optimized check for the "Preview" binary header
+    // All known preview headers (Preview_ / PreviewS) share the first 7 bytes "Preview"
     if (view.length >= this.#previewHeader.length) {
       let isPreview = true;
       for (let i = 0; i < this.#previewHeader.length; i++) {
@@ -33,9 +34,8 @@ export class PreviewManager extends WebsocketManager {
       }
 
       if (isPreview) {
-        // Set and delete the topic data to trigger Svelte's reactivity, but not store it in the manager.
+        // Set the topic data to trigger Svelte's reactivity
         this.topics["Preview"] = data;
-        // delete this.topics["Preview"];
         return;
       }
     }

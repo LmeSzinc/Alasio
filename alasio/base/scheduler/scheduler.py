@@ -169,6 +169,14 @@ class AlasioScheduler:
         self.device.on_task_switch()
         self._send_scheduler_running(task)
 
+    def _on_game_stop(self):
+        """
+        Callback function when game stops
+
+        Sends a stop preview signal to the backend
+        """
+        self.device.backend_send_preview_stop()
+
     def _on_idle(self):
         """
         Callback function on scheduler idle
@@ -199,10 +207,12 @@ class AlasioScheduler:
         if method == 'stop_game':
             logger.info('Stop game during wait')
             self._run_task('stop_game')
+            self._on_game_stop()
             run = True
         elif method == 'stop_device':
             logger.info('Stop device during wait')
             self._run_task('stop_device')
+            self._on_game_stop()
             run = True
         elif method == 'goto_main':
             logger.info('Goto main page during wait')

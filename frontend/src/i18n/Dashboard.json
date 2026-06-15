@@ -1,4 +1,18 @@
 {
+  "Collapse": {
+    "en-US": "Collapse",
+    "zh-CN": "折叠",
+    "ja-JP": "折り畳む",
+    "zh-TW": "折疊",
+    "es-ES": "Contraer"
+  },
+  "Expand": {
+    "en-US": "Expand",
+    "zh-CN": "展开",
+    "ja-JP": "展開",
+    "zh-TW": "展開",
+    "es-ES": "Expandir"
+  },
   "NoData": {
     "en-US": "No Data",
     "zh-CN": "无数据",
@@ -48,20 +62,6 @@
     "zh-TW": "很久以前",
     "es-ES": "Antiguo"
   },
-  "Collapse": {
-    "en-US": "Collapse",
-    "zh-CN": "折叠",
-    "ja-JP": "折り畳む",
-    "zh-TW": "折疊",
-    "es-ES": "Contraer"
-  },
-  "Expand": {
-    "en-US": "Expand",
-    "zh-CN": "展开",
-    "ja-JP": "展開",
-    "zh-TW": "展開",
-    "es-ES": "Expandir"
-  },
   "PreviewRealtime": {
     "en-US": "Realtime",
     "zh-CN": "实时",
@@ -82,6 +82,20 @@
     "ja-JP": "無効",
     "zh-TW": "禁用",
     "es-ES": "Desactivar"
+  },
+  "PreviewError": {
+    "en-US": "Preview Error",
+    "zh-CN": "预览错误",
+    "ja-JP": "プレビューエラー",
+    "zh-TW": "預覽錯誤",
+    "es-ES": "Error de vista previa"
+  },
+  "PreviewStopped": {
+    "en-US": "Game Stopped",
+    "zh-CN": "游戏已停止",
+    "ja-JP": "ゲーム停止",
+    "zh-TW": "遊戲已停止",
+    "es-ES": "Juego detenido"
   },
   "PreviewDisabled": {
     "en-US": "Preview disabled",
