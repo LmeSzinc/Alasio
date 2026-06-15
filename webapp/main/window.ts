@@ -66,9 +66,13 @@ export function setupWindowIPC() {
         mainWindow?.webContents.send('shutdown:stage', stage);
         
         if (stage === ShutdownStage.Done) {
-          mainWindow?.destroy();
-          app.quit();
+          // Resolve first so the IPC reply is sent to the renderer
+          // before destroying the window (otherwise "reply was never sent" error)
           resolve();
+          setImmediate(() => {
+            mainWindow?.destroy();
+            app.quit();
+          });
         }
       });
     });

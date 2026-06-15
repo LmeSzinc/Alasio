@@ -65,7 +65,11 @@ export function startBackend(
 export async function shutdownBackend(
   onStageChange?: (stage: ShutdownStage) => void
 ): Promise<void> {
-  if (!backendProcess || !backendProcess.pid) return;
+  // If backend was never started or never became ready, mark shutdown success immediately
+  if (!backendProcess || !backendProcess.pid || !isBackendReady) {
+    onStageChange?.(ShutdownStage.Done);
+    return;
+  }
 
   const pid = backendProcess.pid;
   let exited = false;
