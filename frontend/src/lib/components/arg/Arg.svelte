@@ -51,4 +51,4 @@
 </script>
 
 <!-- Pass all props, including parentWidth, down to the chosen layout -->
-<LayoutComponent bind:data {InputComponent} {...restProps} />
+<LayoutComponent {data} {InputComponent} {...restProps} />

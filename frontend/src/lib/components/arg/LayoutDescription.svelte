@@ -11,6 +11,6 @@
 <div class={cn("flex flex-row items-center gap-x-1.5", className)}>
   <I18nText text={displayName} class="text-muted-foreground flex-1 text-sm" />
   <div class="flex w-9/20 max-w-50 justify-center">
-    <InputComponent bind:data {handleEdit} {handleReset} isDesc={true} />
+    <InputComponent {data} {handleEdit} {handleReset} isDesc={true} />
   </div>
 </div>

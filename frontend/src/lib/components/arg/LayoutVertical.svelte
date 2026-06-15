@@ -39,6 +39,6 @@
 
   <!-- Third row: input -->
   <div class="items-center">
-    <InputComponent bind:data {handleEdit} {handleReset} />
+    <InputComponent {data} {handleEdit} {handleReset} />
   </div>
 </div>

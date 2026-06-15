@@ -89,7 +89,7 @@
       {:else}
         <div class="flex flex-col gap-y-1.5">
           {#each Object.entries(groupData) as [argKey]}
-            <Arg data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
+            <Arg bind:data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
           {/each}
         </div>
       {/if}

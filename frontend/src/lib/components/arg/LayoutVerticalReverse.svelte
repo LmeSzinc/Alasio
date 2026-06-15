@@ -32,7 +32,7 @@
 
   <!-- Second row: input -->
   <div class="flex items-center">
-    <InputComponent bind:data {handleEdit} {handleReset} />
+    <InputComponent {data} {handleEdit} {handleReset} />
   </div>
 
   <!-- Third row: help -->
