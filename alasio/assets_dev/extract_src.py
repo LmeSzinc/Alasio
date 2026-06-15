@@ -58,4 +58,5 @@ class AssetsExtractorSRC(AssetsExtractor):
 if __name__ == '__main__':
     with suppress_keyboard_interrupt():
         self = AssetsExtractorSRC(r'E:/ProgramData/pycharm/StarRailCopilot')
-        self.generate()
+        while 1:
+            self.watch_files()

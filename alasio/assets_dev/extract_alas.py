@@ -117,6 +117,5 @@ class AssetsExtractorALAS(AssetsExtractor):
 if __name__ == '__main__':
     with suppress_keyboard_interrupt():
         self = AssetsExtractorALAS(r'E:/ProgramData/pycharm/AzurLaneAutoScript')
-        self.generate()
-        # while 1:
-        #     self.watch_files()
+        while 1:
+            self.watch_files()

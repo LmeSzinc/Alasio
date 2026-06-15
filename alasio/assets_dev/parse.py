@@ -4,7 +4,7 @@ from typing import Iterator, List, Tuple
 
 from alasio.base.image.color import get_color
 from alasio.base.image.draw import get_bbox
-from alasio.base.image.imfile import ImageBroken, image_load, image_size
+from alasio.base.image.imfile import ImageBroken, ImageNotSupported, image_load, image_size
 from alasio.base.op import Area, Slist
 from alasio.config.const import Const
 from alasio.ext.cache import cached_property
@@ -76,7 +76,12 @@ class AssetImage:
             self.valid = False
             return
 
-        bbox = get_bbox(image)
+        try:
+            bbox = get_bbox(image)
+        except ImageNotSupported as e:
+            logger.warning(f'{self.file}: {e}')
+            self.valid = False
+            return
         # must be an asset, not a full screenshot
         if bbox[0] == 0 and bbox[1] == 0 and bbox[2] == resolution[0] and bbox[3] == resolution[1]:
             self.valid = False
