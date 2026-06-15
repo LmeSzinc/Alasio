@@ -434,7 +434,7 @@ def image_preview(image, now=None, quality=75):
         now = int(time.time() * 1000)
     else:
         now = int(now * 1000)
-    return b'Preview' + now.to_bytes(8, 'big') + data
+    return b''.join((b'Preview', now.to_bytes(8, 'big'), data))
 
 
 def image_fixup(file, need_crop=False):

@@ -68,9 +68,12 @@ class DeviceBase:
             pass
         return self.screenshot()
 
-    def backend_send_preview(self, flag=None) -> "Optional[Lock]":
+    def backend_send_preview(self, force=None) -> "Optional[Lock]":
         """
         Send image preview to backend if preview requested and same config
+
+        Args:
+            force (bool): True to force update preview even if backend did not request an update
         """
         if not self.config.config_name:
             return
@@ -78,9 +81,9 @@ class DeviceBase:
         if not backend.inited or not backend.config_name:
             return
 
-        if flag is None:
-            flag = backend.preview_requested.get_and_clear()
-            if not flag:
+        if force is None:
+            force = backend.preview_requested.get_and_clear()
+            if not force:
                 return
 
         try:

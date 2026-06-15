@@ -175,7 +175,7 @@ class AlasioScheduler:
         """
         TaskState.subclasses_clear_all()
         # send last screenshot on idle
-        self.device.backend_send_preview(flag=True)
+        self.device.backend_send_preview(force=True)
         self.device.on_idle()
         self.config.release()
         self._send_scheduler_running(None)
