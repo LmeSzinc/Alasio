@@ -7,6 +7,10 @@
   let { data = $bindable(), class: className, handleEdit, handleReset, isDesc }: InputProps = $props();
   const arg = $derived(useArgValue<string>(data));
 
+  // Pending reset flag: set on mousedown (fires before blur), checked in onBlur to prevent
+  // unwanted submit(handleEdit) when user clicks the reset button.
+  let _pendingReset = $state(false);
+
   let textareaEl: HTMLTextAreaElement | null = $state(null);
 
   let debounceTimer: ReturnType<typeof setTimeout>;
@@ -25,10 +29,15 @@
   function onBlur() {
     // To prevent double-firing, clear any pending timer
     clearTimeout(debounceTimer);
+    if (_pendingReset) {
+      _pendingReset = false;
+      return;
+    }
     // Immediately trigger the edit callback when the user leaves the textarea
     arg.submit(handleEdit);
   }
   function onReset() {
+    _pendingReset = false;
     // Trigger the provided reset callback
     arg.reset(handleReset);
   }
@@ -50,6 +59,7 @@
   <!-- Reset button is visible only on focus -->
   <Reset
     {onReset}
+    onmousedown={() => (_pendingReset = true)}
     class={cn(
       "pointer-events-none absolute top-1 right-1 opacity-0 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
       "hover:bg-card dark:hover:bg-card",

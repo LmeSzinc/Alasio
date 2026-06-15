@@ -20,6 +20,9 @@
 
   // Local display value for datetime
   let displayValue = $state("");
+  // Pending reset flag: set on mousedown (fires before blur), checked in onBlur to prevent
+  // unwanted submit(handleEdit) when user clicks the reset button.
+  let _pendingReset = $state(false);
 
   // Getter/setter for the input element to bind to
   const inputValue = {
@@ -107,6 +110,12 @@
   }
 
   function onBlur() {
+    // If user just clicked the reset button (mousedown fired before blur), skip submit
+    if (_pendingReset) {
+      _pendingReset = false;
+      return;
+    }
+
     // To prevent double-firing, clear any pending timer
     clearTimeout(debounceTimer);
 
@@ -125,6 +134,8 @@
   }
 
   function onReset() {
+    // Clear pending reset flag
+    _pendingReset = false;
     // Hide error on reset
     showError = false;
     // Trigger the provided reset callback
@@ -171,7 +182,7 @@
           "w-0 group-focus-within:w-4",
         )}
       >
-        <Reset {onReset} class="opacity-0 transition-opacity duration-200 group-focus-within:opacity-100" />
+        <Reset {onReset} onmousedown={() => (_pendingReset = true)} class="opacity-0 transition-opacity duration-200 group-focus-within:opacity-100" />
       </div>
     </div>
   </div>
