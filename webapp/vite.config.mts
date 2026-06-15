@@ -17,7 +17,7 @@ export default defineConfig({
         entry: resolve(__dirname, 'main/index.ts'),
         vite: {
           build: {
-            outDir: 'dist/main',
+            outDir: '../dist/main',
           },
         },
       },
@@ -25,7 +25,7 @@ export default defineConfig({
         entry: resolve(__dirname, 'preload/index.ts'),
         vite: {
           build: {
-            outDir: 'dist/preload',
+            outDir: '../dist/preload',
           },
         },
       },
