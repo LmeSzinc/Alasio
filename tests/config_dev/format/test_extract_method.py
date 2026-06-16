@@ -1,6 +1,57 @@
 import pytest
 
-from alasio.config_dev.format.extract_method import extract_method
+from alasio.config_dev.format.extract_method import extract_method, remove_indent
+
+
+class TestRemoveIndent:
+    """Tests for remove_indent helper."""
+
+    def test_remove_one_indent(self):
+        """Remove one indent level (4 spaces) from a line."""
+        assert remove_indent("    def foo(self):") == "def foo(self):"
+        assert remove_indent("        pass") == "    pass"
+
+    def test_remove_multiple_indent(self):
+        """Remove multiple indent levels from a line."""
+        assert remove_indent("        def foo(self):", indent=2) == "def foo(self):"
+        assert remove_indent("            pass", indent=2) == "    pass"
+        assert remove_indent("            pass", indent=3) == "pass"
+
+    def test_remove_indent_from_empty_line(self):
+        """Empty line should be returned unchanged."""
+        assert remove_indent("") == ""
+        assert remove_indent("   ") == ""
+        assert remove_indent("     ") == ""
+
+    def test_remove_indent_from_line_with_no_leading_space(self):
+        """Line with no leading spaces should be returned unchanged."""
+        assert remove_indent("foo") == "foo"
+        assert remove_indent("def foo():") == "def foo():"
+
+    def test_remove_indent_partial(self):
+        """Remove all leading spaces when line has fewer than requested."""
+        assert remove_indent("  foo", indent=1) == "foo"
+        assert remove_indent(" foo", indent=2) == "foo"
+
+    def test_remove_indent_lines_containing_tabs(self):
+        """Tab is considered as an indent and removed."""
+        assert remove_indent("\tdef foo(self):") == "def foo(self):"
+        line = " \t def foo(self):"
+        # indent=1: 1 space removed, tab remains
+        assert remove_indent(line) == "\t def foo(self):"
+
+    def test_remove_indent_default_is_one(self):
+        """Default indent parameter should be 1."""
+        assert remove_indent("    x") == "x"
+        assert remove_indent("x") == "x"
+
+    def test_remove_indent_negative_indent(self):
+        """Negative indent should be treated as 0, returning line unchanged."""
+        assert remove_indent("    x", indent=-1) == "    x"
+
+    def test_remove_indent_zero_indent(self):
+        """Zero indent should return the line unchanged."""
+        assert remove_indent("    x", indent=0) == "    x"
 
 
 class TestExtractMethod:
@@ -629,6 +680,146 @@ class TestEdgeCases:
 
     this is not valid python
 """)
+
+
+class TestKeepIndent:
+    """Tests for extract_method with keep_indent parameter."""
+
+    def test_keep_indent_true_by_default(self):
+        """keep_indent should be True by default."""
+        source = """class A:
+    def foo(self):
+        pass
+"""
+        result = extract_method(source)
+        assert result["A"]["foo"] == ["    def foo(self):", "        pass"]
+        # Explicit keep_indent=True should match default
+        result_explicit = extract_method(source, keep_indent=True)
+        assert result == result_explicit
+
+    def test_keep_indent_false_removes_one_level(self):
+        """keep_indent=False should remove one indent level from each line."""
+        source = """class A:
+    def foo(self):
+        pass
+"""
+        result = extract_method(source, keep_indent=False)
+        assert result["A"]["foo"] == ["def foo(self):", "    pass"]
+
+    def test_keep_indent_false_with_decorators(self):
+        """Decorator lines should also be dedented."""
+        source = """class A:
+    @property
+    def name(self):
+        return "hello"
+"""
+        result = extract_method(source, keep_indent=False)
+        assert result["A"]["name"] == [
+            "@property",
+            "def name(self):",
+            '    return "hello"'
+        ]
+
+    def test_keep_indent_false_empty_lines(self):
+        """Empty/blank lines should remain unchanged."""
+        source = """class A:
+    def process(self):
+        step1()
+
+        step2()
+        return
+"""
+        result = extract_method(source, keep_indent=False)
+        assert result["A"]["process"] == [
+            "def process(self):",
+            "    step1()",
+            "",
+            "    step2()",
+            "    return"
+        ]
+
+    def test_keep_indent_false_multiple_classes(self):
+        """Multiple classes should all be dedented."""
+        source = """class A:
+    def foo(self):
+        return 1
+
+class B:
+    @classmethod
+    def bar(cls):
+        return 2
+"""
+        result = extract_method(source, keep_indent=False)
+        assert result["A"]["foo"] == [
+            "def foo(self):",
+            "    return 1"
+        ]
+        assert result["B"]["bar"] == [
+            "@classmethod",
+            "def bar(cls):",
+            "    return 2"
+        ]
+
+    def test_keep_indent_false_with_async(self):
+        """Async methods should be dedented correctly."""
+        source = """class A:
+    async def fetch(self):
+        return await api()
+"""
+        result = extract_method(source, keep_indent=False)
+        assert result["A"]["fetch"] == [
+            "async def fetch(self):",
+            "    return await api()"
+        ]
+
+    def test_keep_indent_false_one_liner(self):
+        """Single-line methods should be dedented."""
+        source = """class A:
+    def foo(self): return 1
+    def bar(self): return 2
+"""
+        result = extract_method(source, keep_indent=False)
+        assert result["A"]["foo"] == ["def foo(self): return 1"]
+        assert result["A"]["bar"] == ["def bar(self): return 2"]
+
+    def test_keep_indent_false_multiline_string(self):
+        """Multiline strings inside methods should have consistent dedent."""
+        source = """class A:
+    def docstring(self):
+        \"\"\"
+        A multiline docstring.
+
+        Second paragraph.
+        \"\"\"
+        return True
+"""
+        result = extract_method(source, keep_indent=False)
+        expected = [
+            "def docstring(self):",
+            '    """',
+            "    A multiline docstring.",
+            "",
+            "    Second paragraph.",
+            '    """',
+            "    return True"
+        ]
+        assert result["A"]["docstring"] == expected
+
+    def test_keep_indent_false_nested_func(self):
+        """Nested functions inside method should have one level removed."""
+        source = """class A:
+    def outer(self):
+        def inner():
+            return 1
+        return inner()
+"""
+        result = extract_method(source, keep_indent=False)
+        assert result["A"]["outer"] == [
+            "def outer(self):",
+            "    def inner():",
+            "        return 1",
+            "    return inner()"
+        ]
 
 
 class TestExtractMethodResultType:
