@@ -20,6 +20,10 @@ class AutoBlankLineMixin(CodeObject):
         if isinstance(prev, Empty) or isinstance(curr, Empty):
             return 0
 
+        # RawClass/RawDef have no header line, so skip Class/Def blank line rules
+        if getattr(curr, '_skip_class_blank_lines', False):
+            return 0
+
         # PEP8: 2 blank lines between top-level definitions
         if indent == 0:
             # 2 lines before Class/Def; 1 line if prev is a Comment (associated with the definition)
@@ -132,3 +136,63 @@ class Def(AutoBlankLineMixin, ClosureObject):
         else:
             with self:
                 yield from Pass(self.gen).generate()
+
+
+class RawClass(Class):
+    """
+    A code block that acts like a class (auto blank lines, indentation behavior)
+    but without the ``class Name(...):`` header line.
+
+    Use together with ``gen.Raw()`` to write a custom class header while keeping
+    proper indentation and PEP8 blank-line behavior for the body.
+
+    Examples::
+
+        gen.Raw('class MyClass(BaseModel):')
+        with gen.RawClass('MyClass'):
+            gen.Var('name', 'john')
+            gen.Var('age', 0)
+
+        # Output:
+        # class MyClass(BaseModel):
+        #     name = 'john'
+        #     age = 0
+    """
+    _skip_class_blank_lines = True
+
+    def __init__(self, gen, name=''):
+        super().__init__(gen, name)
+
+    def generate(self):
+        # content only — no class ...: header
+        if self.items:
+            yield from self.generate_items()
+
+
+class RawDef(Def):
+    """
+    A code block that acts like a function (auto blank lines, indentation behavior)
+    but without the ``def name(...):`` header line.
+
+    Use together with ``gen.Raw()`` to write a custom function header while keeping
+    proper indentation and PEP8 blank-line behavior for the body.
+
+    Examples::
+
+        gen.Raw('def run(self, timeout=10):')
+        with gen.RawDef('run'):
+            gen.Var('name', 'john')
+
+        # Output:
+        # def run(self, timeout=10):
+        #     name = 'john'
+    """
+    _skip_class_blank_lines = True
+
+    def __init__(self, gen, name=''):
+        super().__init__(gen, name)
+
+    def generate(self):
+        # content only — no def name(...): header
+        if self.items:
+            yield from self.generate_items()

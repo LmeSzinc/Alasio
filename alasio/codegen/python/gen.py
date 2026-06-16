@@ -210,6 +210,25 @@ class CodeGen(CodeGenBase):
         self._add_item(item)
         return item
 
+    def RawClass(self, name=''):
+        """
+        Define a class-like block without the 'class Name(...):' header.
+        Provides auto blank lines and proper indentation for the body.
+
+        Use together with gen.Raw() to write a custom class header.
+
+        Examples:
+            gen.Raw('class MyClass(BaseModel):')
+            with gen.RawClass():
+                gen.Var('name', 'john')
+            # Output
+            # class MyClass(BaseModel):
+            #     name = 'john'
+        """
+        item = RawClass(self, name)
+        self._add_item(item)
+        return item
+
     def Def(self, name):
         """
         Define a function.
@@ -224,6 +243,25 @@ class CodeGen(CodeGenBase):
                 name = 'john'
         """
         item = Def(self, name)
+        self._add_item(item)
+        return item
+
+    def RawDef(self, name=''):
+        """
+        Define a function-like block without the 'def Name(...):' header.
+        Provides auto blank lines and proper indentation for the body.
+
+        Use together with gen.Raw() to write a custom function header.
+
+        Examples:
+            gen.Raw('def run(self, timeout=10):')
+            with gen.RawDef():
+                gen.Var('name', 'john')
+            # Output
+            # def run(self, timeout=10):
+            #     name = 'john'
+        """
+        item = RawDef(self, name)
         self._add_item(item)
         return item
 

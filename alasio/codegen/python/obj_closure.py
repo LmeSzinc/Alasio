@@ -155,23 +155,22 @@ class CustomTab(ClosureObject):
         self.context_name = 'CustomTab'
         # Passthrough mode: no prefix/suffix/line_ending → items go to parent context
         self._passthrough = not (prefix or suffix or line_ending)
+        self._indent_prev = gen.indent
+        self._context_name_prev = gen.context_name
+        self._context_prev = gen.context
 
     def __enter__(self):
-        self.indent_prev = self.gen.indent
-        self.gen.indent = self.indent_prev + self._indent_tab
+        self.gen.indent = self._indent + self._indent_tab
         if not self._passthrough:
-            # Capture items
-            self.context_name_prev = self.gen.context_name
-            self.context_prev = self.gen.context
             self.gen.context = self
             self.gen.context_name = self.context_name
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.gen.indent = self.indent_prev
+        self.gen.indent = self._indent_prev
         if not self._passthrough:
-            self.gen.context = self.context_prev
-            self.gen.context_name = self.context_name_prev
+            self.gen.context = self._context_prev
+            self.gen.context_name = self._context_name_prev
 
     @cached_property
     def line_ending(self):
