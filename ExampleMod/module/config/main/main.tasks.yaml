@@ -8,6 +8,8 @@ Main:
     Fleet2: Fleet
     Submarine:
     Emotion:
+    Emotion1: EmotionRecord
+    Emotion2: EmotionRecord
     HpControl:
     EnemyPriority:
     Hard: CampaignHard
@@ -18,8 +20,8 @@ Main:
     - StopCondition
     - info: Fleet
       groups: [ Fleet1, Fleet2 ]
+    - [ Emotion, Emotion1, Emotion2 ]
     - Submarine
-    - Emotion
     - HpControl
     - EnemyPriority
     - Hard

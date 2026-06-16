@@ -36,6 +36,7 @@
     "file": "main/main_config.json",
     "i18n": [
       "alasio/alasio_i18n.json",
+      "alasio/store_i18n.json",
       "main/main_i18n.json"
     ],
     "config": {

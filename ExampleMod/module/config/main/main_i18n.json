@@ -335,18 +335,20 @@
           "calculate_ignore": "calculate_ignore"
         }
       }
+    }
+  },
+  "EmotionRecord": {
+    "_info": {
+      "zh-CN": {"name": "EmotionRecord", "help": ""},
+      "en-US": {"name": "EmotionRecord", "help": ""}
     },
-    "Fleet1Value": {
-      "zh-CN": {"name": "Emotion.Fleet1Value", "help": ""},
-      "en-US": {"name": "Emotion.Fleet1Value", "help": ""}
+    "Value": {
+      "zh-CN": {"name": "EmotionRecord.Value", "help": ""},
+      "en-US": {"name": "EmotionRecord.Value", "help": ""}
     },
-    "Fleet1Record": {
-      "zh-CN": {"name": "Emotion.Fleet1Record", "help": ""},
-      "en-US": {"name": "Emotion.Fleet1Record", "help": ""}
-    },
-    "Fleet1Control": {
+    "Control": {
       "zh-CN": {
-        "name": "Emotion.Fleet1Control",
+        "name": "EmotionRecord.Control",
         "help": "",
         "option_i18n": {
           "keep_exp_bonus": "keep_exp_bonus",
@@ -356,7 +358,7 @@
         }
       },
       "en-US": {
-        "name": "Emotion.Fleet1Control",
+        "name": "EmotionRecord.Control",
         "help": "",
         "option_i18n": {
           "keep_exp_bonus": "keep_exp_bonus",
@@ -366,9 +368,9 @@
         }
       }
     },
-    "Fleet1Recover": {
+    "Recover": {
       "zh-CN": {
-        "name": "Emotion.Fleet1Recover",
+        "name": "EmotionRecord.Recover",
         "help": "",
         "option_i18n": {
           "not_in_dormitory": "not_in_dormitory",
@@ -377,7 +379,7 @@
         }
       },
       "en-US": {
-        "name": "Emotion.Fleet1Recover",
+        "name": "EmotionRecord.Recover",
         "help": "",
         "option_i18n": {
           "not_in_dormitory": "not_in_dormitory",
@@ -386,63 +388,9 @@
         }
       }
     },
-    "Fleet1Oath": {
-      "zh-CN": {"name": "Emotion.Fleet1Oath", "help": ""},
-      "en-US": {"name": "Emotion.Fleet1Oath", "help": ""}
-    },
-    "Fleet2Value": {
-      "zh-CN": {"name": "Emotion.Fleet2Value", "help": ""},
-      "en-US": {"name": "Emotion.Fleet2Value", "help": ""}
-    },
-    "Fleet2Record": {
-      "zh-CN": {"name": "Emotion.Fleet2Record", "help": ""},
-      "en-US": {"name": "Emotion.Fleet2Record", "help": ""}
-    },
-    "Fleet2Control": {
-      "zh-CN": {
-        "name": "Emotion.Fleet2Control",
-        "help": "",
-        "option_i18n": {
-          "keep_exp_bonus": "keep_exp_bonus",
-          "prevent_green_face": "prevent_green_face",
-          "prevent_yellow_face": "prevent_yellow_face",
-          "prevent_red_face": "prevent_red_face"
-        }
-      },
-      "en-US": {
-        "name": "Emotion.Fleet2Control",
-        "help": "",
-        "option_i18n": {
-          "keep_exp_bonus": "keep_exp_bonus",
-          "prevent_green_face": "prevent_green_face",
-          "prevent_yellow_face": "prevent_yellow_face",
-          "prevent_red_face": "prevent_red_face"
-        }
-      }
-    },
-    "Fleet2Recover": {
-      "zh-CN": {
-        "name": "Emotion.Fleet2Recover",
-        "help": "",
-        "option_i18n": {
-          "not_in_dormitory": "not_in_dormitory",
-          "dormitory_floor_1": "dormitory_floor_1",
-          "dormitory_floor_2": "dormitory_floor_2"
-        }
-      },
-      "en-US": {
-        "name": "Emotion.Fleet2Recover",
-        "help": "",
-        "option_i18n": {
-          "not_in_dormitory": "not_in_dormitory",
-          "dormitory_floor_1": "dormitory_floor_1",
-          "dormitory_floor_2": "dormitory_floor_2"
-        }
-      }
-    },
-    "Fleet2Oath": {
-      "zh-CN": {"name": "Emotion.Fleet2Oath", "help": ""},
-      "en-US": {"name": "Emotion.Fleet2Oath", "help": ""}
+    "Oath": {
+      "zh-CN": {"name": "EmotionRecord.Oath", "help": ""},
+      "en-US": {"name": "EmotionRecord.Oath", "help": ""}
     }
   },
   "HpControl": {

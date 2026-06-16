@@ -55,20 +55,18 @@ class Submarine(a.GroupBase):
 
 class Emotion(a.GroupBase):
     Mode: t.Literal['calculate', 'ignore', 'calculate_ignore'] = 'calculate'
-    Fleet1Value: int = 119
-    Fleet1Record: a.T_DATETIME = a.DEFAULT_TIME
-    Fleet1Control: t.Literal[
+
+
+class EmotionRecord(a.DashboardAmount):
+    Value: e.Annotated[int, m.Meta(ge=0, le=150)] = 119
+    Control: t.Literal[
         'keep_exp_bonus', 'prevent_green_face', 'prevent_yellow_face', 'prevent_red_face',
     ] = 'prevent_yellow_face'
-    Fleet1Recover: t.Literal['not_in_dormitory', 'dormitory_floor_1', 'dormitory_floor_2'] = 'not_in_dormitory'
-    Fleet1Oath: bool = False
-    Fleet2Value: int = 119
-    Fleet2Record: a.T_DATETIME = a.DEFAULT_TIME
-    Fleet2Control: t.Literal[
-        'keep_exp_bonus', 'prevent_green_face', 'prevent_yellow_face', 'prevent_red_face',
-    ] = 'prevent_yellow_face'
-    Fleet2Recover: t.Literal['not_in_dormitory', 'dormitory_floor_1', 'dormitory_floor_2'] = 'not_in_dormitory'
-    Fleet2Oath: bool = False
+    Recover: t.Literal['not_in_dormitory', 'dormitory_floor_1', 'dormitory_floor_2'] = 'not_in_dormitory'
+    Oath: bool = False
+
+    def post_edit(self):
+        pass
 
 
 class HpControl(a.GroupBase):

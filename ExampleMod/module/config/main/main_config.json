@@ -228,6 +228,123 @@
       }
     }
   },
+  "card-Main-Emotion": {
+    "_info": {"group": "Emotion", "arg": "_info", "card": "card-Main-Emotion"},
+    "Emotion": {
+      "Mode": {
+        "task": "Main",
+        "group": "Emotion",
+        "arg": "Mode",
+        "dt": "select",
+        "value": "calculate",
+        "option": ["calculate", "ignore", "calculate_ignore"]
+      }
+    },
+    "Emotion1": {
+      "_info": {"group": "Emotion1", "arg": "_info", "dashboard": "Amount"},
+      "Time": {
+        "task": "Main",
+        "group": "Emotion1",
+        "arg": "Time",
+        "cls": "EmotionRecord",
+        "i18ngroup": "DashboardBase",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      },
+      "Value": {
+        "task": "Main",
+        "group": "Emotion1",
+        "arg": "Value",
+        "cls": "EmotionRecord",
+        "i18ngroup": "EmotionRecord",
+        "dt": "input-int",
+        "value": 119,
+        "ge": 0,
+        "le": 150
+      },
+      "Control": {
+        "task": "Main",
+        "group": "Emotion1",
+        "arg": "Control",
+        "cls": "EmotionRecord",
+        "i18ngroup": "EmotionRecord",
+        "dt": "select",
+        "value": "prevent_yellow_face",
+        "option": ["keep_exp_bonus", "prevent_green_face", "prevent_yellow_face", "prevent_red_face"]
+      },
+      "Recover": {
+        "task": "Main",
+        "group": "Emotion1",
+        "arg": "Recover",
+        "cls": "EmotionRecord",
+        "i18ngroup": "EmotionRecord",
+        "dt": "select",
+        "value": "not_in_dormitory",
+        "option": ["not_in_dormitory", "dormitory_floor_1", "dormitory_floor_2"]
+      },
+      "Oath": {
+        "task": "Main",
+        "group": "Emotion1",
+        "arg": "Oath",
+        "cls": "EmotionRecord",
+        "i18ngroup": "EmotionRecord",
+        "dt": "checkbox",
+        "value": false
+      }
+    },
+    "Emotion2": {
+      "_info": {"group": "Emotion2", "arg": "_info", "dashboard": "Amount"},
+      "Time": {
+        "task": "Main",
+        "group": "Emotion2",
+        "arg": "Time",
+        "cls": "EmotionRecord",
+        "i18ngroup": "DashboardBase",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      },
+      "Value": {
+        "task": "Main",
+        "group": "Emotion2",
+        "arg": "Value",
+        "cls": "EmotionRecord",
+        "i18ngroup": "EmotionRecord",
+        "dt": "input-int",
+        "value": 119,
+        "ge": 0,
+        "le": 150
+      },
+      "Control": {
+        "task": "Main",
+        "group": "Emotion2",
+        "arg": "Control",
+        "cls": "EmotionRecord",
+        "i18ngroup": "EmotionRecord",
+        "dt": "select",
+        "value": "prevent_yellow_face",
+        "option": ["keep_exp_bonus", "prevent_green_face", "prevent_yellow_face", "prevent_red_face"]
+      },
+      "Recover": {
+        "task": "Main",
+        "group": "Emotion2",
+        "arg": "Recover",
+        "cls": "EmotionRecord",
+        "i18ngroup": "EmotionRecord",
+        "dt": "select",
+        "value": "not_in_dormitory",
+        "option": ["not_in_dormitory", "dormitory_floor_1", "dormitory_floor_2"]
+      },
+      "Oath": {
+        "task": "Main",
+        "group": "Emotion2",
+        "arg": "Oath",
+        "cls": "EmotionRecord",
+        "i18ngroup": "EmotionRecord",
+        "dt": "checkbox",
+        "value": false
+      }
+    }
+  },
   "card-Main-Submarine": {
     "_info": {"group": "Submarine", "arg": "_info", "card": "card-Main-Submarine"},
     "Submarine": {
@@ -262,93 +379,6 @@
         "dt": "select",
         "value": "2_grid_to_boss",
         "option": ["to_boss_position", "1_grid_to_boss", "2_grid_to_boss", "use_open_ocean_support"]
-      }
-    }
-  },
-  "card-Main-Emotion": {
-    "_info": {"group": "Emotion", "arg": "_info", "card": "card-Main-Emotion"},
-    "Emotion": {
-      "Mode": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Mode",
-        "dt": "select",
-        "value": "calculate",
-        "option": ["calculate", "ignore", "calculate_ignore"]
-      },
-      "Fleet1Value": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Fleet1Value",
-        "dt": "input-int",
-        "value": 119
-      },
-      "Fleet1Record": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Fleet1Record",
-        "dt": "datetime",
-        "value": "2020-01-01T00:00:00Z"
-      },
-      "Fleet1Control": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Fleet1Control",
-        "dt": "select",
-        "value": "prevent_yellow_face",
-        "option": ["keep_exp_bonus", "prevent_green_face", "prevent_yellow_face", "prevent_red_face"]
-      },
-      "Fleet1Recover": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Fleet1Recover",
-        "dt": "select",
-        "value": "not_in_dormitory",
-        "option": ["not_in_dormitory", "dormitory_floor_1", "dormitory_floor_2"]
-      },
-      "Fleet1Oath": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Fleet1Oath",
-        "dt": "checkbox",
-        "value": false
-      },
-      "Fleet2Value": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Fleet2Value",
-        "dt": "input-int",
-        "value": 119
-      },
-      "Fleet2Record": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Fleet2Record",
-        "dt": "datetime",
-        "value": "2020-01-01T00:00:00Z"
-      },
-      "Fleet2Control": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Fleet2Control",
-        "dt": "select",
-        "value": "prevent_yellow_face",
-        "option": ["keep_exp_bonus", "prevent_green_face", "prevent_yellow_face", "prevent_red_face"]
-      },
-      "Fleet2Recover": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Fleet2Recover",
-        "dt": "select",
-        "value": "not_in_dormitory",
-        "option": ["not_in_dormitory", "dormitory_floor_1", "dormitory_floor_2"]
-      },
-      "Fleet2Oath": {
-        "task": "Main",
-        "group": "Emotion",
-        "arg": "Fleet2Oath",
-        "dt": "checkbox",
-        "value": false
       }
     }
   },

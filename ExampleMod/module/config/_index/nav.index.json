@@ -80,13 +80,13 @@
       "zh-CN": "Fleet",
       "en-US": "Fleet"
     },
-    "card-Main-Submarine": {
-      "zh-CN": "Submarine",
-      "en-US": "Submarine"
-    },
     "card-Main-Emotion": {
       "zh-CN": "Emotion",
       "en-US": "Emotion"
+    },
+    "card-Main-Submarine": {
+      "zh-CN": "Submarine",
+      "en-US": "Submarine"
     },
     "card-Main-HpControl": {
       "zh-CN": "HpControl",

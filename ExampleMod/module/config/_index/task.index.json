@@ -54,6 +54,8 @@
       "Fleet2": {"file": "main/main_model.py", "cls": "Fleet", "task": "Main"},
       "Submarine": {"file": "main/main_model.py", "cls": "Submarine", "task": "Main"},
       "Emotion": {"file": "main/main_model.py", "cls": "Emotion", "task": "Main"},
+      "Emotion1": {"file": "main/main_model.py", "cls": "EmotionRecord", "task": "Main"},
+      "Emotion2": {"file": "main/main_model.py", "cls": "EmotionRecord", "task": "Main"},
       "HpControl": {"file": "main/main_model.py", "cls": "HpControl", "task": "Main"},
       "EnemyPriority": {"file": "main/main_model.py", "cls": "EnemyPriority", "task": "Main"},
       "Hard": {"file": "main/main_model.py", "cls": "CampaignHard", "task": "Main"}

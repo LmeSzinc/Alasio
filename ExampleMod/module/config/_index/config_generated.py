@@ -52,6 +52,8 @@ class ConfigGenerated(AlasioConfigGenerated):
     Fleet2: "main.Fleet"
     Submarine: "main.Submarine"
     Emotion: "main.Emotion"
+    Emotion1: "main.EmotionRecord"
+    Emotion2: "main.EmotionRecord"
     HpControl: "main.HpControl"
     EnemyPriority: "main.EnemyPriority"
     Hard: "main.CampaignHard"

@@ -71,28 +71,20 @@ Emotion:
     Mode:
       value: calculate
       option: [ calculate, ignore, calculate_ignore ]
-    Fleet1Value: 119
-    Fleet1Record:
-      value: 2020-01-01 00:00:00
-      display: disabled
-    Fleet1Control:
+
+EmotionRecord:
+  parent: DashboardAmount
+  args:
+    Value:
+      value: 119
+      range: 0~150
+    Control:
       value: prevent_yellow_face
       option: [ keep_exp_bonus, prevent_green_face, prevent_yellow_face, prevent_red_face ]
-    Fleet1Recover:
+    Recover:
       value: not_in_dormitory
       option: [ not_in_dormitory, dormitory_floor_1, dormitory_floor_2 ]
-    Fleet1Oath: false
-    Fleet2Value: 119
-    Fleet2Record:
-      value: 2020-01-01 00:00:00
-      display: disabled
-    Fleet2Control:
-      value: prevent_yellow_face
-      option: [ keep_exp_bonus, prevent_green_face, prevent_yellow_face, prevent_red_face ]
-    Fleet2Recover:
-      value: not_in_dormitory
-      option: [ not_in_dormitory, dormitory_floor_1, dormitory_floor_2 ]
-    Fleet2Oath: false
+    Oath: false
 
 HpControl:
   args:
