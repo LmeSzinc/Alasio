@@ -1,8 +1,9 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
-from msgspec import DecodeError, MsgspecError, Struct
+from msgspec import DecodeError, Struct
 from msgspec.json import Decoder as JsonDecoder
+from msgspecerror import MsgspecError
 
 from alasio.ext.cache import cached_property
 from alasio.ext.file.msgspecfile import JsonCacheTTL
@@ -101,7 +102,7 @@ class ConfigSetEvent(Struct):
     group: str
     arg: str
     value: Any
-    error: Optional[MsgspecError] = None
+    error: Union[MsgspecError, Exception, None] = None
 
 
 class TaskItem(Struct):

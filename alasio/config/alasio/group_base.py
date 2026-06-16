@@ -134,3 +134,21 @@ class GroupBase(m.Struct, omit_defaults=True, dict=True):
         except AttributeError:
             raise DataInconsistent(f'Missing servertime injection. '
                                    f'To access servertime, group model must be wrapped in GroupProxy')
+
+    def post_edit(self, old: e.Self, edits):
+        """
+        Callback method whenever user edits config at frontend.
+        New value is set to current object when this method is called.
+
+        Args:
+            old: Group model with old values
+            edits (dict[str, Any]):
+                New values, key: arg_name, value: arg value
+
+        Raises:
+            msgspec.ValidationError:
+                Raise error to reject user edits
+            Exceptions:
+                Any other errors are considered as internal failures
+        """
+        pass

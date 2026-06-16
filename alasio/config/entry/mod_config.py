@@ -13,6 +13,18 @@ from alasio.ext.deep import deep_set
 from alasio.logger import logger
 
 
+def get_field_default_with_error(model, arg):
+    try:
+        default = get_field_default(model, arg)
+    except AttributeError:
+        # no default
+        default = NODEFAULT
+    # note that default might be NODEFAULT
+    if default == NODEFAULT:
+        raise DataInconsistent(f'Failed to default from {model} field "{arg}"')
+    return default
+
+
 class ModConfig(ModBase):
     """
     Config read/write
@@ -71,7 +83,7 @@ class ModConfig(ModBase):
 
         return out
 
-    def config_batch_set(self, config_name, events):
+    def config_batch_set(self, config_name, events, post_edit=False):
         """
         Batch set config.
         If any event failed to validate, entire config_set is consider failed.
@@ -79,6 +91,7 @@ class ModConfig(ModBase):
         Args:
             config_name (str):
             events (list[ConfigSetEvent]):
+            post_edit (bool): True to call post_edit() of validation model
 
         Returns:
             tuple[bool, list[ConfigSetEvent]]:
@@ -108,7 +121,8 @@ class ModConfig(ModBase):
                 # get model
                 model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
                 if model is None:
-                    continue
+                    raise DataInconsistent(f'Cannot load model for {event.task}.{event.group}, '
+                                           f'file="{model_ref.file}", cls="{model_ref.cls}"')
                 dict_model[key] = model
             dict_value[key][event.arg] = event.value
 
@@ -133,14 +147,7 @@ class ModConfig(ModBase):
                 except IndexError:
                     # can't parse
                     raise DataInconsistent(f'Failed to parse error.loc from "{e}"') from None
-                try:
-                    default = get_field_default(model, arg)
-                except AttributeError:
-                    # no default
-                    default = NODEFAULT
-                # note that default might be NODEFAULT
-                if default == NODEFAULT:
-                    raise DataInconsistent(f'Failed to default from {model} field "{arg}"')
+                default = get_field_default_with_error(model, arg)
                 rollback.append(ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=error))
                 continue
             # validate success
@@ -158,7 +165,7 @@ class ModConfig(ModBase):
             return False, rollback
 
         # init table
-        show = [f'{e.task}.{e.group}.{e.arg}={e.value}' for e in events]
+        show = [f'{e.task}.{e.group}.{e.arg}={repr(e.value)}' for e in events]
         logger.info(f'config_set "{config_name}": {", ".join(show)}')
         table = AlasioConfigTable(config_name)
 
@@ -181,30 +188,45 @@ class ModConfig(ModBase):
                 except KeyError:
                     # this shouldn't happen, as dict_model is paired with dict_value
                     continue
-                data, errors = load_msgpack_with_default(old, model)
-                # for error in errors:
-                #     logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
-                if data is NODEFAULT:
-                    # Failed to convert
-                    continue
+                obj, errors = load_msgpack_with_default(old, model)
+                for error in errors:
+                    logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+                if obj is NODEFAULT:
+                    raise DataInconsistent(f'Failed to load existing config for {row.task}.{row.group}')
                 # update new value onto old value
                 # note that we merge modification onto existing value
                 # meaning that model-level post init validation won't work and each args are separately validated
+                obj_old = obj.__copy__()
                 for arg, value in new.items():
                     try:
-                        setattr(data, arg, value)
+                        setattr(obj, arg, value)
                     except AttributeError:
-                        # this shouldn't happen, as arg is validated
-                        continue
+                        raise DataInconsistent(f'Cannot set attribute {arg} on {model}')
+                # call post_edit()
+                if post_edit:
+                    try:
+                        obj.post_edit(obj_old, new)
+                    except ValidationError as e:
+                        # rollback all args from this group
+                        for arg in new:
+                            default = getattr(obj_old, arg)
+                            rollback.append(ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=e))
+                        show = [f'{e.task}.{e.group}.{e.arg}={repr(e.value)}' for e in new]
+                        logger.info(f'config_set "{config_name}" rejected by post_edit: {", ".join(show)}')
+                        break
+                    except Exception as e:
+                        # wrap internal error
+                        raise DataInconsistent(f'Failed to call {model.__name__}.post_edit(): {e}')
+
                 task, group = key
-                data = encode(data)
+                data = encode(obj)
                 rows.append(ConfigRow(task=task, group=group, value=data))
             # write
             table.upsert_row(rows, conflicts=('task', 'group'), updates='value', _cursor_=c)
 
         return True, success
 
-    def config_set(self, config_name, event):
+    def config_set(self, config_name, event, post_edit=False):
         """
         Set a single config value.
         Optimized for single event without batch overhead.
@@ -212,6 +234,7 @@ class ModConfig(ModBase):
         Args:
             config_name (str):
             event (ConfigSetEvent): Single event to set
+            post_edit (bool): True to call post_edit() of validation model
 
         Returns:
             tuple[bool, ConfigSetEvent]:
@@ -231,7 +254,8 @@ class ModConfig(ModBase):
 
         model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
         if model is None:
-            raise DataInconsistent(f'Cannot load model for {event.task}.{event.group}')
+            raise DataInconsistent(f'Cannot load model for {event.task}.{event.group}, '
+                                   f'file="{model_ref.file}", cls="{model_ref.cls}"')
 
         # validate
         value = {event.arg: event.value}
@@ -243,12 +267,7 @@ class ModConfig(ModBase):
                 arg = error.loc[0]
             except IndexError:
                 raise DataInconsistent(f'Failed to parse error.loc from "{e}"') from None
-            try:
-                default = get_field_default(model, arg)
-            except AttributeError:
-                default = NODEFAULT
-            if default == NODEFAULT:
-                raise DataInconsistent(f'Failed to default from {model} field "{arg}"')
+            default = get_field_default_with_error(model, arg)
             rollback = ConfigSetEvent(task=event.task, group=event.group, arg=arg, value=default, error=error)
             return False, rollback
 
@@ -259,7 +278,7 @@ class ModConfig(ModBase):
                 f'Missing arg "{event.arg}" after converting value, value={value}, value_obj={value_obj}')
 
         # init table
-        logger.info(f'config_set "{config_name}": {event.task}.{event.group}.{event.arg}={event.value}')
+        logger.info(f'config_set "{config_name}": {event.task}.{event.group}.{event.arg}={repr(event.value)}')
         table = AlasioConfigTable(config_name)
 
         # write after validation
@@ -272,18 +291,34 @@ class ModConfig(ModBase):
                 break
 
             # parse existing value
-            data, errors = load_msgpack_with_default(old, model)
-            if data is NODEFAULT:
-                raise DataInconsistent(f'Failed to load existing config for {event.task}.{event.group}')
+            obj, errors = load_msgpack_with_default(old, model)
+            for error in errors:
+                logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+            if obj is NODEFAULT:
+                raise DataInconsistent(f'Failed to load existing config for {row.task}.{row.group}')
+            obj_old = obj.__copy__()
 
             # update value
             try:
-                setattr(data, event.arg, arg_value)
+                setattr(obj, event.arg, arg_value)
             except AttributeError:
                 raise DataInconsistent(f'Cannot set attribute {event.arg} on {model}')
 
+            # call post_edit()
+            if post_edit:
+                try:
+                    obj.post_edit(obj_old, {event.arg: arg_value})
+                except ValidationError as e:
+                    default = getattr(obj_old, event.arg)
+                    rollback = ConfigSetEvent(task=event.task, group=event.group, arg=event.arg, value=default, error=e)
+                    logger.info(f'config_set "{config_name}" rejected by post_edit: '
+                                f'{event.task}.{event.group}.{event.arg}={repr(event.value)}')
+                    return False, rollback
+                except Exception as e:
+                    raise DataInconsistent(f'Failed to call {model.__name__}.post_edit(): {e}')
+
             # encode and write
-            data = encode(data)
+            data = encode(obj)
             row = ConfigRow(task=event.task, group=event.group, value=data)
             table.upsert_row([row], conflicts=('task', 'group'), updates='value', _cursor_=c)
 

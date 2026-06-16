@@ -65,8 +65,58 @@ class EmotionRecord(a.DashboardAmount):
     Recover: t.Literal['not_in_dormitory', 'dormitory_floor_1', 'dormitory_floor_2'] = 'not_in_dormitory'
     Oath: bool = False
 
-    def post_edit(self):
-        pass
+    @property
+    def speed(self):
+        """
+        Returns:
+            int: recover speed per 6 min
+        """
+        recover = self.Recover
+        if recover == 'dormitory_floor_2':
+            speed = 50
+        elif recover == 'dormitory_floor_1':
+            speed = 40
+        else:
+            speed = 20
+        if self.Oath:
+            speed += 10
+        return speed // 10
+
+    @property
+    def limit(self):
+        """
+        Returns:
+            int: Minimum emotion value to control
+        """
+        control = self.Control
+        if control == 'keep_exp_bonus':
+            return 120
+        if control == 'prevent_green_face':
+            return 40
+        if control == 'prevent_yellow_face':
+            return 30
+        # let's just don't be that harsh
+        return 2
+
+    @property
+    def max(self):
+        """
+        Returns:
+            int: Maximum emotion value
+        """
+        recover = self.Recover
+        if recover == 'dormitory_floor_2' or recover == 'dormitory_floor_1':
+            return 150
+        return 119
+
+    def post_edit(self, old: e.Self, edits):
+        if self.Control == 'keep_exp_bonus':
+            recover = self.Recover
+            if recover == 'dormitory_floor_2' or recover == 'dormitory_floor_1':
+                pass
+            else:
+                raise m.ValidationError(
+                    'EmotionControl="Keep Happy Bonus" and RecoverLocation="Docks" can not be used together')
 
 
 class HpControl(a.GroupBase):
