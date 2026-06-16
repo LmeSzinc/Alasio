@@ -24,7 +24,7 @@
   }
 
   // --- Dashboard types as a single card (simulating real config) ---
-  const dashboardCard: CardData = {
+  let dashboardCard = $state({
     _info: { group: "DashboardDemo", arg: "_info", card: "card-Dashboard-Demo", name: "Dashboard Types" },
     Amount: {
       _info: info("Amount", "Amount", "#eb8efe", "Gems"),
@@ -69,10 +69,10 @@
       Eta: arg("PlannerDone", "Eta", "input", "00:00:00"),
       Time: timeArg("PlannerDone", 5 * 1000),
     },
-  };
+  });
 
   // --- Non-dashboard card (normal args, for comparison) ---
-  const normalCard: CardData = {
+  let normalCard = $state({
     _info: { group: "NormalDemo", arg: "_info", card: "card-Normal-Demo", name: "Non-Dashboard (normal args)" },
     Settings: {
       _info: { group: "Settings", arg: "_info", name: "Settings", value: "" } as any,
@@ -87,10 +87,10 @@
       Retries: arg("Output", "Retries", "input-int", 3, { ge: 1, le: 10 }),
       Notes: arg("Output", "Notes", "textarea", "Optional notes here"),
     },
-  };
+  });
 
   // --- Mixed card (dashboard + non-dashboard groups side by side) ---
-  const mixedCard: CardData = {
+  let mixedCard = $state({
     _info: { group: "MixedDemo", arg: "_info", card: "card-Mixed-Demo", name: "Mixed: Dashboard + Normal" },
     // Dashboard groups
     Gems: {
@@ -125,7 +125,7 @@
       MaxDepth: arg("Advanced", "MaxDepth", "input-int", 3, { ge: 0, le: 10 }),
       Debug: arg("Advanced", "Debug", "checkbox", false),
     },
-  };
+  });
 
   // Full-width card class matching ArgCardList logic
   const noopEdit = noop;
@@ -147,7 +147,7 @@
       each rendered as a single arg row with PrettyValue on the right and time below.
     </p>
     <ArgCard
-      cardData={dashboardCard}
+      bind:cardData={dashboardCard}
       parentWidth={1800}
       handleEdit={noopEdit}
       handleReset={noopReset}
@@ -163,7 +163,7 @@
       each arg renders individually as separate rows.
     </p>
     <ArgCard
-      cardData={normalCard}
+      bind:cardData={normalCard}
       parentWidth={1800}
       handleEdit={noopEdit}
       handleReset={noopReset}
@@ -179,7 +179,7 @@
       in the real config overview.
     </p>
     <ArgCard
-      cardData={mixedCard}
+      bind:cardData={mixedCard}
       parentWidth={1800}
       handleEdit={noopEdit}
       handleReset={noopReset}
