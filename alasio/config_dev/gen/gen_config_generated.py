@@ -133,6 +133,7 @@ class GenConfigGenerated(CrossNavGenerator):
                     gen.Import(name)
 
         gen.FromImport('alasio.config.alasio.group_proxy').Import('batch_set')
+        gen.FromImport('alasio.base.timer').Import('getnow')
 
         # group models
         for nav in self.dict_nav_config.values():
