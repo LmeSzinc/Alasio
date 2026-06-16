@@ -20,8 +20,9 @@ class AutoBlankLineMixin(CodeObject):
         if isinstance(prev, Empty) or isinstance(curr, Empty):
             return 0
 
-        # RawClass/RawDef have no header line, so skip Class/Def blank line rules
-        if getattr(curr, '_skip_class_blank_lines', False):
+        # A Raw item preceding a Class/Def is treated as the definition
+        # header (e.g. gen.Raw('def foo():', indent=False) inside RawDef).
+        if isinstance(prev, Raw) and isinstance(curr, (Class, Def)):
             return 0
 
         # PEP8: 2 blank lines between top-level definitions
@@ -158,8 +159,6 @@ class RawClass(Class):
         #     name = 'john'
         #     age = 0
     """
-    _skip_class_blank_lines = True
-
     def __init__(self, gen, name=''):
         super().__init__(gen, name)
 
@@ -187,7 +186,6 @@ class RawDef(Def):
         # def run(self, timeout=10):
         #     name = 'john'
     """
-    _skip_class_blank_lines = True
 
     def __init__(self, gen, name=''):
         super().__init__(gen, name)

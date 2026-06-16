@@ -71,13 +71,114 @@ class Complex:
 """
         assert code == expected
 
+    def test_auto_blank_lines_around_def(self):
+        """1 blank line before and after a Def inside a Class."""
+        gen = CodeGen()
+        with gen.Class('MyClass'):
+            gen.Var('x', 1)
+            with gen.Def('method_a'):
+                pass
+            gen.Var('y', 2)
+            with gen.Def('method_b'):
+                pass
+            gen.Var('z', 3)
+
+        code = gen.generate_str()
+        expected = """\
+class MyClass:
+    x = 1
+
+    def method_a():
+        pass
+
+    y = 2
+
+    def method_b():
+        pass
+
+    z = 3
+"""
+        assert code == expected
+
+    def test_auto_blank_lines_def_adjacent(self):
+        """1 blank line between two adjacent Defs inside a Class."""
+        gen = CodeGen()
+        with gen.Class('MyClass'):
+            with gen.Def('first'):
+                pass
+            with gen.Def('second'):
+                pass
+            with gen.Def('third'):
+                pass
+
+        code = gen.generate_str()
+        expected = """\
+class MyClass:
+    def first():
+        pass
+
+    def second():
+        pass
+
+    def third():
+        pass
+"""
+        assert code == expected
+
+    def test_auto_blank_lines_class_inside_class(self):
+        """1 blank line before and after a nested Class inside a Class."""
+        gen = CodeGen()
+        with gen.Class('Outer'):
+            gen.Var('x', 1)
+            with gen.Class('Inner'):
+                gen.Var('y', 2)
+            gen.Var('z', 3)
+
+        code = gen.generate_str()
+        expected = """\
+class Outer:
+    x = 1
+
+    class Inner:
+        y = 2
+
+    z = 3
+"""
+        assert code == expected
+
+    def test_auto_blank_lines_mixed_class_def(self):
+        """1 blank line around mixed Class and Def inside a Class."""
+        gen = CodeGen()
+        with gen.Class('Outer'):
+            gen.Var('x', 1)
+            with gen.Class('Inner'):
+                pass
+            with gen.Def('method'):
+                pass
+            gen.Var('y', 2)
+
+        code = gen.generate_str()
+        expected = """\
+class Outer:
+    x = 1
+
+    class Inner:
+        pass
+
+    def method():
+        pass
+
+    y = 2
+"""
+        assert code == expected
+
 
 class TestObjRawClass:
     def test_basic(self):
-        """RawClass produces body without class header."""
+        """RawClass with header inside, produces body."""
         gen = CodeGen()
-        gen.Raw('class MyClass:')
         with gen.RawClass():
+            gen.Raw('class MyClass:', indent=False)
             gen.Var('x', 1)
 
         code = gen.generate_str()
@@ -90,8 +191,8 @@ class MyClass:
     def test_with_inherit(self):
         """RawClass with set_inherit still skips the header."""
         gen = CodeGen()
-        gen.Raw('class User(BaseModel, metaclass=Singleton):')
         with gen.RawClass().set_inherit('BaseModel', metaclass='Singleton'):
+            gen.Raw('class User(BaseModel, metaclass=Singleton):', indent=False)
             gen.Var('name', 'john')
             gen.Var('age', 0)
 
@@ -116,8 +217,8 @@ class User(BaseModel, metaclass=Singleton):
         """RawClass nested inside another class."""
         gen = CodeGen()
         with gen.Class('Outer'):
-            gen.Raw('    class Inner:')
             with gen.RawClass():
+                gen.Raw('    class Inner:', indent=False)
                 gen.Var('y', 2)
 
         code = gen.generate_str()
@@ -131,8 +232,8 @@ class Outer:
     def test_multiple_items(self):
         """RawClass with multiple items."""
         gen = CodeGen()
-        gen.Raw('class MyClass:')
         with gen.RawClass():
+            gen.Raw('class MyClass:', indent=False)
             gen.Var('x', 1)
             gen.Var('y', 2)
             gen.Var('z', 3)
@@ -149,8 +250,8 @@ class MyClass:
     def test_auto_blank_lines_between_methods(self):
         """RawClass should preserve auto blank lines between nested methods."""
         gen = CodeGen()
-        gen.Raw('class MyClass:')
         with gen.RawClass():
+            gen.Raw('class MyClass:', indent=False)
             with gen.Def('first'):
                 pass
             with gen.Def('second'):
@@ -170,8 +271,8 @@ class MyClass:
     def test_auto_blank_lines_method_and_var(self):
         """RawClass auto blank lines between method and variable."""
         gen = CodeGen()
-        gen.Raw('class MyClass:')
         with gen.RawClass():
+            gen.Raw('class MyClass:', indent=False)
             gen.Var('x', 1)
             with gen.Def('method'):
                 pass
@@ -186,17 +287,54 @@ class MyClass:
 """
         assert code == expected
 
-    def test_with_raw_indent_false_header(self):
-        """RawClass with custom header using gen.Raw(indent=False)."""
+    def test_auto_blank_lines_around_def(self):
+        """1 blank line before and after a Def inside RawClass."""
         gen = CodeGen()
-        gen.Raw('class MyClass:', indent=False)
         with gen.RawClass():
+            gen.Raw('class MyClass:', indent=False)
             gen.Var('x', 1)
+            with gen.Def('method_a'):
+                pass
+            gen.Var('y', 2)
+            with gen.Def('method_b'):
+                pass
+            gen.Var('z', 3)
 
         code = gen.generate_str()
         expected = """\
 class MyClass:
     x = 1
+
+    def method_a():
+        pass
+
+    y = 2
+
+    def method_b():
+        pass
+
+    z = 3
+"""
+        assert code == expected
+
+    def test_auto_blank_lines_def_adjacent(self):
+        """1 blank line between adjacent Defs inside RawClass."""
+        gen = CodeGen()
+        with gen.RawClass():
+            gen.Raw('class MyClass:', indent=False)
+            with gen.Def('first'):
+                pass
+            with gen.Def('second'):
+                pass
+
+        code = gen.generate_str()
+        expected = """\
+class MyClass:
+    def first():
+        pass
+
+    def second():
+        pass
 """
         assert code == expected
 
@@ -208,11 +346,11 @@ class TestRawClassDefTopLevel:
         same as Class and Def.
         """
         gen = CodeGen()
-        gen.Raw('class First:')
         with gen.RawClass():
+            gen.Raw('class First:', indent=False)
             gen.Var('a', 1)
-        gen.Raw('def func():')
         with gen.RawDef():
+            gen.Raw('def func():', indent=False)
             gen.Var('b', 2)
 
         ref = CodeGen()
@@ -228,8 +366,8 @@ class TestRawClassDefTopLevel:
         gen = CodeGen()
         with gen.Class('Existing'):
             gen.Var('x', 1)
-        gen.Raw('class Custom:')
         with gen.RawClass():
+            gen.Raw('class Custom:', indent=False)
             gen.Var('y', 2)
 
         code = gen.generate_str()
