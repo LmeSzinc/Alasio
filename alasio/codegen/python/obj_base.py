@@ -60,6 +60,10 @@ class CodeObject:
         self.gen = gen
         self._indent = gen.indent
         self._context_name = gen.context_name
+        # store indent and context at object init
+        self._indent_prev = gen.indent
+        self._context_name_prev = gen.context_name
+        self._context_prev = gen.context
         self._anno = ''
         # Capture custom line_ending from enclosing context (e.g. CustomTab)
         ctx = gen.context
@@ -94,21 +98,17 @@ class CodeObject:
         # When used as a context manager, default to newline unless explicitly set
         if not self._wrap_explicit and self._wrap == 'inline':
             self._wrap = 'newline'
-        # store indent and context
-        self.indent_prev = self.gen.indent
-        self.context_name_prev = self.gen.context_name
-        self.context_prev = self.gen.context
         # enter indent and context
-        self.gen.indent = self.indent_prev + self._indent_tab
+        self.gen.indent = self._indent + self._indent_tab
         self.gen.context = self
         self.gen.context_name = self.context_name
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # restore
-        self.gen.indent = self.indent_prev
-        self.gen.context = self.context_prev
-        self.gen.context_name = self.context_name_prev
+        self.gen.indent = self._indent_prev
+        self.gen.context = self._context_prev
+        self.gen.context_name = self._context_name_prev
 
     def apply_context_name(self, context_name: str):
         """
