@@ -1,7 +1,9 @@
 from alasio.codegen.python import CodeGen
 from alasio.config.entry.const import ModEntryInfo
+from alasio.config_dev.format.extract_method import extract_method
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.config_dev.format.format_yaml import yaml_formatter
+from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.cache_alasio import CacheAlasio
 from alasio.config_dev.parse.load_alas_i18n import LoadAlasI18n
 from alasio.config_dev.parse.parse_args import ArgData, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
@@ -99,6 +101,24 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         return parent
 
     @cached_property
+    def model_methods(self):
+        """
+        Returns:
+            dict[str, dict[str, list[str]]]:
+                key: {class_name}.{method_name}
+                value: list of code
+        """
+        try:
+            source = self.model_file.atomic_read_text()
+        except FileNotFoundError:
+            return {}
+        try:
+            methods = extract_method(source)
+        except SyntaxError as e:
+            raise DefinitionError(f'SyntaxError in model file {self.model_file}: {e}')
+        return methods
+
+    @cached_property
     def model_gen(self):
         """
         Generate msgspec models
@@ -106,6 +126,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         Returns:
             CodeGen | None:
         """
+        _ = self.model_methods
         gen = CodeGen()
         # no datetime because we have alias: a.T_DATETIME, a.DEFAULT_TIME
         # gen.Import('datetime').as_('d')
@@ -147,6 +168,14 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                         continue
                     # inline
                     gen.Anno(arg_name, arg.get_anno()).Var(arg.get_value())
+
+                # keep manual methods
+                methods = self.model_methods.get(group_name)
+                if methods:
+                    for method_name, lines in methods.items():
+                        with gen.RawDef():
+                            for line in lines:
+                                gen.Raw(line, indent=False)
 
         # gen.print()
         if gen.has_content:
