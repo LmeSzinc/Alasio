@@ -32,15 +32,23 @@ class Raw(CodeObject):
     Raw string content
     """
 
-    def __init__(self, gen, text):
+    def __init__(self, gen, text, indent=True):
         super().__init__(gen)
-        # trim leading/trailing empty lines and dedent
-        text = inspect.cleandoc(text)
+        if indent:
+            # trim leading/trailing empty lines and dedent
+            text = inspect.cleandoc(text)
+        else:
+            # keep indent from input, only trim leading/trailing empty lines
+            text = text.lstrip('\n').rstrip()
         self.lines = text.splitlines()
+        self._add_indent = indent
 
     def generate(self):
-        for line in self.lines:
-            yield f'{self.indent_str}{line}'
+        if self._add_indent:
+            for line in self.lines:
+                yield f'{self.indent_str}{line}'
+        else:
+            yield from self.lines
 
 
 class Comment(CodeObject):

@@ -247,11 +247,16 @@ class CodeGen(CodeGenBase):
         self._add_item(item)
         return item
 
-    def Raw(self, text):
+    def Raw(self, text, indent=True):
         """
         Raw string content
+
+        Args:
+            text (str): Raw text content
+            indent (bool): Whether to auto-dedent and add generator indent.
+                Defaults to True. When False, keeps the indent from input.
         """
-        item = Raw(self, text)
+        item = Raw(self, text, indent=indent)
         self._add_item(item)
         return item
 
