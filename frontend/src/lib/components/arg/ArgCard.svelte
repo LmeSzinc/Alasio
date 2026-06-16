@@ -1,12 +1,12 @@
 <script lang="ts">
   import * as Card from "$lib/components/ui/card";
   import { cn } from "$lib/utils";
+  import StaticDatetime from "../arginput/StaticDatetime.svelte";
+  import PrettyValue from "../dashboard/PrettyValue.svelte";
   import Arg from "./Arg.svelte";
   import CardEnable from "./CardEnable.svelte";
   import I18nText from "./I18nText.svelte";
   import LayoutHorizontalLike from "./LayoutHorizontalLike.svelte";
-  import PrettyValue from "../dashboard/PrettyValue.svelte";
-  import StaticDatetime from "../arginput/StaticDatetime.svelte";
   import type { ArgData, CardData, InfoData, InputProps } from "./utils.svelte";
 
   type Props = {
@@ -39,6 +39,23 @@
   });
 
   let isAdvanced = $state(false);
+
+  // Get extra args from a dashboard group
+  function getDashboardArgs(groupData: Record<string, ArgData>, dashboardType: string): string[] {
+    return Object.entries(groupData)
+      .filter(([argKey, _]) => {
+        return !isDashboardInternalArg(argKey, dashboardType);
+      })
+      .map(([argKey]) => argKey);
+  }
+  // Arg name "_info", "Value", "Time", "ServerUpdate" will be removed from the group
+  // If dashboard type is "DynamicTotal", arg name "Total" will be removed
+  function isDashboardInternalArg(argKey: string, dashboardType: string): boolean {
+    if (argKey === "_info") return true;
+    if (argKey === "Value" || argKey === "Time" || argKey === "ServerUpdate") return true;
+    if (dashboardType === "DynamicTotal" && argKey === "Total") return true;
+    return false;
+  }
 </script>
 
 <Card.Root class={cn("neushadow relative mx-auto gap-0 border-none", flashing && "animate-flash-primary", className)}>
@@ -75,18 +92,28 @@
     {#each Object.entries(Groups) as [groupKey, groupData]}
       <hr />
       {@const dashboardType = (groupData._info as ArgData | undefined)?.dashboard ?? ""}
+      {@const dashboardArgs = getDashboardArgs(groupData, dashboardType)}
       {#if dashboardType}
-        <LayoutHorizontalLike data={groupData._info as ArgData}>
-          {#snippet InputSnippet()}
-            <PrettyValue data={groupData} variant="primary" class="w-full text-left" />
-          {/snippet}
-          {#snippet PlaceholderSnippet()}
-            {#if groupData.Time}
-              <StaticDatetime data={groupData.Time} class="justify-start" />
-            {/if}
-          {/snippet}
-        </LayoutHorizontalLike>
+        <!-- Dashboard -->
+        <div class="flex flex-col gap-y-1.5">
+          <!-- Display dashboard value and time as a compact arg -->
+          <LayoutHorizontalLike data={groupData._info as ArgData}>
+            {#snippet InputSnippet()}
+              <PrettyValue data={groupData} variant="primary" class="w-full text-left" />
+            {/snippet}
+            {#snippet PlaceholderSnippet()}
+              {#if groupData.Time}
+                <StaticDatetime data={groupData.Time} class="justify-start" />
+              {/if}
+            {/snippet}
+          </LayoutHorizontalLike>
+          <!-- Display extra dashboard args -->
+          {#each dashboardArgs as argKey}
+            <Arg bind:data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
+          {/each}
+        </div>
       {:else}
+        <!-- Normal group -->
         <div class="flex flex-col gap-y-1.5">
           {#each Object.entries(groupData) as [argKey]}
             <Arg bind:data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
