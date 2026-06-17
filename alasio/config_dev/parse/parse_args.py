@@ -1,5 +1,6 @@
+from collections import Counter
 from datetime import datetime, timezone
-from typing import Any, Literal, Union
+from typing import Any, Dict, Literal, Union
 
 import msgspec
 from msgspec import Struct, UNSET, UnsetType
@@ -43,12 +44,17 @@ TYPE_DT_TO_PYTHON = {
     'textarea': 'str',
     # checkbox
     'checkbox': 'bool',
+    # enable is like checkbox but with "true" and "false" as options
+    # frontend will display it as a button with i18n support
     'enable': 'bool',
     # select
     'select': 'str',
     'radio': 'str',
     'multi-select': 't.Tuple[str, ...]',
     'multi-radio': 't.Tuple[str, ...]',
+    # secondary-select is like select in data structure level
+    # frontend will display wth secondary select menu, group -> option
+    'secondary-select': 'str',
     # datatime
     'datetime': 'e.Annotated[d.datetime, m.Meta(tz=True)]',
     # filter
@@ -60,7 +66,7 @@ TYPE_DT_TO_PYTHON = {
 #   {'dt': 'select'} is a literal in python: Literal["option-A", "option-B"]
 TYPE_ARG_LITERAL = {
     'static',
-    'select', 'radio', 'multi-select', 'multi-radio',
+    'select', 'radio', 'multi-select', 'multi-radio', 'secondary-select',
 }
 # Define which "dt" is a tuple of value
 # Example:
@@ -92,34 +98,10 @@ def populate_arg(value) -> dict:
             default = value['value']
         except KeyError:
             raise DefinitionError(f'Missing "value" attribute')
-        # Parse range
-        if 'range' in value:
-            range_str = value['range']
-            if range_str:
-                try:
-                    dict_range = parse_range(range_str)
-                except ValueError as e:
-                    raise DefinitionError(f'Cannot parse range "{range_str}", {e}')
-                value.update(dict_range)
         if 'dt' in value:
-            # Having pre-defined type, check if valid
-            dt = value['dt']
-            if dt not in TYPE_DT_TO_PYTHON:
-                raise DefinitionError(f'Invalid datatype "{dt}"')
-            # dt="static" must have option
-            if dt == 'static':
-                value['option'] = [default]
-            # Check if literal args have option
-            if dt in TYPE_ARG_LITERAL and 'option' not in value:
-                raise DefinitionError(f'datatype "{dt}" must have "option" defined')
             return value
         # No pre-defined type, if it has option, predict as select
         if 'option' in value:
-            option = value['option']
-            if not option:
-                raise DefinitionError('"option" is an empty list')
-            if default not in option:
-                raise DefinitionError('Default value is not in "option"')
             value['dt'] = 'select'
             return value
         # No pre-defined type, predict by default value
@@ -130,6 +112,104 @@ def populate_arg(value) -> dict:
             return value
 
     raise DefinitionError(f'Cannot predict "dt"')
+
+
+def _validate_option(option: list, value: Any) -> None:
+    if not option:
+        raise DefinitionError('"option" is empty')
+    if value not in option:
+        raise DefinitionError(f'Default value "{value}" is not in "option"')
+    counts = Counter(option)
+    for _option, _count in counts.items():
+        if _count > 1:
+            raise DefinitionError(f'"option" has duplicate value "{_option}"')
+
+
+def preprocess_arg(arg: dict) -> dict:
+    """
+    Additional pre-process before validating as ArgData
+
+    Args:
+        arg: {'dt': 'checkbox', 'default': true}
+    """
+    try:
+        value = arg['value']
+    except KeyError:
+        raise DefinitionError(f'Missing "value" attribute')
+    try:
+        dt = arg['dt']
+    except KeyError:
+        raise DefinitionError(f'Missing "dt" attribute')
+
+    # Parse range
+    range_str = arg.get('range', '')
+    if range_str:
+        try:
+            dict_range = parse_range(range_str)
+        except ValueError as e:
+            raise DefinitionError(f'Cannot parse range "{range_str}", {e}')
+        arg.update(dict_range)
+
+    # check if dt valid
+    if dt not in TYPE_DT_TO_PYTHON:
+        raise DefinitionError(f'Invalid datatype "{dt}"')
+    # dt="static" must have option
+    if dt == 'static':
+        arg['option'] = [value]
+    if dt == 'enable':
+        arg['option'] = ['true', 'false']
+    # Check if literal args have option
+    if dt in TYPE_ARG_LITERAL and 'option' not in arg:
+        raise DefinitionError(f'datatype "{dt}" must have "option" defined')
+
+    # populate secondary-select
+    # convert 'option' and 'option_dict'
+    if dt == 'secondary-select':
+        if 'option' in arg:
+            if 'option_dict' in arg:
+                raise DefinitionError('"option" and "option_dict" cannot be defined at the same time')
+            else:
+                # copy option to option_dict
+                arg['option_dict'] = arg['option']
+                arg.pop('option', None)
+        if 'option_dict' in arg:
+            option_dict = arg['option_dict']
+            if not option_dict:
+                raise DefinitionError('"option_dict" is empty')
+            # validate all options
+            try:
+                option = []
+                for _group, _options in option_dict.items():
+                    option.extend(_options)
+                _validate_option(option, value)
+                option = set(option)
+                for _group in option_dict:
+                    if _group in option:
+                        raise DefinitionError(f'"option_dict" group name "{_group}" cannot be in "option"')
+            except (AttributeError, TypeError) as e:
+                raise DefinitionError(f'"option_dict" must be a dict[str, list] if dt="secondary-select", {e}')
+        else:
+            raise DefinitionError('dt="secondary-select" must have "option" or "option_dict" defined')
+    else:
+        arg.pop('option_dict', None)
+        # check option
+        if dt != 'enable':
+            if 'option' in arg:
+                _validate_option(arg['option'], value)
+    
+    vtype = type(value)
+    # Timezone default to UTC
+    if vtype is datetime and not value.tzinfo:
+        arg['value'] = value = value.replace(tzinfo=timezone.utc)
+    # Split filters
+    if dt in TYPE_ARG_TUPLE and vtype is str:
+        arg['value'] = value = tuple(s.strip() for s in value.split('>'))
+    # textarea is default to vert layout
+    if 'layout' not in arg:
+        if dt in ['textarea', 'filter', 'filter-order']:
+            arg['layout'] = 'vert'
+
+    return arg
 
 
 # No need to modify
@@ -145,6 +225,8 @@ class ArgData(Struct, omit_defaults=True):
     # default value
     value: Any
     option: Union[list, UnsetType] = UNSET
+    # {group: [option1, option2, ...]} in secondary-select
+    option_dict: Union[Dict[str, list], UnsetType] = UNSET
 
     # Data topics events will have `option_i18n` for option translations
     # key is option, value is translation
@@ -179,7 +261,7 @@ class ArgData(Struct, omit_defaults=True):
     # 4. "desc" to show arg like plain text
     # - {name} {input}
     # help is ignored, input follows name instead of right aligned
-    layout: Literal['hori', 'vert', 'vert-rev', 'desc'] = UNSET
+    layout: Union[Literal['hori', 'vert', 'vert-rev', 'desc'], UnsetType] = UNSET
 
     # Msgspec constraints
     # https://jcristharif.com/msgspec/constraints.html
@@ -243,6 +325,7 @@ class ArgData(Struct, omit_defaults=True):
     def from_arg_data(cls, data) -> "ArgData":
         try:
             data = populate_arg(data)
+            data = preprocess_arg(data)
         except DefinitionError as e:
             e.value = data
             raise
@@ -252,23 +335,6 @@ class ArgData(Struct, omit_defaults=True):
             ne = DefinitionError(e, value=data)
             raise ne
         return arg
-
-    def __post_init__(self):
-        value = self.value
-        vtype = type(value)
-        # Timezone default to UTC
-        if vtype is datetime and not value.tzinfo:
-            self.value = value.replace(tzinfo=timezone.utc)
-        # Split filters
-        if self.dt in TYPE_ARG_TUPLE and vtype is str:
-            self.value = tuple(s.strip() for s in value.split('>'))
-        # textarea is default to vert layout
-        if self.layout is UNSET:
-            if self.dt in ['textarea', 'filter', 'filter-order']:
-                self.layout = 'vert'
-        if self.dt == 'enable':
-            self.option = ['true', 'false']
-        return self
 
     def to_dict(self) -> dict:
         """

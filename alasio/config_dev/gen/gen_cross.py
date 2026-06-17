@@ -404,6 +404,9 @@ class CrossNavGenerator:
                         for key in ['value', 'option']:
                             if key in row:
                                 row[key] = NoIndent(row[key])
+                        option_dict = row.get('option_dict')
+                        if option_dict:
+                            row['option_dict'] = {k: NoIndent(v) for k, v in option_dict.items()}
                     # add args
                     for arg_name, row in args.items():
                         deep_set(out, keys=[card_name, group_name, arg_name], value=row)

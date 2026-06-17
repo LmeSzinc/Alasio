@@ -163,8 +163,13 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                     # Expand literal
                     if arg.dt in TYPE_ARG_LITERAL:
                         with gen.Literal(arg_name).set_literal('t.Literal').Var(arg.value).wrap():
-                            for option in arg.option:
-                                gen.Item(option)
+                            if arg.option_dict:
+                                for options in arg.option_dict.values():
+                                    for option in options:
+                                        gen.Item(option)
+                            else:
+                                for option in arg.option:
+                                    gen.Item(option)
                         continue
                     # inline
                     gen.Anno(arg_name, arg.get_anno()).Var(arg.get_value())
@@ -194,6 +199,22 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         """
         return self.read_i18n_json()
 
+    @staticmethod
+    def _load_arg_option_i18n(old, new, option, lang):
+        inline = True
+        default = str(option)
+        if not default.isdigit():
+            inline = False
+        # option name must not be empty, default to {option}
+        key = [lang, 'option_i18n', default]
+        value = deep_get(old, key, default='')
+        if not value:
+            value = default
+        if default != value:
+            inline = False
+        deep_set(new, key, value)
+        return inline
+
     def _update_arg_i18n(self, group_name, arg_name, arg: ArgData):
         """
         Update i18n of {group_name}.{arg_name}
@@ -222,21 +243,18 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             value = format_i18n(value)
             deep_set(new, key, value)
         # option
-        if arg.option:
+        if arg.option or arg.option_dict:
             for lang in self.entry.gui_language:
                 inline = True
-                for option in arg.option:
-                    default = str(option)
-                    if not default.isdigit():
-                        inline = False
-                    # option name must not be empty, default to {option}
-                    key = [lang, 'option_i18n', default]
-                    value = deep_get(old, key, default='')
-                    if not value:
-                        value = default
-                    if default != value:
-                        inline = False
-                    deep_set(new, key, value)
+                if arg.option_dict:
+                    for group in arg.option_dict:
+                        inline &= self._load_arg_option_i18n(old, new, group, lang)
+                    for options in arg.option_dict.values():
+                        for option in options:
+                            inline &= self._load_arg_option_i18n(old, new, option, lang)
+                else:
+                    for option in arg.option:
+                        inline &= self._load_arg_option_i18n(old, new, option, lang)
                 # if options are all digit and option name is same as option, make it inline
                 if inline:
                     key = [lang, 'option_i18n']
