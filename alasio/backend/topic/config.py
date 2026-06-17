@@ -3,7 +3,7 @@ from typing import Any
 
 import trio.to_thread
 from msgspec import ValidationError
-from msgspecerror import MsgspecError
+from msgspecerror import ErrorInfo
 
 from alasio.backend.reactive.base_msgbus import on_msgbus_config_event
 from alasio.backend.reactive.base_rpc import rpc
@@ -165,7 +165,7 @@ class ConfigArg(BaseTopic):
             await self.server.send(resp_event)
             # re-raise error, so server will treat as RPC call failed
             if resp.error is not None:
-                if isinstance(resp.error, MsgspecError):
+                if isinstance(resp.error, ErrorInfo):
                     msg = resp.error.msg
                 else:
                     msg = str(resp.error)

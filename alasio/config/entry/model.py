@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 from msgspec import DecodeError, Struct
 from msgspec.json import Decoder as JsonDecoder
-from msgspecerror import MsgspecError
+from msgspecerror import ErrorInfo
 
 from alasio.ext.cache import cached_property
 from alasio.ext.file.msgspecfile import JsonCacheTTL
@@ -102,7 +102,7 @@ class ConfigSetEvent(Struct):
     group: str
     arg: str
     value: Any
-    error: Union[MsgspecError, Exception, None] = None
+    error: Union[ErrorInfo, Exception, None] = None
 
 
 class TaskItem(Struct):
