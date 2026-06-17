@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import * as Dialog from "$lib/components/ui/dialog";
-  import * as Tooltip from "$lib/components/ui/tooltip";
   import { t } from "$lib/i18n";
+  import { cn } from "$lib/utils";
   import { LockKeyhole, RotateCcw } from "@lucide/svelte";
   import Enable from "../arginput/Enable.svelte";
   import Input from "../arginput/Input.svelte";
@@ -64,9 +64,14 @@ Z`;
   <div class="absolute top-0 right-0 flex flex-col items-end gap-1">
     <!-- Enable button row -->
     <div class="flex h-8 items-center justify-center gap-x-1">
-      <!-- Card-level buttons -->
-      <div class="flex items-center gap-x-1">
-        <!-- Reset button - always visible -->
+      <!-- Card-level buttons - visible on card hover -->
+      <div
+        class={cn(
+          "flex items-center gap-x-1",
+          "pointer-events-none opacity-0 transition-opacity duration-200 group-hover/card:pointer-events-auto group-hover/card:opacity-100",
+        )}
+      >
+        <!-- Reset button, visible on card hover -->
         <Button
           variant="ghost"
           class="text-muted-foreground pointer-events-auto gap-x-1"

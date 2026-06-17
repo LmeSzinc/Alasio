@@ -58,7 +58,7 @@
   }
 </script>
 
-<Card.Root class={cn("neushadow relative mx-auto gap-0 border-none", flashing && "animate-flash-primary", className)}>
+<Card.Root class={cn("group/card neushadow relative mx-auto gap-0 border-none", flashing && "animate-flash-primary", className)}>
   <!-- Group name and help -->
   <Card.Header class="flex flex-col gap-y-1.5">
     <!-- Group name -->
