@@ -43,7 +43,7 @@
   }
 </script>
 
-<div class={cn("group relative flex w-full items-start", className)}>
+<div class={cn("group relative flex w-full items-start focus-within:z-10", className)}>
   <Textarea
     class={cn(
       "bg-accent peer font-sm min-h-[80px] resize-y font-mono shadow-none",

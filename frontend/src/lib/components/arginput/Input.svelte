@@ -144,7 +144,7 @@
 </script>
 
 <div class={cn("group w-full", className)}>
-  <div class="relative flex w-full items-center">
+  <div class="relative flex w-full items-center focus-within:z-10">
     <!-- Primary color bottom border -->
     <!-- On focus, gray bottom border and primary color rounded ring -->
     <Input
