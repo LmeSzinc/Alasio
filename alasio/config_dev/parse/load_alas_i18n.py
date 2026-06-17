@@ -33,6 +33,10 @@ class LoadAlasI18n(metaclass=Singleton):
     def __init__(self):
         self.inited = False
         self.folder: PathStr = PathStr.new('')
+        # {old_group: new_group}
+        self._redirect_group = {}
+        # {(old_group, old_arg): (new_group, new_arg)}
+        self._redirect_arg = {}
 
     def register(self, folder: str):
         self.folder = PathStr.new(folder)
@@ -61,6 +65,58 @@ class LoadAlasI18n(metaclass=Singleton):
                 deep_set(out, keys=[group, arg, lang], value=row)
         return out
 
+    def redirect_group(self, old_group, new_group):
+        """
+        Redirect old group to new group
+
+        Args:
+            old_group (str):
+            new_group (str):
+        """
+        self._redirect_group[new_group] = old_group
+
+    def redirect_arg(self, old_arg, new_arg):
+        """
+        Redirect old arg to new arg
+
+        Args:
+            old_arg (str): {group}.{arg}
+            new_arg (str): {group}.{arg}
+        """
+        old_group, _, old_arg = old_arg.partition('.')
+        new_group, _, new_arg = new_arg.partition('.')
+        self._redirect_arg[(new_group, new_arg)] = (old_group, old_arg)
+
+    def _get_arg_i18n(self, group_name, arg_name):
+        """
+        Get arg i18n
+
+        Args:
+            group_name (str):
+            arg_name (str):
+        """
+        # try literal match
+        try:
+            return deep_get_with_error(self.old_i18n, [group_name, arg_name])
+        except KeyError:
+            pass
+        # try group redirect match
+        new_group_name = self._redirect_group.get(group_name, None)
+        if new_group_name:
+            try:
+                return deep_get_with_error(self.old_i18n, [new_group_name, arg_name])
+            except KeyError:
+                pass
+        # try arg redirect match
+        new = self._redirect_arg.get((group_name, arg_name), None)
+        if new:
+            new_group_name, new_arg_name = new
+            try:
+                return deep_get_with_error(self.old_i18n, [new_group_name, new_arg_name])
+            except KeyError:
+                pass
+        return None
+
     def load_arg(self, old, group_name, arg_name, languages, options=None):
         """
         Args:
@@ -70,7 +126,7 @@ class LoadAlasI18n(metaclass=Singleton):
             languages (list[str] | dict[str, Any]):
             options (list):
         """
-        i18n = deep_get(self.old_i18n, [group_name, arg_name])
+        i18n = self._get_arg_i18n(group_name, arg_name)
         if not i18n:
             return old
         for lang in languages:
