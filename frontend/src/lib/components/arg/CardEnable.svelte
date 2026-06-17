@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import * as Dialog from "$lib/components/ui/dialog";
+  import * as Tooltip from "$lib/components/ui/tooltip";
   import { t } from "$lib/i18n";
   import { LockKeyhole, RotateCcw } from "@lucide/svelte";
   import Enable from "../arginput/Enable.svelte";
@@ -34,10 +35,10 @@ L ${svgW} 0
 Z`;
 </script>
 
-{#if SchedulerEnable}
-  {@const enable = !!SchedulerEnable?.value}
-  <!-- rounded-xl to be the same as shadcn Card component -->
-  <div class="pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-xl">
+<!-- rounded-xl to be the same as shadcn Card component -->
+<div class="pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-xl">
+  {#if SchedulerEnable}
+    {@const enable = !!SchedulerEnable?.value}
     <!-- SVG deco tag -->
     <svg viewBox="0 0 {svgW} {svgH}" width={svgW} height={svgH} class="absolute top-0 right-0">
       <defs>
@@ -59,19 +60,29 @@ Z`;
       <path d={svgD} class={enable ? "fill-primary" : "fill-muted-foreground/30"} />
       <path d={svgD} fill="url(#diagonalHatch)" />
     </svg>
-    <div class="absolute top-0 right-0 flex flex-col items-end gap-1">
-      <!-- Enable button -->
-      <div class="flex h-8 items-center justify-center gap-x-1">
-        <!-- Reset button -->
-        <Button
-          variant="ghost"
-          size="icon"
-          class="text-muted-foreground pointer-events-auto h-6 w-6"
-          onclick={() => (dialogOpen = true)}
-        >
-          <RotateCcw class="size-3.5" />
-        </Button>
-
+  {/if}
+  <div class="absolute top-0 right-0 flex flex-col items-end gap-1">
+    <!-- Enable button row -->
+    <div class="flex h-8 items-center justify-center gap-x-1">
+      <!-- Reset button - always visible -->
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="text-muted-foreground pointer-events-auto h-6 w-6"
+              onclick={() => (dialogOpen = true)}
+            >
+              <RotateCcw class="size-3.5" />
+            </Button>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>{t.Input.GroupResetTitle()}</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+      {#if SchedulerEnable}
         <div class="flex h-8 w-32 items-center justify-center">
           {#if SchedulerEnable?.dt === "static"}
             <div class="flex items-center">
@@ -92,22 +103,25 @@ Z`;
             />
           {/if}
         </div>
-      </div>
-      <!-- NextRun -->
-      {#if SchedulerNextRun}
-        <div class="mr-6 flex w-50 items-center justify-center">
-          <Input
-            bind:data={cardData.Scheduler.NextRun}
-            {handleEdit}
-            {handleReset}
-            class="pointer-events-auto w-full text-sm"
-            isDesc
-          />
-        </div>
+      {:else}
+        <!-- placeholder to keep the right position -->
+        <div class="h-8 w-4"></div>
       {/if}
     </div>
+    <!-- NextRun -->
+    {#if SchedulerNextRun}
+      <div class="mr-6 flex w-50 items-center justify-center">
+        <Input
+          bind:data={cardData.Scheduler.NextRun}
+          {handleEdit}
+          {handleReset}
+          class="pointer-events-auto w-full text-sm"
+          isDesc
+        />
+      </div>
+    {/if}
   </div>
-{/if}
+</div>
 
 <!-- Dialog for resetting the group -->
 <Dialog.Root bind:open={dialogOpen}>

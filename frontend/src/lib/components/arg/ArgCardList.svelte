@@ -69,6 +69,7 @@
     if (target && groupElements[target] && root) {
       const element = groupElements[target];
       const parent = scrollParent;
+      if (trigger === undefined) return;
       const isNavSwitchScroll = trigger < 0;
 
       if (parent) {
