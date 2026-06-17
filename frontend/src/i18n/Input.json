@@ -1,10 +1,10 @@
 {
   "GroupResetTitle": {
-    "en-US": "Reset group",
-    "zh-CN": "重置设置组",
-    "ja-JP": "設定グループのリセット",
-    "zh-TW": "重置設定組",
-    "es-ES": "Restablecer grupo"
+    "en-US": "Reset",
+    "zh-CN": "重置",
+    "ja-JP": "リセット",
+    "zh-TW": "重置",
+    "es-ES": "Reiniciar"
   },
   "GroupResetDesc": {
     "en-US": "Are you sure you want to reset all content in group \"{name}\"? All settings will be restored to their default values.",

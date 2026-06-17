@@ -64,24 +64,18 @@ Z`;
   <div class="absolute top-0 right-0 flex flex-col items-end gap-1">
     <!-- Enable button row -->
     <div class="flex h-8 items-center justify-center gap-x-1">
-      <!-- Reset button - always visible -->
-      <Tooltip.Provider>
-        <Tooltip.Root>
-          <Tooltip.Trigger>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="text-muted-foreground pointer-events-auto h-6 w-6"
-              onclick={() => (dialogOpen = true)}
-            >
-              <RotateCcw class="size-3.5" />
-            </Button>
-          </Tooltip.Trigger>
-          <Tooltip.Content>
-            <p>{t.Input.GroupResetTitle()}</p>
-          </Tooltip.Content>
-        </Tooltip.Root>
-      </Tooltip.Provider>
+      <!-- Card-level buttons -->
+      <div class="flex items-center gap-x-1">
+        <!-- Reset button - always visible -->
+        <Button
+          variant="ghost"
+          class="text-muted-foreground pointer-events-auto gap-x-1"
+          onclick={() => (dialogOpen = true)}
+        >
+          <RotateCcw class="size-3.5" />
+          <p>{t.Input.GroupResetTitle()}</p>
+        </Button>
+      </div>
       {#if SchedulerEnable}
         <div class="flex h-8 w-32 items-center justify-center">
           {#if SchedulerEnable?.dt === "static"}
