@@ -265,7 +265,7 @@ class ModLoader:
             value (Any):
 
         Returns:
-            tuple[bool, ConfigSetEvent]:
+            tuple[bool, list[ConfigSetEvent]]:
         """
         try:
             mod = self.dict_mod[mod_name]
@@ -273,8 +273,8 @@ class ModLoader:
             raise ValidationError(f'No such mod: "{mod_name}"') from None
 
         event = ConfigSetEvent(task=task_name, group=group_name, arg=arg_name, value=value)
-        success, response = mod.config_set(config_name, event, post_edit=True)
-        return success, response
+        success, responses = mod.config_set(config_name, event, post_edit=True)
+        return success, responses
 
     def gui_config_reset(self, mod_name, config_name, task_name, group_name, arg_name):
         """

@@ -480,18 +480,13 @@ class AlasioConfigBase:
         # messages = ', '.join(messages)
         # logger.info(f'Save config "{self.config_name}": {messages}')
         if len(events) == 1:
-            # single set event
-            _, r = self.mod.config_set(self.config_name, events[0])
+            _, responses = self.mod.config_set(self.config_name, events[0])
+        else:
+            _, responses = self.mod.config_batch_set(self.config_name, events)
+        for r in responses:
             if r.error:
                 logger.info(f'Failed to save config "{self.config_name}", '
                             f'key={r.task}.{r.group}.{r.arg}, error={r.error}')
-        else:
-            # batch set
-            _, responses = self.mod.config_batch_set(self.config_name, events)
-            for r in responses:
-                if r.error:
-                    logger.info(f'Failed to save config "{self.config_name}", '
-                                f'key={r.task}.{r.group}.{r.arg}, error={r.error}')
         # broadcast to backend
         backend = BackendBridge()
         if backend.inited:

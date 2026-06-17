@@ -71,16 +71,17 @@ class TestConfigReadWrite:
             value=True
         )
 
-        success, response = example_mod.config_set(self.TEST_CONFIG_NAME, event)
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, event)
 
         # Verify success
         assert success is True
-        assert response is not None
-        assert response.error is None
-        assert response.task == 'Main'
-        assert response.group == 'Scheduler'
-        assert response.arg == 'Enable'
-        assert response.value is True
+        assert len(responses) == 1
+        assert responses[0] is not None
+        assert responses[0].error is None
+        assert responses[0].task == 'Main'
+        assert responses[0].group == 'Scheduler'
+        assert responses[0].arg == 'Enable'
+        assert responses[0].value is True
 
     def test_config_set_and_read(self, example_mod, task_index_data):
         """Test setting a value and reading it back"""
@@ -91,7 +92,7 @@ class TestConfigReadWrite:
             arg='Enable',
             value=True
         )
-        success, response = example_mod.config_set(self.TEST_CONFIG_NAME, event)
+        success, _ = example_mod.config_set(self.TEST_CONFIG_NAME, event)
         assert success is True
 
         # Read back
@@ -124,9 +125,10 @@ class TestConfigReadWrite:
             arg='ServerUpdate',
             value='03:00'
         )
-        success, response = example_mod.config_set(self.TEST_CONFIG_NAME, event2)
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, event2)
         assert success is True
-        assert response.value == '03:00'
+        assert len(responses) == 1
+        assert responses[0].value == '03:00'
 
         # Read back and verify both changes
         task_info = task_index_data['Main']
@@ -146,10 +148,11 @@ class TestConfigReadWrite:
             value=new_time
         )
 
-        success, response = example_mod.config_set(self.TEST_CONFIG_NAME, event)
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, event)
 
         assert success is True
-        assert response.value == new_time
+        assert len(responses) == 1
+        assert responses[0].value == new_time
 
         # Read back
         task_info = task_index_data['Main']
@@ -167,14 +170,15 @@ class TestConfigReadWrite:
             value='not_a_bool'
         )
 
-        success, response = example_mod.config_set(self.TEST_CONFIG_NAME, event)
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, event)
 
         # Should fail with rollback
         assert success is False
-        assert response is not None
-        assert response.error is not None
+        assert len(responses) == 1
+        assert responses[0] is not None
+        assert responses[0].error is not None
         # Should contain default value
-        assert response.value is False
+        assert responses[0].value is False
 
     def test_config_reset_single_event(self, example_mod):
         """Test resetting a single config value to default"""
@@ -401,11 +405,12 @@ class TestConfigReadWrite:
             arg='Enable',
             value=True
         )
-        success, response = example_mod.config_set(self.TEST_CONFIG_NAME, event)
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, event)
 
         # Should succeed by overwriting/recovering
         assert success is True
-        assert response.error is None
+        assert len(responses) == 1
+        assert responses[0].error is None
 
         # Verify value is set
         task_info = task_index_data['Main']

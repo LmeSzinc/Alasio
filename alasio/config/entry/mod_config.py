@@ -3,7 +3,7 @@ from collections import defaultdict
 from msgspec import NODEFAULT, ValidationError, convert
 from msgspec.msgpack import encode
 from msgspec.structs import asdict
-from msgspecerror import get_field_default, load_msgpack_with_default, parse_msgspec_error
+from msgspecerror import get_field_default, get_model_changes, load_msgpack_with_default, parse_msgspec_error
 
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.mod_base import ModBase
@@ -97,9 +97,9 @@ class ModConfig(ModBase):
             tuple[bool, list[ConfigSetEvent]]:
                 note that the return type of event.value will match the model definition,
                 which might differ from input.
-                If success, returns True and a list of set event.
+                If success, returns True and a list of success_event.
                     - event.error is None
-                If failed, returns False and a list of rollback event.
+                If failed, returns False and a list of rollback_event.
                     - event.error is parsed error message
 
         Raises:
@@ -181,6 +181,7 @@ class ModConfig(ModBase):
             # update
             rows = []
             for key, new in dict_value.items():
+                task, group = key
                 # parse existing value
                 old = dict_old.get(key, b'\x80')
                 try:
@@ -190,9 +191,9 @@ class ModConfig(ModBase):
                     continue
                 obj, errors = load_msgpack_with_default(old, model)
                 for error in errors:
-                    logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+                    logger.warning(f'Config data inconsistent at {task}.{group}: {error}')
                 if obj is NODEFAULT:
-                    raise DataInconsistent(f'Failed to load existing config for {row.task}.{row.group}')
+                    raise DataInconsistent(f'Failed to load existing config for {task}.{group}')
                 # update new value onto old value
                 # note that we merge modification onto existing value
                 # meaning that model-level post init validation won't work and each args are separately validated
@@ -204,21 +205,34 @@ class ModConfig(ModBase):
                         raise DataInconsistent(f'Cannot set attribute {arg} on {model}')
                 # call post_edit()
                 if post_edit:
+                    obj_patch = obj.__copy__()
                     try:
                         obj.post_edit(obj_old, new)
                     except ValidationError as e:
                         # rollback all args from this group
                         for arg in new:
                             default = getattr(obj_old, arg)
-                            rollback.append(ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=e))
+                            rollback.append(
+                                ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=e))
                         show = [f'{e.task}.{e.group}.{e.arg}={repr(e.value)}' for e in new]
                         logger.info(f'config_set "{config_name}" rejected by post_edit: {", ".join(show)}')
                         break
                     except Exception as e:
                         # wrap internal error
                         raise DataInconsistent(f'Failed to call {model.__name__}.post_edit(): {e}')
+                    # log changes and collect post_edit side effects
+                    if obj != obj_patch:
+                        try:
+                            dict_diff = get_model_changes(obj_patch, obj)
+                        except (TypeError, AttributeError) as e:
+                            logger.error(f'Failed to get model changes: {e}')
+                        else:
+                            show = [f'{task}.{group}.{arg}={repr(value)}' for arg, value in
+                                    dict_diff.items()]
+                            logger.info(f'config_set "{config_name}" post_edit effect: {show}')
+                            for arg, value in dict_diff.items():
+                                success.append(ConfigSetEvent(task=task, group=group, arg=arg, value=value))
 
-                task, group = key
                 data = encode(obj)
                 rows.append(ConfigRow(task=task, group=group, value=data))
             # write
@@ -237,24 +251,33 @@ class ModConfig(ModBase):
             post_edit (bool): True to call post_edit() of validation model
 
         Returns:
-            tuple[bool, ConfigSetEvent]:
-                If success, returns (True, event) where event.error is None
-                If failed, returns (False, rollback_event) where rollback_event.error contains error message
+            tuple[bool, list[ConfigSetEvent]]:
+                note that the return type of event.value will match the model definition,
+                which might differ from input.
+                If success, returns True and a list of success_event.
+                    - event.error is None
+                If failed, returns False and a list of rollback_event.
+                    - event.error is parsed error message
+                note that there might be multiple success_event if post_edit has side effect changes
+                but there always be one rollback_event
 
         Raises:
             DataInconsistent:
         """
+        task = event.task
+        group = event.group
+
         # get model
         task_index_data = self.task_index_data()
         try:
-            model_ref = task_index_data[event.task].group[event.group]
+            model_ref = task_index_data[task].group[group]
         except KeyError:
-            logger.warning(f'Cannot set non-exist group {event.task}.{event.group}')
-            raise DataInconsistent(f'Group {event.task}.{event.group} does not exist')
+            logger.warning(f'Cannot set non-exist group {task}.{group}')
+            raise DataInconsistent(f'Group {task}.{group} does not exist')
 
         model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
         if model is None:
-            raise DataInconsistent(f'Cannot load model for {event.task}.{event.group}, '
+            raise DataInconsistent(f'Cannot load model for {task}.{group}, '
                                    f'file="{model_ref.file}", cls="{model_ref.cls}"')
 
         # validate
@@ -268,17 +291,19 @@ class ModConfig(ModBase):
             except IndexError:
                 raise DataInconsistent(f'Failed to parse error.loc from "{e}"') from None
             default = get_field_default_with_error(model, arg)
-            rollback = ConfigSetEvent(task=event.task, group=event.group, arg=arg, value=default, error=error)
-            return False, rollback
+            rollback = ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=error)
+            return False, [rollback]
 
         # get validated value
         arg_value = getattr(value_obj, event.arg, NODEFAULT)
         if arg_value is NODEFAULT:
             raise DataInconsistent(
                 f'Missing arg "{event.arg}" after converting value, value={value}, value_obj={value_obj}')
+        success: "list[ConfigSetEvent]" = [
+            ConfigSetEvent(task=task, group=group, arg=event.arg, value=arg_value)]
 
         # init table
-        logger.info(f'config_set "{config_name}": {event.task}.{event.group}.{event.arg}={repr(event.value)}')
+        logger.info(f'config_set "{config_name}": {task}.{group}.{event.arg}={repr(event.value)}')
         table = AlasioConfigTable(config_name)
 
         # write after validation
@@ -293,9 +318,9 @@ class ModConfig(ModBase):
             # parse existing value
             obj, errors = load_msgpack_with_default(old, model)
             for error in errors:
-                logger.warning(f'Config data inconsistent at {row.task}.{row.group}: {error}')
+                logger.warning(f'Config data inconsistent at {task}.{group}: {error}')
             if obj is NODEFAULT:
-                raise DataInconsistent(f'Failed to load existing config for {row.task}.{row.group}')
+                raise DataInconsistent(f'Failed to load existing config for {task}.{group}')
             obj_old = obj.__copy__()
 
             # update value
@@ -306,24 +331,37 @@ class ModConfig(ModBase):
 
             # call post_edit()
             if post_edit:
+                obj_patch = obj.__copy__()
                 try:
                     obj.post_edit(obj_old, {event.arg: arg_value})
                 except ValidationError as e:
+                    # rollback all args from this group
                     default = getattr(obj_old, event.arg)
-                    rollback = ConfigSetEvent(task=event.task, group=event.group, arg=event.arg, value=default, error=e)
-                    logger.info(f'config_set "{config_name}" rejected by post_edit: '
-                                f'{event.task}.{event.group}.{event.arg}={repr(event.value)}')
-                    return False, rollback
+                    rollback = ConfigSetEvent(task=task, group=group, arg=event.arg, value=default, error=e)
+                    show = f'{task}.{group}.{event.arg}={repr(event.value)}'
+                    logger.info(f'config_set "{config_name}" rejected by post_edit: {show}')
+                    return False, [rollback]
                 except Exception as e:
+                    # wrap internal error
                     raise DataInconsistent(f'Failed to call {model.__name__}.post_edit(): {e}')
+                # log changes and collect post_edit side effects
+                if obj != obj_patch:
+                    try:
+                        dict_diff = get_model_changes(obj_patch, obj)
+                    except (TypeError, AttributeError) as e:
+                        logger.error(f'Failed to get model changes: {e}')
+                    else:
+                        show = [f'{task}.{group}.{arg}={repr(value)}' for arg, value in dict_diff.items()]
+                        logger.info(f'config_set "{config_name}" post_edit effect: {show}')
+                        for arg, value in dict_diff.items():
+                            success.append(ConfigSetEvent(task=task, group=group, arg=arg, value=value))
 
             # encode and write
             data = encode(obj)
-            row = ConfigRow(task=event.task, group=event.group, value=data)
+            row = ConfigRow(task=task, group=group, value=data)
             table.upsert_row([row], conflicts=('task', 'group'), updates='value', _cursor_=c)
 
-        success_event = ConfigSetEvent(task=event.task, group=event.group, arg=event.arg, value=arg_value)
-        return True, success_event
+        return True, success
 
     def config_batch_reset(self, config_name, events):
         """

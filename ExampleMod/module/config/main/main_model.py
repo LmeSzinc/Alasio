@@ -117,6 +117,21 @@ class EmotionRecord(a.DashboardAmount):
             else:
                 raise m.ValidationError(
                     'EmotionControl="Keep Happy Bonus" and RecoverLocation="Docks" can not be used together')
+        self.update()
+
+    @a.batch_set
+    def update(self):
+        now = a.getnow()
+        recover_count = int(now.timestamp() // 360 - self.Time.timestamp() // 360)
+        if recover_count > 0:
+            value = min(self.Value + self.speed * recover_count, self.max)
+            self.Value = value
+            self.Time = now
+        else:
+            maximum = self.max
+            if self.Value > maximum:
+                self.Value = maximum
+                self.Time = now
 
 
 class HpControl(a.GroupBase):

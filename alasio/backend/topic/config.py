@@ -141,18 +141,20 @@ class ConfigArg(BaseTopic):
             return
 
         # call
-        success, resp = await trio.to_thread.run_sync(
+        success, responses = await trio.to_thread.run_sync(
             MOD_LOADER.gui_config_set,
             mod_name, config_name, task, group, arg, value
         )
-        resp: ConfigSetEvent
-        # logger.info([success, resp])
+        responses: "list[ConfigSetEvent]"
+        # logger.info([success, responses])
         if success:
             # broadcast to all connections
-            event = ConfigEvent(t=self.topic_name(), c=config_name, v=resp)
+            event = ConfigEvent(t=self.topic_name(), c=config_name, v=responses)
             await self.msgbus_config_asend(event)
             await self.msgbus_global_asend(self.topic_name(), event)
         else:
+            # there always be one rollback_event
+            resp = responses[0]
             # rollback self
             key = self.dict_config_to_topic.get((resp.task, resp.group, resp.arg))
             if key is None:
