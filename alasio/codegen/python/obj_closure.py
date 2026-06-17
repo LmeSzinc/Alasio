@@ -1,4 +1,4 @@
-from alasio.codegen.python.obj_base import CodeObject, GatherItems
+from alasio.codegen.python.obj_base import CodeObject, GatherItems, Linebreak
 from alasio.ext.cache import cached_property
 
 
@@ -69,8 +69,11 @@ class ClosureWithName(ClosureObject):
         ending = self.line_ending
         if not self.items:
             return f'{self.closure_empty}{ending}'
-        items = GatherItems().add(self.items).get_inline()
-        return f'{self.closure_start}{items}{self.closure_end}{ending}'
+        # Linebreak markers have no item_str; skip them for inline representation
+        inline_items = [i for i in self.items if not isinstance(i, Linebreak)]
+        gi = GatherItems(wrap='inline').add(inline_items)
+        content = gi.get_inline()
+        return f'{self.closure_start}{content}{self.closure_end}{ending}'
 
     def generate(self):
         ending = self.line_ending
@@ -81,17 +84,7 @@ class ClosureWithName(ClosureObject):
             yield f'{self.indent_str}{prefix}{self.closure_empty}{suffix}{ending}'
             return
 
-        # auto mode: decide inline vs expand based on total length
         wrap = self._wrap
-        if wrap == 'auto':
-            inline_items = GatherItems(wrap='inline').add(self.items).get_inline()
-            total_len = (len(self.indent_str) + len(prefix) + len(self.closure_start)
-                         + len(inline_items) + len(self.closure_end) + len(suffix))
-            if total_len > GatherItems.DEFAULT_WIDTH:
-                wrap = 'expand'
-            else:
-                yield f'{self.indent_str}{prefix}{self.closure_start}{inline_items}{self.closure_end}{suffix}{ending}'
-                return
 
         if wrap == 'newline':
             # Each item on its own line
@@ -101,20 +94,36 @@ class ClosureWithName(ClosureObject):
             yield f'{self.indent_str}{self.closure_end}{suffix}{ending}'
             return
 
-        # expand: brackets on separate lines, items wrapped inline
+        gi = GatherItems(wrap=wrap).add(self.items)
+
+        # --- auto mode: check if everything fits on one line ---
+        if wrap == 'auto':
+            # Linebreak markers have no item_str; exclude them for inline check
+            inline_items = [i for i in self.items if not isinstance(i, Linebreak)]
+            inline_str = GatherItems(wrap='inline').add(inline_items).get_inline()
+            total_len = (len(self.indent_str) + len(prefix) + len(self.closure_start)
+                         + len(inline_str) + len(self.closure_end) + len(suffix))
+            if total_len <= GatherItems.DEFAULT_WIDTH:
+                yield f'{self.indent_str}{prefix}{self.closure_start}{inline_str}{self.closure_end}{suffix}{ending}'
+                return
+            # Doesn't fit inline — use expand layout
+            wrap = 'expand'
+
+        # --- multi-line layout ---
+        rows = list(gi.iter_multiline())
+
+        if not rows:
+            yield f'{self.indent_str}{prefix}{self.closure_empty}{suffix}{ending}'
+            return
+
         if wrap == 'expand':
-            items = GatherItems(wrap='expand').add(self.items)
-            rows = list(items.iter_multiline())
             yield f'{self.indent_str}{prefix}{self.closure_start}'
             for row in rows:
                 yield f'{self.indent_str}    {row}'
             yield f'{self.indent_str}{self.closure_end}{suffix}{ending}'
             return
 
-        # int or 'inline': use GatherItems
-        items = GatherItems(wrap=wrap).add(self.items)
-        rows = list(items.iter_multiline())
-
+        # inline or int
         if len(rows) == 1:
             row = rows[0].rstrip(',')
             yield f'{self.indent_str}{prefix}{self.closure_start}{row}{self.closure_end}{suffix}{ending}'
@@ -315,9 +324,8 @@ class Literal(ClosureWithName):
         """
         Build comma-separated items string for the Literal type annotation.
         """
-        items = GatherItems().add(self.items)
-        inline = items.get_inline()
-        return inline.rstrip(',')
+        items = GatherItems(wrap='inline').add(self.items)
+        return items.get_inline().rstrip(',')
 
     @cached_property
     def item_str(self):

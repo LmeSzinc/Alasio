@@ -349,8 +349,8 @@ data = {
             gen.Var('other', 'value')
         # Access the Var items inside the Dict
         # Var.item_str includes trailing comma from line_ending,
-        # but _strip_trailing_comma should remove it before joining
-        gather = GatherItems()
+        # get_inline() strips trailing comma for clean inline
+        gather = GatherItems(wrap='inline')
         gather.add(gen.items[0].items)
         result = gather.get_inline()
         assert result == "'key': 42, 'other': 'value'"

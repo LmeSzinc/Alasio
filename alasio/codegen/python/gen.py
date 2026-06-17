@@ -77,6 +77,31 @@ class CodeGen(CodeGenBase):
         self._add_item(item)
         return item
 
+    def Linebreak(self):
+        """
+        A marker to break lines in ClosureWithName when wrap='auto'.
+        Outputs nothing itself. When encountered during rendering with wrap='auto',
+        the items after the Linebreak are moved to a new line.
+        Items before and after still follow wrap=auto.
+
+        Examples:
+            with gen.Dict('config').wrap('auto'):
+                gen.Var('host', 'localhost')
+                gen.Var('port', 8080)
+                gen.Linebreak()
+                gen.Var('timeout', 30)
+                gen.Var('retries', 3)
+            # If total fits inline:
+            #     config = {'host': 'localhost', 'port': 8080, 'timeout': 30, 'retries': 3}
+            # If total does not fit:
+            #     config = {'host': 'localhost', 'port': 8080,
+            #         'timeout': 30, 'retries': 3,
+            #     }
+        """
+        item = Linebreak(self)
+        self._add_item(item)
+        return item
+
     def Item(self, value):
         """
         Define an item in List/Tuple/Set/Literal

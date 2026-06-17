@@ -167,6 +167,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                                 for options in arg.option_dict.values():
                                     for option in options:
                                         gen.Item(option)
+                                    gen.Linebreak()
                             else:
                                 for option in arg.option:
                                     gen.Item(option)

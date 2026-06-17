@@ -158,6 +158,38 @@ class CodeObject:
         raise NotImplementedError
 
 
+class Linebreak(CodeObject):
+    """
+    A marker to break lines in ClosureWithName when wrap='auto'.
+    Outputs nothing itself. When encountered during rendering with wrap='auto',
+    the items after the Linebreak are moved to a new line.
+    Items before and after still follow wrap=auto.
+
+    Examples::
+
+        with gen.Dict('config').wrap('auto'):
+            gen.Var('host', 'localhost')
+            gen.Var('port', 8080)
+            gen.Linebreak()
+            gen.Var('timeout', 30)
+            gen.Var('retries', 3)
+
+    If total fits inline:
+
+        config = {'host': 'localhost', 'port': 8080, 'timeout': 30, 'retries': 3}
+
+    If total does not fit, groups are separated by newlines,
+    each group independently follows wrap=auto::
+
+        config = {'host': 'localhost', 'port': 8080,
+            'timeout': 30, 'retries': 3,
+        }
+    """
+
+    def generate(self):
+        return
+
+
 class GatherItems:
     """
     Gather Item/Var and convert to str.
@@ -199,69 +231,112 @@ class GatherItems:
         return self
 
     def get_inline(self):
-        items = [i for i in self.items if hasattr(i, 'item_str')]
-        if not items:
+        """
+        Return a single string with all items joined on one line.
+        Trailing line_ending (e.g. comma) is stripped.
+
+        Returns:
+            str: Joined inline string, or empty string if no items.
+        """
+        if not self.items:
             return ''
-        result = ' '.join(item.item_str for item in items)
-        # Remove trailing comma for inline generation;
-        # multi-line output (iter_multiline with max_width) keeps per-row commas.
+        result = ' '.join(item.item_str for item in self.items)
         if result.endswith(','):
             result = result[:-1]
         return result
 
     def iter_multiline(self):
         """
-        Generate compact lines with max width like:
-        {indent_str}item1, item2, item3, item4, item5,
-        {indent_str}item6, item7, item8, item9, item10,
-        {indent_str}item11, item12,
+        Yield content rows respecting wrap mode and Linebreak markers.
 
-        Each item_str carries its own line_ending.
-        Tokens are joined with a single space.
+        For ``'inline'``: yield a single row (all items joined).
+        For ``'newline'``: yield each item as its own row.
+        For ``'auto'`` / ``'expand'``: split at Linebreak boundaries into
+        groups, pack each group independently at ``DEFAULT_WIDTH``.
+        For ``int``: same as expand but using the integer width.
+
+        Generated rows do NOT include indent prefix — the caller is
+        responsible for adding indentation.
 
         Yields:
-            str:
+            str: Content row.
         """
         if self.wrap == 'inline':
             yield self.get_inline()
             return
+
         if not self.items:
             return
+
         if self.wrap == 'newline':
-            max_width = 1  # force each item to its own line
-        elif self.wrap in ('expand', 'auto'):
-            max_width = self.DEFAULT_WIDTH
-        elif isinstance(self.wrap, int):
+            for item in self.items:
+                yield item.item_str.rstrip(',')
+            return
+
+        # Determine packing width from the items' own indent
+        if isinstance(self.wrap, int):
             max_width = self.wrap
         else:
             max_width = self.DEFAULT_WIDTH
-        buffer = []
-        # Filter to items that have item_str (skip Comment, Empty, etc.)
-        gather_items = [i for i in self.items if hasattr(i, 'item_str')]
-        if not gather_items:
-            return
-        indent_str = gather_items[0].indent_str
-        indent_width = len(indent_str)
+        indent_width = len(self.items[0].indent_str)
         remain_width = max_width - indent_width
-        for item in gather_items:
+
+        # Split items at Linebreak boundaries into groups
+        groups = []
+        current = []
+        for item in self.items:
+            if isinstance(item, Linebreak):
+                if current:
+                    groups.append(current)
+                current = []
+            else:
+                current.append(item)
+        if current:
+            groups.append(current)
+
+        if not groups:
+            return
+
+        if len(groups) > 1:
+            # Multiple groups from Linebreak — render each independently
+            for group in groups:
+                if not group:
+                    continue
+                joined = ' '.join(i.item_str for i in group)
+                if len(joined) <= remain_width:
+                    yield joined
+                else:
+                    yield from self._iter_pack(group, remain_width)
+        else:
+            # Single group — regular wrapping
+            yield from self._iter_pack(groups[0], remain_width)
+
+    @staticmethod
+    def _iter_pack(items, max_width):
+        """
+        Pack items with ``item_str`` into rows fitting within *max_width*.
+
+        Each row preserves the trailing ``line_ending`` (e.g. comma) from
+        the last item's ``item_str``.
+
+        Yields:
+            str: Content row (without indent prefix).
+        """
+        buffer = []
+        count = 0
+        for item in items:
             token = item.item_str
             if buffer:
-                # +1 for the space between tokens
-                add_length = len(token) + 1
-                if add_length <= remain_width:
+                add_len = 1 + len(token)
+                if count + add_len <= max_width:
                     buffer.append(token)
-                    remain_width -= add_length
+                    count += add_len
                 else:
                     yield ' '.join(buffer)
                     buffer = [token]
-                    remain_width = max_width - indent_width - len(token)
+                    count = len(token)
             else:
                 buffer = [token]
-                remain_width = max_width - indent_width - len(token)
-            if remain_width <= 0:
-                yield ' '.join(buffer)
-                buffer = []
-                remain_width = max_width - indent_width
-
+                count = len(token)
         if buffer:
             yield ' '.join(buffer)

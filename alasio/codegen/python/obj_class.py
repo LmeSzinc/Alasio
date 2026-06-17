@@ -85,7 +85,7 @@ class Class(AutoBlankLineMixin, ClosureObject):
     def generate(self):
         # class Name(inherit, key=value):
         if self._inherit_args or self._inherit_kwargs:
-            inherit = GatherItems().add(self._inherit_args).add(self._inherit_kwargs.values())
+            inherit = GatherItems(wrap='inline').add(self._inherit_args).add(self._inherit_kwargs.values())
             args = inherit.get_inline().rstrip(',')
             yield f'{self.indent_str}class {self.name}({args}):'
         else:
@@ -128,7 +128,7 @@ class Def(AutoBlankLineMixin, ClosureObject):
 
     def generate(self):
         # def name(args):
-        args = GatherItems().add(self._args).add(self._kwargs.values())
+        args = GatherItems(wrap='inline').add(self._args).add(self._kwargs.values())
         args_str = args.get_inline().rstrip(',')
         yield f'{self.indent_str}def {self.name}({args_str}):'
         # content
