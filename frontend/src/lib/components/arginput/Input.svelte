@@ -23,6 +23,8 @@
   // Pending reset flag: set on mousedown (fires before blur), checked in onBlur to prevent
   // unwanted submit(handleEdit) when user clicks the reset button.
   let _pendingReset = $state(false);
+  // Snapshot of displayValue at focus time; used on blur to skip submit when nothing changed
+  let _focusDisplayValue = $state("");
 
   // Getter/setter for the input element to bind to
   const inputValue = {
@@ -109,6 +111,13 @@
     }, 3000);
   }
 
+  function onFocus() {
+    // Snapshot the display value to detect no-op blur later
+    if (isDatetime) {
+      _focusDisplayValue = displayValue;
+    }
+  }
+
   function onBlur() {
     // If user just clicked the reset button (mousedown fired before blur), skip submit
     if (_pendingReset) {
@@ -121,6 +130,13 @@
 
     if (isDatetime) {
       arg.value = parseToUTC(displayValue);
+      // Skip submit if the display value hasn't changed since focus.
+      // Without this guard, parseToUTC(formatToLocal(x)) produces a different
+      // string than x (e.g. ".000Z" vs "Z"), making submit's dirty check
+      // always fire even when nothing was edited.
+      if (displayValue === _focusDisplayValue) {
+        return;
+      }
     }
 
     // Show error on blur
@@ -159,6 +175,7 @@
       )}
       bind:value={inputValue.val}
       bind:ref={inputEl}
+      onfocus={onFocus}
       oninput={onInput}
       onblur={onBlur}
     />
