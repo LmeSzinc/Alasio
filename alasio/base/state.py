@@ -273,10 +273,11 @@ class GameStateBase(GlobalState):
             result = commission_parse(...)
 
         Note that when using with @classmethod or @staticmethod, when() should at inner
-        # @classmethod
-        # @GameStateBase.when(server='cn')
-        # def class_method(cls):
-        #     return f'class_method_on_{cls.__name__}'
+        Examples:
+            @classmethod
+            @GameStateBase.when(server='cn')
+            def class_method(cls):
+                return f'class_method_on_{cls.__name__}'
         """
 
         def decorator(func):
