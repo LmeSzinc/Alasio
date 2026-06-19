@@ -5,6 +5,7 @@ import msgspec as m
 import typing_extensions as e
 from msgspecerror import get_msgspec_annotation
 
+from alasio.backport.literal import parse_literal_string
 from alasio.config.alasio.group_proxy import batch_set
 from alasio.config.const import DataInconsistent
 
@@ -15,49 +16,6 @@ DEFAULT_TIME = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
 T_DATETIME = e.Annotated[d.datetime, m.Meta(tz=True)]
 T_INT_GE0 = e.Annotated[int, m.Meta(ge=0)]
 T_TUPLE_STR = t.Tuple[str, ...]
-
-
-def _parse_literal_arg(arg):
-    """
-    Parse literal arg like:
-    'normal' -> normal
-
-    Args:
-        arg (str):
-    
-    Returns:
-        str:
-    """
-    if arg.startswith("'") and arg.endswith("'"):
-        return arg[1:-1]
-    if arg.startswith('"') and arg.endswith('"'):
-        return arg[1:-1]
-    return arg
-
-
-def _parse_literal_string(anno):
-    """
-    Parse literal string like:
-    t.Literal[('normal', 'hard')] -> ['normal', 'hard']
-    t.Literal['normal', 'hard'] -> ['normal', 'hard']
-    Literal['normal', 'hard'] -> ['normal', 'hard']
-    typing.Literal['normal', 'hard'] -> ['normal', 'hard']
-
-    Args:
-        anno (str):
-
-    Returns:
-        list[str]:
-    
-    Raises:
-        ValueError: If anno is not a literal
-    """
-    if not anno.startswith(('Literal', 't.Literal', 'typing.Literal')):
-        raise ValueError('Annotation is not a literal')
-    args = anno.partition('[')[2].rpartition(']')[0]
-    if args.startswith('(') and args.endswith(')'):
-        args = args[1:-1]
-    return [_parse_literal_arg(arg.strip()) for arg in args.split(',')]
 
 
 class GroupBase(m.Struct, omit_defaults=True, dict=True):
@@ -107,7 +65,7 @@ class GroupBase(m.Struct, omit_defaults=True, dict=True):
         # usually because of `from __future__ import annotations`
         if isinstance(anno, str):
             try:
-                return _parse_literal_string(anno)
+                return parse_literal_string(anno)
             except ValueError:
                 raise DataInconsistent(f'Arg is not a literal: {cls}.{attr}')
         # typing.Literal object

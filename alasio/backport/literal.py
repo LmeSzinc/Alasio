@@ -61,6 +61,54 @@ _UNWRAP_ORIGINS = _build_unwrap_origins()
 _LITERAL_ORIGINS = _build_literal_origins()
 
 
+def _remove_paired_quotes(arg):
+    """
+    Remove paired quotes from a literal argument string.
+
+    'normal' -> normal
+    "hard"   -> hard
+    normal   -> normal
+
+    Args:
+        arg (str): A literal argument.
+
+    Returns:
+        str: The argument with paired quotes removed.
+    """
+    if arg.startswith("'") and arg.endswith("'"):
+        return arg[1:-1]
+    if arg.startswith('"') and arg.endswith('"'):
+        return arg[1:-1]
+    return arg
+
+
+def parse_literal_string(anno):
+    """
+    Parse a literal annotation string into a list of option strings.
+
+    Examples:
+        t.Literal[('normal', 'hard')] -> ['normal', 'hard']
+        t.Literal['normal', 'hard']   -> ['normal', 'hard']
+        Literal['normal', 'hard']     -> ['normal', 'hard']
+        typing.Literal['normal', 'hard'] -> ['normal', 'hard']
+
+    Args:
+        anno (str): A literal annotation string.
+
+    Returns:
+        list[str]: The parsed literal option strings.
+
+    Raises:
+        ValueError: If anno is not a literal.
+    """
+    if not anno.startswith(('Literal', 't.Literal', 'typing.Literal')):
+        raise ValueError('Annotation is not a literal')
+    args = anno.partition('[')[2].rpartition(']')[0]
+    if args.startswith('(') and args.endswith(')'):
+        args = args[1:-1]
+    return [_remove_paired_quotes(arg.strip()) for arg in args.split(',')]
+
+
 def get_literal(tp):
     """
     Extract Literal type hint values as a tuple.
