@@ -1,3 +1,7 @@
+import functools
+import types
+from typing import Type
+
 from alasio.ext.cache import CacheOperation, cached_property
 from alasio.ext.singleton import Singleton
 
@@ -157,3 +161,144 @@ class TaskState(StateBase):
         for subclass in subclasses.values():
             subclass.clear()
             subclass.__class__.singleton_clear()
+
+
+class _StateDispatcher:
+    # key: (module name, qualname), value: callable function
+    FUNC_REGISTRY = {}
+
+    def __init__(self, first_func, state_cls: "Type[GameStateBase]"):
+        self.state_cls = state_cls
+        # [(conditions_dict, target_function)]
+        self.cases = []
+        functools.update_wrapper(self, first_func)
+
+    def __call__(self, *args, **call_kwargs):
+        state = self.state_cls()
+        fallback_func = None
+
+        for cond, func in self.cases:
+            if not cond:
+                fallback_func = func
+                continue
+            if state.match(**cond):
+                return func(*args, **call_kwargs)
+
+        if fallback_func is not None:
+            return fallback_func(*args, **call_kwargs)
+
+        return None
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        return types.MethodType(self, instance)
+
+
+class GameStateBase(GlobalState):
+    """
+    Examples:
+        # Define your GameState
+        # All fields should have default value
+        class GameState(GameStateBase):
+            server: t.Literal['cn', 'en', 'jp', 'tw'] = 'cn'
+    """
+    server: str = 'cn'
+    lang: str = 'zh-CN'
+
+    @classmethod
+    def set_server(cls, server):
+        self = cls()
+        self.server = server
+
+    @classmethod
+    def set_lang(cls, lang):
+        self = cls()
+        self.lang = lang
+
+    @classmethod
+    def match(cls, **kwargs):
+        """
+        Args:
+            **kwargs:
+
+        Returns:
+            bool: True if GameState matches given condition
+        """
+        self = cls()
+        return self._match(**kwargs)
+
+    def _match(self, **kwargs):
+        """
+        Args:
+            **kwargs:
+
+        Returns:
+            bool: True if GameState matches given condition
+        """
+        matched = True
+        for key, value in kwargs.items():
+            try:
+                if getattr(self, key) != value:
+                    matched = False
+                    break
+            except AttributeError:
+                # condition does not exist, no match
+                matched = False
+                break
+        return matched
+
+    @classmethod
+    def when(cls, **kwargs):
+        """
+        Return a decorator that runs the function only if GameState matches the condition
+
+        Examples:
+            @GameState.when(server='cn')
+            def commission_parse(...):
+                # this only runs when server='cn'
+
+            @GameState.when(server='en')
+            @GameState.when(server='jp')
+            def commission_parse(...):
+                # this only runs when server='en' or server='jp'
+
+            @GameState.when()
+            def commission_parse(...):
+                # fallback method if no conditions matched
+                # If no fallback method is defined and GameState doesn't match the condition above,
+                # calling commission_parse() will do nothing and return None
+
+            # the correct method will be called, depending on GameState
+            result = commission_parse(...)
+
+        Note that when using with @classmethod or @staticmethod, when() should at inner
+        # @classmethod
+        # @GameStateBase.when(server='cn')
+        # def class_method(cls):
+        #     return f'class_method_on_{cls.__name__}'
+        """
+
+        def decorator(func):
+            # unique key
+            key = (func.__module__, func.__qualname__)
+
+            if key not in _StateDispatcher.FUNC_REGISTRY:
+                dispatcher = _StateDispatcher(func, cls)
+                _StateDispatcher.FUNC_REGISTRY[key] = dispatcher
+            else:
+                dispatcher = _StateDispatcher.FUNC_REGISTRY[key]
+
+            # if decorator is chained, extract the function from last case
+            if isinstance(func, _StateDispatcher):
+                try:
+                    func = dispatcher.cases[-1][1]
+                except IndexError:
+                    # this shouldn't happen
+                    pass
+
+            # add cases
+            dispatcher.cases.append((kwargs, func))
+            return dispatcher
+
+        return decorator
