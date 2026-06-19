@@ -56,6 +56,9 @@ class GroupBase(m.Struct, omit_defaults=True, dict=True):
 
         Args:
             attr (str):
+
+        Returns:
+            tuple:
         """
         try:
             anno = get_msgspec_annotation(cls, attr)
@@ -71,7 +74,7 @@ class GroupBase(m.Struct, omit_defaults=True, dict=True):
         # typing.Literal object
         literal_args = getattr(anno, '__args__', None)
         if literal_args is not None:
-            return list(literal_args)
+            return literal_args
         raise DataInconsistent(f'Arg is not a literal: {cls}.{attr}')
 
     @batch_set

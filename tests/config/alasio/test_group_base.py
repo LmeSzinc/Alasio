@@ -107,7 +107,7 @@ class TestBaseModelGetOption:
     def test_get_option_literal_string_annotation(self):
         """Test get_option on field with string literal annotation"""
         options = LiteralTestModel.get_option('difficulty')
-        assert options == ['normal', 'hard']
+        assert options == ('normal', 'hard')
 
     def test_get_option_missing_attribute_raises(self):
         """Test get_option with nonexistent attribute raises DataInconsistent"""

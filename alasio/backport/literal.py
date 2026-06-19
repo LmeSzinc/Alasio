@@ -84,19 +84,19 @@ def _remove_paired_quotes(arg):
 
 def parse_literal_string(anno):
     """
-    Parse a literal annotation string into a list of option strings.
+    Parse a literal annotation string into a tuple of option strings.
 
     Examples:
-        t.Literal[('normal', 'hard')] -> ['normal', 'hard']
-        t.Literal['normal', 'hard']   -> ['normal', 'hard']
-        Literal['normal', 'hard']     -> ['normal', 'hard']
-        typing.Literal['normal', 'hard'] -> ['normal', 'hard']
+        t.Literal[('normal', 'hard')] -> ('normal', 'hard')
+        t.Literal['normal', 'hard']   -> ('normal', 'hard')
+        Literal['normal', 'hard']     -> ('normal', 'hard')
+        typing.Literal['normal', 'hard'] -> ('normal', 'hard')
 
     Args:
         anno (str): A literal annotation string.
 
     Returns:
-        list[str]: The parsed literal option strings.
+        tuple: The parsed literal option strings.
 
     Raises:
         ValueError: If anno is not a literal.
@@ -106,7 +106,7 @@ def parse_literal_string(anno):
     args = anno.partition('[')[2].rpartition(']')[0]
     if args.startswith('(') and args.endswith(')'):
         args = args[1:-1]
-    return [_remove_paired_quotes(arg.strip()) for arg in args.split(',')]
+    return tuple(_remove_paired_quotes(arg.strip()) for arg in args.split(','))
 
 
 def get_literal(tp):
@@ -115,14 +115,23 @@ def get_literal(tp):
 
     If the input type is (or is wrapped by) Literal, return the literal values as a tuple.
     Handles wrapping types like Annotated, ClassVar, Final, etc.
+    Also accepts a Literal annotation string (e.g. "t.Literal['normal', 'hard']")
+    and parses it via parse_literal_string.
     If the input is not a Literal type, return None.
 
     Args:
-        tp: A type hint object.
+        tp: A type hint object or a string annotation.
 
     Returns:
         tuple | None: The literal values if tp is Literal, otherwise None.
     """
+    # String annotation path
+    if isinstance(tp, str):
+        try:
+            return parse_literal_string(tp)
+        except ValueError:
+            return None
+
     # Fast path: check plain Literal first without entering the unwrap loop
     origin = get_origin(tp)
     if origin in _LITERAL_ORIGINS:

@@ -193,22 +193,39 @@ class TestRemovePairedQuotes:
         result = _remove_paired_quotes("normal'")
         assert result == "normal'"
 
+    def test_string_annotation(self):
+        """get_literal with a string annotation should parse via parse_literal_string."""
+        result = get_literal("t.Literal['normal', 'hard']")
+        assert result == ('normal', 'hard')
+        assert isinstance(result, tuple)
+
+    def test_string_annotation_no_match(self):
+        """get_literal with a non-literal string should return None."""
+        result = get_literal("str")
+        assert result is None
+
+    def test_string_annotation_typo(self):
+        """get_literal with a typo literal string should return None."""
+        result = get_literal("typo.Literal['a']")
+        assert result is None
+
 
 class TestParseLiteralString:
     """Tests for parse_literal_string function."""
 
     @pytest.mark.parametrize('anno, expected', [
-        ("t.Literal['normal', 'hard']", ['normal', 'hard']),
-        ("t.Literal[('normal', 'hard')]", ['normal', 'hard']),
-        ("Literal['normal', 'hard']", ['normal', 'hard']),
-        ("typing.Literal['normal', 'hard']", ['normal', 'hard']),
-        ("t.Literal['normal']", ['normal']),
-        ("t.Literal['easy', 'normal', 'hard']", ['easy', 'normal', 'hard']),
+        ("t.Literal['normal', 'hard']", ('normal', 'hard')),
+        ("t.Literal[('normal', 'hard')]", ('normal', 'hard')),
+        ("Literal['normal', 'hard']", ('normal', 'hard')),
+        ("typing.Literal['normal', 'hard']", ('normal', 'hard')),
+        ("t.Literal['normal']", ('normal',)),
+        ("t.Literal['easy', 'normal', 'hard']", ('easy', 'normal', 'hard')),
     ])
     def test_valid_literal(self, anno, expected):
         """Test valid literal annotations are parsed correctly"""
         result = parse_literal_string(anno)
         assert result == expected
+        assert isinstance(result, tuple)
 
     @pytest.mark.parametrize('anno', [
         "str",
@@ -221,31 +238,30 @@ class TestParseLiteralString:
             parse_literal_string(anno)
 
     # ---- Attack / edge-case tests ----
-    # These document how parse_literal_string handles malformed inputs.
 
     def test_unclosed_bracket(self):
         """Missing ] causes args extraction to return empty string"""
         result = parse_literal_string("t.Literal['normal'")
-        assert result == ['']
+        assert result == ('',)
 
     def test_empty_brackets(self):
         """Empty [] yields a single empty option"""
         result = parse_literal_string("t.Literal[]")
-        assert result == ['']
+        assert result == ('',)
 
     def test_unclosed_quote(self):
         """Unclosed single quote leaks the ' prefix into the option"""
         result = parse_literal_string("t.Literal['normal, hard]")
-        assert result == ["'normal", "hard"]
+        assert result == ("'normal", "hard")
 
     def test_double_quotes(self):
         """Double-quoted options are stripped by _remove_paired_quotes"""
         result = parse_literal_string('t.Literal["normal", "hard"]')
-        assert result == ['normal', 'hard']
+        assert result == ('normal', 'hard')
 
     def test_single_quote_inside_option(self):
         """Option containing a single quote like \"it's\" handled with double-quote delimiters"""
         anno = 't.Literal["it\'s", "that\'s"]'
         result = parse_literal_string(anno)
         # _remove_paired_quotes handles both single and double quotes
-        assert result == ["it's", "that's"]
+        assert result == ("it's", "that's")
