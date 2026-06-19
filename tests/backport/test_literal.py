@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from alasio.backport.literal import _remove_paired_quotes, get_literal, parse_literal_string
+from alasio.backport.literal import get_literal, parse_literal_string
 
 
 class TestGetLiteral:
@@ -144,72 +144,6 @@ class TestGetLiteral:
         result = get_literal(Final[int])
         assert result is None
 
-
-class TestRemovePairedQuotes:
-    """Tests for _remove_paired_quotes function."""
-
-    def test_plain_string(self):
-        """Test a plain string without quotes returns as-is"""
-        result = _remove_paired_quotes('normal')
-        assert result == 'normal'
-
-    def test_quoted_string(self):
-        """Test a string wrapped in single quotes"""
-        result = _remove_paired_quotes("'normal'")
-        assert result == 'normal'
-
-    def test_quoted_with_underscore(self):
-        """Test a quoted string with underscore"""
-        result = _remove_paired_quotes("'hard_mode'")
-        assert result == 'hard_mode'
-
-    def test_quoted_numeric(self):
-        """Test a quoted numeric string"""
-        result = _remove_paired_quotes("'123'")
-        assert result == '123'
-
-    def test_double_quotes(self):
-        """Test a string wrapped in double quotes"""
-        result = _remove_paired_quotes('"normal"')
-        assert result == 'normal'
-
-    def test_empty_string(self):
-        """Test empty string returns empty string"""
-        result = _remove_paired_quotes('')
-        assert result == ''
-
-    def test_single_char(self):
-        """Test a single character without quotes returns as-is"""
-        result = _remove_paired_quotes('a')
-        assert result == 'a'
-
-    def test_partial_left_quote(self):
-        """Test string with only left quote"""
-        result = _remove_paired_quotes("'normal")
-        assert result == "'normal"
-
-    def test_partial_right_quote(self):
-        """Test string with only right quote"""
-        result = _remove_paired_quotes("normal'")
-        assert result == "normal'"
-
-    def test_string_annotation(self):
-        """get_literal with a string annotation should parse via parse_literal_string."""
-        result = get_literal("t.Literal['normal', 'hard']")
-        assert result == ('normal', 'hard')
-        assert isinstance(result, tuple)
-
-    def test_string_annotation_no_match(self):
-        """get_literal with a non-literal string should return None."""
-        result = get_literal("str")
-        assert result is None
-
-    def test_string_annotation_typo(self):
-        """get_literal with a typo literal string should return None."""
-        result = get_literal("typo.Literal['a']")
-        assert result is None
-
-
 class TestParseLiteralString:
     """Tests for parse_literal_string function."""
 
@@ -255,7 +189,7 @@ class TestParseLiteralString:
         assert result == ("'normal", "hard")
 
     def test_double_quotes(self):
-        """Double-quoted options are stripped by _remove_paired_quotes"""
+        """Double-quoted options are stripped by _parse_literal_item"""
         result = parse_literal_string('t.Literal["normal", "hard"]')
         assert result == ('normal', 'hard')
 
@@ -263,5 +197,67 @@ class TestParseLiteralString:
         """Option containing a single quote like \"it's\" handled with double-quote delimiters"""
         anno = 't.Literal["it\'s", "that\'s"]'
         result = parse_literal_string(anno)
-        # _remove_paired_quotes handles both single and double quotes
+        # _parse_literal_item handles both single and double quotes
         assert result == ("it's", "that's")
+
+    @pytest.mark.parametrize('anno, expected', [
+        ("t.Literal[42]", (42,)),
+        ("t.Literal[-1, 0, 1]", (-1, 0, 1)),
+        ("t.Literal[0x1F, 0o10, 0b1010]", (31, 8, 10)),
+        ("t.Literal[True]", (True,)),
+        ("t.Literal[True, False]", (True, False)),
+        ("t.Literal[None]", (None,)),
+        ("t.Literal[None, True, 42, 'str']", (None, True, 42, 'str')),
+        ("t.Literal[b'hello']", (b'hello',)),
+        ("t.Literal[b\"world\"]", (b'world',)),
+        ("t.Literal['str', 42, True, None, b'bytes']", ('str', 42, True, None, b'bytes')),
+    ])
+    def test_non_str_types(self, anno, expected):
+        """Test parse_literal_string handles int, bool, None, bytes."""
+        result = parse_literal_string(anno)
+        assert result == expected
+
+
+class TestGetLiteralStringAnnotation:
+    """Tests for get_literal with string annotations."""
+
+    def test_str_values(self):
+        """get_literal with string annotation of str values."""
+        result = get_literal("t.Literal['normal', 'hard']")
+        assert result == ('normal', 'hard')
+        assert isinstance(result, tuple)
+
+    def test_int_values(self):
+        """get_literal with string annotation of int values."""
+        result = get_literal("t.Literal[42, -1, 0]")
+        assert result == (42, -1, 0)
+
+    def test_bool_values(self):
+        """get_literal with string annotation of bool values."""
+        result = get_literal("t.Literal[True, False]")
+        assert result == (True, False)
+
+    def test_none_value(self):
+        """get_literal with string annotation of None."""
+        result = get_literal("t.Literal[None]")
+        assert result == (None,)
+
+    def test_bytes_values(self):
+        """get_literal with string annotation of bytes values."""
+        result = get_literal("t.Literal[b'hello']")
+        assert result == (b'hello',)
+
+    def test_mixed_values(self):
+        """get_literal with string annotation of mixed types."""
+        result = get_literal("t.Literal['str', 42, True, None, b'bytes']")
+        assert result == ('str', 42, True, None, b'bytes')
+
+    def test_not_literal_string(self):
+        """get_literal with a non-literal string should return None."""
+        result = get_literal("str")
+        assert result is None
+
+    def test_typo_literal_string(self):
+        """get_literal with a typo literal string should return None."""
+        result = get_literal("typo.Literal['a']")
+        assert result is None

@@ -61,42 +61,73 @@ _UNWRAP_ORIGINS = _build_unwrap_origins()
 _LITERAL_ORIGINS = _build_literal_origins()
 
 
-def _remove_paired_quotes(arg):
+def _parse_literal_item(item):
     """
-    Remove paired quotes from a literal argument string.
+    Parse a single literal item string to its Python value.
 
-    'normal' -> normal
-    "hard"   -> hard
-    normal   -> normal
+    Handles str, int, bytes, bool, and None literals.
+    Falls back to returning the item as-is for unrecognised inputs (e.g. malformed).
 
     Args:
-        arg (str): A literal argument.
+        item (str): A single literal argument string.
 
     Returns:
-        str: The argument with paired quotes removed.
+        str | int | bool | None | bytes: The parsed value.
     """
-    if arg.startswith("'") and arg.endswith("'"):
-        return arg[1:-1]
-    if arg.startswith('"') and arg.endswith('"'):
-        return arg[1:-1]
-    return arg
+    item = item.strip()
+
+    # String: paired quotes — strip them directly
+    if item.startswith("'") and item.endswith("'"):
+        return item[1:-1]
+    if item.startswith('"') and item.endswith('"'):
+        return item[1:-1]
+
+    # Bytes: b'...' or b"..."
+    if item.startswith("b'") and item.endswith("'"):
+        return item[2:-1].encode('latin-1')
+    if item.startswith('b"') and item.endswith('"'):
+        return item[2:-1].encode('latin-1')
+
+    # Bool
+    if item == 'True':
+        return True
+    if item == 'False':
+        return False
+
+    # None
+    if item == 'None':
+        return None
+
+    # Int: supports decimal, hex (0x), octal (0o), binary (0b)
+    try:
+        return int(item, 0)
+    except (ValueError, TypeError):
+        pass
+
+    # Fallback: return as-is (backwards compatible with malformed inputs)
+    return item
 
 
 def parse_literal_string(anno):
     """
-    Parse a literal annotation string into a tuple of option strings.
+    Parse a literal annotation string into a tuple of literal values.
+
+    Handles str, int, bytes, bool, and None literal items.
+    According to PEP 586, typing.Literal can also accept Enum values,
+    but since parse_literal_string() is just simple string parsing, Enum value will be parsed as str.
 
     Examples:
-        t.Literal[('normal', 'hard')] -> ('normal', 'hard')
-        t.Literal['normal', 'hard']   -> ('normal', 'hard')
-        Literal['normal', 'hard']     -> ('normal', 'hard')
-        typing.Literal['normal', 'hard'] -> ('normal', 'hard')
+        t.Literal[('normal', 'hard')]        -> ('normal', 'hard')
+        t.Literal['normal', 'hard']          -> ('normal', 'hard')
+        t.Literal[42, -1, 0x1F]              -> (42, -1, 31)
+        t.Literal[True, False, None]         -> (True, False, None)
+        t.Literal[b'hello', 'str']           -> (b'hello', 'str')
 
     Args:
         anno (str): A literal annotation string.
 
     Returns:
-        tuple: The parsed literal option strings.
+        tuple: The parsed literal values.
 
     Raises:
         ValueError: If anno is not a literal.
@@ -106,7 +137,7 @@ def parse_literal_string(anno):
     args = anno.partition('[')[2].rpartition(']')[0]
     if args.startswith('(') and args.endswith(')'):
         args = args[1:-1]
-    return tuple(_remove_paired_quotes(arg.strip()) for arg in args.split(','))
+    return tuple(_parse_literal_item(arg) for arg in args.split(','))
 
 
 def get_literal(tp):
