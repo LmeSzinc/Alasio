@@ -172,6 +172,117 @@ class TestGameStateInheritance:
         }
 
 
+class TestGameStateSet:
+    """Tests for GameStateBase.set() classmethod."""
+
+    def test_set_success_on_literal_subclass(self):
+        """set() should work on a subclass with Literal annotation."""
+        from typing import Literal
+
+        class GS(GameStateBase):
+            server: Literal['cn', 'en', 'jp', 'tw'] = 'cn'
+
+        GS.set('server', 'en')
+        assert GS().server == 'en'
+
+    def test_set_invalid_value_raises(self):
+        """set() should raise ValueError for invalid Literal value."""
+        from typing import Literal
+
+        class GS(GameStateBase):
+            server: Literal['cn', 'en'] = 'cn'
+
+        with pytest.raises(ValueError, match='Cannot set GS.server=jp, value invalid'):
+            GS.set('server', 'jp')
+
+    def test_set_nonexistent_key_raises(self):
+        """set() should raise AttributeError for non-existent key."""
+        class GS(GameStateBase):
+            pass
+
+        with pytest.raises(AttributeError, match='Cannot set GS.foo=bar, no such attribute'):
+            GS.set('foo', 'bar')
+
+    def test_set_persists_in_singleton(self):
+        """Value set via set() should persist on the singleton."""
+        from typing import Literal
+
+        class GS(GameStateBase):
+            server: Literal['cn', 'en'] = 'cn'
+
+        GS.set('server', 'en')
+        assert GS().server == 'en'
+        assert GameStateBase().server == 'cn'  # different class
+
+    def test_set_reflected_in_get_attrs_set(self):
+        """After set(), get_attrs_set should include the new value."""
+        from typing import Literal
+
+        class GS(GameStateBase):
+            server: Literal['cn', 'en'] = 'cn'
+
+        GS.set('server', 'en')
+        assert GS().get_attrs_set()['server'] == 'en'
+
+    def test_set_overwrites_existing(self):
+        """set() should overwrite a previously set value."""
+        from typing import Literal
+
+        class GS(GameStateBase):
+            server: Literal['cn', 'en', 'jp'] = 'cn'
+
+        GS.set('server', 'en')
+        GS.set('server', 'jp')
+        assert GS().server == 'jp'
+
+    def test_set_on_plain_str_annotation(self):
+        """set() should work when annotation is str (no literal validation)."""
+        class GS(GameStateBase):
+            pass
+
+        # server is annotated as str, get_literal returns None → no validation
+        GS.set('server', 'en')
+        assert GS().server == 'en'
+
+    def test_set_lang_with_plain_str(self):
+        """set() on lang should work when annotation is str."""
+        class GS(GameStateBase):
+            pass
+
+        GS.set('lang', 'ja-JP')
+        assert GS().lang == 'ja-JP'
+
+    def test_set_server_delegates_to_set(self):
+        """set_server() should delegate to set() with Literal validation."""
+        from typing import Literal
+
+        class GS(GameStateBase):
+            server: Literal['cn', 'en', 'jp', 'tw'] = 'cn'
+
+        GS.set_server('en')
+        assert GS().server == 'en'
+
+    def test_set_server_invalid_raises(self):
+        """set_server() should raise ValueError via set()."""
+        from typing import Literal
+
+        class GS(GameStateBase):
+            server: Literal['cn', 'en'] = 'cn'
+
+        with pytest.raises(ValueError, match='Cannot set GS.server=jp, value invalid'):
+            GS.set_server('jp')
+
+    def test_set_lang_delegates_to_set(self):
+        """set_lang() should delegate to set()."""
+        from typing import Literal
+
+        class GS(GameStateBase):
+            lang: Literal['zh-CN', 'en-US', 'ja-JP'] = 'zh-CN'
+
+        GS.set_lang('en-US')
+        assert GS().lang == 'en-US'
+
+
 class TestGameStateMatch:
     """Tests for match and _match methods."""
 

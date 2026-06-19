@@ -2,6 +2,9 @@ import functools
 import types
 from typing import Type
 
+from msgspecerror import get_class_annotation_dict
+
+from alasio.backport.literal import get_literal
 from alasio.ext.cache import CacheOperation, cached_property
 from alasio.ext.singleton import Singleton
 
@@ -30,6 +33,14 @@ class StateBase(metaclass=Singleton):
 
             res[name] = attr
         return res
+
+    @cached_property
+    def dict_annotations(self):
+        """
+        Returns:
+            dict[str, Any]: {name: annotation}, annotation can be typehint or string
+        """
+        return get_class_annotation_dict(self.__class__)
 
     def is_set(self, attr):
         """
@@ -207,14 +218,27 @@ class GameStateBase(GlobalState):
     lang: str = 'zh-CN'
 
     @classmethod
-    def set_server(cls, server):
+    def set(cls, key, value):
         self = cls()
-        self.server = server
+        # field must be defined
+        dict_anno = self.dict_annotations
+        try:
+            anno = dict_anno[key]
+        except KeyError:
+            raise AttributeError(f'Cannot set {cls.__name__}.{key}={value}, no such attribute')
+        # if field is literal, check value
+        options = get_literal(anno)
+        if options is not None and value not in options:
+            raise ValueError(f'Cannot set {cls.__name__}.{key}={value}, value invalid')
+        setattr(self, key, value)
+
+    @classmethod
+    def set_server(cls, server):
+        cls.set('server', server)
 
     @classmethod
     def set_lang(cls, lang):
-        self = cls()
-        self.lang = lang
+        cls.set('lang', lang)
 
     @classmethod
     def match(cls, **kwargs):
