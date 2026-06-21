@@ -35,7 +35,6 @@ class TestGameStateDefaults:
         # Methods should be excluded
         assert 'match' not in defaults
         assert 'when' not in defaults
-        assert '_match' not in defaults
         # dict_defaults itself is internal, not a state field
         assert 'dict_defaults' not in defaults
         assert 'struct_model' not in defaults

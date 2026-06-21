@@ -148,7 +148,7 @@ class _StateMeta(type):
         for subclass in subclasses:
             subclass.reset_all_fields()
 
-    def _match(cls, **kwargs):
+    def match(cls, **kwargs):
         """
         Args:
             **kwargs:
@@ -166,16 +166,6 @@ class _StateMeta(type):
                 matched = False
                 break
         return matched
-
-    def match(cls, **kwargs):
-        """
-        Args:
-            **kwargs:
-
-        Returns:
-            bool: True if state matches given condition
-        """
-        return cls._match(**kwargs)
 
 
 class GlobalState(metaclass=_StateMeta):
@@ -227,7 +217,7 @@ class _StateDispatcher:
             if not cond:
                 fallback_func = func
                 continue
-            if self.state_cls._match(**cond):
+            if self.state_cls.match(**cond):
                 return func(*args, **call_kwargs)
 
         if fallback_func is not None:
@@ -263,11 +253,11 @@ class GameStateBase(GlobalState):
         """
         if isinstance(server, (list, tuple, set)):
             for item in server:
-                if cls._match(server=item):
+                if cls.match(server=item):
                     return True
             return False
         else:
-            return cls._match(server=server)
+            return cls.match(server=server)
 
     @classmethod
     def match_lang(cls, lang):
@@ -280,11 +270,11 @@ class GameStateBase(GlobalState):
         """
         if isinstance(lang, (list, tuple, set)):
             for item in lang:
-                if cls._match(lang=item):
+                if cls.match(lang=item):
                     return True
             return False
         else:
-            return cls._match(lang=lang)
+            return cls.match(lang=lang)
 
     @classmethod
     def when(cls, **kwargs):

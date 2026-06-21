@@ -388,13 +388,6 @@ class TestMatch:
         assert StateA.match(a='z', b='w')
         assert not StateA.match(a='z', b='y')
 
-    def test_match_and__match_same_results(self):
-        class StateA(GlobalState):
-            a: str = 'x'
-
-        assert StateA._match(a='x') == StateA.match(a='x')
-        assert StateA._match(a='z') == StateA.match(a='z')
-
     def test_match_on_subclass_with_custom_defaults(self):
         class BaseA(GlobalState):
             a: str = 'default_a'
