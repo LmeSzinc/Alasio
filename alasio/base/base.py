@@ -3,7 +3,7 @@ from typing import Union
 from msgspecerror import get_class_annotation
 
 from alasio.base.exception import ScriptError
-from alasio.config._index.config_generated import AlasioConfigGenerated
+from alasio.config.base import AlasioConfigBase
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
 from alasio.logger import logger
@@ -11,12 +11,12 @@ from alasio.logger import logger
 
 class ModuleBase:
     # subclasses may override these
-    config: AlasioConfigGenerated
+    config: AlasioConfigBase
     device: DeviceBase
 
     def __init__(
             self,
-            config: Union[AlasioConfigGenerated, str],
+            config: Union[AlasioConfigBase, str],
             device: Union[DeviceBase, str, None] = None,
             task: str = '',
     ):
@@ -32,7 +32,7 @@ class ModuleBase:
                 Bind a task only for dev purpose. Usually to be "" for auto task scheduling.
         """
         # build config
-        if isinstance(config, AlasioConfigGenerated):
+        if isinstance(config, AlasioConfigBase):
             self.config = config
             if task:
                 self.config.task = task

@@ -9,7 +9,7 @@ from alasio.base.scheduler.inflect import Inflection
 from alasio.base.scheduler.task_record import TaskRecord, TaskTooManyExecutionsError, TaskTooManyFailuresError
 from alasio.base.state import TaskState
 from alasio.base.timer import getnow
-from alasio.config._index.config_generated import AlasioConfigGenerated
+from alasio.config.base import AlasioConfigBase
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
 from alasio.ext.cache import cached_property
@@ -41,10 +41,10 @@ class AlasioScheduler:
         self.skip_first_task = {'Restart', 'RestartDevice', 'RestartGame'}
 
     def create_config(self):
-        return AlasioConfigGenerated(self.config_name)
+        return AlasioConfigBase(self.config_name)
 
     @cached_property
-    def config(self) -> AlasioConfigGenerated:
+    def config(self) -> AlasioConfigBase:
         try:
             return self.create_config()
         except RequestHumanTakeover as e:

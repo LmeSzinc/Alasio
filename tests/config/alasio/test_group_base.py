@@ -7,7 +7,7 @@ import pytest
 from alasio.base.servertime import ServerTime
 from alasio.config.alasio.group_base import DEFAULT_TIME, GroupBase, T_DATETIME, T_INT_GE0
 from alasio.config.alasio.group_proxy import GroupProxy
-from alasio.config.base.config_base import BatchSetContext
+from alasio.config.base import BatchSetContext
 from alasio.config.const import DataInconsistent
 
 

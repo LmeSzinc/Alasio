@@ -29,11 +29,8 @@ class GenConfigGenerated(CrossNavGenerator):
         # Basic imports
         gen.Import('typing').as_('t')
         if self.alasio:
-            gen.FromImport('alasio.config._index.config_generated').Import('AlasioConfigGenerated')
+            gen.FromImport('alasio.config.base').Import('AlasioConfigBase')
             gen.FromImport('..const').Import('entry')
-        else:
-            gen.FromImport('alasio.config.base.config_base').Import('AlasioConfigBase')
-
         # TYPE_CHECKING block - imports only used for type hints
         with gen.If('t.TYPE_CHECKING'):
             gen.Import('alasio.config.alasio.group_export').as_('alasio').lazy()
@@ -44,9 +41,9 @@ class GenConfigGenerated(CrossNavGenerator):
 
         # Class definition
         if self.alasio:
-            cls = gen.Class('ConfigGenerated').set_inherit('AlasioConfigGenerated')
+            cls = gen.Class('ConfigGenerated').set_inherit('AlasioConfigBase')
         else:
-            cls = gen.Class('AlasioConfigGenerated').set_inherit('AlasioConfigBase')
+            cls = gen.Class('AlasioConfigGenerated')
         with cls:
             gen.Comment('A generated config struct to fool IDE\'s type-predict and auto-complete')
             if self.alasio:

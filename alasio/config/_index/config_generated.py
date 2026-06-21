@@ -1,13 +1,11 @@
 import typing as t
 
-from alasio.config.base.config_base import AlasioConfigBase
-
 if t.TYPE_CHECKING:
     from ..alasio import alasio_model as alasio
     from ..alasio import device_model as device
 
 
-class AlasioConfigGenerated(AlasioConfigBase):
+class AlasioConfigGenerated:
     # A generated config struct to fool IDE's type-predict and auto-complete
 
     """

@@ -2,7 +2,7 @@ import threading
 
 import msgspec
 
-from alasio.config.base.config_base import BatchSetContext, TemporaryContext
+from alasio.config.base import BatchSetContext, TemporaryContext
 from alasio.device.config import DeviceConfig
 from alasio.logger import logger
 

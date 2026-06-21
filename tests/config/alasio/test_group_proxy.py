@@ -12,7 +12,7 @@ from ExampleMod.module.config.const import entry
 from alasio.base.timer import getnow
 from alasio.config.alasio.group_proxy import GroupProxy, batch_set
 from alasio.config.alasio.store_model import DashboardAmount, DashboardBase
-from alasio.config.base.config_base import AlasioConfigBase
+from alasio.config.base import AlasioConfigBase
 from alasio.config.entry.mod import Mod
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext.cache import cached_property as alasio_cached_property

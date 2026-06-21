@@ -12,6 +12,7 @@ from alasio.base.exception import RequestHumanTakeover, ScriptError, TaskStop
 from alasio.base.pretty import dict2kv
 from alasio.base.servertime import ServerTime, nearest_future, random_time
 from alasio.base.timer import getnow
+from alasio.config._index.config_generated import AlasioConfigGenerated
 from alasio.config.alasio.group_proxy import GroupProxy
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
@@ -71,7 +72,7 @@ class TemporaryContext:
                 self.config._apply_override_config(group, arg, value)
 
 
-class AlasioConfigBase:
+class AlasioConfigBase(AlasioConfigGenerated):
     """
 
     """
