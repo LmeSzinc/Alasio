@@ -243,38 +243,32 @@ class GameStateBase(GlobalState):
     lang: str = 'zh-CN'
 
     @classmethod
-    def match_server(cls, server):
+    def match_server(cls, *server):
         """
         Args:
-            server: server name or a list of servers
+            *server: server names
 
         Returns:
-            bool: If any server matched
+            bool: True if any server matches the current state
         """
-        if isinstance(server, (list, tuple, set)):
-            for item in server:
-                if cls.match(server=item):
-                    return True
-            return False
-        else:
-            return cls.match(server=server)
+        for item in server:
+            if cls.match(server=item):
+                return True
+        return False
 
     @classmethod
-    def match_lang(cls, lang):
+    def match_lang(cls, *lang):
         """
         Args:
-            lang: language name or a list of languages
+            *lang: language names
 
         Returns:
-            bool: If any server matched
+            bool: True if any language matches the current state
         """
-        if isinstance(lang, (list, tuple, set)):
-            for item in lang:
-                if cls.match(lang=item):
-                    return True
-            return False
-        else:
-            return cls.match(lang=lang)
+        for item in lang:
+            if cls.match(lang=item):
+                return True
+        return False
 
     @classmethod
     def when(cls, **kwargs):

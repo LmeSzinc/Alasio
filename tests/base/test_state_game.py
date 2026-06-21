@@ -191,6 +191,102 @@ class TestGameStateAssignment:
         assert GS.lang == 'en-US'
 
 
+class TestGameStateMatchServer:
+    """Tests for GameStateBase.match_server()."""
+
+    def setup_method(self):
+        """Reset class-level state before each test."""
+        GameStateBase.reset_all_fields()
+
+    def test_match_server_single_match(self):
+        """match_server with a single matching server should return True."""
+        assert GameStateBase.match_server('cn') is True
+
+    def test_match_server_single_no_match(self):
+        """match_server with a single non-matching server should return False."""
+        assert GameStateBase.match_server('en') is False
+
+    def test_match_server_multiple_one_matches(self):
+        """match_server with multiple args should return True if any matches."""
+        assert GameStateBase.match_server('en', 'cn') is True
+
+    def test_match_server_multiple_none_match(self):
+        """match_server with multiple non-matching args should return False."""
+        assert GameStateBase.match_server('en', 'jp') is False
+
+    def test_match_server_no_args(self):
+        """match_server with no args should return False."""
+        assert GameStateBase.match_server() is False
+
+    def test_match_server_after_change(self):
+        """match_server should reflect runtime state changes."""
+        GameStateBase.server = 'jp'
+        assert GameStateBase.match_server('jp') is True
+        assert GameStateBase.match_server('cn', 'en') is False
+
+    def test_match_server_unpack_list(self):
+        """A list can be unpacked into match_server."""
+        assert GameStateBase.match_server(*['cn', 'en']) is True
+        assert GameStateBase.match_server(*['en', 'jp']) is False
+
+    def test_match_server_on_subclass(self):
+        """match_server should respect subclass overrides."""
+        class CustomGS(GameStateBase):
+            server: str = 'en'
+
+        assert CustomGS.match_server('en') is True
+        assert CustomGS.match_server('cn') is False
+        assert CustomGS.match_server('cn', 'en') is True
+
+
+class TestGameStateMatchLang:
+    """Tests for GameStateBase.match_lang()."""
+
+    def setup_method(self):
+        """Reset class-level state before each test."""
+        GameStateBase.reset_all_fields()
+
+    def test_match_lang_single_match(self):
+        """match_lang with a single matching lang should return True."""
+        assert GameStateBase.match_lang('zh-CN') is True
+
+    def test_match_lang_single_no_match(self):
+        """match_lang with a single non-matching lang should return False."""
+        assert GameStateBase.match_lang('en-US') is False
+
+    def test_match_lang_multiple_one_matches(self):
+        """match_lang with multiple args should return True if any matches."""
+        assert GameStateBase.match_lang('en-US', 'zh-CN') is True
+
+    def test_match_lang_multiple_none_match(self):
+        """match_lang with multiple non-matching args should return False."""
+        assert GameStateBase.match_lang('en-US', 'ja-JP') is False
+
+    def test_match_lang_no_args(self):
+        """match_lang with no args should return False."""
+        assert GameStateBase.match_lang() is False
+
+    def test_match_lang_after_change(self):
+        """match_lang should reflect runtime state changes."""
+        GameStateBase.lang = 'en-US'
+        assert GameStateBase.match_lang('en-US') is True
+        assert GameStateBase.match_lang('zh-CN', 'ja-JP') is False
+
+    def test_match_lang_unpack_list(self):
+        """A list can be unpacked into match_lang."""
+        assert GameStateBase.match_lang(*['zh-CN', 'en-US']) is True
+        assert GameStateBase.match_lang(*['en-US', 'ja-JP']) is False
+
+    def test_match_lang_on_subclass(self):
+        """match_lang should respect subclass overrides."""
+        class CustomGS(GameStateBase):
+            lang: str = 'ja-JP'
+
+        assert CustomGS.match_lang('ja-JP') is True
+        assert CustomGS.match_lang('zh-CN') is False
+        assert CustomGS.match_lang('zh-CN', 'ja-JP') is True
+
+
 class TestGameStateWhen:
     """Tests for when decorator with _StateDispatcher."""
 
