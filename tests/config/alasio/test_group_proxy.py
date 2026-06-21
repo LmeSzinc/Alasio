@@ -136,6 +136,12 @@ class ProxyTestGroup(Struct, dict=True):
         return self.side_effect_functools_cached
 
 
+class MockResponse:
+    """Minimal mock for config set response."""
+    def __init__(self):
+        self.error = None
+
+
 class MockMod:
     def __init__(self):
         self.name = "MockMod"
@@ -145,10 +151,10 @@ class MockMod:
         return ProxyTestGroup
 
     def config_set(self, name, event):
-        return None, type('Response', (), {'error': None})
+        return None, [MockResponse()]
 
     def config_batch_set(self, name, events):
-        return None, [type('Response', (), {'error': None}) for _ in events]
+        return None, [MockResponse() for _ in events]
 
     def task_index_data(self):
         return {

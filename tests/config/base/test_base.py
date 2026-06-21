@@ -766,8 +766,8 @@ class TestConfigEdgeCases:
 
         # Modified dict should be empty after re-init
         assert len(config._modified) == 0
-        # But overrides should still be applied
-        assert config._override_config['Scheduler'].get('Enable') is True
+        # Value reverts to DB default since modification wasn't saved
+        assert config.Scheduler.Enable is False
 
     def test_thread_safety_across_multiple_threads(self, config):
         """Test that config operations are thread-safe"""
@@ -804,7 +804,7 @@ class TestConfigEdgeCases:
     def test_temporary_override_with_existing_modified(self, config):
         """Test temporary override when there are pending modifications"""
         config.auto_save = False
-        config.register_modify('Main', 'Scheduler', 'Enable', True)
+        config.Scheduler.Enable = True
 
         with config.temporary(Scheduler_Enable=False):
             assert config.Scheduler.Enable is False

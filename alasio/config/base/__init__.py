@@ -1,1 +1,6 @@
-from alasio.config.base.config_base import AlasioConfigBase, BatchSetContext, TemporaryContext
+from .config_access import BatchSetContext, TemporaryContext
+from .config_task import AlasioConfigBaseTask
+
+
+class AlasioConfigBase(AlasioConfigBaseTask):
+    pass
