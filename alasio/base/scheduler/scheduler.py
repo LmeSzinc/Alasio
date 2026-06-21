@@ -165,7 +165,7 @@ class AlasioScheduler:
         Args:
             task (str | None):
         """
-        TaskState.subclasses_clear_all()
+        TaskState.reset_all_subclasses()
         self.device.on_task_switch()
         self._send_scheduler_running(task)
 
@@ -181,7 +181,7 @@ class AlasioScheduler:
         """
         Callback function on scheduler idle
         """
-        TaskState.subclasses_clear_all()
+        TaskState.reset_all_subclasses()
         # send last screenshot on idle
         self.device.backend_send_preview(force=True)
         self.device.on_idle()

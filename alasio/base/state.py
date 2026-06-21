@@ -1,177 +1,213 @@
 import functools
 import types
-from typing import Type
+from typing import Any, TYPE_CHECKING, Type
 
+import msgspec
+from msgspec._core import Factory
 from msgspecerror import get_class_annotation_dict
 
-from alasio.backport.literal import get_literal
-from alasio.ext.cache import CacheOperation, cached_property
-from alasio.ext.singleton import Singleton
 
+class _StateMeta(type):
+    if TYPE_CHECKING:
+        struct_model: "type[msgspec.Struct]"
+        dict_defaults: "dict[str, Any]"
 
-class StateBase(metaclass=Singleton):
-    @cached_property
-    def dict_defaults(self):
-        """
-        Get all attrs of state and their default values
+    def __init__(cls, name, bases, dct):
+        super().__init__(name, bases, dct)
 
-        Returns:
-            dict[str, Any]:
-        """
-        res = {}
-        # Iterate over all attributes of the class including inherited ones
-        for name in dir(self.__class__):
-            # Skip private/protected attributes
-            if name.startswith('_'):
+        # gather all fields
+        dict_annotations = get_class_annotation_dict(cls)
+        struct_fields = []
+        for attr, anno in dict_annotations.items():
+            try:
+                default = getattr(cls, attr)
+            except AttributeError:
+                raise TypeError(f'State field {cls.__name__}.{attr} must have a default')
+            struct_fields.append((attr, anno, default))
+
+        # create struct model
+        struct_model: "type[msgspec.Struct]" = msgspec.defstruct(
+            f'{cls.__name__}Struct', struct_fields, omit_defaults=True, forbid_unknown_fields=True,
+        )
+        if len(struct_model.__struct_fields__) != len(struct_model.__struct_defaults__):
+            raise ValueError(f'All fields in state class {cls.__name__} must have a default value')
+
+        # gather default values
+        dict_defaults = {}
+        for name, value in zip(struct_model.__struct_fields__, struct_model.__struct_defaults__):
+            if value is msgspec.UNSET:
                 continue
-            # Skip methods and other callables
-            attr = getattr(self.__class__, name)
-            if callable(attr):
-                continue
-            if isinstance(attr, CacheOperation):
-                continue
+            if value is msgspec.NODEFAULT:
+                raise ValueError(f'State field {cls.__name__}.{name} must have a default value')
+            if isinstance(value, Factory):
+                raise TypeError(f'State field {cls.__name__}.{name} must be static default value, not {value}')
+            dict_defaults[name] = value
 
-            res[name] = attr
-        return res
+        # Use super().__setattr__ to bypass the custom __setattr__ hook
+        # since struct_model and dict_defaults are internal, not state fields
+        super().__setattr__('struct_model', struct_model)
+        super().__setattr__('dict_defaults', dict_defaults)
 
-    @cached_property
-    def dict_annotations(self):
+    def __call__(cls, *args, **kwargs):
+        raise TypeError(
+            f"State class '{cls.__name__}' cannot be instantiated. "
+            f"Please use class attributes directly (e.g., {cls.__name__}.field_name)."
+        )
+
+    def update(cls, **kwargs):
         """
-        Returns:
-            dict[str, Any]: {name: annotation}, annotation can be typehint or string
-        """
-        return get_class_annotation_dict(self.__class__)
+        Update state with kwargs
 
-    def is_set(self, attr):
+        Args:
+            kwargs: key-value pairs to update
+        """
+        # may raise ValidationError
+        obj = msgspec.convert(kwargs, cls.struct_model)
+        for name in kwargs:
+            if name not in cls.dict_defaults:
+                continue
+            # if validate success, set to class attribute
+            # value type may change after validation
+            value = getattr(obj, name)
+            super().__setattr__(name, value)
+
+    def __setattr__(cls, name, value):
+        data = {name: value}
+        cls.update(**data)
+
+    def is_modified(cls, name):
         """
         Args:
-            attr (str):
+            name (str):
 
         Returns:
-            bool: True if attr is set on state instance
+            bool: true if attr is modified
         """
-        return attr in self.dict_defaults
-
-    def unset(self, attr):
-        """
-        Unset an attr
-        After unset, you can still access obj.attr and get default value
-
-        Args:
-            attr (str):
-
-        Returns:
-            Any: The value of attr
-        """
-        if attr not in self.dict_defaults:
-            return None
         try:
-            return self.__dict__.pop(attr)
+            default = cls.dict_defaults[name]
+            value = getattr(cls, name)
+        except (KeyError, AttributeError):
+            raise ValueError(f'State field {cls.__name__}.{name} does not exist')
+        return value != default
+
+    def get_default(cls, name):
+        """
+        Args:
+            name (str):
+
+        Returns:
+            Any: default value of attr
+        """
+        try:
+            return cls.dict_defaults[name]
         except KeyError:
-            return getattr(self, attr, None)
+            raise ValueError(f'State field {cls.__name__}.{name} does not exist')
 
-    def unset_defaults(self):
+    def reset_field(cls, name):
         """
-        Unset all attrs that equals default
-        """
-        defaults = self.dict_defaults
-        for key, value in list(self.__dict__.items()):
-            if key in defaults and value == defaults[key]:
-                self.__dict__.pop(key, None)
-        return self
-
-    def clear(self):
-        """
-        Clear all instance attributes, all attrs will be default values
-        """
-        defaults = self.dict_defaults
-        for key, value in list(self.__dict__.items()):
-            if key in defaults:
-                self.__dict__.pop(key, None)
-
-    def get_attrs(self):
-        """
-        Get all attrs and their values
-        attrs that haven't been set will be included with default value
-
-        Returns:
-            dict[str, Any]:
-        """
-        res = self.dict_defaults.copy()
-        for k, v in self.__dict__.items():
-            if k in res:
-                res[k] = v
-        return res
-
-    def get_attrs_set(self):
-        """
-        Get all attrs which is set on current obj and their values
-        attrs that haven't been set are not included
-
-        Returns:
-            dict[str, Any]:
-        """
-        defaults = self.dict_defaults
-        return {k: v for k, v in self.__dict__.items() if k in defaults}
-
-    def merge(self, other):
-        """
-        Merge another state into self.
-        attrs that is set on another state and exists in self, will be set to self
+        Reset an attr to default value
 
         Args:
-            other (StateBase):
+            name (str):
         """
-        defaults = self.dict_defaults
-        for key, value in other.get_attrs_set().items():
-            if key in defaults:
-                setattr(self, key, value)
-        return self
+        try:
+            default = cls.dict_defaults[name]
+        except KeyError:
+            raise ValueError(f'State field {cls.__name__}.{name} does not exist')
+        super().__setattr__(name, default)
+
+    def reset_all_fields(cls):
+        """
+        Reset all attrs to default values
+        """
+        for name, value in cls.dict_defaults.items():
+            super().__setattr__(name, value)
+
+    def _iter_all_subclasses(cls):
+        """
+        Iterate all subclasses
+
+        Yields:
+            Type[StateBase]: subclass
+        """
+        stack = set(cls.__subclasses__())
+        while True:
+            new_stack = set()
+            for subclass in stack:
+                yield subclass
+                new_stack.update(subclass.__subclasses__())
+            if not new_stack:
+                break
+            stack = new_stack
+
+    def reset_all_subclasses(cls):
+        """
+        Reset all subclasses' fields to default values
+        """
+        subclasses = list(cls._iter_all_subclasses())
+        for subclass in subclasses:
+            subclass.reset_all_fields()
+
+    def _match(cls, **kwargs):
+        """
+        Args:
+            **kwargs:
+
+        Returns:
+            bool: True if state matches given condition
+        """
+        matched = True
+        for key, value in kwargs.items():
+            try:
+                if getattr(cls, key) != value:
+                    matched = False
+                    break
+            except AttributeError:
+                matched = False
+                break
+        return matched
+
+    def match(cls, **kwargs):
+        """
+        Args:
+            **kwargs:
+
+        Returns:
+            bool: True if state matches given condition
+        """
+        return cls._match(**kwargs)
 
 
-class GlobalState(StateBase):
+class GlobalState(metaclass=_StateMeta):
     """
     A global state class
+    Note that every field must have typehint and static default value.
+
+    Examples:
+        class GlobalState(TaskState):
+            server: Literal['cn', 'en'] = 'cn'
+            lang: Literal['zh-CN', 'en'] = 'zh-CN'
+
+        if not GlobalState.server == 'cn':
+            GlobalState.server = 'cn'
     """
-    _subclasses: "dict[int, StateBase]" = {}
-
-    def __init__(self):
-        GlobalState._subclasses[id(self)] = self
-
-    @classmethod
-    def subclasses_clear_all(cls):
-        subclasses = GlobalState._subclasses
-        GlobalState._subclasses = {}
-        for subclass in subclasses.values():
-            subclass.clear()
-            subclass.__class__.singleton_clear()
+    pass
 
 
-class TaskState(StateBase):
+class TaskState(metaclass=_StateMeta):
     """
     A state class that resets on task switch
+    Note that every field must have typehint and static default value.
 
     Examples:
         class CampaignState(TaskState):
-            is_clear_mode = False
-            is_fleet_lock = False
+            is_clear_mode: bool = False
+            is_fleet_lock: bool = False
 
-        state = CampaignState()
-        if not state.is_clear_mode:
-            state.is_fleet_lock = False
+        if not CampaignState.is_clear_mode:
+            CampaignState.is_fleet_lock = False
     """
-    _subclasses: "dict[int, StateBase]" = {}
-
-    def __init__(self):
-        TaskState._subclasses[id(self)] = self
-
-    @classmethod
-    def subclasses_clear_all(cls):
-        subclasses = TaskState._subclasses
-        TaskState._subclasses = {}
-        for subclass in subclasses.values():
-            subclass.clear()
-            subclass.__class__.singleton_clear()
+    pass
 
 
 class _StateDispatcher:
@@ -185,14 +221,13 @@ class _StateDispatcher:
         functools.update_wrapper(self, first_func)
 
     def __call__(self, *args, **call_kwargs):
-        state = self.state_cls()
         fallback_func = None
 
         for cond, func in self.cases:
             if not cond:
                 fallback_func = func
                 continue
-            if state.match(**cond):
+            if self.state_cls._match(**cond):
                 return func(*args, **call_kwargs)
 
         if fallback_func is not None:
@@ -218,59 +253,38 @@ class GameStateBase(GlobalState):
     lang: str = 'zh-CN'
 
     @classmethod
-    def set(cls, key, value):
-        self = cls()
-        # field must be defined
-        dict_anno = self.dict_annotations
-        try:
-            anno = dict_anno[key]
-        except KeyError:
-            raise AttributeError(f'Cannot set {cls.__name__}.{key}={value}, no such attribute')
-        # if field is literal, check value
-        options = get_literal(anno)
-        if options is not None and value not in options:
-            raise ValueError(f'Cannot set {cls.__name__}.{key}={value}, value invalid')
-        setattr(self, key, value)
-
-    @classmethod
-    def set_server(cls, server):
-        cls.set('server', server)
-
-    @classmethod
-    def set_lang(cls, lang):
-        cls.set('lang', lang)
-
-    @classmethod
-    def match(cls, **kwargs):
+    def match_server(cls, server):
         """
         Args:
-            **kwargs:
+            server: server name or a list of servers
 
         Returns:
-            bool: True if GameState matches given condition
+            bool: If any server matched
         """
-        self = cls()
-        return self._match(**kwargs)
+        if isinstance(server, (list, tuple, set)):
+            for item in server:
+                if cls._match(server=item):
+                    return True
+            return False
+        else:
+            return cls._match(server=server)
 
-    def _match(self, **kwargs):
+    @classmethod
+    def match_lang(cls, lang):
         """
         Args:
-            **kwargs:
+            lang: language name or a list of languages
 
         Returns:
-            bool: True if GameState matches given condition
+            bool: If any server matched
         """
-        matched = True
-        for key, value in kwargs.items():
-            try:
-                if getattr(self, key) != value:
-                    matched = False
-                    break
-            except AttributeError:
-                # condition does not exist, no match
-                matched = False
-                break
-        return matched
+        if isinstance(lang, (list, tuple, set)):
+            for item in lang:
+                if cls._match(lang=item):
+                    return True
+            return False
+        else:
+            return cls._match(lang=lang)
 
     @classmethod
     def when(cls, **kwargs):

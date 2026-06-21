@@ -1,5 +1,10 @@
-"""Tests for GameStateBase class."""
+"""
+Tests for GameStateBase class.
 
+States are class-based (no instantiation). Field assignment goes through _StateMeta.__setattr__
+which validates via msgspec.convert against the struct model.
+"""
+import msgspec
 import pytest
 
 from alasio.base.state import GameStateBase, _StateDispatcher
@@ -16,88 +21,29 @@ class TestGameStateDefaults:
         """GameStateBase should default to lang='zh-CN'."""
         assert GameStateBase.lang == 'zh-CN'
 
-    def test_instance_has_defaults(self):
-        """Instance should have default values for server and lang."""
-        state = GameStateBase()
-        assert state.server == 'cn'
-        assert state.lang == 'zh-CN'
-
     def test_dict_defaults_contains_server_and_lang(self):
         """dict_defaults should include server and lang."""
-        state = GameStateBase()
-        defaults = state.dict_defaults
+        defaults = GameStateBase.dict_defaults
         assert 'server' in defaults
         assert 'lang' in defaults
         assert defaults['server'] == 'cn'
         assert defaults['lang'] == 'zh-CN'
 
-    def test_dict_defaults_does_not_contain_private(self):
-        """dict_defaults should exclude private/protected attrs and callables."""
-        state = GameStateBase()
-        defaults = state.dict_defaults
-        # Private attrs
-        assert '_subclasses' not in defaults
-        # dict_defaults itself is a cached_property, should be excluded
-        assert 'dict_defaults' not in defaults
+    def test_dict_defaults_does_not_contain_methods(self):
+        """dict_defaults should exclude methods."""
+        defaults = GameStateBase.dict_defaults
         # Methods should be excluded
-        assert 'set_server' not in defaults
-        assert 'set_lang' not in defaults
         assert 'match' not in defaults
         assert 'when' not in defaults
         assert '_match' not in defaults
-        # Singleton methods from metaclass
-        assert 'singleton_clear' not in defaults
-        assert 'singleton_instance' not in defaults
+        # dict_defaults itself is internal, not a state field
+        assert 'dict_defaults' not in defaults
+        assert 'struct_model' not in defaults
 
-
-class TestGameStateSingleton:
-    """Tests for singleton behavior of GameStateBase."""
-
-    def test_singleton_identity(self):
-        """GameStateBase() should return the same instance."""
-        s1 = GameStateBase()
-        s2 = GameStateBase()
-        assert s1 is s2
-
-    def test_singleton_identity_multiple_calls(self):
-        """Multiple calls to GameStateBase() should all return the same instance."""
-        instances = [GameStateBase() for _ in range(10)]
-        assert all(i is instances[0] for i in instances)
-
-    def test_subclass_independent_singleton(self):
-        """Each subclass of GameStateBase should have its own singleton."""
-        class GameStateA(GameStateBase):
-            pass
-
-        class GameStateB(GameStateBase):
-            pass
-
-        a1 = GameStateA()
-        a2 = GameStateA()
-        b1 = GameStateB()
-        b2 = GameStateB()
-        assert a1 is a2
-        assert b1 is b2
-        assert a1 is not b1
-
-    def test_singleton_clear_creates_new_instance(self):
-        """After singleton_clear, a new instance should be returned."""
-        class TempGameState(GameStateBase):
-            pass
-
-        first = TempGameState()
-        TempGameState.singleton_clear()
-        second = TempGameState()
-        assert first is not second
-
-    def test_singleton_instance_method(self):
-        """singleton_instance should return the current instance or None."""
-        class TempGameState(GameStateBase):
-            pass
-
-        assert TempGameState.singleton_instance() is None
-        instance = TempGameState()
-        assert TempGameState.singleton_instance() is instance
+    def test_cannot_instantiate(self):
+        """GameStateBase() should raise TypeError."""
+        with pytest.raises(TypeError, match='cannot be instantiated'):
+            GameStateBase()
 
 
 class TestGameStateInheritance:
@@ -105,270 +51,145 @@ class TestGameStateInheritance:
 
     def test_subclass_custom_defaults(self):
         """Subclass should be able to override server and lang defaults."""
+
         class CustomGameState(GameStateBase):
-            server = 'en'
-            lang = 'en-US'
+            server: str = 'en'
+            lang: str = 'en-US'
 
-        state = CustomGameState()
-        assert state.server == 'en'
-        assert state.lang == 'en-US'
-
-    def test_subclass_with_extra_attrs(self):
-        """Subclass should be able to add extra attributes."""
-        class ExtraGameState(GameStateBase):
-            region = 'na'
-            channel = 'google'
-
-        state = ExtraGameState()
-        assert state.server == 'cn'
-        assert state.lang == 'zh-CN'
-        assert state.region == 'na'
-        assert state.channel == 'google'
+        assert CustomGameState.server == 'en'
+        assert CustomGameState.lang == 'en-US'
 
     def test_subclass_dict_defaults_reflects_overrides(self):
         """dict_defaults should reflect subclass overrides."""
-        class CustomGameState(GameStateBase):
-            server = 'en'
-            extra = 42
 
-        state = CustomGameState()
-        assert state.dict_defaults['server'] == 'en'
-        assert state.dict_defaults['lang'] == 'zh-CN'
-        assert state.dict_defaults['extra'] == 42
+        class CustomGameState(GameStateBase):
+            server: str = 'en'
+            extra: int = 42
+
+        assert CustomGameState.dict_defaults['server'] == 'en'
+        assert CustomGameState.dict_defaults['lang'] == 'zh-CN'
+        assert CustomGameState.dict_defaults['extra'] == 42
 
     def test_subclass_does_not_affect_parent(self):
         """Modifying subclass state should not affect GameStateBase."""
+
         class CustomGameState(GameStateBase):
-            server = 'en'
+            server: str = 'en'
 
-        # Reset GameStateBase singleton to default
-        gs = GameStateBase()
-        gs.server = 'cn'
+        # Reset GameStateBase to default
+        GameStateBase.reset_field('server')
 
-        custom = CustomGameState()
-        custom.server = 'jp'
+        CustomGameState.server = 'jp'
 
-        assert GameStateBase().server == 'cn'
-        assert CustomGameState().server == 'jp'
+        assert GameStateBase.server == 'cn'
+        assert CustomGameState.server == 'jp'
 
     def test_multi_level_inheritance(self):
         """Multi-level inheritance should work correctly."""
+
         class Level1(GameStateBase):
-            server = 'en'
-            custom_field = 'level1'
+            server: str = 'en'
+            custom_field: str = 'level1'
 
         class Level2(Level1):
-            server = 'jp'
-            lang = 'ja-JP'
+            server: str = 'jp'
+            lang: str = 'ja-JP'
 
-        state = Level2()
-        assert state.server == 'jp'
-        assert state.lang == 'ja-JP'
-        assert state.custom_field == 'level1'
-        assert Level2().dict_defaults == {
+        assert Level2.server == 'jp'
+        assert Level2.lang == 'ja-JP'
+        assert Level2.custom_field == 'level1'
+        assert Level2.dict_defaults == {
             'server': 'jp',
             'lang': 'ja-JP',
             'custom_field': 'level1',
         }
 
 
-class TestGameStateSet:
-    """Tests for GameStateBase.set() classmethod."""
+class TestGameStateAssignment:
+    """Tests for direct field assignment."""
 
-    def test_set_success_on_literal_subclass(self):
-        """set() should work on a subclass with Literal annotation."""
+    def test_direct_assignment(self):
+        """Direct assignment should work."""
+
+        class GS(GameStateBase):
+            server: str = 'cn'
+
+        GS.server = 'en'
+        assert GS.server == 'en'
+
+    def test_direct_assignment_literal_valid(self):
+        """Direct assignment with valid Literal value should work."""
         from typing import Literal
 
         class GS(GameStateBase):
             server: Literal['cn', 'en', 'jp', 'tw'] = 'cn'
 
-        GS.set('server', 'en')
-        assert GS().server == 'en'
+        GS.server = 'en'
+        assert GS.server == 'en'
 
-    def test_set_invalid_value_raises(self):
-        """set() should raise ValueError for invalid Literal value."""
+    def test_direct_assignment_literal_invalid_raises(self):
+        """Direct assignment with invalid Literal value should raise ValidationError."""
         from typing import Literal
 
         class GS(GameStateBase):
             server: Literal['cn', 'en'] = 'cn'
 
-        with pytest.raises(ValueError, match='Cannot set GS.server=jp, value invalid'):
-            GS.set('server', 'jp')
+        with pytest.raises(msgspec.ValidationError):
+            GS.server = 'jp'
 
-    def test_set_nonexistent_key_raises(self):
-        """set() should raise AttributeError for non-existent key."""
+    def test_direct_assignment_type_mismatch_raises(self):
+        """Direct assignment with wrong type should raise ValidationError."""
+
         class GS(GameStateBase):
-            pass
+            server: str = 'cn'
 
-        with pytest.raises(AttributeError, match='Cannot set GS.foo=bar, no such attribute'):
-            GS.set('foo', 'bar')
+        with pytest.raises(msgspec.ValidationError):
+            GS.server = 123
 
-    def test_set_persists_in_singleton(self):
-        """Value set via set() should persist on the singleton."""
+    def test_assignment_persists(self):
+        """Value set via direct assignment should persist on the class."""
         from typing import Literal
 
         class GS(GameStateBase):
             server: Literal['cn', 'en'] = 'cn'
 
-        GS.set('server', 'en')
-        assert GS().server == 'en'
-        assert GameStateBase().server == 'cn'  # different class
+        GS.server = 'en'
+        assert GS.server == 'en'
+        # Parent class should not be affected
+        assert GameStateBase.server == 'cn'
 
-    def test_set_reflected_in_get_attrs_set(self):
-        """After set(), get_attrs_set should include the new value."""
+    def test_assignment_reflected_in_is_modified(self):
+        """After assignment, is_modified should reflect the change."""
         from typing import Literal
 
         class GS(GameStateBase):
             server: Literal['cn', 'en'] = 'cn'
 
-        GS.set('server', 'en')
-        assert GS().get_attrs_set()['server'] == 'en'
+        GS.server = 'en'
+        assert GS.is_modified('server')
 
-    def test_set_overwrites_existing(self):
-        """set() should overwrite a previously set value."""
+    def test_assignment_overwrites_existing(self):
+        """Multiple assignments should overwrite previous values."""
         from typing import Literal
 
         class GS(GameStateBase):
             server: Literal['cn', 'en', 'jp'] = 'cn'
 
-        GS.set('server', 'en')
-        GS.set('server', 'jp')
-        assert GS().server == 'jp'
+        GS.server = 'en'
+        GS.server = 'jp'
+        assert GS.server == 'jp'
+        assert GS.is_modified('server')
 
-    def test_set_on_plain_str_annotation(self):
-        """set() should work when annotation is str (no literal validation)."""
-        class GS(GameStateBase):
-            pass
-
-        # server is annotated as str, get_literal returns None → no validation
-        GS.set('server', 'en')
-        assert GS().server == 'en'
-
-    def test_set_lang_with_plain_str(self):
-        """set() on lang should work when annotation is str."""
-        class GS(GameStateBase):
-            pass
-
-        GS.set('lang', 'ja-JP')
-        assert GS().lang == 'ja-JP'
-
-    def test_set_server_delegates_to_set(self):
-        """set_server() should delegate to set() with Literal validation."""
-        from typing import Literal
+    def test_update_via_update_method(self):
+        """update() should work for batch setting."""
 
         class GS(GameStateBase):
-            server: Literal['cn', 'en', 'jp', 'tw'] = 'cn'
+            server: str = 'cn'
+            lang: str = 'zh-CN'
 
-        GS.set_server('en')
-        assert GS().server == 'en'
-
-    def test_set_server_invalid_raises(self):
-        """set_server() should raise ValueError via set()."""
-        from typing import Literal
-
-        class GS(GameStateBase):
-            server: Literal['cn', 'en'] = 'cn'
-
-        with pytest.raises(ValueError, match='Cannot set GS.server=jp, value invalid'):
-            GS.set_server('jp')
-
-    def test_set_lang_delegates_to_set(self):
-        """set_lang() should delegate to set()."""
-        from typing import Literal
-
-        class GS(GameStateBase):
-            lang: Literal['zh-CN', 'en-US', 'ja-JP'] = 'zh-CN'
-
-        GS.set_lang('en-US')
-        assert GS().lang == 'en-US'
-
-
-class TestGameStateMatch:
-    """Tests for match and _match methods."""
-
-    def test_match_single_condition_true(self):
-        """match should return True if single condition matches default."""
-        assert GameStateBase.match(server='cn')
-        assert GameStateBase.match(lang='zh-CN')
-
-    def test_match_single_condition_false(self):
-        """match should return False if single condition doesn't match."""
-        assert not GameStateBase.match(server='en')
-        assert not GameStateBase.match(lang='en-US')
-
-    def test_match_multiple_conditions_all_match(self):
-        """match should return True if all conditions match."""
-        assert GameStateBase.match(server='cn', lang='zh-CN')
-
-    def test_match_multiple_conditions_one_fails(self):
-        """match should return False if any condition fails (AND logic)."""
-        assert not GameStateBase.match(server='cn', lang='en-US')
-        assert not GameStateBase.match(server='en', lang='zh-CN')
-        assert not GameStateBase.match(server='en', lang='en-US')
-
-    def test_match_nonexistent_key(self):
-        """match should return False for non-existent attributes."""
-        assert not GameStateBase.match(nonexistent='value')
-        assert not GameStateBase.match(foo='bar')
-
-    def test_match_mixed_existent_and_nonexistent(self):
-        """match should return False if any key doesn't exist."""
-        assert not GameStateBase.match(server='cn', nonexistent='value')
-        assert not GameStateBase.match(server='cn', lang='zh-CN', fake='attr')
-
-    def test_match_empty_kwargs(self):
-        """match with empty kwargs should return True (vacuous truth)."""
-        assert GameStateBase.match()
-
-    @pytest.mark.parametrize("server, lang, expected", [
-        ('cn', 'zh-CN', True),
-        ('cn', 'en-US', False),
-        ('en', 'zh-CN', False),
-        ('en', 'en-US', False),
-        ('jp', 'ja-JP', False),
-        ('tw', 'zh-TW', False),
-    ])
-    def test_match_parametrized_combinations(self, server, lang, expected):
-        """match with various server/lang combinations."""
-        assert GameStateBase.match(server=server, lang=lang) == expected
-
-    def test_match_after_set_server(self):
-        """match should reflect instance-set values."""
-        class GS(GameStateBase):
-            pass
-
-        state = GS()
-        state.server = 'en'
-        assert GS.match(server='en')
-        assert not GS.match(server='cn')
-
-    def test_match_with_multiple_conditions_after_set(self):
-        """match with multiple conditions should reflect instance-set values."""
-        class GS(GameStateBase):
-            pass
-
-        state = GS()
-        state.server = 'en'
-        state.lang = 'en-US'
-        assert GS.match(server='en', lang='en-US')
-        assert not GS.match(server='en', lang='zh-CN')
-
-    def test_match_classmethod_vs_instance_method(self):
-        """Both match (classmethod) and _match (instance) should produce same results."""
-        state = GameStateBase()
-        assert GameStateBase.match(server='cn') == state._match(server='cn')
-        assert GameStateBase.match(server='en') == state._match(server='en')
-
-    def test_match_on_subclass_with_custom_defaults(self):
-        """match should work on subclasses with custom defaults."""
-        class GS(GameStateBase):
-            server = 'en'
-            lang = 'en-US'
-
-        assert GS.match(server='en')
-        assert GS.match(lang='en-US')
-        assert not GS.match(server='cn')
-        assert not GS.match(server='cn', lang='en-US')
+        GS.update(server='en', lang='en-US')
+        assert GS.server == 'en'
+        assert GS.lang == 'en-US'
 
 
 class TestGameStateWhen:
@@ -495,6 +316,7 @@ class TestGameStateWhen:
 
     def test_propagates_arguments(self):
         """Arguments should be forwarded to the decorated function."""
+
         @GameStateBase.when(server='cn')
         def add(a, b):
             return a + b
@@ -504,6 +326,7 @@ class TestGameStateWhen:
 
     def test_propagates_kwargs(self):
         """Keyword arguments should be forwarded to the decorated function."""
+
         @GameStateBase.when(server='cn')
         def greet(name, greeting='Hello'):
             return f'{greeting}, {name}!'
@@ -513,6 +336,7 @@ class TestGameStateWhen:
 
     def test_returns_none_for_explicitly_null(self):
         """A decorated function that returns None should still return None."""
+
         @GameStateBase.when(server='cn')
         def returns_none():
             return None
@@ -571,9 +395,10 @@ class TestGameStateWhen:
         assert call_count == 1  # not called
 
     def test_when_on_subclass(self):
-        """@when on a subclass should use the subclass singleton for matching."""
+        """@when on a subclass should use the subclass state for matching."""
+
         class GS(GameStateBase):
-            server = 'jp'
+            server: str = 'jp'
 
         call_count = 0
 
@@ -588,8 +413,9 @@ class TestGameStateWhen:
 
     def test_when_on_subclass_no_match(self):
         """@when on a subclass should not match if conditions don't match subclass defaults."""
+
         class GS(GameStateBase):
-            server = 'jp'
+            server: str = 'jp'
 
         call_count = 0
 
@@ -604,11 +430,12 @@ class TestGameStateWhen:
 
     def test_when_on_different_subclasses_independent(self):
         """@when on different subclasses should be independent."""
+
         class GSCn(GameStateBase):
-            server = 'cn'
+            server: str = 'cn'
 
         class GSEn(GameStateBase):
-            server = 'en'
+            server: str = 'en'
 
         call_log = []
 
@@ -627,8 +454,9 @@ class TestGameStateWhen:
         assert en_func() == 'en'
         assert call_log == ['cn', 'en']
 
-    def test_when_with_set_server_on_subclass(self):
-        """@when should reflect set_server changes on the subclass."""
+    def test_when_with_assigned_server_on_subclass(self):
+        """@when should reflect server assignment changes on the subclass."""
+
         class GS(GameStateBase):
             pass
 
@@ -647,16 +475,16 @@ class TestGameStateWhen:
         call_log.clear()
 
         # Change server to 'en'
-        GS.set_server('en')
+        GS.server = 'en'
 
-        # Now condition matches: cases[0] empty cond sets fallback_func,
-        # cases[1]: match(server='en') -> True -> returns func() immediately
+        # Now condition matches
         result = my_func()
         assert result == 'fb'
         assert call_log == ['fallback']
 
     def test_when_returns_none_without_fallback(self):
         """When no conditions match and no fallback is defined, return None."""
+
         @GameStateBase.when(server='en')
         def my_func():
             return 'only_for_en'
@@ -666,6 +494,7 @@ class TestGameStateWhen:
 
     def test_when_decorator_on_classmethod(self):
         """@when should work with classmethods (@classmethod must be outer)."""
+
         class MyClass:
             @classmethod
             @GameStateBase.when(server='cn')
@@ -677,6 +506,7 @@ class TestGameStateWhen:
 
     def test_when_decorator_on_staticmethod(self):
         """@when should work with staticmethods (@staticmethod must be outer)."""
+
         class MyClass:
             @staticmethod
             @GameStateBase.when(server='cn')
@@ -692,6 +522,7 @@ class TestGameStateWhenOnMethod:
 
     def test_instance_method_condition_match(self):
         """@when on instance method should work when condition matches."""
+
         class MyHandler:
             @GameStateBase.when(server='cn')
             def handle(self, value):
@@ -702,6 +533,7 @@ class TestGameStateWhenOnMethod:
 
     def test_instance_method_condition_no_match(self):
         """@when on instance method should return None when condition doesn't match."""
+
         class MyHandler:
             @GameStateBase.when(server='en')
             def handle(self, value):
@@ -712,6 +544,7 @@ class TestGameStateWhenOnMethod:
 
     def test_instance_method_preserves_self(self):
         """@when on instance method should correctly forward self."""
+
         class MyHandler:
             def __init__(self):
                 self.prefix = 'pre_'
@@ -725,6 +558,7 @@ class TestGameStateWhenOnMethod:
 
     def test_instance_method_chained_conditions(self):
         """Chained @when on instance method should work."""
+
         class MyHandler:
             @GameStateBase.when(server='en')
             @GameStateBase.when(server='cn')
@@ -736,6 +570,7 @@ class TestGameStateWhenOnMethod:
 
     def test_instance_method_chained_with_fallback(self):
         """@when with fallback on instance method should fallback when no match."""
+
         class MyHandler:
             @GameStateBase.when(server='en')
             @GameStateBase.when()
@@ -748,6 +583,7 @@ class TestGameStateWhenOnMethod:
 
     def test_instance_method_condition_matches_before_fallback(self):
         """@when condition should match before fallback on instance method."""
+
         class MyHandler:
             @GameStateBase.when(server='cn')
             @GameStateBase.when()
@@ -760,8 +596,9 @@ class TestGameStateWhenOnMethod:
 
     def test_instance_method_with_subclass_state(self):
         """@when on instance method with subclass state should work."""
+
         class GS(GameStateBase):
-            server = 'jp'
+            server: str = 'jp'
 
         class MyHandler:
             @GS.when(server='jp')
@@ -773,6 +610,7 @@ class TestGameStateWhenOnMethod:
 
     def test_multiple_instance_methods_independent(self):
         """Multiple @when-decorated methods on same class should be independent."""
+
         class MyHandler:
             @GameStateBase.when(server='cn')
             def method_a(self, x):
@@ -788,6 +626,7 @@ class TestGameStateWhenOnMethod:
 
     def test_different_instances_same_class(self):
         """Different instances of the same class with @when should work."""
+
         class MyHandler:
             @GameStateBase.when(server='cn')
             def handle(self, value):
@@ -804,6 +643,7 @@ class TestGameStateWhenOnMethodRuntimeChange:
 
     def test_runtime_change_switches_which_method_executes(self):
         """Changing server at runtime should switch which @when method fires."""
+
         class GS(GameStateBase):
             pass
 
@@ -823,21 +663,21 @@ class TestGameStateWhenOnMethodRuntimeChange:
         assert handler.handle_en(1) is None
 
         # Change server to 'en' at runtime
-        GS.set_server('en')
+        GS.server = 'en'
 
         # Now handle_en should match, handle_cn should not
         assert handler.handle_en(2) == 'en:2'
         assert handler.handle_cn(2) is None
 
-        # Change back to 'cn' by directly setting
-        gs = GS()
-        gs.server = 'cn'
+        # Change back to 'cn' by directly setting the class attribute
+        GS.server = 'cn'
 
         assert handler.handle_cn(3) == 'cn:3'
         assert handler.handle_en(3) is None
 
     def test_runtime_change_with_fallback(self):
         """Changing server at runtime should switch between condition and fallback."""
+
         class GS(GameStateBase):
             pass
 
@@ -858,7 +698,7 @@ class TestGameStateWhenOnMethodRuntimeChange:
         call_log.clear()
 
         # Change server to 'en' at runtime
-        GS.set_server('en')
+        GS.server = 'en'
 
         # Now condition 'en' matches (same function, but dispatch path changed)
         assert handler.handle(7) == 70
@@ -866,6 +706,7 @@ class TestGameStateWhenOnMethodRuntimeChange:
 
     def test_runtime_change_multiple_conditions(self):
         """Changing server should switch between multiple @when conditions."""
+
         class GS(GameStateBase):
             pass
 
@@ -887,24 +728,25 @@ class TestGameStateWhenOnMethodRuntimeChange:
         call_log.clear()
 
         # Change to 'en'
-        GS.set_server('en')
+        GS.server = 'en'
         assert handler.handle(2) == 2
         assert call_log == [2]
         call_log.clear()
 
         # Change to 'jp'
-        GS.set_server('jp')
+        GS.server = 'jp'
         assert handler.handle(3) == 3
         assert call_log == [3]
         call_log.clear()
 
         # Change to 'tw' → no match → fallback
-        GS.set_server('tw')
+        GS.server = 'tw'
         assert handler.handle(4) == 4
         assert call_log == [4]
 
     def test_runtime_change_standalone_function(self):
         """Changing server at runtime should switch dispatch of standalone @when functions."""
+
         class GS(GameStateBase):
             pass
 
@@ -923,13 +765,13 @@ class TestGameStateWhenOnMethodRuntimeChange:
         call_log.clear()
 
         # Change to 'en' — first condition matches
-        GS.set_server('en')
+        GS.server = 'en'
         assert my_func('b') == 'ok:b'
         assert call_log == ['b']
         call_log.clear()
 
         # Change to 'jp' — no match → fallback
-        GS.set_server('jp')
+        GS.server = 'jp'
         assert my_func('c') == 'ok:c'
         assert call_log == ['c']
 
@@ -957,6 +799,7 @@ class TestGameStateWhenIntegration:
 
     def test_when_does_not_mutate_global_state(self):
         """Calling a @when-decorated function should not modify GameState."""
+
         class GS(GameStateBase):
             pass
 
@@ -964,17 +807,18 @@ class TestGameStateWhenIntegration:
         def my_func():
             return 'ok'
 
-        assert GS().server == 'cn'
+        assert GS.server == 'cn'
         my_func()
         # State should not change after call
-        assert GS().server == 'cn'
+        assert GS.server == 'cn'
 
-    def test_when_with_custom_state_after_clear(self):
-        """@when should work after singleton_clear on the state class."""
+    def test_when_after_reset(self):
+        """@when should work after resetting the state field to default."""
+
         class GS(GameStateBase):
             pass
 
-        GS.set_server('en')
+        GS.server = 'en'
 
         @GS.when(server='en')
         def my_func():
@@ -982,9 +826,9 @@ class TestGameStateWhenIntegration:
 
         assert my_func() == 'en_result'
 
-        GS.singleton_clear()
+        # Reset to default 'cn'
+        GS.reset_field('server')
 
-        # After clear, the singleton is a new instance with default 'cn'
         @GS.when(server='cn')
         def other_func():
             return 'cn_result'
@@ -1011,6 +855,7 @@ class TestGameStateDispatcherEdgeCases:
 
     def test_dispatcher_wraps_function_name(self):
         """The dispatcher should preserve the original function's name."""
+
         @GameStateBase.when(server='cn')
         def my_special_function():
             return 'ok'
@@ -1019,6 +864,7 @@ class TestGameStateDispatcherEdgeCases:
 
     def test_dispatcher_wraps_function_doc(self):
         """The dispatcher should preserve the original function's docstring."""
+
         @GameStateBase.when(server='cn')
         def my_documented_func():
             """This is my documented function."""
@@ -1028,6 +874,7 @@ class TestGameStateDispatcherEdgeCases:
 
     def test_empty_cases_list(self):
         """A _StateDispatcher with no cases should return None on call."""
+
         def dummy():
             pass
 
