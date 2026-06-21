@@ -6,7 +6,7 @@ from msgspec import Struct
 
 if TYPE_CHECKING:
     from alasio.base.servertime import ServerTime
-    from alasio.config.base import AlasioConfigBase
+    from alasio.config.base.config_base import AlasioConfigBase
 
 
 class GroupProxy(Struct):

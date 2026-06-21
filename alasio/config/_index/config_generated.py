@@ -1,6 +1,6 @@
 import typing as t
 
-from alasio.config.base import AlasioConfigBase
+from alasio.config.base.config_base import AlasioConfigBase
 
 if t.TYPE_CHECKING:
     from ..alasio import alasio_model as alasio

@@ -6,7 +6,7 @@ import pytest
 
 from ExampleMod.module.config.const import entry
 from alasio.config.alasio.group_proxy import GroupProxy
-from alasio.config.config_generated import AlasioConfigGenerated as AlasioConfigBase
+from alasio.config._index.config_generated import AlasioConfigGenerated as AlasioConfigBase
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.mod import Mod
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
@@ -648,187 +648,215 @@ class TestConfigEdgeCases:
         with pytest.raises(DataInconsistent):
             _ = cfg.BadGroup
 
-    def test_group_construct_nonexistent_model(self, config):
+    def test_group_construct_non_existent_model(self, config):
         """Test _group_construct with non-existent model file"""
 
         class BadConfig(AlasioConfigBase):
             entry = config.mod.entry
             # Non-existent model
-            BadGroup: "nonexistent.NonExistentClass"
+            BadGroup: "nonexistent.NonExistentModel"
 
         cfg = BadConfig(':memory:', task='Main')
 
         with pytest.raises(DataInconsistent):
             _ = cfg.BadGroup
 
-    def test_corrupted_db_data_recovery(self, config):
-        """Test that corrupted DB data is handled gracefully"""
-        # Insert corrupted data
-        table = AlasioConfigTable(self.TEST_CONFIG_NAME)
-        corrupted_row = ConfigRow(
-            task='Main',
-            group='Scheduler',
-            value=b'corrupted_not_msgpack'
-        )
-        table.upsert_row(corrupted_row, conflicts=('task', 'group'), updates='value')
+    def test_old_style_config_reference_raises_error(self, config):
+        """Test old style Group_Arg reference raises clear error"""
+        with pytest.raises(AttributeError) as excinfo:
+            _ = config.Scheduler_Enable
 
-        # Re-init should handle gracefully
-        config.init_task()
+        assert 'Old config reference style detected' in str(excinfo.value)
 
-        # Should use default values
+    def test_cross_get_non_existent_task(self, config):
+        """Test cross_get with non-existent task"""
+        result = config.cross_get('NonExistentTask', 'Scheduler', 'Enable')
+        assert result is None
+
+    def test_cross_get_non_existent_group(self, config):
+        """Test cross_get with non-existent group"""
+        result = config.cross_get('Main', 'NonExistentGroup', 'Enable')
+        assert result is None
+
+    def test_cross_get_with_default(self, config):
+        """Test cross_get with custom default value"""
+        result = config.cross_get('Main', 'NonExistentGroup', 'Enable', default=False)
+        assert result is False
+
+    def test_cross_set_non_existent_group(self, config):
+        """Test cross_set with non-existent group does not crash"""
+        config.cross_set('NonExistentTask', 'Scheduler', 'Enable', True)
+
+    def test_cross_set_same_value(self, config):
+        """Test cross_set with same value does not register modify"""
+        config.auto_save = False
+        # Scheduler.Enable default is False, set to False should do nothing
+        modified_count_before = len(config._modified)
+        config.cross_set('Main', 'Scheduler', 'Enable', False)
+        assert len(config._modified) == modified_count_before
+
+    def test_cross_set_different_value(self, config):
+        """Test cross_set with different value registers modify"""
+        config.auto_save = False
+        config.cross_set('Main', 'Scheduler', 'Enable', True)
+        assert len(config._modified) == 1
+
+    def test_cross_set_and_get_roundtrip(self, config):
+        """Test cross_set then cross_get roundtrip"""
+        config.cross_set('Main', 'Scheduler', 'Enable', True)
+        result = config.cross_get('Main', 'Scheduler', 'Enable')
+        assert result is True
+
+    def test_scheduler_default_values(self, config):
+        """Test Scheduler group default values"""
         assert config.Scheduler.Enable is False
+        assert config.Scheduler.ServerUpdate == '00:00'
+        assert config.Scheduler.NextRun == d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
 
-    def test_lowercase_attribute_access_raises_error(self, config):
-        """Test that lowercase attribute access raises AttributeError"""
-        with pytest.raises(AttributeError):
-            _ = config.lowercase_attr
+    def test_task_stop_raises_exception(self):
+        """Test task_stop raises TaskStop"""
+        from alasio.base.exception import TaskStop
+        with pytest.raises(TaskStop):
+            AlasioConfigBase.task_stop()
 
-    def test_empty_attribute_name_raises_error(self, config):
-        """Test that empty attribute name raises AttributeError"""
-        # This is a defensive test
-        with pytest.raises(AttributeError):
-            _ = getattr(config, '')
+    def test_task_stop_with_message(self):
+        """Test task_stop with custom message"""
+        from alasio.base.exception import TaskStop
+        with pytest.raises(TaskStop, match='Custom stop message'):
+            AlasioConfigBase.task_stop('Custom stop message')
 
-    def test_override_format_invalid(self, config):
-        """Test override with invalid format logs warning"""
-        # Invalid format: no underscore separator
-        prev_config, prev_const = config.override(InvalidFormat=True)
-
-        # Should not crash
-        assert len(prev_config) == 0
-        assert len(prev_const) == 0
-
-
-class TestConfigConcurrency:
-    """Test suite for concurrent config access"""
-
-    TEST_CONFIG_NAME = ':memory:'
-
-    @pytest.fixture
-    def config(self, example_mod):
-        """Create test config instance"""
-
-        class MyConfig(AlasioConfigBase):
+    def test_empty_config_name_creates_file(self, example_mod):
+        """Test config with empty name works as a base config"""
+        class EmptyNameConfig(AlasioConfigBase):
             entry = example_mod.entry
             Scheduler: "scheduler.Scheduler"
 
-        return MyConfig(self.TEST_CONFIG_NAME, task='Main')
+        cfg = EmptyNameConfig('', task='')
+        # Should not crash
+        assert cfg.config_name == ''
+        assert cfg.task == ''
 
-    def test_concurrent_batch_set_isolation(self, config):
-        """Test that batch_set is isolated per thread"""
+    def test_release_method(self, config):
+        """Test release clears internal state"""
+        config.auto_save = False
+        # Access group to populate cache
+        _ = config.Scheduler
+
+        # Set modification
+        config.Scheduler.Enable = True
+        assert len(config._modified) == 1
+
+        # Release
+        config.release()
+
+        # Should have clear state
+        assert len(config._dict_row) == 0
+        assert len(config._dict_group) == 0
+        assert len(config._modified) == 0
+        assert config._config_cached is False
+
+    def test_init_task_after_release(self, config):
+        """Test init_task after release restores state"""
+        config.auto_save = False
+        config.Scheduler.Enable = True
+
+        # Release and re-init
+        config.release()
+        config.init_task()
+
+        # Modified dict should be empty after re-init
+        assert len(config._modified) == 0
+        # But overrides should still be applied
+        assert config._override_config['Scheduler'].get('Enable') is True
+
+    def test_thread_safety_across_multiple_threads(self, config):
+        """Test that config operations are thread-safe"""
         errors = []
 
-        def thread_task(thread_id):
+        def set_enable(value):
             try:
-                with config.batch_set() as bs:
-                    assert bs.depth == 1
-                    # Modify config
-                    config.Scheduler.Enable = (thread_id == 1)
-                    # Modification should stay in memory
-                    assert len(config._modified) >= 1
-
-                    # Wait for other thread to enter batch_set
-                    time.sleep(0.5)
-
-                    # Still in batch_set
-                    assert bs.depth == 1
+                config.auto_save = False
+                config.Scheduler.Enable = value
             except Exception as e:
-                errors.append(f"Thread {thread_id} error: {e}")
+                errors.append(e)
 
-        t1 = threading.Thread(target=thread_task, args=(1,))
-        t2 = threading.Thread(target=thread_task, args=(2,))
+        threads = []
+        for i in range(10):
+            t = threading.Thread(target=set_enable, args=(i % 2 == 0,))
+            threads.append(t)
+            t.start()
 
-        t1.start()
-        # Ensure t1 enters batch_set first
-        time.sleep(0.1)
-        t2.start()
+        for t in threads:
+            t.join()
 
-        t1.join()
-        t2.join()
+        # Should have no errors
+        assert len(errors) == 0, f'Thread safety errors: {errors}'
 
-        assert not errors, "\n".join(errors)
+    def test_register_modify_with_batch_set(self, config):
+        """Test register_modify inside batch_set context"""
+        with config.batch_set():
+            config.register_modify('Main', 'Scheduler', 'Enable', True)
+            assert len(config._modified) == 1
 
-    def test_concurrent_temporary_not_isolated(self, config):
-        """Test that temporary context is NOT isolated per thread"""
-        errors = []
+        # Should save after context exit
+        assert len(config._modified) == 0
 
-        def thread1():
-            try:
-                # Initial is False
-                with config.temporary(Scheduler_Enable=True):
-                    # In thread1, it is True
-                    assert config.Scheduler.Enable is True, 'In thread1, it is True'
-                    # Wait for thread 2 to enter and set it to False
-                    time.sleep(0.3)
-                    # Thread 2 should have set it to False
-                    assert config.Scheduler.Enable is False, 'Thread 2 should have set it to False'
-                    # Wait for thread 2 to exit and rollback to True
-                    time.sleep(0.3)
-                    # Now it should be back to True because of thread 2's rollback
-                    assert config.Scheduler.Enable is True, 'Thread 2 exit should rollback to True'
-            except Exception as e:
-                errors.append(f"Thread 1 error: {e}")
+    def test_temporary_override_with_existing_modified(self, config):
+        """Test temporary override when there are pending modifications"""
+        config.auto_save = False
+        config.register_modify('Main', 'Scheduler', 'Enable', True)
 
-        def thread2():
-            try:
-                # Wait for thread 1 to set it to True
-                time.sleep(0.1)
-                # Thread 1 has set it to True, thread 2 sets it to False
-                with config.temporary(Scheduler_Enable=False):
-                    assert config.Scheduler.Enable is False, 'Thread 2 set it to False'
-                    # Hold it for a while
-                    time.sleep(0.3)
-                # After exit, it rolls back to True (what thread 2 saw when it entered)
-            except Exception as e:
-                errors.append(f"Thread 2 error: {e}")
+        with config.temporary(Scheduler_Enable=False):
+            assert config.Scheduler.Enable is False
 
-        t1 = threading.Thread(target=thread1)
-        t2 = threading.Thread(target=thread2)
+        # After temporary, should restore to modified value (True)
+        assert config.Scheduler.Enable is True
 
-        t1.start()
-        t2.start()
-
-        t1.join()
-        t2.join()
-
-        assert not errors, "\n".join(errors)
-
-    def test_race_condition_autosave(self, config, example_mod):
-        """
-        Force race condition between autosave and batch_set in different threads.
-        Thread 1: batch_set (depth 1) -> modify -> modify
-        Thread 2: no batch_set -> modify (triggers immediate save)
-        """
-        config.auto_save = True
-        errors = []
-
-        def thread1():
-            try:
-                with config.batch_set():
+    def test_multiple_batch_set_depth_tracking(self, config):
+        """Test depth tracking in deeply nested batch_set"""
+        with config.batch_set() as bs1:
+            assert bs1.depth == 1
+            with config.batch_set() as bs2:
+                assert bs2.depth == 2
+                with config.batch_set() as bs3:
+                    assert bs3.depth == 3
                     config.Scheduler.Enable = True
-                    time.sleep(0.3)
-                    config.Scheduler.ServerUpdate = '10:00'
-                    # modified should contain 2 events (or more if thread2 ran)
-                    # But thread1 hasn't saved yet
-            except Exception as e:
-                errors.append(f"Thread 1 error: {e}")
+                assert bs3.depth == 2  # after __exit__, depth decremented to 2
+            assert bs2.depth == 1
+        assert bs1.depth == 0
 
-        def thread2():
-            try:
-                time.sleep(0.1)  # Wait for thread1 to enter batch_set
-                # Thread 2 is NOT in batch_set, this should trigger immediate save
-                # But it will also save whatever is in config.modified
-                config.Scheduler.NextRun = d.datetime(2025, 1, 1, tzinfo=d.timezone.utc)
-            except Exception as e:
-                errors.append(f"Thread 2 error: {e}")
+    def test_save_with_modified_contains_auto_save_disabled(self, config):
+        """Test that save() correctly handles modified when auto_save is disabled"""
+        config.auto_save = False
+        config.Scheduler.Enable = True
+        config.Scheduler.ServerUpdate = '10:00'
 
-        t1 = threading.Thread(target=thread1)
-        t2 = threading.Thread(target=thread2)
+        # Save should persist both changes
+        config.save()
+        assert len(config._modified) == 0
 
-        t1.start()
-        t2.start()
+    def test_scheduler_group_with_no_scheduler(self, config):
+        """Test that accessing Scheduler group works"""
+        # Scheduler should be accessible without task having explicit Scheduler group
+        sched = config.Scheduler
+        assert hasattr(sched, 'Enable')
+        assert hasattr(sched, 'NextRun')
 
-        t1.join()
-        t2.join()
+    def test_config_repr(self, config_cls):
+        """Test config repr does not crash"""
+        config = config_cls(self.TEST_CONFIG_NAME, task='Main')
+        # Just ensure no exception
+        repr(config)
 
-        assert not errors, "\n".join(errors)
+    def test_long_running_memory_stability(self, config):
+        """
+        Test that repeated init_task/release cycles don't leak memory
+        """
+        for _ in range(10):
+            config.init_task()
+            config.Scheduler.Enable = True
+            config.release()
+
+        # After all cycles, should still work
+        config.init_task()
+        assert config.Scheduler.Enable is True

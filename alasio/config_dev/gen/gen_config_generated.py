@@ -32,7 +32,7 @@ class GenConfigGenerated(CrossNavGenerator):
             gen.FromImport('alasio.config._index.config_generated').Import('AlasioConfigGenerated')
             gen.FromImport('..const').Import('entry')
         else:
-            gen.FromImport('alasio.config.base').Import('AlasioConfigBase')
+            gen.FromImport('alasio.config.base.config_base').Import('AlasioConfigBase')
 
         # TYPE_CHECKING block - imports only used for type hints
         with gen.If('t.TYPE_CHECKING'):

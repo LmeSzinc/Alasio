@@ -1,7 +1,7 @@
 from typing import Generic, Optional, TypeVar
 
-from alasio.config.base import BatchSetContext, TemporaryContext
 from alasio.config._index.config_generated import AlasioConfigGenerated
+from alasio.config.base.config_base import BatchSetContext, TemporaryContext
 from alasio.ext.cache import cached_property
 from alasio.logger import logger
 
