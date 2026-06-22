@@ -207,11 +207,11 @@ class _StateMeta(type):
             # unique key
             key = (func.__module__, func.__qualname__)
 
-            if key not in _StateDispatcher.FUNC_REGISTRY:
+            if key not in _StateDispatcher.REGISTRY:
                 dispatcher = _StateDispatcher(func, cls)
-                _StateDispatcher.FUNC_REGISTRY[key] = dispatcher
+                _StateDispatcher.REGISTRY[key] = dispatcher
             else:
-                dispatcher = _StateDispatcher.FUNC_REGISTRY[key]
+                dispatcher = _StateDispatcher.REGISTRY[key]
 
             # if decorator is chained, extract the function from last case
             if isinstance(func, _StateDispatcher):
@@ -268,7 +268,7 @@ class TaskState(metaclass=_StateMeta):
 
 class _StateDispatcher:
     # key: (module name, qualname), value: callable function
-    FUNC_REGISTRY = {}
+    REGISTRY = {}
 
     def __init__(self, first_func, state_cls: "_StateMeta"):
         self.state_cls = state_cls
@@ -344,3 +344,131 @@ class GameStateBase(GlobalState):
             if cls.match(lang=item):
                 return True
         return False
+
+
+class _ConfigDispatcher:
+    """
+    Dispatcher for Config.when() decorated methods.
+
+    When called, checks each condition against the instance's config attribute
+    and dispatches to the matching method.
+    """
+
+    def __init__(self, first_func):
+        self.cases = []
+        functools.update_wrapper(self, first_func)
+
+    def __call__(self, *args, **call_kwargs):
+        try:
+            instance = args[0]
+        except IndexError:
+            raise TypeError(
+                f'{self.__name__} must be called as a bound method, '
+                f'method decorated by Config.when() must have `self` as first argument'
+            )
+        try:
+            config = instance.config
+        except AttributeError:
+            raise AttributeError(f'Method decorated by Config.when() must have `self.config`')
+        fallback_func = None
+        last_func = None
+
+        for cond, func in self.cases:
+            last_func = func
+            if not cond:
+                fallback_func = func
+                continue
+            matched = True
+            for key, value in cond.items():
+                config_value = getattr(config, key)
+                if config_value != value:
+                    matched = False
+                    break
+            if matched:
+                return func(*args, **call_kwargs)
+
+        if fallback_func is not None:
+            return fallback_func(*args, **call_kwargs)
+
+        if last_func is not None:
+            logger.warning(
+                f'Config.when() no condition matched for {last_func.__name__!r}, '
+                f'using last defined function'
+            )
+            return last_func(*args, **call_kwargs)
+
+        return None
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        return types.MethodType(self, instance)
+
+
+class Config:
+    """
+    Config class with when() decorator for method dispatch.
+
+    Examples:
+        class MyTask:
+            config = MyConfig()
+
+            @Config.when(DEVICE_SCREENSHOT_METHOD='adb')
+            def screenshot(self):
+                ...
+    """
+
+    # key: (module name, qualname), value: callable function
+    REGISTRY = {}
+
+    @classmethod
+    def when(cls, **kwargs):
+        """
+        Return a decorator that runs the method only if config matches the condition.
+
+        The decorated method must have `self` as first argument,
+        and the instance must have a `config` attribute.
+
+        Examples:
+            @Config.when(DEVICE_SCREENSHOT_METHOD='adb')
+            def screenshot(self):
+                # this only runs when self.config.DEVICE_SCREENSHOT_METHOD == 'adb'
+
+            @Config.when(DEVICE_SCREENSHOT_METHOD='adb')
+            @Config.when(DEVICE_SCREENSHOT_METHOD='uiautomator2')
+            def screenshot(self):
+                # this runs when either condition matches
+
+            @Config.when()
+            def screenshot(self):
+                # fallback method if no conditions matched
+        """
+
+        def decorator(func):
+            key = (func.__module__, func.__qualname__)
+
+            if key not in cls.REGISTRY:
+                dispatcher = _ConfigDispatcher(func)
+                cls.REGISTRY[key] = dispatcher
+            else:
+                dispatcher = cls.REGISTRY[key]
+
+            # if decorator is chained, extract the function from last case
+            if isinstance(func, _ConfigDispatcher):
+                try:
+                    func = dispatcher.cases[-1][1]
+                except IndexError:
+                    pass
+
+            # replace existing entry with same kwargs, or append new one
+            # this prevents unbounded growth when decorating dynamically defined methods
+            for i, (cond, _) in enumerate(dispatcher.cases):
+                if cond == kwargs:
+                    dispatcher.cases[i] = (kwargs, func)
+                    break
+            else:
+                dispatcher.cases.append((kwargs, func))
+
+            return dispatcher
+
+        return decorator
