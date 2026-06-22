@@ -221,8 +221,14 @@ class _StateMeta(type):
                     # this shouldn't happen
                     pass
 
-            # add cases
-            dispatcher.cases.append((kwargs, func))
+            # replace existing entry with same kwargs, or append new one
+            # this prevents unbounded growth when when() decorates dynamically defined functions
+            for i, (cond, _) in enumerate(dispatcher.cases):
+                if cond == kwargs:
+                    dispatcher.cases[i] = (kwargs, func)
+                    break
+            else:
+                dispatcher.cases.append((kwargs, func))
             return dispatcher
 
         return decorator

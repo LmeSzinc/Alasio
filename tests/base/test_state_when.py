@@ -733,3 +733,102 @@ class TestGameStateDispatcherEdgeCases:
         result = my_func()
         assert result == 'last_fallback'
         assert call_log == ['fallback']
+
+
+class TestWhenNoMemoryLeak:
+    """Test that when() does not leak memory when decorating dynamically defined functions."""
+
+    def setup_method(self):
+        """Clean registry before each test."""
+        _StateDispatcher.FUNC_REGISTRY.clear()
+        GameStateBase.reset_all_fields()
+
+    def test_single_when_in_factory_no_leak(self):
+        """Factory with single @when should not grow cases."""
+
+        def make():
+            @GameStateBase.when(server='cn')
+            def handler():
+                return 'ok'
+
+            return handler
+
+        h1 = make()
+        key = list(_StateDispatcher.FUNC_REGISTRY.keys())[0]
+        dispatcher = _StateDispatcher.FUNC_REGISTRY[key]
+        assert len(dispatcher.cases) == 1
+        assert h1() == 'ok'
+
+        for _ in range(10):
+            make()
+
+        assert len(dispatcher.cases) == 1
+        assert h1() == 'ok'
+
+    def test_chained_when_in_factory_no_leak(self):
+        """Factory with chained @when should not grow cases."""
+
+        def make():
+            @GameStateBase.when(server='en')
+            @GameStateBase.when(server='cn')
+            def handler():
+                return 'chained'
+
+            return handler
+
+        h1 = make()
+        key = list(_StateDispatcher.FUNC_REGISTRY.keys())[0]
+        dispatcher = _StateDispatcher.FUNC_REGISTRY[key]
+        assert len(dispatcher.cases) == 2
+
+        for _ in range(10):
+            make()
+
+        assert len(dispatcher.cases) == 2
+
+    def test_chained_with_fallback_in_factory_no_leak(self):
+        """Factory with chained @when + fallback should not grow cases."""
+
+        def make():
+            @GameStateBase.when(server='en')
+            @GameStateBase.when()
+            def handler():
+                return 'fallback'
+
+            return handler
+
+        h1 = make()
+        key = list(_StateDispatcher.FUNC_REGISTRY.keys())[0]
+        dispatcher = _StateDispatcher.FUNC_REGISTRY[key]
+        assert len(dispatcher.cases) == 2
+
+        for _ in range(10):
+            make()
+
+        assert len(dispatcher.cases) == 2
+
+    def test_multiple_factories_independent(self):
+        """Different factory functions should have independent registries."""
+
+        def make_a():
+            @GameStateBase.when(server='cn')
+            def handler_a():
+                return 'a'
+
+            return handler_a
+
+        def make_b():
+            @GameStateBase.when(server='en')
+            def handler_b():
+                return 'b'
+
+            return handler_b
+
+        make_a()
+        make_a()
+        make_b()
+        make_b()
+
+        assert len(_StateDispatcher.FUNC_REGISTRY) == 2
+        for dispatcher in _StateDispatcher.FUNC_REGISTRY.values():
+            assert len(dispatcher.cases) == 1
