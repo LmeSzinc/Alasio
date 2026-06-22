@@ -40,7 +40,7 @@ class Raw(CodeObject):
         else:
             # keep indent from input, only trim leading/trailing empty lines
             text = text.lstrip('\n').rstrip()
-        self.lines = text.splitlines()
+        self.lines = text.splitlines() if text else ['']
         self._add_indent = indent
 
     def generate(self):

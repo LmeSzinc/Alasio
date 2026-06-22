@@ -68,20 +68,20 @@ class MyClass:
         assert code == 'print(1)\n'
 
     def test_raw_empty_text(self):
-        """Raw with empty text should produce nothing."""
+        """Raw with empty text should produce one blank line."""
         gen = CodeGen()
         gen.Raw('')
 
         code = gen.generate_str()
-        assert code == ''
+        assert code == '\n'
 
     def test_raw_empty_text_indent_false(self):
-        """Raw with empty text and indent=False should produce nothing."""
+        """Raw with empty text and indent=False should produce one blank line."""
         gen = CodeGen()
         gen.Raw('', indent=False)
 
         code = gen.generate_str()
-        assert code == ''
+        assert code == '\n'
 
     def test_raw_multiline_no_extra_leading_trailing(self):
         """Raw should strip leading/trailing empty lines regardless of indent mode."""

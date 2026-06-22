@@ -507,6 +507,72 @@ class TestExactSourcePreservation:
             "        return"
         ]
 
+    def test_preserves_whitespace_only_empty_lines(self):
+        """Blank lines containing only whitespace should be preserved."""
+        source = """class Spacing:
+    def process(self):
+        step1()
+   \t
+        step2()
+
+        step3()
+        return
+"""
+        result = extract_method(source)
+        assert result["Spacing"]["process"] == [
+            "    def process(self):",
+            "        step1()",
+            "   \t",
+            "        step2()",
+            "",
+            "        step3()",
+            "        return"
+        ]
+
+    def test_preserves_consecutive_empty_lines(self):
+        """Multiple consecutive empty lines within a method should be preserved."""
+        source = """class Spacing:
+    def process(self):
+        step1()
+
+
+        step2()
+
+
+
+        step3()
+        return
+"""
+        result = extract_method(source)
+        assert result["Spacing"]["process"] == [
+            "    def process(self):",
+            "        step1()",
+            "",
+            "",
+            "        step2()",
+            "",
+            "",
+            "",
+            "        step3()",
+            "        return"
+        ]
+
+    def test_preserves_empty_line_at_start_of_method_body(self):
+        """Empty line right after the def line should be preserved."""
+        source = """class Spacing:
+    def process(self):
+
+        step1()
+        return
+"""
+        result = extract_method(source)
+        assert result["Spacing"]["process"] == [
+            "    def process(self):",
+            "",
+            "        step1()",
+            "        return"
+        ]
+
     def test_preserves_comment_lines(self):
         """Comments inside a method should be preserved."""
         source = """class Docs:
