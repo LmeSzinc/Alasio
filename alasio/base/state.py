@@ -1,6 +1,6 @@
 import functools
 import types
-from typing import Any, TYPE_CHECKING, Type
+from typing import Any, TYPE_CHECKING
 
 import msgspec
 from msgspec._core import Factory
@@ -167,6 +167,61 @@ class _StateMeta(type):
                 break
         return matched
 
+    def when(cls, **kwargs):
+        """
+        Return a decorator that runs the function only if the state class matches the condition
+
+        Examples:
+            @GameState.when(server='cn')
+            def commission_parse(...):
+                # this only runs when server='cn'
+
+            @GameState.when(server='en')
+            @GameState.when(server='jp')
+            def commission_parse(...):
+                # this only runs when server='en' or server='jp'
+
+            @GameState.when()
+            def commission_parse(...):
+                # fallback method if no conditions matched
+                # If no fallback method is defined and state doesn't match the condition above,
+                # calling commission_parse() will do nothing and return None
+
+            # the correct method will be called, depending on state
+            result = commission_parse(...)
+
+        Note that when using with @classmethod or @staticmethod, when() should at inner
+        Examples:
+            @classmethod
+            @GameStateBase.when(server='cn')
+            def class_method(cls):
+                return f'class_method_on_{cls.__name__}'
+        """
+
+        def decorator(func):
+            # unique key
+            key = (func.__module__, func.__qualname__)
+
+            if key not in _StateDispatcher.FUNC_REGISTRY:
+                dispatcher = _StateDispatcher(func, cls)
+                _StateDispatcher.FUNC_REGISTRY[key] = dispatcher
+            else:
+                dispatcher = _StateDispatcher.FUNC_REGISTRY[key]
+
+            # if decorator is chained, extract the function from last case
+            if isinstance(func, _StateDispatcher):
+                try:
+                    func = dispatcher.cases[-1][1]
+                except IndexError:
+                    # this shouldn't happen
+                    pass
+
+            # add cases
+            dispatcher.cases.append((kwargs, func))
+            return dispatcher
+
+        return decorator
+
 
 class GlobalState(metaclass=_StateMeta):
     """
@@ -204,7 +259,7 @@ class _StateDispatcher:
     # key: (module name, qualname), value: callable function
     FUNC_REGISTRY = {}
 
-    def __init__(self, first_func, state_cls: "Type[GameStateBase]"):
+    def __init__(self, first_func, state_cls: "_StateMeta"):
         self.state_cls = state_cls
         # [(conditions_dict, target_function)]
         self.cases = []
@@ -269,59 +324,3 @@ class GameStateBase(GlobalState):
             if cls.match(lang=item):
                 return True
         return False
-
-    @classmethod
-    def when(cls, **kwargs):
-        """
-        Return a decorator that runs the function only if GameState matches the condition
-
-        Examples:
-            @GameState.when(server='cn')
-            def commission_parse(...):
-                # this only runs when server='cn'
-
-            @GameState.when(server='en')
-            @GameState.when(server='jp')
-            def commission_parse(...):
-                # this only runs when server='en' or server='jp'
-
-            @GameState.when()
-            def commission_parse(...):
-                # fallback method if no conditions matched
-                # If no fallback method is defined and GameState doesn't match the condition above,
-                # calling commission_parse() will do nothing and return None
-
-            # the correct method will be called, depending on GameState
-            result = commission_parse(...)
-
-        Note that when using with @classmethod or @staticmethod, when() should at inner
-        Examples:
-            @classmethod
-            @GameStateBase.when(server='cn')
-            def class_method(cls):
-                return f'class_method_on_{cls.__name__}'
-        """
-
-        def decorator(func):
-            # unique key
-            key = (func.__module__, func.__qualname__)
-
-            if key not in _StateDispatcher.FUNC_REGISTRY:
-                dispatcher = _StateDispatcher(func, cls)
-                _StateDispatcher.FUNC_REGISTRY[key] = dispatcher
-            else:
-                dispatcher = _StateDispatcher.FUNC_REGISTRY[key]
-
-            # if decorator is chained, extract the function from last case
-            if isinstance(func, _StateDispatcher):
-                try:
-                    func = dispatcher.cases[-1][1]
-                except IndexError:
-                    # this shouldn't happen
-                    pass
-
-            # add cases
-            dispatcher.cases.append((kwargs, func))
-            return dispatcher
-
-        return decorator
