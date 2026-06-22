@@ -144,6 +144,37 @@ class AlasioConfigBaseTask(AlasioConfigBaseAccess):
         self.cross_set(task, 'Scheduler', 'NextRun', run)
         self.get_task_schedule()
 
+    def get_all_tasks(self):
+        """
+        Get all task names that have a Scheduler group.
+
+        Returns:
+            list[str]: List of task names with Scheduler, in task index order.
+        """
+        return [task_name for task_name, _ in self.mod.iter_task_scheduler_group()]
+
+    def task_limit_nextrun(self, task, future):
+        """
+        Limit the next run time of one or more tasks.
+        If the task's next run is later than ``future``, set it to ``now``.
+
+        Args:
+            task (str | list[str]): Task name or list of task names.
+            future (datetime): Upper bound for next run. Tasks with a next run
+                later than this time will be reset to now.
+        """
+        now = getnow().replace(microsecond=0)
+        if isinstance(task, str):
+            task = [task]
+
+        for t in task:
+            next_run = self.cross_get(t, 'Scheduler', 'NextRun', default=None)
+            if next_run is None:
+                continue
+            if next_run > future:
+                # logger.info(f'Limit next run of task `{t}` from {next_run} to {now}')
+                self.cross_set(t, 'Scheduler', 'NextRun', now)
+
     def is_task_enabled(self, task):
         return bool(self.cross_get(task, 'Scheduler', 'Enable', default=False))
 
