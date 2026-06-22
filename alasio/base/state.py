@@ -6,6 +6,8 @@ import msgspec
 from msgspec._core import Factory
 from msgspecerror import get_class_annotation_dict
 
+from alasio.logger import logger
+
 
 class _StateMeta(type):
     if TYPE_CHECKING:
@@ -196,6 +198,9 @@ class _StateMeta(type):
             @GameStateBase.when(server='cn')
             def class_method(cls):
                 return f'class_method_on_{cls.__name__}'
+
+        Note that if no fallback method is defined and current state doesn't match any conditions,
+        the last defined method will be called.
         """
 
         def decorator(func):
@@ -267,8 +272,10 @@ class _StateDispatcher:
 
     def __call__(self, *args, **call_kwargs):
         fallback_func = None
+        last_func = None
 
         for cond, func in self.cases:
+            last_func = func
             if not cond:
                 fallback_func = func
                 continue
@@ -277,6 +284,13 @@ class _StateDispatcher:
 
         if fallback_func is not None:
             return fallback_func(*args, **call_kwargs)
+
+        if last_func is not None:
+            logger.warning(
+                f'when() no condition matched for {last_func.__name__!r}, '
+                f'using last defined function on {self.state_cls.__name__}'
+            )
+            return last_func(*args, **call_kwargs)
 
         return None
 

@@ -7,6 +7,7 @@ through the _StateMeta metaclass.
 import pytest
 
 from alasio.base.state import GameStateBase, _StateDispatcher
+from alasio.logger import logger
 
 
 class TestGameStateWhen:
@@ -27,7 +28,7 @@ class TestGameStateWhen:
         assert call_count == 1
 
     def test_single_condition_no_match(self):
-        """@when with non-matching condition should return None and not call."""
+        """@when with non-matching condition should call last defined function and log warning."""
         call_count = 0
 
         @GameStateBase.when(server='en')
@@ -36,9 +37,11 @@ class TestGameStateWhen:
             call_count += 1
             return 42
 
-        result = my_func()
-        assert result is None
-        assert call_count == 0
+        with logger.mock_capture_writer() as capture:
+            result = my_func()
+        assert result == 42
+        assert call_count == 1
+        assert capture.backend.any_contains('no condition matched')
 
     def test_fallback_empty_when(self):
         """@when() without kwargs should always call the function."""
@@ -116,8 +119,8 @@ class TestGameStateWhen:
         assert result == 'ok'
         assert call_log == ['matched']
 
-    def test_no_fallback_no_match_returns_none(self):
-        """Without fallback and no matching condition, should return None."""
+    def test_no_fallback_no_match_calls_last_defined_function(self):
+        """Without fallback and no matching condition, should call last defined function and log warning."""
         call_count = 0
 
         @GameStateBase.when(server='en')
@@ -127,9 +130,11 @@ class TestGameStateWhen:
             call_count += 1
             return 'should_not_happen'
 
-        result = my_func()
-        assert result is None
-        assert call_count == 0
+        with logger.mock_capture_writer() as capture:
+            result = my_func()
+        assert result == 'should_not_happen'
+        assert call_count == 1
+        assert capture.backend.any_contains('no condition matched')
 
     def test_propagates_arguments(self):
         """Arguments should be forwarded to the decorated function."""
@@ -176,7 +181,7 @@ class TestGameStateWhen:
         assert call_count == 1
 
     def test_multiple_conditions_partial_match(self):
-        """@when with multiple kwargs should fail if any condition doesn't match."""
+        """@when with multiple kwargs should log warning and call last defined function."""
         call_count = 0
 
         @GameStateBase.when(server='cn', lang='en-US')
@@ -186,8 +191,11 @@ class TestGameStateWhen:
             return 'ok'
 
         # Default lang is 'zh-CN', not 'en-US'
-        assert my_func() is None
-        assert call_count == 0
+        with logger.mock_capture_writer() as capture:
+            result = my_func()
+        assert result == 'ok'
+        assert call_count == 1
+        assert capture.backend.any_contains('no condition matched')
 
     def test_when_with_lang_condition(self):
         """@when with lang condition should work."""
@@ -208,8 +216,11 @@ class TestGameStateWhen:
             call_count += 1
             return 'en_func'
 
-        assert other_func() is None
-        assert call_count == 1  # not called
+        with logger.mock_capture_writer() as capture:
+            result = other_func()
+        assert result == 'en_func'
+        assert call_count == 2  # called as fallback
+        assert capture.backend.any_contains('no condition matched')
 
     def test_when_on_subclass(self):
         """@when on a subclass should use the subclass state for matching."""
@@ -229,7 +240,7 @@ class TestGameStateWhen:
         assert call_count == 1
 
     def test_when_on_subclass_no_match(self):
-        """@when on a subclass should not match if conditions don't match subclass defaults."""
+        """@when on a subclass should call last defined function and log warning."""
 
         class GS(GameStateBase):
             server: str = 'jp'
@@ -242,8 +253,11 @@ class TestGameStateWhen:
             call_count += 1
             return 'cn_but_gs_is_jp'
 
-        assert my_func() is None
-        assert call_count == 0
+        with logger.mock_capture_writer() as capture:
+            result = my_func()
+        assert result == 'cn_but_gs_is_jp'
+        assert call_count == 1
+        assert capture.backend.any_contains('no condition matched')
 
     def test_when_on_different_subclasses_independent(self):
         """@when on different subclasses should be independent."""
@@ -299,15 +313,17 @@ class TestGameStateWhen:
         assert result == 'fb'
         assert call_log == ['fallback']
 
-    def test_when_returns_none_without_fallback(self):
-        """When no conditions match and no fallback is defined, return None."""
+    def test_when_returns_last_func_without_fallback(self):
+        """When no conditions match and no fallback, call last defined function and log warning."""
 
         @GameStateBase.when(server='en')
         def my_func():
             return 'only_for_en'
 
-        result = my_func()
-        assert result is None
+        with logger.mock_capture_writer() as capture:
+            result = my_func()
+        assert result == 'only_for_en'
+        assert capture.backend.any_contains('no condition matched')
 
     def test_when_decorator_on_classmethod(self):
         """@when should work with classmethods (@classmethod must be outer)."""
@@ -349,7 +365,7 @@ class TestGameStateWhenOnMethod:
         assert obj.handle('test') == 'handled_test'
 
     def test_instance_method_condition_no_match(self):
-        """@when on instance method should return None when condition doesn't match."""
+        """@when on instance method should call method and log warning when condition doesn't match."""
 
         class MyHandler:
             @GameStateBase.when(server='en')
@@ -357,7 +373,10 @@ class TestGameStateWhenOnMethod:
                 return f'handled_{value}'
 
         obj = MyHandler()
-        assert obj.handle('test') is None
+        with logger.mock_capture_writer() as capture:
+            result = obj.handle('test')
+        assert result == 'handled_test'
+        assert capture.backend.any_contains('no condition matched')
 
     def test_instance_method_preserves_self(self):
         """@when on instance method should correctly forward self."""
@@ -477,20 +496,20 @@ class TestGameStateWhenOnMethodRuntimeChange:
 
         # Default server is 'cn'
         assert handler.handle_cn(1) == 'cn:1'
-        assert handler.handle_en(1) is None
+        assert handler.handle_en(1) == 'en:1'  # fallback to last defined function
 
         # Change server to 'en' at runtime
         GS.server = 'en'
 
         # Now handle_en should match, handle_cn should not
         assert handler.handle_en(2) == 'en:2'
-        assert handler.handle_cn(2) is None
+        assert handler.handle_cn(2) == 'cn:2'  # fallback to last defined function
 
         # Change back to 'cn' by directly setting the class attribute
         GS.server = 'cn'
 
         assert handler.handle_cn(3) == 'cn:3'
-        assert handler.handle_en(3) is None
+        assert handler.handle_en(3) == 'en:3'  # fallback to last defined function
 
     def test_runtime_change_with_fallback(self):
         """Changing server at runtime should switch between condition and fallback."""
