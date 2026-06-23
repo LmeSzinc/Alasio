@@ -1,3 +1,4 @@
+import copy
 import functools
 import types
 from typing import Any, TYPE_CHECKING
@@ -25,6 +26,11 @@ class _StateMeta(type):
                 default = getattr(cls, attr)
             except AttributeError:
                 raise TypeError(f'State field {cls.__name__}.{attr} must have a default')
+            # Wrap non-empty mutable collections with default_factory
+            # to avoid msgspec.defstruct rejecting them as unsafe defaults
+            # empty mutable collections will be auto converted to factory at msgspec internal
+            if isinstance(default, (list, dict, set)) and default:
+                default = msgspec.field(default_factory=lambda v=copy.deepcopy(default): v)
             struct_fields.append((attr, anno, default))
 
         # create struct model
@@ -42,7 +48,8 @@ class _StateMeta(type):
             if value is msgspec.NODEFAULT:
                 raise ValueError(f'State field {cls.__name__}.{name} must have a default value')
             if isinstance(value, Factory):
-                raise TypeError(f'State field {cls.__name__}.{name} must be static default value, not {value}')
+                # Mutable default wrapped with Factory; call it to get the default
+                value = value.factory()
             dict_defaults[name] = value
 
         # Use super().__setattr__ to bypass the custom __setattr__ hook
@@ -136,6 +143,8 @@ class _StateMeta(type):
             default = cls.__dict_defaults__[name]
         except KeyError:
             raise ValueError(f'State field {cls.__name__}.{name} does not exist')
+        if isinstance(default, (list, dict, set)):
+            default = copy.deepcopy(default)
         super().__setattr__(name, default)
 
     def reset_all_fields(cls):
@@ -143,6 +152,8 @@ class _StateMeta(type):
         Reset all attrs to default values
         """
         for name, value in cls.__dict_defaults__.items():
+            if isinstance(value, (list, dict, set)):
+                value = copy.deepcopy(value)
             super().__setattr__(name, value)
 
     def _iter_all_subclasses(cls):

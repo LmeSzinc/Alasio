@@ -612,3 +612,153 @@ class TestStructModel:
             field_idx = StateA.__struct_model__.__struct_fields__.index(name)
             struct_default = StateA.__struct_model__.__struct_defaults__[field_idx]
             assert expected == struct_default
+
+
+class TestMutableDefaults:
+    """Test mutable collection (list, dict, set) defaults are auto-wrapped and isolated"""
+
+    def test_list_default(self):
+        """Non-empty list default should be accepted"""
+
+        class StateA(GlobalState):
+            items: list = [1, 2, 3]
+
+        assert StateA.items == [1, 2, 3]
+
+    def test_dict_default(self):
+        """Non-empty dict default should be accepted"""
+
+        class StateA(GlobalState):
+            mapping: dict = {'a': 1, 'b': 2}
+
+        assert StateA.mapping == {'a': 1, 'b': 2}
+
+    def test_set_default(self):
+        """Non-empty set default should be accepted"""
+
+        class StateA(GlobalState):
+            tags: set = {1, 2, 3}
+
+        assert StateA.tags == {1, 2, 3}
+
+    def test_empty_list_default(self):
+        """Empty list default should be accepted"""
+
+        class StateA(GlobalState):
+            items: list = []
+
+        assert StateA.items == []
+
+    def test_empty_dict_default(self):
+        """Empty dict default should be accepted"""
+
+        class StateA(GlobalState):
+            mapping: dict = {}
+
+        assert StateA.mapping == {}
+
+    def test_empty_set_default(self):
+        """Empty set default should be accepted"""
+
+        class StateA(GlobalState):
+            tags: set = set()
+
+        assert StateA.tags == set()
+
+    def test_mutation_does_not_affect_default(self):
+        """Mutating the current value should not change the stored default"""
+
+        class StateA(GlobalState):
+            items: list = [1, 2, 3]
+
+        StateA.items.append(4)
+        assert StateA.items == [1, 2, 3, 4]
+        assert StateA.get_default('items') == [1, 2, 3]
+
+    def test_dict_mutation_does_not_affect_default(self):
+        """Mutating a dict field should not change the stored default"""
+
+        class StateA(GlobalState):
+            mapping: dict = {'a': 1}
+
+        StateA.mapping['b'] = 2
+        assert StateA.mapping == {'a': 1, 'b': 2}
+        assert StateA.get_default('mapping') == {'a': 1}
+
+    def test_set_mutation_does_not_affect_default(self):
+        """Mutating a set field should not change the stored default"""
+
+        class StateA(GlobalState):
+            tags: set = {1, 2}
+
+        StateA.tags.add(3)
+        assert StateA.tags == {1, 2, 3}
+        assert StateA.get_default('tags') == {1, 2}
+
+    def test_reset_field_restores_fresh_copy(self):
+        """reset_field should restore a fresh (deep-copied) default, not the same object"""
+
+        class StateA(GlobalState):
+            items: list = [1, 2, 3]
+
+        StateA.items.append(99)
+        StateA.reset_field('items')
+        assert StateA.items == [1, 2, 3]
+        # Mutating the restored value should not affect the default
+        StateA.items.append(88)
+        assert StateA.get_default('items') == [1, 2, 3]
+
+    def test_reset_all_fields_restores_fresh_copy(self):
+        """reset_all_fields should restore fresh copies for mutable defaults"""
+
+        class StateA(GlobalState):
+            items: list = [1, 2, 3]
+            mapping: dict = {'x': 0}
+
+        StateA.items.append(99)
+        StateA.mapping['y'] = 1
+        StateA.reset_all_fields()
+        assert StateA.items == [1, 2, 3]
+        assert StateA.mapping == {'x': 0}
+        # Mutating the restored value should not affect defaults
+        StateA.items.append(77)
+        StateA.mapping['z'] = 2
+        assert StateA.get_default('items') == [1, 2, 3]
+        assert StateA.get_default('mapping') == {'x': 0}
+
+    def test_is_modified_with_mutable(self):
+        """is_modified should detect mutations"""
+
+        class StateA(GlobalState):
+            items: list = [1, 2, 3]
+
+        assert not StateA.is_modified('items')
+        StateA.items.append(4)
+        assert StateA.is_modified('items')
+        StateA.reset_field('items')
+        assert not StateA.is_modified('items')
+
+    def test_update_replaces_mutable(self):
+        """update should replace the mutable value entirely"""
+
+        class StateA(GlobalState):
+            items: list = [1, 2, 3]
+
+        StateA.update(items=[4, 5, 6])
+        assert StateA.items == [4, 5, 6]
+        assert StateA.get_default('items') == [1, 2, 3]
+
+    def test_update_from_class_replaces_mutable(self):
+        """update_from_class should replace mutable field values"""
+
+        class StateA(GlobalState):
+            items: list = [1, 2, 3]
+            mapping: dict = {'a': 1}
+
+        class Override:
+            items = [7, 8, 9]
+            mapping = {'b': 2}
+
+        StateA.update_from_class(Override)
+        assert StateA.items == [7, 8, 9]
+        assert StateA.mapping == {'b': 2}
