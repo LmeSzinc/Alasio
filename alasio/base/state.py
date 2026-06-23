@@ -11,8 +11,8 @@ from alasio.logger import logger
 
 class _StateMeta(type):
     if TYPE_CHECKING:
-        struct_model: "type[msgspec.Struct]"
-        dict_defaults: "dict[str, Any]"
+        __struct_model__: "type[msgspec.Struct]"
+        __dict_defaults__: "dict[str, Any]"
 
     def __init__(cls, name, bases, dct):
         super().__init__(name, bases, dct)
@@ -29,7 +29,7 @@ class _StateMeta(type):
 
         # create struct model
         struct_model: "type[msgspec.Struct]" = msgspec.defstruct(
-            f'{cls.__name__}Struct', struct_fields, omit_defaults=True, forbid_unknown_fields=True,
+            f'{cls.__name__}Struct', struct_fields, omit_defaults=True,
         )
         if len(struct_model.__struct_fields__) != len(struct_model.__struct_defaults__):
             raise ValueError(f'All fields in state class {cls.__name__} must have a default value')
@@ -47,8 +47,8 @@ class _StateMeta(type):
 
         # Use super().__setattr__ to bypass the custom __setattr__ hook
         # since struct_model and dict_defaults are internal, not state fields
-        super().__setattr__('struct_model', struct_model)
-        super().__setattr__('dict_defaults', dict_defaults)
+        super().__setattr__('__struct_model__', struct_model)
+        super().__setattr__('__dict_defaults__', dict_defaults)
 
     def __call__(cls, *args, **kwargs):
         raise TypeError(
@@ -58,20 +58,40 @@ class _StateMeta(type):
 
     def update(cls, **kwargs):
         """
-        Update state with kwargs
+        Update state with kwargs.
+        Only attributes that already exist in the state class will be merged.
 
         Args:
             kwargs: key-value pairs to update
         """
         # may raise ValidationError
-        obj = msgspec.convert(kwargs, cls.struct_model)
+        obj = msgspec.convert(kwargs, cls.__struct_model__)
         for name in kwargs:
-            if name not in cls.dict_defaults:
+            if name not in cls.__dict_defaults__:
                 continue
             # if validate success, set to class attribute
             # value type may change after validation
             value = getattr(obj, name)
             super().__setattr__(name, value)
+
+    def update_from_class(cls, override_cls):
+        """
+        Merge class attributes from an override class into this state class.
+        Only attributes that already exist in the state class will be merged.
+
+        Args:
+            override_cls (type): Any class whose attributes to merge
+        """
+        names = dir(override_cls)
+        kwargs = {}
+        for name in names:
+            if name.startswith('__') and name.endswith('__'):
+                continue
+            # this shouldn't raise Attribute error
+            value = getattr(override_cls, name)
+            kwargs[name] = value
+
+        cls.update(**kwargs)
 
     def __setattr__(cls, name, value):
         data = {name: value}
@@ -86,7 +106,7 @@ class _StateMeta(type):
             bool: true if attr is modified
         """
         try:
-            default = cls.dict_defaults[name]
+            default = cls.__dict_defaults__[name]
             value = getattr(cls, name)
         except (KeyError, AttributeError):
             raise ValueError(f'State field {cls.__name__}.{name} does not exist')
@@ -101,7 +121,7 @@ class _StateMeta(type):
             Any: default value of attr
         """
         try:
-            return cls.dict_defaults[name]
+            return cls.__dict_defaults__[name]
         except KeyError:
             raise ValueError(f'State field {cls.__name__}.{name} does not exist')
 
@@ -113,7 +133,7 @@ class _StateMeta(type):
             name (str):
         """
         try:
-            default = cls.dict_defaults[name]
+            default = cls.__dict_defaults__[name]
         except KeyError:
             raise ValueError(f'State field {cls.__name__}.{name} does not exist')
         super().__setattr__(name, default)
@@ -122,7 +142,7 @@ class _StateMeta(type):
         """
         Reset all attrs to default values
         """
-        for name, value in cls.dict_defaults.items():
+        for name, value in cls.__dict_defaults__.items():
             super().__setattr__(name, value)
 
     def _iter_all_subclasses(cls):

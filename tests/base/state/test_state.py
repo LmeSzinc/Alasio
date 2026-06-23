@@ -21,7 +21,7 @@ class TestBasicState:
         assert StateA.a == 1
         assert StateA.b == '2'
         # dict_defaults contains all annotated fields with defaults
-        assert StateA.dict_defaults == {'a': 1, 'b': '2'}
+        assert StateA.__dict_defaults__ == {'a': 1, 'b': '2'}
 
     def test_requires_annotation(self):
         """Fields without type annotations are not included in dict_defaults"""
@@ -32,7 +32,7 @@ class TestBasicState:
 
         assert StateA.a == 1
         assert StateA.b == '2'
-        assert StateA.dict_defaults == {'a': 1}
+        assert StateA.__dict_defaults__ == {'a': 1}
 
     def test_cannot_instantiate(self):
         class StateA(GlobalState):
@@ -58,12 +58,12 @@ class TestInheritanceAndOverride:
         assert StateB.a == 1
         assert StateB.b == 3
         assert StateB.c == 4
-        assert StateB.dict_defaults == {'a': 1, 'b': 3, 'c': 4}
+        assert StateB.__dict_defaults__ == {'a': 1, 'b': 3, 'c': 4}
 
         # Parent state is not affected by children
         assert StateA.a == 1
         assert StateA.b == 2
-        assert StateA.dict_defaults == {'a': 1, 'b': 2}
+        assert StateA.__dict_defaults__ == {'a': 1, 'b': 2}
 
     def test_inherit_task_state(self):
         """TaskState also supports inheritance"""
@@ -136,14 +136,16 @@ class TestAttrModification:
         with pytest.raises(msgspec.ValidationError):
             StateA.a = 'not_an_int'
 
-    def test_undefined_field_raises_error(self):
-        """Setting a field not defined in the class raises ValidationError"""
+    def test_undefined_field_dropped(self):
+        """Setting a field not defined in the state is silently dropped"""
 
         class StateA(GlobalState):
             a: int = 1
 
-        with pytest.raises(msgspec.ValidationError):
-            StateA.update(b=2)
+        StateA.update(b=2)
+        assert StateA.a == 1
+        with pytest.raises(AttributeError):
+            _ = StateA.b
 
     def test_reset_field_nonexistent(self):
         class StateA(GlobalState):
@@ -221,14 +223,174 @@ class TestBatchUpdate:
         with pytest.raises(msgspec.ValidationError):
             StateA.update(a='not_an_int')
 
-    def test_update_unknown_field_raises_error(self):
-        """update with unknown field raises ValidationError"""
+    def test_update_unknown_field_dropped(self):
+        """update with unknown field silently drops it"""
 
         class StateA(GlobalState):
             a: int = 1
 
-        with pytest.raises(msgspec.ValidationError):
-            StateA.update(unknown_field=42)
+        StateA.update(unknown_field=42)
+        assert StateA.a == 1
+
+
+class TestUpdateFromClass:
+    """Test update_from_class for merging class attributes into state"""
+
+    def test_update_from_class_basic(self):
+        """Basic merge: fields in override class that exist in state are applied"""
+
+        class StateA(GlobalState):
+            a: int = 1
+            b: str = 'hello'
+            c: float = 3.14
+
+        class Override:
+            a = 99
+            b = 'world'
+            c = 2.71
+
+        StateA.update_from_class(Override)
+        assert StateA.a == 99
+        assert StateA.b == 'world'
+        assert StateA.c == 2.71
+
+    def test_update_from_class_partial(self):
+        """Only fields that exist in state are merged; unrelated override fields are ignored"""
+
+        class StateA(GlobalState):
+            a: int = 1
+            b: str = 'hello'
+
+        class Override:
+            a = 99
+            extra = 'ignored'
+            another_extra = 42
+
+        StateA.update_from_class(Override)
+        assert StateA.a == 99
+        assert StateA.b == 'hello'  # unchanged
+
+    def test_update_from_class_missing_fields(self):
+        """Fields in state but not in override class remain unchanged"""
+
+        class StateA(GlobalState):
+            a: int = 1
+            b: str = 'hello'
+
+        class Override:
+            a = 99
+
+        StateA.update_from_class(Override)
+        assert StateA.a == 99
+        assert StateA.b == 'hello'  # unchanged
+
+    def test_update_from_class_after_modification(self):
+        """update_from_class resets previously modified fields"""
+
+        class StateA(GlobalState):
+            a: int = 1
+            b: str = 'hello'
+
+        StateA.a = 10
+        StateA.b = 'modified'
+
+        class Override:
+            a = 99
+
+        StateA.update_from_class(Override)
+        assert StateA.a == 99
+        assert StateA.b == 'modified'  # unchanged because not in Override
+
+    def test_update_from_class_empty_override(self):
+        """Empty override class leaves state unchanged"""
+
+        class StateA(GlobalState):
+            a: int = 1
+            b: str = 'hello'
+
+        class Override:
+            pass
+
+        StateA.update_from_class(Override)
+        assert StateA.a == 1
+        assert StateA.b == 'hello'
+
+    def test_update_from_class_various_types(self):
+        """Override class with various types should merge correctly"""
+
+        class StateA(GlobalState):
+            flag: bool = False
+            count: int = 0
+            name: str = ''
+
+        class Override:
+            flag = True
+            count = 42
+            name = 'test'
+
+        StateA.update_from_class(Override)
+        assert StateA.flag is True
+        assert StateA.count == 42
+        assert StateA.name == 'test'
+
+    def test_update_from_class_override_not_state(self):
+        """Override class is a plain class, not a state class"""
+
+        class StateA(GlobalState):
+            x: int = 0
+            y: int = 0
+
+        class ExternalConfig:
+            x = 100
+            y = 200
+            z = 300  # not in state
+
+        StateA.update_from_class(ExternalConfig)
+        assert StateA.x == 100
+        assert StateA.y == 200
+
+    def test_update_from_class_subclass_state(self):
+        """update_from_class works on subclass states"""
+
+        class BaseA(GlobalState):
+            a: int = 1
+            b: str = 'base'
+
+        class SubA(BaseA):
+            c: float = 0.0
+
+        class Override:
+            a = 99
+            c = 9.99
+
+        SubA.update_from_class(Override)
+        assert SubA.a == 99
+        assert SubA.b == 'base'  # unchanged
+        assert SubA.c == 9.99
+
+    def test_update_from_class_task_state(self):
+        """update_from_class works on TaskState subclasses"""
+
+        class StateA(TaskState):
+            a: int = 1
+            b: str = 'task'
+
+        class Override:
+            a = 42
+            b = 'overridden'
+
+        StateA.update_from_class(Override)
+        assert StateA.a == 42
+        assert StateA.b == 'overridden'
+
+    def test_update_from_class_classmethod_exists(self):
+        """update_from_class is callable as a class method"""
+
+        class StateA(GlobalState):
+            a: int = 1
+
+        assert hasattr(StateA, 'update_from_class')
+        assert callable(StateA.update_from_class)
 
 
 class TestTaskStateResetAll:
@@ -423,10 +585,10 @@ class TestStructModel:
             b: int = 2
 
         # msgspec encoder should omit default values
-        encoded = msgspec.json.encode(StateA.struct_model(a=1, b=2))
+        encoded = msgspec.json.encode(StateA.__struct_model__(a=1, b=2))
         assert encoded == b'{}'
 
-        encoded = msgspec.json.encode(StateA.struct_model(a=10, b=2))
+        encoded = msgspec.json.encode(StateA.__struct_model__(a=10, b=2))
         assert encoded == b'{"a":10}'
 
     def test_forbid_unknown(self):
@@ -436,7 +598,7 @@ class TestStructModel:
             a: int = 1
 
         with pytest.raises(TypeError):
-            StateA.struct_model(a=1, unknown=2)
+            StateA.__struct_model__(a=1, unknown=2)
 
     def test_dict_defaults_matches_struct_defaults(self):
         """dict_defaults should match struct model defaults"""
@@ -446,7 +608,7 @@ class TestStructModel:
             b: str = 'hello'
             c: float = 3.14
 
-        for name, expected in StateA.dict_defaults.items():
-            field_idx = StateA.struct_model.__struct_fields__.index(name)
-            struct_default = StateA.struct_model.__struct_defaults__[field_idx]
+        for name, expected in StateA.__dict_defaults__.items():
+            field_idx = StateA.__struct_model__.__struct_fields__.index(name)
+            struct_default = StateA.__struct_model__.__struct_defaults__[field_idx]
             assert expected == struct_default

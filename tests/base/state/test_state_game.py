@@ -23,7 +23,7 @@ class TestGameStateDefaults:
 
     def test_dict_defaults_contains_server_and_lang(self):
         """dict_defaults should include server and lang."""
-        defaults = GameStateBase.dict_defaults
+        defaults = GameStateBase.__dict_defaults__
         assert 'server' in defaults
         assert 'lang' in defaults
         assert defaults['server'] == 'cn'
@@ -31,7 +31,7 @@ class TestGameStateDefaults:
 
     def test_dict_defaults_does_not_contain_methods(self):
         """dict_defaults should exclude methods."""
-        defaults = GameStateBase.dict_defaults
+        defaults = GameStateBase.__dict_defaults__
         # Methods should be excluded
         assert 'match' not in defaults
         assert 'when' not in defaults
@@ -65,9 +65,9 @@ class TestGameStateInheritance:
             server: str = 'en'
             extra: int = 42
 
-        assert CustomGameState.dict_defaults['server'] == 'en'
-        assert CustomGameState.dict_defaults['lang'] == 'zh-CN'
-        assert CustomGameState.dict_defaults['extra'] == 42
+        assert CustomGameState.__dict_defaults__['server'] == 'en'
+        assert CustomGameState.__dict_defaults__['lang'] == 'zh-CN'
+        assert CustomGameState.__dict_defaults__['extra'] == 42
 
     def test_subclass_does_not_affect_parent(self):
         """Modifying subclass state should not affect GameStateBase."""
@@ -97,7 +97,7 @@ class TestGameStateInheritance:
         assert Level2.server == 'jp'
         assert Level2.lang == 'ja-JP'
         assert Level2.custom_field == 'level1'
-        assert Level2.dict_defaults == {
+        assert Level2.__dict_defaults__ == {
             'server': 'jp',
             'lang': 'ja-JP',
             'custom_field': 'level1',

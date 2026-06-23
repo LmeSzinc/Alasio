@@ -676,8 +676,8 @@ class TestGameStateDispatcherEdgeCases:
     """Edge cases for _StateDispatcher and when decorator."""
 
     def test_dispatcher_registry_key_uniqueness(self):
-        """Different functions should have unique keys in FUNC_REGISTRY."""
-        key_before = len(_StateDispatcher.FUNC_REGISTRY)
+        """Different functions should have unique keys in REGISTRY."""
+        key_before = len(_StateDispatcher.REGISTRY)
 
         @GameStateBase.when(server='cn')
         def func_a():
@@ -687,7 +687,7 @@ class TestGameStateDispatcherEdgeCases:
         def func_b():
             return 'b'
 
-        assert len(_StateDispatcher.FUNC_REGISTRY) == key_before + 2
+        assert len(_StateDispatcher.REGISTRY) == key_before + 2
 
     def test_dispatcher_wraps_function_name(self):
         """The dispatcher should preserve the original function's name."""
@@ -740,7 +740,7 @@ class TestWhenNoMemoryLeak:
 
     def setup_method(self):
         """Clean registry before each test."""
-        _StateDispatcher.FUNC_REGISTRY.clear()
+        _StateDispatcher.REGISTRY.clear()
         GameStateBase.reset_all_fields()
 
     def test_single_when_in_factory_no_leak(self):
@@ -754,8 +754,8 @@ class TestWhenNoMemoryLeak:
             return handler
 
         h1 = make()
-        key = list(_StateDispatcher.FUNC_REGISTRY.keys())[0]
-        dispatcher = _StateDispatcher.FUNC_REGISTRY[key]
+        key = list(_StateDispatcher.REGISTRY.keys())[0]
+        dispatcher = _StateDispatcher.REGISTRY[key]
         assert len(dispatcher.cases) == 1
         assert h1() == 'ok'
 
@@ -777,8 +777,8 @@ class TestWhenNoMemoryLeak:
             return handler
 
         h1 = make()
-        key = list(_StateDispatcher.FUNC_REGISTRY.keys())[0]
-        dispatcher = _StateDispatcher.FUNC_REGISTRY[key]
+        key = list(_StateDispatcher.REGISTRY.keys())[0]
+        dispatcher = _StateDispatcher.REGISTRY[key]
         assert len(dispatcher.cases) == 2
 
         for _ in range(10):
@@ -798,8 +798,8 @@ class TestWhenNoMemoryLeak:
             return handler
 
         h1 = make()
-        key = list(_StateDispatcher.FUNC_REGISTRY.keys())[0]
-        dispatcher = _StateDispatcher.FUNC_REGISTRY[key]
+        key = list(_StateDispatcher.REGISTRY.keys())[0]
+        dispatcher = _StateDispatcher.REGISTRY[key]
         assert len(dispatcher.cases) == 2
 
         for _ in range(10):
@@ -829,6 +829,6 @@ class TestWhenNoMemoryLeak:
         make_b()
         make_b()
 
-        assert len(_StateDispatcher.FUNC_REGISTRY) == 2
-        for dispatcher in _StateDispatcher.FUNC_REGISTRY.values():
+        assert len(_StateDispatcher.REGISTRY) == 2
+        for dispatcher in _StateDispatcher.REGISTRY.values():
             assert len(dispatcher.cases) == 1
