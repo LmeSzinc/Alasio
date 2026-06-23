@@ -257,7 +257,7 @@ class _StateMeta(type):
 class GlobalState(metaclass=_StateMeta):
     """
     A global state class
-    Note that every field must have typehint and static default value.
+    Note that every field must have typehint and static default value (not default factory).
 
     Examples:
         class GlobalState(TaskState):
@@ -273,7 +273,7 @@ class GlobalState(metaclass=_StateMeta):
 class TaskState(metaclass=_StateMeta):
     """
     A state class that resets on task switch
-    Note that every field must have typehint and static default value.
+    Note that every field must have typehint and static default value (not default factory).
 
     Examples:
         class CampaignState(TaskState):
