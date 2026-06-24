@@ -1,6 +1,6 @@
 import pytest
 
-from alasio.base.scheduler.inflect import Inflection
+from alasio.ext.inflect import Inflection
 
 
 class TestInflectionBasic:
@@ -28,6 +28,21 @@ class TestInflectionBasic:
         inf = Inflection.from_string("kebab-case")
         assert inf.to_snake_case() == "kebab_case"
         assert inf.to_pascal_case() == "KebabCase"
+
+    def test_single_word_camel_case(self):
+        """单个单词的 to_camel_case"""
+        inf = Inflection.from_string("Hello")
+        assert inf.to_camel_case() == "hello"
+
+    def test_single_word_kebab_case(self):
+        """单个单词的 to_kebab_case"""
+        inf = Inflection.from_string("Hello")
+        assert inf.to_kebab_case() == "hello"
+
+    def test_single_word_pascal_case(self):
+        """单个单词的 to_pascal_case"""
+        inf = Inflection.from_string("hello")
+        assert inf.to_pascal_case() == "Hello"
 
 
 class TestInflectionEdgeCases:
@@ -77,6 +92,13 @@ class TestInflectionEdgeCases:
         assert inf.to_kebab_case() == "my-crazy-variable-name"
         assert inf.to_pascal_case() == "MyCrazyVariableName"
 
+    def test_whitespace_around_words(self):
+        """词前后的空格应被正确处理"""
+        inf = Inflection.from_string("  hello  world  ")
+        assert inf.to_snake_case() == "hello_world"
+        assert inf.to_kebab_case() == "hello-world"
+        assert inf.to_pascal_case() == "HelloWorld"
+
 
 class TestInflectionApostrophes:
     """撇号和特殊字符测试"""
@@ -93,6 +115,18 @@ class TestInflectionApostrophes:
 
     def test_multiple_apostrophes(self):
         inf = Inflection.from_string("it's'a'me")
+        assert inf.to_snake_case() == "itsame"
+
+    def test_unicode_smart_quote(self):
+        """Unicode 右单引号 \\u2019 应像 ASCII 撇号一样被移除"""
+        inf = Inflection.from_string("Bob\u2019s")
+        assert inf.to_snake_case() == "bobs"
+        assert inf.to_kebab_case() == "bobs"
+        assert inf.to_pascal_case() == "Bobs"
+
+    def test_mixed_apostrophe_types(self):
+        """混合 ASCII 撇号和 Unicode 撇号"""
+        inf = Inflection.from_string("it\u2019s'a\u2019me")
         assert inf.to_snake_case() == "itsame"
 
 
@@ -209,6 +243,8 @@ class TestInflectionDirectInstantiation:
     def test_direct_init_empty_list(self):
         inf = Inflection([])
         assert inf.to_snake_case() == ""
+        assert inf.to_kebab_case() == ""
+        assert inf.to_pascal_case() == ""
         assert inf.to_camel_case() == ""
 
     def test_direct_init_with_words(self):
@@ -310,6 +346,24 @@ class TestInflectionTypeErrors:
         # 字符串会被迭代为单个字符 ['h', 'e', 'l', 'l', 'o']
         result = inf.to_snake_case()
         assert result == "h_e_l_l_o"
+
+    def test_bool_false_input(self):
+        """bool False 是 falsy 值，应返回空 Inflection"""
+        inf = Inflection.from_string(False)
+        assert inf.to_snake_case() == ""
+        assert inf.to_kebab_case() == ""
+        assert inf.to_pascal_case() == ""
+        assert inf.to_camel_case() == ""
+
+    def test_bool_true_input(self):
+        """bool True 不是 falsy 值，re.sub 会因非字符串输入抛出 TypeError"""
+        with pytest.raises(TypeError):
+            Inflection.from_string(True)
+
+    def test_float_input(self):
+        """float 输入应引发类型错误"""
+        with pytest.raises((TypeError, AttributeError)):
+            Inflection.from_string(1.5)
 
 
 class TestInflectionIdempotency:

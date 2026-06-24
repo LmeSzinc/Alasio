@@ -5,7 +5,6 @@ from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
 from alasio.base.exception import *
 from alasio.base.scheduler.configwatcher import ConfigWatcher
-from alasio.base.scheduler.inflect import Inflection
 from alasio.base.scheduler.task_record import TaskRecord, TaskTooManyExecutionsError, TaskTooManyFailuresError
 from alasio.base.state import TaskState
 from alasio.base.timer import getnow
@@ -13,6 +12,7 @@ from alasio.config.base import AlasioConfigBase
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
 from alasio.ext.cache import cached_property
+from alasio.ext.inflect import Inflection
 from alasio.logger import logger
 
 

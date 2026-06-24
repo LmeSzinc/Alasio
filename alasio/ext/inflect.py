@@ -28,7 +28,7 @@ class Inflection:
 
         # 1. Pre-processing: Remove apostrophes/single quotes.
         # Logic: "Bob's Mod" becomes "Bobs Mod" to avoid splitting into "Bob" and "s".
-        text = re.sub(r"['’]", "", text)
+        text = re.sub(r"['\u2019]", "", text)
 
         # 2. Handle CamelCase: Insert underscore between lower/digit and Upper.
         # Logic: "camelCase" -> "camel_Case"
