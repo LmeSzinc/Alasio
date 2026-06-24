@@ -560,10 +560,14 @@ class AlasioLogger(LoggingLevel):
         |                                              LOGIN                                               |
         +==================================================================================================+
         2026-01-01 13:33:48.282 | INFO | LOGIN
+
+        If the title is too long, the box auto-extends to wrap the title with padding.
         """
         title = title.upper()
-        edge = f'+{"=" * 98}+'
-        hr = f' {title} '.center(98, ' ')
+        # Auto-extend interior to wrap long titles: at least 98, with 4+ spaces padding each side
+        interior = max(98, len(title) + 10)
+        edge = f'+{"=" * interior}+'
+        hr = f' {title} '.center(interior, ' ')
         hr = f'|{hr}|'
         self.raw(edge)
         self.raw(hr, **kwargs)
@@ -574,9 +578,12 @@ class AlasioLogger(LoggingLevel):
         """
         ============================================== LOGIN ===============================================
         2026-01-01 13:33:48.282 | INFO | LOGIN
+
+        At least 5 '=' are always shown on each side of the title.
         """
         title = title.upper()
-        hr = f' {title} '.center(100, '=')
+        width = max(100, len(title) + 12)
+        hr = f' {title} '.center(width, '=')
         self.raw(hr, **kwargs)
         self.info(title, **kwargs)
 
@@ -584,18 +591,24 @@ class AlasioLogger(LoggingLevel):
         """
         ---------------------------------------------- LOGIN -----------------------------------------------
         2026-01-01 13:33:48.282 | INFO | LOGIN
+
+        At least 5 '-' are always shown on each side of the title.
         """
         title = title.upper()
-        hr = f' {title} '.center(100, '-')
+        width = max(100, len(title) + 12)
+        hr = f' {title} '.center(width, '-')
         self.raw(hr, **kwargs)
         self.info(title, **kwargs)
 
     def hr3(self, title, **kwargs):
         """
         2026-01-01 13:33:48.282 | INFO | ................ LOGIN .................
+
+        At least 5 '.' are always shown on each side of the title.
         """
         title = title.upper()
-        hr = f' {title} '.center(40, '.')
+        width = max(40, len(title) + 12)
+        hr = f' {title} '.center(width, '.')
         self.info(hr, **kwargs)
 
     def attr(self, name, text):

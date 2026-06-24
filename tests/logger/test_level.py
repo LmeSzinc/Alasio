@@ -170,3 +170,91 @@ def test_level_switch_multiple_times():
         assert capture.fd.any_contains("Error 6")
         assert capture.fd.any_contains("Info 6")
         capture.clear()
+
+
+def test_hr_minimum_fill():
+    """
+    Test that hr1, hr2, hr3 always have at least 5 fill characters
+    on each side of the title, regardless of title length.
+    """
+    with logger.mock_capture_writer() as capture:
+        logger.set_level('INFO')
+
+        # 1. Empty title - should still show 5+ fill chars each side
+        logger.hr1('')
+        assert capture.fd.any_regex(r'={5,}\s+={5,}')
+        capture.clear()
+
+        logger.hr2('')
+        assert capture.fd.any_regex(r'-{5,}\s+-{5,}')
+        capture.clear()
+
+        logger.hr3('')
+        assert capture.fd.any_regex(r'\.{5,}\s+\.{5,}')
+        capture.clear()
+
+        # 2. Very short title
+        logger.hr1('A')
+        assert capture.fd.any_regex(r'={5,}\s+A\s+={5,}')
+        capture.clear()
+
+        logger.hr2('A')
+        assert capture.fd.any_regex(r'-{5,}\s+A\s+-{5,}')
+        capture.clear()
+
+        logger.hr3('A')
+        assert capture.fd.any_regex(r'\.{5,}\s+A\s+\.{5,}')
+        capture.clear()
+
+        # 3. Long title that exceeds default width, requiring extension
+        long_title = 'X' * 90
+        logger.hr1(long_title)
+        assert capture.fd.any_regex(r'={5,}\s+X{90}\s+={5,}')
+        capture.clear()
+
+        long_title2 = 'Y' * 90
+        logger.hr2(long_title2)
+        assert capture.fd.any_regex(r'-{5,}\s+Y{90}\s+-{5,}')
+        capture.clear()
+
+        # 4. Title that exceeds hr3 default width (40) -> need >28 chars
+        medium_title = 'Z' * 30
+        logger.hr3(medium_title)
+        assert capture.fd.any_regex(r'\.{5,}\s+Z{30}\s+\.{5,}')
+        capture.clear()
+
+
+def test_hr0_auto_extend():
+    """
+    Test that hr0 auto-extends the box when title is too long.
+    Short title should keep default 98-char interior.
+    """
+    with logger.mock_capture_writer() as capture:
+        logger.set_level('INFO')
+
+        # 1. Short title - maintain 98-char interior
+        logger.hr0('SHORT')
+        # Check edge line has 98 ='s
+        assert capture.fd.any_regex(r'\+={98}\+')
+        capture.clear()
+
+        # 2. Long title (95 chars) - should extend interior
+        long_title = 'X' * 95
+        logger.hr0(long_title)
+        # Check the title is fully visible in the output
+        assert capture.fd.any_contains(long_title)
+        # Verify top edge is wider than default (>98 ='s)
+        for log in capture.fd.logs:
+            line = log.rstrip('\n')
+            if line.startswith('+') and line.endswith('+') and len(line) > 100:
+                interior_width = len(line) - 2
+                assert interior_width >= len(long_title) + 10
+                break
+        else:
+            raise AssertionError('No extended edge line found for long title')
+        capture.clear()
+
+        # 3. Very long title (200 chars) - should extend significantly
+        very_long_title = 'Y' * 200
+        logger.hr0(very_long_title)
+        assert capture.fd.any_contains(very_long_title)
