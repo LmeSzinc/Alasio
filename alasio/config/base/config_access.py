@@ -98,6 +98,7 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
             '_annotations',
             '_annotations_alasio',
             'servertime',
+            'bound',
         )
 
     def __init__(self, config_name, task=''):
@@ -168,6 +169,22 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
         """
         return ServerTime(8)
 
+    @cached_property
+    def bound(self):
+        """
+        Returns a dict of all bound (group, arg) pairs currently loaded.
+        This is the Alasio equivalent of the original ALAS ``config.bound``.
+
+        Returns:
+            dict:  Key is (group, arg), value is None.
+        """
+        result = {}
+        with self._lock:
+            for (_task, group), obj in self._dict_group.items():
+                for arg in obj.__struct_fields__:
+                    result[(group, arg)] = None
+        return result
+
     def config_cache(self):
         with self._lock:
             if self.is_template_config:
@@ -201,7 +218,8 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
             self._modified.clear()
             # clear thread-local state
             self._local.batch_depth = 0
-            cached_property_threadsafe.pop(self, 'servertime')
+            cached_property.pop(self, 'bound')
+            cached_property.pop(self, 'servertime')
 
     def _check_config_mod(self):
         """
@@ -250,11 +268,15 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
                 # create proxy on groups, so we can catch arg set
                 obj = GroupProxy(_obj=obj, _config=self, _task=group_ref.task, _group=group)
                 setattr(self, group, obj)
+
             # Apply config overrides
             for key, value in self._override_const.items():
                 self._apply_override_const(key, value)
             for group, arg, value in deep_iter_depth2(self._override_config):
                 self._apply_override_config(group, arg, value)
+
+            # reset class specific cache
+            cached_property.pop(self, 'bound')
 
     def _cross_get_group(self, task, group):
         """
@@ -320,6 +342,27 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
             return default
         # get group.arg
         return getattr(obj, arg, default)
+
+    def bound_get(self, group, arg, default=None):
+        """
+        Get config from bounded config groups
+
+        Args:
+            group (str):
+            arg (str):
+            default:
+
+        Returns:
+            Any:
+        """
+        try:
+            obj = getattr(self, group)
+            # unwrap proxy
+            if type(obj) is GroupProxy:
+                obj = obj._obj
+            return getattr(obj, arg, default)
+        except AttributeError:
+            return default
 
     def _iter_task_groups(self, task):
         """
