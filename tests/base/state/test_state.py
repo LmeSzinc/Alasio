@@ -392,6 +392,40 @@ class TestUpdateFromClass:
         assert hasattr(StateA, 'update_from_class')
         assert callable(StateA.update_from_class)
 
+    def test_update_from_instance(self):
+        """update_from_class works with an instance of a class"""
+
+        class StateA(GlobalState):
+            a: int = 1
+            b: str = 'hello'
+
+        class Override:
+            def __init__(self):
+                self.a = 99
+                self.b = 'world'
+
+        StateA.update_from_class(Override())
+        assert StateA.a == 99
+        assert StateA.b == 'world'
+
+    def test_update_from_instance_partial(self):
+        """Instance with only some matching fields"""
+
+        class StateA(GlobalState):
+            a: int = 1
+            b: str = 'hello'
+            c: str = 'extra'
+
+        class Override:
+            def __init__(self):
+                self.a = 55
+                self.c = 'from_instance'
+
+        StateA.update_from_class(Override())
+        assert StateA.a == 55
+        assert StateA.b == 'hello'  # unchanged
+        assert StateA.c == 'from_instance'
+
 
 class TestTaskStateResetAll:
     """Test TaskState-specific reset_all_subclasses functionality"""

@@ -116,21 +116,22 @@ class _StateMeta(type):
         """
         return _StateBatchContext(cls)
 
-    def update_from_class(cls, override_cls):
+    def update_from_class(cls, override):
         """
         Merge class attributes from an override class into this state class.
         Only attributes that already exist in the state class will be merged.
 
         Args:
-            override_cls (type): Any class whose attributes to merge
+            override: Any class whose attributes to merge, or an instance of a class to merge
+                `override` does not need to be a state class, it can be any class or any instance
         """
-        names = dir(override_cls)
+        names = dir(override)
         kwargs = {}
         for name in names:
             if name.startswith('__') and name.endswith('__'):
                 continue
             # this shouldn't raise Attribute error
-            value = getattr(override_cls, name)
+            value = getattr(override, name)
             kwargs[name] = value
 
         cls.update(**kwargs)
