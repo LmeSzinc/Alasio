@@ -10,10 +10,31 @@ from msgspecerror import get_class_annotation_dict
 from alasio.logger import logger
 
 
+class _StateBatchContext:
+    """Context manager for batch-setting multiple state fields in a single update."""
+
+    def __init__(self, cls):
+        self.cls = cls
+        self._buffer = {}
+
+    def __enter__(self):
+        buffers = self.cls.__batch_buffers__
+        buffers.append(self._buffer)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        buffers = self.cls.__batch_buffers__
+        if buffers:
+            buffers.pop()
+        if self._buffer:
+            self.cls.update(**self._buffer)
+
+
 class _StateMeta(type):
     if TYPE_CHECKING:
         __struct_model__: "type[msgspec.Struct]"
         __dict_defaults__: "dict[str, Any]"
+        __batch_buffers__: "list[dict[str, Any]]"
 
     def __init__(cls, name, bases, dct):
         super().__init__(name, bases, dct)
@@ -56,6 +77,8 @@ class _StateMeta(type):
         # since struct_model and dict_defaults are internal, not state fields
         super().__setattr__('__struct_model__', struct_model)
         super().__setattr__('__dict_defaults__', dict_defaults)
+        # batch buffer stack, lazily populated by batch_set()
+        super().__setattr__('__batch_buffers__', [])
 
     def __call__(cls, *args, **kwargs):
         raise TypeError(
@@ -81,6 +104,18 @@ class _StateMeta(type):
             value = getattr(obj, name)
             super().__setattr__(name, value)
 
+    def batch_set(cls):
+        """
+        Context manager to batch multiple attribute sets into a single update.
+
+        Usage:
+            with GameState.batch_set():
+                GameState.server = 'jp'
+                GameState.lang = 'ja-JP'
+            # Single update call here
+        """
+        return _StateBatchContext(cls)
+
     def update_from_class(cls, override_cls):
         """
         Merge class attributes from an override class into this state class.
@@ -101,8 +136,12 @@ class _StateMeta(type):
         cls.update(**kwargs)
 
     def __setattr__(cls, name, value):
-        data = {name: value}
-        cls.update(**data)
+        buffers = cls.__batch_buffers__
+        if buffers:
+            buffers[-1][name] = value
+        else:
+            data = {name: value}
+            cls.update(**data)
 
     def is_modified(cls, name):
         """

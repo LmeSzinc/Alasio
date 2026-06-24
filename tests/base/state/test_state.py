@@ -762,3 +762,99 @@ class TestMutableDefaults:
         StateA.update_from_class(Override)
         assert StateA.items == [7, 8, 9]
         assert StateA.mapping == {'b': 2}
+
+
+class TestBatchSet:
+    """Test batch_set context manager for deferred updates"""
+
+    def test_batch_set_basic(self):
+        """Multiple sets inside context are applied as a single update"""
+
+        class StateA(GlobalState):
+            a: int = 1
+            b: str = 'hello'
+
+        with StateA.batch_set():
+            StateA.a = 99
+            StateA.b = 'world'
+
+        assert StateA.a == 99
+        assert StateA.b == 'world'
+
+    def test_batch_set_no_modification(self):
+        """No sets inside context should skip update"""
+
+        class StateA(GlobalState):
+            a: int = 1
+            b: str = 'hello'
+
+        with StateA.batch_set():
+            pass
+
+        assert StateA.a == 1
+        assert StateA.b == 'hello'
+
+    def test_batch_set_single(self):
+        """Single set inside context should still work"""
+
+        class StateA(GlobalState):
+            a: int = 1
+
+        with StateA.batch_set():
+            StateA.a = 42
+
+        assert StateA.a == 42
+
+    def test_batch_set_validates_types(self):
+        """Type validation still works inside batch context"""
+
+        class StateA(GlobalState):
+            a: int = 1
+
+        with pytest.raises(msgspec.ValidationError):
+            with StateA.batch_set():
+                StateA.a = 'not_an_int'
+
+        # Value should remain unchanged after validation failure
+        assert StateA.a == 1
+
+    def test_batch_set_works_on_subclass(self):
+        """batch_set works on subclass states"""
+
+        class BaseA(GlobalState):
+            a: int = 1
+
+        class SubA(BaseA):
+            b: str = 'base'
+
+        with SubA.batch_set():
+            SubA.a = 10
+            SubA.b = 'overridden'
+
+        assert SubA.a == 10
+        assert SubA.b == 'overridden'
+
+    def test_batch_set_on_task_state(self):
+        """batch_set works on TaskState subclasses"""
+
+        class StateA(TaskState):
+            a: int = 1
+
+        with StateA.batch_set():
+            StateA.a = 88
+
+        assert StateA.a == 88
+
+    def test_batch_set_does_not_affect_normal_set(self):
+        """Normal sets after batch context work as expected"""
+
+        class StateA(GlobalState):
+            a: int = 1
+            b: int = 2
+
+        with StateA.batch_set():
+            StateA.a = 10
+
+        StateA.b = 99
+        assert StateA.a == 10
+        assert StateA.b == 99
