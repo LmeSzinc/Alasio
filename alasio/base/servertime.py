@@ -217,12 +217,12 @@ def nearest_future(futures, threshold=0):
 def parse_second(second):
     """
     Args:
-        second (int | str | tuple[int, int] | list[int]):
-            3, "3", (1, 4), [1, 4], "10~30", "10, 30", "10-30"
+        second (int | float | str | tuple | list):
+            3, 0.5, "3", "0.1~0.2", (1.5, 2.5), [1, 4], "10~30", "10, 30", "10-30"
             second must >= 0
 
     Returns:
-        tuple[int, int]: (low, high) bounds
+        tuple[int | float, int | float]: (low, high) bounds
     """
     if isinstance(second, (tuple, list)):
         try:
@@ -239,27 +239,48 @@ def parse_second(second):
             # check startswith('-'), second might be negative value like "-10"
             low, _, high = second.partition('-')
         else:
-            try:
-                second = int(second)
-            except (ValueError, TypeError):
-                # this shouldn't happen
-                raise ValueError(f'Expect second in integer, got "{second}"') from None
+            if '.' in second:
+                try:
+                    second = float(second)
+                except (ValueError, TypeError):
+                    raise ValueError(f'Expect second numeric, got "{second}"') from None
+            else:
+                try:
+                    second = int(second)
+                except (ValueError, TypeError):
+                    raise ValueError(f'Expect second numeric, got "{second}"') from None
             if second < 0:
                 raise ValueError(f'Second must >=0 , got {second}')
             return second, second
     elif isinstance(second, (int, float)):
         if second < 0:
             raise ValueError(f'Second must >=0 , got {second}')
-        second = int(second)
         return second, second
     else:
         raise ValueError(f'Invalid second input, got {second}')
 
-    try:
-        low = int(low)
-        high = int(high)
-    except (ValueError, TypeError):
-        raise ValueError(f'Low bound and high bound must be integer, got {second}') from None
+    if isinstance(low, str):
+        if '.' in low:
+            try:
+                low = float(low)
+            except (ValueError, TypeError):
+                raise ValueError(f'Low bound and high bound must be numeric, got {second}') from None
+        else:
+            try:
+                low = int(low)
+            except (ValueError, TypeError):
+                raise ValueError(f'Low bound and high bound must be numeric, got {second}') from None
+    if isinstance(high, str):
+        if '.' in high:
+            try:
+                high = float(high)
+            except (ValueError, TypeError):
+                raise ValueError(f'Low bound and high bound must be numeric, got {second}') from None
+        else:
+            try:
+                high = int(high)
+            except (ValueError, TypeError):
+                raise ValueError(f'Low bound and high bound must be numeric, got {second}') from None
     if low > high:
         raise ValueError(f'High bound must >= lower bound, got {second}')
     if low < 0 or high < 0:
@@ -270,8 +291,8 @@ def parse_second(second):
 def random_time(second, n=3, precision=3):
     """
     Args:
-        second (int, str, tuple[int, int]):
-            3, "3", (1, 4), [1, 4], "10~30", "10, 30", "10-30"
+        second (int | float | str | tuple | list):
+            3, 0.5, "3", "0.1~0.2", (1.5, 2.5), [1, 4], "10~30", "10, 30", "10-30"
             second >= 0
         n (int): The amount of numbers in simulation. Default to 3.
         precision (int): Decimals.
@@ -281,7 +302,7 @@ def random_time(second, n=3, precision=3):
     """
     low, high = parse_second(second)
     if low < high:
-        multiply = 10 * precision
+        multiply = 10 ** precision
         return random_normal_distribution_int(low * multiply, high * multiply, n) / multiply
     else:
         return float(low)

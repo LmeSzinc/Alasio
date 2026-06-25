@@ -182,11 +182,16 @@ class TestParseSecond:
     @pytest.mark.parametrize("input_val, expected", [
         (3, (3, 3)),
         (0, (0, 0)),
-        (10.5, (10, 10)),
+        (10.5, (10.5, 10.5)),
+        (0.5, (0.5, 0.5)),
         ("3", (3, 3)),
         (" 10 ", (10, 10)),
+        ("0.1~0.2", (0.1, 0.2)),
+        ("1.5, 2.5", (1.5, 2.5)),
         ((1, 4), (1, 4)),
         ([5, 10], (5, 10)),
+        ((1.5, 2.5), (1.5, 2.5)),
+        ([0.5, 1.5], (0.5, 1.5)),
         ("10~30", (10, 30)),
         ("10, 30", (10, 30)),
         ("10-30", (10, 30)),
@@ -203,7 +208,7 @@ class TestParseSecond:
             parse_second([1])
         with pytest.raises(ValueError, match="High bound must >= lower bound"):
             parse_second("30-10")
-        with pytest.raises(ValueError, match="Low bound and high bound must be integer"):
+        with pytest.raises(ValueError, match="Low bound and high bound must be numeric"):
             parse_second("10-abc")
         with pytest.raises(ValueError, match="Invalid second input"):
             parse_second(None)
