@@ -1,3 +1,7 @@
+import os
+import zipfile
+
+from alasio.ext.cache import cached_property_threadsafe
 from alasio.ext.path.atomic import atomic_open
 
 
@@ -90,3 +94,34 @@ def extract_last_task(src, target_fd, block_size=262144):
 
     finally:
         src_file.close()
+
+
+class ErrorZipWriter:
+    def __init__(self, file):
+        self.file = file
+
+    @cached_property_threadsafe
+    def zipfile(self):
+        import zipfile
+        try:
+            return zipfile.ZipFile(self.file, mode='w', compression=zipfile.ZIP_LZMA, compresslevel=6)
+        except FileNotFoundError:
+            pass
+        folder = os.path.dirname(self.file)
+        os.makedirs(folder, exist_ok=True)
+        return zipfile.ZipFile(self.file, mode='w', compression=zipfile.ZIP_LZMA, compresslevel=6)
+
+    def add_log(self, file, arcname='log.txt'):
+        with self.zipfile.open(arcname, mode='w') as target_fd:
+            extract_last_task(file, target_fd)
+
+    def add_image(self, image, arcname):
+        self.zipfile.writestr(arcname, image, compress_type=zipfile.ZIP_STORED)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        zipfile = cached_property_threadsafe.pop(self, 'zipfile')
+        if zipfile is not None:
+            zipfile.close()

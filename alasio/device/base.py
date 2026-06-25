@@ -1,9 +1,13 @@
 import time
+from collections import deque
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
+from alasio.base.image.imfile import image_encode
 from alasio.device.config import DeviceConfig
+from alasio.ext.cache import cached_property_threadsafe
 from alasio.logger import logger
 
 if TYPE_CHECKING:
@@ -32,6 +36,47 @@ class DeviceBase:
         Subclasses needs to implement this
         """
         pass
+
+    @cached_property_threadsafe
+    def screenshot_deque(self):
+        """
+        A screenshot cache save last screenshot on error
+
+        Returns:
+            deque[dict]: a deque of {"time": datetime, "image": np.ndarray}
+                datetime is timezone native
+        """
+        try:
+            length = int(self.config.Error_ScreenshotLength)
+        except ValueError:
+            logger.error(f'Error.ScreenshotLength={self.config.Error_ScreenshotLength} is not an integer')
+            length = 1
+        # Limit in 1~300
+        length = max(1, min(length, 300))
+        return deque(maxlen=length)
+
+    def screenshot_deque_append(self, image):
+        """
+        Add image to screenshot cache
+
+        Args:
+            image (np.ndarray):
+        """
+        data = {'time': datetime.now(), 'image': image}
+        self.screenshot_deque.append(data)
+
+    def screenshot_deque_iter(self):
+        """
+        Iter screenshot cache to write
+
+        Yields:
+            tuple[str, bytes]: (filename, image_bytes)
+        """
+        for data in self.screenshot_deque:
+            imtime = datetime.strftime(data['time'], '%Y-%m-%d_%H-%M-%S-%f')
+            image = image_encode(data['image'], ext='webp')
+            file = f'{imtime}.webp'
+            yield file, image
 
     def screenshot(self):
         """

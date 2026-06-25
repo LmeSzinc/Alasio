@@ -11,9 +11,11 @@ from alasio.base.timer import getnow
 from alasio.config.base import AlasioConfigBase
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
+from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.inflect import Inflection
 from alasio.logger import logger
+from alasio.logger.error import ErrorZipWriter
 
 
 def interruptable_sleep(second):
@@ -143,7 +145,21 @@ class AlasioScheduler:
             raise SchedulerStop
 
     def _save_error_log(self):
-        pass
+        """
+        Save logs of last task and screenshots to /log/error/{time}_{config}.zip
+        Zipfile has:
+        - {time}.webp
+        - log.txt
+        """
+        now = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+        path = f'log/error/{now}_{self.config_name}.zip'
+        logger.warning(f'Saving error: {path}')
+
+        path = env.PROJECT_ROOT.joinpath(path)
+        with ErrorZipWriter(path) as zipfile:
+            zipfile.add_log(logger._writer.file)
+            for file, image in self.device.screenshot_deque_iter():
+                zipfile.add_image(image, file)
 
     def _send_scheduler_running(self, task):
         """
