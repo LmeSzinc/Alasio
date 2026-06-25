@@ -220,7 +220,9 @@ def to_utc(dt):
     return dt.astimezone(timezone.utc)
 
 
-class TestServerTimeCommon:
+class TestNow:
+    """Tests for ServerTime.now()."""
+
     def test_now(self, server):
         now = server.now()
         # Should have the correct timezone
@@ -249,7 +251,24 @@ class TestServerTimeCommon:
                 f"If local timezone (UTC) were used, weekday would be {utc_dt.weekday()}"
             )
 
-    def test_get_occurrence_daily(self, server):
+
+class TestIsValidDate:
+    """Tests for ServerTime._is_valid_date()."""
+
+    def test_is_valid_date(self, server):
+        assert server._is_valid_date(2023, 1, 31) is True
+        assert server._is_valid_date(2023, 2, 28) is True
+        assert server._is_valid_date(2024, 2, 29) is True
+        assert server._is_valid_date(2023, 2, 29) is False
+        assert server._is_valid_date(2023, 4, 31) is False
+        assert server._is_valid_date(2023, 13, 1) is False
+        assert server._is_valid_date(2023, 0, 1) is False
+
+
+class TestGetOccurrence:
+    """Tests for ServerTime._get_occurrence()."""
+
+    def test_daily(self, server):
         # 10:00 today, daily update at 09:00 -> should be 09:00 tomorrow
         now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
         cond = ServerUpdateCondition(hour=9, minute=0)
@@ -270,7 +289,7 @@ class TestServerTimeCommon:
         res = server._get_occurrence(cond, now, direction=-1)
         assert res == datetime(2022, 12, 31, 9, 0, tzinfo=server.tz)
 
-    def test_get_occurrence_weekly(self, server):
+    def test_weekly(self, server):
         # 2023-01-02 is Monday (1)
         now = datetime(2023, 1, 2, 10, 0, tzinfo=server.tz)
 
@@ -292,7 +311,7 @@ class TestServerTimeCommon:
         res = server._get_occurrence(cond, now, direction=-1)
         assert res == datetime(2022, 12, 28, 9, 0, tzinfo=server.tz)
 
-    def test_get_occurrence_monthly(self, server):
+    def test_monthly(self, server):
         # 2023-01-20, target 1st
         now = datetime(2023, 1, 20, 10, 0, tzinfo=server.tz)
         cond = ServerUpdateCondition(monthday=1, hour=9, minute=0)
@@ -328,21 +347,12 @@ class TestServerTimeCommon:
         res = server._get_occurrence(cond, now, direction=1)
         assert res == datetime(2023, 3, 29, 9, 0, tzinfo=server.tz)
 
-    def test_invalid_monthday_in_occurrence(self, server):
+    def test_invalid_monthday(self, server):
         cond = ServerUpdateCondition(monthday=100, hour=9, minute=0)
         with pytest.raises(ValueError, match="Invalid monthday setting"):
             server._get_occurrence(cond, server.now())
 
-    def test_is_valid_date(self, server):
-        assert server._is_valid_date(2023, 1, 31) is True
-        assert server._is_valid_date(2023, 2, 28) is True
-        assert server._is_valid_date(2024, 2, 29) is True
-        assert server._is_valid_date(2023, 2, 29) is False
-        assert server._is_valid_date(2023, 4, 31) is False
-        assert server._is_valid_date(2023, 13, 1) is False
-        assert server._is_valid_date(2023, 0, 1) is False
-
-    def test_get_occurrence_minutes_only(self, server):
+    def test_minutes_only(self, server):
         """
         Minutes-only condition (hour=None, minute=30) means updates every hour
         at minute 30.
@@ -388,7 +398,7 @@ class TestServerTimeCommon:
         res = server._get_occurrence(cond, now, direction=1)
         assert res == datetime(2023, 1, 1, 1, 30, tzinfo=server.tz)
 
-    def test_get_occurrence_weekday_minute_no_hour(self, server):
+    def test_weekday_minute_no_hour(self, server):
         """
         A condition with weekday/minute but no hour should NOT be treated as
         every-hour — it falls through to the weekly branch with hour=0.
@@ -405,7 +415,7 @@ class TestServerTimeCommon:
         res = server._get_occurrence(cond, now, direction=-1)
         assert res == datetime(2023, 1, 2, 0, 30, tzinfo=server.tz)
 
-    def test_get_occurrence_minutes_only_requires_monthday_weekday_none(self, server):
+    def test_minutes_only_requires_monthday_weekday_none(self, server):
         """
         Minutes-only is only triggered when both monthday and weekday are None.
         A condition with monthday set but no hour should use the monthly branch.
@@ -417,50 +427,62 @@ class TestServerTimeCommon:
         res = server._get_occurrence(cond, now, direction=1)
         assert res == datetime(2023, 2, 1, 0, 30, tzinfo=server.tz)
 
-    def test_get_occurrence_empty_condition(self, server):
+    def test_empty_condition(self, server):
         """An empty ServerUpdateCondition (all fields None) returns None."""
         cond = ServerUpdateCondition()
         now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
         assert server._get_occurrence(cond, now, direction=1) is None
         assert server._get_occurrence(cond, now, direction=-1) is None
 
-    def test_get_next_update_filters_none(self, server):
-        """
-        get_next_update / get_last_update should filter out None results
-        from _get_occurrence (e.g. empty conditions that can appear when
-        directly passing ServerUpdateCondition instances).
-        """
-        now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
 
-        # Mix a valid condition with an empty one
+class TestGetNextUpdate:
+    """Tests for ServerTime.get_next_update()."""
+
+    def test_filters_none(self, server):
+        """Empty conditions are filtered out without crashing."""
+        now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
         updates = [
             ServerUpdateCondition(hour=12, minute=0),
             ServerUpdateCondition(),  # empty → None
         ]
-
         with patch.object(ServerTime, 'now', return_value=now):
-            # Should not crash — empty condition is filtered out
             next_update = server.get_next_update(updates)
             assert to_utc(next_update) == to_utc(datetime(2023, 1, 1, 12, 0, tzinfo=server.tz))
 
-            last_update = server.get_last_update(updates)
-            assert to_utc(last_update) == to_utc(datetime(2022, 12, 31, 12, 0, tzinfo=server.tz))
-
-    def test_get_next_update_empty_raises_error(self, server):
-        """get_next_update raises when all conditions produce no candidates."""
+    def test_empty_raises_error(self, server):
+        """Raises when all conditions produce no candidates."""
         now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
         with patch.object(ServerTime, 'now', return_value=now):
             with pytest.raises(ValueError, match='No valid candidates'):
                 server.get_next_update([ServerUpdateCondition()])
 
-    def test_get_last_update_empty_raises_error(self, server):
-        """get_last_update raises when all conditions produce no candidates."""
+
+class TestGetLastUpdate:
+    """Tests for ServerTime.get_last_update()."""
+
+    def test_filters_none(self, server):
+        """Empty conditions are filtered out without crashing."""
+        now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
+        updates = [
+            ServerUpdateCondition(hour=12, minute=0),
+            ServerUpdateCondition(),  # empty → None
+        ]
+        with patch.object(ServerTime, 'now', return_value=now):
+            last_update = server.get_last_update(updates)
+            assert to_utc(last_update) == to_utc(datetime(2022, 12, 31, 12, 0, tzinfo=server.tz))
+
+    def test_empty_raises_error(self, server):
+        """Raises when all conditions produce no candidates."""
         now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
         with patch.object(ServerTime, 'now', return_value=now):
             with pytest.raises(ValueError, match='No valid candidates'):
                 server.get_last_update([ServerUpdateCondition()])
 
-    def test_get_delta_to_updates_nearest_future(self, server):
+
+class TestGetDeltaToUpdate:
+    """Tests for ServerTime.get_delta_to_update()."""
+
+    def test_nearest_future(self, server):
         """
         When ``now`` is closer to the next update than the last,
         the delta should be positive (future).
@@ -474,7 +496,7 @@ class TestServerTimeCommon:
             assert delta is not None
             assert delta.total_seconds() == 2 * 3600  # +2 hours
 
-    def test_get_delta_to_updates_nearest_past(self, server):
+    def test_nearest_past(self, server):
         """
         When ``now`` is closer to the last update than the next,
         the delta should be negative (past).
@@ -488,7 +510,7 @@ class TestServerTimeCommon:
             assert delta is not None
             assert delta.total_seconds() == -1 * 3600  # -1 hour
 
-    def test_get_delta_to_updates_midway(self, server):
+    def test_midway(self, server):
         """
         When ``now`` is exactly midway between two daily updates,
         both directions have the same distance.
@@ -502,7 +524,7 @@ class TestServerTimeCommon:
             assert delta is not None
             assert abs(delta.total_seconds()) == 6 * 3600  # 6 hours
 
-    def test_get_delta_to_updates_minutes_only(self, server):
+    def test_minutes_only(self, server):
         """
         Minutes-only condition (every hour) — nearest could be
         a few minutes away in either direction.
@@ -517,7 +539,7 @@ class TestServerTimeCommon:
             assert delta is not None
             assert delta.total_seconds() == -5 * 60  # -5 minutes
 
-    def test_get_delta_to_updates_empty_condition(self, server):
+    def test_empty_condition(self, server):
         """Empty conditions should raise ValueError."""
         now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
         with patch.object(ServerTime, 'now', return_value=now):
