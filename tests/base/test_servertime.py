@@ -11,6 +11,7 @@ from alasio.base.servertime import (
     parse_server_update,
     parse_server_update_list,
     parse_timezone,
+    random_time,
 )
 from alasio.testing.patch_time import PatchTime
 
@@ -621,3 +622,76 @@ class TestServerUpdateComplex:
         with patch.object(ServerTime, 'now', return_value=now_time):
             assert to_utc(server.get_next_update(updates)) == to_utc(expected_next)
             assert to_utc(server.get_last_update(updates)) == to_utc(expected_last)
+
+
+class TestRandomTime:
+    """Tests for random_time()."""
+
+    @pytest.mark.parametrize("second, expected", [
+        (3, 3.0),
+        (0, 0.0),
+        (5.5, 5.5),
+        (0.5, 0.5),
+        ("3", 3.0),
+        ("0.5", 0.5),
+    ])
+    def test_single_value(self, second, expected):
+        """Single value returns that value as float."""
+        assert random_time(second) == expected
+        assert isinstance(random_time(second), float)
+
+    @pytest.mark.parametrize("second, low, high", [
+        ((1, 4), 1.0, 4.0),
+        ((1.5, 2.5), 1.5, 2.5),
+        ([0, 3], 0.0, 3.0),
+        ([0.5, 1.5], 0.5, 1.5),
+        ("0.1~0.2", 0.1, 0.2),
+        ("1.5, 2.5", 1.5, 2.5),
+        ("10-30", 10.0, 30.0),
+        ("0, 1", 0.0, 1.0),
+    ])
+    def test_range_bounds(self, second, low, high):
+        """Range value returns float within [low, high]."""
+        for _ in range(100):
+            result = random_time(second)
+            assert isinstance(result, float)
+            assert low <= result <= high, f"Expected [{low}, {high}] for {second!r}, got {result}"
+
+    def test_float_range_produces_fractional_values(self):
+        """
+        Float range input produces values with sub-second precision,
+        not just whole integers.
+        """
+        results = {random_time((0.5, 1.5)) for _ in range(200)}
+        assert any(v != int(v) for v in results), (
+            f"All values were whole numbers: {sorted(results)}"
+        )
+
+    def test_precision_three_millisecond_resolution(self):
+        """
+        With precision=3 (default), the step should be 10**3=1000,
+        producing randomness at 0.001s granularity.
+        """
+        results = {random_time((0, 1), precision=3) for _ in range(500)}
+        # Every value must be a multiple of 0.001
+        for v in results:
+            thousandths = round(v * 1000)
+            assert abs(v - thousandths / 1000) < 1e-10, (
+                f"Value {v} is not a multiple of 0.001"
+            )
+        # At least some values should have non-zero thousandths digit,
+        # proving actual 0.001-level precision beyond just 0.01 steps
+        has_ms = any(round(v * 1000) % 10 != 0 for v in results)
+        assert has_ms, (
+            f"All values were multiples of 0.01, expected some 0.001-level: "
+            f"{sorted(results)}"
+        )
+
+    def test_round_prevents_floating_point_noise(self):
+        """
+        round(value, precision) must prevent floating-point artifacts
+        like 0.300000001 from appearing.
+        """
+        for _ in range(500):
+            v = random_time((0, 1), precision=3)
+            assert v == round(v, 3), f"Floating-point noise detected: {v}"

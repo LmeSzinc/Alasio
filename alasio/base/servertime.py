@@ -303,9 +303,10 @@ def random_time(second, n=3, precision=3):
     low, high = parse_second(second)
     if low < high:
         multiply = 10 ** precision
-        return random_normal_distribution_int(low * multiply, high * multiply, n) / multiply
+        value = random_normal_distribution_int(low * multiply, high * multiply, n) / multiply
+        return round(value, precision)
     else:
-        return float(low)
+        return round(float(low), precision)
 
 
 class ServerTime:
