@@ -317,6 +317,10 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                     where field is "name", "help", "option_i18n", etc.
                 value: translation
         """
+        # No i18n for mixin class, because they won't be shown
+        if self.nav_name == 'mixin':
+            return {}
+
         _ = self._i18n_old
         new = {}
         for group_name, group in self.groups_data.items():
@@ -347,7 +351,12 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         # Auto create {nav}.tasks.yaml
         if self.file.exists():
             file = self.tasks_file
-            if file.ensure_exist():
+            if self.alasio:
+                op = file.ensure_exist()
+            else:
+                # alasio navs don't auto create {nav}.tasks.yaml, because many of them are empty
+                op = False
+            if op:
                 logger.info(f'Write file {file}')
                 if gitadd:
                     gitadd.stage_add(file)

@@ -114,6 +114,7 @@ class GenConfigGenerated(CrossNavGenerator):
         for module_name in [
             'alasio.config.alasio.group_base',
             'alasio.config.alasio.store_model',
+            'alasio.config.alasio.mixin_model',
         ]:
             module = importlib.import_module(module_name)
             with gen.FromImport(module_name).wrap():

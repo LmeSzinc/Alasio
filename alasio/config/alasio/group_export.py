@@ -19,6 +19,7 @@ from alasio.config.alasio.group_base import (
     T_TUPLE_STR,
 )
 from alasio.config.alasio.group_proxy import batch_set
+from alasio.config.alasio.mixin_model import Future12hMixin, Future1monthMixin, Future1weekMixin, Future24hMixin
 from alasio.config.alasio.store_model import (
     DashboardAmount,
     DashboardBase,

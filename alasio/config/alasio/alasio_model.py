@@ -13,6 +13,14 @@ class Scheduler(a.GroupBase):
     NextRun: a.T_DATETIME = a.DEFAULT_TIME
     ServerUpdate: t.Literal['00:00'] = '00:00'
 
+    def post_edit(self, old: e.Self, edits):
+        if 'NextRun' in edits:
+            from datetime import timedelta
+            from alasio.base.timer import getnow
+            now = getnow()
+            if self.NextRun - now > timedelta(days=1, seconds=-1):
+                self.NextRun = now
+
 
 class SchedulerU00(Scheduler):
     pass

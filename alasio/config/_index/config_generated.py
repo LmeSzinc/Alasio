@@ -29,5 +29,9 @@ class AlasioConfigGenerated:
     # Scheduler: "alasio.SchedulerStatic"
 
     """
+    ========== nav: mixin ==========
+    """
+
+    """
     ========== nav: store ==========
     """
