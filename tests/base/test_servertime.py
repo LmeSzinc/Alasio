@@ -342,6 +342,110 @@ class TestServerTimeCommon:
         assert server._is_valid_date(2023, 13, 1) is False
         assert server._is_valid_date(2023, 0, 1) is False
 
+    def test_get_occurrence_minutes_only(self, server):
+        """
+        Minutes-only condition (hour=None, minute=30) means updates every hour
+        at minute 30.
+        """
+        cond = ServerUpdateCondition(minute=30)
+
+        # Direction=1: before the :30 mark → same hour
+        now = datetime(2023, 1, 1, 10, 15, tzinfo=server.tz)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 1, 1, 10, 30, tzinfo=server.tz)
+
+        # Direction=1: after the :30 mark → next hour
+        now = datetime(2023, 1, 1, 10, 45, tzinfo=server.tz)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 1, 1, 11, 30, tzinfo=server.tz)
+
+        # Direction=1: exactly at :30 → next hour
+        now = datetime(2023, 1, 1, 10, 30, tzinfo=server.tz)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 1, 1, 11, 30, tzinfo=server.tz)
+
+        # Direction=-1: before the :30 mark → previous hour
+        now = datetime(2023, 1, 1, 10, 15, tzinfo=server.tz)
+        res = server._get_occurrence(cond, now, direction=-1)
+        assert res == datetime(2023, 1, 1, 9, 30, tzinfo=server.tz)
+
+        # Direction=-1: after the :30 mark → same hour
+        now = datetime(2023, 1, 1, 10, 45, tzinfo=server.tz)
+        res = server._get_occurrence(cond, now, direction=-1)
+        assert res == datetime(2023, 1, 1, 10, 30, tzinfo=server.tz)
+
+        # Direction=-1: exactly at :30 → previous hour
+        now = datetime(2023, 1, 1, 10, 30, tzinfo=server.tz)
+        res = server._get_occurrence(cond, now, direction=-1)
+        assert res == datetime(2023, 1, 1, 9, 30, tzinfo=server.tz)
+
+        # Crossing midnight
+        now = datetime(2023, 1, 1, 0, 15, tzinfo=server.tz)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 1, 1, 0, 30, tzinfo=server.tz)
+
+        now = datetime(2023, 1, 1, 0, 45, tzinfo=server.tz)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 1, 1, 1, 30, tzinfo=server.tz)
+
+    def test_get_occurrence_weekday_minute_no_hour(self, server):
+        """
+        A condition with weekday/minute but no hour should NOT be treated as
+        every-hour — it falls through to the weekly branch with hour=0.
+        """
+        # 2023-01-02 is Monday (weekday=1), 10:15
+        now = datetime(2023, 1, 2, 10, 15, tzinfo=server.tz)
+        cond = ServerUpdateCondition(weekday=1, minute=30)
+
+        # Should be next Monday at 00:30 (every-hour branch would give 10:30)
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 1, 9, 0, 30, tzinfo=server.tz)
+
+        # Past should be this Monday at 00:30 (already passed)
+        res = server._get_occurrence(cond, now, direction=-1)
+        assert res == datetime(2023, 1, 2, 0, 30, tzinfo=server.tz)
+
+    def test_get_occurrence_minutes_only_requires_monthday_weekday_none(self, server):
+        """
+        Minutes-only is only triggered when both monthday and weekday are None.
+        A condition with monthday set but no hour should use the monthly branch.
+        """
+        now = datetime(2023, 1, 15, 10, 0, tzinfo=server.tz)
+        cond = ServerUpdateCondition(monthday=1, minute=30)
+
+        # Should be Feb 1st 00:30, not Jan 15th 10:30
+        res = server._get_occurrence(cond, now, direction=1)
+        assert res == datetime(2023, 2, 1, 0, 30, tzinfo=server.tz)
+
+    def test_get_occurrence_empty_condition(self, server):
+        """An empty ServerUpdateCondition (all fields None) returns None."""
+        cond = ServerUpdateCondition()
+        now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
+        assert server._get_occurrence(cond, now, direction=1) is None
+        assert server._get_occurrence(cond, now, direction=-1) is None
+
+    def test_get_next_update_filters_none(self, server):
+        """
+        get_next_update / get_last_update should filter out None results
+        from _get_occurrence (e.g. empty conditions that can appear when
+        directly passing ServerUpdateCondition instances).
+        """
+        now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
+
+        # Mix a valid condition with an empty one
+        updates = [
+            ServerUpdateCondition(hour=12, minute=0),
+            ServerUpdateCondition(),  # empty → None
+        ]
+
+        with patch.object(ServerTime, 'now', return_value=now):
+            # Should not crash — empty condition is filtered out
+            next_update = server.get_next_update(updates)
+            assert to_utc(next_update) == to_utc(datetime(2023, 1, 1, 12, 0, tzinfo=server.tz))
+
+            last_update = server.get_last_update(updates)
+            assert to_utc(last_update) == to_utc(datetime(2022, 12, 31, 12, 0, tzinfo=server.tz))
+
 
 class TestServerUpdateComplex:
     @pytest.mark.parametrize("now_time, expected_next, expected_last", [

@@ -19,7 +19,7 @@ class ServerUpdateCondition(msgspec.Struct):
 
 
 TYPE_TIMEZONE_INPUT = Union[str, int, timedelta, timezone]
-TYPE_SERVER_UPDATE_INPUT = Union[str, int, List[str], ServerUpdateCondition]
+TYPE_SERVER_UPDATE_INPUT = Union[str, int, List[str], ServerUpdateCondition, List[ServerUpdateCondition]]
 
 
 def parse_timezone(tz: TYPE_TIMEZONE_INPUT) -> timezone:
@@ -328,52 +328,24 @@ class ServerTime:
         """
         Calculates the next (direction=1) or last (direction=-1) occurrence of a single condition.
 
+        Check order: monthday → weekday → hour → minute → None.
+
         Args:
             cond (ServerUpdateCondition): Condition to check
             now (datetime): Base datetime in the server timezone
             direction (int): 1 for next occurrence, -1 for last occurrence. Defaults to 1.
 
         Returns:
-            datetime: The calculated occurrence time
+            datetime | None: The calculated occurrence time, or None if the condition is empty
         """
-        h, m = cond.hour or 0, cond.minute or 0
-
-        # 1. 每日更新
-        if cond.monthday is None and cond.weekday is None:
-            dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
-            if direction == 1 and dt <= now:
-                dt += timedelta(days=1)
-            elif direction == -1 and dt >= now:
-                dt -= timedelta(days=1)
-            return dt
-
-        # 2. 每周更新
-        if cond.weekday is not None:
-            current_wkday = now.isoweekday()  # 1-7
-            # 计算天数差
-            if direction == 1:
-                days_diff = (cond.weekday - current_wkday) % 7
-            else:
-                days_diff = -((current_wkday - cond.weekday) % 7)
-
-            dt = now.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(days=days_diff)
-            # 如果算出来的时间不符合方向要求，强制跳一周
-            if direction == 1 and dt <= now:
-                dt += timedelta(days=7)
-            elif direction == -1 and dt >= now:
-                dt -= timedelta(days=7)
-            return dt
-
-        # 3. 每月更新
+        # 1. 每月更新
         if cond.monthday is not None:
-            # 尝试当前月、下/上个月，直到找到合法的日期
+            h, m = cond.hour or 0, cond.minute or 0
             curr_y, curr_m = now.year, now.month
-            for i in range(12):  # 最多找12个月
+            for i in range(12):
                 target_m = curr_m + i * direction
-                # 调整月份溢出
                 adj_y = curr_y + (target_m - 1) // 12
                 adj_m = (target_m - 1) % 12 + 1
-
                 if self._is_valid_date(adj_y, adj_m, cond.monthday):
                     dt = datetime(adj_y, adj_m, cond.monthday, h, m, tzinfo=self.tz)
                     if direction == 1 and dt > now:
@@ -381,6 +353,46 @@ class ServerTime:
                     if direction == -1 and dt < now:
                         return dt
             raise ValueError(f"Invalid monthday setting: {cond.monthday}")
+
+        # 2. 每周更新
+        if cond.weekday is not None:
+            h, m = cond.hour or 0, cond.minute or 0
+            current_wkday = now.isoweekday()
+            if direction == 1:
+                days_diff = (cond.weekday - current_wkday) % 7
+            else:
+                days_diff = -((current_wkday - cond.weekday) % 7)
+            dt = now.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(days=days_diff)
+            if direction == 1 and dt <= now:
+                dt += timedelta(days=7)
+            elif direction == -1 and dt >= now:
+                dt -= timedelta(days=7)
+            return dt
+
+        # 3. 每日更新 (at a specific hour)
+        if cond.hour is not None:
+            h, m = cond.hour, cond.minute or 0
+            dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if direction == 1 and dt <= now:
+                dt += timedelta(days=1)
+            elif direction == -1 and dt >= now:
+                dt -= timedelta(days=1)
+            return dt
+
+        # 4. Every hour at this minute (hour=None, minute is set)
+        if cond.minute is not None:
+            m = cond.minute
+            dt = now.replace(minute=m, second=0, microsecond=0)
+            if direction == 1:
+                if dt <= now:
+                    dt += timedelta(hours=1)
+            else:
+                if dt >= now:
+                    dt -= timedelta(hours=1)
+            return dt
+
+        # 5. Empty condition — nothing to compute
+        return None
 
     def get_next_update(self, server_updates: TYPE_SERVER_UPDATE_INPUT):
         """
@@ -395,6 +407,7 @@ class ServerTime:
 
         # Calculate the next occurrence for all configurations and take the minimum
         candidates = [self._get_occurrence(cond, now, direction=1) for cond in updates]
+        candidates = [c for c in candidates if c is not None]
         return min(candidates).astimezone()
 
     def get_last_update(self, server_updates: TYPE_SERVER_UPDATE_INPUT):
@@ -410,4 +423,5 @@ class ServerTime:
 
         # Calculate the last occurrence for all configurations and take the maximum
         candidates = [self._get_occurrence(cond, now, direction=-1) for cond in updates]
+        candidates = [c for c in candidates if c is not None]
         return max(candidates).astimezone()
