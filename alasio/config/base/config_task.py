@@ -16,13 +16,6 @@ from alasio.logger import logger
 class AlasioConfigBaseTask(AlasioConfigBaseAccess):
     """Mixin for task scheduling methods of AlasioConfigBaseAccess."""
 
-    @staticmethod
-    def task_stop(message=''):
-        """
-        Helper method to stop current task.
-        """
-        raise TaskStop(message)
-
     def get_task_schedule(self):
         """
         Returns:
@@ -94,6 +87,23 @@ class AlasioConfigBaseTask(AlasioConfigBaseAccess):
         else:
             logger.info(f'Switch task `{prev}` to `{new}`')
             return True
+
+    @staticmethod
+    def task_stop(message=''):
+        """
+        Helper method to stop current task.
+        """
+        raise TaskStop(message)
+
+    def check_task_switch(self, message='Task switched'):
+        """
+        Stop current task if task switched.
+
+        Raises:
+            TaskEnd:
+        """
+        if self.task_switched():
+            self.task_stop(message=message)
 
     def task_delay(self, minute=None, server_update=None, target=None, task=None):
         """
