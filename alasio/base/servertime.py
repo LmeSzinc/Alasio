@@ -12,6 +12,7 @@ class ServerUpdateCondition(msgspec.Struct):
     # 1 for the first day of month
     monthday: Annotated[Optional[int], msgspec.Meta(ge=1, le=31)] = None
     # 1 for monday, ..., 7 for sunday
+    # weekday is 1-based, 1 for monday, ..., 7 for sunday, this is different to the weekday in datetime
     weekday: Annotated[Optional[int], msgspec.Meta(ge=1, le=7)] = None
     # hour=4,minute=0 means server updates at 04:00 everyday
     hour: Annotated[Optional[int], msgspec.Meta(ge=0, le=23)] = None
@@ -73,6 +74,7 @@ def parse_timezone(tz: TYPE_TIMEZONE_INPUT) -> timezone:
 def parse_server_update(update):
     """
     Parse user input ServerUpdate
+    note that: weekday is 1-based, 1 for monday, ..., 7 for sunday, this is different to the weekday in datetime
 
     "12:34" to ServerUpdateCondition(hour=12, minute=34)
     "18" to ServerUpdateCondition(hour=18)

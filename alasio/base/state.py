@@ -364,7 +364,7 @@ class _StateDispatcher:
 
         if last_func is not None:
             logger.warning(
-                f'when() no condition matched for {last_func.__name__!r}, '
+                f'{self.state_cls.__name__}.when() no condition matched for {last_func.__name__!r}, '
                 f'using last defined function on {self.state_cls.__name__}'
             )
             return last_func(*args, **call_kwargs)

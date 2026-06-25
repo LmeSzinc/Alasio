@@ -6,6 +6,7 @@ Config.when() dispatches to the correct method based on self.config attribute va
 import pytest
 
 from alasio.base.state import Config, _ConfigDispatcher
+from alasio.ext.cache import cached_property
 from alasio.logger import logger
 
 
@@ -471,3 +472,171 @@ class TestConfigWhenNoMemoryLeak:
             make()
 
         assert len(dispatcher.cases) == 3
+
+
+class TestConfigWhenWithCachedProperty:
+    """Tests for @Config.when() combined with @cached_property.
+
+    @cached_property must be on the outside, @Config.when() on the inside:
+        @cached_property
+        @Config.when(server='cn')
+        def method(self):
+            ...
+    """
+
+    def setup_method(self):
+        Config.REGISTRY.clear()
+
+    def test_cached_property_correct_order_dispatch(self):
+        """@cached_property outside @Config.when() should dispatch correctly."""
+        call_count = 0
+
+        class MyTask:
+            config = SimpleConfig(SERVER='cn')
+
+            @cached_property
+            @Config.when(SERVER='cn')
+            def server_specific(self):
+                nonlocal call_count
+                call_count += 1
+                return 'cn_data'
+
+        task = MyTask()
+        # First access: dispatch and cache
+        assert task.server_specific == 'cn_data'
+        assert call_count == 1
+
+    def test_cached_property_caches_result(self):
+        """cached_property should prevent re-dispatch on second access."""
+        call_count = 0
+
+        class MyTask:
+            config = SimpleConfig(SERVER='cn')
+
+            @cached_property
+            @Config.when(SERVER='cn')
+            def server_specific(self):
+                nonlocal call_count
+                call_count += 1
+                return 'cn_data'
+
+        task = MyTask()
+        # First access
+        assert task.server_specific == 'cn_data'
+        assert call_count == 1
+        # Second access: from instance __dict__, no re-dispatch
+        assert task.server_specific == 'cn_data'
+        assert call_count == 1
+
+    def test_cached_property_config_change_after_cached(self):
+        """Changing config after first access should NOT affect cached result."""
+
+        class MyTask:
+            config = SimpleConfig(SERVER='cn')
+
+            @cached_property
+            @Config.when(SERVER='cn')
+            def server_specific(self):
+                return 'cn_data'
+
+        task = MyTask()
+        # First access: caches 'cn_data'
+        assert task.server_specific == 'cn_data'
+        # Change config at runtime
+        task.config.SERVER = 'en'
+        # Still returns cached value, does not re-dispatch
+        assert task.server_specific == 'cn_data'
+
+    def test_cached_property_cache_clear_then_redispatch(self):
+        """After clearing cached_property cache, should re-dispatch based on current config."""
+
+        class MyTask:
+            config = SimpleConfig(SERVER='cn')
+
+            @cached_property
+            @Config.when(SERVER='cn')
+            def server_specific(self):
+                return 'cn_data'
+
+            @cached_property
+            @Config.when(SERVER='en')
+            def server_specific(self):
+                return 'en_data'
+
+        task = MyTask()
+        # First access: dispatch to cn version
+        assert task.server_specific == 'cn_data'
+        # Clear the cached value
+        cached_property.pop(task, 'server_specific')
+        # Change config
+        task.config.SERVER = 'en'
+        # Re-dispatch to en version
+        assert task.server_specific == 'en_data'
+
+    def test_cached_property_with_chained_when(self):
+        """cached_property should work with chained @Config.when()."""
+        call_count = 0
+
+        class MyTask:
+            config = SimpleConfig(SERVER='cn')
+
+            @cached_property
+            @Config.when(SERVER='en')
+            @Config.when(SERVER='cn')
+            @Config.when()
+            def server_specific(self):
+                nonlocal call_count
+                call_count += 1
+                return 'supported_server'
+
+        task = MyTask()
+        # Matches SERVER='cn'
+        assert task.server_specific == 'supported_server'
+        assert call_count == 1
+        # Change to en, but value is cached — no re-dispatch
+        task.config.SERVER = 'en'
+        assert task.server_specific == 'supported_server'
+        assert call_count == 1
+
+    def test_cached_property_with_fallback(self):
+        """cached_property should work with a fallback @Config.when()."""
+        call_count = 0
+
+        class MyTask:
+            config = SimpleConfig(SERVER='nonexistent')
+
+            @cached_property
+            @Config.when(SERVER='cn')
+            def server_specific(self):
+                nonlocal call_count
+                call_count += 1
+                return 'cn_data'
+
+            @cached_property
+            @Config.when()
+            def server_specific(self):
+                nonlocal call_count
+                call_count += 1
+                return 'fallback'
+
+        task = MyTask()
+        # No match, should use fallback
+        assert task.server_specific == 'fallback'
+        assert call_count == 1
+
+    def test_cached_property_wrong_order_raises_typeerror(self):
+        """@Config.when() outside @cached_property should raise TypeError when called."""
+
+        class MyTask:
+            config = SimpleConfig(SERVER='cn')
+
+            @Config.when(SERVER='cn')
+            @cached_property
+            def server_specific(self):
+                return 'data'
+
+        task = MyTask()
+        # Access returns a bound method, calling it goes through dispatcher
+        # which tries to call the non-callable cached_property instance
+        with pytest.raises(TypeError, match='object is not callable'):
+            task.server_specific()
