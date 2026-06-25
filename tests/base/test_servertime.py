@@ -12,6 +12,7 @@ from alasio.base.servertime import (
     parse_server_update_list,
     parse_timezone,
 )
+from alasio.testing.patch_time import PatchTime
 
 
 class TestParseTimezone:
@@ -225,6 +226,29 @@ class TestServerTimeCommon:
         # Should have the correct timezone
         assert now.tzinfo == server.tz
 
+    def test_now_weekday_server_tz(self, server):
+        """
+        server.now().weekday() should return the weekday in the server timezone,
+        not the local timezone.
+        """
+
+        # Choose a UTC moment where server timezone (UTC+8) has a different weekday.
+        # 2026-06-26 17:00 UTC = Friday (weekday=4)
+        # 2026-06-27 01:00 UTC+8 = Saturday (weekday=5)
+        utc_dt = datetime(2026, 6, 26, 17, 0, tzinfo=timezone.utc)
+        server_dt = utc_dt.astimezone(server.tz)
+
+        # Verify the weekday differs between timezones at this moment
+        assert utc_dt.weekday() == 4  # Friday in UTC
+        assert server_dt.weekday() == 5  # Saturday in server tz
+
+        with PatchTime(server_dt):
+            result = server.now()
+            assert result.weekday() == 5, (
+                f"Expected weekday=5 (Saturday) in server tz, got {result.weekday()}. "
+                f"If local timezone (UTC) were used, weekday would be {utc_dt.weekday()}"
+            )
+
     def test_get_occurrence_daily(self, server):
         # 10:00 today, daily update at 09:00 -> should be 09:00 tomorrow
         now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
@@ -336,7 +360,7 @@ class TestServerUpdateComplex:
         now_time = now_time.replace(tzinfo=server.tz)
         expected_next = expected_next.replace(tzinfo=server.tz)
         expected_last = expected_last.replace(tzinfo=server.tz)
-        
+
         updates = "00:00, 12:00, 18:00"
         with patch.object(ServerTime, 'now', return_value=now_time):
             assert to_utc(server.get_next_update(updates)) == to_utc(expected_next)
@@ -349,27 +373,27 @@ class TestServerUpdateComplex:
         # 4th is Monday
         # 11th, 18th, 25th are Mondays
         # 31st is Sunday
-        
+
         # 1. May 1st 02:30 (Friday)
         # Next: May 2nd 00:00 (min of 2nd 00:00 and 4th 04:00)
         # Last: May 1st 00:00 (max of 1st 00:00 and Apr 27th 04:00)
         (datetime(2026, 5, 1, 2, 30), datetime(2026, 5, 2, 0, 0), datetime(2026, 5, 1, 0, 0)),
-        
+
         # 2. May 1st 09:30 (Friday)
         # Next: May 2nd 00:00
         # Last: May 1st 00:00
         (datetime(2026, 5, 1, 9, 30), datetime(2026, 5, 2, 0, 0), datetime(2026, 5, 1, 0, 0)),
-        
+
         # 3. May 25th 23:30 (Monday)
         # Next: May 26th 00:00 (min of 26th 00:00 and Jun 1st 04:00)
         # Last: May 25th 04:00 (max of 25th 00:00 and 25th 04:00)
         (datetime(2026, 5, 25, 23, 30), datetime(2026, 5, 26, 0, 0), datetime(2026, 5, 25, 4, 0)),
-        
+
         # 4. May 26th 02:30 (Tuesday)
         # Next: May 27th 00:00 (min of 27th 00:00 and Jun 1st 04:00)
         # Last: May 26th 00:00 (max of 26th 00:00 and 25th 04:00)
         (datetime(2026, 5, 26, 2, 30), datetime(2026, 5, 27, 0, 0), datetime(2026, 5, 26, 0, 0)),
-        
+
         # 5. May 31st 23:30 (Sunday)
         # Next: Jun 1st 00:00 (min of Jun 1st 00:00 and Jun 1st 04:00)
         # Last: May 31st 00:00 (max of May 31st 00:00 and May 25th 04:00)
@@ -382,7 +406,7 @@ class TestServerUpdateComplex:
         now_time = now_time.replace(tzinfo=server.tz)
         expected_next = expected_next.replace(tzinfo=server.tz)
         expected_last = expected_last.replace(tzinfo=server.tz)
-        
+
         # weekday1 is Monday
         updates = ["00:00", "weekday1-04:00"]
         with patch.object(ServerTime, 'now', return_value=now_time):

@@ -324,20 +324,18 @@ class ServerTime:
         last_day = calendar.monthrange(y, month)[1]
         return 1 <= d <= last_day
 
-    def _get_occurrence(self, cond, base_dt, direction=1):
+    def _get_occurrence(self, cond, now, direction=1):
         """
         Calculates the next (direction=1) or last (direction=-1) occurrence of a single condition.
 
         Args:
             cond (ServerUpdateCondition): Condition to check
-            base_dt (datetime): Base datetime
+            now (datetime): Base datetime in the server timezone
             direction (int): 1 for next occurrence, -1 for last occurrence. Defaults to 1.
 
         Returns:
             datetime: The calculated occurrence time
         """
-        # Ensure the base time is in the server timezone
-        now = base_dt.astimezone(self.tz)
         h, m = cond.hour or 0, cond.minute or 0
 
         # 1. 每日更新
@@ -384,7 +382,7 @@ class ServerTime:
                         return dt
             raise ValueError(f"Invalid monthday setting: {cond.monthday}")
 
-    def get_next_update(self, server_updates: TYPE_TIMEZONE_INPUT):
+    def get_next_update(self, server_updates: TYPE_SERVER_UPDATE_INPUT):
         """
         Args:
             server_updates: Server update inputs
@@ -399,7 +397,7 @@ class ServerTime:
         candidates = [self._get_occurrence(cond, now, direction=1) for cond in updates]
         return min(candidates).astimezone()
 
-    def get_last_update(self, server_updates):
+    def get_last_update(self, server_updates: TYPE_SERVER_UPDATE_INPUT):
         """
         Args:
             server_updates: Server update inputs
