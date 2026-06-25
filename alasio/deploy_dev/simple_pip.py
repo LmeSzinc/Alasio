@@ -110,7 +110,7 @@ class SimplePip:
 
         # add xxxsitepackage tag to avoid random output in user cmd env
         code = 'import site, json; print("xxxsitepackage", json.dumps(site.getsitepackages()))'
-        result = run_cmd([python_executable, '-c', code])
+        result = run_cmd([python_executable, '-c', code]).stdout
         # xxxsitepackage ['xxx\alas2026', 'xxx\alas2026\lib\site-packages']
         for row in result.splitlines():
             if not row.startswith('xxxsitepackage'):

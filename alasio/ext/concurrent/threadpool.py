@@ -5,7 +5,7 @@ from typing import Callable, Generic, TypeVar
 
 from typing_extensions import ParamSpec
 
-from alasio.ext.concurrent.cmd import run_cmd
+from alasio.ext.concurrent.cmd import CmdlineResultStr, run_cmd
 from alasio.logger import logger
 
 ParamP = ParamSpec("ParamP")
@@ -429,7 +429,7 @@ class ThreadPool:
 
         return thread_wrapper
 
-    def start_cmd_soon(self, cmd, timeout=10, strip=True) -> Job[str]:
+    def start_cmd_soon(self, cmd, timeout=10, strip=True) -> Job[CmdlineResultStr]:
         """
         Run cmd on subprocess and communicate it on another thread,
         result can be got from `job` object
