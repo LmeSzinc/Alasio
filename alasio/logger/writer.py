@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from alasio.ext import env
 from alasio.ext.cache import cached_property_threadsafe
 from alasio.ext.path import PathStr
+from alasio.ext.path.atomic import atomic_open
 from alasio.ext.singleton import Singleton
 
 if TYPE_CHECKING:
@@ -47,10 +48,10 @@ class LogWriter(metaclass=Singleton):
     def fd(self):
         file = self.file
         try:
-            return open(file, 'a', encoding='utf-8')
+            return atomic_open(file, mode='a', encoding='utf-8')
         except FileNotFoundError:
             file.uppath().makedirs(exist_ok=True)
-        return open(file, 'a', encoding='utf-8')
+            return atomic_open(file, mode='a', encoding='utf-8')
 
     @cached_property_threadsafe
     def stdout(self):

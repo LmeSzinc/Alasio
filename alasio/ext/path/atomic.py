@@ -87,6 +87,8 @@ def windows_attempt_delay(attempt):
     # large attempt causes heavy power calculation
     if attempt > 10:
         attempt = 10
+    if attempt < 0:
+        attempt = 0
     delay = 2 ** attempt * WINDOWS_RETRY_DELAY
     # wait 1s at max
     if delay > 1:
@@ -680,6 +682,49 @@ def atomic_read_bytes_into(file, buffer):
         # Linux and Mac allow reading while replacing
         yield from file_read_bytes_into(file, buffer)
         return
+
+
+def atomic_open(file, mode='r', encoding=None, **kwargs):
+    """
+    Open a file atomically with retry on PermissionError (Windows only).
+
+    Unlike atomic_write, this returns an open file handle rather than
+    writing data atomically. The PermissionError retry handles cases
+    where the file is temporarily locked by another process.
+
+    Args:
+        file (str): Target file path
+        mode (str): File open mode. Defaults to 'r'.
+        encoding (str): Text encoding. Defaults to None.
+        **kwargs: Additional arguments passed to open()
+
+    Returns:
+        file object: Opened file handle
+
+    Examples:
+        # Append-mode log file
+        with atomic_open('log.txt', mode='a', encoding='utf-8') as f:
+            f.write('hello\\n')
+
+        # Read-mode with error handling
+        f = atomic_open('config.json', mode='r', encoding='utf-8')
+        data = f.read()
+        f.close()
+    """
+    if IS_WINDOWS:
+        last_error = None
+        for attempt in range(WINDOWS_MAX_ATTEMPT):
+            try:
+                return open(file, mode=mode, encoding=encoding, **kwargs)
+            except PermissionError as e:
+                last_error = e
+                delay = windows_attempt_delay(attempt)
+                time.sleep(delay)
+                continue
+        if last_error is not None:
+            raise last_error from None
+    else:
+        return open(file, mode=mode, encoding=encoding, **kwargs)
 
 
 def _copy_iter(source, buffer, chunk_size):
