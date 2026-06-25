@@ -408,6 +408,9 @@ class ServerTime:
         # Calculate the next occurrence for all configurations and take the minimum
         candidates = [self._get_occurrence(cond, now, direction=1) for cond in updates]
         candidates = [c for c in candidates if c is not None]
+        if not candidates:
+            raise ValueError('No valid candidates from server update conditions')
+
         return min(candidates).astimezone()
 
     def get_last_update(self, server_updates: TYPE_SERVER_UPDATE_INPUT):
@@ -424,4 +427,42 @@ class ServerTime:
         # Calculate the last occurrence for all configurations and take the maximum
         candidates = [self._get_occurrence(cond, now, direction=-1) for cond in updates]
         candidates = [c for c in candidates if c is not None]
+        if not candidates:
+            raise ValueError('No valid candidates from server update conditions')
+
         return max(candidates).astimezone()
+
+    def get_delta_to_update(self, server_updates):
+        """
+        Returns the timedelta to the nearest server update (before or after now).
+
+        Args:
+            server_updates: Server update inputs
+
+        Returns:
+            timedelta: Time delta to the nearest update.
+                Positive if the nearest update is after now,
+                negative if before now.
+
+        Raises:
+            ValueError: If no valid update conditions produce a candidate.
+        """
+        now = self.now()
+        updates = parse_server_update_list(server_updates)
+
+        # Collect both next and last occurrences for each condition
+        candidates = []
+        for cond in updates:
+            next_oc = self._get_occurrence(cond, now, direction=1)
+            if next_oc is not None:
+                candidates.append(next_oc)
+            last_oc = self._get_occurrence(cond, now, direction=-1)
+            if last_oc is not None:
+                candidates.append(last_oc)
+
+        if not candidates:
+            raise ValueError('No valid candidates from server update conditions')
+
+        # Pick the datetime closest to now
+        nearest = min(candidates, key=lambda dt: abs((dt - now).total_seconds()))
+        return nearest - now

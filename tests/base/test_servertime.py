@@ -446,6 +446,84 @@ class TestServerTimeCommon:
             last_update = server.get_last_update(updates)
             assert to_utc(last_update) == to_utc(datetime(2022, 12, 31, 12, 0, tzinfo=server.tz))
 
+    def test_get_next_update_empty_raises_error(self, server):
+        """get_next_update raises when all conditions produce no candidates."""
+        now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            with pytest.raises(ValueError, match='No valid candidates'):
+                server.get_next_update([ServerUpdateCondition()])
+
+    def test_get_last_update_empty_raises_error(self, server):
+        """get_last_update raises when all conditions produce no candidates."""
+        now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            with pytest.raises(ValueError, match='No valid candidates'):
+                server.get_last_update([ServerUpdateCondition()])
+
+    def test_get_delta_to_updates_nearest_future(self, server):
+        """
+        When ``now`` is closer to the next update than the last,
+        the delta should be positive (future).
+        """
+        # Server updates at 00:00, 12:00. Now is 10:00.
+        # Last was 00:00 (10h ago), next is 12:00 (2h later).
+        # Nearest is 12:00 → delta = +2h
+        now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            delta = server.get_delta_to_update("00:00, 12:00")
+            assert delta is not None
+            assert delta.total_seconds() == 2 * 3600  # +2 hours
+
+    def test_get_delta_to_updates_nearest_past(self, server):
+        """
+        When ``now`` is closer to the last update than the next,
+        the delta should be negative (past).
+        """
+        # Server updates at 00:00, 12:00. Now is 13:00.
+        # Last was 12:00 (1h ago), next is tomorrow 00:00 (11h later).
+        # Nearest is 12:00 → delta = -1h
+        now = datetime(2023, 1, 1, 13, 0, tzinfo=server.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            delta = server.get_delta_to_update("00:00, 12:00")
+            assert delta is not None
+            assert delta.total_seconds() == -1 * 3600  # -1 hour
+
+    def test_get_delta_to_updates_midway(self, server):
+        """
+        When ``now`` is exactly midway between two daily updates,
+        both directions have the same distance.
+        """
+        # Server updates at 00:00, 12:00. Now is 06:00.
+        # Next 12:00 is +6h, last 00:00 was -6h.
+        # Both are 6h away; the first in the candidate list wins.
+        now = datetime(2023, 1, 1, 6, 0, tzinfo=server.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            delta = server.get_delta_to_update("00:00, 12:00")
+            assert delta is not None
+            assert abs(delta.total_seconds()) == 6 * 3600  # 6 hours
+
+    def test_get_delta_to_updates_minutes_only(self, server):
+        """
+        Minutes-only condition (every hour) — nearest could be
+        a few minutes away in either direction.
+        """
+        # Now is 10:35, every hour at :30.
+        # Last was 10:30 (5min ago), next is 11:30 (55min later).
+        # Nearest is 10:30 → delta = -5min
+        now = datetime(2023, 1, 1, 10, 35, tzinfo=server.tz)
+        cond = ServerUpdateCondition(minute=30)
+        with patch.object(ServerTime, 'now', return_value=now):
+            delta = server.get_delta_to_update([cond])
+            assert delta is not None
+            assert delta.total_seconds() == -5 * 60  # -5 minutes
+
+    def test_get_delta_to_updates_empty_condition(self, server):
+        """Empty conditions should raise ValueError."""
+        now = datetime(2023, 1, 1, 10, 0, tzinfo=server.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            with pytest.raises(ValueError, match='No valid candidates'):
+                server.get_delta_to_update([ServerUpdateCondition()])
+
 
 class TestServerUpdateComplex:
     @pytest.mark.parametrize("now_time, expected_next, expected_last", [
