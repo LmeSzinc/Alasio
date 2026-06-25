@@ -107,7 +107,11 @@ class PatchTime:
             self._sleep_calls.append(seconds)
             self.shift(seconds)
 
-        # Apply patches to the datetime module
+        # Capture originals before patching
+        original_datetime_cls = datetime.datetime
+        original_date_cls = datetime.date
+
+        # Apply patches to the datetime module (these affect future imports)
         self._monkeypatch.setattr(datetime, "datetime", MockDatetime)
         self._monkeypatch.setattr(datetime, "date", MockDate)
 
@@ -120,7 +124,42 @@ class PatchTime:
         self._monkeypatch.setattr(time, "perf_counter_ns", mock_perf_counter_ns)
         self._monkeypatch.setattr(time, "sleep", mock_sleep)
 
+        # Also redirect modules that already imported datetime/date via
+        # `from datetime import datetime` / `from datetime import date`.
+        # The global monkey-patch above only affects future imports; existing
+        # module-level references still point to the original classes.
+        self._patch_direct_references(original_datetime_cls, MockDatetime)
+        self._patch_direct_references(original_date_cls, MockDate)
+
         return self
+
+    def _patch_direct_references(self, original_cls, mock_cls):
+        """
+        Redirect modules that already imported a datetime class via
+        ``from datetime import <name>`` (e.g. ``from datetime import datetime``).
+        Those modules hold a stale reference to the original class; this method
+        replaces it with the mock so that ``module.datetime.now(tz)`` calls the
+        mocked version.
+
+        Uses ``self._monkeypatch`` so all patches are undone together in ``__exit__``.
+        """
+        import sys
+
+        attr_name = original_cls.__name__
+        for mod_name, mod in list(sys.modules.items()):
+            # Skip dunder/internal modules and the datetime/time modules themselves.
+            # Single-underscore modules (e.g. `_test_helper`) are valid targets.
+            if mod_name.startswith('__') or mod_name.startswith('importlib'):
+                continue
+            if mod is sys or mod is datetime or mod is time or mod is pytest:
+                continue
+            try:
+                if getattr(mod, attr_name, None) is original_cls:
+                    self._monkeypatch.setattr(mod, attr_name, mock_cls)
+            except Exception:
+                # Some modules (C extensions, frozen modules) cannot be
+                # patched; skip them silently.
+                pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Undo patches when exiting the context manager."""
