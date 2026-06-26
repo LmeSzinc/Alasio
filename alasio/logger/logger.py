@@ -563,7 +563,7 @@ class AlasioLogger(LoggingLevel):
 
         If the title is too long, the box auto-extends to wrap the title with padding.
         """
-        title = title.upper()
+        title = f'{title}'.upper()
         # Auto-extend interior to wrap long titles: at least 98, with 4+ spaces padding each side
         interior = max(98, len(title) + 10)
         edge = f'+{"=" * interior}+'
@@ -581,7 +581,7 @@ class AlasioLogger(LoggingLevel):
 
         At least 5 '=' are always shown on each side of the title.
         """
-        title = title.upper()
+        title = f'{title}'.upper()
         width = max(100, len(title) + 12)
         hr = f' {title} '.center(width, '=')
         self.raw(hr, **kwargs)
@@ -594,7 +594,7 @@ class AlasioLogger(LoggingLevel):
 
         At least 5 '-' are always shown on each side of the title.
         """
-        title = title.upper()
+        title = f'{title}'.upper()
         width = max(100, len(title) + 12)
         hr = f' {title} '.center(width, '-')
         self.raw(hr, **kwargs)
@@ -606,7 +606,7 @@ class AlasioLogger(LoggingLevel):
 
         At least 5 '.' are always shown on each side of the title.
         """
-        title = title.upper()
+        title = f'{title}'.upper()
         width = max(40, len(title) + 12)
         hr = f' {title} '.center(width, '.')
         self.info(hr, **kwargs)
