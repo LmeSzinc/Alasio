@@ -89,14 +89,15 @@
     // Hide error while typing
     showError = false;
 
-    if (isDatetime) {
-      arg.value = parseToUTC(displayValue);
-    }
-
     // Clear the previous timer on each keystroke
     clearTimeout(debounceTimer);
     // Set a new timer to trigger the edit callback after a delay
     debounceTimer = setTimeout(() => {
+      // For datetime, convert displayValue to UTC before validation/submission
+      if (isDatetime) {
+        arg.value = parseToUTC(displayValue);
+      }
+
       // Show error after debounce
       showError = true;
 
