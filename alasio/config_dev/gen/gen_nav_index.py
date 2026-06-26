@@ -1,4 +1,7 @@
+from typing import Iterator
+
 from alasio.config_dev.format.format_yaml import yaml_formatter
+from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.gen.gen_cross import CrossNavGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext.cache import cached_property
@@ -25,7 +28,7 @@ class GenNavIndex(CrossNavGenerator):
         """
         out = {}
 
-        def iter_configs():
+        def iter_configs() -> "Iterator[ConfigGenerator]":
             yield from self.dict_nav_config.values()
             if self.alasio:
                 yield from self.alasio.dict_nav_config.values()
@@ -62,8 +65,17 @@ class GenNavIndex(CrossNavGenerator):
             dict[str, None]:
                 key: nav_name, ordered by existing file order then new navs appended
         """
+        current_navs = {}
+        for nav_name, config in self.dict_nav_config.items():
+            # skip dashboard
+            if nav_name == 'dashboard':
+                continue
+            # skip empty nav
+            if not config.tasks_data:
+                continue
+            current_navs[nav_name] = None
+
         old = read_yaml(self.nav_order_file)
-        current_navs = {k for k in self.dict_nav_config if k != 'dashboard'}
         out = {}
         for nav_name in deep_keys_depth1(old):
             if nav_name in current_navs:
