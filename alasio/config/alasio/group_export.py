@@ -21,6 +21,7 @@ from alasio.config.alasio.group_base import (
 from alasio.config.alasio.group_proxy import batch_set
 from alasio.config.alasio.mixin_model import Future12hMixin, Future1monthMixin, Future1weekMixin, Future24hMixin
 from alasio.config.alasio.store_model import (
+    DASHBOARD_VALUE_ERROR_MODE,
     DashboardAmount,
     DashboardBase,
     DashboardDynamicTotal,

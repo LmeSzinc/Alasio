@@ -5,6 +5,12 @@ from alasio.base.timer import getnow
 from alasio.config.alasio.group_proxy import batch_set
 from alasio.config.const import DataInconsistent
 from alasio.ext.cache import cached_property
+from alasio.logger import logger
+
+# if error == 'raise', raise ValueError if value not match
+# if error == 'drop', drop current set operation, do nothing
+# if error == 'cap', value will be capped to satisfy constraints
+DASHBOARD_VALUE_ERROR_MODE = t.Literal['raise', 'drop', 'cap']
 
 
 def cap_value(value, meta):
@@ -85,44 +91,57 @@ class DashboardAmount(DashboardBase, dict=True):
         return f'{self.Value}'
 
     @batch_set
-    def set(self, value, raise_error=False):
+    def set(self, value, error: DASHBOARD_VALUE_ERROR_MODE = 'drop'):
         """
         Args:
             value (int): value to set
-            raise_error (bool):
-                True: raise error if value is out of range
-                False: cap value to range
+            error: 'raise' means raise ValueError if value is out of range
+                'drop' means drop current set operation, do nothing
+                'cap' means cap value to range
 
         Returns:
             bool: True if value is set
-                False if value is capped to range and raise_error is False
+                False if value is capped or value is dropped
         """
-        if raise_error:
+        if error == 'raise':
             cap = cap_value(value, self.meta)
             if cap != value:
-                raise ValueError(f'Value {value} is out of range {self.meta.ge}~{self.meta.le}')
+                raise ValueError(
+                    f'{self.__class__.__name__}.set({value}) is out of range {self.meta.ge}~{self.meta.le}')
             self.Value = value
             self.Time = getnow()
             return True
-        else:
+        elif error == 'drop':
+            cap = cap_value(value, self.meta)
+            if cap != value:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}) is out of range {self.meta.ge}~{self.meta.le}, '
+                    f'drop set operation')
+                return False
+            self.Value = value
+            self.Time = getnow()
+            return True
+        elif error == 'cap':
             cap = cap_value(value, self.meta)
             self.Value = cap
             self.Time = getnow()
             return cap == value
+        else:
+            raise ValueError(f'Invalid error mode: {error}')
 
     @batch_set
-    def add(self, value=1, raise_error=False):
+    def add(self, value=1, error: DASHBOARD_VALUE_ERROR_MODE = 'drop'):
         """
         Add value to current value
         """
-        return self.set(self.Value + value, raise_error)
+        return self.set(self.Value + value, error)
 
     @batch_set
-    def sub(self, value=1, raise_error=False):
+    def sub(self, value=1, error: DASHBOARD_VALUE_ERROR_MODE = 'drop'):
         """
         Subtract value from current value
         """
-        return self.set(self.Value - value, raise_error)
+        return self.set(self.Value - value, error)
 
     @batch_set
     def reset(self):
@@ -240,49 +259,75 @@ class DashboardDynamicTotal(DashboardAmount):
         return self.get_meta('Total')
 
     @batch_set
-    def add(self, value=1, raise_error=False):
+    def add(self, value=1, error: DASHBOARD_VALUE_ERROR_MODE = 'drop'):
         """
         Add value to current value
         Total remains unchanged
         """
-        return self.set(self.Value + value, self.Total, raise_error)
+        return self.set(self.Value + value, self.Total, error)
 
     @batch_set
-    def sub(self, value=1, raise_error=False):
+    def sub(self, value=1, error: DASHBOARD_VALUE_ERROR_MODE = 'drop'):
         """
         Subtract value from current value
         Total remains unchanged
         """
-        return self.set(self.Value - value, self.Total, raise_error)
+        return self.set(self.Value - value, self.Total, error)
 
     @batch_set
-    def set(self, value, total, raise_error=False):
+    def set(self, value, total, error: DASHBOARD_VALUE_ERROR_MODE = 'drop'):
         """
         Args:
             value (int): value to set
             total (int): total value
-            raise_error (bool):
-                True: raise error if value is out of range
-                False: cap value to range
+            error (DASHBOARD_VALUE_ERROR_MODE):
+                'raise': raise error if value is out of range
+                'drop': drop current set operation, do nothing
+                'cap': cap value to range
 
         Returns:
             bool: True if value is set
-                False if value is capped to range and raise_error is False
+                False if value is capped or value is dropped
         """
-        if raise_error:
+        if error == 'raise':
             cap = cap_value(value, self.meta)
             if cap != value:
-                raise ValueError(f'Value {value} is out of range {self.meta.ge}~{self.meta.le}')
+                raise ValueError(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range {self.meta.ge}~{self.meta.le}')
             cap = cap_value(total, self.meta_total)
             if cap != total:
-                raise ValueError(f'Total {total} is out of range {self.meta_total.ge}~{self.meta_total.le}')
+                raise ValueError(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range '
+                    f'{self.meta_total.ge}~{self.meta_total.le}')
             if value > total:
-                raise ValueError(f'Value {value} is greater than total {total}')
+                raise ValueError(f'{self.__class__.__name__}.set({value}, {total}) is greater than total {total}')
             self.Value = value
             self.Total = total
             self.Time = getnow()
             return True
-        else:
+        elif error == 'drop':
+            cap = cap_value(value, self.meta)
+            if cap != value:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range '
+                    f'{self.meta.ge}~{self.meta.le}, drop set operation')
+                return False
+            cap = cap_value(total, self.meta_total)
+            if cap != total:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range '
+                    f'{self.meta_total.ge}~{self.meta_total.le}, drop set operation')
+                return False
+            if value > total:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}, {total}) is greater than total {total}, '
+                    f'drop set operation')
+                return False
+            self.Value = value
+            self.Total = total
+            self.Time = getnow()
+            return True
+        elif error == 'cap':
             cap = cap_value(value, self.meta)
             cap_total = cap_value(total, self.meta_total)
             if cap > cap_total:
@@ -291,6 +336,8 @@ class DashboardDynamicTotal(DashboardAmount):
             self.Total = cap_total
             self.Time = getnow()
             return cap == value and cap_total == total
+        else:
+            raise ValueError(f'Invalid error mode: {error}')
 
     def is_empty(self):
         """
