@@ -19,20 +19,24 @@ def timer(function):
     return function_timer
 
 
-def getnow(tz=True):
+def getnow(tz=True, ms=False):
     """
     Get datatime now, with or without timezone
 
     Args:
         tz (tzinfo | bool):
+        ms (bool): True to have microsecond
     """
-    n = datetime.now()
+    now = datetime.now()
     if tz is True:
-        return n.astimezone()
+        now = now.astimezone()
     elif tz is False:
-        return n
+        pass
     else:
-        return n.astimezone(tz)
+        now = now.astimezone(tz)
+    if not ms:
+        now = now.replace(microsecond=0)
+    return now
 
 
 class Timer:

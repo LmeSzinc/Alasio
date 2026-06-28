@@ -328,7 +328,8 @@ class ServerTime:
         Returns:
             datetime: Current time in server timezone
         """
-        return datetime.now(self.tz)
+        # getnow(self.tz)
+        return datetime.now(self.tz).replace(microsecond=0)
 
     @staticmethod
     def _is_valid_date(y, month, d):
@@ -387,9 +388,12 @@ class ServerTime:
             else:
                 days_diff = -((current_wkday - cond.weekday) % 7)
             dt = now.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(days=days_diff)
+            # Note that we use `dt > now` to find occurrence in the future, and `dt <= now` for the past
+            # Since now() removed microseconds, the real time is likely to passed `now`
+            # so `now` is included in the past, and not included in the future
             if direction == 1 and dt <= now:
                 dt += timedelta(days=7)
-            elif direction == -1 and dt >= now:
+            elif direction == -1 and dt > now:
                 dt -= timedelta(days=7)
             return dt
 
@@ -399,7 +403,7 @@ class ServerTime:
             dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
             if direction == 1 and dt <= now:
                 dt += timedelta(days=1)
-            elif direction == -1 and dt >= now:
+            elif direction == -1 and dt > now:
                 dt -= timedelta(days=1)
             return dt
 
@@ -407,12 +411,10 @@ class ServerTime:
         if cond.minute is not None:
             m = cond.minute
             dt = now.replace(minute=m, second=0, microsecond=0)
-            if direction == 1:
-                if dt <= now:
-                    dt += timedelta(hours=1)
-            else:
-                if dt >= now:
-                    dt -= timedelta(hours=1)
+            if direction == 1 and dt <= now:
+                dt += timedelta(hours=1)
+            elif direction == -1 and dt > now:
+                dt -= timedelta(hours=1)
             return dt
 
         # 5. Empty condition — nothing to compute

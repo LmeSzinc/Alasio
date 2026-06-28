@@ -126,7 +126,7 @@ class AlasioConfigBaseTask(AlasioConfigBaseAccess):
         futures = []
         if minute is not None:
             delay = int(random_time(minute) * 60)
-            futures.append(getnow().replace(microsecond=0) + timedelta(seconds=delay))
+            futures.append(getnow() + timedelta(seconds=delay))
         if server_update is not None:
             if server_update is True:
                 try:
@@ -212,7 +212,7 @@ class AlasioConfigBaseTask(AlasioConfigBaseAccess):
                     self.cross_set(task, 'Scheduler', 'Enable', 'enabled')
                 else:
                     self.cross_set(task, 'Scheduler', 'Enable', True)
-                self.cross_set(task, 'Scheduler', 'NextRun', getnow().replace(microsecond=0))
+                self.cross_set(task, 'Scheduler', 'NextRun', getnow())
             return True
         else:
             logger.info(f'Task call: {task} (skipped because disabled by user)')

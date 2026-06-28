@@ -390,10 +390,10 @@ class TestGetOccurrence:
         res = server._get_occurrence(cond, now, direction=-1)
         assert res == datetime(2023, 1, 1, 10, 30, tzinfo=server.tz)
 
-        # Direction=-1: exactly at :30 → previous hour
+        # Direction=-1: exactly at :30 → same hour
         now = datetime(2023, 1, 1, 10, 30, tzinfo=server.tz)
         res = server._get_occurrence(cond, now, direction=-1)
-        assert res == datetime(2023, 1, 1, 9, 30, tzinfo=server.tz)
+        assert res == datetime(2023, 1, 1, 10, 30, tzinfo=server.tz)
 
         # Crossing midnight
         now = datetime(2023, 1, 1, 0, 15, tzinfo=server.tz)
