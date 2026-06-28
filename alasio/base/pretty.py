@@ -1,26 +1,37 @@
-def dict2kv(dic, drop_none=False, use_repr=False):
+from datetime import datetime
+
+
+def pretty_value(value):
+    """
+    Like repr(value) but pretty showing datetime
+    """
+    if isinstance(value, datetime):
+        return value.isoformat(sep='T')
+    return repr(value)
+
+
+def dict2kv(dic, drop_none=False, use_pretty=False):
     """
     Format dict to readable string
 
     Args:
         dic (dict): {'path': 'Scheduler.ServerUpdate', 'value': True}
         drop_none: True to drop None values
-        use_repr:
-
+        use_pretty:
 
     Returns:
         str: "path='Scheduler.ServerUpdate', value=True"
     """
     if drop_none:
-        if use_repr:
+        if use_pretty:
+            items = [f'{k}={pretty_value(v)}' for k, v in dic.items() if v is not None]
+        else:
             items = [f'{k}={repr(v)}' for k, v in dic.items() if v is not None]
-        else:
-            items = [f'{k}={v}' for k, v in dic.items() if v is not None]
     else:
-        if use_repr:
-            items = [f'{k}={repr(v)}' for k, v in dic.items()]
+        if use_pretty:
+            items = [f'{k}={pretty_value(v)}' for k, v in dic.items()]
         else:
-            items = [f'{k}={v}' for k, v in dic.items()]
+            items = [f'{k}={repr(v)}' for k, v in dic.items()]
     return ', '.join(items)
 
 

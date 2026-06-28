@@ -5,6 +5,7 @@ from msgspec.msgpack import encode
 from msgspec.structs import asdict
 from msgspecerror import get_field_default, get_model_changes, load_msgpack_with_default, parse_msgspec_error
 
+from alasio.base.pretty import pretty_value
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.mod_base import ModBase
 from alasio.config.entry.model import ConfigSetEvent, ModelConfigRef
@@ -165,7 +166,7 @@ class ModConfig(ModBase):
             return False, rollback
 
         # init table
-        show = [f'{e.task}.{e.group}.{e.arg}={repr(e.value)}' for e in events]
+        show = [f'{e.task}.{e.group}.{e.arg}={pretty_value(e.value)}' for e in events]
         logger.info(f'config_set "{config_name}": {", ".join(show)}')
         table = AlasioConfigTable(config_name)
 
@@ -214,7 +215,7 @@ class ModConfig(ModBase):
                             default = getattr(obj_old, arg)
                             rollback.append(
                                 ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=e))
-                        show = [f'{e.task}.{e.group}.{e.arg}={repr(e.value)}' for e in new]
+                        show = [f'{e.task}.{e.group}.{e.arg}={pretty_value(e.value)}' for e in new]
                         logger.info(f'config_set "{config_name}" rejected by post_edit: {", ".join(show)}')
                         break
                     except Exception as e:
@@ -227,8 +228,7 @@ class ModConfig(ModBase):
                         except (TypeError, AttributeError) as e:
                             logger.error(f'Failed to get model changes: {e}')
                         else:
-                            show = [f'{task}.{group}.{arg}={repr(value)}' for arg, value in
-                                    dict_diff.items()]
+                            show = [f'{task}.{group}.{arg}={pretty_value(value)}' for arg, value in dict_diff.items()]
                             logger.info(f'config_set "{config_name}" post_edit effect: {show}')
                             for arg, value in dict_diff.items():
                                 success.append(ConfigSetEvent(task=task, group=group, arg=arg, value=value))
@@ -303,7 +303,7 @@ class ModConfig(ModBase):
             ConfigSetEvent(task=task, group=group, arg=event.arg, value=arg_value)]
 
         # init table
-        logger.info(f'config_set "{config_name}": {task}.{group}.{event.arg}={repr(event.value)}')
+        logger.info(f'config_set "{config_name}": {task}.{group}.{event.arg}={pretty_value(event.value)}')
         table = AlasioConfigTable(config_name)
 
         # write after validation
@@ -338,7 +338,7 @@ class ModConfig(ModBase):
                     # rollback all args from this group
                     default = getattr(obj_old, event.arg)
                     rollback = ConfigSetEvent(task=task, group=group, arg=event.arg, value=default, error=e)
-                    show = f'{task}.{group}.{event.arg}={repr(event.value)}'
+                    show = f'{task}.{group}.{event.arg}={pretty_value(event.value)}'
                     logger.info(f'config_set "{config_name}" rejected by post_edit: {show}')
                     return False, [rollback]
                 except Exception as e:
@@ -351,7 +351,7 @@ class ModConfig(ModBase):
                     except (TypeError, AttributeError) as e:
                         logger.error(f'Failed to get model changes: {e}')
                     else:
-                        show = [f'{task}.{group}.{arg}={repr(value)}' for arg, value in dict_diff.items()]
+                        show = [f'{task}.{group}.{arg}={pretty_value(value)}' for arg, value in dict_diff.items()]
                         logger.info(f'config_set "{config_name}" post_edit effect: {show}')
                         for arg, value in dict_diff.items():
                             success.append(ConfigSetEvent(task=task, group=group, arg=arg, value=value))
