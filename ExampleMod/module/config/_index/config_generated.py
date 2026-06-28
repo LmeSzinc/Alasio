@@ -23,15 +23,6 @@ class ConfigGenerated(AlasioConfigBase):
     Game: "alas.Game"
 
     """
-    ========== nav: dashboard ==========
-    """
-    # ----- Dashboard -----
-    Oil: "dashboard.Oil"
-    Gems: "dashboard.Gems"
-    Progress: "dashboard.Progress"
-    Planner: "dashboard.Planner"
-
-    """
     ========== nav: general ==========
     """
     # ----- General -----
@@ -77,3 +68,12 @@ class ConfigGenerated(AlasioConfigBase):
     # ----- OpsiAshAssist -----
     # Scheduler: "alasio.SchedulerU00"
     OpsiAshAssist: "opsi.OpsiAshAssist"
+
+    """
+    ========== nav: dashboard ==========
+    """
+    # ----- Dashboard -----
+    Oil: "dashboard.Oil"
+    Gems: "dashboard.Gems"
+    Progress: "dashboard.Progress"
+    Planner: "dashboard.Planner"

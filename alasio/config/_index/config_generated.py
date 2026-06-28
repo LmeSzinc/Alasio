@@ -9,11 +9,6 @@ class AlasioConfigGenerated:
     # A generated config struct to fool IDE's type-predict and auto-complete
 
     """
-    ========== nav: alasio ==========
-    """
-    Scheduler: "alasio.Scheduler"
-
-    """
     ========== nav: device ==========
     """
     # ----- Device -----
@@ -27,6 +22,11 @@ class AlasioConfigGenerated:
 
     # ----- RestartGame -----
     # Scheduler: "alasio.SchedulerStatic"
+
+    """
+    ========== nav: alasio ==========
+    """
+    Scheduler: "alasio.Scheduler"
 
     """
     ========== nav: mixin ==========

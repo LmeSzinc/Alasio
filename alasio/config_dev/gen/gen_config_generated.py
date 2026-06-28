@@ -3,12 +3,42 @@ import inspect
 from collections import defaultdict
 
 from alasio.codegen.python import CodeGen
-from alasio.config_dev.gen.gen_cross import CrossNavGenerator
+from alasio.config_dev.gen.gen_nav_index import GenNavIndex
 from alasio.logger import logger
 
 
-class GenConfigGenerated(CrossNavGenerator):
+class GenConfigGenerated(GenNavIndex):
     """Generator for config_generated.py and group_export.py."""
+
+    def _iter_nav_config_by_order(self):
+        """
+        Yields:
+            tuple[str, ConfigGenerator]:
+        """
+        dashboard = 'dashboard'
+        visited = set()
+
+        # 1. iter from nav_order_data
+        for nav_name in self.nav_order_data:
+            if nav_name == dashboard:
+                continue
+            config = self.dict_nav_config.get(nav_name, None)
+            if config is not None:
+                visited.add(nav_name)
+                yield nav_name, config
+
+        # 2. iter any unknown navs
+        for nav_name, config in self.dict_nav_config.items():
+            if nav_name == dashboard:
+                continue
+            if nav_name not in visited:
+                yield nav_name, config
+
+        # 3. iter dashboard navs
+        nav_name = dashboard
+        config = self.dict_nav_config.get(dashboard, None)
+        if config is not None:
+            yield nav_name, config
 
     def generate_config_generated_file(self, gitadd=None):
         """
@@ -53,7 +83,7 @@ class GenConfigGenerated(CrossNavGenerator):
             # Generate group attributes organized by nav
             # Sort nav names for stable output, but keep group order as defined
             collected_groups = defaultdict(set)
-            for nav_name, config in self.dict_nav_config.items():
+            for nav_name, config in self._iter_nav_config_by_order():
                 # Nav comment
                 gen.MultilineComment(f'========== nav: {nav_name} ==========')
                 # having at lease one Scheduler group

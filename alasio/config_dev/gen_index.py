@@ -1,6 +1,5 @@
 from alasio.config_dev.gen.gen_config_generated import GenConfigGenerated
 from alasio.config_dev.gen.gen_config_index import GenConfigIndex
-from alasio.config_dev.gen.gen_nav_index import GenNavIndex
 from alasio.config_dev.gen.gen_queue_index import GenQueueIndex
 from alasio.ext import env
 from alasio.ext.file.jsonfile import write_json_custom_indent
@@ -11,7 +10,6 @@ from alasio.logger import logger
 
 class IndexGenerator(
     GenConfigIndex,
-    GenNavIndex,
     GenQueueIndex,
     GenConfigGenerated,
 ):
