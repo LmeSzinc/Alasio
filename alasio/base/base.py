@@ -1,8 +1,9 @@
-from typing import Union
+from typing import Optional, Union
 
 from msgspecerror import get_class_annotation
 
 from alasio.base.exception import ScriptError
+from alasio.base.timer import T_TIMER_LIMIT, Timer
 from alasio.config.base import AlasioConfigBase
 from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
@@ -69,3 +70,54 @@ class ModuleBase:
         else:
             logger.warning('ModuleBase received an unknown device, using it anyway')
             self.device = device
+
+    def loop(self, *, skip_first=True, timeout: Optional[T_TIMER_LIMIT] = None):
+        """
+        A syntactic sugar to start a state loop
+
+        Args:
+            skip_first (bool): Usually to be True to reuse the previous screenshot
+            timeout: Seconds of timeout, or (second, count), or a Timer object
+
+        Yields:
+            np.ndarray: screenshot
+
+        Examples:
+            # state machine that handle clicking until destination
+            for _ in self.loop():
+                if self.appear(...):
+                    break
+                if self.appear_then_click(...):
+                    continue
+
+        Examples:
+            # state machine with timeout
+            for _ in self.loop(timeout=2):
+                if self.appear(...):
+                    logger.info('Wait success')
+                    break
+            else:
+                logger.warning('Wait timeout')
+        """
+        if timeout is not None:
+            timeout = Timer.from_seconds(timeout).reset()
+
+        while 1:
+            if timeout is not None:
+                if timeout.reached():
+                    return
+
+            if skip_first:
+                skip_first = False
+            else:
+                self.device.screenshot()
+
+            try:
+                yield self.device.image
+                continue
+            except AttributeError:
+                pass
+
+            # no cached screenshot, take new screenshot anyway
+            self.device.screenshot()
+            yield self.device.image

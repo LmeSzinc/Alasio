@@ -1,6 +1,9 @@
 import time
 from datetime import datetime
 from functools import wraps
+from typing import Tuple, Union
+
+from typing_extensions import Self
 
 
 def timer(function):
@@ -39,6 +42,10 @@ def getnow(tz=True, ms=False):
     return now
 
 
+# timeout `limit` in seconds or (limit, count), limit can be int or float
+T_TIMER_LIMIT = Union[int, float, Tuple[int, int], Tuple[float, int], 'Timer']
+
+
 class Timer:
     def __init__(self, limit, count=0):
         """
@@ -49,25 +56,37 @@ class Timer:
             limit (int | float): Timer limit
             count (int): Timer access count. Default to 0.
         """
+        if limit < 0:
+            limit = 0
+        if count < 0:
+            count = 0
         self.limit = limit
         self.count = count
         self._start = 0.
         self._access = 0
 
     @classmethod
-    def from_seconds(cls, limit, speed=0.5):
+    def from_seconds(cls, limit: T_TIMER_LIMIT, speed=0.5) -> Self:
         """
         Create timer from given seconds
 
         Args:
-            limit (int | float):
+            limit:
+                - timeout `limit` in seconds, limit can be int or float
+                - (limit, count), limit can be int or float
+                - Timer object
             speed (int | float): Approximate screenshot time cost
                 if time cost > 0.5s, device is considered slow
         """
+        if isinstance(limit, Timer):
+            return limit
+        if isinstance(limit, tuple):
+            limit, count = limit
+            return cls(limit, count=count)
         count = int(limit / speed)
         return cls(limit, count=count)
 
-    def start(self):
+    def start(self) -> Self:
         """
         Start current timer.
         If timer not started, reached() always return True. So we can have fast first try on:
@@ -110,7 +129,7 @@ class Timer:
         """
         return self._access
 
-    def set(self, current=None, count=None, speed=0.5):
+    def set(self, current=None, count=None, speed=0.5) -> Self:
         """
         Set internal state directly
 
@@ -138,7 +157,7 @@ class Timer:
                 pass
         return self
 
-    def add_count(self):
+    def add_count(self) -> Self:
         self._access += 1
         return self
 
@@ -155,7 +174,7 @@ class Timer:
             # not started, return True for fast first try
             return True
 
-    def reset(self):
+    def reset(self) -> Self:
         """
         Reset the timer as if it just started
         """
@@ -163,7 +182,7 @@ class Timer:
         self._access = 0
         return self
 
-    def clear(self):
+    def clear(self) -> Self:
         """
         Reset the timer as if it never started
         """
@@ -182,13 +201,14 @@ class Timer:
         else:
             return False
 
-    def wait(self):
+    def wait(self) -> Self:
         """
         Wait until timer reached.
         """
         diff = self._start + self.limit - time.monotonic()
         if diff > 0:
             time.sleep(diff)
+        return self
 
     def show(self):
         from alasio.logger import logger

@@ -31,6 +31,72 @@ class TestTimerInitialization:
         assert t.limit == 5
         assert t.count == 5  # 5 / 1.0 = 5
 
+    def test_init_negative_limit(self):
+        """Test __init__ with negative limit clamps to 0"""
+        t = Timer(limit=-5.0, count=10)
+        assert t.limit == 0.0
+        assert t.count == 10
+
+    def test_init_negative_count(self):
+        """Test __init__ with negative count clamps to 0"""
+        t = Timer(limit=5.0, count=-3)
+        assert t.limit == 5.0
+        assert t.count == 0
+
+    def test_init_both_negative(self):
+        """Test __init__ with both negative"""
+        t = Timer(limit=-5.0, count=-3)
+        assert t.limit == 0.0
+        assert t.count == 0
+
+
+class TestFromSeconds:
+    """Test from_seconds class method with T_TIMER_LIMIT types"""
+
+    def test_float_limit(self):
+        """from_seconds with float limit"""
+        t = Timer.from_seconds(limit=7.5, speed=0.5)
+        assert t.limit == 7.5
+        assert t.count == 15  # 7.5 / 0.5 = 15
+
+    def test_tuple_int_int(self):
+        """from_seconds with (int, int) tuple"""
+        t = Timer.from_seconds(limit=(10, 3))
+        assert t.limit == 10
+        assert t.count == 3
+
+    def test_tuple_float_int(self):
+        """from_seconds with (float, int) tuple"""
+        t = Timer.from_seconds(limit=(7.5, 3))
+        assert t.limit == 7.5
+        assert t.count == 3
+
+    def test_timer_object(self):
+        """from_seconds with Timer object returns the same Timer"""
+        original = Timer(limit=10, count=5)
+        result = Timer.from_seconds(limit=original)
+        assert result is original
+        assert result.limit == 10
+        assert result.count == 5
+
+    def test_tuple_negative_limit(self):
+        """from_seconds with negative limit in tuple clamps to 0"""
+        t = Timer.from_seconds(limit=(-10, 3))
+        assert t.limit == 0
+        assert t.count == 3
+
+    def test_tuple_negative_count(self):
+        """from_seconds with negative count in tuple clamps to 0"""
+        t = Timer.from_seconds(limit=(10, -5))
+        assert t.limit == 10
+        assert t.count == 0
+
+    def test_default_speed(self):
+        """from_seconds with default speed (0.5)"""
+        t = Timer.from_seconds(limit=10)
+        assert t.limit == 10
+        assert t.count == 20  # 10 / 0.5 = 20
+
 
 class TestTimerStart:
     """Test Timer start functionality"""
@@ -284,7 +350,7 @@ class TestTimerIntegration:
         t._access = 3
 
         string_repr = str(t)
-        assert 'Timer' in string_repr
-        assert '5' in string_repr  # limit
-        assert '3' in string_repr  # access count
-        assert '10' in string_repr  # count
+        assert "Timer" in string_repr
+        assert "5" in string_repr  # limit
+        assert "3" in string_repr  # access count
+        assert "10" in string_repr  # count
