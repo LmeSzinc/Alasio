@@ -123,6 +123,10 @@ class DashboardAmount(DashboardBase, dict=True):
             return True
         elif error == 'cap':
             cap = cap_value(value, self.meta)
+            if cap != value:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}) is out of range {self.meta.ge}~{self.meta.le}, '
+                    f'cap value to {cap}')
             self.Value = cap
             self.Time = getnow()
             return cap == value
@@ -329,8 +333,19 @@ class DashboardDynamicTotal(DashboardAmount):
             return True
         elif error == 'cap':
             cap = cap_value(value, self.meta)
+            if cap != value:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range '
+                    f'{self.meta.ge}~{self.meta.le}, cap value to {cap}')
             cap_total = cap_value(total, self.meta_total)
+            if cap_total != total:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range '
+                    f'{self.meta_total.ge}~{self.meta_total.le}, cap total to {cap_total}')
             if cap > cap_total:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}, {total}) is greater than total {total}, '
+                    f'cap value to {cap_total}')
                 cap = cap_total
             self.Value = cap
             self.Total = cap_total

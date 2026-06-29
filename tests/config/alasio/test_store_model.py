@@ -17,6 +17,7 @@ from alasio.logger import logger
 
 # ---- Tests: cap_value ----
 
+
 class TestCapValue:
     """Test suite for cap_value function"""
 
@@ -83,10 +84,12 @@ class TestCapValue:
 
 # ---- Test helper structs ----
 
+
 class _DashboardAmountLimited(DashboardAmount):
     """
     Test helper: DashboardAmount with ge=0, le=100
     """
+
     Value: e.Annotated[int, m.Meta(ge=0, le=100)] = 0
 
 
@@ -94,6 +97,7 @@ class _DashboardAmountOnlyGe(DashboardAmount):
     """
     Test helper: DashboardAmount with ge=0 only (no le — same as T_INT_GE0)
     """
+
     Value: e.Annotated[int, m.Meta(ge=0)] = 0
 
 
@@ -101,6 +105,7 @@ class _DashboardRemainLimited(DashboardRemain):
     """
     Test helper: DashboardRemain with ge=0, le=3
     """
+
     Value: e.Annotated[int, m.Meta(ge=0, le=3)] = 0
 
 
@@ -108,6 +113,7 @@ class _DashboardDynamicTotalLimited(DashboardDynamicTotal):
     """
     Test helper: DashboardDynamicTotal with ge=0, le=200 for Value, ge=0 for Total
     """
+
     Value: e.Annotated[int, m.Meta(ge=0, le=200)] = 0
     Total: e.Annotated[int, m.Meta(ge=0)] = 0
 
@@ -116,6 +122,7 @@ class _DashboardDynamicTotalBothCapped(DashboardDynamicTotal):
     """
     Test helper: DashboardDynamicTotal with ge=0, le=200 for both Value and Total
     """
+
     Value: e.Annotated[int, m.Meta(ge=0, le=200)] = 0
     Total: e.Annotated[int, m.Meta(ge=0, le=200)] = 0
 
@@ -124,11 +131,13 @@ class _DashboardDynamicTotalNoGe(DashboardDynamicTotal):
     """
     Test helper: DashboardDynamicTotal with no ge on Value (le=200 only)
     """
+
     Value: e.Annotated[int, m.Meta(le=200)] = 0
     Total: e.Annotated[int, m.Meta(ge=0)] = 0
 
 
 # ---- Tests: DashboardBase.is_expired ----
+
 
 class TestDashboardBaseIsExpired:
     """Test suite for DashboardBase.is_expired"""
@@ -146,6 +155,7 @@ class TestDashboardBaseIsExpired:
 
 
 # ---- Tests: DashboardAmount.meta ----
+
 
 class TestDashboardAmountMeta:
     """Test suite for DashboardAmount.meta"""
@@ -175,6 +185,7 @@ class TestDashboardAmountMeta:
 
 
 # ---- Tests: DashboardAmount.is_empty ----
+
 
 class TestDashboardAmountIsEmpty:
     """Test suite for DashboardAmount.is_empty"""
@@ -215,11 +226,12 @@ class TestDashboardAmountIsEmpty:
             Value: e.Annotated[int, m.Meta(le=100)] = 0
 
         obj = _NoGeAmount(Value=50)
-        with pytest.raises(DataInconsistent, match='does not have ge defined'):
+        with pytest.raises(DataInconsistent, match="does not have ge defined"):
             obj.is_empty()
 
 
 # ---- Tests: DashboardAmount.is_full ----
+
 
 class TestDashboardAmountIsFull:
     """Test suite for DashboardAmount.is_full"""
@@ -254,11 +266,12 @@ class TestDashboardAmountIsFull:
     def test_is_full_raises_when_le_is_none(self):
         """is_full raises DataInconsistent if meta.le is None"""
         obj = _DashboardAmountOnlyGe(Value=5)
-        with pytest.raises(DataInconsistent, match='does not have le defined'):
+        with pytest.raises(DataInconsistent, match="does not have le defined"):
             obj.is_full()
 
 
 # ---- Tests: DashboardAmount.set ----
+
 
 class TestDashboardAmountSet:
     """Test suite for DashboardAmount.set"""
@@ -289,40 +302,44 @@ class TestDashboardAmountSet:
     def test_set_above_le_cap(self):
         """set with value above le caps to le and returns False"""
         obj = _DashboardAmountLimited(Value=0)
-        result = obj.set(200, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(200, error="cap")
         assert result is False
         assert obj.Value == 100
+        assert capture.backend.any_contains("out of range")
 
     def test_set_below_ge_cap(self):
         """set with value below ge caps to ge and returns False"""
         obj = _DashboardAmountLimited(Value=50)
-        result = obj.set(-10, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(-10, error="cap")
         assert result is False
         assert obj.Value == 0
+        assert capture.backend.any_contains("out of range")
 
     def test_set_above_le_drop(self):
         """set with value above le and error='drop' does nothing and logs warning"""
         obj = _DashboardAmountLimited(Value=0)
         with logger.mock_capture_writer() as capture:
-            result = obj.set(200, error='drop')
+            result = obj.set(200, error="drop")
         assert result is False
         assert obj.Value == 0
-        assert capture.backend.any_contains('out of range')
+        assert capture.backend.any_contains("out of range")
 
     def test_set_below_ge_drop(self):
         """set with value below ge and error='drop' does nothing and logs warning"""
         obj = _DashboardAmountLimited(Value=50)
         with logger.mock_capture_writer() as capture:
-            result = obj.set(-10, error='drop')
+            result = obj.set(-10, error="drop")
         assert result is False
         assert obj.Value == 50
-        assert capture.backend.any_contains('out of range')
+        assert capture.backend.any_contains("out of range")
 
     def test_set_within_range_drop(self):
         """set with value within range and error='drop' succeeds"""
         obj = _DashboardAmountLimited(Value=0)
         with logger.mock_capture_writer() as capture:
-            result = obj.set(50, error='drop')
+            result = obj.set(50, error="drop")
         assert result is True
         assert obj.Value == 50
         assert len(capture.backend.logs) == 0
@@ -330,19 +347,19 @@ class TestDashboardAmountSet:
     def test_set_above_le_with_raise(self):
         """set with value above le and error='raise' raises ValueError"""
         obj = _DashboardAmountLimited(Value=0)
-        with pytest.raises(ValueError, match='out of range'):
-            obj.set(200, error='raise')
+        with pytest.raises(ValueError, match="out of range"):
+            obj.set(200, error="raise")
 
     def test_set_below_ge_with_raise(self):
         """set with value below ge and error='raise' raises ValueError"""
         obj = _DashboardAmountLimited(Value=50)
-        with pytest.raises(ValueError, match='out of range'):
-            obj.set(-10, error='raise')
+        with pytest.raises(ValueError, match="out of range"):
+            obj.set(-10, error="raise")
 
     def test_set_within_range_with_raise(self):
         """set with value within range and error='raise' returns True"""
         obj = _DashboardAmountLimited(Value=0)
-        result = obj.set(50, error='raise')
+        result = obj.set(50, error="raise")
         assert result is True
         assert obj.Value == 50
 
@@ -356,12 +373,15 @@ class TestDashboardAmountSet:
     def test_set_only_ge_below(self):
         """set below ge on only-ge struct caps to ge"""
         obj = _DashboardAmountOnlyGe(Value=50)
-        result = obj.set(-5, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(-5, error="cap")
         assert result is False
         assert obj.Value == 0
+        assert capture.backend.any_contains("out of range")
 
 
 # ---- Tests: DashboardAmount.add ----
+
 
 class TestDashboardAmountAdd:
     """Test suite for DashboardAmount.add"""
@@ -390,27 +410,30 @@ class TestDashboardAmountAdd:
     def test_add_above_le_caps(self):
         """add above le caps to le and returns False"""
         obj = _DashboardAmountLimited(Value=99)
-        result = obj.add(5, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.add(5, error="cap")
         assert result is False
         assert obj.Value == 100
+        assert capture.backend.any_contains("out of range")
 
     def test_add_above_le_drop(self):
         """add above le with error='drop' does nothing and logs warning"""
         obj = _DashboardAmountLimited(Value=99)
         with logger.mock_capture_writer() as capture:
-            result = obj.add(5, error='drop')
+            result = obj.add(5, error="drop")
         assert result is False
         assert obj.Value == 99
-        assert capture.backend.any_contains('out of range')
+        assert capture.backend.any_contains("out of range")
 
     def test_add_above_le_raises(self):
         """add above le with error='raise' raises ValueError"""
         obj = _DashboardAmountLimited(Value=99)
-        with pytest.raises(ValueError, match='out of range'):
-            obj.add(5, error='raise')
+        with pytest.raises(ValueError, match="out of range"):
+            obj.add(5, error="raise")
 
 
 # ---- Tests: DashboardAmount.sub ----
+
 
 class TestDashboardAmountSub:
     """Test suite for DashboardAmount.sub"""
@@ -439,27 +462,30 @@ class TestDashboardAmountSub:
     def test_sub_below_ge_caps(self):
         """sub below ge caps to ge and returns False"""
         obj = _DashboardAmountLimited(Value=1)
-        result = obj.sub(5, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.sub(5, error="cap")
         assert result is False
         assert obj.Value == 0
+        assert capture.backend.any_contains("out of range")
 
     def test_sub_below_ge_drop(self):
         """sub below ge with error='drop' does nothing and logs warning"""
         obj = _DashboardAmountLimited(Value=1)
         with logger.mock_capture_writer() as capture:
-            result = obj.sub(5, error='drop')
+            result = obj.sub(5, error="drop")
         assert result is False
         assert obj.Value == 1
-        assert capture.backend.any_contains('out of range')
+        assert capture.backend.any_contains("out of range")
 
     def test_sub_below_ge_raises(self):
         """sub below ge with error='raise' raises ValueError"""
         obj = _DashboardAmountLimited(Value=1)
-        with pytest.raises(ValueError, match='out of range'):
-            obj.sub(5, error='raise')
+        with pytest.raises(ValueError, match="out of range"):
+            obj.sub(5, error="raise")
 
 
 # ---- Tests: DashboardAmount.reset ----
+
 
 class TestDashboardAmountReset:
     """Test suite for DashboardAmount.reset"""
@@ -490,11 +516,12 @@ class TestDashboardAmountReset:
             Value: e.Annotated[int, m.Meta(le=100)] = 0
 
         obj = _NoGeAmount(Value=50)
-        with pytest.raises(DataInconsistent, match='does not have ge defined'):
+        with pytest.raises(DataInconsistent, match="does not have ge defined"):
             obj.reset()
 
 
 # ---- Tests: DashboardAmount.update ----
+
 
 class TestDashboardAmountUpdate:
     """Test suite for DashboardAmount.update"""
@@ -525,6 +552,7 @@ class TestDashboardAmountUpdate:
 
 # ---- Tests: DashboardTotal ----
 
+
 class TestDashboardTotal:
     """Test suite for DashboardTotal (inherits DashboardAmount, no overrides)"""
 
@@ -549,7 +577,7 @@ class TestDashboardTotal:
             Value: e.Annotated[int, m.Meta(ge=0, le=100)] = 0
 
         obj = _TestTotal(Value=0)
-        result = obj.set(200, error='cap')
+        result = obj.set(200, error="cap")
         assert result is False
         assert obj.Value == 100
 
@@ -561,10 +589,10 @@ class TestDashboardTotal:
 
         obj = _TestTotal(Value=0)
         with logger.mock_capture_writer() as capture:
-            result = obj.set(200, error='drop')
+            result = obj.set(200, error="drop")
         assert result is False
         assert obj.Value == 0
-        assert capture.backend.any_contains('out of range')
+        assert capture.backend.any_contains("out of range")
 
     def test_reset_resets_to_ge(self):
         """DashboardTotal.reset sets Value to meta.ge (inherited behavior)"""
@@ -613,6 +641,7 @@ class TestDashboardTotal:
 
 # ---- Tests: DashboardRemain ----
 
+
 class TestDashboardRemainReset:
     """Test suite for DashboardRemain.reset (overrides parent to reset to le)"""
 
@@ -645,7 +674,7 @@ class TestDashboardRemainReset:
             Value: e.Annotated[int, m.Meta(ge=0)] = 0
 
         obj = _NoLeRemain(Value=5)
-        with pytest.raises(DataInconsistent, match='does not have le defined'):
+        with pytest.raises(DataInconsistent, match="does not have le defined"):
             obj.reset()
 
     def test_is_full_works(self):
@@ -664,6 +693,7 @@ class TestDashboardRemainReset:
 
 
 # ---- Tests: DashboardDynamicTotal ----
+
 
 class TestDashboardDynamicTotalSet:
     """Test suite for DashboardDynamicTotal.set"""
@@ -694,93 +724,103 @@ class TestDashboardDynamicTotalSet:
     def test_set_value_exceeds_total_caps(self):
         """set caps value to total when value > total"""
         obj = _DashboardDynamicTotalLimited(Value=0, Total=0)
-        result = obj.set(150, 100, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(150, 100, error="cap")
         assert result is False
         assert obj.Value == 100
         assert obj.Total == 100
+        assert capture.backend.any_contains("greater than total")
 
     def test_set_value_exceeds_total_raises(self):
         """set raises ValueError when value > total and error='raise'"""
         obj = _DashboardDynamicTotalLimited(Value=0, Total=0)
-        with pytest.raises(ValueError, match='greater than total'):
-            obj.set(150, 100, error='raise')
+        with pytest.raises(ValueError, match="greater than total"):
+            obj.set(150, 100, error="raise")
 
     def test_set_value_above_le_caps(self):
         """set caps value to le when value > le"""
         obj = _DashboardDynamicTotalLimited(Value=0, Total=50)
-        result = obj.set(250, 50, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(250, 50, error="cap")
         assert result is False
         assert obj.Value == 50
         assert obj.Total == 50
+        assert capture.backend.any_contains("out of range")
 
     def test_set_total_above_le_caps_total_only(self):
         """set caps total to le when total > le, value within range stays"""
         obj = _DashboardDynamicTotalBothCapped(Value=0, Total=0)
-        result = obj.set(150, 300, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(150, 300, error="cap")
         assert result is False
         assert obj.Value == 150
         assert obj.Total == 200
+        assert capture.backend.any_contains("out of range")
 
     def test_set_both_above_le_caps(self):
         """set caps both value and total when both exceed le"""
         obj = _DashboardDynamicTotalBothCapped(Value=0, Total=0)
-        result = obj.set(300, 300, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(300, 300, error="cap")
         assert result is False
         assert obj.Value == 200
         assert obj.Total == 200
+        assert capture.backend.any_contains("out of range")
 
     def test_set_value_below_ge_caps(self):
         """set caps value to ge when value < ge"""
         obj = _DashboardDynamicTotalLimited(Value=50, Total=100)
-        result = obj.set(-5, 100, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(-5, 100, error="cap")
         assert result is False
         assert obj.Value == 0
+        assert capture.backend.any_contains("out of range")
 
     def test_set_value_exceeds_total_drop(self):
         """set with value > total and error='drop' does nothing and logs warning"""
         obj = _DashboardDynamicTotalLimited(Value=10, Total=100)
         with logger.mock_capture_writer() as capture:
-            result = obj.set(150, 50, error='drop')
+            result = obj.set(150, 50, error="drop")
         assert result is False
         assert obj.Value == 10
         assert obj.Total == 100
-        assert capture.backend.any_contains('greater than total')
+        assert capture.backend.any_contains("greater than total")
 
     def test_set_value_above_le_drop(self):
         """set with value > le and error='drop' does nothing and logs warning"""
         obj = _DashboardDynamicTotalLimited(Value=0, Total=50)
         with logger.mock_capture_writer() as capture:
-            result = obj.set(250, 50, error='drop')
+            result = obj.set(250, 50, error="drop")
         assert result is False
         assert obj.Value == 0
         assert obj.Total == 50
-        assert capture.backend.any_contains('out of range')
+        assert capture.backend.any_contains("out of range")
 
     def test_set_total_above_le_drop(self):
         """set with total > le and error='drop' does nothing and logs warning"""
         obj = _DashboardDynamicTotalBothCapped(Value=0, Total=0)
         with logger.mock_capture_writer() as capture:
-            result = obj.set(150, 300, error='drop')
+            result = obj.set(150, 300, error="drop")
         assert result is False
         assert obj.Value == 0
         assert obj.Total == 0
-        assert capture.backend.any_contains('out of range')
+        assert capture.backend.any_contains("out of range")
 
     def test_set_value_below_ge_drop(self):
         """set with value < ge and error='drop' does nothing and logs warning"""
         obj = _DashboardDynamicTotalLimited(Value=50, Total=100)
         with logger.mock_capture_writer() as capture:
-            result = obj.set(-5, 100, error='drop')
+            result = obj.set(-5, 100, error="drop")
         assert result is False
         assert obj.Value == 50
         assert obj.Total == 100
-        assert capture.backend.any_contains('out of range')
+        assert capture.backend.any_contains("out of range")
 
     def test_set_within_range_drop(self):
         """set with value and total within range and error='drop' succeeds"""
         obj = _DashboardDynamicTotalLimited(Value=0, Total=0)
         with logger.mock_capture_writer() as capture:
-            result = obj.set(30, 100, error='drop')
+            result = obj.set(30, 100, error="drop")
         assert result is True
         assert obj.Value == 30
         assert obj.Total == 100
@@ -789,20 +829,20 @@ class TestDashboardDynamicTotalSet:
     def test_set_value_exceeds_total_with_raise(self):
         """set with value > total and error='raise' raises"""
         obj = _DashboardDynamicTotalLimited(Value=0, Total=0)
-        with pytest.raises(ValueError, match='greater than total'):
-            obj.set(50, 30, error='raise')
+        with pytest.raises(ValueError, match="greater than total"):
+            obj.set(50, 30, error="raise")
 
     def test_set_value_above_le_with_raise(self):
         """set with value > le and error='raise' raises"""
         obj = _DashboardDynamicTotalBothCapped(Value=0, Total=0)
-        with pytest.raises(ValueError, match='out of range'):
-            obj.set(999, 100, error='raise')
+        with pytest.raises(ValueError, match="out of range"):
+            obj.set(999, 100, error="raise")
 
     def test_set_total_above_le_with_raise(self):
         """set with total > le and error='raise' raises"""
         obj = _DashboardDynamicTotalBothCapped(Value=0, Total=0)
-        with pytest.raises(ValueError, match='out of range'):
-            obj.set(50, 999, error='raise')
+        with pytest.raises(ValueError, match="out of range"):
+            obj.set(50, 999, error="raise")
 
     def test_set_updates_time(self):
         """set updates Time"""
@@ -838,7 +878,7 @@ class TestDashboardDynamicTotalIsEmpty:
     def test_is_empty_raises_when_ge_is_none(self):
         """is_empty raises DataInconsistent if meta.ge is None"""
         obj = _DashboardDynamicTotalNoGe(Value=0, Total=0)
-        with pytest.raises(DataInconsistent, match='does not have ge defined'):
+        with pytest.raises(DataInconsistent, match="does not have ge defined"):
             obj.is_empty()
 
 
@@ -904,20 +944,22 @@ class TestDashboardDynamicTotalInherited:
     def test_add_caps_at_limit(self):
         """add caps Value when exceeding le, and Total is preserved"""
         obj = _DashboardDynamicTotalLimited(Value=199, Total=200)
-        result = obj.add(5, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.add(5, error="cap")
         assert result is False
         assert obj.Value == 200
         assert obj.Total == 200
+        assert capture.backend.any_contains("out of range")
 
     def test_add_drop_at_limit(self):
         """add with error='drop' beyond limit does nothing and logs warning"""
         obj = _DashboardDynamicTotalLimited(Value=199, Total=200)
         with logger.mock_capture_writer() as capture:
-            result = obj.add(5, error='drop')
+            result = obj.add(5, error="drop")
         assert result is False
         assert obj.Value == 199
         assert obj.Total == 200
-        assert capture.backend.any_contains('out of range')
+        assert capture.backend.any_contains("out of range")
 
     def test_reset_works(self):
         """DashboardDynamicTotal inherits DashboardAmount.reset"""
@@ -941,20 +983,22 @@ class TestDashboardDynamicTotalInherited:
     def test_sub_caps_at_limit(self):
         """sub caps Value when going below ge, and Total is preserved"""
         obj = _DashboardDynamicTotalLimited(Value=1, Total=100)
-        result = obj.sub(5, error='cap')
+        with logger.mock_capture_writer() as capture:
+            result = obj.sub(5, error="cap")
         assert result is False
         assert obj.Value == 0
         assert obj.Total == 100
+        assert capture.backend.any_contains("out of range")
 
     def test_sub_drop_at_limit(self):
         """sub with error='drop' beyond limit does nothing and logs warning"""
         obj = _DashboardDynamicTotalLimited(Value=1, Total=100)
         with logger.mock_capture_writer() as capture:
-            result = obj.sub(5, error='drop')
+            result = obj.sub(5, error="drop")
         assert result is False
         assert obj.Value == 1
         assert obj.Total == 100
-        assert capture.backend.any_contains('out of range')
+        assert capture.backend.any_contains("out of range")
 
     def test_update_does_nothing_when_not_expired(self):
         """
