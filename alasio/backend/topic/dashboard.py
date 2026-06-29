@@ -9,13 +9,13 @@ from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.model import ConfigSetEvent
-from alasio.ext.deep import deep_iter_depth2, deep_set, deep_values_depth1
+from alasio.ext.deep import deep_iter, deep_set
 
 
 class Dashboard(BaseTopic):
     FULL_EVENT_ONLY = True
     # dict that convert config path to topic data path
-    # key: (task, group, arg), value: str
+    # key: (task, group, arg), value: card_name
     dict_config_to_topic = {}
 
     @async_reactive_nocache
@@ -43,21 +43,18 @@ class Dashboard(BaseTopic):
 
         # convert config path to topic data path
         dict_config_to_topic = {}
-        for group_name, arg_name, info in deep_iter_depth2(data):
+        for keys, info in deep_iter(data, depth=3):
+            card_name, group_name, arg_name = keys
+            if group_name == '_info':
+                continue
             try:
                 task = info['task']
                 group = info['group']
-                arg_value = info['value']
+                arg = info['arg']
             except KeyError:
                 # this shouldn't happen
                 continue
-            for dashboard_arg_data in deep_values_depth1(arg_value):
-                try:
-                    arg = dashboard_arg_data['arg']
-                except KeyError:
-                    # this shouldn't happen
-                    continue
-                dict_config_to_topic[(task, group, arg)] = group_name
+            dict_config_to_topic[(task, group, arg)] = card_name
         self.dict_config_to_topic = dict_config_to_topic
 
         return data
@@ -79,12 +76,12 @@ class Dashboard(BaseTopic):
             if type(e) is dict:
                 e = ConfigSetEvent(**e)
 
-            key = self.dict_config_to_topic.get((e.task, e.group, e.arg))
-            if key is None:
+            card_name = self.dict_config_to_topic.get((e.task, e.group, e.arg))
+            if card_name is None:
                 # not displaying this key
                 continue
 
-            topic_key = (key, e.group, 'value', e.arg, 'value')
+            topic_key = (card_name, e.group, e.arg, 'value')
             # set to topic data
             deep_set(data, keys=topic_key, value=e.value)
             # collect response
