@@ -36,6 +36,8 @@
     });
   }
 
+  // --- Toast on RPC success ---
+  // RPC framework will have its toast on failure, so we only need to handle success case
   const toastOptions = {
     duration: 2000,
     classes: {

@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { t } from "$lib/i18n";
+  import { HeaderContext } from "$lib/slotcontext.svelte";
   import { cn } from "$lib/utils";
 
   // --- Props Definition (Svelte 5 Runes) ---
@@ -31,19 +32,41 @@
 
   // --- Derived State ---
   const currentPath = $derived(page.url.pathname);
+  function matchPath(path: string) {
+    return currentPath === path || currentPath.startsWith(path + "/");
+  }
 
   // --- Event Handlers ---
   async function handleNavClick(path: string) {
     await goto(path);
   }
+
+  // header snippet
+  const displayHeader = $derived.by(() => {
+    for (const item of alasioNavItems) {
+      if (matchPath(item.path)) return item.name;
+    }
+    for (const item of devNavItems) {
+      if (matchPath(item.path)) return item.name;
+    }
+    for (const item of debugNavItems) {
+      if (matchPath(item.path)) return item.name;
+    }
+    return currentPath;
+  });
+  HeaderContext.use(header);
 </script>
+
+{#snippet header()}
+  <h1 class="w-full flex-1 text-center text-lg">{displayHeader}</h1>
+{/snippet}
 
 {#snippet navSection(title: string, items: typeof devNavItems)}
   <div class="flex flex-col space-y-1">
     <h2 class="px-3 text-lg font-semibold">{title}</h2>
     <div class="border-border border-t"></div>
     {#each items as item (item.path)}
-      {@const isActive = currentPath === item.path || currentPath.startsWith(item.path + "/")}
+      {@const isActive = matchPath(item.path)}
       <Button
         variant={isActive ? "default" : "ghost"}
         class="h-9 w-full justify-start px-3"

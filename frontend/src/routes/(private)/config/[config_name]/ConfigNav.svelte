@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "$lib/components/ui/accordion";
+  import { t } from "$lib/i18n";
+  import { HeaderContext } from "$lib/slotcontext.svelte";
   import { cn } from "$lib/utils.js";
   import { useTopic } from "$lib/ws";
   import { untrack } from "svelte";
@@ -17,7 +19,7 @@
   let { onCardClick, onOverviewClick, onDeviceClick, class: className }: $$props = $props();
 
   // --- WebSocket & RPC Setup ---
-  const topicClient = useTopic("ConfigNav");
+  const topicClient = useTopic<Record<string, Record<string, string>>>("ConfigNav");
 
   // --- Data Types ---
   type CardItem = { key: string; name: string };
@@ -25,11 +27,11 @@
 
   // Derived state to transform raw topic data into a structured array for the UI.
   const navItems = $derived.by(() => {
-    const serverData = topicClient.data as Record<string, Record<string, string>> | undefined;
+    const navData = topicClient.data;
 
-    if (!serverData) return [] as NavItem[];
+    if (!navData) return [] as NavItem[];
 
-    return Object.entries(serverData).map(([navKey, navData]) => ({
+    return Object.entries(navData).map(([navKey, navData]) => ({
       key: navKey,
       name: navData._info || navKey,
       cards: Object.entries(navData)
@@ -63,7 +65,24 @@
       }
     }
   });
+
+  // --- Header Snippet ---
+  // Use the nav_name to display the current nav name in the header
+  // If the nav_name is "Overview" or "Device", display "Overview" or "Device"
+  // Otherwise, display the nav_name
+  const displayHeader = $derived.by(() => {
+    // reference topic data first
+    const navData = topicClient.data;
+    if (ui.isOverview) return t.Overview.OverviewTitle();
+    if (ui.isDevice) return t.Device.DeviceTitle();
+    return navData?.[ui.nav_name]?._info || ui.nav_name;
+  });
+  HeaderContext.use(header);
 </script>
+
+{#snippet header()}
+  <h1 class="w-full flex-1 text-center text-lg">{displayHeader}</h1>
+{/snippet}
 
 <nav class={cn("w-full", className)} aria-label="Configuration Navigation">
   <div class="flex flex-col px-3">
@@ -88,7 +107,7 @@
     <Accordion type="single" class="w-full" bind:value={ui.opened_nav}>
       {#each navItems as nav (nav.key)}
         <AccordionItem class="border-none" value={nav.key}>
-          <AccordionTrigger class={cn("text-md px-3 py-2 pl-6 capitalize")}>
+          <AccordionTrigger class={cn("text-md px-3 py-2 pl-6")}>
             {nav.name}
           </AccordionTrigger>
           <AccordionContent class="bg-accent border-y py-2">
