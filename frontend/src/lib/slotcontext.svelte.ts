@@ -1,11 +1,13 @@
-import { getContext, setContext, type Snippet } from "svelte";
+import { getContext, setContext, untrack, type Snippet } from "svelte";
 
 // We can render content using `{@render children()}`, but impossibe to render another snippet from child page like `{@render children.nav()}`.
 // So here comes the magic to store the nav snippet in global context.
 // https://github.com/sveltejs/kit/issues/12928#issuecomment-2627360639
 
 /**
- * Creates a reusable slot context that can store and manage snippets across component hierarchy.
+ * Creates a reusable slot context that can manage snippets across component hierarchy
+ * using a stack model. Child components can push their own snippet, and when they
+ * unmount, the parent's snippet is automatically restored.
  *
  * @param name A unique identifier for this context (used to create the context key)
  * @returns An object with methods and a reactive snippet property
@@ -38,11 +40,11 @@ export function createSlotContext(name: string) {
   type GenericSnippet = (...args: any[]) => { "{@render ...} must be called with a Snippet": any };
 
   interface ContextValue {
-    snippet: GenericSnippet | undefined;
+    entries: GenericSnippet[];
   }
 
   function init() {
-    const context: ContextValue = $state({ snippet: undefined });
+    const context: ContextValue = $state({ entries: [] });
     return setContext(key, context);
   }
 
@@ -51,7 +53,7 @@ export function createSlotContext(name: string) {
     if (!context) {
       return;
     }
-    context.snippet = snippet;
+    context.entries = [...context.entries, snippet];
   }
 
   function getContextValue() {
@@ -63,8 +65,10 @@ export function createSlotContext(name: string) {
     if (!context) {
       return;
     }
-    if (snippet === undefined || context.snippet === snippet) {
-      context.snippet = undefined;
+    if (snippet === undefined) {
+      context.entries = [];
+    } else {
+      context.entries = context.entries.filter((e) => e !== snippet);
     }
   }
 
@@ -73,13 +77,18 @@ export function createSlotContext(name: string) {
    * It automatically sets the snippet when the component mounts (or when the snippet changes)
    * and cleans it up when the component is destroyed (or when the snippet changes).
    *
+   * With the stack model, a child component can push its own snippet over the parent's,
+   * and when the child unmounts the parent's snippet is automatically restored.
+   *
    * @param snippet The snippet to be set in the context. Can be a reactive value.
    *                If the snippet becomes undefined, it will be cleaned from the context.
    */
   function use(snippet: GenericSnippet | undefined) {
     $effect(() => {
       if (snippet) {
-        set(snippet);
+        untrack(() => {
+          set(snippet);
+        });
         return () => {
           clean(snippet);
         };
@@ -94,11 +103,14 @@ export function createSlotContext(name: string) {
     use,
     /**
      * Direct access to the current snippet stored in the context.
-     * Returns undefined if the context hasn't been initialized or no snippet is set.
+     * Returns the top-most snippet on the stack (the most recently set by a descendant),
+     * or undefined if the context hasn't been initialized or the stack is empty.
      */
     get snippet(): Snippet | undefined {
       // Internal state is cast to Snippet for external consumption
-      return getContextValue()?.snippet as Snippet | undefined;
+      const ctx = getContextValue();
+      const entries = ctx?.entries;
+      return (entries && entries.length > 0 ? entries[entries.length - 1] : undefined) as Snippet | undefined;
     },
   };
 }
