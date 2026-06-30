@@ -6,7 +6,9 @@ def pretty_value(value):
     Like repr(value) but pretty showing datetime
     """
     if isinstance(value, datetime):
-        return value.isoformat(sep='T')
+        # '2026-06-30T12:00:00+08:00'
+        value = value.isoformat(sep='T')
+        return f"'{value}'"
     return repr(value)
 
 
