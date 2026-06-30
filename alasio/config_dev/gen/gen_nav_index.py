@@ -116,6 +116,9 @@ class GenNavIndex(CrossNavGenerator):
             dict[str, dict[str, dict[str, str]]]:
                 key: {nav_name}.{card_name}.{lang}
                 value: i18n translation
+
+            {nav_name}._info.{lang} is manual maintained
+            {nav_name}.{card_name}.{lang} is auto generated from card.info
         """
         old = read_msgspec(self.nav_index_file)
         out = {}
