@@ -38,6 +38,7 @@ TYPE_YAML_TO_DT = {
 TYPE_DT_TO_PYTHON = {
     # python type str of static is meaningless, as it will be convert to literal
     'static': 'str',
+    # 'static-hide' is an alias of dt='static' and hide=True
     # text input
     'input': 'str',
     'input-int': 'int',
@@ -188,6 +189,11 @@ def preprocess_arg(arg: dict) -> dict:
         except ValueError as e:
             raise DefinitionError(f'Cannot parse range "{range_str}", {e}')
         arg.update(dict_range)
+
+    # 'static-hide' is an alias of dt='static' and hide=True
+    if dt == 'static-hide':
+        arg['hide'] = True
+        arg['dt'] = dt = 'static'
 
     # check if dt valid
     if dt not in TYPE_DT_TO_PYTHON:

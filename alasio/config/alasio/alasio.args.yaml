@@ -7,8 +7,7 @@ Scheduler:
       dt: datetime
       value: 2020-01-01T00:00:00Z
     ServerUpdate:
-      hide: true
-      dt: static
+      dt: static-hide
       value: "00:00"
 
 # Scheduler is an alias of SchedulerU00
@@ -40,8 +39,7 @@ SchedulerU04:
   parent: Scheduler
   args:
     ServerUpdate:
-      hide: true
-      dt: static
+      dt: static-hide
       value: "04:00"
 
 SchedulerStaticU04:
