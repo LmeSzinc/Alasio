@@ -125,6 +125,37 @@ def _validate_option(option: list, value: Any) -> None:
             raise DefinitionError(f'"option" has duplicate value "{_option}"')
 
 
+def populate_input(dt: str, value):
+    """
+    Auto redirect dt='input' to dt='input-int' or dt='input-float' if value is int or float
+    Convert value to corresponding input type
+
+    Returns:
+        tuple[str, Any]: (dt, value)
+    """
+    vtype = type(value)
+    if dt == 'input':
+        if vtype is str:
+            pass
+        elif vtype is int:
+            dt = 'input-int'
+        elif vtype is float:
+            dt = 'input-float'
+        else:
+            raise DefinitionError(f'Value of "input-*" datatype must be str/int/float')
+    elif dt == 'input-int':
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            raise DefinitionError(f'Value of "input-int" datatype must be int')
+    elif dt == 'input-float':
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            raise DefinitionError(f'Value of "input-float" datatype must be float')
+    return dt, value
+
+
 def preprocess_arg(arg: dict) -> dict:
     """
     Additional pre-process before validating as ArgData
@@ -153,6 +184,12 @@ def preprocess_arg(arg: dict) -> dict:
     # check if dt valid
     if dt not in TYPE_DT_TO_PYTHON:
         raise DefinitionError(f'Invalid datatype "{dt}"')
+
+    # auto redirect dt='input' to dt='input-int' or dt='input-float' if value is int or float
+    dt, value = populate_input(dt, value)
+    arg['dt'] = dt
+    arg['value'] = value
+
     # dt="static" must have option
     if dt == 'static':
         arg['option'] = [value]
