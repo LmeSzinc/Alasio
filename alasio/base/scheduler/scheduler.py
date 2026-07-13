@@ -113,7 +113,7 @@ class AlasioScheduler:
             logger.warning(e)
             self.config.task_call('RestartDevice')
             return False
-        except (GameWaitTooLongError, GameTooManyClickError) as e:
+        except (GameStuckError, GameTooManyClickError) as e:
             logger.error(e)
             self._save_error_log()
             logger.warning(f'Game stuck, game will be restarted in 10 seconds')

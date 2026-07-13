@@ -22,7 +22,7 @@ class SchedulerStop(Exception):
     pass
 
 
-class GameWaitTooLongError(Exception):
+class GameStuckError(Exception):
     """
     Raises on game stuck (taking screenshots for a while but no game clicking)
     Scheduler will kill game and rerun.
