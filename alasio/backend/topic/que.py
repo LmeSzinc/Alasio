@@ -12,7 +12,7 @@ from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.model import TaskItem
-from alasio.ext.deep import deep_iter_depth1
+from alasio.ext.deep import deep_get, deep_iter_depth1
 
 
 class TaskQueueData(TypedDict):
@@ -38,7 +38,9 @@ class TaskQueueSource(ConfigEventCache):
             return {'running': None, 'pending': [], 'waiting': []}
 
         pending_task, waiting_task = mod.get_task_schedule(self.config_name)
-        return {'running': None, 'pending': pending_task, 'waiting': waiting_task}
+        # Preserve current running state from worker, so reinit() won't clear it
+        running = deep_get(self.data, keys='running', default=None)
+        return {'running': running, 'pending': pending_task, 'waiting': waiting_task}
 
     def _apply_event_update(self, event: ConfigEvent):
         # simple merge
