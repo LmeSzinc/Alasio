@@ -36,6 +36,7 @@ TYPE_YAML_TO_DT = {
 #   Default value must be static, you should use "t.Tuple" instead of "t.List"
 #   All datetime should be timezone aware
 TYPE_DT_TO_PYTHON = {
+    # python type str of static is meaningless, as it will be convert to literal
     'static': 'str',
     # text input
     'input': 'str',
@@ -156,6 +157,13 @@ def populate_input(dt: str, value):
     return dt, value
 
 
+def validate_literal_item(item: Any) -> None:
+    vtype = type(item)
+    if vtype in (bool, str, int, float, bytes, None):
+        return
+    raise DefinitionError(f'Value of "{item}" must be bool/str/int/float/bytes/None')
+
+
 def preprocess_arg(arg: dict) -> dict:
     """
     Additional pre-process before validating as ArgData
@@ -195,6 +203,7 @@ def preprocess_arg(arg: dict) -> dict:
         arg['option'] = [value]
     if dt == 'enable':
         arg['option'] = ['true', 'false']
+
     # Check if literal args have option
     if dt in TYPE_ARG_LITERAL and 'option' not in arg:
         raise DefinitionError(f'datatype "{dt}" must have "option" defined')
@@ -225,6 +234,9 @@ def preprocess_arg(arg: dict) -> dict:
                         raise DefinitionError(f'"option_dict" group name "{_group}" cannot be in "option"')
             except (AttributeError, TypeError) as e:
                 raise DefinitionError(f'"option_dict" must be a dict[str, list] if dt="secondary-select", {e}')
+            # options in literal datatype must be valid python literal items
+            for item in option:
+                validate_literal_item(item)
         else:
             raise DefinitionError('dt="secondary-select" must have "option" or "option_dict" defined')
     else:
@@ -232,7 +244,13 @@ def preprocess_arg(arg: dict) -> dict:
         # check option
         if dt != 'enable':
             if 'option' in arg:
-                _validate_option(arg['option'], value)
+                option = arg['option']
+                _validate_option(option, value)
+                # options in literal datatype must be valid python literal items
+                if not isinstance(option, list):
+                    raise DefinitionError(f'datatype "{dt}" option must be list')
+                for item in option:
+                    validate_literal_item(item)
     
     vtype = type(value)
     # Timezone default to UTC
