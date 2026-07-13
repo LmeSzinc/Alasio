@@ -197,8 +197,8 @@ class AlasioLogger(LoggingLevel):
         Examples:
             with logger.mock_capture_writer() as capture:
                 logger.info("Hello Info")
-                assert any("Hello Info" in log for log in capture.fd.logs)
-                assert any("Hello Info" in log for log in capture.stdout.logs)
+                assert capture.fd.any_contains("Hello Info")
+                assert capture.stdout.any_contains("Hello Info")
                 assert any(log['l'] == 'INFO' and log['m'] == 'Hello Info' for log in capture.backend.logs)
                 capture.clear()
         """
