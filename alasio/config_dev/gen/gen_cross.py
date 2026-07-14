@@ -367,6 +367,29 @@ class CrossNavGenerator:
     Generate {nav}_config.json
     """
 
+    def _resolve_info_i18ngroup(self, group):
+        """
+        For a variant group without override_i18n, find the ancestor whose
+        _info should be used. Returns the first ancestor with override_i18n=True
+        along the MRO chain, or the root of the MRO chain if none found.
+
+        Args:
+            group (GroupData): The variant group
+
+        Returns:
+            str: Ancestor group name to use for _info
+        """
+        for parent_name in group.mro:
+            if parent_name == group.name:
+                continue
+            parent = self.groups_data.get(parent_name)
+            if parent is not None and parent.override_i18n:
+                return parent_name
+        # Fall back to the last in MRO (root/base group)
+        if group.mro:
+            return group.mro[-1]
+        return group.name
+
     def _generate_nav_config_json(self, config: ConfigGenerator):
         """
         Generate {nav}_config.json from one nav config
@@ -390,6 +413,13 @@ class CrossNavGenerator:
                 if config.nav_name != 'dashboard':
                     # No card._info in dashboard, for simpler data structure
                     row = {'group': card.info, 'arg': '_info', 'card': card_name}
+                    # resolve group._info
+                    info_group = self.groups_data[card.info]
+                    if info_group.parent and not info_group.override_i18n and not info_group.dashboard:
+                        i18ngroup = self._resolve_info_i18ngroup(info_group)
+                        if i18ngroup and i18ngroup != card.info:
+                            # group._info does not have i18ngroup, it just uses group to indicate
+                            row['group'] = i18ngroup
                     deep_set(out, keys=[card_name, '_info'], value=NoIndent(row))
                 # gen args
                 for group_name, ref in card.groups.items():

@@ -106,7 +106,8 @@
         "group": "Campaign",
         "arg": "AmbushEvade",
         "dt": "checkbox",
-        "value": true
+        "value": true,
+        "advanced": true
       }
     }
   },
@@ -474,7 +475,7 @@
     }
   },
   "card-Main-Hard": {
-    "_info": {"group": "CampaignHard", "arg": "_info", "card": "card-Main-Hard"},
+    "_info": {"group": "Campaign", "arg": "_info", "card": "card-Main-Hard"},
     "Hard": {
       "Name": {
         "task": "Main",
@@ -565,7 +566,8 @@
         "cls": "CampaignHard",
         "i18ngroup": "Campaign",
         "dt": "checkbox",
-        "value": true
+        "value": true,
+        "advanced": true
       }
     }
   }

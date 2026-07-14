@@ -230,10 +230,6 @@
     }
   },
   "CampaignHard": {
-    "_info": {
-      "zh-CN": {"name": "CampaignHard", "help": ""},
-      "en-US": {"name": "CampaignHard", "help": ""}
-    },
     "Event": {
       "zh-CN": {
         "name": "CampaignHard.Event",

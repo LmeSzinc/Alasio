@@ -40,6 +40,18 @@ class GenNavIndex(CrossNavGenerator):
                     name = deep_get(group_data, keys=['_info', lang, 'name'], default=group_name)
                     deep_set(out, [group_name, lang], name)
 
+        # Resolve variant groups that inherit _info from ancestors
+        for group_name, group in self.groups_data.items():
+            if group_name in out:
+                continue  # already has its own _info entry
+            if not group.parent:
+                continue  # not a variant, should have _info already
+            i18ngroup = self._resolve_info_i18ngroup(group)
+            if i18ngroup and i18ngroup in out:
+                # Copy the ancestor's name for each language
+                for lang, name in out[i18ngroup].items():
+                    deep_set(out, [group_name, lang], name)
+
         return out
 
     @cached_property

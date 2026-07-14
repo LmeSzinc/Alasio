@@ -31,7 +31,9 @@ Campaign:
     UseFleetLock: true
     UseAutoSearch: true
     Use2xBook: false
-    AmbushEvade: true
+    AmbushEvade:
+      value: true
+      advanced: true
 
 CampaignHard:
   parent: Campaign

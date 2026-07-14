@@ -325,8 +325,14 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         new = {}
         for group_name, group in self.groups_data.items():
             # {group}._info
-            row = self._update_info_i18n(group_name, '_info')
-            deep_set(new, [group_name, '_info'], row)
+            if group.parent and not group.override_i18n and not group.dashboard:
+                # Variant group without override_i18n: skip _info generation,
+                # will inherit from ancestor's _info instead
+                # Dashboard groups always generate _info regardless.
+                pass
+            else:
+                row = self._update_info_i18n(group_name, '_info')
+                deep_set(new, [group_name, '_info'], row)
             # {group}.{arg}
             for arg_name, arg in group.args.items():
                 if arg.hide:

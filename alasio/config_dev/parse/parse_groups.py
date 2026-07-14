@@ -39,6 +39,11 @@ class GroupData(Struct):
     # - equals input args if is a variant (having `parent`)
     # - empty dict if not a variant
     override_args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
+    # override i18n of this group
+    # - if True and this group has a parent, generate its own _info in i18n
+    # - if False and this group has a parent, reuse parent's _info from MRO chain
+    # - dashboard groups always have its _info
+    override_i18n: bool = False
     # dashboard group name without "Dashboard" prefix, e.g. "Amount", "Count"
     # real value will be set in MRO build
     # if parent or any ancestor is dashboard group, `dashboard` will be set
@@ -152,6 +157,7 @@ class GroupData(Struct):
             parent=other.parent,
             mro=other.mro,
             override_args=new_override,
+            override_i18n=other.override_i18n,
         )
 
     def __post_init__(self):
