@@ -263,6 +263,7 @@ class CrossNavGenerator:
                     which indicates:
                     - read config from task={ref_task_name} and group={group_name}
                     - validate with model file={file}, class {class_name}
+                model_data have extra key '_global_bind'
         """
         out = {}
         global_bind = {}
@@ -336,6 +337,16 @@ class CrossNavGenerator:
                 f'Cross-task group ref does not exist: {ref_task}.{group}',
             )
 
+        # add _global_bind
+        # move dashboard groups to the end, to reduce diff complexity when adding new groups
+        groups = {}
+        for group_name, ref in global_bind.items():
+            if ref.get('task') != 'Dashboard':
+                groups[group_name] = ref
+        for group_name, ref in global_bind.items():
+            if ref.get('task') == 'Dashboard':
+                groups[group_name] = ref
+        global_bind = groups
         out['_global_bind'] = global_bind
 
         return out
