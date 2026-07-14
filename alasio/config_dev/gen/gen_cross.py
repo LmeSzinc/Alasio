@@ -65,6 +65,18 @@ class CrossNavGenerator:
                         file=file,
                     )
                 out[nav] = parser
+
+        # one nav folder can only have one nav defined, expect for alasio internal
+        if self.alasio:
+            dict_folder = {}
+            for nav_name, parser in out.items():
+                if parser.folder in dict_folder:
+                    raise DefinitionError(
+                        f'Cannot define multiple nav in the same nav folder',
+                        file=parser.file,
+                    )
+                dict_folder[parser.folder] = nav_name
+
         return out
 
     """
