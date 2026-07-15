@@ -356,9 +356,13 @@ class BackendBridge(metaclass=Singleton):
             self.preview_requested.set()
             return
         if command == 'scheduler-stopping':
+            from alasio.logger import logger
+            logger.error(f'[BackendBridge] received command {command}')
             self.scheduler_stopping.set()
             return
         if command == 'scheduler-continue':
+            from alasio.logger import logger
+            logger.error(f'[BackendBridge] received command {command}')
             self.scheduler_stopping.clear()
             return
         if command in ['killing', 'force-killing']:
