@@ -699,3 +699,24 @@ class AlasioTable(Generic[T_model]):
         sql = f'DELETE FROM "{self.TABLE_NAME}" WHERE "id"=:id'
 
         self.execute_one_or_many(sql, rows, _cursor_=_cursor_, drop_no_pk=True)
+
+    def execute_fetchone(self, sql, _cursor_: "SqlitePoolCursor | None" = None):
+        """
+        Args:
+            sql (str):
+            _cursor_:
+
+        Returns:
+            Any
+        """
+        if _cursor_ is None:
+            with self.cursor() as c:
+                c.execute(sql)
+                result = c.fetchone()
+        else:
+            _cursor_.execute(sql)
+            result = _cursor_.fetchone()
+        return result
+
+    def get_data_version(self, _cursor_: "SqlitePoolCursor | None" = None):
+        return self.execute_fetchone('PRAGMA data_version;', _cursor_=_cursor_)

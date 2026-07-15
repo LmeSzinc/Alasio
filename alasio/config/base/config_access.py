@@ -17,7 +17,8 @@ from alasio.config.entry.model import ConfigSetEvent
 from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
-from alasio.ext.cache import cached_property, cached_property_threadsafe
+from alasio.db.conn import SQLITE_POOL
+from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_iter_depth2
 from alasio.logger import logger
 
@@ -85,6 +86,7 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
             'mod',
             'task',
             '_config_cached',
+            '_data_version',
             '_dict_row',
             '_dict_group',
             '_modified',
@@ -119,6 +121,8 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
         self.task = task
         # Whether config rows are cached
         self._config_cached = False
+        # (id of connection, sqlite data_version of connection)
+        self._data_version: "tuple[int, int]" = (0, 0)
         # A snapshot of config table, updated on task start and every init_task() call.
         # Key: (task, group). Value: group data in messagepack
         # We don't update config realtime, otherwise things will get really complex if user modify configs
@@ -191,9 +195,15 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
                 return
             if self._config_cached:
                 return
+            # reduce global pool size to 1, so sqlite connection can be consistent
+            SQLITE_POOL.pool_size = 1
             # cache config rows
             table = AlasioConfigTable(self.config_name)
-            rows: "list[ConfigRow]" = table.select()
+            with table.cursor() as c:
+                data_version = table.get_data_version(_cursor_=c)
+                self._data_version = (id(c.connection), data_version)
+                rows: "list[ConfigRow]" = table.select(_cursor_=c)
+
             dict_row = {}
             for row in rows:
                 key = (row.task, row.group)
@@ -215,9 +225,23 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
             self._dict_row.clear()
             self._dict_group.clear()
             self._config_cached = False
+
+            if self._modified:
+                # typical unsafe usage is:
+                # with config.batch_set():
+                #     config.release()
+                #     # or config.task_switched()
+                #     # or config.check_task_switched()
+                logger.error('Trying to release config cache but having unsaved config modifications, '
+                             'this could lead to data inconsistency')
             self._modified.clear()
             # clear thread-local state
+            depth = getattr(self._local, 'batch_depth', 0)
+            if depth > 0:
+                logger.error('Trying to release config cache but batch_depth > 0, '
+                             'this could lead to data inconsistency')
             self._local.batch_depth = 0
+
             cached_property.pop(self, 'bound')
             cached_property.pop(self, 'servertime')
 

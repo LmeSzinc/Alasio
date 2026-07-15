@@ -10,6 +10,7 @@ from alasio.base.servertime import nearest_future, random_time
 from alasio.base.timer import getnow
 from alasio.config.base.config_access import AlasioConfigBaseAccess
 from alasio.config.entry.model import TaskItem
+from alasio.config.table.config import AlasioConfigTable
 from alasio.logger import logger
 
 
@@ -76,11 +77,22 @@ class AlasioConfigBaseTask(AlasioConfigBaseAccess):
             logger.info(f'Stop task {prev}, scheduler stopping')
             return True
 
-        # reload
-        self.release()
+        with self._lock:
+            # check if data_version changed
+            table = AlasioConfigTable(self.config_name)
+            with table.cursor() as c:
+                data_version = table.get_data_version(_cursor_=c)
+                data_version = (id(c.connection), data_version)
 
-        # check task switch
-        new = self.get_next_task().TaskName
+            # reload
+            logger.info([data_version, self._data_version])
+            if data_version != self._data_version:
+                self.release()
+                self.init_task()
+
+            # check task switch
+            new = self.get_next_task().TaskName
+
         if prev == new:
             logger.info(f'Continue task `{new}`')
             return False
