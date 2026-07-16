@@ -222,6 +222,13 @@ class AlasioLogger(LoggingLevel):
         """
         self._writer.mute_clear()
 
+    def check_rotate(self):
+        """
+        rotate log to file with new date
+        """
+        with self._lock:
+            self._writer.check_rotate()
+
     def _process_event(self, level, event, event_dict, exc_info=None):
         """
         Internal method that emulates structlog processors chain

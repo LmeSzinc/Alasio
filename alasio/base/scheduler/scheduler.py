@@ -333,6 +333,7 @@ class AlasioScheduler:
         logger.info(f'Start scheduler loop: {self.config_name}')
         self._on_task_switch(None)
         while 1:
+            logger.check_rotate()
             try:
                 self._task_loop()
             except SchedulerStop:

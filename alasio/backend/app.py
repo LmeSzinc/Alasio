@@ -90,6 +90,8 @@ def sync_task_gc(wait=8):
     """
     Synchronous task that do garbage collect periodically at background
     """
+    from alasio.logger import logger
+    logger.check_rotate()
     from alasio.db.conn import SQLITE_POOL
     SQLITE_POOL.gc(wait)
     from alasio.config.entry.model import MOD_JSON_CACHE
