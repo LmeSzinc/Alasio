@@ -85,19 +85,21 @@ class AlasioConfigBaseTask(AlasioConfigBaseAccess):
                 data_version = (id(c.connection), data_version)
 
             # reload
-            logger.info([data_version, self._data_version])
-            if data_version != self._data_version:
+            logger.info(f'data_version: {data_version} -> {self._data_version}')
+            reload = data_version != self._data_version
+            if reload:
                 self.release()
                 self.init_task()
 
             # check task switch
             new = self.get_next_task().TaskName
 
+        reload_msg = ' (config reloaded)' if reload else ''
         if prev == new:
-            logger.info(f'Continue task `{new}`')
+            logger.info(f'Continue task `{new}`{reload_msg}')
             return False
         else:
-            logger.info(f'Switch task `{prev}` to `{new}`')
+            logger.info(f'Switch task `{prev}` to `{new}`{reload_msg}')
             return True
 
     @staticmethod
