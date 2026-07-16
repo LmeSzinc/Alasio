@@ -719,4 +719,8 @@ class AlasioTable(Generic[T_model]):
         return result
 
     def get_data_version(self, _cursor_: "SqlitePoolCursor | None" = None):
-        return self.execute_fetchone('PRAGMA data_version;', _cursor_=_cursor_)
+        """
+        Returns:
+            int:
+        """
+        return self.execute_fetchone('PRAGMA data_version;', _cursor_=_cursor_)[0]
