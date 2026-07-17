@@ -91,7 +91,8 @@ def encode_bit2_opcode_iter(data):
     p_lit_count = [INF] * (n + 1)
     p_lit_count[0] = 0
 
-    # 追溯链深度设为 64，兼顾极速与最完美压缩率
+    # 追溯链深度 64。后续链条目由 chain-skip 跳过 (LCP <= best 时
+    # 仅做 O(1) 偏移比较)，64 限制了第一链条目的 LCP 计算开销。
     LIMIT_CHAIN_STEPS = 64
 
     for i in range(n):

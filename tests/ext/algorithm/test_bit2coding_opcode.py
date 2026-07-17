@@ -574,3 +574,44 @@ class TestLargeData:
         assert encoded == encoded2, (
             "Output should be deterministic regardless of chain limit"
         )
+
+    @staticmethod
+    def _de_bruijn(k, n):
+        """Generate a De Bruijn sequence of order n over alphabet 0..k-1.
+
+        Returns a linear sequence of length ``k^n + n - 1`` where every possible
+        n-tuple over the alphabet appears exactly once as a contiguous substring.
+        """
+        a = [0] * (k * n)
+        seq = []
+
+        def db(t, p):
+            if t > n:
+                if n % p == 0:
+                    for j in range(1, p + 1):
+                        seq.append(a[j])
+            else:
+                a[t] = a[t - p]
+                db(t + 1, p)
+                for j in range(a[t - p] + 1, k):
+                    a[t] = j
+                    db(t + 1, t)
+
+        db(1, 1)
+        return seq + seq[:n - 1]
+
+    def test_no_repeated_four_tuples(self):
+        """De Bruijn B(4,4) sequence (259 elements): all 256 four-tuples unique,
+        so no LZ77 copy match exists.  Round-trip verifies the encoder handles
+        purely literal-dominated data without error."""
+        data = self._de_bruijn(4, 4)
+        assert len(data) == 4 ** 4 + 3  # 259
+
+        # Verify completeness
+        tuples = {tuple(data[i:i + 4]) for i in range(len(data) - 3)}
+        assert len(tuples) == 4 ** 4, \
+            f"De Bruijn B(4,4) must have all {4 ** 4} distinct 4-tuples"
+
+        encoded = list(encode_bit2_opcode_iter(data))
+        decoded = decode_bit2_opcode(encoded)
+        assert decoded == data, "Round-trip should succeed for De Bruijn data"
