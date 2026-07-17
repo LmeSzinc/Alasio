@@ -215,65 +215,83 @@ def encode_bit2_opcode_iter(data):
                 f_d = L_D_TABLE[c_offset - 1]
 
                 if c_offset <= 256:
-                    # Band A: [3, min(l, 32)], cost = current_dp + 2  (short copy format)
+                    # Band A: [3, min(l, 32)], cost = current_dp + 2 (short copy format)
+                    # Pre-check: dp is non-decreasing; if the END of the band
+                    # cannot be improved, no position in the band can.
                     limit32 = l if l < 33 else 32
                     if limit32 >= 3:
-                        for curr_l in range(3, limit32 + 1):
-                            next_idx = i + curr_l
-                            cost = current_dp + 2
-                            if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
-                                dp[next_idx] = cost
-                                p_lit_count[next_idx] = current_lit_count
-                                p_prev[next_idx] = i
-                                p_op[next_idx] = 2
-                                p_offset[next_idx] = c_offset
-                    # Band B: [33, min(l, 256)], cost = current_dp + 3  (long format, L=0)
+                        ca = current_dp + 2
+                        end32 = i + limit32
+                        if ca < dp[end32] or (ca == dp[end32] and current_lit_count < p_lit_count[end32]):
+                            for curr_l in range(3, limit32 + 1):
+                                next_idx = i + curr_l
+                                if ca < dp[next_idx] or (ca == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                                    dp[next_idx] = ca
+                                    p_lit_count[next_idx] = current_lit_count
+                                    p_prev[next_idx] = i
+                                    p_op[next_idx] = 2
+                                    p_offset[next_idx] = c_offset
+                    # Band B: [33, min(l, 256)], cost = current_dp + 3 (long format, L=0)
                     if l > 32:
                         limit256 = l if l < 257 else 256
-                        for curr_l in range(33, limit256 + 1):
-                            next_idx = i + curr_l
-                            cost = current_dp + 3
-                            if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
-                                dp[next_idx] = cost
-                                p_lit_count[next_idx] = current_lit_count
-                                p_prev[next_idx] = i
-                                p_op[next_idx] = 2
-                                p_offset[next_idx] = c_offset
+                        cb = current_dp + 3
+                        end256 = i + limit256
+                        if cb < dp[end256] or (cb == dp[end256] and current_lit_count < p_lit_count[end256]):
+                            for curr_l in range(33, limit256 + 1):
+                                next_idx = i + curr_l
+                                if cb < dp[next_idx] or (cb == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                                    dp[next_idx] = cb
+                                    p_lit_count[next_idx] = current_lit_count
+                                    p_prev[next_idx] = i
+                                    p_op[next_idx] = 2
+                                    p_offset[next_idx] = c_offset
                     # Band C: [257, l], cost varies with L_D_TABLE
+                    # Variable-cost band: check at START (lowest cost). If start
+                    # cannot be improved, later positions (with higher cost) cannot.
                     if l > 256:
-                        for curr_l in range(257, l + 1):
-                            next_idx = i + curr_l
-                            cost = current_dp + 3 + L_D_TABLE[curr_l - 1]
-                            if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
-                                dp[next_idx] = cost
-                                p_lit_count[next_idx] = current_lit_count
-                                p_prev[next_idx] = i
-                                p_op[next_idx] = 2
-                                p_offset[next_idx] = c_offset
+                        start_cost = current_dp + 3 + L_D_TABLE[256]
+                        start_idx = i + 257
+                        if start_cost < dp[start_idx] or (start_cost == dp[start_idx] and current_lit_count < p_lit_count[start_idx]):
+                            for curr_l in range(257, l + 1):
+                                next_idx = i + curr_l
+                                cost = current_dp + 3 + L_D_TABLE[curr_l - 1]
+                                if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                                    dp[next_idx] = cost
+                                    p_lit_count[next_idx] = current_lit_count
+                                    p_prev[next_idx] = i
+                                    p_op[next_idx] = 2
+                                    p_offset[next_idx] = c_offset
                 else:
                     base_cost = 3 + f_d
-                    # Band A: [3, min(l, 256)], cost = current_dp + base_cost
+                    # Band A: [3, min(l, 256)], cost = current_dp + base_cost (constant)
                     limit256 = l if l < 257 else 256
-                    for curr_l in range(3, limit256 + 1):
-                        next_idx = i + curr_l
-                        cost = current_dp + base_cost
-                        if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
-                            dp[next_idx] = cost
-                            p_lit_count[next_idx] = current_lit_count
-                            p_prev[next_idx] = i
-                            p_op[next_idx] = 2
-                            p_offset[next_idx] = c_offset
+                    if limit256 >= 3:
+                        ca = current_dp + base_cost
+                        end_l256 = i + limit256
+                        if ca < dp[end_l256] or (ca == dp[end_l256] and current_lit_count < p_lit_count[end_l256]):
+                            for curr_l in range(3, limit256 + 1):
+                                next_idx = i + curr_l
+                                if ca < dp[next_idx] or (ca == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                                    dp[next_idx] = ca
+                                    p_lit_count[next_idx] = current_lit_count
+                                    p_prev[next_idx] = i
+                                    p_op[next_idx] = 2
+                                    p_offset[next_idx] = c_offset
                     # Band B: [257, l], cost varies with L_D_TABLE
+                    # Variable-cost band: check at START for the same reason.
                     if l > 256:
-                        for curr_l in range(257, l + 1):
-                            next_idx = i + curr_l
-                            cost = current_dp + base_cost + L_D_TABLE[curr_l - 1]
-                            if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
-                                dp[next_idx] = cost
-                                p_lit_count[next_idx] = current_lit_count
-                                p_prev[next_idx] = i
-                                p_op[next_idx] = 2
-                                p_offset[next_idx] = c_offset
+                        start_cost = current_dp + base_cost + L_D_TABLE[256]
+                        start_idx = i + 257
+                        if start_cost < dp[start_idx] or (start_cost == dp[start_idx] and current_lit_count < p_lit_count[start_idx]):
+                            for curr_l in range(257, l + 1):
+                                next_idx = i + curr_l
+                                cost = current_dp + base_cost + L_D_TABLE[curr_l - 1]
+                                if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                                    dp[next_idx] = cost
+                                    p_lit_count[next_idx] = current_lit_count
+                                    p_prev[next_idx] = i
+                                    p_op[next_idx] = 2
+                                    p_offset[next_idx] = c_offset
 
                 idx = prev_chain[idx]
                 step_chain += 1
