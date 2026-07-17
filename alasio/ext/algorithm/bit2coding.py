@@ -1,3 +1,5 @@
+from collections import deque
+
 from alasio.backport.batch import batched
 from alasio.ext.algorithm.unpack import unpack_little_int
 
@@ -139,6 +141,12 @@ def encode_bit2_opcode_iter(data):
         if i < n - 2:
             idx = prev_chain[i]
             step_chain = 0
+            # Track best LCP seen per offset category. The first chain entry
+            # (closest match) always has the smallest offset and cheapest copy
+            # cost; later entries with same or worse cost and <= LCP cannot
+            # improve any dp position, so we skip them entirely.
+            best_l_short = 0  # offset <= 256  (cost 2/3 + L_D_TABLE)
+            best_l_long = 0   # offset > 256   (cost 3+fd + L_D_TABLE)
             while idx != -1 and step_chain < LIMIT_CHAIN_STEPS:
                 # 极速 C 级切片比较 + 指数增长 + 二分收窄求 LCP
                 max_len = n - i
@@ -173,71 +181,121 @@ def encode_bit2_opcode_iter(data):
                         high_l = mid - 1
 
                 c_offset = i - idx
+
+                # Skip this entry if a previous entry already covered this
+                # range with the same or better cost.
+                if c_offset <= 256:
+                    if l <= best_l_short:
+                        idx = prev_chain[idx]
+                        step_chain += 1
+                        continue
+                    best_l_short = l
+                else:
+                    if l <= best_l_long:
+                        idx = prev_chain[idx]
+                        step_chain += 1
+                        continue
+                    best_l_long = l
+
                 f_d = L_D_TABLE[c_offset - 1]
 
-                # 【无损修复】：不使用 32 窗口剪枝，保留完整的转移可能，支持任何位置对齐后续最佳匹配
                 if c_offset <= 256:
-                    for curr_l in range(3, l + 1):
-                        # 【开销修复】：长复制格式开销修正为 3 + l_d（之前写成了 2）
-                        copy_cost = 2 if curr_l <= 32 else (3 + L_D_TABLE[curr_l - 1])
-                        cost = current_dp + copy_cost
-                        next_idx = i + curr_l
-                        # Copy 不增加字面值数量，继承 current_lit_count
-                        if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
-                            dp[next_idx] = cost
-                            p_lit_count[next_idx] = current_lit_count
-                            p_prev[next_idx] = i
-                            p_op[next_idx] = 2
-                            p_offset[next_idx] = c_offset
+                    # Band A: [3, min(l, 32)], cost = current_dp + 2  (short copy format)
+                    limit32 = l if l < 33 else 32
+                    if limit32 >= 3:
+                        for curr_l in range(3, limit32 + 1):
+                            next_idx = i + curr_l
+                            cost = current_dp + 2
+                            if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                                dp[next_idx] = cost
+                                p_lit_count[next_idx] = current_lit_count
+                                p_prev[next_idx] = i
+                                p_op[next_idx] = 2
+                                p_offset[next_idx] = c_offset
+                    # Band B: [33, min(l, 256)], cost = current_dp + 3  (long format, L=0)
+                    if l > 32:
+                        limit256 = l if l < 257 else 256
+                        for curr_l in range(33, limit256 + 1):
+                            next_idx = i + curr_l
+                            cost = current_dp + 3
+                            if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                                dp[next_idx] = cost
+                                p_lit_count[next_idx] = current_lit_count
+                                p_prev[next_idx] = i
+                                p_op[next_idx] = 2
+                                p_offset[next_idx] = c_offset
+                    # Band C: [257, l], cost varies with L_D_TABLE
+                    if l > 256:
+                        for curr_l in range(257, l + 1):
+                            next_idx = i + curr_l
+                            cost = current_dp + 3 + L_D_TABLE[curr_l - 1]
+                            if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                                dp[next_idx] = cost
+                                p_lit_count[next_idx] = current_lit_count
+                                p_prev[next_idx] = i
+                                p_op[next_idx] = 2
+                                p_offset[next_idx] = c_offset
                 else:
-                    # 【开销修复】：长复制开销修正为 3 + f_d + l_d（之前写成了 2 + f_d + l_d）
                     base_cost = 3 + f_d
-                    for curr_l in range(3, l + 1):
-                        copy_cost = base_cost + L_D_TABLE[curr_l - 1]
-                        cost = current_dp + copy_cost
+                    # Band A: [3, min(l, 256)], cost = current_dp + base_cost
+                    limit256 = l if l < 257 else 256
+                    for curr_l in range(3, limit256 + 1):
                         next_idx = i + curr_l
+                        cost = current_dp + base_cost
                         if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
                             dp[next_idx] = cost
                             p_lit_count[next_idx] = current_lit_count
                             p_prev[next_idx] = i
                             p_op[next_idx] = 2
                             p_offset[next_idx] = c_offset
+                    # Band B: [257, l], cost varies with L_D_TABLE
+                    if l > 256:
+                        for curr_l in range(257, l + 1):
+                            next_idx = i + curr_l
+                            cost = current_dp + base_cost + L_D_TABLE[curr_l - 1]
+                            if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                                dp[next_idx] = cost
+                                p_lit_count[next_idx] = current_lit_count
+                                p_prev[next_idx] = i
+                                p_op[next_idx] = 2
+                                p_offset[next_idx] = c_offset
 
                 idx = prev_chain[idx]
                 step_chain += 1
 
     # ==========================================
-    # 5. 逆向重构与合并
+    # 5. 逆向重构与合并 (单遍扫描)
     # ==========================================
-    opcodes_reversed = []
+    merged = deque()
+    literal_slices = []  # list of memoryview slices in reverse order
     curr = n
     while curr > 0:
         prev = p_prev[curr]
         op_type = p_op[curr]
 
         if op_type == 0:
-            opcodes_reversed.append((0, list(mv[prev:curr])))
-        elif op_type == 1:
-            opcodes_reversed.append((1, mv[prev], curr - prev))
-        elif op_type == 2:
-            opcodes_reversed.append((2, p_offset[curr], curr - prev))
+            literal_slices.append(mv[prev:curr])
+        else:
+            if literal_slices:
+                # Flatten slices in forward order
+                flat = []
+                for sl in reversed(literal_slices):
+                    flat.extend(sl)
+                literal_slices = []
+                merged.appendleft((0, flat))
+            if op_type == 1:
+                merged.appendleft((1, mv[prev], curr - prev))
+            else:
+                merged.appendleft((2, p_offset[curr], curr - prev))
         curr = prev
 
-    opcodes = list(reversed(opcodes_reversed))
-    merged_opcodes = []
-    current_literals = []
-    for op in opcodes:
-        if op[0] == 0:
-            current_literals.extend(op[1])
-        else:
-            if current_literals:
-                merged_opcodes.append((0, current_literals))
-                current_literals = []
-            merged_opcodes.append(op)
-    if current_literals:
-        merged_opcodes.append((0, current_literals))
+    if literal_slices:
+        flat = []
+        for sl in reversed(literal_slices):
+            flat.extend(sl)
+        merged.appendleft((0, flat))
 
-    yield from merged_opcodes
+    yield from merged
 
 
 def decode_bit2_opcode(opcodes):
