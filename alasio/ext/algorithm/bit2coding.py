@@ -73,9 +73,10 @@ def encode_bit2_opcode_iter(data):
     # ==========================================
     LITERAL_COSTS = (
         0, 1, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5,
-        6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9
+        6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9,
+        10, 10
     )
-    LIT_TRANSITIONS = tuple(range(33))
+    LIT_TRANSITIONS = tuple(range(35))
 
     dp = [INF] * (n + 1)
     dp[0] = 0
@@ -322,7 +323,7 @@ def _encode_literal_iter(items):
     Yields:
         int: compressed data in uint8
     """
-    for item_batch in batched(items, 32):
+    for item_batch in batched(items, 34):
         n = len(item_batch)
         # Use compact formats for small trailing batches
         # 000000XX: 1 item
@@ -333,8 +334,8 @@ def _encode_literal_iter(items):
         if n == 2:
             yield 16 + item_batch[0] * 4 + item_batch[1]
             continue
-        # 001NNNNN: pack N+1 items, N (0~31)
-        yield 31 + n
+        # 001NNNNN: pack N+3 items, N (0~31), 1 header byte + ceil(N/4) data bytes
+        yield 29 + n
         stack_count = 0
         stack_val = 0
         for item in item_batch:
@@ -358,7 +359,7 @@ def encode_bit2_stream_iter(opcodes, ext8=False):
     1. literal operations, op=(0, data), e.g. (0, [1, 2, 3, 4, ...])
     000000XX: 1 item
     0001XXYY: 2 item
-    001NNNNN: pack N+1 items, N (0~31), indicates to read 1~8 bytes, each following bytes are AABBCCDD
+    001NNNNN: pack N+3 items, N (0~31), indicates to read 1~9 bytes, each following bytes are AABBCCDD
               last byte may have trailing 00 to fill up to a full byte, e.g. AABB0000
     (NOT PLANNED) 000001DD: pack N+16 items, N (0~2^32),
               D (0~3) indicates to read D+1 bytes of N, N is packed in little-endian
@@ -505,9 +506,9 @@ def decode_bit2_stream_iter(data, total, ext8=False):
             read += 1
             opcodes.append((2, offset, length))
             count += length
-        # 001NNNNN: pack N+1 items, N (0~31)
+        # 001NNNNN: pack N+3 items, N (0~31)
         elif byte >= 32:
-            n = byte - 31  # 1-32 items
+            n = byte - 29  # 3-34 items
             packed_count = (n + 3) // 4
             remain_n = n
             items = []

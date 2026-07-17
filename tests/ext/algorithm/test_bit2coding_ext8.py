@@ -97,27 +97,27 @@ class TestEncodeStreamExt8Literal:
         """Normal items followed by ext8 values."""
         items = [1, 2, 3, 0, 4, 5]
         result = list(encode_bit2_stream_iter([(0, items)], ext8=True))
-        # [1,2,3,0] → batch 4 items: 31+4=35 header, packed: 1*64+2*16+3*4+0=108
+        # [1,2,3,0] → batch 4 items: 29+4=33 header, packed: 1*64+2*16+3*4+0=108
         # then 4,5 yield individually
-        assert result == [35, 108, 4, 5]
+        assert result == [33, 108, 4, 5]
 
     def test_ext8_followed_by_normal_batch(self):
         """Ext8 values followed by normal items."""
         items = [4, 5, 0, 1, 2, 3]
         result = list(encode_bit2_stream_iter([(0, items)], ext8=True))
-        # 4,5 → single bytes; [0,1,2,3] → batch 4: 35, 27
-        assert result == [4, 5, 35, 27]
+        # 4,5 → single bytes; [0,1,2,3] → batch 4: 33, 27
+        assert result == [4, 5, 33, 27]
 
     def test_ext8_interspersed_with_normal_batches(self):
         """Ext8 values interleaved between normal batches."""
         items = [0, 0, 0, 0, 4, 1, 1, 1, 1, 5, 2, 2, 2, 2]
         result = list(encode_bit2_stream_iter([(0, items)], ext8=True))
-        # [0,0,0,0] → batch 4: 35, 0
+        # [0,0,0,0] → batch 4: 33, 0
         # 4 → single byte
-        # [1,1,1,1] → batch 4: 35, 85  (1*64+1*16+1*4+1)
+        # [1,1,1,1] → batch 4: 33, 85  (1*64+1*16+1*4+1)
         # 5 → single byte
-        # [2,2,2,2] → batch 4: 35, 170 (2*64+2*16+2*4+2)
-        assert result == [35, 0, 4, 35, 85, 5, 35, 170]
+        # [2,2,2,2] → batch 4: 33, 170 (2*64+2*16+2*4+2)
+        assert result == [33, 0, 4, 33, 85, 5, 33, 170]
 
     def test_ext8_only_no_normal(self):
         """All ext8 values, no normal 0-3 items."""
@@ -229,8 +229,8 @@ class TestDecodeStreamExt8Literal:
 
     def test_ext8_with_batch_literal_decode(self):
         """Batch literal header followed by ext8 value."""
-        # 35 = batch header for 4 items; 27 = packed [0,1,2,3]; then 6 = ext8
-        data = memoryview(bytes([35, 27, 6]))
+        # 33 = batch header for 4 items (29+4); 27 = packed [0,1,2,3]; then 6 = ext8
+        data = memoryview(bytes([33, 27, 6]))
         opcodes, read = decode_bit2_stream_iter(data, 5, ext8=True)
         assert opcodes == [(0, [0, 1, 2, 3]), (0, [6])]
         assert read == 3

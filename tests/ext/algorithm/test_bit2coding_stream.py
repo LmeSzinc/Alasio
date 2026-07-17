@@ -50,31 +50,31 @@ class TestEncodeStreamLiteral:
     def test_three_items_literal(self):
         """3 literal items → header 32-63 + packed bytes."""
         result = list(encode_bit2_stream_iter([(0, [1, 2, 3])]))
-        # header: 31+3 = 34
+        # header: 29+3 = 32
         # packed: 1*64 + 2*16 + 3*4 + 0(pad) = 108
-        assert result == [34, 108]
+        assert result == [32, 108]
 
     def test_four_items_literal(self):
         """4 literal items → header + 1 packed byte."""
         result = list(encode_bit2_stream_iter([(0, [0, 1, 2, 3])]))
-        # header: 31+4 = 35
+        # header: 29+4 = 33
         # packed: 0*64 + 1*16 + 2*4 + 3 = 27
-        assert result == [35, 27]
+        assert result == [33, 27]
 
     def test_eight_items_literal(self):
         """8 literal items → header + 2 packed bytes."""
         items = [0, 1, 2, 3, 3, 2, 1, 0]
         result = list(encode_bit2_stream_iter([(0, items)]))
-        # header: 31+8 = 39
+        # header: 29+8 = 37
         # packed byte 1: 0*64 + 1*16 + 2*4 + 3 = 27
         # packed byte 2: 3*64 + 2*16 + 1*4 + 0 = 228
-        assert result == [39, 27, 228]
+        assert result == [37, 27, 228]
 
     def test_thirty_two_items_literal(self):
         """32 literal items: header + 8 packed bytes."""
         items = [i % 4 for i in range(32)]
         result = list(encode_bit2_stream_iter([(0, items)]))
-        assert result[0] == 63  # 31+32 (max of batch header, byte 00111111)
+        assert result[0] == 61  # 29+32
         assert len(result) == 1 + 8
         for i in range(8):
             base = i * 4
@@ -82,40 +82,37 @@ class TestEncodeStreamLiteral:
             assert result[1 + i] == expected
 
     def test_fifty_items_literal(self):
-        """50 literal items: batch of 32 + batch of 18."""
+        """50 literal items: batch of 34 + batch of 16."""
         items = [i % 4 for i in range(50)]
         result = list(encode_bit2_stream_iter([(0, items)]))
-        # batch 1: 32 items → header 63 + 8 packed bytes
-        assert result[0] == 63
-        # batch 2: 18 items → header 49 + 5 packed bytes
-        assert result[9] == 49  # 31+18
-        assert len(result) == 1 + 8 + 1 + 5
+        # batch 1: 34 items → header 63 + 9 packed bytes
+        assert result[0] == 63  # 29+34
+        # batch 2: 16 items → header 45 + 4 packed bytes
+        assert result[10] == 45  # 29+16
+        assert len(result) == 1 + 9 + 1 + 4
 
     def test_trailing_one_item_batch_uses_compact_format(self):
-        """33 items: batch of 32 + 1 item literal (not batch header)."""
+        """33 items: single batch of 33 (not 32+1)."""
         items = [i % 4 for i in range(33)]
         result = list(encode_bit2_stream_iter([(0, items)]))
-        # batch 1: 32 items
-        assert result[0] == 63  # 31+32
-        # item 33 should be a 1-item literal (byte 0-3)
-        assert result[9] == items[32]  # single item in range 0-3
+        # 33 items fits in one batch: header 62 (29+33) + 9 packed bytes
+        assert result[0] == 62  # 29+33
+        assert len(result) == 1 + 9
 
     def test_trailing_two_item_batch_uses_compact_format(self):
-        """34 items: batch of 32 + 2-item literal."""
+        """34 items: single batch of 34 (not 32+2)."""
         items = [i % 4 for i in range(34)]
         result = list(encode_bit2_stream_iter([(0, items)]))
-        # batch 1: 32 items
-        assert result[0] == 63
-        # last 2 items should use 2-item literal format
-        expected = 16 + items[32] * 4 + items[33]
-        assert result[9] == expected
+        # 34 items fits in one batch: header 63 (29+34) + 9 packed bytes
+        assert result[0] == 63  # 29+34
+        assert len(result) == 1 + 9
 
     def test_odd_padding_single_remainder(self):
         """5 items: header + 2 packed bytes (second has trailing zeros)."""
         items = [1, 2, 3, 0, 1]
         result = list(encode_bit2_stream_iter([(0, items)]))
-        # header: 31+5 = 36
-        assert result[0] == 36
+        # header: 29+5 = 34
+        assert result[0] == 34
         # [1,2,3,0] = 1*64+2*16+3*4+0 = 108
         # [1] padded = 1*64 + 0 = 64
         assert result[1] == 108
@@ -125,17 +122,17 @@ class TestEncodeStreamLiteral:
         """6 items: header + 2 packed bytes."""
         items = [0, 1, 2, 3, 3, 2]
         result = list(encode_bit2_stream_iter([(0, items)]))
-        # header: 31+6 = 37
-        assert result == [37, 27, 224]
+        # header: 29+6 = 35
+        assert result == [35, 27, 224]
 
     def test_seven_items_triple_remainder(self):
         """7 items: header + 2 packed bytes (second has 3 items)."""
         items = [1, 1, 2, 2, 3, 3, 0]
         result = list(encode_bit2_stream_iter([(0, items)]))
-        # header: 31+7 = 38
+        # header: 29+7 = 36
         # [1,1,2,2] = 1*64+1*16+2*4+2 = 90
         # [3,3,0,pad] = 3*64+3*16+0+0 = 240
-        assert result == [38, 90, 240]
+        assert result == [36, 90, 240]
 
 
 # ==============================================================================
@@ -393,45 +390,45 @@ class TestDecodeStreamTwoItemLiteral:
 
 
 class TestDecodeStreamBatchLiteral:
-    """Decoding batch literal (byte 32-63 → 3-32 items)."""
+    """Decoding batch literal (byte 32-63 → 3-34 items)."""
 
     def test_three_items(self):
-        """Batch of 3 items: byte 34 + 1 packed byte with trailing zeros."""
-        data = memoryview(bytes([34, 108]))  # 31+3, packed: 1*64+2*16+3*4 = 108
+        """Batch of 3 items: byte 32 + 1 packed byte with trailing zeros."""
+        data = memoryview(bytes([32, 108]))  # 29+3, packed: 1*64+2*16+3*4 = 108
         opcodes, read = decode_bit2_stream_iter(data, 3)
         assert opcodes == [(0, [1, 2, 3])]
         assert read == 2
 
     def test_four_items(self):
-        """Batch of 4 items: byte 35 + 1 packed byte."""
-        data = memoryview(bytes([35, 27]))  # 31+4, packed: 0*64+1*16+2*4+3 = 27
+        """Batch of 4 items: byte 33 + 1 packed byte."""
+        data = memoryview(bytes([33, 27]))  # 29+4, packed: 0*64+1*16+2*4+3 = 27
         opcodes, read = decode_bit2_stream_iter(data, 4)
         assert opcodes == [(0, [0, 1, 2, 3])]
         assert read == 2
 
     def test_eight_items(self):
-        """Batch of 8 items: byte 39 + 2 packed bytes."""
-        data = memoryview(bytes([39, 27, 228]))
+        """Batch of 8 items: byte 37 + 2 packed bytes."""
+        data = memoryview(bytes([37, 27, 228]))
         opcodes, read = decode_bit2_stream_iter(data, 8)
         assert opcodes == [(0, [0, 1, 2, 3, 3, 2, 1, 0])]
         assert read == 3
 
     def test_thirty_two_items(self):
-        """Batch of 32 items: byte 63 + 8 packed bytes."""
+        """Batch of 32 items: byte 61 + 8 packed bytes."""
         expected_items = [i % 4 for i in range(32)]
         packed = bytearray()
         for i in range(0, 32, 4):
             packed.append(expected_items[i] * 64 + expected_items[i + 1] * 16 + expected_items[i + 2] * 4 + expected_items[i + 3])
-        data = memoryview(bytes([63]) + packed)
+        data = memoryview(bytes([61]) + packed)
         opcodes, read = decode_bit2_stream_iter(data, 32)
         assert opcodes == [(0, expected_items)]
         assert read == 9
 
     def test_two_items_trailing_one(self):
         """5 items: should use batch header for all 5, not split (n!=1 or 2 in encode's batched loop)."""
-        # encode_bit2_stream_iter produces batches via batched(items, 32)
-        # 5 items is < 32 so it's one batch → byte 36 + 2 packed bytes
-        data = memoryview(bytes([36, 108, 64]))  # 31+5, [1,2,3,0]=108, [1,pad]=64
+        # encode_bit2_stream_iter produces batches via batched(items, 34)
+        # 5 items is < 34 so it's one batch → byte 34 + 2 packed bytes
+        data = memoryview(bytes([34, 108, 64]))  # 29+5, [1,2,3,0]=108, [1,pad]=64
         opcodes, read = decode_bit2_stream_iter(data, 5)
         assert opcodes == [(0, [1, 2, 3, 0, 1])]
         assert read == 3
@@ -709,7 +706,7 @@ def _build_roundtrip_cases():
     cases.append([(0, [1, 2, 3, 0])])
     cases.append([(0, [i % 4 for i in range(7)])])
     cases.append([(0, [i % 4 for i in range(32)])])
-    # Multiple batches (33 items → 32+1)
+    # Batch of 33 items (single batch with new 3-34 range)
     cases.append([(0, [i % 4 for i in range(33)])])
     # Short runs
     for v in range(4):
