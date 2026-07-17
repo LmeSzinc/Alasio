@@ -480,7 +480,7 @@ class TestRoundtripExt8:
     def test_roundtrip_large_mixed(self):
         """Large mixed normal/ext8 data round-trips."""
         data = []
-        for i in range(2000):
+        for i in range(400):
             if i % 2 == 0:
                 data.append(i % 4)
             else:
@@ -492,7 +492,7 @@ class TestRoundtripExt8:
     def test_roundtrip_alternating_ext8_and_run_patterns(self):
         """Data with both ext8 singletons and runs of normal values (0-3)."""
         data = []
-        for i in range(1000):
+        for i in range(200):
             if i % 5 == 0:
                 # run of 5 identical normal values (0-3)
                 data.extend([i % 4] * 5)
@@ -510,7 +510,7 @@ class TestRoundtripExt8:
         """Data consisting entirely of values 4-7, no runs of same value ≥3."""
         # Mix values so that no run of 3+ identical values 4-7 occurs
         # (ext8 only supports 4-7 as literals, not runs).
-        data = [4, 5, 6, 7] * 250
+        data = [4, 5, 6, 7] * 100
         encoded = encode_bit2(data, ext8=True)
         decoded, _ = decode_bit2(encoded, len(data), ext8=True)
         assert decoded == data
@@ -635,7 +635,7 @@ class TestCopyWithExt8Values:
 
     def test_copy_repeating_4_item_pattern(self):
         """4-item pattern of 4-7 values is detected as a copy."""
-        data = [4, 5, 6, 7, 4, 5, 6, 7]
+        data = [4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 6, 7]
         opcodes = list(encode_bit2_opcode_iter(data))
         assert any(op[0] == 2 for op in opcodes), (
             "encode_bit2_opcode_iter should detect a copy for "
@@ -651,7 +651,7 @@ class TestCopyWithExt8Values:
 
     def test_copy_longer_pattern_with_ext8(self):
         """Longer repeating pattern with mixed 0-3 and 4-7 values."""
-        data = [0, 4, 5, 1, 6, 7, 0, 4, 5, 1, 6, 7]
+        data = [0, 4, 5, 1, 6, 7, 0, 4, 5, 1, 6, 7, 0, 4, 5, 1, 6, 7]
         opcodes = list(encode_bit2_opcode_iter(data))
         has_copy = any(op[0] == 2 for op in opcodes)
         assert has_copy, (

@@ -92,6 +92,20 @@ class TestEncodeRun:
         result = list(encode_bit2_opcode_iter(data))
         assert result == [(1, 1, 5), (0, [3]), (1, 0, 4)]
 
+    def test_run_length_boundaries(self):
+        """Run lengths at the short/long format boundary (34, 35, 36)."""
+        # 34: short format (cost=1)
+        result = list(encode_bit2_opcode_iter([0] * 34))
+        assert result == [(1, 0, 34)], f"Expected single run of 34, got {result}"
+
+        # 35: long format boundary (cost=2 + 0)
+        result = list(encode_bit2_opcode_iter([0] * 35))
+        assert result == [(1, 0, 35)], f"Expected single run of 35, got {result}"
+
+        # 36: long format (cost=2 + 0)
+        result = list(encode_bit2_opcode_iter([0] * 36))
+        assert result == [(1, 0, 36)], f"Expected single run of 36, got {result}"
+
 
 # ==============================================================================
 # encode_bit2_opcode_iter — copy path
@@ -164,6 +178,45 @@ class TestEncodeCopy:
         # 验证包含 ext8 元素的模式能够被完美识别并作为 LZ77 Copy 压缩
         assert result == [(0, pattern), (2, 16, 16)]
 
+    def test_long_copy_large_offset_and_length(self):
+        """Copy with both offset > 256 and length > 32 (0111LLFF long format)."""
+        # 36-element pattern with long run separator to push second occurrence past offset 256
+        pattern = [0, 1, 2, 3] * 9  # 36 elements
+        run = [2] * 260            # pushes pattern to offset 296
+        data = pattern + run + pattern
+        result = list(encode_bit2_opcode_iter(data))
+
+        # Verify round-trip correctness
+        decoded = decode_bit2_opcode(result)
+        assert decoded == data
+
+        # Verify the structure:
+        #   (0, [0,1,2,3]) + (2, 4, 32) → first 36-element pattern via rolling copy
+        #   (1, 2, 260)                  → separator run
+        #   (2, 296, 36)                 → second pattern via copy at offset 296, length 36
+        first_literal = result[0]
+        assert first_literal[0] == 0
+        assert list(first_literal[1]) == [0, 1, 2, 3]
+
+        rolling_copy = result[1]
+        assert rolling_copy == (2, 4, 32), (
+            f"Expected rolling copy (2, 4, 32) for first pattern, got {rolling_copy}"
+        )
+
+        run_sep = result[2]
+        assert run_sep == (1, 2, 260), (
+            f"Expected run (1, 2, 260), got {run_sep}"
+        )
+
+        long_copy = result[3]
+        assert long_copy[0] == 2, f"Expected copy opcode, got {long_copy}"
+        assert long_copy[1] > 256, (
+            f"Expected copy offset > 256, got {long_copy[1]}"
+        )
+        assert long_copy[2] > 32, (
+            f"Expected copy length > 32, got {long_copy[2]}"
+        )
+
 
 # ==============================================================================
 # encode_bit2_opcode_iter — run vs copy decision
@@ -183,6 +236,46 @@ class TestEncodeRunVsCopy:
         # At i=8: run_len=4 (zeros), copy_len=8 (matches data[0:8] at offset 8).
         #         8 > 4+2? Yes → copy wins over run at the 2nd half.
         assert result == [(1, 0, 4), (1, 1, 4), (2, 8, 8)]
+
+
+# ==============================================================================
+# encode_bit2_opcode_iter — tiebreaker (cost equality)
+# ==============================================================================
+
+
+class TestEncodeTiebreaker:
+    """DP tiebreaker: when costs are equal, the encoder prefers the path with fewer
+    literal elements (``p_lit_count``), which produces fewer literal blocks in the
+    merged output and therefore smaller stream encoding overhead."""
+
+    def test_run_plus_literal_beats_full_literal(self):
+        """When run(3)+literal(1) has same cost as literal(4), run+literal wins
+        because it contributes fewer literal elements (1 vs 4)."""
+        # Example: data starts with a run of 3 identical values + 1 different value
+        # Position 0:
+        #   literal(4): dp[4] = 2, lit_count=4
+        #   run(3):     dp[3] = 1, lit_count=0
+        # Position 3:
+        #   literal(1): dp[4] = dp[3]+1 = 2, lit_count=0+1=1
+        # Both paths reach position 4 with cost 2, but run+literal has 1 literal
+        # element vs 4 → tiebreaker selects run+literal.
+        data = [0, 0, 0, 1]
+        result = list(encode_bit2_opcode_iter(data))
+        assert result == [(1, 0, 3), (0, [1])]
+
+    def test_copy_plus_literal_beats_full_literal(self):
+        """When copy(4) has same cost as literal(4), copy wins because it
+        contributes fewer literal elements (0 vs 4)."""
+        # data = [0,1,0,1,0,1,0,1]: at position 2, the 3-tuple (0,1,0) matches
+        # position 0 (offset=2, LCP=6). Copy(2,6) costs 2, while literal(6) costs 3,
+        # but the tiebreaker is visible at position 6:
+        #   literal(6) from i=0:  dp[6] = 3, lit=6
+        #   copy(2,4) from i=2:   dp[6] = dp[2]+2 = 1+2 = 3, lit=2
+        #   same cost → copy wins (fewer literal elements).
+        # This propagates: at i=2, copy(2,6) wins for position 8 as well.
+        data = [0, 1, 0, 1, 0, 1, 0, 1]
+        result = list(encode_bit2_opcode_iter(data))
+        assert result == [(0, [0, 1]), (2, 2, 6)]
 
 
 # ==============================================================================
@@ -364,9 +457,12 @@ class TestRoundtrip:
         [0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 1, 2],
         # Copy beats run (copy_len > run_len + 2)
         [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
-        # Long constant run
+        # Long constant run (covering short/long format boundary)
         [2] * 50,
         [0] * 100,
+        [0] * 34,  # short format boundary (l=34, cost=1)
+        [0] * 35,  # long format start (l=35, cost=2+L_D_TABLE[0])
+        [0] * 36,  # long format (l=36, cost=2+L_D_TABLE[1])
         # Repeated short pattern
         [0, 1] * 10,
         [1, 2, 3] * 10,
@@ -420,6 +516,8 @@ class TestLargeData:
         ([0] * 200, "all zeros"),
         ([1, 2, 3] * 200, "repeating pattern"),
         ([i % 4 for i in range(200)], "cycling values"),
+        # Enough data to trigger 64+ LZ77 hash chain entries for many positions
+        ([0, 1, 2, 3] * 80, "many chain entries"),
     ]
 
     @pytest.mark.parametrize("data, name", LARGE_CASES)
@@ -457,4 +555,22 @@ class TestLargeData:
         assert total_output < len(data), (
             f"Encoded size ({total_output}) should be less than "
             f"input size ({len(data)}) for repetitive data"
+        )
+
+    def test_copy_chain_limit_safety(self):
+        """Encoder handles data with more than 64 LZ77 hash chain entries safely
+        (``LIMIT_CHAIN_STEPS = 64``). The chain limit is an optimization that should
+        not affect correctness; round-trip and determinism are verified."""
+        # [0,1,2,3]*80 = 320 elements.
+        # Each 3-tuple (0,1,2) occurs at every 4th position (80 positions).
+        # At position 256 there are 65 chain entries, exceeding LIMIT_CHAIN_STEPS.
+        data = [0, 1, 2, 3] * 80
+        encoded = list(encode_bit2_opcode_iter(data))
+        decoded = decode_bit2_opcode(encoded)
+        assert decoded == data, "Round-trip should succeed with many chain entries"
+
+        # Determinism: same input → same output even at the chain limit boundary
+        encoded2 = list(encode_bit2_opcode_iter(data))
+        assert encoded == encoded2, (
+            "Output should be deterministic regardless of chain limit"
         )

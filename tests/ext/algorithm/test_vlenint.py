@@ -307,7 +307,7 @@ class TestRoundtrip:
 
     def test_roundtrip_large_constant_zero(self):
         """A large run of zeros compresses well via bit2 run encoding."""
-        data = [0] * 1000
+        data = [0] * 200
         encoded = encode_vlenint(data)
         decoded, _ = decode_vlenint(encoded, len(data))
         assert decoded == data

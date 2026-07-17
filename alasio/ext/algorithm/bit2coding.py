@@ -29,7 +29,7 @@ def encode_bit2_opcode_iter(data):
     if n > 0:
         run_lens[n - 1] = 1
         for i in range(n - 2, -1, -1):
-            if data[i] == data[i + 1]:
+            if mv[i] == mv[i + 1]:
                 run_lens[i] = run_lens[i + 1] + 1
             else:
                 run_lens[i] = 1
@@ -41,7 +41,7 @@ def encode_bit2_opcode_iter(data):
     head = {}  # 键为 (a, b, c) 元组，值为最新的索引
 
     for i in range(n - 2):
-        key = (data[i], data[i + 1], data[i + 2])
+        key = (mv[i], mv[i + 1], mv[i + 2])
         prev_chain[i] = head.get(key, -1)
         head[key] = i
     # ==========================================
@@ -121,7 +121,7 @@ def encode_bit2_opcode_iter(data):
 
         # --- B. O(1) + 32 窗口剪枝的 Run 转移 (数学无损) ---
         r_len = run_lens[i]
-        if r_len >= 3 and data[i] <= 3:
+        if r_len >= 3 and mv[i] <= 3:
             start_l = r_len - 32
             if start_l < 3:
                 start_l = 3
@@ -205,7 +205,9 @@ def encode_bit2_opcode_iter(data):
                 idx = prev_chain[idx]
                 step_chain += 1
 
-    # --- 5. 逆向重构与合并 ---
+    # ==========================================
+    # 5. 逆向重构与合并
+    # ==========================================
     opcodes_reversed = []
     curr = n
     while curr > 0:
@@ -213,9 +215,9 @@ def encode_bit2_opcode_iter(data):
         op_type = p_op[curr]
 
         if op_type == 0:
-            opcodes_reversed.append((0, list(data[prev:curr])))
+            opcodes_reversed.append((0, list(mv[prev:curr])))
         elif op_type == 1:
-            opcodes_reversed.append((1, data[prev], curr - prev))
+            opcodes_reversed.append((1, mv[prev], curr - prev))
         elif op_type == 2:
             opcodes_reversed.append((2, p_offset[curr], curr - prev))
         curr = prev

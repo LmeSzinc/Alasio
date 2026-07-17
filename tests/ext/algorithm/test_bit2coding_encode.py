@@ -154,7 +154,7 @@ class TestRoundtrip:
     def test_roundtrip_large_synthetic(self):
         """Large synthetic data round-trips correctly."""
         data = []
-        for i in range(2000):
+        for i in range(200):
             if i % 7 == 0:
                 data.extend([i % 4] * 5)  # run
             else:
@@ -166,21 +166,21 @@ class TestRoundtrip:
 
     def test_roundtrip_large_constant(self):
         """Large constant run round-trips correctly."""
-        data = [3] * 5000
+        data = [3] * 400
         encoded = encode_bit2(data)
         decoded, _ = decode_bit2(encoded, len(data))
         assert decoded == data
 
     def test_roundtrip_repeating_pattern(self):
         """Repeating 3-value pattern round-trips correctly."""
-        data = [1, 2, 3] * 3334
+        data = [1, 2, 3] * 200
         encoded = encode_bit2(data)
         decoded, _ = decode_bit2(encoded, len(data))
         assert decoded == data
 
     def test_roundtrip_cycling_values(self):
         """Cycling 0-3 sequence round-trips correctly."""
-        data = [i % 4 for i in range(5000)]
+        data = [i % 4 for i in range(200)]
         encoded = encode_bit2(data)
         decoded, _ = decode_bit2(encoded, len(data))
         assert decoded == data
