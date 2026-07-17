@@ -201,7 +201,6 @@ class AlasioScheduler:
         # send last screenshot on idle
         self.device.backend_send_preview(force=True)
         self.device.on_idle()
-        self.config.release()
         self._send_scheduler_running(None)
 
     def _wait_future(self, task: str, future: datetime):
@@ -217,7 +216,7 @@ class AlasioScheduler:
             return True
         logger.info(f'Wait until {future} for task `{task}`')
 
-        # release
+        # run before idle
         method = self.config.Optimization.WhenTaskQueueEmpty
         run = False
         if method == 'stop_game':
@@ -238,7 +237,10 @@ class AlasioScheduler:
             logger.info('Stay there during wait')
         else:
             logger.warning(f'Unknown Optimization.WhenTaskQueueEmpty={method}, treat as stay_there')
+
+        # release
         self._on_idle()
+        self.config.release()
         if run:
             # re-log, incase task logs flush wait message
             logger.info(f'Wait until {future} for task `{task}`')
@@ -265,10 +267,13 @@ class AlasioScheduler:
                     reached = False
                     break
 
-        backend.send_worker_state('running')
+        # recover
         if reached:
+            backend.send_worker_state('running')
             # send first screenshot on recover
             backend.preview_requested.set()
+            self.config.init_task()
+
         return reached
 
     def _task_loop(self):
