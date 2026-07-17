@@ -1,5 +1,4 @@
 from alasio.backport.batch import batched
-from alasio.ext.algorithm.lz77 import match_lz77, match_run
 from alasio.ext.algorithm.unpack import unpack_little_int
 
 
@@ -16,60 +15,226 @@ def encode_bit2_opcode_iter(data):
             - (1, int, int): run value and length
             - (2, int, int): copy offset and length
     """
-    pending_literals = []
-
-    i = 0
     mv = memoryview(bytes(data))
-    # get length later so no need to iter deque twice
     n = len(mv)
+    if n == 0:
+        return
 
-    while i < n:
-        # 1. 检测连续重复 (Run)
-        run_val, run_len = match_run(mv, i, min_length=3)
+    INF = 2 ** 32 - 1
 
-        # 2. 检测历史匹配 (Copy)
-        copy_offset, copy_len = match_lz77(mv, i, min_length=3)
-
-        # 3. 决策：Run vs Copy vs Literal
-        if run_len >= 3 and run_val <= 3:
-            # 如果 Copy 的长度远大于 Run 长度，才优先考虑 Copy
-            if copy_len > run_len + 2:
-                # flush_literals
-                if pending_literals:
-                    yield 0, pending_literals
-                    pending_literals = []
-                # operation: copy
-                yield 2, copy_offset, copy_len
-                i += copy_len
+    # ==========================================
+    # 1. 预计算 Run 长度 (逆向扫描, 时间 O(N))
+    # ==========================================
+    run_lens = [0] * n
+    if n > 0:
+        run_lens[n - 1] = 1
+        for i in range(n - 2, -1, -1):
+            if data[i] == data[i + 1]:
+                run_lens[i] = run_lens[i + 1] + 1
             else:
-                # flush_literals
-                if pending_literals:
-                    yield 0, pending_literals
-                    pending_literals = []
-                # operation: run
-                yield 1, run_val, run_len
-                i += run_len
+                run_lens[i] = 1
 
-        elif copy_len >= 3:
-            # 判断这次 Copy 是否合算（长偏移量需要更长的匹配长度才合算）
-            if copy_offset <= 256 or copy_len >= 4:
-                # flush_literals
-                if pending_literals:
-                    yield 0, pending_literals
-                    pending_literals = []
-                # operation: copy
-                yield 2, copy_offset, copy_len
-                i += copy_len
-            else:
-                pending_literals.append(mv[i])
-                i += 1
+    # ==========================================
+    # 2. 预计算 LZ77 哈希链 (前向扫描, 时间 O(N))
+    # ==========================================
+    prev_chain = [-1] * n
+    head = {}  # 键为 (a, b, c) 元组，值为最新的索引
+
+    for i in range(n - 2):
+        key = (data[i], data[i + 1], data[i + 2])
+        prev_chain[i] = head.get(key, -1)
+        head[key] = i
+    # ==========================================
+    # 3. 预计算两大开销静态查找表
+    # ==========================================
+    # 变长小端整数对应的 d 字节开销表
+    L_D_TABLE = [0] * (n + 2)
+    for val in range(n + 2):
+        if val <= 255:
+            l_d = 0
+        elif val <= 65535:
+            l_d = 1
+        elif val <= 16777215:
+            l_d = 2
         else:
-            pending_literals.append(mv[i])
-            i += 1
+            l_d = 3
+        L_D_TABLE[val] = l_d
 
-    # flush_literals
-    if pending_literals:
-        yield 0, pending_literals
+    # Run 开销表
+    RUN_COST_TABLE = [INF] * (n + 1)
+    for l in range(3, n + 1):
+        if l < 35:
+            RUN_COST_TABLE[l] = 1
+        else:
+            RUN_COST_TABLE[l] = 2 + L_D_TABLE[l - 35]
+
+    # ==========================================
+    # 4. DP 最优解转移
+    # ==========================================
+    LITERAL_COSTS = (
+        0, 1, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5,
+        6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9
+    )
+    LIT_TRANSITIONS = tuple(range(33))
+
+    dp = [INF] * (n + 1)
+    dp[0] = 0
+
+    p_prev = [0] * (n + 1)
+    p_op = [0] * (n + 1)
+    p_offset = [0] * (n + 1)
+
+    # 第二优化目标：记录到达各站点的字面值元素累计总数
+    p_lit_count = [INF] * (n + 1)
+    p_lit_count[0] = 0
+
+    # 追溯链深度设为 64，兼顾极速与最完美压缩率
+    LIMIT_CHAIN_STEPS = 64
+
+    for i in range(n):
+        current_dp = dp[i]
+        if current_dp == INF:
+            continue
+
+        current_lit_count = p_lit_count[i]
+
+        # --- A. 字面值转移 ---
+        rem = n - i
+        for k in LIT_TRANSITIONS:
+            if k > rem:
+                if rem > 0:
+                    cost = current_dp + LITERAL_COSTS[rem]
+                    new_lit = current_lit_count + rem
+                    # 开销更小，或者开销相同但字面值数更少时更新
+                    if cost < dp[n] or (cost == dp[n] and new_lit < p_lit_count[n]):
+                        dp[n] = cost
+                        p_lit_count[n] = new_lit
+                        p_prev[n], p_op[n] = i, 0
+                break
+            cost = current_dp + LITERAL_COSTS[k]
+            next_idx = i + k
+            new_lit = current_lit_count + k
+            if cost < dp[next_idx] or (cost == dp[next_idx] and new_lit < p_lit_count[next_idx]):
+                dp[next_idx] = cost
+                p_lit_count[next_idx] = new_lit
+                p_prev[next_idx], p_op[next_idx] = i, 0
+
+        # --- B. O(1) + 32 窗口剪枝的 Run 转移 (数学无损) ---
+        r_len = run_lens[i]
+        if r_len >= 3 and data[i] <= 3:
+            start_l = r_len - 32
+            if start_l < 3:
+                start_l = 3
+            for l in range(start_l, r_len + 1):
+                cost = current_dp + RUN_COST_TABLE[l]
+                next_idx = i + l
+                # Run 不增加字面值数量，因此直接继承 current_lit_count
+                if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                    dp[next_idx] = cost
+                    p_lit_count[next_idx] = current_lit_count
+                    p_prev[next_idx], p_op[next_idx] = i, 1
+
+        # --- C. 无损状态空间的高速 LZ77 转移 ---
+        if i < n - 2:
+            idx = prev_chain[i]
+            step_chain = 0
+            while idx != -1 and step_chain < LIMIT_CHAIN_STEPS:
+                # 极速 C 级切片比较 + 指数增长 + 二分收窄求 LCP
+                max_len = n - i
+                low_l = 3
+                step_growth = 1
+
+                while True:
+                    test_len = low_l + step_growth
+                    if test_len > max_len:
+                        test_len = max_len
+
+                    if mv[idx: idx + test_len] == mv[i: i + test_len]:
+                        low_l = test_len
+                        if test_len == max_len:
+                            break
+                        step_growth *= 2
+                    else:
+                        break
+
+                high_l = low_l + step_growth - 1
+                if high_l > max_len:
+                    high_l = max_len
+
+                l = low_l
+                binary_low = low_l + 1
+                while binary_low <= high_l:
+                    mid = (binary_low + high_l) // 2
+                    if mv[idx: idx + mid] == mv[i: i + mid]:
+                        l = mid
+                        binary_low = mid + 1
+                    else:
+                        high_l = mid - 1
+
+                c_offset = i - idx
+                f_d = L_D_TABLE[c_offset - 1]
+
+                # 【无损修复】：不使用 32 窗口剪枝，保留完整的转移可能，支持任何位置对齐后续最佳匹配
+                if c_offset <= 256:
+                    for curr_l in range(3, l + 1):
+                        # 【开销修复】：长复制格式开销修正为 3 + l_d（之前写成了 2）
+                        copy_cost = 2 if curr_l <= 32 else (3 + L_D_TABLE[curr_l - 1])
+                        cost = current_dp + copy_cost
+                        next_idx = i + curr_l
+                        # Copy 不增加字面值数量，继承 current_lit_count
+                        if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                            dp[next_idx] = cost
+                            p_lit_count[next_idx] = current_lit_count
+                            p_prev[next_idx] = i
+                            p_op[next_idx] = 2
+                            p_offset[next_idx] = c_offset
+                else:
+                    # 【开销修复】：长复制开销修正为 3 + f_d + l_d（之前写成了 2 + f_d + l_d）
+                    base_cost = 3 + f_d
+                    for curr_l in range(3, l + 1):
+                        copy_cost = base_cost + L_D_TABLE[curr_l - 1]
+                        cost = current_dp + copy_cost
+                        next_idx = i + curr_l
+                        if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                            dp[next_idx] = cost
+                            p_lit_count[next_idx] = current_lit_count
+                            p_prev[next_idx] = i
+                            p_op[next_idx] = 2
+                            p_offset[next_idx] = c_offset
+
+                idx = prev_chain[idx]
+                step_chain += 1
+
+    # --- 5. 逆向重构与合并 ---
+    opcodes_reversed = []
+    curr = n
+    while curr > 0:
+        prev = p_prev[curr]
+        op_type = p_op[curr]
+
+        if op_type == 0:
+            opcodes_reversed.append((0, list(data[prev:curr])))
+        elif op_type == 1:
+            opcodes_reversed.append((1, data[prev], curr - prev))
+        elif op_type == 2:
+            opcodes_reversed.append((2, p_offset[curr], curr - prev))
+        curr = prev
+
+    opcodes = list(reversed(opcodes_reversed))
+    merged_opcodes = []
+    current_literals = []
+    for op in opcodes:
+        if op[0] == 0:
+            current_literals.extend(op[1])
+        else:
+            if current_literals:
+                merged_opcodes.append((0, current_literals))
+                current_literals = []
+            merged_opcodes.append(op)
+    if current_literals:
+        merged_opcodes.append((0, current_literals))
+
+    yield from merged_opcodes
 
 
 def decode_bit2_opcode(opcodes):
