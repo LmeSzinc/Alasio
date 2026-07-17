@@ -122,20 +122,34 @@ def encode_bit2_opcode_iter(data):
                 p_lit_count[next_idx] = new_lit
                 p_prev[next_idx], p_op[next_idx] = i, 0
 
-        # --- B. O(1) + 32 窗口剪枝的 Run 转移 (数学无损) ---
+        # --- B. Run 转移 (32 窗口剪枝 + 开销均匀跳过) ---
         r_len = run_lens[i]
         if r_len >= 3 and mv[i] <= 3:
             start_l = r_len - 32
             if start_l < 3:
                 start_l = 3
-            for l in range(start_l, r_len + 1):
+
+            # Run 开销在窗口内最多两种 (短格式 cost=1, 长格式 cost=2+L_D_TABLE)。
+            # 若窗口内开销均匀，取最大长度即可 (相同开销，走得更远)。
+            # 若窗口跨越开销边界，安全回退到遍历所有长度。
+            if RUN_COST_TABLE[start_l] == RUN_COST_TABLE[r_len]:
+                # Run 开销均匀: 仅检查窗口内最大长度
+                l = r_len
                 cost = current_dp + RUN_COST_TABLE[l]
                 next_idx = i + l
-                # Run 不增加字面值数量，因此直接继承 current_lit_count
                 if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
                     dp[next_idx] = cost
                     p_lit_count[next_idx] = current_lit_count
                     p_prev[next_idx], p_op[next_idx] = i, 1
+            else:
+                # 窗口跨越短/长格式或 L_D_TABLE 分界: 遍历所有长度
+                for l in range(start_l, r_len + 1):
+                    cost = current_dp + RUN_COST_TABLE[l]
+                    next_idx = i + l
+                    if cost < dp[next_idx] or (cost == dp[next_idx] and current_lit_count < p_lit_count[next_idx]):
+                        dp[next_idx] = cost
+                        p_lit_count[next_idx] = current_lit_count
+                        p_prev[next_idx], p_op[next_idx] = i, 1
 
         # --- C. 无损状态空间的高速 LZ77 转移 ---
         if i < n - 2:
