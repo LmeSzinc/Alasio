@@ -29,8 +29,11 @@ def remove_tb_frames(exc, n: int):
 
 
 class Error:
-    """Concrete :class:`Outcome` subclass representing a raised exception.
+    """Wraps a caught exception for deferred re-raising.
 
+    When a job function raises, the exception is captured in an Error
+    object instead of propagating immediately. The caller re-raises it
+    on ``unwrap()``, preserving the original traceback.
     """
     __slots__ = ('error',)
 
@@ -76,10 +79,12 @@ class _JobKill(Exception):
 
 class Job(Generic[ResultT]):
     """
-    A simple queue, copied from queue.Queue()
-    Faster but can only put() once and get() once.
-    """
+    A single-consumer job submitted to the thread pool.
 
+    Unlike ``queue.Queue`` this only supports a single ``put()`` and
+    a single ``get()``, which removes all locking overhead on the
+    internal data path.
+    """
     __slots__ = ('worker', 'func', 'args', 'kwargs', 'result', 'put_lock', 'notify_get')
 
     def __init__(self, worker, func, args, kwargs):
@@ -90,7 +95,7 @@ class Job(Generic[ResultT]):
         self.args = args
         self.kwargs = kwargs
 
-        # self.result: "Any | Error"
+        self.result = None
         self.put_lock = Lock()
         self.notify_get = Lock()
         self.notify_get.acquire()
@@ -106,11 +111,11 @@ class Job(Generic[ResultT]):
 
         # Return job result or raise job error
         # `result` will be set in _handle_job
-        item = self.result
-        if type(item) is Error:
-            return item.unwrap()
+        result = self.result
+        if type(result) is Error:
+            return result.unwrap()
         else:
-            return item
+            return result
 
     def get_or_kill(self, timeout) -> ResultT:
         """
@@ -140,7 +145,7 @@ class Job(Generic[ResultT]):
                 # Trying to kill a finished job, do nothing
                 return
             if worker is None:
-                # job running on unknown worker, do nothing
+                # Job running on unknown worker, do nothing
                 return
             worker.kill()
             del self.worker
@@ -170,9 +175,14 @@ class WorkerThread:
     def __repr__(self):
         return f'{self.__class__.__name__}({self.default_name})'
 
-    def _handle_job(self) -> None:
-        # Convert to local variable, `self.job` will be another
-        # value if new job is assigned
+    def _handle_job(self) -> bool:
+        """
+        Handle a job on this worker.
+
+        Returns:
+            bool: True if worker should continue, False if worker was
+                killed and should exit
+        """
         job = self.job
         del self.job
 
@@ -183,9 +193,10 @@ class WorkerThread:
             exc = remove_tb_frames(exc, 1)
             result = Error(exc)
 
-            # Check if job killed, must before marking self idle
+            # If worker was killed, exit without going back to idle pool.
+            # kill() already removed from all_workers and released full_lock.
             if type(result.error) is _JobKill:
-                return
+                return False
 
         # Tell the cache that we're available to be assigned a new
         # job. We do this *before* calling 'deliver', so that if
@@ -198,48 +209,61 @@ class WorkerThread:
         # logger.info('deliver job')
         with job.put_lock:
             job.result = result
-            del job.worker
+            try:
+                del job.worker
+            except AttributeError:
+                # _kill() already deleted job.worker, delivery is no-op
+                pass
             job.notify_get.release()
+        return True
 
     def _work(self) -> None:
         pool = self.thread_pool
-        while True:
-            if self.worker_lock.acquire(timeout=pool.IDLE_TIMEOUT):
-                # We got a job
-                self._handle_job()
-            else:
-                # Timeout acquiring lock, so we can probably exit. But,
-                # there's a race condition: we might be assigned a job *just*
-                # as we're about to exit. So we have to check.
-                try:
-                    del pool.idle_workers[self]
-                except KeyError:
-                    # Someone else removed us from the idle worker queue, so
-                    # they must be in the process of assigning us a job - loop
-                    # around and wait for it.
-                    pool.release_full_lock()
-                    continue
+        try:
+            while True:
+                if self.worker_lock.acquire(timeout=pool.IDLE_TIMEOUT):
+                    # We got a job, exit if worker was killed
+                    if not self._handle_job():
+                        return
                 else:
-                    # We successfully removed ourselves from the idle
-                    # worker queue, so no more jobs are incoming; it's safe to
-                    # exit.
-                    del pool.all_workers[self]
-                    pool.release_full_lock()
-                    # logger.info(f'End worker thread: {self.default_name}')
-                    return
+                    # Timeout acquiring lock, so we can probably exit. But,
+                    # there's a race condition: we might be assigned a job *just*
+                    # as we're about to exit. So we have to check.
+                    try:
+                        del pool.idle_workers[self]
+                    except KeyError:
+                        # Someone else removed us from the idle worker queue, so
+                        # they must be in the process of assigning us a job - loop
+                        # around and wait for it.
+                        pool.release_full_lock()
+                        continue
+                    else:
+                        # We successfully removed ourselves from the idle
+                        # worker queue, so no more jobs are incoming; it's safe to
+                        # exit.
+                        pool.all_workers.pop(self, None)
+                        pool.release_full_lock()
+                        return
+        except _JobKill:
+            # Worker thread was killed. kill() already removed it from
+            # all_workers and released full_lock. Thread exits cleanly.
+            return
 
     def kill(self):
         """
-        Yes, it's unsafe to kill a thread, but what else can you do
-        if a single job function get blocked.
-        This method should be protected by `job.put_lock` to prevent
-        race condition with `_handle_job()`.
+        Abort the current blocking call and remove this worker from the pool.
+        The thread will exit once it catches the injected exception.
+        This method should be protected by ``job.put_lock`` to prevent
+        race condition with ``_handle_job()``.
+
+        If the thread is stuck in a blocking C call (e.g. RPC in kernel mode),
+        the injected Python exception may not be deliverable, causing a thread
+        leak. Each leak is bounded to one thread per kill() and does not block
+        the pool from creating replacement workers.
 
         Returns:
-            bool: If success to kill the thread
+            bool: If success to abort
         """
-        # Send SystemExit to thread
-        # logger.info(f'kill worker thread: {self.default_name}')
         thread_id = ctypes.c_long(self.thread.ident)
         res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
             thread_id, ctypes.py_object(_JobKill))
@@ -253,7 +277,7 @@ class WorkerThread:
             except AttributeError:
                 job = None
             logger.error(f'Failed to kill thread {self.thread.ident} from job {job}')
-            # Failed to send SystemExit, reset it
+            # Failed to send _JobKill, reset it
             ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
             return False
 
@@ -288,13 +312,13 @@ class ThreadPool:
 
         When pool full,
         Pool tells all workers: any worker finishes his job notify me.
-        `self.notify_worker.release()`
+        ``self.notify_worker.release()``
         Then the pool blocks himself.
-        `self.notify_pool.acquire()`
+        ``self.notify_pool.acquire()``
         The fastest worker, and also the only worker, receives the message,
-        `if self.notify_worker.acquire(blocking=False):`
+        ``if self.notify_worker.acquire(blocking=False):``
         Worker tells the pool, new pool slot is ready, you are ready to go.
-        `self.notify_pool.release()`
+        ``self.notify_pool.release()``
         """
         if self.notify_worker.acquire(blocking=False):
             try:
@@ -323,10 +347,11 @@ class ThreadPool:
                 # Race condition when multiple threads trying to get thread worker
                 # It's ok to treat multiple release as one
                 pass
-            while 1:
+            while True:
                 # If any worker finishes within timeout, we can get it
-                # Race condition when all workers just done `release_full_lock` and no one notifies
-                # To handle that, we acquire with timeout and check if there's idle worker
+                # Race condition when all workers just done `release_full_lock`
+                # and no one notifies. To handle that, we acquire with timeout
+                # and check if there's idle worker.
                 self.notify_pool.acquire(timeout=0.01)
                 # Re-acquire `notify_worker` so other workers can
                 # call `release_full_lock` for next `_get_thread_worker`
@@ -336,11 +361,12 @@ class ThreadPool:
                     worker, _ = self.idle_workers.popitem()
                     return worker
                 except KeyError:
-                    # Race condition when multiple threads trying to get thread worker,
-                    # they all pass through full lock check and pop the only idle worker.
-                    # Just let the slower ones do full lock check again
+                    # Race condition when multiple threads trying to get
+                    # thread worker, they all pass through full lock check
+                    # and pop the only idle worker. Just let the slower ones
+                    # do full lock check again.
                     pass
-                # A thread just existed, pool no longer full
+                # A thread just exited, pool no longer full
                 if len(self.all_workers) < self.pool_size:
                     break
 
@@ -357,10 +383,11 @@ class ThreadPool:
                     # Race condition when multiple threads trying to get thread worker
                     # It's ok to treat multiple release as one
                     pass
-                while 1:
+                while True:
                     # If any worker finishes within timeout, we can get it
-                    # Race condition when all workers just done `release_full_lock` and no one notifies
-                    # To handle that, we acquire with timeout and check if there's idle worker
+                    # Race condition when all workers just done `release_full_lock`
+                    # and no one notifies. To handle that, we acquire with timeout
+                    # and check if there's idle worker.
                     self.notify_pool.acquire(timeout=0.01)
                     # Re-acquire `notify_worker` so other workers can
                     # call `release_full_lock` for next `_get_thread_worker`
@@ -393,14 +420,14 @@ class ThreadPool:
         return worker
 
     def start_thread_soon(
-            self, func: Callable[[ParamP], ResultT], *args: ParamP.args, **kwargs: ParamP.kwargs
-    ) -> Job[ResultT]:
+            self, func: "Callable[[ParamP], ResultT]", *args: "ParamP.args", **kwargs: "ParamP.kwargs"
+    ) -> "Job[ResultT]":
         """
         Run a function on thread, costs extra ~15us,
-        result can be got from `job` object
+        result can be got from ``job`` object
 
         Examples:
-            job = WORKER_POOL.start_thread_soon(func, *args)
+            job = THREAD_POOL.start_thread_soon(func, *args)
             result = job.get()
         """
         worker = self._get_thread_worker()
@@ -410,10 +437,10 @@ class ThreadPool:
         worker.worker_lock.release()
         return job
 
-    def run_on_thread(self, func: Callable[[ParamP], ResultT]) -> Callable[[ParamP], Job[ResultT]]:
+    def run_on_thread(self, func: "Callable[[ParamP], ResultT]") -> "Callable[[ParamP], Job[ResultT]]":
         """
         Decorate a function to run on thread,
-        result can be got from `Job` object
+        result can be got from ``Job`` object
 
         Examples:
             @run_on_thread
@@ -424,15 +451,15 @@ class ThreadPool:
         """
 
         @wraps(func)
-        def thread_wrapper(*args: ParamP.args, **kwargs: ParamP.kwargs) -> Job[ResultT]:
+        def thread_wrapper(*args: "ParamP.args", **kwargs: "ParamP.kwargs") -> "Job[ResultT]":
             return self.start_thread_soon(func, *args, **kwargs)
 
         return thread_wrapper
 
-    def start_cmd_soon(self, cmd, timeout=10, strip=True) -> Job[CmdlineResultStr]:
+    def start_cmd_soon(self, cmd, timeout=10, strip=True) -> "Job[CmdlineResultStr]":
         """
         Run cmd on subprocess and communicate it on another thread,
-        result can be got from `job` object
+        result can be got from ``job`` object
 
         Args:
             cmd (list[str]):
@@ -454,7 +481,7 @@ class ThreadPool:
         Auto wait all jobs finished
 
         Examples:
-            with WORKER_POOL.wait_jobs() as pool:
+            with THREAD_POOL.wait_jobs() as pool:
                 pool.start_thread_soon(...)
         """
         return WaitJobsWrapper(self)
@@ -464,7 +491,7 @@ class ThreadPool:
         Auto wait all jobs finished and gather results
 
         Examples:
-            pool = WORKER_POOL.gather_jobs()
+            pool = THREAD_POOL.gather_jobs()
             with pool:
                 pool.start_thread_soon(...)
             # Get results
@@ -541,7 +568,7 @@ class WaitJobsWrapper:
     def start_thread_soon(self, func, *args, **kwargs):
         """
         Run a function on thread,
-        result can be got from `job` object
+        result can be got from ``job`` object
 
         Args:
             func (Callable[..., ResultT]):
