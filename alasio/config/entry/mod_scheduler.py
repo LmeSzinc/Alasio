@@ -6,6 +6,7 @@ from msgspecerror import load_msgpack_with_default
 from alasio.base.filter import parse_filter
 from alasio.config.entry.mod_base import ModBase
 from alasio.config.entry.model import TaskItem
+from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.cache import cached_property
 from alasio.ext.file.loadpy import LOADPY_CACHE
@@ -48,6 +49,33 @@ class ModScheduler(ModBase):
         for i, task in enumerate(priority, start=1):
             dict_priority[task] = i
         return dict_priority
+
+    def iter_task_groups(self, task):
+        """
+        Args:
+            task (str):
+
+        Yields:
+            tuple[str, ModelGroupRef]:
+        """
+        index = self.task_index_data()
+
+        # iter global bind groups first
+        global_bind = index.get('_global_bind', None)
+        if global_bind is not None:
+            for group, group_ref in global_bind.group.items():
+                yield group, group_ref
+
+        # then task groups
+        if task:
+            if not validate_task_name(task):
+                raise KeyError(f'Task name format invalid: "{task}"')
+            try:
+                task_ref = index[task]
+            except KeyError:
+                raise KeyError(f'No such task "{task}"')
+            for group, group_ref in task_ref.group.items():
+                yield group, group_ref
 
     def iter_task_scheduler_group(self, dict_task_priority=None):
         """

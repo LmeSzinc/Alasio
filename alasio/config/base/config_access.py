@@ -14,7 +14,6 @@ from alasio.config.const import DataInconsistent
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.mod import Mod
 from alasio.config.entry.model import ConfigSetEvent
-from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
 from alasio.db.conn import SQLITE_POOL
@@ -270,7 +269,7 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
 
             dict_row = self._dict_row
             dict_group = self._dict_group
-            for group, group_ref in self._iter_task_groups(self.task):
+            for group, group_ref in self.mod.iter_task_groups(self.task):
                 key = (group_ref.task, group)
                 if key in dict_group:
                     continue
@@ -387,33 +386,6 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
             return getattr(obj, arg, default)
         except AttributeError:
             return default
-
-    def _iter_task_groups(self, task):
-        """
-        Args:
-            task (str):
-
-        Yields:
-            tuple[str, ModelGroupRef]:
-        """
-        index = self.mod.task_index_data()
-
-        # iter global bind groups first
-        global_bind = index.get('_global_bind', None)
-        if global_bind is not None:
-            for group, group_ref in global_bind.group.items():
-                yield group, group_ref
-
-        # then task groups
-        if task:
-            if not validate_task_name(task):
-                raise KeyError(f'Task name format invalid: "{task}"')
-            try:
-                task_ref = index[task]
-            except KeyError:
-                raise KeyError(f'No such task "{task}"')
-            for group, group_ref in task_ref.group.items():
-                yield group, group_ref
 
     def construct_group(self, group) -> Struct:
         """
