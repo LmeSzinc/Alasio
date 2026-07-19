@@ -3,7 +3,8 @@ from collections import defaultdict
 from msgspec import NODEFAULT, ValidationError, convert
 from msgspec.msgpack import encode
 from msgspec.structs import asdict
-from msgspecerror import get_field_default, get_model_changes, load_msgpack_with_default, parse_msgspec_error
+from msgspecerror import (ErrorInfo, ErrorType, get_field_default, get_model_changes, load_msgpack_with_default,
+                          parse_msgspec_error)
 
 from alasio.base.pretty import pretty_value
 from alasio.config.const import DataInconsistent
@@ -109,6 +110,8 @@ class ModConfig(ModBase):
         # prepare model and default
         task_index_data = self.task_index_data()
 
+        rollback: "list[ConfigSetEvent]" = []
+        has_error = False
         dict_model = {}
         dict_value = defaultdict(dict)
         for event in events:
@@ -117,7 +120,13 @@ class ModConfig(ModBase):
                 try:
                     model_ref = task_index_data[event.task].group[event.group]
                 except KeyError:
-                    logger.warning(f'Cannot set non-exist group {event.task}.{event.group}')
+                    rollback.append(ConfigSetEvent(
+                        task=event.task, group=event.group, arg=event.arg, value=None,
+                        error=ErrorInfo(
+                            msg=f'No such group: {event.task}.{event.group}',
+                            type=ErrorType.INPUT_REJECTED,
+                            loc=(event.arg,))))
+                    has_error = True
                     continue
                 # get model
                 model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
@@ -127,8 +136,7 @@ class ModConfig(ModBase):
                 dict_model[key] = model
             dict_value[key][event.arg] = event.value
 
-        # validate
-        rollback: "list[ConfigSetEvent]" = []
+        # validate - process all events, collect all errors
         success: "list[ConfigSetEvent]" = []
         for key, value in dict_value.items():
             try:
@@ -150,19 +158,38 @@ class ModConfig(ModBase):
                     raise DataInconsistent(f'Failed to parse error.loc from "{e}"') from None
                 default = get_field_default_with_error(model, arg)
                 rollback.append(ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=error))
+                has_error = True
                 continue
-            # validate success
+            # validate all args in this group
+            group_success: "list[ConfigSetEvent]" = []
+            group_has_error = False
             for arg in value:
                 arg_value = getattr(value_obj, arg, NODEFAULT)
                 if arg_value is NODEFAULT:
-                    raise DataInconsistent(
-                        f'Missing arg "{arg}" after converting value, value={value}, value_obj={value_obj}')
-                success.append(ConfigSetEvent(task=task, group=group, arg=arg, value=arg_value))
-            # we will do dict.update later
-            dict_value[key] = asdict(value_obj)
+                    rollback.append(ConfigSetEvent(
+                        task=task, group=group, arg=arg, value=None,
+                        error=ErrorInfo(
+                            msg=f'No such field: {task}.{group}.{arg}',
+                            type=ErrorType.INPUT_REJECTED,
+                            loc=(arg,))))
+                    group_has_error = True
+                    break
+                group_success.append(ConfigSetEvent(task=task, group=group, arg=arg, value=arg_value))
+            if group_has_error:
+                # previous valid args in this group also go to rollback (no error)
+                rollback.extend(group_success)
+                has_error = True
+            else:
+                # all args valid for this group
+                success.extend(group_success)
+                # keep only the validated input fields, not defaults expanded via asdict()
+                # or existing fields (e.g. Enable=True) would be overwritten by model defaults (e.g. Enable=False)
+                dict_value[key] = {arg: getattr(value_obj, arg) for arg in value}
 
-        # if any event failed to validate, entire config_set is consider failed
-        if rollback:
+        # if any event failed to validate, entire batch is atomic: nothing is written
+        if has_error:
+            # include other groups' valid events in rollback (no error)
+            rollback.extend(success)
             return False, rollback
 
         # init table
@@ -272,8 +299,12 @@ class ModConfig(ModBase):
         try:
             model_ref = task_index_data[task].group[group]
         except KeyError:
-            logger.warning(f'Cannot set non-exist group {task}.{group}')
-            raise DataInconsistent(f'Group {task}.{group} does not exist')
+            error = ErrorInfo(
+                msg=f'No such group: {task}.{group}',
+                type=ErrorType.INPUT_REJECTED,
+                loc=(event.arg,))
+            rollback = ConfigSetEvent(task=task, group=group, arg=event.arg, value=None, error=error)
+            return False, [rollback]
 
         model = self.get_group_model(file=model_ref.file, cls=model_ref.cls)
         if model is None:
@@ -297,8 +328,12 @@ class ModConfig(ModBase):
         # get validated value
         arg_value = getattr(value_obj, event.arg, NODEFAULT)
         if arg_value is NODEFAULT:
-            raise DataInconsistent(
-                f'Missing arg "{event.arg}" after converting value, value={value}, value_obj={value_obj}')
+            error = ErrorInfo(
+                msg=f'No such field: {task}.{group}.{event.arg}',
+                type=ErrorType.INPUT_REJECTED,
+                loc=(event.arg,))
+            rollback = ConfigSetEvent(task=task, group=group, arg=event.arg, value=None, error=error)
+            return False, [rollback]
         success: "list[ConfigSetEvent]" = [
             ConfigSetEvent(task=task, group=group, arg=event.arg, value=arg_value)]
 
