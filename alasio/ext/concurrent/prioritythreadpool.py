@@ -5,7 +5,13 @@ from typing import Callable, TypeVar
 
 from typing_extensions import ParamSpec
 
-from alasio.ext.concurrent.threadpool import Error, Job, WorkerThread, _JobKill, remove_tb_frames
+from alasio.ext.concurrent.threadpool import (
+    Error,
+    Job,
+    JobKill,
+    WorkerThread,
+    remove_tb_frames,
+)
 
 ParamP = ParamSpec("ParamP")
 ResultT = TypeVar("ResultT")
@@ -34,7 +40,7 @@ class PriorityWorkerThread(WorkerThread):
             result = Error(exc)
 
             # Check if job killed, must before marking self idle
-            if type(result.error) is _JobKill:
+            if type(result.error) is JobKill:
                 return
 
         # Job finished, putin result and notify
@@ -123,7 +129,11 @@ class PriorityThreadPool:
             # logger.info(f'New worker thread: {worker.default_name}')
 
     def enqueue(
-            self, func: Callable[[ParamP], ResultT], priority, *args: ParamP.args, **kwargs: ParamP.kwargs
+        self,
+        func: Callable[[ParamP], ResultT],
+        priority,
+        *args: ParamP.args,
+        **kwargs: ParamP.kwargs,
     ) -> Job[ResultT]:
         """
         Args:

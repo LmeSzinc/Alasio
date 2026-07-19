@@ -1,7 +1,7 @@
 import ctypes
 from functools import wraps
 from threading import Lock, Thread
-from typing import Callable, Generic, TypeVar
+from typing import Callable, Generic, TypeVar, Union
 
 from typing_extensions import ParamSpec
 
@@ -73,17 +73,20 @@ class JobTimeout(Exception):
     pass
 
 
-class _JobKill(Exception):
+class JobKill(Exception):
     pass
+
+
+NODEFAULT = object()
 
 
 class Job(Generic[ResultT]):
     """
-    A single-consumer job submitted to the thread pool.
+    A job submitted to the thread pool.
 
-    Unlike ``queue.Queue`` this only supports a single ``put()`` and
-    a single ``get()``, which removes all locking overhead on the
-    internal data path.
+    Unlike ``queue.Queue`` this only supports a single ``put()``,
+    which removes all locking overhead on the internal data path.
+    ``get()`` may be called multiple times (the result is cached).
     """
     __slots__ = ('worker', 'func', 'args', 'kwargs', 'result', 'put_lock', 'notify_get')
 
@@ -95,7 +98,7 @@ class Job(Generic[ResultT]):
         self.args = args
         self.kwargs = kwargs
 
-        self.result = None
+        self.result: "Union[ResultT, NODEFAULT]" = NODEFAULT
         self.put_lock = Lock()
         self.notify_get = Lock()
         self.notify_get.acquire()
@@ -105,9 +108,12 @@ class Job(Generic[ResultT]):
 
     def get(self) -> ResultT:
         """
-        Get job result or job error
+        Get job result, or raise job error, or raise JobKill
+
+        Returns the cached result when called more than once.
         """
-        self.notify_get.acquire()
+        if self.result is NODEFAULT:
+            self.notify_get.acquire()
 
         # Return job result or raise job error
         # `result` will be set in _handle_job
@@ -120,11 +126,18 @@ class Job(Generic[ResultT]):
     def get_or_kill(self, timeout) -> ResultT:
         """
         Try to get result within given seconds,
-        if success, return job result or job error
+        if success, return job result, or raise job error, or raise JobKill
         if failed, kill job and raise JobTimeout
 
         Note that JobTimeout may not raises immediately if POOL_SIZE reached
         """
+        result = self.result
+        if result is not NODEFAULT:
+            if type(result) is Error:
+                return result.unwrap()
+            else:
+                return result
+
         if self.notify_get.acquire(timeout=timeout):
             # Return job result or raise job error
             # `result` will be set in _handle_job
@@ -193,9 +206,14 @@ class WorkerThread:
             exc = remove_tb_frames(exc, 1)
             result = Error(exc)
 
-            # If worker was killed, exit without going back to idle pool.
-            # kill() already removed from all_workers and released full_lock.
-            if type(result.error) is _JobKill:
+            # If worker was killed, deliver result and exit without going
+            # back to idle pool.  kill() already removed from all_workers,
+            # idle_workers and released full_lock.  _kill() already deleted
+            # job.worker so we skip that here.
+            if type(result.error) is JobKill:
+                with job.put_lock:
+                    job.result = result
+                    job.notify_get.release()
                 return False
 
         # Tell the cache that we're available to be assigned a new
@@ -244,7 +262,7 @@ class WorkerThread:
                         pool.all_workers.pop(self, None)
                         pool.release_full_lock()
                         return
-        except _JobKill:
+        except JobKill:
             # Worker thread was killed. kill() already removed it from
             # all_workers and released full_lock. Thread exits cleanly.
             return
@@ -266,9 +284,11 @@ class WorkerThread:
         """
         thread_id = ctypes.c_long(self.thread.ident)
         res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
-            thread_id, ctypes.py_object(_JobKill))
+            thread_id, ctypes.py_object(JobKill)
+        )
         if res <= 1:
             self.thread_pool.all_workers.pop(self, None)
+            self.thread_pool.idle_workers.pop(self, None)
             self.thread_pool.release_full_lock()
             return True
         else:
@@ -276,8 +296,8 @@ class WorkerThread:
                 job = self.job
             except AttributeError:
                 job = None
-            logger.error(f'Failed to kill thread {self.thread.ident} from job {job}')
-            # Failed to send _JobKill, reset it
+            logger.error(f"Failed to kill thread {self.thread.ident} from job {job}")
+            # Failed to send JobKill, reset it
             ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
             return False
 

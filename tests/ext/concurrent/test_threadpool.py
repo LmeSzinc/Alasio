@@ -13,7 +13,7 @@ from alasio.ext.concurrent.threadpool import (
     JobTimeout,
     ThreadPool,
     WaitJobsWrapper,
-    _JobKill,
+    JobKill,
     remove_tb_frames,
 )
 
@@ -44,7 +44,7 @@ def _wait_then_raise(event, exc_class=ValueError, msg="test error"):
 
 
 def _busy_loop():
-    """Busy-loop so _JobKill can be delivered by `PyThreadState_SetAsyncExc`."""
+    """Busy-loop so `JobKill` can be delivered by `PyThreadState_SetAsyncExc`."""
     try:
         while True:
             pass
@@ -205,11 +205,12 @@ class TestJobGet:
         with pytest.raises(ValueError, match="job_error"):
             job.get()
 
-    def test_get_on_finished_job_once(self):
-        """get() on a finished job returns the result (single-consumer contract)."""
+    def test_get_twice_is_reentrant(self):
+        """get() is re-entrant — the result is cached for subsequent calls."""
         pool = ThreadPool(pool_size=4)
         job = pool.start_thread_soon(lambda: 99)
         assert job.get() == 99
+        assert job.get() == 99  # second call returns cached result
 
     def test_get_after_error(self):
         """get() after job raised an error still raises."""
@@ -217,6 +218,9 @@ class TestJobGet:
         job = pool.start_thread_soon(
             lambda: (_ for _ in ()).throw(ValueError("persistent"))
         )
+        with pytest.raises(ValueError, match="persistent"):
+            job.get()
+        # Second get() also raises (cached error)
         with pytest.raises(ValueError, match="persistent"):
             job.get()
 
@@ -252,6 +256,13 @@ class TestJobGetOrKill:
         pool = ThreadPool(pool_size=4)
         job = pool.start_thread_soon(lambda: "done")
         assert job.get_or_kill(timeout=5) == "done"
+
+    def test_get_then_get_or_kill(self):
+        """get() then get_or_kill() works (result cached via NODEFAULT)."""
+        pool = ThreadPool(pool_size=4)
+        job = pool.start_thread_soon(lambda: "cached")
+        assert job.get() == "cached"
+        assert job.get_or_kill(timeout=5) == "cached"
 
 
 class TestJobKill:
@@ -760,18 +771,17 @@ class TestEdgeCases:
         assert not found_handle_job, "_handle_job should be removed from traceback"
 
     def test_job_kill_exception_caught_in_handle_job(self):
-        """_JobKill raised during job execution is caught by _handle_job.
+        """``JobKill`` raised during job execution is delivered as a result.
 
-        When ``_handle_job`` catches ``_JobKill`` it returns ``False``
-        immediately without delivering the result to the ``Job`` object,
-        so ``job.get()`` would hang.  Use ``get_or_kill`` to verify the
-        worker exited instead.
+        ``_handle_job`` now always delivers the result (including ``JobKill``)
+        to the ``Job`` object.  ``get()`` returns the ``JobKill`` exception
+        via ``Error.unwrap()``.
         """
         pool = ThreadPool(pool_size=4)
-        job = pool.start_thread_soon(lambda: (_ for _ in ()).throw(_JobKill()))
-        # The worker caught _JobKill and exited without delivering a result
-        with pytest.raises(JobTimeout):
-            job.get_or_kill(timeout=0.05)
+        job = pool.start_thread_soon(lambda: (_ for _ in ()).throw(JobKill()))
+        # The worker caught JobKill and delivered it — get() gets it back
+        with pytest.raises(JobKill):
+            job.get()
 
     def test_create_lock_contention(self):
         """Multiple threads contending for create_lock creates workers correctly."""
