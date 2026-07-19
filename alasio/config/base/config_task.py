@@ -39,22 +39,26 @@ class AlasioConfigBaseTask(AlasioConfigBaseAccess):
             backend.send(ConfigEvent(t='TaskQueue', v=data))
         return pending_task, waiting_task
 
-    def get_next_task(self) -> TaskItem:
-        pending_task, waiting_task = self.get_task_schedule()
-        # get first task
-        if pending_task:
-            logger.info(f'Pending tasks: {[f.TaskName for f in pending_task]}')
-            task = pending_task[0]
-            task.NextRun = task.NextRun.astimezone()
-            logger.attr('Task', task)
-            return task
-        if waiting_task:
+    def get_next_task(self):
+        """
+        Returns:
+            tuple[list[TaskItem], list[TaskItem], TaskItem]]:
+                pending_tasks, waiting_tasks, next_task
+        """
+        pending_tasks, waiting_tasks = self.get_task_schedule()
+        if pending_tasks:
+            logger.info(f'Pending tasks: {[f.TaskName for f in pending_tasks]}')
+            next_task = pending_tasks[0]
+            next_task.NextRun = next_task.NextRun.astimezone()
+            logger.attr('Task', next_task)
+        elif waiting_tasks:
             logger.info('No task pending')
-            task = waiting_task[0]
-            task.NextRun = task.NextRun.astimezone()
-            logger.attr('Task', task)
-            return task
-        raise RequestHumanTakeover('No task waiting or pending, please enable at least on task')
+            next_task = waiting_tasks[0]
+            next_task.NextRun = next_task.NextRun.astimezone()
+            logger.attr('Task', next_task)
+        else:
+            raise RequestHumanTakeover('No task waiting or pending, please enable at least on task')
+        return pending_tasks, waiting_tasks, next_task
 
     def task_switched(self):
         """
@@ -92,7 +96,8 @@ class AlasioConfigBaseTask(AlasioConfigBaseAccess):
                 self.init_task()
 
             # check task switch
-            new = self.get_next_task().TaskName
+            _, _, next_task = self.get_next_task()
+            new = next_task.TaskName
 
         reload_msg = ' (config reloaded)' if reload else ''
         if prev == new:

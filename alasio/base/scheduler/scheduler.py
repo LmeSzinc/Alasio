@@ -40,7 +40,7 @@ class AlasioScheduler:
     def __init__(self, config_name):
         self.config_name = config_name
         # Skip first restart
-        self.skip_first_task = {'Restart', 'RestartDevice', 'RestartGame'}
+        self.skip_first_tasks = {'Restart', 'RestartDevice', 'RestartGame'}
 
     def create_config(self):
         return AlasioConfigBase(self.config_name)
@@ -276,6 +276,36 @@ class AlasioScheduler:
 
         return reached
 
+    def _skip_first_tasks(self, pending_tasks, next_task):
+        """
+        skip restart tasks at startup
+
+        Args:
+            pending_tasks (list[TaskItem]):
+            next_task (TaskItem):
+
+        Returns:
+            bool: True if skipped
+        """
+        if next_task.TaskName not in self.skip_first_tasks:
+            return False
+
+        restart_tasks = []
+        # find til the first non-restart task
+        for task in pending_tasks:
+            if task.TaskName in self.skip_first_tasks:
+                restart_tasks.append(task.TaskName)
+            else:
+                break
+
+        logger.info(f'Skip first tasks: {restart_tasks}')
+        with self.config.batch_set():
+            for name in restart_tasks:
+                self.config.task_delay(server_update=True, task=name)
+        for name in restart_tasks:
+            self.skip_first_tasks.discard(name)
+        return True
+
     def _task_loop(self):
         backend = BackendBridge()
         if backend.scheduler_stopping.is_set():
@@ -284,9 +314,13 @@ class AlasioScheduler:
         # get next task
         self.config.release()
         try:
-            task = self.config.get_next_task()
+            pending_tasks, _, task = self.config.get_next_task()
         except RequestHumanTakeover:
             raise SchedulerStop
+
+        if self._skip_first_tasks(pending_tasks=pending_tasks, next_task=task):
+            return False
+
         # init task
         self.config.task = task.TaskName
         self.config.init_task()
@@ -294,11 +328,6 @@ class AlasioScheduler:
         reached = self._wait_future(task=task.TaskName, future=task.NextRun)
         if not reached:
             return False
-        # skip restart
-        if task.TaskName in self.skip_first_task:
-            self.config.task_delay(server_update=True)
-            self.skip_first_task.discard(task.TaskName)
-            return True
 
         # Run
         logger.info(f'Scheduler: Start task `{task.TaskName}`')
@@ -306,7 +335,7 @@ class AlasioScheduler:
         logger.hr0(task.TaskName)
         success = self._run_task(task.TaskName)
         logger.info(f'Scheduler: End task `{task.TaskName}`')
-        self.skip_first_task.clear()
+        self.skip_first_tasks.clear()
 
         # Check task record constraints (execution frequency and failure count)
         try:
