@@ -151,7 +151,6 @@
 <div
   class={cn(
     "neushadow bg-card group relative flex flex-col items-center justify-center overflow-hidden rounded-lg",
-    "aspect-video",
     className,
   )}
 >
