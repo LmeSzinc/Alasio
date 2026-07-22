@@ -861,3 +861,189 @@ class TestRegression:
         # Must match V3 behaviour: LCS('.prettierignore', '.gitignore') = 6
         assert lookback == 1
         assert length == 6
+
+
+# ---------------------------------------------------------------------------
+# max_lookback filter
+# ---------------------------------------------------------------------------
+
+
+class TestGetLcsMaxLookback:
+    """Test the ``max_lookback`` parameter that limits forward search distance.
+
+    The lookback of a candidate is ``current_index - prev_index``.
+    ``max_lookback`` filters out candidates whose lookback exceeds this value.
+    """
+
+    def test_default_no_filtering(self):
+        """max_lookback=None (default) behaves identically to no limit."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("a.py")       # idx 0
+        lcs.add_path("b.py")       # idx 1
+        lcs.add_path("c.py")       # idx 2
+        lookback, length = lcs.get_lcs("d.py", max_lookback=None)
+        # Level 3: LCS('.py','.py')=3, c.py(idx 2) matched
+        assert lookback == 1
+        assert length == 3
+
+    # ------------------------------------------------------------------
+    # Level 1
+    # ------------------------------------------------------------------
+
+    def test_level1_filters_beyond_max_lookback(self):
+        """Level 1 skips candidates whose lookback exceeds max_lookback."""
+        lcs = PathLookbackLCS()
+        # All paths share bucket (.py, 'a', 'a')
+        lcs.add_path("xaaa.py")    # idx 0
+        lcs.add_path("xbaa.py")    # idx 1
+        lcs.add_path("xcaa.py")    # idx 2
+        # Query "xdaa.py": same bucket, max_lookback=1
+        # reversed: xcaa.py(2, lookback=1) ok, xbaa.py(1, lookback=2) break early
+        lookback, length = lcs.get_lcs("xdaa.py", max_lookback=1)
+        assert lookback == 1
+        # LCS("xdaa.py", "xcaa.py") = "aa.py" = 5
+        assert length == 5
+
+    def test_level1_all_candidates_beyond_lookback_falls_through(self):
+        """All Level 1 candidates exceed max_lookback -> fall through to Level 2/3."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("xaaa.py")    # idx 0, bucket (.py, 'a', 'a')
+        lcs.add_path("xbaa.py")    # idx 1, bucket (.py, 'a', 'a')
+        # Query "xcaa.py": same bucket
+        # max_lookback=0: most recent is xbaa.py(1, lookback=1) > 0 -> break immediately
+        # No Level 1 result. Level 2: suffix '.py', last 'a' -> xbaa.py(1) filtered too
+        # Level 3: suffix '.py' -> xbaa.py(1) filtered -> (0, 0)
+        lookback, length = lcs.get_lcs("xcaa.py", max_lookback=0)
+        assert lookback == 0
+        assert length == 0
+
+    def test_level1_exact_match_within_lookback_short_circuits(self):
+        """Exact match within max_lookback triggers short-circuit return."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("xaaa.py")    # idx 0
+        lcs.add_path("xbaa.py")    # idx 1
+        lcs.add_path("xcaa.py")    # idx 2
+        # Query "xbaa.py": exact match with idx 1, lookback=3-1=2
+        # max_lookback=2: xcaa.py(2, lookback=1) checked, not full match
+        #                xbaa.py(1, lookback=2) full match -> short circuit
+        lookback, length = lcs.get_lcs("xbaa.py", max_lookback=2)
+        assert lookback == 2
+        assert length == len("xbaa.py")
+
+    def test_level1_exact_match_beyond_lookback_no_short_circuit(self):
+        """Exact match beyond max_lookback does not short circuit; a nearer
+        candidate may still match."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("xaaa.py")    # idx 0
+        lcs.add_path("xbaa.py")    # idx 1, the exact target
+        lcs.add_path("xcaa.py")    # idx 2, most recent
+        # Query "xbaa.py": exact match with idx 1, lookback=3-1=2
+        # max_lookback=1: xcaa.py(2, lookback=1) ok — LCS("xbaa.py","xcaa.py")="aa.py"=5
+        #                  xbaa.py(1, lookback=2) filtered — break early
+        # Result: xcaa.py matched with LCS=5
+        lookback, length = lcs.get_lcs("xbaa.py", max_lookback=1)
+        assert lookback == 1
+        assert length == 5
+
+    # ------------------------------------------------------------------
+    # Level 2
+    # ------------------------------------------------------------------
+
+    def test_level2_filters_beyond_max_lookback(self):
+        """Level 2 filters candidates whose lookback exceeds max_lookback."""
+        lcs = PathLookbackLCS()
+        # Same suffix, same last char, different lsecond -> Level 1 misses, Level 2 hits
+        lcs.add_path("xabx.py")    # idx 0, last='x', second='b', bucket (.py, 'x', 'b')
+        lcs.add_path("xacx.py")    # idx 1, last='x', second='c', bucket (.py, 'x', 'c')
+        # Query "xadx.py": last='x', second='d' -> Level 1 miss
+        # Level 2: suffix '.py', last 'x':
+        #   lsecond='b': xabx.py(0), lookback=2-0=2 > 1 -> filtered
+        #   lsecond='c': xacx.py(1), lookback=2-1=1 <= 1 -> selected, best_length=4
+        lookback, length = lcs.get_lcs("xadx.py", max_lookback=1)
+        assert lookback == 1
+        assert length == 4
+
+    def test_level2_all_candidates_beyond_lookback_falls_through(self):
+        """All Level 2 candidates exceed max_lookback -> fall through to Level 3."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("xabx.py")    # idx 0
+        lcs.add_path("xacx.py")    # idx 1
+        # Query "xadx.py": max_lookback=0 filters both Level 2 candidates
+        # Level 3: LCS('.py','.py')=3
+        #   xacx.py(1): lookback=1 > 0 -> filtered
+        #   xabx.py(0): lookback=2 > 0 -> filtered
+        lookback, length = lcs.get_lcs("xadx.py", max_lookback=0)
+        assert lookback == 0
+        assert length == 0
+
+    # ------------------------------------------------------------------
+    # Level 3
+    # ------------------------------------------------------------------
+
+    def test_level3_filters_beyond_max_lookback(self):
+        """Level 3 filters candidates whose lookback exceeds max_lookback."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("aaaa.py")    # idx 0, last='a', bucket (.py, 'a', 'a')
+        # Query "bbbb.py": last='b', lsecond='b'
+        # Level 1: (.py, 'b', 'b') empty
+        # Level 2: (.py, 'b') empty
+        # Level 3: LCS('.py','.py')=3, aaaa.py(0): lookback=1-0=1 <= 1 -> matched
+        lookback, length = lcs.get_lcs("bbbb.py", max_lookback=1)
+        assert lookback == 1
+        assert length == 3
+
+    def test_level3_all_candidates_beyond_lookback_falls_through(self):
+        """All Level 3 candidates exceed max_lookback -> (0, 0)."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("aaaa.py")    # idx 0
+        # Query "bbbb.py": max_lookback=0, aaaa.py(0) lookback=1 > 0 -> filtered
+        lookback, length = lcs.get_lcs("bbbb.py", max_lookback=0)
+        assert lookback == 0
+        assert length == 0
+
+    # ------------------------------------------------------------------
+    # Combinations with other parameters
+    # ------------------------------------------------------------------
+
+    def test_combined_with_min_length(self):
+        """max_lookback and min_length both apply — filters at all levels."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("xaaa.py")    # idx 0, bucket (.py, 'a', 'a')
+        lcs.add_path("xbaa.py")    # idx 1
+        lcs.add_path("xcaa.py")    # idx 2
+        # Query "xdaa.py": same bucket
+        # Level 1: LCS=5 < min_length=6 -> filtered, break (next beyond lookback)
+        # Level 2: fixed length=4 < min_length=6 -> exit check fails
+        # Level 3: suffix LCS('.py','.py')=3 < min_length=6 -> exit check fails
+        lookback, length = lcs.get_lcs("xdaa.py", min_length=6, max_lookback=1)
+        assert lookback == 0
+        assert length == 0
+
+    def test_combined_with_max_length(self):
+        """max_lookback and max_length both apply — filters at all levels."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("xaaa.py")    # idx 0, bucket (.py, 'a', 'a')
+        lcs.add_path("xbaa.py")    # idx 1
+        lcs.add_path("xcaa.py")    # idx 2
+        # Query "xdaa.py": same bucket
+        # Level 1: LCS=5 > max_length=2 -> filtered
+        # Level 2: fixed length=4 > max_length=2 -> filtered
+        # Level 3: suffix LCS('.py','.py')=3 > max_length=2 -> no suffix match
+        lookback, length = lcs.get_lcs("xdaa.py", max_length=2, max_lookback=1)
+        assert lookback == 0
+        assert length == 0
+
+    def test_multiple_candidates_within_lookback_picks_best_lcs(self):
+        """When multiple candidates are within max_lookback, pick the one
+        with the largest LCS."""
+        lcs = PathLookbackLCS()
+        # Same bucket suffixed with "__common.py": last='y', second='n'
+        lcs.add_path("zz__common.py")    # idx 0
+        lcs.add_path("yy__common.py")    # idx 1
+        # Query "xx__common.py": same bucket
+        # Both candidates are within max_lookback=2.
+        # LCS("xx__common.py", "yy__common.py") = "__common.py" = 12
+        # Tie goes to the most recent (idx 1).
+        lookback, length = lcs.get_lcs("xx__common.py", max_lookback=2)
+        assert lookback == 1
+        assert length == len("__common.py")

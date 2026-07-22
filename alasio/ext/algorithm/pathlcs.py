@@ -34,12 +34,15 @@ class PathLookbackLCS:
             second = ''
         return suffix, last, second
 
-    def get_lcs(self, path, min_length=1, max_length=None):
+    def get_lcs(self, path, min_length=1, max_length=None, max_lookback=None):
         """
         Args:
             path (str):
             min_length (int): Minimum LCS length for a candidate.
             max_length (int | None): Maximum LCS length for a candidate.
+            max_lookback (int | None): Maximum lookback distance.
+                Only consider candidates whose lookback (current_index - prev_index)
+                is <= max_lookback. None means no limit.
 
         Returns:
             tuple[int, int]: lookback, lcs_length
@@ -55,6 +58,10 @@ class PathLookbackLCS:
         # match suffix + last + second
         dict_path = self.dict_suffix[suffix][last][second]
         for prev, prev_index in reversed(dict_path.items()):
+            if max_lookback is not None and current_index - prev_index > max_lookback:
+                # reversed() yields decreasing prev_index, so remaining entries
+                # will have even larger lookback — safe to stop early.
+                break
             length = get_lcs_length(path, prev)
             if length < min_length:
                 continue
@@ -78,11 +85,13 @@ class PathLookbackLCS:
                 length = suffix_length + len(last)
                 if max_length is not None and length > max_length:
                     continue
-                # pick the one with maximum index
+                # pick the one with maximum index within max_lookback
                 for dict_path in dict_last.values():
                     if not dict_path:
                         continue
                     prev_index = next(reversed(dict_path.values()))
+                    if max_lookback is not None and current_index - prev_index > max_lookback:
+                        continue
                     if prev_index > best_index:
                         best_index = prev_index
                         best_length = length
@@ -91,6 +100,8 @@ class PathLookbackLCS:
 
         # match suffix
         best_dict_suffix = None
+        best_length = 0  # Reset from Level 2; Level 3 tracks suffix LCS independently
+        best_index = -1  # Reset from Level 2; Level 3 finds max index in suffix bucket
         for cand_suffix, dict_suffix in self.dict_suffix.items():
             length = get_lcs_length(suffix, cand_suffix)
             if max_length is not None and length > max_length:
@@ -111,12 +122,14 @@ class PathLookbackLCS:
                 best_length = length
 
         if best_length:
-            # pick the one with maximum index
+            # pick the one with maximum index within max_lookback
             for cand_last, dict_last in best_dict_suffix.items():
                 for dict_path in dict_last.values():
                     if not dict_path:
                         continue
                     prev_index = next(reversed(dict_path.values()))
+                    if max_lookback is not None and current_index - prev_index > max_lookback:
+                        continue
                     if prev_index > best_index:
                         best_index = prev_index
             if best_index != -1 and best_length >= min_length:
