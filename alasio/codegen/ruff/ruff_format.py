@@ -1,7 +1,9 @@
 import os
 import re
 from pathlib import Path
+
 import isort
+import ruff
 
 from alasio.ext import env
 from alasio.ext.cache import cached_property
@@ -53,6 +55,7 @@ class RuffFormatter:
 
     def __init__(self):
         _ = self.cwd
+        _ = self.ruff_bin
         _ = self.rules
         _ = self.known_first_party
         _ = self.ruff_config
@@ -89,6 +92,10 @@ class RuffFormatter:
         cwd = PathStr.new(self._get_cwd())
         print(f'Ruff format cwd: {cwd}')
         return cwd
+
+    @cached_property
+    def ruff_bin(self):
+        return ruff.find_ruff_bin()
 
     @cached_property
     def rules(self):
@@ -162,7 +169,7 @@ class RuffFormatter:
         origin = code
         temp_config_file = self.cwd / '_temp_config.toml'
         cmd = [
-            'ruff', 'check', '-', '--fix',
+            self.ruff_bin, 'check', '-', '--fix',
             '--preview',  # enable E2 E3 W3
             '--stdin-filename', filename,
             '--select', self.rules,
