@@ -61,7 +61,7 @@ class TestVlenintValueCheck:
     ])
     def test_overflow_raises(self, bad):
         """Values above 2**32 - 1 should raise ValueError."""
-        with pytest.raises(ValueError, match="Value must be <= 2\\*\\*32 - 1"):
+        with pytest.raises(ValueError, match="Value must be < 2\\*\\*32"):
             vlenint_value_check(bad)
 
 
