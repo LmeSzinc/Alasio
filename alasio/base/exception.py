@@ -14,14 +14,6 @@ class TaskStop(Exception):
     pass
 
 
-class SchedulerStop(Exception):
-    """
-    Internal exception that raises on task end and captured by scheduler.
-    Both task and scheduler will stop immediately.
-    """
-    pass
-
-
 class GameStuckError(Exception):
     """
     Raises on game stuck (taking screenshots for a while but no game clicking)

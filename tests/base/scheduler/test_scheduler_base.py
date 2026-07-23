@@ -5,35 +5,21 @@ Uses mock data to cover all code paths in scheduler.py without
 depending on actual config/database infrastructure.
 """
 
-import time
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 import pytest
 
 from alasio.base.exception import (
-    EmulatorNotRunningError,
-    GameBugError,
-    GameNotRunningError,
-    GamePageUnknownError,
-    GameStuckError,
-    GameTooManyClickError,
-    RequestHumanTakeover,
-    SchedulerStop,
-    ScriptError,
-    TaskStop,
+    EmulatorNotRunningError, GameBugError, GameNotRunningError, GamePageUnknownError, GameStuckError,
+    GameTooManyClickError, RequestHumanTakeover, ScriptError, TaskStop
 )
-from alasio.base.scheduler.scheduler import AlasioScheduler, interruptable_sleep
-from alasio.base.scheduler.task_record import (
-    TaskRecord,
-    TaskTooManyExecutionsError,
-    TaskTooManyFailuresError,
-)
+from alasio.base.scheduler.scheduler import AlasioScheduler, SchedulerError, SchedulerStop, interruptable_sleep
+from alasio.base.scheduler.task_record import TaskRecord, TaskTooManyExecutionsError, TaskTooManyFailuresError
 from alasio.config.entry.model import TaskItem
 from alasio.ext.cache import InstanceCacheOperation
 from alasio.logger import logger
 from alasio.testing.patch_time import PatchTime
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -209,22 +195,22 @@ class TestAlasioSchedulerInit:
             # create_config should only be called once
             assert MockCls.call_count == 1
 
-    def test_config_raises_scheduler_stop_on_request_human_takeover(self, scheduler):
-        """config cached_property raises SchedulerStop on RequestHumanTakeover."""
+    def test_config_raises_scheduler_error_on_request_human_takeover(self, scheduler):
+        """config cached_property raises SchedulerError on RequestHumanTakeover."""
         with mock.patch.object(
             scheduler,
             "create_config",
             side_effect=RequestHumanTakeover("manual intervention needed"),
         ):
-            with pytest.raises(SchedulerStop):
+            with pytest.raises(SchedulerError):
                 _ = scheduler.config
 
-    def test_config_raises_scheduler_stop_on_generic_exception(self, scheduler):
-        """config cached_property raises SchedulerStop on generic Exception."""
+    def test_config_raises_scheduler_error_on_generic_exception(self, scheduler):
+        """config cached_property raises SchedulerError on generic Exception."""
         with mock.patch.object(
             scheduler, "create_config", side_effect=ValueError("something broke")
         ):
-            with pytest.raises(SchedulerStop):
+            with pytest.raises(SchedulerError):
                 _ = scheduler.config
 
     def test_create_device(self, scheduler):
@@ -248,22 +234,22 @@ class TestAlasioSchedulerInit:
                 assert d1 is d2
                 assert MockDB.call_count == 1
 
-    def test_device_raises_scheduler_stop_on_request_human_takeover(self, scheduler):
-        """device cached_property raises SchedulerStop on RequestHumanTakeover."""
+    def test_device_raises_scheduler_error_on_request_human_takeover(self, scheduler):
+        """device cached_property raises SchedulerError on RequestHumanTakeover."""
         with mock.patch.object(
             scheduler,
             "create_device",
             side_effect=RequestHumanTakeover("manual intervention"),
         ):
-            with pytest.raises(SchedulerStop):
+            with pytest.raises(SchedulerError):
                 _ = scheduler.device
 
-    def test_device_raises_scheduler_stop_on_generic_exception(self, scheduler):
-        """device cached_property raises SchedulerStop on generic Exception."""
+    def test_device_raises_scheduler_error_on_generic_exception(self, scheduler):
+        """device cached_property raises SchedulerError on generic Exception."""
         with mock.patch.object(
             scheduler, "create_device", side_effect=RuntimeError("device failure")
         ):
-            with pytest.raises(SchedulerStop):
+            with pytest.raises(SchedulerError):
                 _ = scheduler.device
 
 
@@ -276,10 +262,10 @@ class TestAlasioSchedulerRunTask:
     """Tests for _run_task() covering all exception branches."""
 
     def test_task_function_not_found(self, scheduler):
-        """_run_task raises SchedulerStop when no method matches the task name."""
+        """_run_task raises SchedulerError when no method matches the task name."""
         _cache_config(scheduler)
         _cache_device(scheduler)
-        with pytest.raises(SchedulerStop):
+        with pytest.raises(SchedulerError):
             scheduler._run_task("NonExistentTask")
 
     def test_task_success(self, scheduler):
@@ -398,7 +384,7 @@ class TestAlasioSchedulerRunTask:
         mock_save.assert_not_called()
 
     def test_request_human_takeover(self, scheduler):
-        """_run_task raises SchedulerStop on RequestHumanTakeover."""
+        """_run_task raises SchedulerError on RequestHumanTakeover."""
         _cache_config(scheduler)
         _cache_device(scheduler)
 
@@ -407,11 +393,11 @@ class TestAlasioSchedulerRunTask:
 
         scheduler.my_task = _raise_takeover
 
-        with pytest.raises(SchedulerStop):
+        with pytest.raises(SchedulerError):
             scheduler._run_task("MyTask")
 
     def test_script_error(self, scheduler):
-        """_run_task raises SchedulerStop on ScriptError."""
+        """_run_task raises SchedulerError on ScriptError."""
         _cache_config(scheduler)
         _cache_device(scheduler)
 
@@ -420,11 +406,11 @@ class TestAlasioSchedulerRunTask:
 
         scheduler.my_task = _raise_script_error
 
-        with pytest.raises(SchedulerStop):
+        with pytest.raises(SchedulerError):
             scheduler._run_task("MyTask")
 
     def test_generic_exception(self, scheduler):
-        """_run_task raises SchedulerStop on any other Exception."""
+        """_run_task raises SchedulerError on any other Exception."""
         _cache_config(scheduler)
         _cache_device(scheduler)
 
@@ -434,7 +420,7 @@ class TestAlasioSchedulerRunTask:
         scheduler.my_task = _raise_generic
 
         with mock.patch.object(scheduler, "_save_error_log") as mock_save:
-            with pytest.raises(SchedulerStop):
+            with pytest.raises(SchedulerError):
                 scheduler._run_task("MyTask")
             mock_save.assert_called_once()
 
@@ -922,12 +908,12 @@ class TestAlasioSchedulerTaskLoop:
             scheduler._task_loop()
 
     def test_task_loop_stop_on_request_human_takeover(self, scheduler):
-        """_task_loop raises SchedulerStop when get_next_task raises RequestHumanTakeover."""
+        """_task_loop raises SchedulerError when get_next_task raises RequestHumanTakeover."""
         _patch_backend()
         config = _cache_config(scheduler)
         config.get_next_task.side_effect = RequestHumanTakeover("no tasks enabled")
 
-        with pytest.raises(SchedulerStop):
+        with pytest.raises(SchedulerError):
             scheduler._task_loop()
 
     def test_task_loop_skip_first_tasks(self, scheduler):
@@ -1003,7 +989,7 @@ class TestAlasioSchedulerTaskLoop:
         assert result is True
 
     def test_task_loop_run_failure_handle_error_false(self, scheduler):
-        """_task_loop raises SchedulerStop when task fails and Error.HandleError is False."""
+        """_task_loop raises SchedulerError when task fails and Error.HandleError is False."""
         _patch_backend()
         config = _cache_config(scheduler, Error__HandleError=False)
         _cache_device(scheduler)
@@ -1018,11 +1004,11 @@ class TestAlasioSchedulerTaskLoop:
 
         scheduler.main = _fail
 
-        with pytest.raises(SchedulerStop):
+        with pytest.raises(SchedulerError):
             scheduler._task_loop()
 
     def test_task_loop_too_many_executions(self, scheduler):
-        """_task_loop raises SchedulerStop when task hits execution limit."""
+        """_task_loop raises SchedulerError when task hits execution limit."""
         _patch_backend()
         config = _cache_config(scheduler)
         _cache_device(scheduler)
@@ -1039,11 +1025,11 @@ class TestAlasioSchedulerTaskLoop:
             "mark_task_result",
             side_effect=TaskTooManyExecutionsError("Main", 4, 3),
         ):
-            with pytest.raises(SchedulerStop):
+            with pytest.raises(SchedulerError):
                 scheduler._task_loop()
 
     def test_task_loop_too_many_failures(self, scheduler):
-        """_task_loop raises SchedulerStop when task hits failure limit."""
+        """_task_loop raises SchedulerError when task hits failure limit."""
         _patch_backend()
         config = _cache_config(scheduler)
         _cache_device(scheduler)
@@ -1060,7 +1046,7 @@ class TestAlasioSchedulerTaskLoop:
             "mark_task_result",
             side_effect=TaskTooManyFailuresError("Main", 3, 3),
         ):
-            with pytest.raises(SchedulerStop):
+            with pytest.raises(SchedulerError):
                 scheduler._task_loop()
 
 
@@ -1119,3 +1105,18 @@ class TestAlasioSchedulerRun:
 
         # _on_task_switch should be called at least once at start
         mock_switch.assert_any_call(None)
+
+    def test_run_scheduler_error_sends_error_state(self, scheduler):
+        """run() sends worker_state 'error' and breaks on SchedulerError."""
+        backend = _patch_backend(inited=True)
+        _cache_config(scheduler)
+        _cache_device(scheduler)
+
+        with mock.patch.object(
+            scheduler, "_task_loop", side_effect=SchedulerError("something failed")
+        ):
+            with mock.patch.object(scheduler, "_on_task_switch"):
+                with mock.patch.object(scheduler, "_on_idle"):
+                    scheduler.run()
+
+        backend.send_worker_state.assert_any_call("error")

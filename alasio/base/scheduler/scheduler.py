@@ -3,7 +3,10 @@ from datetime import datetime
 
 from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
-from alasio.base.exception import *
+from alasio.base.exception import (
+    EmulatorNotRunningError, GameBugError, GameNotRunningError, GamePageUnknownError, GameStuckError,
+    GameTooManyClickError, RequestHumanTakeover, ScriptError, TaskStop
+)
 from alasio.base.scheduler.configwatcher import ConfigWatcher
 from alasio.base.scheduler.task_record import TaskRecord, TaskTooManyExecutionsError, TaskTooManyFailuresError
 from alasio.base.state import TaskState
@@ -18,6 +21,24 @@ from alasio.logger import logger
 from alasio.logger.error import ErrorZipWriter
 
 
+class SchedulerStop(Exception):
+    """
+    Internal exception that raises when receiving scheduler-stopping event from BackendBridge
+    or when user intervention is requested.
+    Scheduler loop will exit gracefully without sending an error event.
+    """
+    pass
+
+
+class SchedulerError(Exception):
+    """
+    Internal exception that raises when an error occurs during scheduler operation
+    (e.g., ScriptError, task failure, unexpected exception).
+    Scheduler loop will exit and send an error event to BackendBridge.
+    """
+    pass
+
+
 def interruptable_sleep(second):
     """
     Args:
@@ -30,8 +51,8 @@ def interruptable_sleep(second):
     backend = BackendBridge()
     while 1:
         if backend.scheduler_stopping.is_set():
-            raise SchedulerStop()
-        time.sleep(1)
+            raise SchedulerStop
+        time.sleep(0.5)
         if time.perf_counter() >= end:
             return True
 
@@ -51,10 +72,10 @@ class AlasioScheduler:
             return self.create_config()
         except RequestHumanTakeover as e:
             logger.critical(e)
-            raise SchedulerStop
+            raise SchedulerError
         except Exception as e:
             logger.exception(e)
-            raise SchedulerStop
+            raise SchedulerError
 
     def create_device(self):
         device_config = DeviceConfig.from_config(self.config)
@@ -66,10 +87,10 @@ class AlasioScheduler:
             return self.create_device()
         except RequestHumanTakeover as e:
             logger.critical(e)
-            raise SchedulerStop
+            raise SchedulerError
         except Exception as e:
             logger.exception(e)
-            raise SchedulerStop
+            raise SchedulerError
 
     def restart_device(self):
         raise NotImplementedError
@@ -99,7 +120,7 @@ class AlasioScheduler:
             func = self.__getattribute__(name)
         except AttributeError:
             logger.critical(f'Task function not defined: "{name}"')
-            raise SchedulerStop
+            raise SchedulerError
         try:
             func()
             return True
@@ -132,17 +153,19 @@ class AlasioScheduler:
             return False
         except RequestHumanTakeover as e:
             logger.critical(e)
-            raise SchedulerStop
+            raise SchedulerError
         except ScriptError as e:
             logger.exception(e)
             logger.critical('This is likely to be a mistake of developers, but sometimes just random issues')
-            raise SchedulerStop
+            raise SchedulerError
         except SchedulerStop:
+            raise
+        except SchedulerError:
             raise
         except Exception as e:
             logger.exception(e)
             self._save_error_log()
-            raise SchedulerStop
+            raise SchedulerError
 
     def _save_error_log(self):
         """
@@ -316,7 +339,7 @@ class AlasioScheduler:
         try:
             pending_tasks, _, task = self.config.get_next_task()
         except RequestHumanTakeover:
-            raise SchedulerStop
+            raise SchedulerError
 
         if self._skip_first_tasks(pending_tasks=pending_tasks, next_task=task):
             return False
@@ -347,7 +370,7 @@ class AlasioScheduler:
             logger.critical("Possible reason #2: There is a problem with this task. "
                             "Please contact developers or try to fix it yourself.")
             logger.critical('Request human takeover')
-            raise SchedulerStop
+            raise SchedulerError
         except TaskTooManyFailuresError as e:
             logger.critical(e)
             logger.critical("Possible reason #1: You haven't used it correctly. "
@@ -355,13 +378,13 @@ class AlasioScheduler:
             logger.critical("Possible reason #2: There is a problem with this task. "
                             "Please contact developers or try to fix it yourself.")
             logger.critical('Request human takeover')
-            raise SchedulerStop
+            raise SchedulerError
         if success:
             return True
         elif self.config.Error.HandleError:
             return True
         else:
-            raise SchedulerStop
+            raise SchedulerError
 
     def run(self):
         logger.info(f'Start scheduler loop: {self.config_name}')
@@ -371,6 +394,12 @@ class AlasioScheduler:
             try:
                 self._task_loop()
             except SchedulerStop:
+                break
+            except SchedulerError as e:
+                logger.critical(f'SchedulerError: {e}')
+                backend = BackendBridge()
+                if backend.inited:
+                    backend.send_worker_state('error')
                 break
         self._on_task_switch(None)
         self._on_idle()
