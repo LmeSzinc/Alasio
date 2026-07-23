@@ -3,8 +3,6 @@ import sys
 from threading import Event, Lock, Thread, get_ident
 from typing import Literal
 
-from msgspec.msgpack import Encoder, decode
-
 from alasio.backend.worker.event import CommandEvent, ConfigEvent
 from alasio.backport.threading_ext import PreemptiveEvent
 from alasio.ext.cache import cached_property
@@ -132,6 +130,7 @@ def mod_entry(mod_name, config_name, child_conn, project_root='', mod_root='', p
 
             # import Scheduler
             import importlib
+
             from alasio.ext.path.calc import to_python_import
             entry = to_python_import(path_main)
             module = importlib.import_module(entry)
@@ -224,7 +223,13 @@ class BackendBridge(metaclass=Singleton):
 
     @cached_property
     def _encoder(self):
+        from msgspec.msgpack import Encoder
         return Encoder()
+
+    @cached_property
+    def _decoder(self):
+        from msgspec.msgpack import Decoder
+        return Decoder(CommandEvent)
 
     def send(self, event: ConfigEvent) -> Lock:
         """
@@ -350,7 +355,7 @@ class BackendBridge(metaclass=Singleton):
                     pass
 
     def _handle_backend_command(self, data: bytes):
-        event = decode(data, type=CommandEvent)
+        event = self._decoder.decode(data)
         command = event.c
         if command == 'preview':
             self.preview_requested.set()
