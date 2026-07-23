@@ -1,5 +1,4 @@
 import os
-import zipfile
 
 from alasio.ext.cache import cached_property_threadsafe
 from alasio.ext.path.atomic import atomic_open
@@ -116,6 +115,7 @@ class ErrorZipWriter:
             extract_last_task(file, target_fd)
 
     def add_image(self, image, arcname):
+        import zipfile
         self.zipfile.writestr(arcname, image, compress_type=zipfile.ZIP_STORED)
 
     def __enter__(self):
