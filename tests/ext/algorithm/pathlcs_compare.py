@@ -7,7 +7,7 @@ from alasio.ext.algorithm.pathlcs_v3 import PathLookbackLCSV3
 from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.git.attr.attr import GitAttributes
-from alasio.git.stage.repo import GitRepo
+from alasio.git.repo import GitRepo
 
 
 class FileInfo(msgspec.Struct, dict=True):
