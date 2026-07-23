@@ -1,5 +1,6 @@
 import time
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
@@ -11,14 +12,15 @@ from alasio.base.scheduler.configwatcher import ConfigWatcher
 from alasio.base.scheduler.task_record import TaskRecord, TaskTooManyExecutionsError, TaskTooManyFailuresError
 from alasio.base.state import TaskState
 from alasio.base.timer import getnow
-from alasio.config.base import AlasioConfigBase
-from alasio.device.base import DeviceBase
-from alasio.device.config import DeviceConfig
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.inflect import Inflection
 from alasio.logger import logger
 from alasio.logger.error import ErrorZipWriter
+
+if TYPE_CHECKING:
+    from alasio.config.base import AlasioConfigBase
+    from alasio.device.base import DeviceBase
 
 
 class SchedulerStop(Exception):
@@ -64,10 +66,11 @@ class AlasioScheduler:
         self.skip_first_tasks = {'Restart', 'RestartDevice', 'RestartGame'}
 
     def create_config(self):
+        from alasio.config.base import AlasioConfigBase
         return AlasioConfigBase(self.config_name)
 
     @cached_property
-    def config(self) -> AlasioConfigBase:
+    def config(self) -> "AlasioConfigBase":
         try:
             return self.create_config()
         except RequestHumanTakeover as e:
@@ -78,11 +81,13 @@ class AlasioScheduler:
             raise SchedulerError
 
     def create_device(self):
+        from alasio.device.base import DeviceBase
+        from alasio.device.config import DeviceConfig
         device_config = DeviceConfig.from_config(self.config)
         return DeviceBase(device_config)
 
     @cached_property
-    def device(self) -> DeviceBase:
+    def device(self) -> "DeviceBase":
         try:
             return self.create_device()
         except RequestHumanTakeover as e:

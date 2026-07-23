@@ -181,14 +181,14 @@ class TestAlasioSchedulerInit:
     def test_create_config_returns_alasio_config(self):
         """create_config() delegates to AlasioConfigBase."""
         s = AlasioScheduler("test_config")
-        with mock.patch("alasio.base.scheduler.scheduler.AlasioConfigBase") as MockCls:
+        with mock.patch("alasio.config.base.AlasioConfigBase") as MockCls:
             cfg = s.create_config()
             MockCls.assert_called_once_with("test_config")
             assert cfg is MockCls.return_value
 
     def test_config_cached_property_caches(self, scheduler):
         """Accessing .config twice returns the same cached object."""
-        with mock.patch("alasio.base.scheduler.scheduler.AlasioConfigBase") as MockCls:
+        with mock.patch("alasio.config.base.AlasioConfigBase") as MockCls:
             c1 = scheduler.config
             c2 = scheduler.config
             assert c1 is c2
@@ -216,8 +216,8 @@ class TestAlasioSchedulerInit:
     def test_create_device(self, scheduler):
         """create_device() uses DeviceConfig.from_config and DeviceBase."""
         _cache_config(scheduler)
-        with mock.patch("alasio.base.scheduler.scheduler.DeviceConfig") as MockDC:
-            with mock.patch("alasio.base.scheduler.scheduler.DeviceBase") as MockDB:
+        with mock.patch("alasio.device.config.DeviceConfig") as MockDC:
+            with mock.patch("alasio.device.base.DeviceBase") as MockDB:
                 dev = scheduler.create_device()
                 MockDC.from_config.assert_called_once()
                 MockDB.assert_called_once_with(MockDC.from_config.return_value)
@@ -227,8 +227,8 @@ class TestAlasioSchedulerInit:
         """Accessing .device twice returns the same cached object."""
         _cache_config(scheduler)
         InstanceCacheOperation.pop(scheduler, "device")
-        with mock.patch("alasio.base.scheduler.scheduler.DeviceConfig") as MockDC:
-            with mock.patch("alasio.base.scheduler.scheduler.DeviceBase") as MockDB:
+        with mock.patch("alasio.device.config.DeviceConfig") as MockDC:
+            with mock.patch("alasio.device.base.DeviceBase") as MockDB:
                 d1 = scheduler.device
                 d2 = scheduler.device
                 assert d1 is d2
