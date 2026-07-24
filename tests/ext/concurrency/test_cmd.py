@@ -199,6 +199,47 @@ class TestRunCmdErrors:
             assert "Unexpected error during execution: something went wrong" in str(exc.value)
 
 
+class TestRunCmdCwd:
+    """Tests for cwd parameter."""
+
+    def test_cwd_default_uses_current_directory(self):
+        """
+        Test that default cwd=None runs in current working directory.
+        """
+        import os
+        res = run_cmd([PYTHON, "-c", "import os; print(os.getcwd())"])
+        expected = os.getcwd().replace("\\", "/").lower()
+        assert res.stdout.replace("\\", "/").lower() == expected
+
+    def test_cwd_set_to_temp_directory(self, tmp_path):
+        """
+        Test that cwd changes the working directory of the subprocess.
+        """
+        res = run_cmd([PYTHON, "-c", "import os; print(os.getcwd())"], cwd=str(tmp_path))
+        expected = str(tmp_path).replace("\\", "/").lower()
+        assert res.stdout.replace("\\", "/").lower() == expected
+
+    def test_cwd_with_bytes_mode(self, tmp_path):
+        """
+        Test that cwd works with text=False (bytes mode).
+        """
+        res = run_cmd(
+            [PYTHON, "-c", "import os; print(os.getcwd())"],
+            text=False,
+            cwd=str(tmp_path),
+        )
+        expected = str(tmp_path).replace("\\", "/").lower()
+        assert res.stdout.decode("utf-8").strip().replace("\\", "/").lower() == expected
+        assert isinstance(res, CmdlineResultBytes)
+
+    def test_cwd_non_existent_directory(self):
+        """
+        Test that a non-existent cwd raises CmdlineError.
+        """
+        with pytest.raises(CmdlineError):
+            run_cmd([PYTHON, "-c", "print('hello')"], cwd="/nonexistent_cwd_path_xyz_12345")
+
+
 class TestRunCmdEncoding:
     """Tests for encoding handling."""
 

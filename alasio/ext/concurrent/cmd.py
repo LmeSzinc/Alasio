@@ -78,6 +78,7 @@ def run_cmd(
         timeout: "Union[int, float]" = 10,
         text: "Literal[True]" = True,
         strip: bool = True,
+        cwd: "Optional[str]" = None,
         **kwargs,
 ) -> CmdlineResultStr: ...
 
@@ -88,6 +89,7 @@ def run_cmd(
         timeout: "Union[int, float]" = 10,
         text: "Literal[False]" = False,
         strip: bool = True,
+        cwd: "Optional[str]" = None,
         **kwargs,
 ) -> CmdlineResultBytes: ...
 
@@ -97,6 +99,7 @@ def run_cmd(
         timeout: "Union[int, float]" = 10,
         text: bool = True,
         strip: bool = True,
+        cwd: "Optional[str]" = None,
         encoding='utf-8',
         errors='replace',
         check=True,
@@ -108,6 +111,7 @@ def run_cmd(
         timeout (int | float): Timeout in seconds
         text (bool): True to return in str, False to return in text
         strip (bool): Whether to strip() output, stdout, stderr. Defaults to True.
+        cwd (str | None): Working directory for the subprocess. Defaults to None (current working directory).
         encoding:
         errors:
         check:
@@ -133,6 +137,7 @@ def run_cmd(
             cmd,
             capture_output=True,
             text=text,
+            cwd=cwd,
             encoding=encoding,
             errors=errors,
             timeout=timeout,
