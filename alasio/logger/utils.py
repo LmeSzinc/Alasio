@@ -158,12 +158,12 @@ def stringify_event(event):
     # Better exception logging
     # If someone do:
     #   try:
-    #       raise ExampleError()
+    #       raise ExampleError("oops")
     #   except ExampleError as e:
     #       logger.error(e)
     # We can log:
-    #   ExampleError:
-    # instead of just empty string ""
+    #   ExampleError: oops
+    # instead of just empty string "oops"
     if isinstance(event, Exception):
         if isinstance(event, (BaseExceptionGroup, ExceptionGroup)):
             msg = str(event)
