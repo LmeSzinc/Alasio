@@ -174,6 +174,127 @@ class GitReset(GitObjectManager):
         # Should not reach here
         return None
 
+    def compare_commit(self, old, new):
+        """
+        Compare two commits and return added, modified, and deleted files.
+
+        Walks the commit trees side-by-side to find differences.
+        A file is considered modified when it exists in both commits but
+        has a different sha1 or mode.  Renamed files are detected as a
+        deletion at the old path plus an addition at the new path.
+
+        Args:
+            old (str): Old commit sha1 (or tree / tag sha1).
+            new (str): New commit sha1 (or tree / tag sha1).
+
+        Returns:
+            tuple[dict[str, FileEntry], dict[str, FileEntry], dict[str, FileEntry]]:
+                (added, modified, deleted).
+        """
+        # Resolve commit/tag to tree sha1
+        def _resolve_tree(sha1):
+            while True:
+                obj = self.cat(sha1)
+                if obj.type == 1:  # commit
+                    sha1 = obj.decoded.tree
+                elif obj.type == 4:  # tag
+                    sha1 = obj.decoded.object
+                else:
+                    return sha1
+
+        old_tree = _resolve_tree(old)
+        new_tree = _resolve_tree(new)
+        added, modified, deleted = self._compare_trees(old_tree, new_tree, '')
+        return added, modified, deleted
+
+    def _compare_trees(self, old_tree_sha1, new_tree_sha1, prefix):
+        """
+        Recursively compare two git tree objects.
+
+        Args:
+            old_tree_sha1 (str | None): Old tree sha1, or None when the
+                entire tree is absent (all entries are additions).
+            new_tree_sha1 (str | None): New tree sha1, or None when the
+                entire tree is absent (all entries are deletions).
+            prefix (str): Path prefix accumulated from parent trees.
+
+        Returns:
+            tuple[dict[str, FileEntry], dict[str, FileEntry], dict[str, FileEntry]]:
+                (added, modified, deleted).
+        """
+        added = {}
+        modified = {}
+        deleted = {}
+
+        old_entries = {}
+        new_entries = {}
+        all_names = set()
+
+        if old_tree_sha1 is not None:
+            for entry in self.cat(old_tree_sha1).decoded:
+                old_entries[entry.name] = entry
+                all_names.add(entry.name)
+
+        if new_tree_sha1 is not None:
+            for entry in self.cat(new_tree_sha1).decoded:
+                new_entries[entry.name] = entry
+                all_names.add(entry.name)
+
+        for name in all_names:
+            path = f'{prefix}/{name}' if prefix else name
+            old_entry = old_entries.get(name)
+            new_entry = new_entries.get(name)
+
+            if old_entry is None:
+                # Entry exists only in the new tree → added
+                if new_entry.mode == b'40000':
+                    sub_added, _, _ = self._compare_trees(new_entry.sha1, None, path)
+                    added.update(sub_added)
+                else:
+                    added[path] = FileEntry(sha1=new_entry.sha1, mode=new_entry.mode, path=path)
+
+            elif new_entry is None:
+                # Entry exists only in the old tree → deleted
+                if old_entry.mode == b'40000':
+                    _, _, sub_deleted = self._compare_trees(old_entry.sha1, None, path)
+                    deleted.update(sub_deleted)
+                else:
+                    deleted[path] = FileEntry(sha1=old_entry.sha1, mode=old_entry.mode, path=path)
+
+            elif old_entry.mode == b'40000' and new_entry.mode == b'40000':
+                # Both are directories
+                if old_entry.sha1 == new_entry.sha1:
+                    # Entire subtree unchanged
+                    continue
+                sub_added, sub_modified, sub_deleted = self._compare_trees(
+                    old_entry.sha1, new_entry.sha1, path,
+                )
+                added.update(sub_added)
+                modified.update(sub_modified)
+                deleted.update(sub_deleted)
+
+            elif old_entry.mode == b'40000' and new_entry.mode != b'40000':
+                # Directory became a file / submodule / symlink:
+                # all old directory contents are deleted, the new entry is added.
+                _, _, sub_deleted = self._compare_trees(old_entry.sha1, None, path)
+                deleted.update(sub_deleted)
+                added[path] = FileEntry(sha1=new_entry.sha1, mode=new_entry.mode, path=path)
+
+            elif old_entry.mode != b'40000' and new_entry.mode == b'40000':
+                # File / submodule / symlink became a directory:
+                # the old entry is deleted, all new directory contents are added.
+                deleted[path] = FileEntry(sha1=old_entry.sha1, mode=old_entry.mode, path=path)
+                sub_added, _, _ = self._compare_trees(None, new_entry.sha1, path)
+                added.update(sub_added)
+
+            elif old_entry.sha1 != new_entry.sha1 or old_entry.mode != new_entry.mode:
+                # Both are non-directories but differ in content or mode → modified
+                modified[path] = FileEntry(sha1=new_entry.sha1, mode=new_entry.mode, path=path)
+
+            # else: both are non-directories and identical → skip
+
+        return added, modified, deleted
+
     @staticmethod
     def _reset_task_iter(dict_file):
         """
