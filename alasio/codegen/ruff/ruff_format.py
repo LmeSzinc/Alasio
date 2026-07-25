@@ -203,6 +203,8 @@ class RuffFormatter:
         # ---------- sort imports ----------
         # since import sorting in ruff is kind of strict, we use isort
         code = code.decode('utf-8')
+        # isort.api.sort_code_string() requires isort>=5.0.0
+        # show_diff=False requires requires isort>=5.2.0
         new = isort.api.sort_code_string(
             code,
             line_length=self.LINE_LENGTH,
