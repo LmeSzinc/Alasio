@@ -3,6 +3,7 @@ from typing import Union
 from tqdm import tqdm
 
 from alasio.backport import removesuffix
+from alasio.deploy_dev.pack.encode_base import PackEncodeBase
 from alasio.deploy_dev.pack.pack_model import FileInfo, RefInfo
 from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
@@ -11,26 +12,28 @@ from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.repo import GitRepo
 
 
-class PackFull:
+class PackFull(PackEncodeBase):
     def __init__(self, repo: Union[GitRepo, MockGitRepo], commit=''):
         """
         Args:
             repo (GitRepo): GitRepo object
             commit (str): commit sha1 in str
         """
+        super().__init__()
         self.repo = repo
-        self._commit = commit
-
-    @cached_property
-    def commit(self):
-        return self._commit or self.repo.head_get()
+        if commit:
+            self.latest_commit = commit
+        if not self.latest_commit:
+            self.latest_commit = repo.head_get()
+        if not self.latest_commit:
+            raise ValueError(f'Empty latest commit at repo {repo}')
 
     @cached_property
     def filelist(self):
         """
         {filepath: FileEntry}
         """
-        return self.repo.list_files(self.commit)
+        return self.repo.list_files(self.latest_commit)
 
     @cached_property
     def gitattributes(self):

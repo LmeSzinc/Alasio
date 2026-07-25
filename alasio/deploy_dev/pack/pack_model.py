@@ -166,7 +166,6 @@ class FileInfo(RefInfo):
 
             # try plain zstd compression
             compressed_data = zstd_compress(data, source=source)
-            print(compressed_data[:20])
             compressed_length = len(compressed_data)
             if compressed_length < best_length:
                 best_length = compressed_length

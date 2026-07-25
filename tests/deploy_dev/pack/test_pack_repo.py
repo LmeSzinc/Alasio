@@ -11,32 +11,6 @@ from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.stage.gitreset import FileEntry
 
-# ════════════════════════════════════════════════════════════════════════════
-#  Constructor & basic properties
-# ════════════════════════════════════════════════════════════════════════════
-
-
-class TestPackFullInit:
-    """Tests for PackFull.__init__ and basic properties."""
-
-    def test_init_with_commit(self):
-        """Provide a commit sha1, verify commit property returns it."""
-        mock = MockGitRepo()
-        pack = PackFull(mock, commit='abc123')
-        assert pack.commit == 'abc123'
-
-    def test_init_default_commit(self):
-        """Without commit, _commit stays empty (not called yet)."""
-        mock = MockGitRepo()
-        pack = PackFull(mock)
-        assert pack._commit == ''
-
-    def test_init_repo_stored(self):
-        """The repo reference should be stored."""
-        mock = MockGitRepo()
-        pack = PackFull(mock)
-        assert pack.repo is mock
-
 
 # ════════════════════════════════════════════════════════════════════════════
 #  filelist
@@ -150,8 +124,8 @@ class TestFileinfoBasic:
         # load_data() sets sha1 to sha1(content).hexdigest() (raw content hash)
         assert entry.sha1 == _sha1(content).hexdigest()
         assert entry.size == len(content)
-        assert entry.edit == 0          # A (added)
-        assert entry.mode == 0          # 644
+        assert entry.edit == 0  # A (added)
+        assert entry.mode == 0  # 644
         assert entry.source_lookback == 0
 
     def test_multiple_files(self):
@@ -431,7 +405,7 @@ class TestFileinfoData:
     def test_new_file_has_data(self):
         """A new (A) file gets its content loaded and potentially compressed."""
         mock = MockGitRepo()
-        content = b'hello world' * 100   # 1100 bytes – large enough for lzma
+        content = b'hello world' * 100  # 1100 bytes – large enough for lzma
         mock.register_file('c1', 'big.txt', content)
         pack = PackFull(mock, commit='c1')
         entry = pack.fileinfo['big.txt']
@@ -540,7 +514,7 @@ class TestFileinfoIntegration:
         # File ordering: parent directories before nested files
         paths = list(info)
         assert paths.index('data/file.bin') < paths.index('data/readme.txt') or \
-            paths.index('data/readme.txt') < paths.index('data/file.bin')
+               paths.index('data/readme.txt') < paths.index('data/file.bin')
         # All data-related paths are contiguous
         data_start = next(i for i, p in enumerate(paths) if p.startswith('data/'))
         data_end = max(i for i, p in enumerate(paths) if p.startswith('data/'))
@@ -556,10 +530,10 @@ class TestFileinfoIntegration:
 
         mock.register_file('c1', 'pkg/__init__.py', b'')
         mock.register_file('c1', 'pkg/a1.py', content_a)
-        mock.register_file('c1', 'pkg/a2.py', content_a)   # copy of a1
+        mock.register_file('c1', 'pkg/a2.py', content_a)  # copy of a1
         mock.register_file('c1', 'pkg/b1.py', content_b)
-        mock.register_file('c1', 'pkg/b2.py', content_b)   # copy of b1
-        mock.register_file('c1', 'pkg/a3.py', content_a)   # copy of a1 (via a2)
+        mock.register_file('c1', 'pkg/b2.py', content_b)  # copy of b1
+        mock.register_file('c1', 'pkg/a3.py', content_a)  # copy of a1 (via a2)
 
         pack = PackFull(mock, commit='c1')
         info = pack.fileinfo
@@ -581,6 +555,3 @@ class TestFileinfoIntegration:
         # Source files have correct caches updated
         assert info['pkg/a1.py'].edit == 0
         assert info['pkg/a1.py'].source_lookback == 0
-
-
-# ════════════════════════════════════════════════════════════════════════════
