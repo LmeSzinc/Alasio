@@ -63,7 +63,7 @@ class TestStdServer:
         resp = self._run_line(json.dumps({"method": "exec_python", "params": {"code": "1/0"}}))
         assert "result" in resp, f"expected 'result', got {resp}"
         inner = json.loads(resp["result"])
-        assert inner["error"] is True, repr(resp)
+        assert inner["status"] != "Completed", repr(resp)
 
     def test_shell_nonexistent_command(self):
         """A shell command that fails completely should still return 'result'."""

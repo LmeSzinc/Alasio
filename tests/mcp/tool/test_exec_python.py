@@ -3,7 +3,8 @@
 import pytest
 
 from alasio.mcp.tool.base import RequestModel
-from alasio.mcp.tool.exec_python import ExecPython, PythonParams, PythonResult
+from alasio.mcp.tool.exec_python import ExecPython, PythonParams
+from alasio.mcp.tool.exec_shell import ShellResult
 
 
 class TestExecPython:
@@ -28,20 +29,20 @@ class TestExecPython:
     def test_python_success(self, tool, req, code, expected):
         """Valid Python code should execute and capture stdout."""
         result = tool.run(req({"code": code}))
-        assert isinstance(result, PythonResult)
+        assert isinstance(result, ShellResult)
         assert result.stdout.strip() == expected, repr(result)
-        assert result.error is False, repr(result)
+        assert result.status == "Completed", repr(result)
 
     def test_python_error(self, tool, req):
-        """Python runtime error should return error=True with stderr."""
+        """Python runtime error should return status != Completed."""
         result = tool.run(req({"code": "1/0"}))
-        assert result.error is True, repr(result)
+        assert result.status != "Completed", repr(result)
         assert "ZeroDivisionError" in result.stderr or "division by zero" in result.stderr, repr(result)
 
     def test_python_syntax_error(self, tool, req):
         """Syntax error should be caught and returned."""
         result = tool.run(req({"code": "print("}))
-        assert result.error is True, repr(result)
+        assert result.status != "Completed", repr(result)
         assert result.stderr, repr(result)
 
     def test_python_missing_code(self, tool, req):
@@ -58,12 +59,12 @@ class TestExecPython:
         """Empty code string is valid and should produce empty output."""
         result = tool.run(req({"code": ""}))
         assert result.stdout == "", repr(result)
-        assert result.error is False, repr(result)
+        assert result.status == "Completed", repr(result)
 
     def test_params_model(self, tool):
         """PythonParams should be the params_model."""
         assert tool.params_model is PythonParams
 
     def test_result_model(self, tool):
-        """PythonResult should be the result_model."""
-        assert tool.result_model is PythonResult
+        """ShellResult should be the result_model."""
+        assert tool.result_model is ShellResult

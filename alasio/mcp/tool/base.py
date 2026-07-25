@@ -9,6 +9,8 @@ from typing import Any, Dict, Literal
 
 import msgspec
 
+# ── Wire models ──────────────────────────────────────────────────────────
+
 
 class RequestModel(msgspec.Struct):
     """Incoming request envelope, validated by the server.
@@ -38,6 +40,9 @@ class ResponseModel(msgspec.Struct, omit_defaults=True):
 
     result: str = ""
     error: str = ""
+
+
+# ── Tool base class ──────────────────────────────────────────────────────
 
 
 class ToolBase:
