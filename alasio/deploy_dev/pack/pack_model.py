@@ -1,10 +1,4 @@
-from hashlib import sha1
-
-from msgspec import Struct, UNSET, UnsetType
-
-from alasio.ext.compress.algo_lzma import lzma_compress
-from alasio.ext.compress.algo_zstd import zstd_compress
-from alasio.logger import logger
+from msgspec import UNSET, Struct, UnsetType
 
 
 class RefInfo(Struct):
@@ -63,45 +57,6 @@ class FileInfo(RefInfo):
     # if edit is others, source_lookback is "0
     source_lookback: int = 0
 
-    @classmethod
-    def new_deleted(cls, path):
-        """
-        Create an empty record to indicate a file that should not exist
-
-        Args:
-            path (str):
-        """
-        return cls(path=path, edit=2)
-
-    def load_git_mode(self, mode):
-        """
-        Convert git entry mode to our RefInfo.mode, and set to self
-
-        Args:
-            mode (bytes):
-
-        Returns:
-            int:
-        """
-        if mode == b'100644':
-            self.eol = 0
-        elif mode == b'100755':
-            self.eol = 1
-        elif mode == b'120000':
-            logger.warning(f'RefInfo does not support symlink yet, file="{self.path}"')
-            self.eol = 0
-        else:
-            # 040000 and 160000 should be handled by list_files() so nothing should hit here
-            logger.warning(f'RefInfo gets unknown git entry mode {mode}, file="{self.path}')
-            self.eol = 0
-
-    # @classmethod
-    # def from_refinfo(cls, ref: "RefInfo"):
-    #     """
-    #     Create an empty FileInfo from RefInfo
-    #     """
-    #     return cls(path=ref.path, size=ref.size, sha1=ref.sha1, mode=ref.mode, eol=ref.eol)
-
     def __repr__(self):
         """
         Returns:
@@ -118,69 +73,6 @@ class FileInfo(RefInfo):
         return f'{type(self).__name__}({", ".join(fields)})'
 
     __str__ = __repr__
-
-    def load_data(self, data, source=None, zstd=True):
-        """
-        Find the best compress algorithm to store data, and set `algo` and `data`
-
-        Args:
-            data (bytes):
-            source (bytes): Optional old file content for zstd
-            zstd (bool):
-        """
-        best_length = len(data)
-        # empty file, treat as raw
-        if best_length == 0:
-            self.algo = 0
-            self.data = data
-            self.data_size = 0
-            self.size = 0
-            self.sha1 = ''
-            return
-        best_data = data
-        algo = 0
-
-        # try lzma compression
-        compressed_data = lzma_compress(data)
-        compressed_length = len(compressed_data)
-        if compressed_length < best_length:
-            best_length = compressed_length
-            best_data = compressed_data
-            algo = 1
-        else:
-            del compressed_length
-            del compressed_data
-
-        if zstd:
-            # try zstd --patch-from
-            if source is not None:
-                compressed_data = zstd_compress(data, source=source)
-                compressed_length = len(compressed_data)
-                if compressed_length < best_length:
-                    best_length = compressed_length
-                    best_data = compressed_data
-                    algo = 2
-                else:
-                    del compressed_length
-                    del compressed_data
-
-            # try plain zstd compression
-            compressed_data = zstd_compress(data, source=source)
-            compressed_length = len(compressed_data)
-            if compressed_length < best_length:
-                best_length = compressed_length
-                best_data = compressed_data
-                algo = 2
-            else:
-                del compressed_length
-                del compressed_data
-
-        # set
-        self.algo = algo
-        self.data = best_data
-        self.data_size = best_length
-        self.size = len(data)
-        self.sha1 = sha1(data).hexdigest()
 
 
 class IdxInfo(FileInfo):
