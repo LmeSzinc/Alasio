@@ -11,6 +11,7 @@ from alasio.ext.concurrent.cmd import parse_result, run_cmd
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.ext.path.calc import get_suffix
+from alasio.logger.utils import stringify_event
 
 RUFF_RULES = """
 # import rules
@@ -167,6 +168,16 @@ class RuffFormatter:
         print(f'Formatting: {filename}')
         code = atomic_read_bytes(file)
         origin = code
+
+        # ---------- syntax check ----------
+        try:
+            compile(code, filename=filename, mode='exec')
+        except (SyntaxError, UnicodeDecodeError) as e:
+            print(stringify_event(e))
+            print()
+            return
+
+        # ---------- ruff format ----------
         temp_config_file = self.cwd / '_temp_config.toml'
         cmd = [
             self.ruff_bin, 'check', '-', '--fix',
@@ -184,10 +195,12 @@ class RuffFormatter:
         finally:
             temp_config_file.file_remove()
         result.stderr = parse_result(result.stderr)
+        if result.stderr:
+            print(result.stderr)
         if result.stdout:
             code = result.stdout
 
-        # sort imports
+        # ---------- sort imports ----------
         # since import sorting in ruff is kind of strict, we use isort
         code = code.decode('utf-8')
         new = isort.api.sort_code_string(
@@ -202,13 +215,12 @@ class RuffFormatter:
             print('Import sorting all good')
         else:
             print('Import sorting fixed')
-            code = new.encode('utf-8')
+        code = new.encode('utf-8')
 
         # write file if changed
         if code != origin:
             print(f'Writing: {file}')
             atomic_write(file, code)
-        print(result.stderr)
         print()
 
 
