@@ -1,4 +1,5 @@
 import os
+import re
 from functools import cached_property
 from itertools import chain
 from typing import Generic, List, Literal, TypeVar, Union
@@ -333,6 +334,36 @@ class MarkdownTable(Generic[T]):
 
     # -- Table formatting -----------------------------------------------------
 
+    _RE_WIDE = re.compile(r'[^\x00-\xff]')
+
+    @classmethod
+    def _display_width(cls, text):
+        """
+        Approximate display width — non-ASCII chars count as 2.
+
+        Non-string types (int, float, …) produce ASCII-only ``str()`` so
+        they skip the regex entirely.  Pure ASCII strings also skip it.
+        """
+        if text.isascii():
+            return len(text)
+        return len(text) + len(cls._RE_WIDE.findall(text))
+
+    @classmethod
+    def _pad_cell(cls, text, width, align='left'):
+        """
+        Pad *text* to display *width*, accounting for CJK double-width chars.
+        """
+        padding = width - cls._display_width(text)
+        if padding <= 0:
+            return text
+        if align == 'left':
+            return text.ljust(len(text) + padding)
+        if align == 'right':
+            return text.rjust(len(text) + padding)
+        if align == 'center':
+            return text.center(len(text) + padding)
+        return text.ljust(len(text) + padding)
+
     def _format_table(self):
         """
         Yield aligned markdown table lines.
@@ -362,20 +393,17 @@ class MarkdownTable(Generic[T]):
                 str(obj_dict.get(into_header[h], '')) for h in self.headers
             ])
 
-        # Resolve auto widths; enforce minimum 3 for valid separator
+        # Resolve auto widths using display width; enforce minimum 3
         for i in range(num_cols):
             cf = col_fmt[i]
             if cf.width == 'auto':
-                cf.width = max(len(r[i]) for r in all_rows)
+                cf.width = max(self._display_width(r[i]) for r in all_rows)
             if cf.width < 3:
                 cf.width = 3
 
-        # Align format characters
-        _align_fmt = {'left': '<', 'center': '^', 'right': '>'}
-
         # Header row
         parts = [
-            f' {h:{_align_fmt[cf.align]}{cf.width}} '
+            f' {self._pad_cell(h, cf.width, cf.align)} '
             for h, cf in zip(self.headers, col_fmt)
         ]
         yield f'|{"|".join(parts)}|'
@@ -395,7 +423,7 @@ class MarkdownTable(Generic[T]):
         # Data rows
         for vals in all_rows[1:]:
             parts = [
-                f' {v:{_align_fmt[cf.align]}{cf.width}} '
+                f' {self._pad_cell(v, cf.width, cf.align)} '
                 for v, cf in zip(vals, col_fmt)
             ]
             yield f'|{"|".join(parts)}|'
