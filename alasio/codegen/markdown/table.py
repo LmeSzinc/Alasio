@@ -1,12 +1,12 @@
 import os
 import re
-from functools import cached_property
 from itertools import chain
 from typing import Generic, List, Literal, TypeVar, Union
 
 import msgspec
 from msgspec.structs import asdict, fields
 
+from alasio.ext.cache import cached_property
 from alasio.ext.cache.msgspec_meta import get_field_metadata
 
 T = TypeVar('T', bound=msgspec.Struct)
@@ -47,6 +47,30 @@ class MarkdownTable(Generic[T]):
     stops at the next heading of the same **or higher** level (e.g. if
     ``title`` matches ``## Config``, the scope ends before the next ``#`` or
     ``##`` heading; ``###`` sub-headings remain inside the scope).
+
+    Usage::
+
+        class Player(msgspec.Struct):
+            name: str
+            score: int
+
+        # Read the first table in a file
+        table = MarkdownTable("stats.md", "", Player).read()
+        for row in table.rows:
+            print(row.name, row.score)
+
+        # Read a table under a specific heading
+        table = MarkdownTable("stats.md", "Leaderboard", Player).read()
+        table.rows[0].score = 9999
+        table.write()
+
+        # Formatting extras via ``Annotated``
+        class Config(msgspec.Struct):
+            key: Annotated[str, Meta(extra={"width": 16})]
+            value: Annotated[str, Meta(extra={"width": 30, "align": "right"})]
+
+        table = MarkdownTable("config.md", "Network", Config).read()
+        table.write()
 
     Args:
         file (str or file-like): Path to the markdown file, or a file-like
