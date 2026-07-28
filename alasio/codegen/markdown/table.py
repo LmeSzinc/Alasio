@@ -1,11 +1,33 @@
 import os
 from functools import cached_property
-from typing import Generic, List, TypeVar
+from itertools import chain
+from typing import Generic, List, Literal, TypeVar, Union
 
 import msgspec
 from msgspec.structs import asdict, fields
 
+from alasio.ext.cache.msgspec_meta import get_field_metadata
+
 T = TypeVar('T', bound=msgspec.Struct)
+
+
+class FieldFormatExtra(msgspec.Struct):
+    """
+    Per-field formatting options for markdown table output.
+
+    Usage in a struct field::
+
+        class MyModel(msgspec.Struct):
+            name: Annotated[str, Meta(extra={"width": 20, "align": "center"})]
+
+    Args:
+        align (str): Column alignment. Defaults to 'left'.
+        width (str | int): 'auto' = adjust to longest content;
+            int = fixed minimum width (extended if content is longer).
+            Defaults to 'auto'.
+    """
+    align: Literal['left', 'center', 'right'] = 'left'
+    width: Union[Literal['auto'], int] = 'auto'
 
 
 class MarkdownTable(Generic[T]):
@@ -96,13 +118,31 @@ class MarkdownTable(Generic[T]):
     @cached_property
     def _field_info(self):
         """
-        Map lowercase field encode name -> Python field name.
+        Map field encode name -> Python field name.
 
         ``FieldInfo.encode_name`` is the key used when serialising
         (JSON/msgpack), which may differ from the Python attribute name if
         ``rename`` or field-level aliases are configured.
         """
-        return {f.encode_name.lower(): f.name for f in fields(self.model)}
+        return {f.encode_name: f.name for f in fields(self.model)}
+
+    @cached_property
+    def _field_format(self):
+        """
+        Map Python field name -> ``FieldFormatExtra``.
+
+        Built from each field's ``Meta(extra=...)`` dict via
+        :func:`get_field_metadata`.  Supported keys are ``width``
+        (``'auto'`` or ``int``) and ``align`` (``'left'``,
+        ``'center'``, ``'right'``).  Fields without metadata get
+        a default ``FieldFormatExtra()``.
+        """
+        result = {}
+        for name, meta in get_field_metadata(self.model).items():
+            result[name] = msgspec.convert(
+                meta.extra, FieldFormatExtra, strict=False,
+            )
+        return result
 
     # -- Table line predicates -------------------------------------------------
 
@@ -232,7 +272,7 @@ class MarkdownTable(Generic[T]):
     def _validate_headers(self, headers):
         """Raise ``TypeError`` if any header lacks a matching model field."""
         for h in headers:
-            if h.lower().strip() not in self._field_info:
+            if h not in self._field_info:
                 raise TypeError(
                     f"Table header '{h}' does not match any field in "
                     f"model '{self.model.__name__}'.  "
@@ -261,11 +301,9 @@ class MarkdownTable(Generic[T]):
         self.headers = self._parse_row(header_line)
         self._validate_headers(self.headers)
 
-        # Pre-build encode-name list aligned with headers (per-row, not per-cell)
-        encode_names = {f.encode_name.lower(): f.encode_name for f in fields(self.model)}
-        header_encodes = [encode_names[h.lower().strip()] for h in self.headers]
+        # Use headers directly as encode-name keys (validated to match)
         dict_rows = [
-            {key: val for key, val in zip(header_encodes, self._parse_row(row))}
+            {h: val for h, val in zip(self.headers, self._parse_row(row))}
             for row in body_lines
         ]
 
@@ -290,48 +328,74 @@ class MarkdownTable(Generic[T]):
         if not self._read:
             raise RuntimeError("Must call read() before write()")
 
-        new_table = self._format_table()
-        result = '\n'.join([*self._before, *new_table, *self._after])
+        result = '\n'.join(chain(self._before, self._format_table(), self._after))
         self._write_content(result)
 
     # -- Table formatting -----------------------------------------------------
 
     def _format_table(self):
         """
-        Format ``self.rows`` into aligned markdown table lines.
+        Yield aligned markdown table lines.
 
-        Returns:
-            list[str]: Formatted table lines using ``self.headers``.
+        Yields:
+            str: Each row of the formatted table.
         """
         num_cols = len(self.headers)
         if num_cols == 0:
-            return []
+            return
 
-        # Build width-calculation matrix from header + all row values
-        into_header = {
-            h.lower().strip(): self._field_info.get(h.lower().strip())
-            for h in self.headers
-        }
-        as_row_vals = lambda obj: [  # noqa: E731
-            str(asdict(obj).get(into_header[h.lower().strip()], ''))
-            for h in self.headers
-        ]
+        # Build col_fmt list aligned with headers (by source header order)
+        into_header = {h: self._field_info[h] for h in self.headers}
+        col_fmt = []
+        for h in self.headers:
+            fmt = FieldFormatExtra()
+            meta = self._field_format.get(into_header[h])
+            if meta is not None:
+                fmt = meta
+            col_fmt.append(fmt)
 
+        # Build row-value matrix
         all_rows = [list(self.headers)]
-        all_rows.extend(as_row_vals(obj) for obj in self.rows)
+        for obj in self.rows:
+            obj_dict = asdict(obj)
+            all_rows.append([
+                str(obj_dict.get(into_header[h], '')) for h in self.headers
+            ])
 
-        col_widths = [max(len(r[i]) for r in all_rows) for i in range(num_cols)]
+        # Resolve auto widths; enforce minimum 3 for valid separator
+        for i in range(num_cols):
+            cf = col_fmt[i]
+            if cf.width == 'auto':
+                cf.width = max(len(r[i]) for r in all_rows)
+            if cf.width < 3:
+                cf.width = 3
 
-        lines = [
-            '|' + '|'.join(
-                f' {h:<{col_widths[i]}} ' for i, h in enumerate(self.headers)
-            ) + '|',
-            '|' + '|'.join('-' * (w + 2) for w in col_widths) + '|',
+        # Align format characters
+        _align_fmt = {'left': '<', 'center': '^', 'right': '>'}
+
+        # Header row
+        parts = [
+            f' {h:{_align_fmt[cf.align]}{cf.width}} '
+            for h, cf in zip(self.headers, col_fmt)
         ]
-        lines.extend(
-            '|' + '|'.join(
-                f' {v:<{col_widths[i]}} ' for i, v in enumerate(row_vals)
-            ) + '|'
-            for row_vals in all_rows[1:]
-        )
-        return lines
+        yield f'|{"|".join(parts)}|'
+
+        # Separator row (total width = cf.width + 2)
+        sep_parts = []
+        for cf in col_fmt:
+            w: int = cf.width
+            if cf.align == 'center':
+                sep_parts.append(f':{"-" * w}:')
+            elif cf.align == 'right':
+                sep_parts.append(f'{"-" * (w + 1)}:')
+            else:
+                sep_parts.append('-' * (w + 2))
+        yield f'|{"|".join(sep_parts)}|'
+
+        # Data rows
+        for vals in all_rows[1:]:
+            parts = [
+                f' {v:{_align_fmt[cf.align]}{cf.width}} '
+                for v, cf in zip(vals, col_fmt)
+            ]
+            yield f'|{"|".join(parts)}|'

@@ -155,7 +155,7 @@ Just some text, no table here.
     def test_read_headers_must_match_model(self):
         """Raise TypeError when a table header has no matching field."""
         content = """\
-| Name | Age | Extra |
+| name | age | Extra |
 |------|-----|-------|
 | Alice | 30 | ignore |
 """
@@ -164,10 +164,10 @@ Just some text, no table here.
         with pytest.raises(TypeError, match="Extra"):
             table.read()
 
-    def test_read_case_insensitive_header_matching(self):
-        """Headers are matched to fields case-insensitively."""
+    def test_read_exact_header_matching(self):
+        """Headers must match encode names exactly."""
         content = """\
-| Name | Age |
+| name | age |
 |------|-----|
 | Alice | 30 |
 """
@@ -175,7 +175,7 @@ Just some text, no table here.
         table = MarkdownTable(f, "", Person)
         table.read()
 
-        assert table.headers == ["Name", "Age"]
+        assert table.headers == ["name", "age"]
         assert table.rows[0].name == "Alice"
         assert table.rows[0].age == 30
 
@@ -359,7 +359,7 @@ Some footer text
     def test_write_headers_preserved(self):
         """Original markdown headers are kept on write."""
         content = """\
-| Name | Age |
+| name | age |
 |------|-----|
 | Alice | 30 |
 """
@@ -369,7 +369,7 @@ Some footer text
         table.write()
 
         expected = """\
-| Name  | Age |
+| name  | age |
 |-------|-----|
 | Alice | 30  |
 """
@@ -568,7 +568,7 @@ After
     def test_write_model_uses_correct_fields(self):
         """Model field values are written under the matching header."""
         content = """\
-| Name | Age |
+| name | age |
 |------|-----|
 | Alice | 30 |
 """
@@ -581,7 +581,7 @@ After
         table.write()
 
         expected = """\
-| Name | Age |
+| name | age |
 |------|-----|
 | Bob  | 25  |
 """

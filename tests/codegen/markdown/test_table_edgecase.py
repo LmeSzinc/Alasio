@@ -41,15 +41,15 @@ class TestMarkdownTableEdgeCases:
         with pytest.raises(TypeError, match="age"):
             MarkdownTable(f, "", Extra).read()
 
-    def test_read_header_mismatch_field_name(self):
-        """Header matching is by encode_name, case-insensitive."""
+    def test_read_header_matches_encode_name_exactly(self):
+        """Headers must match encode names exactly."""
 
         class Item(msgspec.Struct):
             label: str
             quantity: int
 
         content = """\
-| Label | Quantity |
+| label | quantity |
 |-------|----------|
 | apple | 3 |
 """
