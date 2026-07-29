@@ -1,13 +1,17 @@
 import os
 from itertools import chain
-from typing import Generic, List, Literal, TypeVar, Union
+from typing import Generic, List, Literal, TYPE_CHECKING, TypeVar, Union
 
 import msgspec
 from msgspec.structs import asdict, fields
 
-from alasio.backport.cjk import cjk_width, cjk_pad
+from alasio.backport.cjk import cjk_pad, cjk_width
 from alasio.ext.cache import cached_property
 from alasio.ext.cache.msgspec_meta import get_field_metadata
+from alasio.logger import logger
+
+if TYPE_CHECKING:
+    from alasio.git.stage.gitadd import GitAdd
 
 T = TypeVar('T', bound=msgspec.Struct)
 
@@ -94,6 +98,7 @@ class MarkdownTable(Generic[T]):
         self.rows: "List[T]" = []
         self._before = []
         self._after = []
+        self._cached_table = None
         self._read = False
 
     # -- I/O helpers ----------------------------------------------------------
@@ -214,11 +219,13 @@ class MarkdownTable(Generic[T]):
         Locate the target table and return its raw line slices.
 
         Returns:
-            tuple[list[str], str, list[str], list[str]]:
-            ``(before_lines, header_line, body_lines, after_lines)``
-            where *header_line* is the raw header row line and
-            *body_lines* are the raw data row lines (excluding the
-            separator).  No cell-level parsing is done here.
+            tuple[list[str], str, list[str], list[str], list[str]]:
+            ``(before_lines, header_line, body_lines, after_lines, raw_table)``
+            where *header_line* is the raw header row line,
+            *body_lines* are the raw data row lines (excluding the separator)
+            and *raw_table* is the original ``lines[header_idx:table_end]``
+            slice of the full table (header + separator + body rows).
+            No cell-level parsing is done here.
 
         Raises:
             ValueError: If the title or table is not found.
@@ -290,7 +297,7 @@ class MarkdownTable(Generic[T]):
             if body_lines:
                 table_end = i + 1
 
-        return lines[:header_idx], header_line, body_lines, lines[table_end:]
+        return lines[:header_idx], header_line, body_lines, lines[table_end:], lines[header_idx:table_end]
 
     # -- Header validation ----------------------------------------------------
 
@@ -322,7 +329,8 @@ class MarkdownTable(Generic[T]):
         content = self._read_content()
         lines = content.split('\n')
 
-        self._before, header_line, body_lines, self._after = self._find_table(lines)
+        self._before, header_line, body_lines, self._after, raw_table = self._find_table(lines)
+        self._cached_table = raw_table
         self.headers = self._parse_row(header_line)
         self._validate_headers(self.headers)
 
@@ -340,12 +348,19 @@ class MarkdownTable(Generic[T]):
         self._read = True
         return self
 
-    def write(self):
+    def write(self, gitadd: "GitAdd" = None):
         """
         Write ``self.rows`` back to the file.
 
         Only the table is replaced; content before and after is preserved.
         The original markdown headers are kept.
+
+        If the formatted table lines are identical to the cached table lines
+        from the last read or write, the write is skipped to avoid
+        unnecessary I/O.
+
+        Returns:
+            MarkdownTable: ``self`` for chaining.
 
         Raises:
             RuntimeError: If ``read()`` has not been called first.
@@ -353,8 +368,19 @@ class MarkdownTable(Generic[T]):
         if not self._read:
             raise RuntimeError("Must call read() before write()")
 
-        result = '\n'.join(chain(self._before, self._format_table(), self._after))
-        self._write_content(result)
+        new_table_lines = list(self._format_table())
+
+        # Skip write if formatted table hasn't changed since last read or write
+        if self._cached_table is not None and new_table_lines == self._cached_table:
+            return self
+
+        logger.info(f'Write file {self.file}')
+        self._write_content('\n'.join(chain(self._before, new_table_lines, self._after)))
+        self._cached_table = new_table_lines
+
+        if gitadd:
+            gitadd.stage_add(self.file)
+        return self
 
     # -- Table formatting -----------------------------------------------------
 

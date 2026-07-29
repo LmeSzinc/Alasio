@@ -4,6 +4,7 @@ import msgspec
 import pytest
 
 from alasio.codegen.markdown.table import MarkdownTable
+from alasio.logger import logger
 
 
 class Person(msgspec.Struct):
@@ -340,7 +341,10 @@ Some footer text
         f = StringIO(content)
         table = MarkdownTable(f, "", Person)
         table.read()
-        table.write()
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
 
         expected = """\
 # Header
@@ -366,7 +370,10 @@ Some footer text
         f = StringIO(content)
         table = MarkdownTable(f, "", Person)
         table.read()
-        table.write()
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
 
         expected = """\
 | name  | age |
@@ -392,7 +399,10 @@ After
 
         table.rows[0].name = "Alice Modified"
         table.rows[0].age = 31
-        table.write()
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
 
         expected = """\
 Before
@@ -418,7 +428,10 @@ After
 
         table.rows.append(Person(name="Bob", age=25))
         table.rows.append(Person(name="Charlie", age=35))
-        table.write()
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
 
         expected = """\
 | name    | age |
@@ -444,7 +457,10 @@ After
 
         del table.rows[2]
         del table.rows[1]
-        table.write()
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
 
         expected = """\
 | name  | age |
@@ -465,7 +481,10 @@ After
         table.read()
 
         table.rows.clear()
-        table.write()
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
 
         expected = """\
 | name | age |
@@ -491,7 +510,10 @@ Some text
         table.read()
 
         table.rows[0].age = 31
-        table.write()
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
 
         expected = """\
 # Config
@@ -531,7 +553,10 @@ Some text
         table.read()
 
         table.rows[0].age = 100
-        table.write()
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
 
         f.seek(0)
         table2 = MarkdownTable(f, "", Person)
@@ -558,11 +583,17 @@ After
         table = MarkdownTable(f, "", Person)
         table.read()
 
-        table.write()
+        with logger.mock_capture_writer() as capture1:
+            table.write()
+            assert capture1.fd.any_contains("Write file")
+            assert capture1.stdout.any_contains("Write file")
         f.seek(0)
         snapshot = f.getvalue()
 
-        table.write()
+        with logger.mock_capture_writer() as capture2:
+            table.write()
+            assert not capture2.fd.any_contains("Write file")
+            assert not capture2.stdout.any_contains("Write file")
         assert f.getvalue() == snapshot
 
     def test_write_model_uses_correct_fields(self):
@@ -578,7 +609,10 @@ After
 
         table.rows[0].name = "Bob"
         table.rows[0].age = 25
-        table.write()
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
 
         expected = """\
 | name | age |
@@ -586,3 +620,62 @@ After
 | Bob  | 25  |
 """
         assert f.getvalue() == expected
+
+
+class TestMarkdownTableWriteBehavior:
+    """Tests for write() skip-on-no-change, logging, and chaining."""
+
+    def test_write_returns_self(self):
+        """write() returns self for chaining."""
+        content = """\
+| name | age |
+|------|-----|
+| Alice | 30 |
+"""
+        f = StringIO(content)
+        table = MarkdownTable(f, "", Person)
+        table.read()
+        with logger.mock_capture_writer() as capture:
+            result = table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
+        assert result is table
+
+    def test_write_unchanged_skips_write_and_log(self):
+        """Second write with no changes should not produce log output."""
+        content = """\
+| name | age |
+|------|-----|
+| Alice | 30 |
+"""
+        f = StringIO(content)
+        table = MarkdownTable(f, "", Person)
+        table.read()
+        # First write: formats table -> content changes -> logs
+        with logger.mock_capture_writer() as capture_first:
+            table.write()
+            assert capture_first.fd.any_contains("Write file")
+            assert capture_first.stdout.any_contains("Write file")
+
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            # No log should be emitted since content is unchanged
+            assert not capture.fd.any_contains("Write file")
+            assert not capture.stdout.any_contains("Write file")
+
+    def test_write_changed_logs(self):
+        """Write after row modification should log the write."""
+        content = """\
+| name | age |
+|------|-----|
+| Alice | 30 |
+"""
+        f = StringIO(content)
+        table = MarkdownTable(f, "", Person)
+        table.read()
+        table.rows[0].name = "Bob"
+
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
