@@ -15,8 +15,11 @@ def extract_last_task(src, target_fd, block_size=262144):
             buffering disabled for efficient reverse-seeking.
         target_fd (io.IOBase): Writable binary stream to receive output.
         block_size (int): Read block size in bytes. Defaults to 262144.
+            Clamped to ``max(4096, block_size)`` and rounded down to the
+            nearest multiple of 4096.
     """
     import re
+
     # +==================================================================================================+
     # |                                              LOGIN                                               |
     # +==================================================================================================+
@@ -29,6 +32,10 @@ def extract_last_task(src, target_fd, block_size=262144):
     )
     alignment = 4096
     overlap_size = 4096
+
+    # Clamp block_size to >= 4096 and round down to the nearest multiple of 4096
+    block_size = max(alignment, block_size)
+    block_size = (block_size // alignment) * alignment
 
     # Accept both a file path and an already-open file-like object (e.g. BytesIO)
     if isinstance(src, str):

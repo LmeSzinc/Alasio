@@ -25,6 +25,23 @@ from alasio.logger import logger
 from alasio.logger.error import extract_last_task
 
 
+class ReadCounter(io.BytesIO):
+    """Wrap a bytes object and count ``.read()`` calls."""
+
+    def __init__(self, data):
+        super().__init__(data)
+        self.read_count = 0
+        self.seek_count = 0
+
+    def read(self, size=-1):
+        self.read_count += 1
+        return super().read(size)
+
+    def seek(self, pos, whence=0):
+        self.seek_count += 1
+        return super().seek(pos, whence)
+
+
 class TestExtractLastTask:
     """Test suite for extract_last_task."""
 
@@ -47,10 +64,40 @@ class TestExtractLastTask:
             content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target, block_size=block_size)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target, block_size=block_size)
         result = target.getvalue()
 
         # Expected: content from second byte (after skipping first '+') to end
+        expected = content[1:]
+        assert result == expected
+        assert counter.read_count == 1
+
+    @pytest.mark.parametrize('block_size, expected_clamped', [
+        (0, 4096),
+        (100, 4096),
+        (4095, 4096),
+        (4096, 4096),
+        (5000, 4096),
+        (8192, 8192),
+        (10000, 8192),
+        (262144, 262144),
+        (262145, 262144),
+    ])
+    def test_block_size_clamping(self, block_size, expected_clamped):
+        """
+        block_size < 4096 is raised to 4096; non-multiples are rounded down.
+        """
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('CLAMP')
+            logger.info('clamp')
+            content = ''.join(capture.fd.logs).encode('utf-8')
+
+        target = io.BytesIO()
+        counter = ReadCounter(content)
+        extract_last_task(counter, target, block_size=block_size)
+        result = target.getvalue()
+
         expected = content[1:]
         assert result == expected
 
@@ -71,12 +118,14 @@ class TestExtractLastTask:
             content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target)
         result = target.getvalue()
 
         # Expected: task from marker to end, skipping first byte
         expected = content[marker_offset + 1:]
         assert result == expected
+        assert counter.read_count == 1
 
     def test_multiple_tasks_extracts_last(self):
         """
@@ -94,11 +143,13 @@ class TestExtractLastTask:
             content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target)
         result = target.getvalue()
 
         expected = content[last_marker_offset + 1:]
         assert result == expected
+        assert counter.read_count == 1
 
     def test_back_to_back_markers(self):
         """
@@ -116,12 +167,14 @@ class TestExtractLastTask:
             content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target)
         result = target.getvalue()
 
         # Last marker is header_b, output from its second byte
         expected = content[last_marker_offset + 1:]
         assert result == expected
+        assert counter.read_count == 1
 
     def test_marker_at_last_block(self):
         """
@@ -144,11 +197,13 @@ class TestExtractLastTask:
         content = filler + marker_content
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target, block_size=block_size)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target, block_size=block_size)
         result = target.getvalue()
 
         expected = marker_content[1:]
         assert result == expected
+        assert counter.read_count == 1
 
     # ------------------------------------------------------------------
     # Boundary / edge cases
@@ -168,10 +223,12 @@ class TestExtractLastTask:
             content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target)
         result = target.getvalue()
 
         assert result == content
+        assert counter.read_count == 1
 
     def test_empty_file(self):
         """
@@ -181,10 +238,13 @@ class TestExtractLastTask:
         last_chunk and last_read_end remain at initial values.
         """
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(b''), target)
+        counter = ReadCounter(b'')
+        extract_last_task(counter, target)
         result = target.getvalue()
 
         assert result == b''
+        assert counter.read_count == 0
+        assert counter.seek_count == 1
 
     def test_single_byte_no_marker(self):
         """
@@ -193,12 +253,14 @@ class TestExtractLastTask:
         Verify the function handles an input smaller than any
         meaningful pattern without crashing.
         """
-        for content in [b'+', b'x', b'\n']:
+        for single in [b'+', b'x', b'\n']:
             target = io.BytesIO()
-            extract_last_task(io.BytesIO(content), target)
+            counter = ReadCounter(single)
+            extract_last_task(counter, target)
             result = target.getvalue()
 
-            assert result == content
+            assert result == single
+            assert counter.read_count == 1
 
     def test_single_line_no_marker(self):
         """
@@ -209,10 +271,12 @@ class TestExtractLastTask:
             content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target)
         result = target.getvalue()
 
         assert result == content
+        assert counter.read_count == 1
 
     def test_header_only(self):
         """
@@ -226,11 +290,13 @@ class TestExtractLastTask:
             content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target)
         result = target.getvalue()
 
         expected = content[1:]
         assert result == expected
+        assert counter.read_count == 1
 
     def test_marker_right_at_end_of_file(self):
         """
@@ -246,11 +312,13 @@ class TestExtractLastTask:
             content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target)
         result = target.getvalue()
 
         expected = content[marker_offset + 1:]
         assert result == expected
+        assert counter.read_count == 1
 
     def test_crlf_line_endings(self):
         """
@@ -268,11 +336,13 @@ class TestExtractLastTask:
         content = content.replace(b'\n', b'\r\n')
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target)
         result = target.getvalue()
 
         expected = content[1:]
         assert result == expected
+        assert counter.read_count == 1
 
     # ------------------------------------------------------------------
     # Reverse-search block-boundary scenarios
@@ -298,11 +368,13 @@ class TestExtractLastTask:
         content = filler + marker_content
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target, block_size=block_size)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target, block_size=block_size)
         result = target.getvalue()
 
         expected = marker_content[1:]
         assert result == expected
+        assert counter.read_count == 1
 
     def test_block_size_smaller_than_file(self):
         """
@@ -322,11 +394,47 @@ class TestExtractLastTask:
         content = filler + marker_content
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target, block_size=block_size)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target, block_size=block_size)
         result = target.getvalue()
 
         expected = marker_content[1:]
         assert result == expected
+        assert counter.read_count == 1
+
+    def test_hr0_at_block_boundary(self):
+        """
+        hr0 header lines straddle a block boundary when reading in reverse.
+
+        The marker's 3-line header (+=====+| ... |+=====+) sits across the
+        boundary between chunk_2 and chunk_1.  The overlap buffer carries
+        the tail of the third line so the regex can match in iteration 2.
+        """
+        block_size = 4096
+
+        # Generate marker + log content using real logger
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('BOUNDARY')
+            logger.info('done')
+            marker_content = ''.join(capture.fd.logs).encode('utf-8')
+
+        # Filler ends at byte 16100 so the marker starts there.
+        # The first reverse chunk starts at byte 16384 (= aligned), which
+        # lands inside the marker's third line.  The pattern is thus split
+        # across chunk_2 (first 284 bytes) and chunk_1 / leftover (tail).
+        filler = b'x\n' * int(16100 / 2)          # 16100 bytes
+        footer = b'y\n' * 2500                     # 5000 bytes
+        content = filler + marker_content + footer
+
+        # extract_last_task outputs from the second byte of the marker
+        # (skipping the leading ``+``) to EOF, which includes the footer.
+        target = io.BytesIO()
+        counter = ReadCounter(content)
+        extract_last_task(counter, target, block_size=block_size)
+        result = target.getvalue()
+        expected = content[len(filler) + 1:]
+        assert result == expected
+        assert counter.read_count == 5
 
     def test_overlap_with_crlf(self):
         """
@@ -350,8 +458,63 @@ class TestExtractLastTask:
         content = filler + marker_content
 
         target = io.BytesIO()
-        extract_last_task(io.BytesIO(content), target, block_size=block_size)
+        counter = ReadCounter(content)
+        extract_last_task(counter, target, block_size=block_size)
         result = target.getvalue()
 
         expected = marker_content[1:]
         assert result == expected
+        assert result == expected
+
+
+class TestReadCountRealistic:
+    """
+    Verify IO read counts in a realistic long-running log scenario.
+    """
+
+    def test_reverse_then_forward_reads(self):
+        """
+        Simulate a real log: many early tasks, a ~100KB gap of log lines,
+        then the last task at the end.
+
+        The reverse phase reads 3 chunks (iter 1 aligned from EOF, iters 2-3 walk
+        4 KB backward each) before finding the header.  The forward phase then
+        reads 4 times (3 data + 1 empty termination) to output the rest.
+        """
+        block_size = 4096
+
+        with logger.mock_capture_writer() as capture:
+            logger.set_level("INFO")
+
+            # 5 earlier tasks
+            for i in range(5):
+                logger.hr0(f"TASK_{i:03d}")
+                logger.info("task running")
+                logger.info("task done")
+
+            # ~100KB gap of log lines
+            for _ in range(3000):
+                logger.info("periodic heartbeat")
+
+            # The LAST task
+            logger.hr0("LAST_TASK")
+            logger.info("last task start")
+            for _ in range(200):
+                logger.info("last progress")
+            logger.info("last task done")
+
+            content = "".join(capture.fd.logs).encode("utf-8")
+
+        # Find the start of the LAST task header (top edge +=====+)
+
+        # Second-to-last occurrence of +===== is the last task header start
+        gap_end = content.rfind(b'+=====', 0, content.rfind(b'+====='))
+
+        counter = ReadCounter(content)
+        target = io.BytesIO()
+        extract_last_task(counter, target, block_size=block_size)
+        result = target.getvalue()
+
+        expected = content[gap_end + 1:]
+        assert result == expected
+        assert counter.read_count == 7
