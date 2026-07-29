@@ -21,50 +21,15 @@ import io
 
 import pytest
 
+from alasio.logger import logger
 from alasio.logger.error import extract_last_task
-
-
-def _make_header(title):
-    """
-    Create hr0-style task header bytes matching the marker regex.
-
-    Uses the same centering logic as logger.hr0():
-        interior = max(98, len(title) + 10)
-        edge = f'+{"=" * interior}+'
-        hr = f'|{f" {title} ".center(interior, " ")}|'
-
-    Args:
-        title (str): Title text (ASCII)
-
-    Returns:
-        bytes: Three-line header with Unix line endings
-    """
-    title_upper = title.upper()
-    interior = max(98, len(title_upper) + 10)
-    edge = f'+{"=" * interior}+\n'
-    hr_line = f'|{f" {title_upper} ".center(interior, " ")}|\n'
-    return (edge + hr_line + edge).encode('ascii')
-
-
-def _make_log(msg, level='INFO'):
-    """
-    Create a log line in standard format.
-
-    Args:
-        msg (str): Log message
-        level (str): Log level
-
-    Returns:
-        bytes: Log line with Unix line ending
-    """
-    return f'2026-06-25 12:00:00.000 | {level} | {msg}\n'.encode()
 
 
 class TestExtractLastTask:
     """Test suite for extract_last_task."""
 
     # ------------------------------------------------------------------
-    # Core scenarios
+    # Core scenarios — using real logger output via mock_capture_writer
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize('block_size', [4096, 262144])
@@ -75,11 +40,11 @@ class TestExtractLastTask:
         The reverse search should find the marker in the first read chunk
         (or the only read chunk) and output from the second byte onward.
         """
-        content = (
-            _make_header('LOGIN')
-            + _make_log('login start')
-            + _make_log('login success')
-        )
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('LOGIN')
+            logger.info('login start')
+            logger.info('login success')
+            content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target, block_size=block_size)
@@ -95,20 +60,22 @@ class TestExtractLastTask:
 
         The reverse search should skip the preamble and find the task header.
         """
-        preamble = b'line 1\nline 2\nline 3\n'
-        content = (
-            preamble
-            + _make_header('COMBAT')
-            + _make_log('combat start')
-            + _make_log('combat end')
-        )
+        with logger.mock_capture_writer() as capture:
+            logger.info('line 1')
+            logger.info('line 2')
+            logger.info('line 3')
+            marker_offset = len(''.join(capture.fd.logs))
+            logger.hr0('COMBAT')
+            logger.info('combat start')
+            logger.info('combat end')
+            content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target)
         result = target.getvalue()
 
         # Expected: task from marker to end, skipping first byte
-        expected = content[len(preamble) + 1:]
+        expected = content[marker_offset + 1:]
         assert result == expected
 
     def test_multiple_tasks_extracts_last(self):
@@ -117,22 +84,20 @@ class TestExtractLastTask:
 
         The reverse search finds the last occurrence of the marker pattern.
         """
-        earlier_task = (
-            _make_header('LOGIN')
-            + _make_log('login done')
-        )
-        last_task = (
-            _make_header('COMMISSION')
-            + _make_log('commission start')
-            + _make_log('commission end')
-        )
-        content = earlier_task + last_task
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('LOGIN')
+            logger.info('login done')
+            last_marker_offset = len(''.join(capture.fd.logs))
+            logger.hr0('COMMISSION')
+            logger.info('commission start')
+            logger.info('commission end')
+            content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target)
         result = target.getvalue()
 
-        expected = last_task[1:]
+        expected = content[last_marker_offset + 1:]
         assert result == expected
 
     def test_back_to_back_markers(self):
@@ -143,17 +108,19 @@ class TestExtractLastTask:
         even when the third line of header A coincides with the first
         line of header B being the same `+=====...=====+` pattern.
         """
-        header_a = _make_header('FIRST')
-        header_b = _make_header('SECOND')
-        log_line = _make_log('second task')
-        content = header_a + header_b + log_line
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('FIRST')
+            last_marker_offset = len(''.join(capture.fd.logs))
+            logger.hr0('SECOND')
+            logger.info('second task')
+            content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target)
         result = target.getvalue()
 
         # Last marker is header_b, output from its second byte
-        expected = header_b[1:] + log_line
+        expected = content[last_marker_offset + 1:]
         assert result == expected
 
     def test_marker_at_last_block(self):
@@ -166,20 +133,21 @@ class TestExtractLastTask:
         """
         block_size = 4096
 
+        # Generate marker + log content using real logger
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('LAST_BLOCK')
+            logger.info('last')
+            marker_content = ''.join(capture.fd.logs).encode('utf-8')
+
         # filler: 20000 bytes before the marker
-        # first reverse-read spans from (filesize - block_size) aligned
-        # down to EOF: (20348 - 4096)//4096*4096 = 12288.
-        # Marker at byte ~20000 is within [12288, 20348) -> found in iter 1.
         filler = b'x\n' * 10000             # 20000 bytes
-        marker = _make_header('LAST_BLOCK')  # 306 bytes
-        log_line = _make_log('last')         # ~42 bytes
-        content = filler + marker + log_line
+        content = filler + marker_content
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target, block_size=block_size)
         result = target.getvalue()
 
-        expected = content[len(filler) + 1:]
+        expected = marker_content[1:]
         assert result == expected
 
     # ------------------------------------------------------------------
@@ -193,11 +161,11 @@ class TestExtractLastTask:
         When the reverse search exhausts all chunks without a match,
         every chunk is accumulated and written in order.
         """
-        content = (
-            b'some log line without header\n'
-            b'another ordinary line\n'
-            b'third line\n'
-        )
+        with logger.mock_capture_writer() as capture:
+            logger.info('some log line without header')
+            logger.info('another ordinary line')
+            logger.info('third line')
+            content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target)
@@ -236,7 +204,9 @@ class TestExtractLastTask:
         """
         Single non-marker line outputs the same line unchanged.
         """
-        content = b'2026-06-25 12:00:00.000 | INFO | single line\n'
+        with logger.mock_capture_writer() as capture:
+            logger.info('single line')
+            content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target)
@@ -251,7 +221,9 @@ class TestExtractLastTask:
         Verifies the forward-read phase correctly handles
         last_read_end == file_size (nothing more to read).
         """
-        content = _make_header('HEADER_ONLY')
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('HEADER_ONLY')
+            content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target)
@@ -267,14 +239,17 @@ class TestExtractLastTask:
         Verifies the forward-read phase handles the case where
         last_read_end == file_size (no additional bytes to read).
         """
-        preamble = b'preamble line\n'
-        content = preamble + _make_header('END')
+        with logger.mock_capture_writer() as capture:
+            logger.info('preamble line')
+            marker_offset = len(''.join(capture.fd.logs))
+            logger.hr0('END')
+            content = ''.join(capture.fd.logs).encode('utf-8')
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target)
         result = target.getvalue()
 
-        expected = content[len(preamble) + 1:]
+        expected = content[marker_offset + 1:]
         assert result == expected
 
     def test_crlf_line_endings(self):
@@ -284,11 +259,13 @@ class TestExtractLastTask:
         The marker regex uses \r?\n to accept both Unix and Windows
         line endings.
         """
-        edge = b'+' + b'=' * 98 + b'+\r\n'
-        hr_line = b'|' + b' ' * 47 + b'TEST' + b' ' * 47 + b'|\r\n'
-        header = edge + hr_line + edge
-        log = b'2026-06-25 12:00:00.000 | INFO | test\r\n'
-        content = header + log
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('TEST')
+            logger.info('test')
+            content = ''.join(capture.fd.logs).encode('utf-8')
+
+        # Convert line endings to CRLF
+        content = content.replace(b'\n', b'\r\n')
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target)
@@ -310,27 +287,21 @@ class TestExtractLastTask:
         """
         block_size = 4096
 
-        # Build a file where the marker straddles the [12288, 16384) boundary:
-        #
-        #   bytes [0, 12270):     non-matching filler (x\n repeated)
-        #   bytes [12270, 12576): marker header (306 bytes)
-        #   bytes [12576, ...):   log lines
-        #
-        # Iteration 1 reads from 12288 (aligned) to EOF (~12618).
-        # Marker starts at 12270 (< 12288) -> not found in iteration 1.
-        # leftover carries [12288, 12618) into iteration 2.
-        # Iteration 2: chunk=[8192, 12288), search_buffer=[8192, 12618).
-        # Marker at [12270, 12576) is fully in search_buffer -> found.
+        # Generate marker + log content using real logger
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('OVERLAP')
+            logger.info('overlap')
+            marker_content = ''.join(capture.fd.logs).encode('utf-8')
+
+        # Filler ends at byte 12270 so the marker starts straddling the boundary
         filler = b'x\n' * 6135            # 12270 bytes
-        marker = _make_header('OVERLAP')  # 306 bytes
-        log_line = _make_log('overlap')   # ~42 bytes
-        content = filler + marker + log_line
+        content = filler + marker_content
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target, block_size=block_size)
         result = target.getvalue()
 
-        expected = content[len(filler) + 1:]
+        expected = marker_content[1:]
         assert result == expected
 
     def test_block_size_smaller_than_file(self):
@@ -340,17 +311,21 @@ class TestExtractLastTask:
         """
         block_size = 4096
 
+        # Generate marker + log content using real logger
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('DEEP')
+            logger.info('deep')
+            marker_content = ''.join(capture.fd.logs).encode('utf-8')
+
         # Fill enough data so the reverse search requires multiple iterations
         filler = b'line\n' * 5000         # 30000 bytes
-        marker = _make_header('DEEP')
-        log_line = _make_log('deep')
-        content = filler + marker + log_line
+        content = filler + marker_content
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target, block_size=block_size)
         result = target.getvalue()
 
-        expected = content[len(filler) + 1:]
+        expected = marker_content[1:]
         assert result == expected
 
     def test_overlap_with_crlf(self):
@@ -361,20 +336,22 @@ class TestExtractLastTask:
         """
         block_size = 4096
 
-        # Build CRLF header manually for precise placement
-        interior = 98
-        edge = b'+' + b'=' * interior + b'+\r\n'
-        hr_line = b'|' + b' ' * 47 + b'CRLF' + b' ' * 47 + b'|\r\n'
-        marker = edge + hr_line + edge   # 306 bytes
+        # Generate marker + log content using real logger
+        with logger.mock_capture_writer() as capture:
+            logger.hr0('CRLF')
+            logger.info('crlf')
+            marker_content = ''.join(capture.fd.logs).encode('utf-8')
 
-        # Filler ends at byte 12270 so marker starts straddling [12288, ...)
+        # Convert marker content to CRLF
+        marker_content = marker_content.replace(b'\n', b'\r\n')
+
+        # Filler ends at byte 12270 so marker starts straddling the boundary
         filler = b'x\r\n' * 4090         # 12270 bytes
-        log_line = b'2026-06-25 12:00:00.000 | INFO | crlf\r\n'
-        content = filler + marker + log_line
+        content = filler + marker_content
 
         target = io.BytesIO()
         extract_last_task(io.BytesIO(content), target, block_size=block_size)
         result = target.getvalue()
 
-        expected = content[len(filler) + 1:]
+        expected = marker_content[1:]
         assert result == expected
