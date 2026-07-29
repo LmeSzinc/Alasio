@@ -3,6 +3,7 @@
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { cn } from "$lib/utils";
   import { ArrowDownToLine } from "@lucide/svelte";
+  import { t } from "$lib/i18n";
   import LogData from "./LogData.svelte";
   import type { LogDataProps } from "./types";
 
@@ -41,12 +42,14 @@
   bind:viewportRef={logContainer}
 >
   <div class={cn("flex flex-col", isInitial && logData && logData.length > 0 && "invisible")}>
-    {#if logData}
+    {#if logData && logData.length > 0}
       {#each logData as log (log)}
         <LogData {...log} />
       {/each}
     {:else}
-      <div class="text-muted-foreground text-sm">暂无日志</div>
+      <div class="flex w-full items-start justify-center">
+        <span class="text-muted-foreground italic text-sm">{t.Overview.LogEmpty()}</span>
+      </div>
     {/if}
   </div>
   <Button

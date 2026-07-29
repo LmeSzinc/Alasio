@@ -129,9 +129,9 @@
 
   // Preview mode display labels
   let modeOptions: { value: PreviewMode; label: string }[] = $derived([
-    { value: "realtime", label: t.Dashboard.PreviewRealtime() },
-    { value: "normal", label: t.Dashboard.PreviewNormal() },
-    { value: "disable", label: t.Dashboard.PreviewDisable() },
+    { value: "realtime", label: t.Overview.PreviewRealtime() },
+    { value: "normal", label: t.Overview.PreviewNormal() },
+    { value: "disable", label: t.Overview.PreviewDisable() },
   ]);
 
   // Timestamp formatting logic
@@ -156,21 +156,21 @@
 >
   {#if previewState === "error"}
     <div class="text-destructive flex h-full items-center justify-center text-sm italic">
-      {t.Dashboard.PreviewError()}
+      {t.Overview.PreviewError()}
     </div>
   {:else if previewState === "stopped"}
     <div class="text-muted-foreground flex h-full items-center justify-center text-sm italic">
-      {t.Dashboard.PreviewStopped()}
+      {t.Overview.PreviewStopped()}
     </div>
   {:else if imageUrl && isPreviewActive}
     <img src={imageUrl} alt="Preview" class="h-full w-full rounded-md object-contain" />
   {:else if !isPreviewActive}
     <div class="text-muted-foreground flex h-full items-center justify-center text-sm italic">
-      {t.Dashboard.PreviewDisabled()}
+      {t.Overview.PreviewDisabled()}
     </div>
   {:else}
     <div class="text-muted-foreground flex h-full items-center justify-center text-sm italic">
-      {t.Dashboard.PreviewWaiting()}
+      {t.Overview.PreviewWaiting()}
     </div>
   {/if}
 
