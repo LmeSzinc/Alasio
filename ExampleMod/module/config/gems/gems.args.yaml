@@ -1,0 +1,80 @@
+GemsFarming:
+  args:
+    ChangeFlagship:
+      value: ship
+      option: [ ship, ship_equip ]
+    CommonCV:
+      value: any
+      option: [ any, langley, bogue, ranger, hermes ]
+    ChangeVanguard:
+      value: ship
+      option: [ disabled, ship, ship_equip ]
+    CommonDD:
+      value: any
+      option: [ any, favourite, aulick_or_foote , cassin_or_downes, z20_or_z21 ]
+    CommissionLimit: true
+
+EquipmentCode:
+  args:
+    ExportToConfig: true
+    Config:
+      dt: textarea
+      value: ""
+
+# Cross-nav variant groups: parents defined in `main` nav
+GemsCampaign:
+  parent: Campaign
+  args:
+    Name:
+      dt: secondary-select
+      value: 2-4
+      option:
+        chapter1: [ 1-1, 1-2, 1-3, 1-4 ]
+        chapter2: [ 2-1, 2-2, 2-3, 2-4 ]
+        chapter3: [ 3-1, 3-2, 3-3, 3-4 ]
+        chapter4: [ 4-1, 4-2, 4-3, 4-4 ]
+        chapter5: [ 5-1, 5-2, 5-3, 5-4 ]
+        chapter6: [ 6-1, 6-2, 6-3, 6-4 ]
+        chapter7: [ 7-1, 7-2, 7-3, 7-4 ]
+        chapter8: [ 8-1, 8-2, 8-3, 8-4 ]
+        chapter9: [ 9-1, 9-2, 9-3, 9-4 ]
+        chapter10: [ 10-1, 10-2, 10-3, 10-4 ]
+        chapter11: [ 11-1, 11-2, 11-3, 11-4 ]
+        chapter12: [ 12-1, 12-2, 12-3, 12-4 ]
+        chapter13: [ 13-1, 13-2, 13-3, 13-4 ]
+        chapter14: [ 14-1, 14-2, 14-3, 14-4 ]
+        chapter15: [ 15-1, 15-2, 15-3, 15-4 ]
+    Mode:
+      dt: static-hide
+      value: normal
+
+GemsStopCondition:
+  parent: StopCondition
+  override_i18n: true
+  args:
+    RunCount:
+      value: 0
+      range: 0~999
+    MapAchievement:
+      dt: static
+      value: non_stop
+
+GemsSubmarine:
+  parent: Submarine
+  args:
+    Fleet:
+      dt: static
+      value: 2
+    Mode:
+      dt: static-hide
+      value: hunt_and_boss
+
+GemsEmotionRecord:
+  parent: EmotionRecord
+  args:
+    Value:
+      value: 150
+      range: 0~200
+    Recover:
+      dt: static
+      value: dormitory_floor_2

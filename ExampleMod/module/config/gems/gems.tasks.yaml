@@ -1,0 +1,17 @@
+GemsFarming:
+  groups:
+    Scheduler:
+    Campaign: GemsCampaign
+    GemsFarming:
+    StopCondition: GemsStopCondition
+    Fleet1: Fleet
+    Submarine: GemsSubmarine
+    Emotion1: GemsEmotionRecord
+    EquipmentCode:
+  displays:
+    - info: GemsFarming
+      groups: [ Scheduler, Campaign, GemsFarming ]
+    - StopCondition
+    - [ Fleet1, Submarine ]
+    - EquipmentCode
+    - Emotion1

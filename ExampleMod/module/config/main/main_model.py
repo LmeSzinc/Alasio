@@ -166,9 +166,37 @@ class EnemyPriority(a.GroupBase):
     EnemyScaleBalanceWeight: t.Literal['default_mode', 'S3_enemy_first', 'S1_enemy_first'] = 'default_mode'
 
 
-class GemsFarming(a.GroupBase):
-    ChangeFlagship: t.Literal['ship', 'ship_equip'] = 'ship'
-    CommonCV: t.Literal['any', 'langley', 'bogue', 'ranger', 'hermes'] = 'any'
-    ChangeVanguard: t.Literal['disabled', 'ship', 'ship_equip'] = 'ship'
-    CommonDD: t.Literal['any', 'favourite', 'aulick_or_foote', 'cassin_or_downes', 'z20_or_z21'] = 'any'
-    CommissionLimit: bool = True
+class GemsCampaign(Campaign):
+    Name: t.Literal[
+        '1-1', '1-2', '1-3', '1-4',
+        '2-1', '2-2', '2-3', '2-4',
+        '3-1', '3-2', '3-3', '3-4',
+        '4-1', '4-2', '4-3', '4-4',
+        '5-1', '5-2', '5-3', '5-4',
+        '6-1', '6-2', '6-3', '6-4',
+        '7-1', '7-2', '7-3', '7-4',
+        '8-1', '8-2', '8-3', '8-4',
+        '9-1', '9-2', '9-3', '9-4',
+        '10-1', '10-2', '10-3', '10-4',
+        '11-1', '11-2', '11-3', '11-4',
+        '12-1', '12-2', '12-3', '12-4',
+        '13-1', '13-2', '13-3', '13-4',
+        '14-1', '14-2', '14-3', '14-4',
+        '15-1', '15-2', '15-3', '15-4',
+    ] = '2-4'
+    Mode: t.Literal['normal'] = 'normal'
+
+
+class GemsStopCondition(StopCondition):
+    RunCount: e.Annotated[int, m.Meta(ge=0, le=999)] = 0
+    MapAchievement: t.Literal['non_stop'] = 'non_stop'
+
+
+class GemsSubmarine(Submarine):
+    Fleet: t.Literal[2] = 2
+    Mode: t.Literal['hunt_and_boss'] = 'hunt_and_boss'
+
+
+class GemsEmotionRecord(EmotionRecord):
+    Value: e.Annotated[int, m.Meta(ge=0, le=200)] = 150
+    Recover: t.Literal['dormitory_floor_2'] = 'dormitory_floor_2'

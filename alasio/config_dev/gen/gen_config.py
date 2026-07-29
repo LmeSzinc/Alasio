@@ -1,19 +1,18 @@
 from alasio.codegen.python import CodeGen
-from alasio.config.entry.const import ModEntryInfo
+from alasio.config.entry.const import ModEntryInfo  # noqa: F401
 from alasio.config_dev.format.extract_method import extract_method
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.config_dev.format.format_yaml import yaml_formatter
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.cache_alasio import CacheAlasio
 from alasio.config_dev.parse.load_alas_i18n import LoadAlasI18n
-from alasio.config_dev.parse.parse_args import ArgData, TYPE_ARG_LITERAL, TYPE_ARG_TUPLE
-from alasio.config_dev.parse.parse_groups import ParseGroups
+from alasio.config_dev.parse.parse_args import TYPE_ARG_LITERAL, TYPE_ARG_TUPLE, ArgData
+from alasio.config_dev.parse.parse_groups import GroupData, ParseGroups
 from alasio.config_dev.parse.parse_tasks import ParseTasks
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_get, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.yamlfile import format_yaml
-from alasio.ext.path import PathStr
 from alasio.logger import logger
 
 
@@ -79,6 +78,12 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         #         which is arg path appended with ArgData
         self.config_data: "dict[str, dict[str, dict]]" = {}
         self.alasio = CacheAlasio().get(entry)
+        # Cross-nav variant model data
+        # groups from other navs whose model should be generated in this nav's model file
+        self.foreign_model_group_data: "dict[str, GroupData]" = {}
+        # groups in this nav that should NOT have their model generated here
+        # (because it will be generated in the parent nav instead)
+        self.skip_model_group_names: "set[str]" = set()
 
     """
     Generate model
@@ -140,7 +145,16 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             gen.Import('alasio.config.alasio.group_base').as_('a')
             gen.CommentCodeGen('alasio.config_dev.gen_alasio')
 
-        for group_name, group in self.groups_data.items():
+        def iter_groups():
+            """Yield (name, g) from own groups (skipping cross-nav variants)
+            then foreign model groups."""
+            for name, g in self.groups_data.items():
+                if name in self.skip_model_group_names:
+                    continue
+                yield name, g
+            yield from self.foreign_model_group_data.items()
+
+        for group_name, group in iter_groups():
             # Skip empty group
             if not group.args:
                 continue

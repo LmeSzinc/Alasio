@@ -104,7 +104,9 @@ class GenConfigGenerated(GenNavIndex):
                         if not group.args:
                             continue
                         cls_name = group.name
-                        anno = f'{group.parser.nav_name}.{cls_name}'
+                        ancestor_config = self.dict_group_to_ancestor_nav[group.name]
+                        model_nav = ancestor_config.nav_name
+                        anno = f'{model_nav}.{cls_name}'
                         # special match that convert any Scheduler child group to Scheduler
                         # because we maintain the consistency between them
                         is_scheduler = 'Scheduler' in group.mro
@@ -116,7 +118,7 @@ class GenConfigGenerated(GenNavIndex):
                         if group_name in collected_groups:
                             gen.Comment(f'{group_name}: "{anno}"')
                         else:
-                            gen.use_import(group.parser.nav_name)
+                            gen.use_import(model_nav)
                             gen.Anno(group_name, anno=f'"{anno}"')
                             # validate if Multiple validation model bound on the same group
                             collected_groups[group_name].add(anno)

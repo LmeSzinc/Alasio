@@ -7,6 +7,7 @@ from ..const import entry
 if t.TYPE_CHECKING:
     from ..alas import alas_model as alas
     from ..dashboard import dashboard_model as dashboard
+    from ..gems import gems_model as gems
     from ..general import general_model as general
     from ..main import main_model as main
     from ..opsi import opsi_model as opsi
@@ -68,6 +69,19 @@ class ConfigGenerated(AlasioConfigBase):
     # ----- OpsiAshAssist -----
     # Scheduler: "alasio.SchedulerU00"
     OpsiAshAssist: "opsi.OpsiAshAssist"
+
+    """
+    ========== nav: gems ==========
+    """
+    # ----- GemsFarming -----
+    # Scheduler: "alasio.Scheduler"
+    # Campaign: "main.GemsCampaign"
+    GemsFarming: "gems.GemsFarming"
+    # StopCondition: "main.GemsStopCondition"
+    # Fleet1: "main.Fleet"
+    # Submarine: "main.GemsSubmarine"
+    # Emotion1: "main.GemsEmotionRecord"
+    EquipmentCode: "gems.EquipmentCode"
 
     """
     ========== nav: dashboard ==========

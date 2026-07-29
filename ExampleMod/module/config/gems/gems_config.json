@@ -1,0 +1,349 @@
+{
+  "card-GemsFarming-GemsFarming": {
+    "_info": {"group": "GemsFarming", "arg": "_info", "card": "card-GemsFarming-GemsFarming"},
+    "Scheduler": {
+      "Enable": {
+        "task": "GemsFarming",
+        "group": "Scheduler",
+        "arg": "Enable",
+        "dt": "enable",
+        "value": false,
+        "option": ["true", "false"]
+      },
+      "NextRun": {
+        "task": "GemsFarming",
+        "group": "Scheduler",
+        "arg": "NextRun",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      }
+    },
+    "Campaign": {
+      "Name": {
+        "task": "GemsFarming",
+        "group": "Campaign",
+        "arg": "Name",
+        "cls": "GemsCampaign",
+        "i18ngroup": "GemsCampaign",
+        "dt": "secondary-select",
+        "value": "2-4",
+        "option_dict": {
+          "chapter1": ["1-1", "1-2", "1-3", "1-4"],
+          "chapter2": ["2-1", "2-2", "2-3", "2-4"],
+          "chapter3": ["3-1", "3-2", "3-3", "3-4"],
+          "chapter4": ["4-1", "4-2", "4-3", "4-4"],
+          "chapter5": ["5-1", "5-2", "5-3", "5-4"],
+          "chapter6": ["6-1", "6-2", "6-3", "6-4"],
+          "chapter7": ["7-1", "7-2", "7-3", "7-4"],
+          "chapter8": ["8-1", "8-2", "8-3", "8-4"],
+          "chapter9": ["9-1", "9-2", "9-3", "9-4"],
+          "chapter10": ["10-1", "10-2", "10-3", "10-4"],
+          "chapter11": ["11-1", "11-2", "11-3", "11-4"],
+          "chapter12": ["12-1", "12-2", "12-3", "12-4"],
+          "chapter13": ["13-1", "13-2", "13-3", "13-4"],
+          "chapter14": ["14-1", "14-2", "14-3", "14-4"],
+          "chapter15": ["15-1", "15-2", "15-3", "15-4"]
+        }
+      },
+      "Event": {
+        "task": "GemsFarming",
+        "group": "Campaign",
+        "arg": "Event",
+        "cls": "GemsCampaign",
+        "dt": "select",
+        "value": "campaign_main",
+        "option": ["campaign_main"]
+      },
+      "UseClearMode": {
+        "task": "GemsFarming",
+        "group": "Campaign",
+        "arg": "UseClearMode",
+        "cls": "GemsCampaign",
+        "dt": "checkbox",
+        "value": true
+      },
+      "UseFleetLock": {
+        "task": "GemsFarming",
+        "group": "Campaign",
+        "arg": "UseFleetLock",
+        "cls": "GemsCampaign",
+        "dt": "checkbox",
+        "value": true
+      },
+      "UseAutoSearch": {
+        "task": "GemsFarming",
+        "group": "Campaign",
+        "arg": "UseAutoSearch",
+        "cls": "GemsCampaign",
+        "dt": "checkbox",
+        "value": true
+      },
+      "Use2xBook": {
+        "task": "GemsFarming",
+        "group": "Campaign",
+        "arg": "Use2xBook",
+        "cls": "GemsCampaign",
+        "dt": "checkbox",
+        "value": false
+      },
+      "AmbushEvade": {
+        "task": "GemsFarming",
+        "group": "Campaign",
+        "arg": "AmbushEvade",
+        "cls": "GemsCampaign",
+        "dt": "checkbox",
+        "value": true,
+        "advanced": true
+      }
+    },
+    "GemsFarming": {
+      "ChangeFlagship": {
+        "task": "GemsFarming",
+        "group": "GemsFarming",
+        "arg": "ChangeFlagship",
+        "dt": "select",
+        "value": "ship",
+        "option": ["ship", "ship_equip"]
+      },
+      "CommonCV": {
+        "task": "GemsFarming",
+        "group": "GemsFarming",
+        "arg": "CommonCV",
+        "dt": "select",
+        "value": "any",
+        "option": ["any", "langley", "bogue", "ranger", "hermes"]
+      },
+      "ChangeVanguard": {
+        "task": "GemsFarming",
+        "group": "GemsFarming",
+        "arg": "ChangeVanguard",
+        "dt": "select",
+        "value": "ship",
+        "option": ["disabled", "ship", "ship_equip"]
+      },
+      "CommonDD": {
+        "task": "GemsFarming",
+        "group": "GemsFarming",
+        "arg": "CommonDD",
+        "dt": "select",
+        "value": "any",
+        "option": ["any", "favourite", "aulick_or_foote", "cassin_or_downes", "z20_or_z21"]
+      },
+      "CommissionLimit": {
+        "task": "GemsFarming",
+        "group": "GemsFarming",
+        "arg": "CommissionLimit",
+        "dt": "checkbox",
+        "value": true
+      }
+    }
+  },
+  "card-GemsFarming-StopCondition": {
+    "_info": {"group": "GemsStopCondition", "arg": "_info", "card": "card-GemsFarming-StopCondition"},
+    "StopCondition": {
+      "OilLimit": {
+        "task": "GemsFarming",
+        "group": "StopCondition",
+        "arg": "OilLimit",
+        "cls": "GemsStopCondition",
+        "dt": "input-int",
+        "value": 1000
+      },
+      "RunCount": {
+        "task": "GemsFarming",
+        "group": "StopCondition",
+        "arg": "RunCount",
+        "cls": "GemsStopCondition",
+        "i18ngroup": "GemsStopCondition",
+        "dt": "input-int",
+        "value": 0,
+        "ge": 0,
+        "le": 999
+      },
+      "MapAchievement": {
+        "task": "GemsFarming",
+        "group": "StopCondition",
+        "arg": "MapAchievement",
+        "cls": "GemsStopCondition",
+        "i18ngroup": "GemsStopCondition",
+        "dt": "static",
+        "value": "non_stop",
+        "option": ["non_stop"]
+      },
+      "StageIncrease": {
+        "task": "GemsFarming",
+        "group": "StopCondition",
+        "arg": "StageIncrease",
+        "cls": "GemsStopCondition",
+        "dt": "checkbox",
+        "value": false
+      },
+      "GetNewShip": {
+        "task": "GemsFarming",
+        "group": "StopCondition",
+        "arg": "GetNewShip",
+        "cls": "GemsStopCondition",
+        "dt": "checkbox",
+        "value": false
+      },
+      "ReachLevel": {
+        "task": "GemsFarming",
+        "group": "StopCondition",
+        "arg": "ReachLevel",
+        "cls": "GemsStopCondition",
+        "dt": "input-int",
+        "value": 0
+      }
+    }
+  },
+  "card-GemsFarming-Fleet1": {
+    "_info": {"group": "Fleet", "arg": "_info", "card": "card-GemsFarming-Fleet1"},
+    "Fleet1": {
+      "Fleet": {
+        "task": "GemsFarming",
+        "group": "Fleet1",
+        "arg": "Fleet",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
+        "dt": "select",
+        "value": 1,
+        "option": [1, 2, 3, 4, 5, 6]
+      },
+      "Formation": {
+        "task": "GemsFarming",
+        "group": "Fleet1",
+        "arg": "Formation",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
+        "dt": "select",
+        "value": "double_line",
+        "option": ["line_ahead", "double_line", "diamond"]
+      },
+      "FleetMode": {
+        "task": "GemsFarming",
+        "group": "Fleet1",
+        "arg": "FleetMode",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
+        "dt": "select",
+        "value": "combat_auto",
+        "option": ["combat_auto", "combat_manual", "stand_still_in_the_middle", "hide_in_bottom_left"]
+      },
+      "FleetStep": {
+        "task": "GemsFarming",
+        "group": "Fleet1",
+        "arg": "FleetStep",
+        "cls": "Fleet",
+        "i18ngroup": "Fleet",
+        "dt": "select",
+        "value": 3,
+        "option": [2, 3, 4, 5]
+      }
+    },
+    "Submarine": {
+      "Fleet": {
+        "task": "GemsFarming",
+        "group": "Submarine",
+        "arg": "Fleet",
+        "cls": "GemsSubmarine",
+        "i18ngroup": "GemsSubmarine",
+        "dt": "static",
+        "value": 2,
+        "option": [2]
+      },
+      "AutoSearchMode": {
+        "task": "GemsFarming",
+        "group": "Submarine",
+        "arg": "AutoSearchMode",
+        "cls": "GemsSubmarine",
+        "dt": "select",
+        "value": "sub_standby",
+        "option": ["sub_standby", "sub_auto_call"]
+      },
+      "DistanceToBoss": {
+        "task": "GemsFarming",
+        "group": "Submarine",
+        "arg": "DistanceToBoss",
+        "cls": "GemsSubmarine",
+        "dt": "select",
+        "value": "2_grid_to_boss",
+        "option": ["to_boss_position", "1_grid_to_boss", "2_grid_to_boss", "use_open_ocean_support"]
+      }
+    }
+  },
+  "card-GemsFarming-EquipmentCode": {
+    "_info": {"group": "EquipmentCode", "arg": "_info", "card": "card-GemsFarming-EquipmentCode"},
+    "EquipmentCode": {
+      "ExportToConfig": {
+        "task": "GemsFarming",
+        "group": "EquipmentCode",
+        "arg": "ExportToConfig",
+        "dt": "checkbox",
+        "value": true
+      },
+      "Config": {
+        "task": "GemsFarming",
+        "group": "EquipmentCode",
+        "arg": "Config",
+        "dt": "textarea",
+        "value": "",
+        "layout": "vert"
+      }
+    }
+  },
+  "card-GemsFarming-Emotion1": {
+    "_info": {"group": "GemsEmotionRecord", "arg": "_info", "card": "card-GemsFarming-Emotion1"},
+    "Emotion1": {
+      "_info": {"group": "Emotion1", "arg": "_info", "dashboard": "Amount"},
+      "Time": {
+        "task": "GemsFarming",
+        "group": "Emotion1",
+        "arg": "Time",
+        "cls": "GemsEmotionRecord",
+        "i18ngroup": "DashboardBase",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      },
+      "Value": {
+        "task": "GemsFarming",
+        "group": "Emotion1",
+        "arg": "Value",
+        "cls": "GemsEmotionRecord",
+        "i18ngroup": "GemsEmotionRecord",
+        "dt": "input-int",
+        "value": 150,
+        "ge": 0,
+        "le": 200
+      },
+      "Control": {
+        "task": "GemsFarming",
+        "group": "Emotion1",
+        "arg": "Control",
+        "cls": "GemsEmotionRecord",
+        "i18ngroup": "EmotionRecord",
+        "dt": "select",
+        "value": "prevent_yellow_face",
+        "option": ["keep_exp_bonus", "prevent_green_face", "prevent_yellow_face", "prevent_red_face"]
+      },
+      "Recover": {
+        "task": "GemsFarming",
+        "group": "Emotion1",
+        "arg": "Recover",
+        "cls": "GemsEmotionRecord",
+        "i18ngroup": "GemsEmotionRecord",
+        "dt": "static",
+        "value": "dormitory_floor_2",
+        "option": ["dormitory_floor_2"]
+      },
+      "Oath": {
+        "task": "GemsFarming",
+        "group": "Emotion1",
+        "arg": "Oath",
+        "cls": "GemsEmotionRecord",
+        "i18ngroup": "EmotionRecord",
+        "dt": "checkbox",
+        "value": false
+      }
+    }
+  }
+}

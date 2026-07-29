@@ -52,6 +52,9 @@ class IndexGenerator(
 
         self.build_group_mro()
 
+        # setup cross-nav variant model data before nav generation
+        self._setup_cross_nav_model_data()
+
         # update nav configs
         for nav in self.dict_nav_config.values():
             nav.generate(gitadd=gitadd)

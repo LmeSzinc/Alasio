@@ -6,7 +6,7 @@ from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.build_mro import build_mro
 from alasio.config_dev.parse.cache_alasio import CacheAlasio
-from alasio.config_dev.parse.parse_groups import GroupData
+from alasio.config_dev.parse.parse_groups import GroupData, ParseGroups
 from alasio.config_dev.parse.parse_store import ParseStore
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
@@ -89,9 +89,9 @@ class CrossNavGenerator:
         # insert alasio groups
         if self.alasio:
             out = self.alasio.groups_data.copy()
-        # insert mod groups
+        # First pass: insert all groups from all navs to allow cross-nav
+        # variant parents to be resolved regardless of nav iteration order
         for config in self.dict_nav_config.values():
-            # iter group data
             for group_name, group_data in config.groups_data.items():
                 # group name cannot be GroupBase
                 if group_name == 'GroupBase':
@@ -110,18 +110,20 @@ class CrossNavGenerator:
                         f'Duplicate group name: "{group_name}"',
                         file=config.file, keys=[group_name],
                     )
-                # group parent can only be the group defined above in the same file, or in alasio
+                out[group_name] = group_data
+        # Second pass: validate that all parents exist in the global registry
+        for config in self.dict_nav_config.values():
+            for group_name, group_data in config.groups_data.items():
                 if self.alasio:
                     for parent in group_data.parent:
                         if parent in self.alasio.groups_data:
                             continue
-                        if parent in out and parent in config.groups_data:
+                        if parent in out:
                             continue
                         raise DefinitionError(
-                            f'Group {group_name} parent {parent} must be defined in alasio or above in the same file',
+                            f'Group {group_name} parent {parent} must be defined in one of the nav files',
                             file=config.file, keys=[group_name, 'parent'], value=parent,
                         )
-                out[group_name] = group_data
         return out
 
     @cached_property
@@ -213,6 +215,78 @@ class CrossNavGenerator:
                         file=task.parser.tasks_file, keys=[task_name, 'displays'], value=card.info)
 
     """
+    Cross-nav helpers
+    """
+
+    @cached_property
+    def dict_group_to_ancestor_nav(self) -> "dict[str, ParseGroups]":
+        """
+        Maps each group name to the ConfigGenerator of the nav where its
+        msgspec model class should be generated.
+
+        Uses the already-resolved MRO on each group. For each group, the MRO
+        is traversed in reverse (root ancestor first) to find the first
+        non-alasio ancestor. That ancestor's parser is the ConfigGenerator
+        that should host this group's model class.
+
+        Groups with no parent or whose entire parent chain ends in an alaiso
+        nav map to their own parser.
+
+        Returns:
+            dict[str, ConfigGenerator]:
+                key: group_name
+                value: ConfigGenerator of the nav that should host the model
+        """
+        out = {}
+
+        for group_name, group in self.groups_data.items():
+            # Default: model stays in own nav
+            ancestor = group.parser
+            # Traverse MRO in reverse (root ancestor first) to find the
+            # first non-alasio ancestor
+            for ancestor_name in reversed(group.mro):
+                if ancestor_name == group.name:
+                    continue  # skip self
+                ancestor_group = self.groups_data.get(ancestor_name)
+                if ancestor_group is None:
+                    continue
+                # Skip alasio framework groups
+                if self.alasio and ancestor_group.parser.nav_name in self.alasio.dict_nav_config:
+                    continue
+                # First non-alasio ancestor found — its nav hosts this group's model
+                ancestor = ancestor_group.parser
+                break
+            out[group_name] = ancestor
+
+        return out
+
+    def _setup_cross_nav_model_data(self):
+        """
+        Setup foreign model group data for cross-nav variant groups.
+
+        For each nav's ConfigGenerator, this sets:
+        - foreign_model_group_data: groups from other navs whose model should be
+          generated in this nav's model file (because their parent is in this nav)
+        - skip_model_group_names: groups that should NOT have their model generated
+          in their own nav (because it will be generated in the parent nav instead)
+        """
+        # Clear
+        for nav in self.dict_nav_config.values():
+            nav.foreign_model_group_data.clear()
+            nav.skip_model_group_names.clear()
+
+        # Find cross-nav variants using the ancestor nav mapping
+        for group_name, group in self.groups_data.items():
+            ancestor_config = self.dict_group_to_ancestor_nav[group_name]
+            if ancestor_config is group.parser:
+                continue
+            # Cross-nav variant: model follows parent chain to ancestor_config's nav
+            # ancestor_config is guaranteed to be a mod nav (alasio case is
+            # already handled in dict_group_to_ancestor_nav)
+            ancestor_config.foreign_model_group_data[group_name] = group
+            group.parser.skip_model_group_names.add(group_name)
+
+    """
     Generate model.index.json
     """
 
@@ -230,14 +304,14 @@ class CrossNavGenerator:
         if self.alasio:
             out = self.alasio.dict_group_ref
         for config in self.dict_nav_config.values():
-            # calculate module file
-            file = config.model_file.subpath_to(self.path_config)
-            if file == config.model_file:
-                raise DefinitionError(
-                    f'model_file is not a subpath of root, model_file={config.model_file}, root={self.root}')
-            file = to_posix(file)
             # iter group models
             for group_name, group in config.groups_data.items():
+                ancestor_config = self.dict_group_to_ancestor_nav[group_name]
+                file = ancestor_config.model_file.subpath_to(self.path_config)
+                if file == config.model_file:
+                    raise DefinitionError(
+                        f'model_file is not a subpath of root, model_file={config.model_file}, root={self.root}')
+                file = to_posix(file)
                 # build model reference
                 ref = {'file': file, 'cls': group_name}
                 out[group_name] = ref

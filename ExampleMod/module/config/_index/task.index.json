@@ -35,6 +35,19 @@
     },
     "config": {"task": ["Dashboard"], "group": []}
   },
+  "GemsFarming": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "Scheduler", "task": "GemsFarming"},
+      "Campaign": {"file": "main/main_model.py", "cls": "GemsCampaign", "task": "GemsFarming"},
+      "GemsFarming": {"file": "gems/gems_model.py", "cls": "GemsFarming", "task": "GemsFarming"},
+      "StopCondition": {"file": "main/main_model.py", "cls": "GemsStopCondition", "task": "GemsFarming"},
+      "Fleet1": {"file": "main/main_model.py", "cls": "Fleet", "task": "GemsFarming"},
+      "Submarine": {"file": "main/main_model.py", "cls": "GemsSubmarine", "task": "GemsFarming"},
+      "Emotion1": {"file": "main/main_model.py", "cls": "GemsEmotionRecord", "task": "GemsFarming"},
+      "EquipmentCode": {"file": "gems/gems_model.py", "cls": "EquipmentCode", "task": "GemsFarming"}
+    },
+    "config": {"task": ["GemsFarming"], "group": []}
+  },
   "General": {
     "group": {
       "Retirement": {"file": "general/general_model.py", "cls": "Retirement", "task": "General"},

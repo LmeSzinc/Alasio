@@ -122,5 +122,31 @@
       "zh-CN": "META支援",
       "en-US": "Opsi AshAssist"
     }
+  },
+  "gems": {
+    "_info": {
+      "zh-CN": "gems",
+      "en-US": "gems"
+    },
+    "card-GemsFarming-GemsFarming": {
+      "zh-CN": "GemsFarming",
+      "en-US": "GemsFarming"
+    },
+    "card-GemsFarming-StopCondition": {
+      "zh-CN": "GemsStopCondition",
+      "en-US": "GemsStopCondition"
+    },
+    "card-GemsFarming-Fleet1": {
+      "zh-CN": "Fleet",
+      "en-US": "Fleet"
+    },
+    "card-GemsFarming-EquipmentCode": {
+      "zh-CN": "EquipmentCode",
+      "en-US": "EquipmentCode"
+    },
+    "card-GemsFarming-Emotion1": {
+      "zh-CN": "GemsEmotionRecord",
+      "en-US": "GemsEmotionRecord"
+    }
   }
 }

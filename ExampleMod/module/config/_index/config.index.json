@@ -22,6 +22,19 @@
       "group": []
     }
   },
+  "gems": {
+    "file": "gems/gems_config.json",
+    "i18n": [
+      "alasio/alasio_i18n.json",
+      "alasio/store_i18n.json",
+      "gems/gems_i18n.json",
+      "main/main_i18n.json"
+    ],
+    "config": {
+      "task": ["GemsFarming"],
+      "group": []
+    }
+  },
   "general": {
     "file": "general/general_config.json",
     "i18n": [
