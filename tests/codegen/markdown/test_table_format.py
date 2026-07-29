@@ -173,6 +173,106 @@ class TestMarkdownTableFormat:
 """
         assert f.getvalue() == expected
 
+    def test_display_width_cjk_auto_width(self):
+        """CJK chars count as 2 display units for auto-width."""
+
+        class Model(msgspec.Struct):
+            name: str
+            age: int
+
+        content = """\
+| name | age |
+|------|-----|
+| 你好世界 | 30 |
+| a | 25 |
+"""
+        f = StringIO(content)
+        table = MarkdownTable(f, "", Model).read()
+        table.write()
+        # Column width = max(4, 8, 1) = 8 → ljust pads CJK (len=4) to 8
+        expected = """\
+| name     | age |
+|----------|-----|
+| 你好世界 | 30  |
+| a        | 25  |
+"""
+        assert f.getvalue() == expected
+
+    def test_display_width_cjk_fixed_width(self):
+        """CJK content with fixed width — padding based on display width."""
+
+        class Model(msgspec.Struct):
+            name: Annotated[str, Meta(extra={"width": 10})]
+            age: int
+
+        content = """\
+| name | age |
+|------|-----|
+| 你好 | 30 |
+"""
+        f = StringIO(content)
+        table = MarkdownTable(f, "", Model).read()
+        table.write()
+        # "你好" display width = 4, fixed width = 10 → padding = 6
+        expected = """\
+| name       | age |
+|------------|-----|
+| 你好       | 30  |
+"""
+        assert f.getvalue() == expected
+
+    def test_display_width_cjk_overflows_fixed(self):
+        """CJK content wider than fixed width overflows."""
+
+        class Model(msgspec.Struct):
+            name: Annotated[str, Meta(extra={"width": 4})]
+            age: int
+
+        content = """\
+| name | age |
+|------|-----|
+| 你好世界 | 30 |
+| a | 25 |
+"""
+        f = StringIO(content)
+        table = MarkdownTable(f, "", Model).read()
+        table.write()
+        # "你好世界" display width = 8 > 4 → overflow
+        # "a" display width = 1 < 4 → padded to 4
+        # "name" display width = 4 = width → exact fit
+        expected = """\
+| name | age |
+|------|-----|
+| 你好世界 | 30  |
+| a    | 25  |
+"""
+        assert f.getvalue() == expected
+
+    def test_display_width_mixed_content(self):
+        """Mixed ASCII + CJK content aligns correctly."""
+
+        class Model(msgspec.Struct):
+            mixed: Annotated[str, Meta(extra={"width": 12})]
+
+        content = """\
+| mixed |
+|-------|
+| hello你好 |
+| abc |
+"""
+        f = StringIO(content)
+        table = MarkdownTable(f, "", Model).read()
+        table.write()
+        # "hello你好" = 5 + 4 = 9 display width, padding = 3
+        # "abc" = 3 display width, padding = 9
+        expected = """\
+| mixed        |
+|--------------|
+| hello你好    |
+| abc          |
+"""
+        assert f.getvalue() == expected
+
 
 class TestMarkdownTableMinWidth:
 
