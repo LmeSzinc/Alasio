@@ -3,7 +3,7 @@ from typing import get_args
 import msgspec
 import pytest
 
-from alasio.backport import process_cpu_count, removeprefix, removesuffix, to_literal
+from alasio.backport import process_cpu_count, removeprefix, removesuffix, str_center, to_literal
 
 
 class TestRemovePrefix:
@@ -119,3 +119,28 @@ class TestProcessCpuCount:
         """
         count = process_cpu_count()
         assert count is None or isinstance(count, int)
+
+
+class TestStrCenter:
+    """Tests for str_center — extra char goes to right when padding is odd."""
+
+    @pytest.mark.parametrize("text, width, char, expected", [
+        # even padding — same as str.center()
+        ("ab", 6, ' ', "  ab  "),
+        ("a", 5, ' ', "  a  "),
+        ("", 4, ' ', "    "),
+        # odd padding — extra char on RIGHT
+        ("ab", 5, ' ', " ab  "),
+        ("abc", 7, ' ', "  abc  "),
+        ("a", 4, ' ', " a  "),
+        # width <= len(text) — return as-is
+        ("hello", 3, ' ', "hello"),
+        ("hello", 5, ' ', "hello"),
+        # custom padding char
+        ("ab", 6, '-', "--ab--"),
+        ("ab", 5, '-', "-ab--"),
+        ("a", 4, '.', ".a.."),
+        ("a", 3, '.', ".a."),
+    ])
+    def test_str_center(self, text, width, char, expected):
+        assert str_center(text, width, char) == expected

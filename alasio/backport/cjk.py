@@ -1,6 +1,8 @@
 import re
 from typing import Literal
 
+from alasio.backport import str_center
+
 # Regex matching CJK characters, fullwidth punctuation, emoji, and other
 # characters that occupy 2 display columns in a monospace terminal.
 _RE_WIDE = re.compile(
@@ -65,12 +67,5 @@ def cjk_pad(text, width, align: T_ALIGN = 'left', char=' '):
     if align == 'right':
         return text.rjust(target, char)
     if align == 'center':
-        # if padding to odd width, give the extra char to the right
-        # while the standard str.center() will give the extra char to the left, bad for visual display
-        pad = target - len(text)
-        if pad <= 0:
-            return text
-        left = pad // 2
-        right = pad - left
-        return ''.join([char * left, text, char * right])
+        return str_center(text, target, char)
     return text.ljust(target, char)

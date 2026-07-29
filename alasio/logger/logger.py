@@ -5,6 +5,7 @@ from io import StringIO
 
 from exceptiongroup import BaseExceptionGroup, ExceptionGroup
 
+from alasio.backport import str_center
 from alasio.backport.patch import patch_startup
 from alasio.backport.rich import patch_rich_traceback_extract, patch_rich_traceback_links
 from alasio.logger.utils import (
@@ -574,7 +575,7 @@ class AlasioLogger(LoggingLevel):
         # Auto-extend interior to wrap long titles: at least 98, with 4+ spaces padding each side
         interior = max(98, len(title) + 10)
         edge = f'+{"=" * interior}+'
-        hr = f' {title} '.center(interior, ' ')
+        hr = str_center(f' {title} ', interior, ' ')
         hr = f'|{hr}|'
         self.raw(edge)
         self.raw(hr, **kwargs)
@@ -590,7 +591,7 @@ class AlasioLogger(LoggingLevel):
         """
         title = f'{title}'.upper()
         width = max(100, len(title) + 12)
-        hr = f' {title} '.center(width, '=')
+        hr = str_center(f' {title} ', width, '=')
         self.raw(hr, **kwargs)
         self.info(title, **kwargs)
 
@@ -603,7 +604,7 @@ class AlasioLogger(LoggingLevel):
         """
         title = f'{title}'.upper()
         width = max(100, len(title) + 12)
-        hr = f' {title} '.center(width, '-')
+        hr = str_center(f' {title} ', width, '-')
         self.raw(hr, **kwargs)
         self.info(title, **kwargs)
 
@@ -615,7 +616,7 @@ class AlasioLogger(LoggingLevel):
         """
         title = f'{title}'.upper()
         width = max(40, len(title) + 12)
-        hr = f' {title} '.center(width, '.')
+        hr = str_center(f' {title} ', width, '.')
         self.info(hr, **kwargs)
 
     def attr(self, name, text):
