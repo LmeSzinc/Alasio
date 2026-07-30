@@ -25,6 +25,7 @@
     { path: "/dev/ws", name: t.WebsocketTest.Title() },
     { path: "/dev/workerstatus", name: "Worker Status" },
     { path: "/dev/scheduler", name: "Scheduler" },
+    { path: "/dev/preview", name: "Preview" },
     { path: "/dev/dashboard", name: "Dashboard" },
     { path: "/dev/dashboardgroup", name: "Dashboard Group" },
     { path: "/dev/log", name: "Log Viewer" },

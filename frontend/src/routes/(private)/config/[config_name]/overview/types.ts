@@ -12,3 +12,6 @@ export interface LogDataProps {
   // meaning don't show time and level, log message is pre-formatted, show it directly
   r?: number;
 }
+
+export type PreviewMode = "realtime" | "normal" | "disable";
+export type PreviewState = "preview" | "stopped" | "error";

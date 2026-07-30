@@ -130,7 +130,7 @@
   <hr class="mb-1" />
 
   <!-- Task list -->
-  <div class="mb-2.5 flex h-12 flex-col gap-0.5 py-0.5 text-sm">
+  <div class="mb-3 flex h-12 flex-col gap-0.5 py-0.5 text-sm">
     {#if taskRunning || nextTasksToShow.length > 0}
       <!-- Task running -->
       {#if isRunning}
