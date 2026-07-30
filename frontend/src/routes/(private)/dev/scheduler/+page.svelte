@@ -38,24 +38,6 @@
     option: ALL_STATES,
   });
 
-  let deviceTypeInput = $state<ArgData>({
-    task: "",
-    group: "",
-    arg: "device_type",
-    dt: "input",
-    value: "Emulator",
-    name: "Device Type",
-  });
-
-  let deviceSerialInput = $state<ArgData>({
-    task: "",
-    group: "",
-    arg: "device_serial",
-    dt: "input",
-    value: "127.0.0.1:5555",
-    name: "Device Serial",
-  });
-
   let taskListInput = $state<ArgData>({
     task: "",
     group: "",
@@ -120,12 +102,9 @@
             <Scheduler
               config_name={configNameInput.value as string}
               state={stateInput.value as WORKER_STATE}
-              deviceType={deviceTypeInput.value as string}
-              deviceSerial={deviceSerialInput.value as string}
               {taskRunning}
               {taskNext}
               onOverviewClick={() => console.log("Overview clicked")}
-              onDeviceClick={() => console.log("Device clicked")}
             />
           </div>
         </div>
@@ -141,8 +120,6 @@
         <div class="space-y-3">
           <Arg bind:data={configNameInput} />
           <Arg bind:data={stateInput} />
-          <Arg bind:data={deviceTypeInput} />
-          <Arg bind:data={deviceSerialInput} />
           <Arg bind:data={taskListInput} />
         </div>
       </Card.Content>
@@ -162,8 +139,6 @@
             <Scheduler
               config_name="TestConfig"
               {state}
-              deviceType="Emulator"
-              deviceSerial="127.0.0.1:5555"
               taskRunning="CurrentTask"
               taskNext={[
                 { TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) },
@@ -202,8 +177,6 @@
             <Scheduler
               config_name="VeryLongConfigurationNameThatShouldBeTruncatedInTheUserInterface"
               {state}
-              deviceType="VeryLongEmulatorType"
-              deviceSerial="127.0.0.1:5555-with-very-long-serial-number"
               taskRunning="VeryLongTaskNameThatWillBeTruncated"
               taskNext={[
                 {
@@ -232,34 +205,10 @@
             <Scheduler
               config_name="NextOnly"
               {state}
-              deviceType="Device"
-              deviceSerial="123456"
               taskNext={[
                 { TaskName: "Future1", NextRun: Math.floor(Date.now() / 1000) + 600 },
                 { TaskName: "Future2", NextRun: Math.floor(Date.now() / 1000) + 3600 },
                 { TaskName: "Future3", NextRun: Math.floor(Date.now() / 1000) + 100000 },
-              ]}
-            />
-          {/each}
-        </div>
-      </Card.Content>
-    </Card.Root>
-
-    <!-- No device info -->
-    <Card.Root class="neushadow border-none">
-      <Card.Header>
-        <Card.Title>No Device Info</Card.Title>
-      </Card.Header>
-      <Card.Content>
-        <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATES as state}
-            <Scheduler
-              config_name="NoDevice"
-              {state}
-              taskRunning="Task"
-              taskNext={[
-                { TaskName: "Task", NextRun: Math.floor(Date.now() / 1000) },
-                { TaskName: "Next", NextRun: Math.floor(Date.now() / 1000) + 3600 },
               ]}
             />
           {/each}

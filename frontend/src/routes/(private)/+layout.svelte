@@ -70,7 +70,7 @@
         <ConfigAside class="pt-1 xl:pt-0" />
       </div>
       {#if NavContext.snippet}
-        <div class={cn("aside-item bg-card w-50 pt-1 xl:pt-0", screen.isXL && "neushadow w-60")}>
+        <div class={cn("aside-item bg-card w-50 xl:pt-0", screen.isXL && "neushadow w-60")}>
           {@render NavContext.snippet()}
         </div>
       {/if}

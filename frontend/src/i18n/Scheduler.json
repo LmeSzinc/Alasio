@@ -62,13 +62,6 @@
     "zh-TW": "強殺中",
     "es-ES": "Forzando cierre"
   },
-  "NoDevice": {
-    "en-US": "No Device",
-    "zh-CN": "无设备",
-    "ja-JP": "デバイスなし",
-    "zh-TW": "無設備",
-    "es-ES": "Sin dispositivo"
-  },
   "NoTask": {
     "en-US": "No Task",
     "zh-CN": "无任务",

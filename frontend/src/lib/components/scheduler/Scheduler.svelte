@@ -5,42 +5,34 @@
   import { t } from "$lib/i18n";
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
-  import { CircleDotDashed, Pencil } from "@lucide/svelte";
+  import { CircleDotDashed } from "@lucide/svelte";
   import ActionKill from "./ActionKill.svelte";
   import ActionSchedulerContinue from "./ActionSchedulerContinue.svelte";
   import ActionSchedulerStop from "./ActionSchedulerStop.svelte";
   import ActionStart from "./ActionStart.svelte";
+  import ConfigName from "./ConfigName.svelte";
   import NextRun from "./NextRun.svelte";
   import type { TaskItem } from "./types";
 
   type $$props = {
     config_name: string;
     state?: WORKER_STATE;
-    deviceType?: string;
-    deviceSerial?: string;
     taskRunning?: string;
     taskNext?: TaskItem[];
     onOverviewClick?: () => void;
-    onDeviceClick?: () => void;
     class?: string;
   };
   let {
     config_name,
     state: stateVal = "idle",
-    deviceType = "",
-    deviceSerial = "",
     taskRunning,
     taskNext,
     onOverviewClick,
-    onDeviceClick,
     class: className,
   }: $$props = $props();
 
   const displayState = useWorkerState(() => stateVal);
   const isRunning = $derived(taskRunning && displayState.value !== "idle");
-  const displaySerial = $derived(
-    deviceSerial.startsWith("127.0.0.1:") ? deviceSerial.replace("127.0.0.1:", "") : deviceSerial,
-  );
 
   // Show 3 tasks, or 2 if a task is running
   let nextTasksToShow = $derived.by(() => {
@@ -78,11 +70,6 @@
     }
   });
 
-  function handleDeviceEdit(e: Event) {
-    e.stopPropagation();
-    onDeviceClick?.();
-  }
-
   // RPCs
   const workerClient = useTopic("Worker");
   const startRpc = workerClient.rpc();
@@ -108,62 +95,41 @@
 </script>
 
 <div
-  class={cn("border-muted-foreground/35 relative flex max-w-60 flex-col gap-1.5 p-3", className)}
+  class={cn("border-muted-foreground/35 relative flex max-w-60 flex-col px-3 pb-3", className)}
   onclick={onOverviewClick}
   onkeydown={(e) => (e.key === "Enter" || e.key === " ") && onOverviewClick?.()}
   role="button"
   tabindex="0"
 >
-  <div>
-    <!-- Title -->
-    <div class="flex items-center gap-2">
-      <!-- Config Name -->
-      <span class="flex-1 truncate text-lg font-semibold">{config_name}</span>
-      <!-- Worker Status -->
-      <span
-        class={cn("ml-auto pl-2 text-sm font-semibold", stateVal === "error" ? "text-destructive" : "text-primary")}
-      >
-        {#if stateVal === "idle"}{t.Scheduler.Idle()}
-        {:else if stateVal === "starting"}{t.Scheduler.Starting()}
-        {:else if stateVal === "running"}{t.Scheduler.Running()}
-        {:else if stateVal === "disconnected"}{t.Scheduler.Disconnected()}
-        {:else if stateVal === "error"}{t.Scheduler.Error()}
-        {:else if stateVal === "scheduler-stopping"}{t.Scheduler.SchedulerStopping()}
-        {:else if stateVal === "scheduler-waiting"}{t.Scheduler.SchedulerWaiting()}
-        {:else if stateVal === "killing"}{t.Scheduler.Killing()}
-        {:else if stateVal === "force-killing"}{t.Scheduler.ForceKilling()}
-        {:else}{stateVal}{/if}
-      </span>
-    </div>
-
-    <!-- Device -->
-    <div class="text-muted-foreground flex w-full gap-0.5 text-xs">
-      {#if deviceType && displaySerial}
-        <span>{deviceType}</span>
-        <span>-</span>
-        <span class="truncate">{displaySerial}</span>
-      {:else if displaySerial}
-        <span class="truncate">{displaySerial}</span>
-      {:else if deviceType}
-        <span class="truncate">{deviceType}</span>
-      {:else}
-        <span class="truncate">{t.Scheduler.NoDevice()}</span>
-      {/if}
-      <button class="ml-1 cursor-pointer" onclick={handleDeviceEdit} aria-label="Edit device">
-        <Pencil
-          class={cn(
-            "h-2.5 w-2.5",
-            "border-muted-foreground/50 hover:text-foreground hover:border-foreground border-b transition-colors",
-          )}
-        />
-      </button>
-    </div>
+  <!-- Title -->
+  <!-- minor padding-left for visual compensation of title -->
+  <div class="flex h-12.5 items-center gap-1 pl-0.25">
+    <!-- Config Name -->
+    <ConfigName text={config_name} class="w-30 shrink-0" />
+    <!-- Worker Status -->
+    <span
+      class={cn(
+        "ml-auto truncate text-right text-sm font-semibold",
+        stateVal === "error" ? "text-destructive" : "text-primary",
+      )}
+    >
+      {#if stateVal === "idle"}{t.Scheduler.Idle()}
+      {:else if stateVal === "starting"}{t.Scheduler.Starting()}
+      {:else if stateVal === "running"}{t.Scheduler.Running()}
+      {:else if stateVal === "disconnected"}{t.Scheduler.Disconnected()}
+      {:else if stateVal === "error"}{t.Scheduler.Error()}
+      {:else if stateVal === "scheduler-stopping"}{t.Scheduler.SchedulerStopping()}
+      {:else if stateVal === "scheduler-waiting"}{t.Scheduler.SchedulerWaiting()}
+      {:else if stateVal === "killing"}{t.Scheduler.Killing()}
+      {:else if stateVal === "force-killing"}{t.Scheduler.ForceKilling()}
+      {:else}{stateVal}{/if}
+    </span>
   </div>
 
-  <hr class="" />
+  <hr class="mb-1" />
 
   <!-- Task list -->
-  <div class="flex h-12 flex-col text-sm">
+  <div class="mb-2.5 flex h-12 flex-col gap-0.5 py-0.5 text-sm">
     {#if taskRunning || nextTasksToShow.length > 0}
       <!-- Task running -->
       {#if isRunning}
@@ -196,7 +162,7 @@
   </div>
 
   <!-- Buttons -->
-  <div class="mt-0.5 flex gap-1">
+  <div class="flex gap-1">
     {#if displayState.value === "idle" || displayState.value === "error"}
       <!-- idle, show one start button-->
       <ActionStart onclick={handleStart} title={t.Scheduler.Start()} />

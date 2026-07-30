@@ -112,7 +112,7 @@
 
 {#snippet nav()}
   <div class="flex h-full flex-col gap-2 overflow-hidden">
-    <Scheduler class="pb-0" {config_name} {state} {taskRunning} {taskNext} {onOverviewClick} {onDeviceClick} />
+    <Scheduler class="pb-0" {config_name} {state} {taskRunning} {taskNext} {onOverviewClick} />
     <div class="border-border mx-3 border-t"></div>
     <ScrollArea class="min-h-0 w-full flex-1">
       <ConfigNav {onCardClick} {onOverviewClick} {onDeviceClick} />
