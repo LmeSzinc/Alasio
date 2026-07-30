@@ -7,8 +7,9 @@
   import { useTopic } from "$lib/ws";
   import { CircleDotDashed, Pencil } from "@lucide/svelte";
   import ActionKill from "./ActionKill.svelte";
+  import ActionSchedulerContinue from "./ActionSchedulerContinue.svelte";
+  import ActionSchedulerStop from "./ActionSchedulerStop.svelte";
   import ActionStart from "./ActionStart.svelte";
-  import ActionStop from "./ActionStop.svelte";
   import NextRun from "./NextRun.svelte";
   import type { TaskItem } from "./types";
 
@@ -119,7 +120,9 @@
       <!-- Config Name -->
       <span class="flex-1 truncate text-lg font-semibold">{config_name}</span>
       <!-- Worker Status -->
-      <span class="text-primary ml-auto pl-2 text-sm font-semibold">
+      <span
+        class={cn("ml-auto pl-2 text-sm font-semibold", stateVal === "error" ? "text-destructive" : "text-primary")}
+      >
         {#if stateVal === "idle"}{t.Scheduler.Idle()}
         {:else if stateVal === "starting"}{t.Scheduler.Starting()}
         {:else if stateVal === "running"}{t.Scheduler.Running()}
@@ -174,7 +177,10 @@
       {#each nextTasksToShow as task}
         <div class="text-muted-foreground flex items-center gap-1">
           <CircleDotDashed
-            class={cn("text-muted-foreground h-3 w-3 shrink-0", isRunning && displayState.value !== "error" ? "animate-spin" : "")}
+            class={cn(
+              "text-muted-foreground h-3 w-3 shrink-0",
+              isRunning && displayState.value !== "error" ? "animate-spin" : "",
+            )}
             strokeWidth="2"
           />
           <span class="flex-1 truncate text-xs">{task.TaskName}</span>
@@ -195,24 +201,23 @@
       <!-- idle, show one start button-->
       <ActionStart onclick={handleStart} title={t.Scheduler.Start()} />
     {:else if displayState.value === "starting"}
-      <!-- starting, show one start button-->
       <ActionStart disabled title={t.Scheduler.Start()} />
     {:else if displayState.value === "running" || displayState.value === "scheduler-waiting"}
-      <!-- running, show stop and kill button-->
-      <ActionStop onclick={handleSchedulerStop} title={t.Scheduler.SchedulerStop()} />
-      <ActionKill onclick={handleKill} />
+      <!-- running: kill (flex-1) + scheduler stop (right) -->
+      <ActionKill onclick={handleKill} title={t.Scheduler.Kill()} class="flex-1" />
+      <ActionSchedulerStop onclick={handleSchedulerStop} title={t.Scheduler.SchedulerStop()} />
     {:else if displayState.value === "scheduler-stopping"}
-      <!-- scheduler-stopping, show continue and kill button-->
-      <ActionStop
+      <!-- scheduler-stopping: kill (flex-1) + scheduler continue (right) -->
+      <ActionKill disabled={isStoppingDebouncing} onclick={handleKill} title={t.Scheduler.Kill()} class="flex-1" />
+      <ActionSchedulerContinue
         disabled={isStoppingDebouncing}
         onclick={handleSchedulerContinue}
         title={t.Scheduler.SchedulerContinue()}
       />
-      <ActionKill disabled={isStoppingDebouncing} onclick={handleKill} />
     {:else if displayState.value === "killing" || displayState.value === "force-killing" || displayState.value === "disconnected"}
-      <!-- killing, show kill button-->
-      <ActionStop disabled title={t.Scheduler.SchedulerStop()} />
-      <ActionKill disabled title={t.Scheduler.Kill()} />
+      <!-- killing: kill (flex-1) + scheduler stop (right) -->
+      <ActionKill disabled title={t.Scheduler.Kill()} class="flex-1" />
+      <ActionSchedulerStop disabled title={t.Scheduler.SchedulerStop()} />
     {/if}
   </div>
 </div>

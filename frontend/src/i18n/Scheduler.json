@@ -1,11 +1,4 @@
 {
-  "Kill": {
-    "en-US": "Kill",
-    "zh-CN": "终止",
-    "ja-JP": "終了",
-    "zh-TW": "終止",
-    "es-ES": "Terminar"
-  },
   "Idle": {
     "en-US": "Idle",
     "zh-CN": "空闲",
@@ -90,18 +83,25 @@
     "zh-TW": "啟動",
     "es-ES": "Iniciar"
   },
-  "SchedulerStop": {
+  "Kill": {
     "en-US": "Stop",
     "zh-CN": "停止",
     "ja-JP": "停止",
     "zh-TW": "停止",
     "es-ES": "Detener"
   },
+  "SchedulerStop": {
+    "en-US": "Gracefully stop at next task checkpoint",
+    "zh-CN": "在下一个任务检查点优雅停止",
+    "ja-JP": "次のタスクチェックポイントで優雅に停止",
+    "zh-TW": "在下一個任務檢查點優雅停止",
+    "es-ES": "Detener elegantemente en el próximo punto de control"
+  },
   "SchedulerContinue": {
-    "en-US": "Continue",
-    "zh-CN": "继续",
-    "ja-JP": "継続",
-    "zh-TW": "繼續",
-    "es-ES": "Continuar"
+    "en-US": "Continue running",
+    "zh-CN": "继续运行",
+    "ja-JP": "実行を継続",
+    "zh-TW": "繼續運行",
+    "es-ES": "Continuar ejecución"
   }
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { cn } from "$lib/utils";
-  import { CircleDotDashed, CirclePlay, Ghost, Pause } from "@lucide/svelte";
+  import { CircleDotDashed, CirclePlay, Ghost, Hourglass, X } from "@lucide/svelte";
   import { mode } from "mode-watcher";
   import { onMount } from "svelte";
   import type { WORKER_STATE } from "./types";
@@ -16,7 +16,11 @@
   let { state: stateVal, active = false, class: className, iconClass, displayIdle = false }: Props = $props();
 
   const strokeWidth = $derived(mode.current === "dark" ? "3" : "2");
-  const spin = $derived(stateVal === "running" || stateVal === "scheduler-waiting" ? "animate-spin" : "");
+  const spin = $derived(
+    stateVal === "running" || stateVal === "scheduler-waiting" || stateVal === "scheduler-stopping"
+      ? "animate-spin"
+      : "",
+  );
 
   // global animation offset
   let delay = $state<string>("0ms");
@@ -36,10 +40,10 @@
     <CircleDotDashed class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Waiting" />
   {:else if stateVal === "error"}
     <!-- Error: red X -->
-    <Ghost class={cn("text-destructive h-3 w-3", iconClass)} {strokeWidth} aria-label="Error" />
+    <X class={cn("text-destructive h-3 w-3", iconClass)} {strokeWidth} aria-label="Error" />
   {:else if stateVal === "scheduler-stopping"}
-    <!-- Scheduler stopping: pause icon (two vertical lines) -->
-    <Pause class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Stopping" />
+    <!-- Scheduler stopping: hourglass icon -->
+    <Hourglass class={cn("h-2.5 w-2.5", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Stopping" />
   {:else if stateVal === "starting"}
     <!-- Starting: hollow circle with muted color -->
     <CirclePlay class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Starting" />

@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as Tooltip from "$lib/components/ui/tooltip";
   import { cn } from "$lib/utils";
+  import { Play } from "@lucide/svelte";
   import type { Snippet } from "svelte";
 
   let {
@@ -26,18 +27,17 @@
           <button
             {...props}
             class={cn(
-              "h-7 w-full cursor-pointer rounded-full",
-              "flex items-center justify-center",
-              "text-primary border-primary/60 border-2 text-sm font-semibold",
+              "h-7 w-7 cursor-pointer rounded-full",
+              "text-primary border-primary/60 flex items-center justify-center border-2",
               disabled ? "cursor-not-allowed opacity-50" : "hover:border-primary",
             )}
             {onclick}
             {disabled}
           >
             {#if children}
-              {@render children?.()}
+              {@render children()}
             {:else}
-              {title}
+              <Play class="h-3.5 w-3.5" />
             {/if}
           </button>
         {/snippet}
