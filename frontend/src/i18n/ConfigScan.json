@@ -1,4 +1,11 @@
 {
+  "Cancel": {
+    "en-US": "Cancel",
+    "zh-CN": "取消",
+    "ja-JP": "キャンセル",
+    "zh-TW": "取消",
+    "es-ES": "Cancelar"
+  },
   "ConfigManager": {
     "en-US": "Config Manager",
     "zh-CN": "配置文件管理器",
@@ -12,6 +19,13 @@
     "ja-JP": "スケジューラグループ #{n}",
     "zh-TW": "調度器組 #{n}",
     "es-ES": "Grupo de programador #{n}"
+  },
+  "RenameConfig": {
+    "en-US": "Rename Config",
+    "zh-CN": "重命名配置",
+    "ja-JP": "設定名を変更",
+    "zh-TW": "重新命名配置",
+    "es-ES": "Renombrar Configuración"
   },
   "CopyConfig": {
     "en-US": "Copy Config",
@@ -47,13 +61,6 @@
     "ja-JP": "設定名を入力",
     "zh-TW": "輸入配置檔案名稱",
     "es-ES": "Ingrese nombre de configuración"
-  },
-  "Cancel": {
-    "en-US": "Cancel",
-    "zh-CN": "取消",
-    "ja-JP": "キャンセル",
-    "zh-TW": "取消",
-    "es-ES": "Cancelar"
   },
   "CopyFrom": {
     "en-US": "Copy from",
@@ -96,13 +103,6 @@
     "ja-JP": "この操作は元に戻せません。設定ファイルは完全に削除されます。",
     "zh-TW": "此操作無法撤銷。配置檔案將被永久刪除。",
     "es-ES": "Esta acción no se puede deshacer. El archivo de configuración se eliminará permanentemente."
-  },
-  "RenameConfig": {
-    "en-US": "Rename Config",
-    "zh-CN": "重命名配置",
-    "ja-JP": "設定名を変更",
-    "zh-TW": "重新命名配置",
-    "es-ES": "Renombrar Configuración"
   },
   "CurrentName": {
     "en-US": "Current name",

@@ -1,4 +1,11 @@
 {
+  "Kill": {
+    "en-US": "Kill",
+    "zh-CN": "终止",
+    "ja-JP": "終了",
+    "zh-TW": "終止",
+    "es-ES": "Terminar"
+  },
   "Idle": {
     "en-US": "Idle",
     "zh-CN": "空闲",
@@ -96,12 +103,5 @@
     "ja-JP": "継続",
     "zh-TW": "繼續",
     "es-ES": "Continuar"
-  },
-  "Kill": {
-    "en-US": "Kill",
-    "zh-CN": "终止",
-    "ja-JP": "終了",
-    "zh-TW": "終止",
-    "es-ES": "Terminar"
   }
 }

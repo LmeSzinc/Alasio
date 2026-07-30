@@ -198,40 +198,40 @@ export class I18nGenerator {
    */
   private async syncJsonAndGen(mod: string, keys: Set<string>) {
     const jsonPath = resolvePath(this.config.i18nPath, `${mod}.json`);
-    let current: Record<string, Record<string, string>> = {};
 
+    // Build new data from all keys, preserving existing translations
+    let currentContent = "";
+    let currentOnDisk: Record<string, Record<string, string>> = {};
     try {
-      current = JSON.parse(await fs.readFile(jsonPath, "utf-8"));
+      currentContent = await fs.readFile(jsonPath, "utf-8");
+      currentOnDisk = JSON.parse(currentContent);
     } catch {}
 
     const newData: Record<string, Record<string, string>> = {};
-    let changed = false;
 
     keys.forEach((k) => {
-      if (!current[k]) {
-        // New key
-        newData[k] = {};
-        this.config.languages.forEach((l) => (newData[k][l] = k));
-        changed = true;
-      } else {
-        // Existing key
-        newData[k] = current[k];
-        // Ensure all langs exist
+      if (currentOnDisk[k]) {
+        // Preserve existing translations, ensuring all langs exist
+        newData[k] = { ...currentOnDisk[k] };
         this.config.languages.forEach((l) => {
           if (!newData[k][l]) {
             newData[k][l] = k;
-            changed = true;
           }
         });
+      } else {
+        // New key: use key name as default for all langs
+        const entry: Record<string, string> = {};
+        this.config.languages.forEach((l) => (entry[l] = k));
+        newData[k] = entry;
       }
     });
 
-    // Check if keys were removed
-    if (Object.keys(current).length !== keys.size) changed = true;
-
-    if (changed) {
-      await fs.outputFile(jsonPath, JSON.stringify(newData, null, 2));
+    // Serialize and compare with current file content to decide whether to write
+    const encoded = JSON.stringify(newData, null, 2).trimEnd();
+    if (encoded !== (currentContent || "")) {
+      await fs.outputFile(jsonPath, encoded);
     }
+
     await this.generateModuleArtifacts(mod, newData);
   }
 
