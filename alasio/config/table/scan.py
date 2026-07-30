@@ -1,3 +1,4 @@
+import os
 from collections import deque
 from copy import deepcopy
 from typing import Union
@@ -412,10 +413,19 @@ class ScanTable(AlasioGuiDB):
         new_file = AlasioConfigDB.config_file(new_name)
         if not old_file.exists():
             raise RpcValueError(f'Config file to rename does not exist: {old_file}')
-        if new_file.exists():
-            raise RpcValueError(f'Config file with new name already exists: {new_file}')
 
-        # rename
+        # On case-insensitive filesystems (Windows), a case-only rename like
+        # "alas" -> "Alas" refers to the same file on disk, so new_file.exists()
+        # returns True. Use os.path.samefile to distinguish this from a real collision.
+        if new_file.exists():
+            try:
+                is_same = os.path.samefile(old_file, new_file)
+            except FileNotFoundError:
+                is_same = False
+            if not is_same:
+                raise RpcValueError(f'Config file with new name already exists: {new_file}')
+
+        # rename (os.rename works for case-only renames on Windows)
         logger.info(f'config_rename: old_name="{old_name}", new_name="{new_name}"')
         try:
             SQLITE_POOL.rename_file(old_file, new_file)
