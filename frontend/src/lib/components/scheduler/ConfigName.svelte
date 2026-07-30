@@ -14,6 +14,8 @@
   let mode = $state<Mode>("base");
 
   $effect(() => {
+    // track on config name changes
+    text;
     containerRef;
     probeLgRef;
     probeBaseRef;
