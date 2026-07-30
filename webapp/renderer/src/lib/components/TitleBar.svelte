@@ -23,7 +23,8 @@
   }
 </script>
 
-<div class="flex h-8 select-none items-center bg-background border-b border-border z-100">
+<!-- Keep h-12 aligned with AppHeader bottom in the embedded web app -->
+<div class="flex h-12 select-none items-center bg-background border-b border-border z-100">
   <div class="flex-1 px-4 cursor-move" style="-webkit-app-region: drag">
     <span class="text-sm font-semibold">Alasio</span>
   </div>
@@ -31,21 +32,21 @@
   <div class="flex" style="-webkit-app-region: no-drag">
     <button
       onclick={handleHide}
-      class="flex h-8 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
+      class="flex h-12 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
       title="Hide to tray"
     >
       <Minimize2 size={16} />
     </button>
     <button
       onclick={handleMinimize}
-      class="flex h-8 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
+      class="flex h-12 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
       title="Minimize"
     >
       <Minus size={16} />
     </button>
     <button
       onclick={handleMaximize}
-      class="flex h-8 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
+      class="flex h-12 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
       title="Maximize"
     >
       {#if isMaximized}
@@ -56,7 +57,7 @@
     </button>
     <button
       onclick={handleClose}
-      class="flex h-8 w-12 items-center justify-center hover:bg-destructive hover:text-destructive-foreground transition-colors"
+      class="flex h-12 w-12 items-center justify-center hover:bg-destructive hover:text-destructive-foreground transition-colors"
       title="Close"
     >
       <X size={16} />

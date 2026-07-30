@@ -102,8 +102,9 @@
   tabindex="0"
 >
   <!-- Title -->
+  <!-- Keep h-12 aligned with AppHeader bottom (h-12 = 48px) -->
   <!-- minor padding-left for visual compensation of title -->
-  <div class="flex h-12.5 items-center gap-1 pl-0.25">
+  <div class="flex h-12 items-center gap-1 pl-0.25">
     <!-- Config Name -->
     <ConfigName text={config_name} class="w-30 shrink-0" />
     <!-- Worker Status -->

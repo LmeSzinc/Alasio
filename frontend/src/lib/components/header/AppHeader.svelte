@@ -17,7 +17,7 @@
   class={cn(
     // global
     "app-header relative z-40",
-    "bg-card flex h-12.5 w-full items-center gap-1 px-4",
+    "bg-card flex h-12 w-full items-center gap-1 px-4",
     className,
   )}
 >

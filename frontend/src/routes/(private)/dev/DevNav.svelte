@@ -62,6 +62,8 @@
 {/snippet}
 
 {#snippet navSection(title: string, items: typeof devNavItems)}
+  <!-- This section's border-t aligns with AppHeader bottom:
+       aside-item pt-1 (4px) + aside p-4 (16px) + h2 line-height (28px) = 48px = h-12 -->
   <div class="flex flex-col space-y-1">
     <h2 class="px-3 text-lg font-semibold">{title}</h2>
     <div class="border-border border-t"></div>
