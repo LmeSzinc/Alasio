@@ -41,10 +41,11 @@ def validate_config_name(config_name):
     # Internal names are not allowed
     # 'gui', 'webapp' are preserved for log files
     # ':memory:' is in-memory sqlite3 database
-    if config_name in ('gui', 'webapp', ':memory:'):
+    name_lower = config_name.lower()
+    if name_lower in ('gui', 'webapp', ':memory:'):
         return f'Config name is protected: "{config_name}"'
     # "template*" are config templates for dev purpose
-    if config_name.startswith('template'):
+    if name_lower.startswith('template'):
         return f'Config name is protected: "{config_name}"'
     return ''
 
@@ -58,7 +59,7 @@ def iter_local_files():
     """
     folder = env.PROJECT_ROOT / 'config'
     for file in folder.iter_files(ext='.db'):
-        name = file.stem.lower()
+        name = file.stem
         error = validate_config_name(name)
         if error:
             continue
