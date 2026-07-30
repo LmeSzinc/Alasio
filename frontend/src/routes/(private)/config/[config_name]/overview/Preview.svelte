@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { WORKER_STATE } from "$lib/components/aside/types";
   import Button from "$lib/components/ui/button/button.svelte";
   import * as Popover from "$lib/components/ui/popover";
   import { t } from "$lib/i18n";
@@ -8,7 +9,7 @@
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
   import { previewClient } from "$lib/ws/preview.svelte";
-  import { Check, Zap } from "@lucide/svelte";
+  import { Check, CircleDotDashed, Clock, EyeOff, PlayOff, Square, TriangleAlert, Zap } from "@lucide/svelte";
   import { onDestroy, untrack } from "svelte";
 
   type Props = {
@@ -16,6 +17,10 @@
     config_name: string;
   };
   let { class: className, config_name }: Props = $props();
+
+  // Track whether the config's worker is running
+  const workerClient = useTopic<Record<string, WORKER_STATE> | undefined>("Worker");
+  const workerState = $derived(workerClient.data?.[config_name] || "idle");
 
   type PreviewMode = "realtime" | "normal" | "disable";
   type PreviewState = "preview" | "stopped" | "error";
@@ -61,7 +66,7 @@
     const timestamp = Number(view.getBigUint64(8));
 
     switch (header) {
-      case 'PreviewS': {
+      case "PreviewS": {
         // Stop signal received
         previewState = "stopped";
         const oldUrl = untrack(() => imageUrl);
@@ -72,7 +77,7 @@
         imageTime = timestamp;
         return;
       }
-      case 'Preview_': {
+      case "Preview_": {
         // Preview signal
         previewState = "preview";
         const imgBlob = new Blob([data.slice(16)], { type: "image/jpeg" });
@@ -155,21 +160,30 @@
   )}
 >
   {#if previewState === "error"}
-    <div class="text-destructive flex h-full items-center justify-center text-sm italic">
+    <div class="text-destructive flex h-full flex-col items-center justify-center gap-2 text-sm italic">
+      <TriangleAlert class="h-5 w-5" />
       {t.Overview.PreviewError()}
     </div>
   {:else if previewState === "stopped"}
-    <div class="text-muted-foreground flex h-full items-center justify-center text-sm italic">
+    <div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm italic">
+      <CircleDotDashed class="h-5 w-5" />
       {t.Overview.PreviewStopped()}
     </div>
   {:else if imageUrl && isPreviewActive}
     <img src={imageUrl} alt="Preview" class="h-full w-full rounded-md object-contain" />
   {:else if !isPreviewActive}
-    <div class="text-muted-foreground flex h-full items-center justify-center text-sm italic">
+    <div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm italic">
+      <EyeOff class="h-5 w-5" />
       {t.Overview.PreviewDisabled()}
     </div>
+  {:else if workerState === "idle"}
+    <div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm italic">
+      <PlayOff class="h-5 w-5" />
+      {t.Overview.PreviewNotRunning()}
+    </div>
   {:else}
-    <div class="text-muted-foreground flex h-full items-center justify-center text-sm italic">
+    <div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm italic">
+      <Clock class="h-5 w-5" />
       {t.Overview.PreviewWaiting()}
     </div>
   {/if}
@@ -182,7 +196,7 @@
         "focus-visible:ring-ring ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
         "opacity-0 transition-opacity group-hover:opacity-100 group-focus:opacity-100",
         previewMode.value === "disable"
-          ? "text-muted-foreground border-transparent"
+          ? "text-muted-foreground border-muted-foreground"
           : previewMode.value === "realtime"
             ? "border-yellow-500 text-yellow-500"
             : "border-blue-400 text-blue-400",

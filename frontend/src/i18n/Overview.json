@@ -55,6 +55,13 @@
     "zh-TW": "預覽已禁用",
     "es-ES": "Vista previa desactivada"
   },
+  "PreviewNotRunning": {
+    "en-US": "Not running",
+    "zh-CN": "未运行",
+    "ja-JP": "未実行",
+    "zh-TW": "未運行",
+    "es-ES": "No en ejecución"
+  },
   "PreviewWaiting": {
     "en-US": "Waiting for preview...",
     "zh-CN": "等待预览...",
