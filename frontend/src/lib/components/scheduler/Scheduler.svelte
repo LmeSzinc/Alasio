@@ -174,7 +174,7 @@
       {#each nextTasksToShow as task}
         <div class="text-muted-foreground flex items-center gap-1">
           <CircleDotDashed
-            class={cn("text-muted-foreground h-3 w-3 shrink-0", isRunning ? "animate-spin" : "")}
+            class={cn("text-muted-foreground h-3 w-3 shrink-0", isRunning && displayState.value !== "error" ? "animate-spin" : "")}
             strokeWidth="2"
           />
           <span class="flex-1 truncate text-xs">{task.TaskName}</span>
