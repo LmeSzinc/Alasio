@@ -369,7 +369,7 @@ class TestAlasioSchedulerRunTask:
         config.task_call.assert_called_once_with("RestartGame")
 
     def test_game_page_unknown_error(self, scheduler):
-        """_run_task returns False on GamePageUnknownError without saving error."""
+        """_run_task raises SchedulerError on GamePageUnknownError and saves error."""
         _cache_config(scheduler)
         _cache_device(scheduler)
 
@@ -379,9 +379,9 @@ class TestAlasioSchedulerRunTask:
         scheduler.my_task = _raise_page_unknown
 
         with mock.patch.object(scheduler, "_save_error_log") as mock_save:
-            result = scheduler._run_task("MyTask")
-        assert result is False
-        mock_save.assert_not_called()
+            with pytest.raises(SchedulerError):
+                scheduler._run_task("MyTask")
+        mock_save.assert_called_once()
 
     def test_request_human_takeover(self, scheduler):
         """_run_task raises SchedulerError on RequestHumanTakeover."""
@@ -981,7 +981,7 @@ class TestAlasioSchedulerTaskLoop:
         config.get_next_task.return_value = (pending, [], next_task)
 
         def _fail():
-            raise GamePageUnknownError("unknown page")
+            raise GameNotRunningError("game not running")
 
         scheduler.main = _fail
 
@@ -1000,7 +1000,7 @@ class TestAlasioSchedulerTaskLoop:
         config.get_next_task.return_value = (pending, [], next_task)
 
         def _fail():
-            raise GamePageUnknownError("unknown page")
+            raise GameNotRunningError("game not running")
 
         scheduler.main = _fail
 

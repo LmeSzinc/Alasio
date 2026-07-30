@@ -155,7 +155,8 @@ class AlasioScheduler:
             return False
         except GamePageUnknownError as e:
             logger.error(e)
-            return False
+            self._save_error_log()
+            raise SchedulerError
         except RequestHumanTakeover as e:
             logger.critical(e)
             raise SchedulerError
@@ -401,7 +402,6 @@ class AlasioScheduler:
             except SchedulerStop:
                 break
             except SchedulerError as e:
-                logger.critical(f'SchedulerError: {e}')
                 backend = BackendBridge()
                 if backend.inited:
                     backend.send_worker_state('error')
