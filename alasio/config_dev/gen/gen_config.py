@@ -313,7 +313,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             # help, help can be empty
             key = [lang, 'help']
             value = deep_get(old, key, default='')
-            value = str(value)
+            value = format_i18n(value)
             deep_set(new, key, value)
             # if help is empty, make name-help inline
             if not value:
