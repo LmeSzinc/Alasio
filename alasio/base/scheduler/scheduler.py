@@ -342,6 +342,7 @@ class AlasioScheduler:
             raise SchedulerStop
         # get next task
         self.config.release()
+        self.config.override_clear()
         try:
             pending_tasks, _, task = self.config.get_next_task()
         except RequestHumanTakeover:

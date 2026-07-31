@@ -628,7 +628,9 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
     def override(self, **kwargs):
         """
         Permanently override config values in memory.
-        These overrides persist across init_task() calls but are not saved to file.
+        - persist across init_task() calls and task_switched() checks
+        - not-persist across task switch in scheduler
+        - will not save to file
 
         Args:
             **kwargs: Key format is Group_Arg=Value, or CONST_NAME=Value

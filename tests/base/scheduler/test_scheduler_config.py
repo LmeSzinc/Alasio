@@ -17,12 +17,12 @@ Uses ExampleMod which provides a minimal but complete mod structure.
 
 import pytest
 
-from ExampleMod.module.config.const import entry
 from alasio.config.alasio.group_proxy import GroupProxy
 from alasio.config.base import AlasioConfigBase
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
 from alasio.logger import logger
+from ExampleMod.module.config.const import entry
 
 env.ALASIO_ROOT.chdir_here()
 
@@ -545,10 +545,14 @@ class TestSchedulerConfigCrossTask:
         assert config.Campaign.Name == "13-1"
         assert config.Campaign.Mode == "hard"
 
-    def test_override_survives_cross_task(self, example_mod):
+    def test_override_cleared_on_task_switch(self, example_mod):
         """
-        Override set for Task A survives even after other tasks run.
-        This tests: override -> release -> init_task(B) -> release -> init_task(A)
+        Override set for Task A is cleared when switching to another task,
+        because scheduler calls release() + override_clear() at the start
+        of each task loop. Saved DB values still survive.
+
+        This tests: override -> release + override_clear -> init_task(B)
+        -> release + override_clear -> init_task(A)
         """
         config_cls = _make_config_cls(example_mod)
         config = config_cls(self.TEST_CONFIG_NAME, task="Main")
@@ -559,21 +563,55 @@ class TestSchedulerConfigCrossTask:
         config.release()
         config.task = "Main"
         config.init_task()
+        assert config.Campaign.Mode == "hard"
 
-        # Other task runs
+        # Scheduler loop starts for another task:
+        # release() clears group cache, override_clear() clears overrides
         config.release()
+        config.override_clear()
         config.task = "Dashboard"
         config.init_task()
 
-        # Back to Main
+        # Back to Main: scheduler loop clears overrides again
         config.release()
+        config.override_clear()
         config.task = "Main"
         config.init_task()
 
         # Saved value survives
         assert config.Campaign.Name == "12-2"
-        # Override survives
+        # Override is cleared, falls back to saved value (default 'normal')
+        assert config.Campaign.Mode == "normal"
+
+    def test_override_cleared_at_task_loop_start(self, example_mod):
+        """
+        Simulates the start of a scheduler _task_loop() iteration:
+        release() + override_clear() are called before the next task runs.
+        Overrides from the previous task are cleared, saved DB values remain.
+        """
+        config_cls = _make_config_cls(example_mod)
+        config = config_cls(self.TEST_CONFIG_NAME, task="Main")
+
+        # Previous task set a saved value and an override
+        config.Campaign.Name = "13-3"
+        config.override(Campaign_Mode="hard")
         assert config.Campaign.Mode == "hard"
+
+        # Scheduler starts a new task loop
+        config.release()
+        config.override_clear()
+
+        # Override state is fully cleared
+        assert not config._override_config
+        assert not config._override_prev_config
+
+        # New task initializes and reads from DB
+        config.task = "Main"
+        config.init_task()
+
+        # Saved value survives, override is gone
+        assert config.Campaign.Name == "13-3"
+        assert config.Campaign.Mode == "normal"
 
     def test_getattr_during_other_task_does_not_corrupt(self, example_mod):
         """
