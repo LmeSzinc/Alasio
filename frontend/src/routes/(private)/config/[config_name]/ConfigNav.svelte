@@ -12,11 +12,12 @@
     onCardClick?: (nav_name: string, card_name: string) => void;
     onOverviewClick?: () => void;
     onDeviceClick?: () => void;
+    viewport?: HTMLElement | null;
     class?: string;
   };
 
   // Assign props to reactive variables, providing default empty functions for callbacks.
-  let { onCardClick, onOverviewClick, onDeviceClick, class: className }: $$props = $props();
+  let { onCardClick, onOverviewClick, onDeviceClick, viewport, class: className }: $$props = $props();
 
   // --- WebSocket & RPC Setup ---
   const topicClient = useTopic<Record<string, Record<string, string>>>("ConfigNav");
@@ -31,13 +32,15 @@
 
     if (!navData) return [] as NavItem[];
 
-    return Object.entries(navData).map(([navKey, navData]) => ({
-      key: navKey,
-      name: navData._info || navKey,
-      cards: Object.entries(navData)
-        .filter(([cardKey]) => cardKey !== "_info")
-        .map(([cardKey, cardName]) => ({ key: cardKey, name: cardName })),
-    }));
+    return Object.entries(navData).map(([navKey, navData]) => {
+      return {
+        key: navKey,
+        name: navData._info || navKey,
+        cards: Object.entries(navData)
+          .filter(([cardKey]) => cardKey !== "_info")
+          .map(([cardKey, cardName]) => ({ key: cardKey, name: cardName })),
+      };
+    });
   });
 
   // --- Event Handlers ---
@@ -64,6 +67,48 @@
         }
       }
     }
+  });
+
+  // --- Auto scroll the opened nav into view ---
+  // Expanding a nav may push its expanded content (nav title + all card titles)
+  // out of the nav viewport. Scroll instantly to fit:
+  // - item shorter than the viewport: align item bottom to viewport bottom
+  // - item taller than the viewport: align item top to viewport top
+  let itemElements: Record<string, HTMLElement> = $state({});
+
+  function scrollNavToFit(navKey: string) {
+    const item = itemElements[navKey];
+    if (!item || !viewport) return;
+
+    const itemTop =
+      item.getBoundingClientRect().top -
+      viewport.getBoundingClientRect().top +
+      viewport.scrollTop;
+    const itemHeight = item.offsetHeight;
+    const viewportHeight = viewport.clientHeight;
+
+    let target: number;
+    if (itemHeight >= viewportHeight) {
+      // Content is taller than the viewport, align to the top
+      target = itemTop;
+    } else {
+      // Show the full expanded item (bottom aligned)
+      // Leave a 24px gap at the viewport bottom so the next nav below
+      // stays visible, hinting that the expanded content has ended
+      target = itemTop + itemHeight - viewportHeight + 24;
+    }
+    // No animation, scroll instantly
+    const targetClamped = Math.max(0, target);
+    viewport.scrollTop = targetClamped;
+  }
+
+  // The accordion content mounts without animation, measure after the DOM is laid out
+  $effect(() => {
+    const opened = ui.opened_nav;
+    if (!opened || ui.isDevice) return;
+    requestAnimationFrame(() => {
+      scrollNavToFit(opened);
+    });
   });
 
   // --- Header Snippet ---
@@ -106,24 +151,26 @@
         -->
     <Accordion type="single" class="w-full" bind:value={ui.opened_nav}>
       {#each navItems as nav (nav.key)}
-        <AccordionItem class="border-none" value={nav.key}>
-          <AccordionTrigger class={cn("text-md px-3 py-2 pl-6")}>
-            {nav.name}
-          </AccordionTrigger>
-          <AccordionContent class="bg-accent border-y py-2">
-            <div class="flex flex-col space-y-1 px-3">
-              {#each nav.cards as card (card.key)}
-                {@const active = card.key === ui.card_indicate && nav.key === ui.nav_name}
-                <NavButton
-                  name={card.name}
-                  {active}
-                  onclick={() => handleCardClick(nav.key, card.key)}
-                  ondblclick={() => ui.triggerFlash(card.key)}
-                />
-              {/each}
-            </div>
-          </AccordionContent>
-        </AccordionItem>
+        <div bind:this={itemElements[nav.key]}>
+          <AccordionItem class="border-none" value={nav.key}>
+            <AccordionTrigger class={cn("text-md px-3 py-2 pl-6")}>
+              {nav.name}
+            </AccordionTrigger>
+            <AccordionContent class="bg-accent border-y py-2">
+              <div class="flex flex-col space-y-1 px-3">
+                {#each nav.cards as card (card.key)}
+                  {@const active = card.key === ui.card_indicate && nav.key === ui.nav_name}
+                  <NavButton
+                    name={card.name}
+                    {active}
+                    onclick={() => handleCardClick(nav.key, card.key)}
+                    ondblclick={() => ui.triggerFlash(card.key)}
+                  />
+                {/each}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        </div>
       {/each}
     </Accordion>
   {:else}

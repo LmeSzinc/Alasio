@@ -15,6 +15,9 @@
   let { data, children } = $props();
   const config_name = $derived(data.config_name);
 
+  // Nav scroll viewport, used by ConfigNav to scroll the opened nav into view
+  let navViewport: HTMLDivElement | null = $state(null);
+
   // topic
   const configClient = useTopic<ConfigTopicLike>("ConfigScan");
   const stateClient = useTopic("ConnState");
@@ -83,7 +86,7 @@
 
   // Scheduler
   const workerClient = useTopic<Record<string, WORKER_STATE> | undefined>("Worker");
-  const state = $derived(workerClient.data?.[config_name] || "idle");
+  const workerState = $derived(workerClient.data?.[config_name] || "idle");
 
   const taskQueueClient = useTopic<TaskQueueData>("TaskQueue");
   const taskQueueI18nClient = useTopic<TaskQueueI18n>("TaskQueueI18n");
@@ -112,10 +115,10 @@
 
 {#snippet nav()}
   <div class="flex h-full flex-col gap-2 overflow-hidden">
-    <Scheduler class="pb-0" {config_name} {state} {taskRunning} {taskNext} {onOverviewClick} />
+    <Scheduler class="pb-0" {config_name} {workerState} {taskRunning} {taskNext} {onOverviewClick} />
     <div class="border-border mx-3 border-t"></div>
-    <ScrollArea class="min-h-0 w-full flex-1">
-      <ConfigNav {onCardClick} {onOverviewClick} {onDeviceClick} />
+    <ScrollArea class="min-h-0 w-full flex-1" bind:viewportRef={navViewport}>
+      <ConfigNav {onCardClick} {onOverviewClick} {onDeviceClick} viewport={navViewport} />
     </ScrollArea>
   </div>
 {/snippet}
