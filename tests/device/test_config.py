@@ -18,8 +18,8 @@ class EmulatorGroup(msgspec.Struct):
 
 class EmulatorInfoGroup(msgspec.Struct):
     Emulator: str = 'auto'
-    name: str = ''
-    path: str = ''
+    Name: str = ''
+    Path: str = ''
 
 
 class ErrorGroup(msgspec.Struct):
@@ -48,8 +48,8 @@ class MockConfig:
         )
         self.EmulatorInfo = EmulatorInfoGroup(
             Emulator='NoxPlayer',
-            name='Nox',
-            path='C:/Nox'
+            Name='Nox',
+            Path='C:/Nox'
         )
         self.Error = ErrorGroup(
             HandleError=False,
@@ -67,6 +67,7 @@ class MockConfig:
         self.auto_save = True
         self._local = threading.local()
         self._local.batch_depth = 0
+        self._override_backup = {}
 
     def save(self):
         self.save_count += 1
@@ -81,8 +82,17 @@ class MockConfig:
                 group, arg = key.split('_', 1)
                 group_obj = getattr(self, group)
                 prev_config[key] = getattr(group_obj, arg)
+                # Save original value if not already saved
+                if (group, arg) not in self._override_backup:
+                    self._override_backup[(group, arg)] = prev_config[key]
                 setattr(group_obj, arg, value)
         return prev_config, {}
+
+    def override_clear(self):
+        for (group, arg), old_val in self._override_backup.items():
+            group_obj = getattr(self, group)
+            setattr(group_obj, arg, old_val)
+        self._override_backup.clear()
 
     def temporary(self, **kwargs):
         return TemporaryContext(self, **kwargs)
@@ -192,9 +202,9 @@ class TestDeviceConfig:
         mock_config = MockConfig()
         device_config = DeviceConfig.from_config(mock_config)
 
-        # MockConfig.save is not called by DeviceConfig directly, 
+        # MockConfig.save is not called by DeviceConfig directly,
         # but AlasioConfigBase.register_modify usually triggers save().
-        # In our MockConfig, we don't have register_modify, 
+        # In our MockConfig, we don't have register_modify,
         # but DeviceConfig calls setattr on mock_config.Emulator which is a msgspec.Struct.
         # msgspec.Struct doesn't trigger anything on setattr by default.
 
@@ -237,7 +247,7 @@ class TestDeviceConfig:
         # Value should be changed in both
         assert mock_config.Emulator.Serial == '127.0.0.1:62001'
         # Note: device_config attributes are not automatically updated unless from_config is called again
-        # or if we implement a way to sync them. 
+        # or if we implement a way to sync them.
         # But wait, DeviceConfig attributes are just values copied in from_config.
         # If we change mock_config, device_config won't know unless it's a proxy.
         # In current implementation, DeviceConfig attributes are NOT proxies to AlasioConfigBase.
@@ -248,3 +258,30 @@ class TestDeviceConfig:
         # But the request is just to "add proxy for override and temporary".
 
         assert mock_config.Emulator.Serial == '127.0.0.1:62001'
+
+    def test_override_clear(self):
+        """
+        Test that DeviceConfig.override_clear correctly clears overrides
+        """
+        mock_config = MockConfig()
+        device_config = DeviceConfig.from_config(mock_config)
+
+        assert mock_config.Emulator.Serial == '127.0.0.1:5555'
+
+        # Override
+        device_config.override(Emulator_Serial='127.0.0.1:62001')
+        assert mock_config.Emulator.Serial == '127.0.0.1:62001'
+
+        # Clear
+        device_config.override_clear()
+        assert mock_config.Emulator.Serial == '127.0.0.1:5555'
+
+    def test_override_clear_no_config(self):
+        """
+        Test override_clear when DeviceConfig has no underlying config
+        """
+        device_config = DeviceConfig()
+        # Should log a warning but not crash
+        with logger.mock_capture_writer() as capture:
+            device_config.override_clear()
+            assert capture.stdout.any_contains('DeviceConfig: Failed to proxy override_clear')

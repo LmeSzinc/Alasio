@@ -166,6 +166,16 @@ class DeviceConfig(Generic[T]):
             return {}, {}
         return self.config.override(**kwargs)
 
+    def override_clear(self):
+        """
+        Clear all memory overrides and restore original DB values.
+        This removes the effect of all previous override() calls.
+        """
+        if self.config is None:
+            logger.warning('DeviceConfig: Failed to proxy override_clear(), config is None')
+            return
+        return self.config.override_clear()
+
     def temporary(self, **kwargs) -> "TemporaryContext":
         """
         Temporarily override config values in memory within a context.
