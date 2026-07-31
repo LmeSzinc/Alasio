@@ -159,7 +159,8 @@ class AlasioConfigBaseTask(AlasioConfigBaseAccess):
             target = target.astimezone()
             futures.append(target)
 
-        kv = dict2kv({'minute': minute, 'server_update': server_update, 'target': target}, drop_none=True)
+        kv = dict2kv({'minute': minute, 'server_update': server_update, 'target': target},
+                     drop_none=True, use_pretty=True)
         if futures:
             run = nearest_future(futures)
         else:
