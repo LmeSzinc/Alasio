@@ -1,6 +1,6 @@
 import threading
 from collections import defaultdict
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from msgspec import NODEFAULT, Struct
 from msgspecerror import get_class_annotation_dict, load_msgpack_with_default
@@ -18,7 +18,7 @@ from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext.cache import cached_property
-from alasio.ext.deep import deep_iter_depth1, deep_iter_depth2
+from alasio.ext.deep import deep_iter_depth1, deep_iter_depth2, deep_keys_depth1
 from alasio.logger import logger
 
 
@@ -91,6 +91,7 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
             '_modified',
             '_override_config',
             '_override_const',
+            '_override_prev_config',
             'auto_save',
             '_lock',
             '_local',
@@ -138,6 +139,8 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
         self._override_config: "dict[str, dict[str, Any]]" = defaultdict(dict)
         # Const overrides, consts are in uppercase like "USE_DATA_KEY"
         self._override_const: "dict[str, Any]" = {}
+        # Original values before the first override, used to rollback in override_clear()
+        self._override_prev_config: "dict[str, dict[str, Any]]" = defaultdict(dict)
 
         # If write after every variable modification.
         self.auto_save = True
@@ -583,6 +586,45 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
         setattr(self, key, value)
         return prev
 
+    def _apply_override_config_clear(self, group, arg, value):
+        """
+        Restore a config arg to its original value when clearing overrides.
+        If the group object does not exist, skip, as it will load the original
+        value from DB when initialized later.
+
+        Args:
+            group (str): Group name
+            arg (str): Arg name
+            value (Any): Original value before the override
+        """
+        # check group object existence without triggering _getattr fallback
+        obj = self.__dict__.get(group, None)
+        if obj is None:
+            return
+        # unwrap proxy
+        if type(obj) is GroupProxy:
+            obj = obj._obj
+        # restore arg
+        try:
+            setattr(obj, arg, value)
+        except AttributeError:
+            logger.warning(f'Trying to restore {group}.{arg}={value} but no such group.arg')
+            return
+
+    def _apply_override_const_clear(self, key):
+        """
+        Delete an overridden const attribute, so it naturally falls back to
+        the class attribute value.
+
+        Args:
+            key (str): Const name
+        """
+        try:
+            delattr(self, key)
+        except AttributeError:
+            logger.warning(f'Trying to clear override of const {key} but attribute not exist')
+            return
+
     def override(self, **kwargs):
         """
         Permanently override config values in memory.
@@ -628,8 +670,32 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
                         continue
                     self._override_config[group][arg] = value
                     prev_config[group][arg] = prev
+                    # record original value on first override
+                    self._override_prev_config[group].setdefault(arg, prev)
 
             return prev_config, prev_const
+
+    def override_clear(self):
+        """
+        Clear all memory overrides and restore original DB values.
+        This removes the effect of all previous override() calls.
+
+        Note:
+            This method is not thread-isolated. Overrides modify shared configuration
+            objects and will be visible to all threads.
+        """
+        with self._lock:
+            # Restore config values recorded on the first override
+            for group, arg, value in deep_iter_depth2(self._override_prev_config):
+                self._apply_override_config_clear(group, arg, value)
+            # Delete overridden const attributes, fall back to class attributes
+            for key in deep_keys_depth1(self._override_const):
+                self._apply_override_const_clear(key)
+
+            # Clear the override state and recorded rollback values
+            self._override_config.clear()
+            self._override_const.clear()
+            self._override_prev_config.clear()
 
     def temporary(self, **kwargs) -> TemporaryContext:
         """
