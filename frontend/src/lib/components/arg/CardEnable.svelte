@@ -74,7 +74,7 @@ Z`;
         <!-- Reset button, visible on card hover -->
         <Button
           variant="ghost"
-          class="text-muted-foreground pointer-events-auto gap-x-1"
+          class="text-muted-foreground pointer-events-auto gap-x-1 hover:bg-transparent dark:hover:bg-transparent"
           onclick={() => (dialogOpen = true)}
         >
           <RotateCcw class="size-3.5" />
