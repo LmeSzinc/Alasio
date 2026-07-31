@@ -101,7 +101,7 @@
           <div class="flex-1">
             <Scheduler
               config_name={configNameInput.value as string}
-              state={stateInput.value as WORKER_STATE}
+              workerState={stateInput.value as WORKER_STATE}
               {taskRunning}
               {taskNext}
               onOverviewClick={() => console.log("Overview clicked")}
@@ -135,10 +135,10 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATES as state}
+          {#each ALL_STATES as workerState}
             <Scheduler
               config_name="TestConfig"
-              {state}
+              {workerState}
               taskRunning="CurrentTask"
               taskNext={[
                 { TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) },
@@ -159,8 +159,8 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATES as state}
-            <Scheduler config_name="EmptyScheduler" {state} taskNext={[]} />
+          {#each ALL_STATES as workerState}
+            <Scheduler config_name="EmptyScheduler" {workerState} taskNext={[]} />
           {/each}
         </div>
       </Card.Content>
@@ -173,10 +173,10 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATES as state}
+          {#each ALL_STATES as workerState}
             <Scheduler
               config_name="VeryLongConfigurationNameThatShouldBeTruncatedInTheUserInterface"
-              {state}
+              {workerState}
               taskRunning="VeryLongTaskNameThatWillBeTruncated"
               taskNext={[
                 {
@@ -201,10 +201,10 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATES as state}
+          {#each ALL_STATES as workerState}
             <Scheduler
               config_name="NextOnly"
-              {state}
+              {workerState}
               taskNext={[
                 { TaskName: "Future1", NextRun: Math.floor(Date.now() / 1000) + 600 },
                 { TaskName: "Future2", NextRun: Math.floor(Date.now() / 1000) + 3600 },

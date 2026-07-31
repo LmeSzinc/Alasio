@@ -16,7 +16,7 @@
 
   type $$props = {
     config_name: string;
-    state?: WORKER_STATE;
+    workerState?: WORKER_STATE;
     taskRunning?: string;
     taskNext?: TaskItem[];
     onOverviewClick?: () => void;
@@ -24,14 +24,14 @@
   };
   let {
     config_name,
-    state: stateVal = "idle",
+    workerState = "idle",
     taskRunning,
     taskNext,
     onOverviewClick,
     class: className,
   }: $$props = $props();
 
-  const displayState = useWorkerState(() => stateVal);
+  const displayState = useWorkerState(() => workerState);
   const isRunning = $derived(taskRunning && displayState.value !== "idle");
 
   // Show 3 tasks, or 2 if a task is running
@@ -58,7 +58,7 @@
 
   let isStoppingDebouncing = $state(false);
   $effect(() => {
-    if (stateVal === "scheduler-stopping") {
+    if (workerState === "scheduler-stopping") {
       isStoppingDebouncing = true;
       const timer = setTimeout(() => {
         isStoppingDebouncing = false;
@@ -111,19 +111,19 @@
     <span
       class={cn(
         "ml-auto truncate text-right text-sm font-semibold",
-        stateVal === "error" ? "text-destructive" : "text-primary",
+        workerState === "error" ? "text-destructive" : "text-primary",
       )}
     >
-      {#if stateVal === "idle"}{t.Scheduler.Idle()}
-      {:else if stateVal === "starting"}{t.Scheduler.Starting()}
-      {:else if stateVal === "running"}{t.Scheduler.Running()}
-      {:else if stateVal === "disconnected"}{t.Scheduler.Disconnected()}
-      {:else if stateVal === "error"}{t.Scheduler.Error()}
-      {:else if stateVal === "scheduler-stopping"}{t.Scheduler.SchedulerStopping()}
-      {:else if stateVal === "scheduler-waiting"}{t.Scheduler.SchedulerWaiting()}
-      {:else if stateVal === "killing"}{t.Scheduler.Killing()}
-      {:else if stateVal === "force-killing"}{t.Scheduler.ForceKilling()}
-      {:else}{stateVal}{/if}
+      {#if workerState === "idle"}{t.Scheduler.Idle()}
+      {:else if workerState === "starting"}{t.Scheduler.Starting()}
+      {:else if workerState === "running"}{t.Scheduler.Running()}
+      {:else if workerState === "disconnected"}{t.Scheduler.Disconnected()}
+      {:else if workerState === "error"}{t.Scheduler.Error()}
+      {:else if workerState === "scheduler-stopping"}{t.Scheduler.SchedulerStopping()}
+      {:else if workerState === "scheduler-waiting"}{t.Scheduler.SchedulerWaiting()}
+      {:else if workerState === "killing"}{t.Scheduler.Killing()}
+      {:else if workerState === "force-killing"}{t.Scheduler.ForceKilling()}
+      {:else}{workerState}{/if}
     </span>
   </div>
 
@@ -135,7 +135,7 @@
       <!-- Task running -->
       {#if isRunning}
         <div class="flex items-center gap-1">
-          <ConfigState state={stateVal} displayIdle={true} iconClass="h-3 w-3" class="shrink-0" />
+          <ConfigState {workerState} displayIdle={true} iconClass="h-3 w-3" class="shrink-0" />
           <span class="flex-1 truncate text-xs">{taskRunning}</span>
           <span class="min-w-8 shrink-0 text-right text-xs">now</span>
         </div>

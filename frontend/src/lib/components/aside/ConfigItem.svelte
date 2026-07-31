@@ -42,7 +42,7 @@
   {/if}
   <div class="relative">
     <ModIcon mod={config.mod} afspin={spin} />
-    <ConfigState state={displayState.value} {active} class="absolute -right-1 bottom-0" />
+    <ConfigState workerState={displayState.value} {active} class="absolute -right-1 bottom-0" />
   </div>
   <span class="line-clamp-2 text-center text-xs break-all" aria-hidden="true">
     {config.name}

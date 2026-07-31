@@ -7,17 +7,17 @@
 
   // props
   type Props = {
-    state: WORKER_STATE;
+    workerState: WORKER_STATE;
     active?: boolean;
     class?: string;
     iconClass?: string;
     displayIdle?: boolean;
   };
-  let { state: stateVal, active = false, class: className, iconClass, displayIdle = false }: Props = $props();
+  let { workerState, active = false, class: className, iconClass, displayIdle = false }: Props = $props();
 
   const strokeWidth = $derived(mode.current === "dark" ? "3" : "2");
   const spin = $derived(
-    stateVal === "running" || stateVal === "scheduler-waiting" || stateVal === "scheduler-stopping"
+    workerState === "running" || workerState === "scheduler-waiting" || workerState === "scheduler-stopping"
       ? "animate-spin"
       : "",
   );
@@ -32,28 +32,28 @@
 </script>
 
 <div class={cn("pointer-events-none", spin, className)} style:animation-delay={delay}>
-  {#if stateVal === "running"}
+  {#if workerState === "running"}
     <!-- Running: solid circle with theme color -->
     <CirclePlay class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Running" />
-  {:else if stateVal === "scheduler-waiting"}
+  {:else if workerState === "scheduler-waiting"}
     <!-- Scheduler waiting: hollow circle with theme color -->
     <CircleDotDashed class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Waiting" />
-  {:else if stateVal === "error"}
+  {:else if workerState === "error"}
     <!-- Error: red X -->
     <X class={cn("text-destructive h-3 w-3", iconClass)} {strokeWidth} aria-label="Error" />
-  {:else if stateVal === "scheduler-stopping"}
+  {:else if workerState === "scheduler-stopping"}
     <!-- Scheduler stopping: hourglass icon -->
     <Hourglass class={cn("h-2.5 w-2.5", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Stopping" />
-  {:else if stateVal === "starting"}
+  {:else if workerState === "starting"}
     <!-- Starting: hollow circle with muted color -->
     <CirclePlay class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Starting" />
-  {:else if stateVal === "killing" || stateVal === "force-killing"}
+  {:else if workerState === "killing" || workerState === "force-killing"}
     <!-- Killing: X with muted color -->
     <Ghost class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Killing" />
-  {:else if stateVal === "disconnected"}
+  {:else if workerState === "disconnected"}
     <!-- Disconnected: circle with muted color -->
     <Ghost class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Disconnected" />
-  {:else if displayIdle && stateVal === "idle"}
+  {:else if displayIdle && workerState === "idle"}
     <!-- idle: no display -->
     <CirclePlay class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Idle" />
   {/if}
