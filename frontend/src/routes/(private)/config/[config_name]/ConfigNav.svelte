@@ -55,12 +55,17 @@
       // Find the nav that was just opened
       const openedNavItem = navItems.find((item) => item.key === ui.opened_nav);
 
-      // If the nav has cards and the current card_name is not in this nav, select the first card
+      // If the nav has cards and the indicator is not on this nav, select the first card.
+      // Check nav_name instead of card_name: card keys may be shared between navs
+      // (e.g. "停止条件" exists in main/gems/coalition), so card_name alone
+      // cannot tell whether the indicator is on the opened nav.
       if (openedNavItem && openedNavItem.cards.length > 0) {
-        const currentCardInNav = openedNavItem.cards.some((card) => card.key === ui.card_name);
+        const indicatorInNav =
+          ui.nav_name === ui.opened_nav &&
+          openedNavItem.cards.some((card) => card.key === ui.card_indicate);
 
-        // Only auto-select if the current card doesn't belong to this nav
-        if (!currentCardInNav) {
+        // Only auto-select if the indicator is not on the opened nav
+        if (!indicatorInNav) {
           untrack(() => {
             handleCardClick(openedNavItem.key, openedNavItem.cards[0].key);
           });

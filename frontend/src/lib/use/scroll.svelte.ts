@@ -21,6 +21,18 @@ export function findScrollParent(node: HTMLElement | null) {
  */
 export function fastSmoothScroll(element: HTMLElement | null | (() => HTMLElement | null)) {
   let isScrolling = $state(false);
+  // Track the pending animation frame so a new scrollTo() cancels the
+  // unfinished animation. Without this, a quick nav switch while a smooth
+  // scroll is still running leaves the viewport in a race between the two
+  // animations, and the foundKey effect may read a stale scroll position.
+  let animationFrame: number | null = null;
+
+  function cancelAnimation() {
+    if (animationFrame !== null) {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+    }
+  }
 
   /**
    * Scroll to a target position.
@@ -31,6 +43,9 @@ export function fastSmoothScroll(element: HTMLElement | null | (() => HTMLElemen
   function scrollTo(target: number, duration = 250, onScrollEnd?: () => void, tolerance = 10) {
     const el = typeof element === "function" ? element() : element;
     if (!el) return;
+
+    // A new scroll request always supersedes the previous animation
+    cancelAnimation();
 
     /**
      * Tolerance default to 10px
@@ -43,9 +58,15 @@ export function fastSmoothScroll(element: HTMLElement | null | (() => HTMLElemen
     }
 
     if (duration <= 0) {
-      requestAnimationFrame(() => {
+      // Mark as scrolling before the rAF callback actually moves the element,
+      // so the foundKey effect in ArgCardList skips updating card_indicate
+      // while the viewport is still at the old position
+      isScrolling = true;
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = null;
         if (el) el.scrollTop = target;
-        requestAnimationFrame(() => {
+        animationFrame = requestAnimationFrame(() => {
+          animationFrame = null;
           isScrolling = false;
           onScrollEnd?.();
         });
@@ -70,9 +91,10 @@ export function fastSmoothScroll(element: HTMLElement | null | (() => HTMLElemen
       }
 
       if (timeElapsed < duration) {
-        requestAnimationFrame(animation);
+        animationFrame = requestAnimationFrame(animation);
       } else {
-        requestAnimationFrame(() => {
+        animationFrame = requestAnimationFrame(() => {
+          animationFrame = null;
           isScrolling = false;
           onScrollEnd?.();
         });
@@ -80,7 +102,7 @@ export function fastSmoothScroll(element: HTMLElement | null | (() => HTMLElemen
     }
 
     isScrolling = true;
-    requestAnimationFrame(animation);
+    animationFrame = requestAnimationFrame(animation);
   }
 
   return {

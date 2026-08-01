@@ -110,6 +110,13 @@
     // if tracking scrollHelper.isScrolling, card_indicate will quickly switch to the card at viewport top instead of the clicked card
     if (untrack(() => scrollHelper.isScrolling)) return;
 
+    // During a nav switch, the topic data of the target nav is loaded asynchronously.
+    // Until the target card's group is mounted, groupViewportSizes still reflects the
+    // previous nav with the old scroll position, and foundKey would point to a stale
+    // card (e.g. the card clicked before the switch). Skip the update in that window
+    // so card_indicate keeps the value set by setNav().
+    if (untrack(() => !ui.card_scroll || !groupElements[ui.card_scroll])) return;
+
     if (foundKey) {
       untrack(() => {
         const card_scroll = ui.card_scroll;
