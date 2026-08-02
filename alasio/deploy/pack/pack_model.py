@@ -9,7 +9,7 @@ class RefInfo(Struct):
     path: str
     # file size
     size: int = 0
-    # git file sha1, length=40 (not sha1 of file content)
+    # sha1 of file content, length=40 (not git file sha1)
     # or '' if file should not exist
     sha1: str = ''
 
