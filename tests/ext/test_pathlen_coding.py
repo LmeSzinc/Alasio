@@ -4,13 +4,10 @@ Tests for pathlen_coding: encode_prefix_comb / decode_prefix_comb.
 import pytest
 
 from alasio.ext.algorithm.pathlen_coding import (
-    decode_prefix_comb,
-    decode_suffix_comb,
-    encode_prefix_comb,
-    encode_suffix_comb,
-    prefix_comb_value_check,
-    suffix_comb_value_check,
+    decode_prefix_comb, decode_suffix_comb, encode_prefix_comb, encode_suffix_comb, prefix_comb_value_check,
+    suffix_comb_value_check
 )
+from alasio.ext.algorithm.vlenint import encode_vlenint
 
 
 class TestPrefixCombValueCheck:
@@ -18,7 +15,7 @@ class TestPrefixCombValueCheck:
 
     def test_valid_inputs(self):
         """Valid inputs should not raise."""
-        prefix_comb_value_check([0, 1, 100, 65535], [0, 1, 100, 65535])
+        prefix_comb_value_check([0, 1, 100, 32639], [0, 1, 100, 65535])
         prefix_comb_value_check([], [])
         prefix_comb_value_check([42], [7])
 
@@ -33,9 +30,9 @@ class TestPrefixCombValueCheck:
             prefix_comb_value_check([0, 5], [-1, 1])
 
     def test_overflow_prefix_reuse(self):
-        """prefix_reuse > 65535 should raise."""
-        with pytest.raises(ValueError, match='prefix_reuse must be <= 65535'):
-            prefix_comb_value_check([65536], [0])
+        """prefix_reuse > 32639 should raise."""
+        with pytest.raises(ValueError, match='prefix_reuse must be <= 32639'):
+            prefix_comb_value_check([32640], [0])
 
     def test_overflow_path_len(self):
         """path_len > 65535 should raise."""
@@ -80,7 +77,7 @@ class TestEncodePrefixCombRoundtrip:
         ([0, 0, 0], [0, 0, 0]),
         ([0, 5, 10], [0, 1, 2]),
         ([31], [7]),
-        ([65535], [65535]),
+        ([32639], [65535]),
         ([0, 1, 2, 3, 4, 5], [0, 0, 0, 0, 0, 0]),
         ([0, 0, 0, 0, 0, 0], [0, 1, 2, 3, 4, 5]),
     ])
@@ -117,7 +114,7 @@ class TestEncodePrefixCombRoundtrip:
 
     def test_roundtrip_format_boundaries(self):
         """Roundtrip values at each format boundary."""
-        pr = [0, 15, 16, 15, 0, 0, 32767, 32768]
+        pr = [0, 15, 16, 15, 0, 0, 32639, 32638]
         pl = [0, 7, 7, 8, 255, 256, 255, 0]
         enc = encode_prefix_comb(pr, pl)
         pr2, pl2 = decode_prefix_comb(enc)
@@ -134,7 +131,7 @@ class TestEncodePrefixCombRoundtrip:
 
     def test_roundtrip_mixed_zigzag(self):
         """Roundtrip with both positive and negative diffs of various sizes."""
-        pr = [5000, 0, 65535, 0, 32768, 50000, 10000]
+        pr = [5000, 0, 32639, 0, 32639, 25000, 10000]
         pl = [0, 100, 200, 300, 400, 500, 600]
         enc = encode_prefix_comb(pr, pl)
         pr2, pl2 = decode_prefix_comb(enc)
@@ -161,7 +158,7 @@ class TestEncodePrefixCombRoundtrip:
         assert 256 <= enc[1] < 16777216
         assert 256 <= enc[2] < 16777216
 
-        pr = [0, 50000]
+        pr = [0, 32639]
         pl = [0, 40000]
         enc = encode_prefix_comb(pr, pl)
         pr2, pl2 = decode_prefix_comb(enc)
@@ -201,15 +198,15 @@ class TestEncodePrefixCombFormat:
         assert 256 <= v < 16777216
 
     def test_1b1b_max(self):
-        """Max 1B+1B value: zz=65534, pl=255 -> fits just under 2^24."""
-        pr = [0, 32767]
+        """Max 1B+1B value: zz=65278, pl=255 -> fits just under 2^24."""
+        pr = [0, 32639]
         pl = [0, 255]
         enc = encode_prefix_comb(pr, pl)
         assert 256 <= enc[1] < 16777216
-        assert enc[1] == 65534 * 256 + 255 + 256
+        assert enc[1] == 65278 * 256 + 255 + 256
 
     def test_2b2b_format(self):
-        """When pl >= 256 or (zz<<8)+pl >= 2^24-256, use biased 2B+2B."""
+        """When pl >= 256, use biased 2B+2B."""
         pr = [0, 100]
         pl = [0, 256]
         enc = encode_prefix_comb(pr, pl)
@@ -218,18 +215,21 @@ class TestEncodePrefixCombFormat:
         assert pr2 == pr
         assert pl2 == pl
 
-        pr = [0, 50000]
-        pl = [0, 0]
+        pr = [0, 32639]
+        pl = [0, 65535]
         enc = encode_prefix_comb(pr, pl)
         assert enc[1] >= 16777216
+        pr2, pl2 = decode_prefix_comb(enc)
+        assert pr2 == pr
+        assert pl2 == pl
 
     def test_2b2b_max(self):
-        """Max 2B+2B value: zz=131070, pl=65535."""
-        pr = [0, 65535]
+        """Max 2B+2B value: zz=65278, pl=65535."""
+        pr = [0, 32639]
         pl = [0, 65535]
         enc = encode_prefix_comb(pr, pl)
         v = enc[1]
-        expected = 16777216 + 131070 * 65536 + 65535
+        expected = 16777216 + 65278 * 65536 + 65535
         assert v == expected
         pr2, pl2 = decode_prefix_comb(enc)
         assert pr2 == pr
@@ -301,6 +301,85 @@ class TestEncodePrefixCombEdgeCases:
         enc_8 = encode_prefix_comb(pr, pl_8)
         assert enc_7[1] < 256, 'pl=7 should use 5b+3b'
         assert enc_8[1] >= 256, 'pl=8 should use 1B+1B'
+
+
+class TestPrefixCombMargins:
+    """Marginal inputs at the boundary of the encodable domain."""
+
+    def test_max_prefix_reuse_positive_diff(self):
+        """diff = +32639 -> zz = 65278, the largest encodable combined int."""
+        pr = [0, 32639]
+        pl = [0, 65535]
+        enc = encode_prefix_comb(pr, pl)
+        assert enc[1] == 16777216 + 65278 * 65536 + 65535
+        assert enc[1] < 2 ** 32
+        pr2, pl2 = decode_prefix_comb(enc)
+        assert pr2 == pr
+        assert pl2 == pl
+
+    def test_max_prefix_reuse_negative_diff(self):
+        """diff = -32639 -> zz = 65277, must encode and roundtrip."""
+        pr = [32639, 0]
+        pl = [0, 65535]
+        enc = encode_prefix_comb(pr, pl)
+        pr2, pl2 = decode_prefix_comb(enc)
+        assert pr2 == pr
+        assert pl2 == pl
+
+    def test_prefix_reuse_plus_one_rejected(self):
+        """prefix_reuse = 32640 (diff = 32640 -> zz = 65280) must be rejected."""
+        with pytest.raises(ValueError, match='prefix_reuse must be <= 32639'):
+            prefix_comb_value_check([0, 32640], [0, 0])
+        with pytest.raises(ValueError, match='prefix_reuse must be <= 32639'):
+            encode_prefix_comb([0, 32640], [0, 0])
+
+    def test_first_value_boundary(self):
+        """First diff is relative to 0, so a leading 32639 is the max."""
+        enc = encode_prefix_comb([32639], [65535])
+        assert enc[0] == 16777216 + 65278 * 65536 + 65535
+        pr2, pl2 = decode_prefix_comb(enc)
+        assert pr2 == [32639]
+        assert pl2 == [65535]
+        with pytest.raises(ValueError, match='prefix_reuse must be <= 32639'):
+            encode_prefix_comb([32640], [0])
+
+    def test_sawtooth_max(self):
+        """Worst-case sawtooth [0, MAX, 0, MAX] must stay encodable."""
+        pr = [0, 32639, 0, 32639]
+        pl = [0, 65535, 0, 65535]
+        enc = encode_prefix_comb(pr, pl)
+        assert all(v < 2 ** 32 for v in enc)
+        pr2, pl2 = decode_prefix_comb(enc)
+        assert pr2 == pr
+        assert pl2 == pl
+
+    def test_large_flat_values(self):
+        """Large single values with no jumps (diff = 0) must encode."""
+        pr = [32639, 32639, 32639]
+        pl = [0, 1, 2]
+        enc = encode_prefix_comb(pr, pl)
+        pr2, pl2 = decode_prefix_comb(enc)
+        assert pr2 == pr
+        assert pl2 == pl
+
+    def test_all_encodable_fit_vlenint(self):
+        """Every value accepted by the checker must fit encode_vlenint (< 2**32)."""
+        for pr0, pr1 in [
+            (0, 0),
+            (0, 1),
+            (0, 16384),
+            (0, 32639),
+            (32639, 0),
+            (16384, 32639),
+            (32639, 32639),
+            (32639, 16384),
+        ]:
+            for pl in [0, 7, 8, 255, 256, 65535]:
+                enc = encode_prefix_comb([pr0, pr1], [0, pl])
+                encode_vlenint(enc)  # must not raise
+                pr2, pl2 = decode_prefix_comb(enc)
+                assert [pr0, pr1] == pr2
+                assert [0, pl] == pl2
 
 
 class TestEncodePrefixCombDeterministic:

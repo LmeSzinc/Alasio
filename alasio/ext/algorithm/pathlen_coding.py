@@ -1,12 +1,19 @@
 """
 Combined encoding for path-based data: prefix (diff+zigzag) and suffix (nibble).
 """
-from collections import deque
-
 from alasio.ext.algorithm.diffcooding import decode_diff, encode_diff
 from alasio.ext.algorithm.zigzag import decode_zigzag, encode_zigzag
 
-MAX_PREFIX_REUSE = 65535
+# MAX_PREFIX_REUSE is bounded by the combined-int encoding, not by the field
+# width itself. prefix_reuse is diff-encoded then zigzagged, so a single value
+# of N can produce a zigzag diff of up to 2N (diff = +N -> zz = 2N).
+# The combined int must stay < 2**32 for vlenint:
+#   2**24 + zz * 65536 + pl <= 2**32 - 1, for any pl <= 65535
+#   -> zz <= 65279, so N <= 65279 // 2 = 32639
+# Limiting the single value (instead of the diff) keeps the constraint easy
+# to satisfy for callers: any adjacent values in [0, MAX_PREFIX_REUSE] are
+# always encodable, no matter how they jump.
+MAX_PREFIX_REUSE = 32639
 MAX_PATH_LEN = 65535
 MAX_SUFFIX_REUSE = 65535
 MAX_SUFFIX_LOOKBACK = 255
@@ -18,6 +25,12 @@ _2B2B_BIAS = 16777216  # 2 ** 24
 def prefix_comb_value_check(list_prefix_reuse, list_path_length):
     """
     Check if the input values are valid for prefix_comb encoding.
+
+    All prefix_reuse values must be in [0, MAX_PREFIX_REUSE] and all
+    path_length values in [0, MAX_PATH_LEN]. Since every value is bounded
+    by MAX_PREFIX_REUSE, adjacent diffs are bounded too, so the zigzag diff
+    never exceeds 2 * MAX_PREFIX_REUSE <= 65279 -- the capacity of the
+    2B+2B combined format. Values passing this check are always encodable.
 
     Args:
         list_prefix_reuse (list[int] | deque[int]): raw prefix lengths.
@@ -96,11 +109,16 @@ def _encode_prefix_comb_iter(list_prefix_reuse, list_path_length):
 
     zz = encode_zigzag(encode_diff(list_prefix_reuse))
 
+    With prefix_reuse <= MAX_PREFIX_REUSE, the zigzag diff is bounded:
+        zz <= 2 * MAX_PREFIX_REUSE = 65278 < 65535
+    so the 2B+2B format only triggers on pl >= 256 (the zz >= 65535 branch
+    is unreachable), and every output is < 2**32, compatible with vlenint.
+
     Args:
         list_prefix_reuse (list[int] | deque[int]): raw prefix lengths.
-            Must be <= 65535.
+            Must be <= MAX_PREFIX_REUSE.
         list_path_length (list[int] | deque[int]): remaining path lengths.
-            Must be <= 65535.
+            Must be <= MAX_PATH_LEN.
 
     Yields:
         int: Combined encoded integer per input pair.
@@ -120,16 +138,18 @@ def _encode_prefix_comb_iter(list_prefix_reuse, list_path_length):
 
 def encode_prefix_comb(list_prefix_reuse, list_path_length):
     """
-    5b+3b encode prefix_reuse (after diff+zigzag) and path_len jointly.
+    Encode prefix_reuse (after diff+zigzag) and path_len jointly.
 
-    Each input pair produces exactly 1 output integer.
-    Apply diff+zigzag to prefix_reuse internally, then combine.
+    Each input pair produces exactly 1 output integer, in one of 3 formats:
+    5b+3b, biased 1B+1B or biased 2B+2B. Apply diff+zigzag to prefix_reuse
+    internally, then combine. Every output is < 2**32, so the result can be
+    fed into encode_vlenint directly.
 
     Args:
         list_prefix_reuse (list[int] | deque[int]): raw prefix lengths.
-            Must be <= 65535.
+            Must be <= MAX_PREFIX_REUSE.
         list_path_length (list[int] | deque[int]): remaining path lengths.
-            Must be <= 65535.
+            Must be <= MAX_PATH_LEN.
 
     Returns:
         list[int]: Encoded list, same length as input.
