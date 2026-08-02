@@ -4,8 +4,8 @@ from typing import Union
 from tqdm import tqdm
 
 from alasio.backport import removesuffix
+from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
-from alasio.deploy_dev.pack.pack_model import FileInfo, RefInfo
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_lzma import lzma_compress
 from alasio.ext.compress.algo_zstd import zstd_compress
