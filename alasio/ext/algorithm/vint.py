@@ -1,5 +1,7 @@
 from collections import deque
 
+from alasio.ext.algorithm.const import MAX_INT64
+
 
 def decode_vint(data):
     """
@@ -10,10 +12,13 @@ def decode_vint(data):
     You should use + - * / % instead of & | >>
 
     Args:
-        data (bytearray | bytes | memoryview):
+        data (bytearray | bytes | memoryview): Data to decode
 
     Returns:
         tuple[int, int]: (decoded_integer, bytes_read)
+
+    Raises:
+        ValueError: If the decoded value exceeds INT64
     """
     num = 0
     read = 1
@@ -25,8 +30,15 @@ def decode_vint(data):
             num += byte - 127
             num *= 128
             read += 1
+            # With at most 7 high bytes the value stays below INT64 (max ~7.3e16)
+            # From the 8th high byte on it may exceed INT64, compare only then
+            # to keep the common path free of big integer comparisons
+            if read > 8 and num > MAX_INT64:
+                raise ValueError(f"[decode_vint] Decoded value exceeds INT64: {num}")
         else:
             num += byte
+            if read > 8 and num > MAX_INT64:
+                raise ValueError(f"[decode_vint] Decoded value exceeds INT64: {num}")
             break
 
     return num, read
@@ -50,7 +62,14 @@ def encode_vint(num):
 
     Returns:
         bytes: Encoded bytes
+
+    Raises:
+        ValueError: If num is negative or exceeds INT64
     """
+    if num < 0:
+        raise ValueError(f"[encode_vint] Value is negative: {num}")
+    if num > MAX_INT64:
+        raise ValueError(f"[encode_vint] Value is too large: {num}")
     result = deque()
     result.append(num % 128)
     while num > 127:
@@ -69,15 +88,19 @@ def decode_vint_list(data, total):
     Decode a sequence of vint-encoded integers from bytes.
 
     Args:
-        data (bytearray | bytes| memoryview): Encoded data containing total vint-encoded integers
+        data (bytearray | bytes | memoryview): Encoded data containing total vint-encoded integers
         total (int): Number of integers to decode
 
     Returns:
-        tuple[list[int], int]: (list[decoded_integer], bytes_read)
+        tuple[list[int], int]: (list[decoded_integer], total_bytes_read)
+
+    Raises:
+        ValueError: If any decoded value exceeds INT64
     """
     num_list = []
     num = 0
     read = 0
+    total_read = 0
     count = 0
     for byte in data:
         # add in the next 7 bits of data
@@ -87,17 +110,26 @@ def decode_vint_list(data, total):
             num += byte - 127
             num *= 128
             read += 1
+            # With at most 7 high bytes the value stays below INT64 (max ~7.3e16)
+            # From the 8th high byte on it may exceed INT64, compare only then
+            # to keep the common path free of big integer comparisons
+            if read > 8 and num > MAX_INT64:
+                raise ValueError(f"[decode_vint_list] Decoded value exceeds INT64: {num}")
         else:
             num += byte
             read += 1
+            if read > 8 and num > MAX_INT64:
+                raise ValueError(f"[decode_vint_list] Decoded value exceeds INT64: {num}")
             # end of num
             count += 1
             num_list.append(num)
+            total_read += read
             num = 0
+            read = 0
         if count >= total:
             break
 
-    return num_list, read
+    return num_list, total_read
 
 
 def encode_vint_list(list_num):
@@ -109,9 +141,16 @@ def encode_vint_list(list_num):
 
     Returns:
         bytes: Encoded bytes, concatenation of each vint-encoded integer
+
+    Raises:
+        ValueError: If any integer is negative or exceeds INT64
     """
     result_list = deque()
     for num in list_num:
+        if num < 0:
+            raise ValueError(f"[encode_vint_list] Value is negative: {num}")
+        if num > MAX_INT64:
+            raise ValueError(f"[encode_vint_list] Value is too large: {num}")
         result = deque()
         result.append(num % 128)
         while num > 127:

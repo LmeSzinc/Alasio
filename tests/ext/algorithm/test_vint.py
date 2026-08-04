@@ -1,5 +1,6 @@
 import pytest
 
+from alasio.ext.algorithm.const import MAX_INT64
 from alasio.ext.algorithm.vint import decode_vint, decode_vint_list, encode_vint, encode_vint_list
 
 
@@ -38,6 +39,29 @@ class TestDecodeVint:
         assert val == 129
         assert read == 2
 
+    @pytest.mark.parametrize("data", [
+        b'\xff' * 8 + b'\x00',  # 8 high bytes, max value exceeds INT64
+        b'\x80' * 9 + b'\x00',  # 9 high bytes, min value exceeds INT64
+        b'\xff' * 100,          # long stream of high bytes
+    ])
+    def test_decode_exceeds_int64_raises(self, data):
+        """decode_vint should raise ValueError when the value exceeds INT64."""
+        with pytest.raises(ValueError):
+            decode_vint(data)
+
+    def test_decode_near_int64_boundary(self):
+        """9-byte values that stay within INT64 must still decode."""
+        val, read = decode_vint(b'\x80' * 8 + b'\x00')
+        assert val == 72624976668147840
+        assert read == 9
+
+    def test_decode_max_int64(self):
+        """Decode the encoding of MAX_INT64 itself."""
+        encoded = encode_vint(MAX_INT64)
+        val, read = decode_vint(encoded)
+        assert val == MAX_INT64
+        assert read == len(encoded)
+
 
 class TestEncodeVint:
     """Tests for encode_vint()"""
@@ -63,10 +87,24 @@ class TestEncodeVint:
         assert encode_vint(num) == expected
 
     @pytest.mark.parametrize("negative", [-1, -128, -129, -16384, -100000])
-    def test_encode_negative_does_not_raise(self, negative):
-        """encode_vint should not raise on negative input (even if result is meaningless)."""
-        encoded = encode_vint(negative)
+    def test_encode_negative_raises(self, negative):
+        """encode_vint should raise ValueError on negative input."""
+        with pytest.raises(ValueError):
+            encode_vint(negative)
+
+    @pytest.mark.parametrize("num", [MAX_INT64 + 1, MAX_INT64 * 2, 1 << 70])
+    def test_encode_exceeds_int64_raises(self, num):
+        """encode_vint should raise ValueError on values exceeding INT64."""
+        with pytest.raises(ValueError):
+            encode_vint(num)
+
+    def test_encode_max_int64(self):
+        """encode_vint should accept MAX_INT64 itself."""
+        encoded = encode_vint(MAX_INT64)
         assert isinstance(encoded, bytes)
+        decoded, read = decode_vint(encoded)
+        assert decoded == MAX_INT64
+        assert read == len(encoded)
 
 
 class TestVintRoundTrip:
@@ -154,6 +192,17 @@ class TestEncodeVintList:
         # Each value 0-99 encodes as single byte, so length should be 100
         assert len(result) == 100
 
+    @pytest.mark.parametrize("nums", [
+        [-1],
+        [0, -5],
+        [MAX_INT64 + 1],
+        [10, 1 << 70],
+    ])
+    def test_encode_invalid_raises(self, nums):
+        """encode_vint_list should raise ValueError on negative or oversized integers."""
+        with pytest.raises(ValueError):
+            encode_vint_list(nums)
+
 
 class TestDecodeVintList:
     """Tests for decode_vint_list()"""
@@ -193,6 +242,41 @@ class TestDecodeVintList:
         result, _ = decode_vint_list(b'', 3)
         assert result == []
 
+    @pytest.mark.parametrize("data", [
+        b'\xff' * 8 + b'\x00',  # 8 high bytes, max value exceeds INT64
+        b'\x80' * 9 + b'\x00',  # 9 high bytes, min value exceeds INT64
+        b'\xff' * 100,          # long stream of high bytes
+    ])
+    def test_decode_exceeds_int64_raises(self, data):
+        """decode_vint_list should raise ValueError when the value exceeds INT64."""
+        with pytest.raises(ValueError):
+            decode_vint_list(data, 1)
+
+    def test_decode_near_int64_boundary(self):
+        """9-byte values that stay within INT64 must still decode."""
+        result, total_read = decode_vint_list(b'\x80' * 8 + b'\x00', 1)
+        assert result == [72624976668147840]
+        assert total_read == 9
+
+    def test_decode_max_int64(self):
+        """Decode the encoding of MAX_INT64 itself."""
+        encoded = encode_vint_list([MAX_INT64])
+        result, total_read = decode_vint_list(encoded, 1)
+        assert result == [MAX_INT64]
+        assert total_read == len(encoded)
+
+    def test_decode_returns_total_read(self):
+        """Total read should count bytes consumed, including multi-byte numbers."""
+        result, total_read = decode_vint_list(b'\x7f\x80\x00', 2)
+        assert result == [127, 128]
+        assert total_read == 3
+
+    def test_decode_total_read_with_trailing_data(self):
+        """Total read should not count bytes beyond the requested numbers."""
+        result, total_read = decode_vint_list(b'\x80\x01\xff\xff\xff', 1)
+        assert result == [129]
+        assert total_read == 2
+
 
 class TestVintListRoundTrip:
     """Round-trip tests for encode_vint_list / decode_vint_list."""
@@ -231,3 +315,10 @@ class TestVintListRoundTrip:
         encoded = encode_vint_list(list_a) + encode_vint_list(list_b)
         result, _ = decode_vint_list(encoded, 4)
         assert result == [10, 20, 30, 40]
+
+    def test_round_trip_max_int64(self):
+        """Round-trip the INT64 boundary value through the list API."""
+        encoded = encode_vint_list([0, MAX_INT64])
+        result, total_read = decode_vint_list(encoded, 2)
+        assert result == [0, MAX_INT64]
+        assert total_read == len(encoded)
