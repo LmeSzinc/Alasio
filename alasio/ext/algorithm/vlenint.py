@@ -1,9 +1,8 @@
 from collections import deque
 
 from alasio.ext.algorithm.bit2coding import decode_bit2, encode_bit2
+from alasio.ext.algorithm.const import MAX_UINT32
 from alasio.ext.algorithm.unpack import pack_little_int, unpack_little_int
-
-MAX_INT32 = 2 ** 32
 
 
 def vlenint_value_check(data):
@@ -22,7 +21,7 @@ def vlenint_value_check(data):
     max_val = max(data)
     if min_val < 0:
         raise ValueError(f"Value must be >= 0, got {min_val}")
-    if max_val >= MAX_INT32:
+    if max_val > MAX_UINT32:
         raise ValueError(f"Value must be < 2**32, got {max_val}")
 
 

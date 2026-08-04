@@ -1,6 +1,7 @@
 from collections import deque
 
 from alasio.backport.batch import batched
+from alasio.ext.algorithm.const import MAX_UINT8, MAX_UINT16, MAX_UINT24, MAX_UINT32
 from alasio.ext.algorithm.unpack import unpack_little_int
 from alasio.ext.algorithm.vint import decode_vint, encode_vint
 
@@ -378,25 +379,25 @@ def decode_bit2_opcode(opcodes):
 def encode_length_int(length):
     """
     Encode length to bytes
-    
+
     Args:
         length (int): length to encode
-    
+
     Returns:
         tuple: (d, *length_bytes)
             D (0~3) indicates to read D+1 bytes of N, N is packed in little-endian
     """
-    if length <= 255:
+    if length <= MAX_UINT8:
         d = 0
         return d, length
-    elif length <= 65535:
+    elif length <= MAX_UINT16:
         d = 1
         return d, length % 256, length // 256
-    elif length <= 16777215:
+    elif length <= MAX_UINT24:
         d = 2
         first = length // 256
         return d, length % 256, first % 256, first // 256
-    elif length <= 4294967295:
+    elif length <= MAX_UINT32:
         d = 3
         first = length // 256
         second = first // 256
@@ -408,10 +409,10 @@ def encode_length_int(length):
 def _encode_literal_iter(items):
     """
     Encode a list of 2bits to bytes in literal
-    
+
     Args:
         items (Iterable[int]): list of 2bits value, value must be 0, 1, 2, 3
-    
+
     Yields:
         int: compressed data in uint8
     """

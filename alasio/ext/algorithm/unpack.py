@@ -1,5 +1,7 @@
 import struct
 
+from alasio.ext.algorithm.const import MAX_INT64, MAX_UINT16, MAX_UINT24, MAX_UINT32, MAX_UINT8
+
 UINT8_unpacker = struct.Struct('<B').unpack_from
 UINT16_unpacker = struct.Struct('<H').unpack_from
 UINT32_unpacker = struct.Struct('<I').unpack_from
@@ -33,7 +35,7 @@ def unpack_little_int(data, index, length):
         elif length == 3:
             try:
                 # Fast path: read 4 bytes as uint32, mask to 24 bits
-                return UINT32_unpacker(data, index)[0] & 0x00FFFFFF
+                return UINT32_unpacker(data, index)[0] & MAX_UINT24
             except (IndexError, struct.error):
                 pass
             # Fallback: only 3 bytes available, use 2+1 method
@@ -54,15 +56,15 @@ def unpack_little_int(data, index, length):
 def pack_little_int(data):
     if data < 0:
         raise ValueError(f"Value is negative: {data}")
-    if data <= 255:
+    if data <= MAX_UINT8:
         return UINT8_packer(data)
-    elif data <= 65535:
+    elif data <= MAX_UINT16:
         return UINT16_packer(data)
-    elif data <= 16777215:
+    elif data <= MAX_UINT24:
         return UINT32_packer(data)[:3]
-    elif data <= 4294967295:
+    elif data <= MAX_UINT32:
         return UINT32_packer(data)
-    elif data <= 9223372036854775807:
+    elif data <= MAX_INT64:
         return UINT64_packer(data)
     else:
         raise ValueError(f"Value is too large: {data}")
