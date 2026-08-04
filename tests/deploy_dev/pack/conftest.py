@@ -6,8 +6,7 @@ The file list is designed to cover every record type produced by PackFull:
 - edit: A (added), C (copied, same content as a previous file), D (deleted marker,
   auto-added for folders without __init__.py)
 - eol: 0 (LF), 1 (CRLF via .gitattributes), 2 (binary, contains b'\\x00')
-- mode: 644 and 755 files (note: PackFull keeps the mode field 0 in full packs,
-  it only uses git mode to derive the initial eol)
+- mode: 644 (0) and 755 (1) files, mode comes from the git entry mode
 - algo: 0 (raw, small/incompressible files), 1 (lzma, big compressible files)
 - empty files (size = 0, sha1 = ''), deep paths, duplicate contents (C)
 """

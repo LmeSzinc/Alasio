@@ -380,6 +380,29 @@ class PackDecodeBase:
             prev = path
         return paths
 
+    @staticmethod
+    def apply_eol(content, eol):
+        """
+        Convert LF blob content to the checkout line ending.
+
+        Git blobs always store normalized LF content for text files, the
+        working tree file gets CRLF when the checkout rule says so. This
+        converts the LF content into the working tree form.
+
+        Args:
+            content (bytes | memoryview): Blob content, usually LF
+            eol (int): Line ending rule, 0 for LF, 1 for CRLF, 2 for binary
+
+        Returns:
+            bytes: Content with the checkout line ending applied
+        """
+        if eol == 1:
+            # normalize any stray CRLF first, the blob should be LF
+            content = bytes(content)
+            return content.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+        # LF (0) and binary (2) are written as-is
+        return content
+
     def catdata(self, info) -> memoryview:
         """
         Get the raw bytes of this file from the data section.
@@ -397,7 +420,12 @@ class PackDecodeBase:
 
     def catfile(self, info) -> memoryview:
         """
-        Extract the file content from the data section.
+        Extract the working tree content of this file.
+
+        The pack stores git blob content (LF normalized for text files).
+        This method decompresses the data and applies the checkout line
+        ending rule (see apply_eol), so the result is what the file
+        should look like in the working tree: CRLF for eol == 1 files.
 
         Files stored raw (algo == 0) are returned as a zero-copy memoryview
         slice of the pack. lzma (algo == 1) and full zstd (algo == 2 with
@@ -415,25 +443,28 @@ class PackDecodeBase:
             info (IdxInfo): Record with data_start / data_size / algo
 
         Returns:
-            memoryview: File content
+            memoryview: Working tree file content
 
         Raises:
             PackDecodeError: If algo is unknown or the data is a zstd patch
                 that requires the old file
         """
+        content = self.catdata(info)
         if info.algo == 0:
-            return self.catdata(info)
-        chunk = self.catdata(info)
+            return memoryview(self.apply_eol(content, info.eol))
+        content = bytes(content)
         if info.algo == 1:
-            return memoryview(lzma_decompress(chunk))
-        if info.algo == 2:
+            content = lzma_decompress(content)
+        elif info.algo == 2:
             if info.source_lookback:
                 raise PackDecodeError(
                     f'Failed to decompress {info.path}: zstd patch data '
                     f'requires the old file content'
                 )
-            return memoryview(zstd_decompress(chunk))
-        raise PackDecodeError(f'Failed to decompress {info.path}: unknown algo {info.algo}')
+            content = zstd_decompress(content)
+        else:
+            raise PackDecodeError(f'Failed to decompress {info.path}: unknown algo {info.algo}')
+        return memoryview(self.apply_eol(content, info.eol))
 
     @cached_property
     def refinfo(self) -> "list[IdxInfo]":

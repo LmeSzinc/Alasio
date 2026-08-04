@@ -35,25 +35,25 @@ class PackFull(PackEncodeBase):
     @staticmethod
     def _load_git_mode(mode, path=''):
         """
-        Convert git entry mode to eol value
+        Convert git entry mode to mode value (0 for 644, 1 for 755)
 
         Args:
             mode (bytes): Git entry mode
             path (str): File path for warning messages
 
         Returns:
-            int: eol value (0 for LF, 1 for CRLF, 2 for binary)
+            int: mode value (0 for filemode 644, 1 for filemode 755)
         """
         if mode == b'100644':
             return 0
         elif mode == b'100755':
             return 1
         elif mode == b'120000':
-            logger.warning(f'RefInfo does not support symlink yet, file="{path}"')
+            logger.warning(f'FileInfo does not support symlink yet, file="{path}"')
             return 0
         else:
             # 040000 and 160000 should be handled by list_files() so nothing should hit here
-            logger.warning(f'RefInfo gets unknown git entry mode {mode}, file="{path}"')
+            logger.warning(f'FileInfo gets unknown git entry mode {mode}, file="{path}"')
             return 0
 
     @staticmethod
@@ -170,7 +170,7 @@ class PackFull(PackEncodeBase):
             path = PathStr(path)
             # use git sha1 temporarily
             info = FileInfo(path=path, sha1=entry.sha1, size=len(obj.decoded))
-            info.eol = self._load_git_mode(entry.mode, path=path)
+            info.mode = self._load_git_mode(entry.mode, path=path)
             out[tuple(path.split('/'))] = info
 
             # if folder does not have __init__.py, add __init__.py and mark as deleted

@@ -137,6 +137,37 @@ class TestPackDecodeRoundtrip:
         assert info.sha1 == ''
         assert info.data_start == 0
 
+    def test_mode_covered(self, website_pack):
+        """mode 0 (644) and 1 (755) must come from the git entry mode."""
+        decoder = PackDecodeBase(website_pack)
+        by_mode = {info.path: info.mode for info in decoder.fileinfo}
+        assert by_mode['scripts/deploy.sh'] == 1  # 755
+        assert by_mode['backend/main.py'] == 0  # 644
+
+
+class TestApplyEol:
+    """apply_eol must convert LF blob content to the checkout form."""
+
+    def test_lf_stays_lf(self):
+        """eol == 0 (LF) must keep the content as-is."""
+        content = b'line1\nline2\n'
+        assert PackDecodeBase.apply_eol(content, 0) == content
+
+    def test_lf_to_crlf(self):
+        """eol == 1 (CRLF) must convert LF to CRLF."""
+        content = b'line1\nline2\n'
+        assert PackDecodeBase.apply_eol(content, 1) == b'line1\r\nline2\r\n'
+
+    def test_crlf_stays_crlf(self):
+        """eol == 1 must not double-convert existing CRLF."""
+        content = b'line1\r\nline2\r\n'
+        assert PackDecodeBase.apply_eol(content, 1) == content
+
+    def test_binary_stays_as_is(self):
+        """eol == 2 (binary) must keep the content as-is."""
+        content = b'line1\r\nline2\r\n\x00tail'
+        assert PackDecodeBase.apply_eol(content, 2) == content
+
 
 class TestPackDecodeData:
     """Data section extraction via data_start / data_size."""
@@ -183,6 +214,18 @@ class TestPackDecodeData:
         assert len(data) == info.data_size
         assert info.data_size < info.size  # compressed smaller than the file
         assert bytes(data) != WEBSITE_FILES[info.path][0]  # not the plain content
+
+    def test_catfile_applies_eol(self, website_pack):
+        """catfile must apply the checkout line ending rule."""
+        decoder = PackDecodeBase(website_pack)
+        info = next(i for i in decoder.fileinfo if i.path == 'backend/main.py')
+        lf_content = bytes(decoder.catdata(info))
+        assert lf_content == WEBSITE_FILES['backend/main.py'][0]
+        # simulate an eol=1 (CRLF) checkout rule: catfile must convert
+        info.eol = 1
+        crlf_content = bytes(decoder.catfile(info))
+        assert crlf_content == lf_content.replace(b'\n', b'\r\n')
+        assert b'\r\n' in crlf_content
 
     def test_data_start_is_file_offset(self, website_pack):
         """data_start must be an offset into the pack file."""
