@@ -30,6 +30,8 @@ WEBSITE_FILES = {
     'backend/config.py': (b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n', 644),
     # same content as config.py -> C (copied)
     'backend/utils.py': (b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n', 644),
+    # same content again -> C (copied), references utils.py -> config.py chain
+    'backend/settings.py': (b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n', 644),
     # CRLF text -> eol = 1
     'backend/requirements.txt': (b'fastapi==0.111.0\r\nuvicorn==0.30.1\r\n', 644),
     'backend/api/__init__.py': (b'from .routes import router\n', 644),

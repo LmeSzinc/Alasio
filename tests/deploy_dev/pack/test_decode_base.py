@@ -11,6 +11,7 @@ PackDecodeError tests live in test_decode_error.py.
 from conftest import COMMIT, WEBSITE_FILES, WEBSITE_PACK, WEBSITE_REPO
 
 from alasio.deploy.decode_base import PackDecodeBase
+from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull
 
 
@@ -39,7 +40,7 @@ class TestPackDecodeBasic:
     def test_refinfo_empty_in_full_pack(self):
         """Full pack has no refinfo, all files are in fileinfo."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        assert decoder.refinfo == []
+        assert decoder.refinfo == {}
         assert len(decoder.fileinfo) == len(WEBSITE_FILES) + 1  # + D marker
 
 
@@ -47,34 +48,134 @@ class TestFullDecode:
     """One-shot full decode: every record and every file content."""
 
     def test_full_decode_all_data(self):
-        """Every record, every field and every content must decode correctly."""
-        pack = PackFull(WEBSITE_REPO, commit=COMMIT)
+        """Every record must decode to the hard-coded expected IdxInfo."""
         decoder = PackDecodeBase(WEBSITE_PACK)
         decoder.validate()
 
-        # every record, field by field, in the encoded order
-        enc_files = list(pack.fileinfo.values())
-        dec_files = decoder.fileinfo
-        assert len(dec_files) == len(enc_files)
-        for enc, dec in zip(enc_files, dec_files):
-            for field in ('path', 'edit', 'eol', 'mode', 'algo', 'size',
-                          'data_size', 'source_lookback'):
-                assert getattr(enc, field) == getattr(dec, field), (
-                    f'{field} mismatch for {enc.path}: '
-                    f'{getattr(enc, field)!r} != {getattr(dec, field)!r}'
-                )
-            # sha1: A files carry it in the pack; C files resolve via source
-            if enc.edit != 2 and not (enc.edit == 0 and enc.source_lookback):
-                assert enc.sha1 == dec.sha1, f'sha1 mismatch for {enc.path}'
+        # hard-coded expectation per file, derived from WEBSITE_FILES:
+        # sha1 is the content sha1 of the blob, data_start is the offset
+        # of the data in the pack file
+        assert decoder.refinfo == {}
+        files = decoder.fileinfo
+        assert files['.gitattributes'] == IdxInfo(
+            path='.gitattributes', edit=0, eol=0, mode=0, algo=1,
+            size=70, data_size=55, source_lookback=0, source_path='',
+            sha1='37b6876fc38b3e141141270502ca0bc70339060c', data_start=707,
+        )
+        assert files['backend/__init__.py'] == IdxInfo(
+            path='backend/__init__.py', edit=0, eol=0, mode=0, algo=0,
+            size=0, data_size=0, source_lookback=0, source_path='',
+            sha1='', data_start=0,
+        )
+        assert files['backend/config.py'] == IdxInfo(
+            path='backend/config.py', edit=0, eol=0, mode=0, algo=0,
+            size=43, data_size=43, source_lookback=0, source_path='',
+            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', data_start=762,
+        )
+        assert files['backend/main.py'] == IdxInfo(
+            path='backend/main.py', edit=0, eol=0, mode=0, algo=0,
+            size=70, data_size=70, source_lookback=0, source_path='',
+            sha1='a936d96edd251c2a5e78812a430076a528fc88e9', data_start=805,
+        )
+        assert files['backend/requirements.txt'] == IdxInfo(
+            path='backend/requirements.txt', edit=0, eol=1, mode=0, algo=0,
+            size=33, data_size=33, source_lookback=0, source_path='',
+            sha1='3f5ff3ff1bd1a310ba43a663e7cb0fb946de82e6', data_start=875,
+        )
+        assert files['backend/settings.py'] == IdxInfo(
+            path='backend/settings.py', edit=0, eol=0, mode=0, algo=0,
+            size=43, data_size=43, source_lookback=3, source_path='backend/config.py',
+            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', data_start=762,
+        )
+        assert files['backend/utils.py'] == IdxInfo(
+            path='backend/utils.py', edit=0, eol=0, mode=0, algo=0,
+            size=43, data_size=43, source_lookback=1, source_path='backend/settings.py',
+            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', data_start=762,
+        )
+        assert files['backend/api/__init__.py'] == IdxInfo(
+            path='backend/api/__init__.py', edit=0, eol=0, mode=0, algo=0,
+            size=27, data_size=27, source_lookback=0, source_path='',
+            sha1='5382076fa462350af2aa921c35ab72e2c8c8002f', data_start=908,
+        )
+        assert files['backend/api/routes.py'] == IdxInfo(
+            path='backend/api/routes.py', edit=0, eol=0, mode=0, algo=0,
+            size=77, data_size=77, source_lookback=0, source_path='',
+            sha1='b3817c4fecaed2e877549b0afdef93e41b7dbc7d', data_start=935,
+        )
+        assert files['backend/static/logo.png'] == IdxInfo(
+            path='backend/static/logo.png', edit=0, eol=2, mode=0, algo=1,
+            size=25600, data_size=302, source_lookback=0, source_path='',
+            sha1='bee4c060ee5e5290ab433d49d1c5676b6e57261e', data_start=1012,
+        )
+        assert files['backend/tools/__init__.py'] == IdxInfo(
+            path='backend/tools/__init__.py', edit=2, eol=0, mode=0, algo=0,
+            size=0, data_size=0, source_lookback=0, source_path='',
+            sha1='', data_start=0,
+        )
+        assert files['backend/tools/helper.py'] == IdxInfo(
+            path='backend/tools/helper.py', edit=0, eol=0, mode=0, algo=0,
+            size=28, data_size=28, source_lookback=0, source_path='',
+            sha1='2ba0e2135cea164cafcd2e9bdceb9789ef953133', data_start=1314,
+        )
+        assert files['docs/README.md'] == IdxInfo(
+            path='docs/README.md', edit=0, eol=0, mode=0, algo=0,
+            size=35, data_size=35, source_lookback=0, source_path='',
+            sha1='8f95d6e53d81d2ae147cf083560cbce33b55d266', data_start=1342,
+        )
+        assert files['frontend/package.json'] == IdxInfo(
+            path='frontend/package.json', edit=0, eol=0, mode=0, algo=0,
+            size=44, data_size=44, source_lookback=0, source_path='',
+            sha1='da2f8d9497d709fa5d98bf97429ff211fd485673', data_start=1377,
+        )
+        assert files['frontend/tsconfig.json'] == IdxInfo(
+            path='frontend/tsconfig.json', edit=0, eol=0, mode=0, algo=0,
+            size=50, data_size=50, source_lookback=0, source_path='',
+            sha1='3587dbace20bd384c164cf5f4b242fa7f2a48fb1', data_start=1421,
+        )
+        assert files['frontend/src/App.svelte'] == IdxInfo(
+            path='frontend/src/App.svelte', edit=0, eol=0, mode=0, algo=1,
+            size=104, data_size=99, source_lookback=0, source_path='',
+            sha1='d6aef44bc7a8fde97945171a59aac8d6b1cea8fb', data_start=1471,
+        )
+        assert files['frontend/src/lib/Button.svelte'] == IdxInfo(
+            path='frontend/src/lib/Button.svelte', edit=0, eol=0, mode=0, algo=1,
+            size=104, data_size=99, source_lookback=1, source_path='frontend/src/App.svelte',
+            sha1='d6aef44bc7a8fde97945171a59aac8d6b1cea8fb', data_start=1471,
+        )
+        assert files['frontend/src/lib/styles.css'] == IdxInfo(
+            path='frontend/src/lib/styles.css', edit=0, eol=0, mode=0, algo=1,
+            size=120000, data_size=135, source_lookback=0, source_path='',
+            sha1='d77a6725ecb2a2798d1df284b809de51da3e0399', data_start=1570,
+        )
+        assert files['frontend/src/routes/+page.svelte'] == IdxInfo(
+            path='frontend/src/routes/+page.svelte', edit=0, eol=0, mode=0, algo=0,
+            size=75, data_size=75, source_lookback=0, source_path='',
+            sha1='7263ba1458fa5627d3c966251db887e0f518288e', data_start=1705,
+        )
+        assert files['scripts/deploy.sh'] == IdxInfo(
+            path='scripts/deploy.sh', edit=0, eol=0, mode=1, algo=0,
+            size=31, data_size=31, source_lookback=0, source_path='',
+            sha1='2690963383249907ec8304c2f09e5d0a5d86f24d', data_start=1780,
+        )
+        assert files['scripts/run.bat'] == IdxInfo(
+            path='scripts/run.bat', edit=0, eol=1, mode=0, algo=0,
+            size=28, data_size=28, source_lookback=0, source_path='',
+            sha1='30c7e458805ec8f7c2335f2d26b01f2ba8d66c16', data_start=1811,
+        )
+        assert files['scripts/run.sh'] == IdxInfo(
+            path='scripts/run.sh', edit=0, eol=0, mode=1, algo=0,
+            size=31, data_size=31, source_lookback=2, source_path='scripts/deploy.sh',
+            sha1='2690963383249907ec8304c2f09e5d0a5d86f24d', data_start=1780,
+        )
 
-        # every file content, copied files resolved through the lookback chain
-        for i, dec in enumerate(dec_files):
+        # every file content, copied files resolved through the source path
+        for dec in files.values():
             if dec.edit == 2:
                 # deleted marker: not in WEBSITE_FILES, no content to check
                 continue
             expected = WEBSITE_FILES[dec.path][0]
             if dec.edit == 0 and dec.source_lookback:
-                source = dec_files[i - dec.source_lookback]
+                source = files[dec.source_path]
                 assert bytes(decoder.catfile(source)) == expected, (
                     f'copied content mismatch: {dec.path}'
                 )
@@ -90,7 +191,7 @@ class TestPackDecodeRoundtrip:
     def test_edit_types_covered(self):
         """Full pack must cover A, C and D edits."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        paths = {info.path: info for info in decoder.fileinfo}
+        paths = decoder.fileinfo
         # C (copied) files with correct lookback chains
         assert paths['backend/utils.py'].edit == 0
         assert paths['backend/utils.py'].source_lookback > 0
@@ -103,34 +204,35 @@ class TestPackDecodeRoundtrip:
         """C files must reference a file with identical content."""
         decoder = PackDecodeBase(WEBSITE_PACK)
         files = decoder.fileinfo
-        for i, info in enumerate(files):
+        for info in files.values():
             if info.edit == 0 and info.source_lookback:
-                source = files[i - info.source_lookback]
+                source = files[info.source_path]
                 assert WEBSITE_FILES[info.path][0] == WEBSITE_FILES[source.path][0]
 
     def test_eol_covered(self):
         """eol 0/1/2 must be covered."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        by_eol = {info.path: info.eol for info in decoder.fileinfo}
-        assert by_eol['backend/requirements.txt'] == 1  # CRLF via gitattributes
-        assert by_eol['scripts/run.bat'] == 1  # CRLF batch file
-        assert by_eol['backend/static/logo.png'] == 2  # binary
-        assert by_eol['backend/main.py'] == 0  # LF
+        files = decoder.fileinfo
+        assert files['backend/requirements.txt'].eol == 1  # CRLF via gitattributes
+        assert files['scripts/run.bat'].eol == 1  # CRLF batch file
+        assert files['backend/static/logo.png'].eol == 2  # binary
+        assert files['backend/main.py'].eol == 0  # LF
 
     def test_algo_covered(self):
         """algo 0 (raw) and 1 (lzma) must be covered."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        algos = {info.path: (info.algo, info.size, info.data_size)
-                 for info in decoder.fileinfo}
-        assert algos['frontend/src/lib/styles.css'][0] == 1
-        assert algos['frontend/src/lib/styles.css'][1] > algos['frontend/src/lib/styles.css'][2]
-        assert algos['backend/main.py'][0] == 0
-        assert algos['backend/main.py'][1] == algos['backend/main.py'][2]
+        files = decoder.fileinfo
+        css = files['frontend/src/lib/styles.css']
+        assert css.algo == 1
+        assert css.size > css.data_size
+        main = files['backend/main.py']
+        assert main.algo == 0
+        assert main.size == main.data_size
 
     def test_empty_file(self):
         """Empty files have size 0, no sha1 and no data."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        info = next(i for i in decoder.fileinfo if i.path == 'backend/__init__.py')
+        info = decoder.fileinfo['backend/__init__.py']
         assert info.edit == 0
         assert info.size == 0
         assert info.data_size == 0
@@ -140,9 +242,9 @@ class TestPackDecodeRoundtrip:
     def test_mode_covered(self):
         """mode 0 (644) and 1 (755) must come from the git entry mode."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        by_mode = {info.path: info.mode for info in decoder.fileinfo}
-        assert by_mode['scripts/deploy.sh'] == 1  # 755
-        assert by_mode['backend/main.py'] == 0  # 644
+        files = decoder.fileinfo
+        assert files['scripts/deploy.sh'].mode == 1  # 755
+        assert files['backend/main.py'].mode == 0  # 644
 
 
 class TestSourcePath:
@@ -156,7 +258,7 @@ class TestSourcePath:
             sha1_to_paths.setdefault(entry.sha1, []).append(path)
 
         decoder = PackDecodeBase(WEBSITE_PACK)
-        for info in decoder.fileinfo:
+        for info in decoder.fileinfo.values():
             if info.source_lookback:
                 # the source must be another file with identical content
                 same_sha1 = sha1_to_paths[repo_files[info.path].sha1]
@@ -173,15 +275,17 @@ class TestSourcePath:
     def test_known_sources(self):
         """C files must reference their duplicate-content source file."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        paths = {info.path: info for info in decoder.fileinfo}
-        assert paths['backend/utils.py'].source_path == 'backend/config.py'
+        paths = decoder.fileinfo
+        # cascade chain: utils.py -> settings.py -> config.py
+        assert paths['backend/settings.py'].source_path == 'backend/config.py'
+        assert paths['backend/utils.py'].source_path == 'backend/settings.py'
         assert paths['frontend/src/lib/Button.svelte'].source_path == 'frontend/src/App.svelte'
         assert paths['scripts/run.sh'].source_path == 'scripts/deploy.sh'
 
     def test_deleted_has_no_source(self):
         """D records have no source_lookback and no source_path."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        info = next(i for i in decoder.fileinfo if i.edit == 2)
+        info = decoder.fileinfo['backend/tools/__init__.py']
         assert info.source_lookback == 0
         assert info.source_path == ''
 
@@ -216,7 +320,7 @@ class TestPackDecodeData:
     def test_all_contents_extract(self):
         """Every file with data must restore its original content."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        for info in decoder.fileinfo:
+        for info in decoder.fileinfo.values():
             if not info.data_size:
                 continue
             content = bytes(decoder.catfile(info))
@@ -225,7 +329,7 @@ class TestPackDecodeData:
     def test_catfile_returns_memoryview(self):
         """catfile must return a memoryview for both raw and lzma files."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        for info in decoder.fileinfo:
+        for info in decoder.fileinfo.values():
             if not info.data_size:
                 continue
             content = decoder.catfile(info)
@@ -235,13 +339,23 @@ class TestPackDecodeData:
     def test_catfile_empty_file(self):
         """Files without data return an empty memoryview."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        info = next(i for i in decoder.fileinfo if i.path == 'backend/__init__.py')
+        info = decoder.fileinfo['backend/__init__.py']
         assert bytes(decoder.catfile(info)) == b''
+
+    def test_catfile_copied_returns_source_content(self):
+        """catfile of a copied file must return the source file content."""
+        decoder = PackDecodeBase(WEBSITE_PACK)
+        for info in decoder.fileinfo.values():
+            if info.edit == 0 and info.source_lookback:
+                expected = WEBSITE_FILES[info.source_path][0]
+                assert bytes(decoder.catfile(info)) == expected, (
+                    f'copied content mismatch: {info.path}'
+                )
 
     def test_catdata_raw(self):
         """catdata of a raw file returns the plain content."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        info = next(i for i in decoder.fileinfo if i.path == 'backend/main.py')
+        info = decoder.fileinfo['backend/main.py']
         data = decoder.catdata(info)
         assert isinstance(data, memoryview)
         assert bytes(data) == WEBSITE_FILES['backend/main.py'][0]
@@ -249,7 +363,7 @@ class TestPackDecodeData:
     def test_catdata_compressed(self):
         """catdata of a compressed file returns the compressed bytes."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        info = next(i for i in decoder.fileinfo if i.path == 'frontend/src/lib/styles.css')
+        info = decoder.fileinfo['frontend/src/lib/styles.css']
         data = decoder.catdata(info)
         assert isinstance(data, memoryview)
         assert len(data) == info.data_size
@@ -259,7 +373,7 @@ class TestPackDecodeData:
     def test_catfile_applies_eol(self):
         """catfile must apply the checkout line ending rule."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        info = next(i for i in decoder.fileinfo if i.path == 'backend/main.py')
+        info = decoder.fileinfo['backend/main.py']
         lf_content = bytes(decoder.catdata(info))
         assert lf_content == WEBSITE_FILES['backend/main.py'][0]
         # simulate an eol=1 (CRLF) checkout rule: catfile must convert
@@ -271,7 +385,7 @@ class TestPackDecodeData:
     def test_data_start_is_file_offset(self):
         """data_start must be an offset into the pack file."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        for info in decoder.fileinfo:
+        for info in decoder.fileinfo.values():
             if info.data_size:
                 assert info.data_start + info.data_size <= len(decoder.data)
                 assert info.data_start > len(decoder.index_section)
@@ -280,8 +394,9 @@ class TestPackDecodeData:
         """Records with data must occupy continuous ranges."""
         decoder = PackDecodeBase(WEBSITE_PACK)
         prev_end = None
-        for info in decoder.fileinfo:
-            if not info.data_size:
+        for info in decoder.fileinfo.values():
+            if not info.data_size or info.source_lookback:
+                # copied files share the data range of their source record
                 continue
             if prev_end is not None:
                 assert info.data_start == prev_end
@@ -315,5 +430,5 @@ class TestPackDecodeEmptyRepo:
         data = b''.join(pack.iter_pack_data())
         decoder = PackDecodeBase(data)
         decoder.validate()
-        assert decoder.fileinfo == []
-        assert decoder.refinfo == []
+        assert decoder.fileinfo == {}
+        assert decoder.refinfo == {}

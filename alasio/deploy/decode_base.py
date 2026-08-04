@@ -68,8 +68,8 @@ class PackDecodeBase:
             end of its checksum digest (excluding the header).
         data_section (memoryview): Data section, from the length vint to the
             end of its checksum digest.
-        refinfo (list[IdxInfo]): Old file records (empty in full pack).
-        fileinfo (list[IdxInfo]): New file records.
+        refinfo (dict[str, IdxInfo]): Old file records (empty in full pack).
+        fileinfo (dict[str, IdxInfo]): New file records, keyed by path.
         idx_info (list[IdxInfo]): All records, refinfo entries first then
             fileinfo entries, in the encoded order.
     """
@@ -250,10 +250,8 @@ class PackDecodeBase:
         _check_length('index data: size', len(sizes), len_refinfo + non_dc)
 
         # data_size diff (non-D non-C fileinfo with algo != 0)
-        count_diff = sum(1 for algo in algos if algo != 0)
         diffs, read = _decode('index data: data_size', decode_vlenint, data[offset:])
         offset += read
-        _check_length('index data: data_size', len(diffs), count_diff)
 
         # all index_data bytes must be consumed
         if offset != len(data):
@@ -261,95 +259,98 @@ class PackDecodeBase:
                 f'Failed to decode index data: {len(data) - offset} trailing bytes'
             )
 
-        # collect non-D non-C fileinfo meta, data_size = size - diff
-        metas = []
-        i_meta = 0
-        i_size = len_refinfo
-        i_diff = 0
-        for edit, lookback in zip(edits, source_lookbacks):
-            if edit == 2 or (edit == 0 and lookback):
-                # D (deleted) and C (copied) have no meta in pack
-                metas.append(None)
-                continue
-            algo = algos[i_meta]
-            size = sizes[i_size]
-            if algo:
-                data_size = size - diffs[i_diff]
-                i_diff += 1
-            else:
-                # raw files store the full content, data_size == size
-                data_size = size
-            metas.append((eols[i_meta], modes[i_meta], algo, size, data_size))
-            i_meta += 1
-            i_size += 1
+        # decode paths in the encoded order: refinfo first, then fileinfo
+        paths = self._decode_paths(
+            path_data, prefix_reuse, path_len, suffix_reuse, suffix_lookback,
+        )
+
+        # build the record list with the minimal attributes (path) first,
+        # the remaining attributes are filled in the passes below
+        info_list = [IdxInfo(path=path) for path in paths]
+
+        # fileinfo: edit, source lookback and source_path
+        for i, info in enumerate(info_list[len_refinfo:]):
+            edit = edits[i]
+            lookback = source_lookbacks[i]
+            info.edit = edit
+            info.source_lookback = lookback
+            # source_path is the path of the record this file references
+            # (C / R / RM / zstd patch), resolved through source_lookback,
+            # a 1-based lookback into the full record list
+            if lookback:
+                source_index = len_refinfo + i - lookback
+                if source_index < 0:
+                    raise PackDecodeError(
+                        f'Failed to decode index data: source lookback out of range: '
+                        f'{lookback} > {len_refinfo + i}, path={info.path}'
+                    )
+                info.source_path = info_list[source_index].path
+
+        # meta of non-D non-C fileinfo
+        non_dc = [
+            info for info in info_list[len_refinfo:]
+            if info.edit != 2 and not (info.edit == 0 and info.source_lookback)
+        ]
+        # check the attribute list lengths before assigning
+        _check_length('index data: eol', len(non_dc), len(eols))
+        _check_length('index data: mode', len(non_dc), len(modes))
+        _check_length('index data: algo', len(non_dc), len(algos))
+        _check_length('index data: size', len(sizes), len_refinfo + len(non_dc))
+
+        for info, eol in zip(non_dc, eols):
+            info.eol = eol
+        for info, mode in zip(non_dc, modes):
+            info.mode = mode
+        for info, algo in zip(non_dc, algos):
+            info.algo = algo
+        for info, size in zip(info_list[:len_refinfo], sizes[:len_refinfo]):
+            info.size = size
+        # data_size starts as the full size, compressed files subtract the diff
+        for info, size in zip(non_dc, sizes[len_refinfo:]):
+            info.size = size
+            info.data_size = size
+        diff_infos = [info for info in non_dc if info.algo]
+        _check_length('index data: data_size', len(diff_infos), len(diffs))
+        for info, diff in zip(diff_infos, diffs):
+            info.data_size -= diff
 
         # sha1: all refinfo + non-D non-C fileinfo with data_size > 0,
         # matching iter_sha1_data() which skips data_size == 0
-        count_sha1 = len_refinfo + sum(1 for meta in metas if meta and meta[4])
+        count_sha1 = len_refinfo + sum(1 for info in non_dc if info.data_size)
         if len(self._sha1_part) != count_sha1 * 20:
             raise PackDecodeError(
                 f'Failed to decode sha1 part: decoded {len(self._sha1_part)} bytes, '
                 f'expected {count_sha1 * 20}'
             )
         sha1s = iter(
-            bytes(self._sha1_part[i * 20:(i + 1) * 20]).hex()
-            for i in range(count_sha1)
+            bytes(self._sha1_part[offset:offset + 20]).hex()
+            for offset in range(0, len(self._sha1_part), 20)
         )
-
-        # decode paths in the encoded order: refinfo first, then fileinfo
-        paths = self._decode_paths(
-            path_data, prefix_reuse, path_len, suffix_reuse, suffix_lookback,
-        )
-
-        # build refinfo entries
-        info_list = []
-        for i in range(len_refinfo):
-            info = IdxInfo(path=paths[i], size=sizes[i])
+        for info in info_list[:len_refinfo]:
             info.sha1 = next(sha1s)
-            info_list.append(info)
 
-        # build fileinfo entries, data_start is the offset in the pack file
+        # data: sha1 and data_start for files with data
         data_offset = 0
-        for i in range(len_fileinfo):
-            path = paths[len_refinfo + i]
-            edit = edits[i]
-            lookback = source_lookbacks[i]
-            meta = metas[i]
-            # source_path is the path of the record this file references
-            # (C / R / RM / zstd patch), resolved through source_lookback,
-            # a 1-based lookback into the records decoded so far
-            source_path = ''
-            if lookback:
-                source_index = len_refinfo + i - lookback
-                if source_index < 0:
-                    raise PackDecodeError(
-                        f'Failed to decode index data: source lookback out of range: '
-                        f'{lookback} > {len_refinfo + i}, path={path}'
-                    )
-                source_path = info_list[source_index].path
-            if edit == 2:
-                # deleted: no meta, no size, no sha1, no data
-                info = IdxInfo(path=path, edit=edit)
-            elif meta is None:
-                # copied: reuse the info of the source file, no data in pack
-                info = IdxInfo(
-                    path=path, edit=edit, source_lookback=lookback,
-                    source_path=source_path,
-                )
-            else:
-                eol, mode, algo, size, data_size = meta
-                info = IdxInfo(
-                    path=path, edit=edit, eol=eol, mode=mode, algo=algo,
-                    size=size, source_lookback=lookback, data_size=data_size,
-                    source_path=source_path,
-                )
-                if data_size:
-                    info.sha1 = next(sha1s)
-                    # offset in the pack file, data can be indexed with
-                    # data_start and data_size directly on the pack bytes
-                    info.data_start = self._data_start + data_offset
-                    data_offset += data_size
-            info_list.append(info)
+        for info in non_dc:
+            if info.data_size:
+                info.sha1 = next(sha1s)
+                # offset in the pack file, data can be indexed with
+                # data_start and data_size directly on the pack bytes
+                info.data_start = self._data_start + data_offset
+                data_offset += info.data_size
+
+        # copied: no data in pack, restore the attributes omitted by the
+        # encoder from the source record (identical content)
+        for i, info in enumerate(info_list[len_refinfo:], start=len_refinfo):
+            if info.edit == 0 and info.source_lookback:
+                source = info_list[i - info.source_lookback]
+                info.size = source.size
+                info.eol = source.eol
+                info.mode = source.mode
+                info.algo = source.algo
+                info.data_size = source.data_size
+                info.data_start = source.data_start
+                info.sha1 = source.sha1
 
         self._len_refinfo = len_refinfo
         return info_list
@@ -379,7 +380,7 @@ class PackDecodeBase:
         prev = ''
         offset = 0
         for i, length in enumerate(path_len):
-            remaining = bytes(path_data[offset:offset + length]).decode('utf-8')
+            remaining = bytes(path_data[offset:offset + length]).decode('utf-8', errors='replace')
             offset += length
             lookback = suffix_lookback[i]
             if lookback:
@@ -391,7 +392,7 @@ class PackDecodeBase:
                 suffix = paths[i - lookback][-suffix_reuse[i]:]
             else:
                 suffix = ''
-            path = prev[:prefix_reuse[i]] + remaining + suffix
+            path = ''.join((prev[:prefix_reuse[i]], remaining, suffix))
             paths.append(path)
             prev = path
         return paths
@@ -451,9 +452,9 @@ class PackDecodeBase:
         decompressed with the old file content, which this method cannot
         provide, so it raises PackDecodeError.
 
-        Files without data (empty, deleted, copied) return an empty
-        memoryview. Copied files must be resolved through source_lookback
-        before calling this method.
+        Files without data (empty, deleted) return an empty memoryview.
+        Copied files restore the data attributes of their source record,
+        so they can be read directly like the source file.
 
         Args:
             info (IdxInfo): Record with data_start / data_size / algo
@@ -483,23 +484,57 @@ class PackDecodeBase:
         return memoryview(self.apply_eol(content, info.eol))
 
     @cached_property
-    def refinfo(self) -> "list[IdxInfo]":
+    def refinfo(self) -> "dict[str, IdxInfo]":
         """
         Old file records, empty in full pack.
 
         Returns:
-            list[IdxInfo]: refinfo entries
+            dict[str, IdxInfo]: {filepath: IdxInfo}
+
+        Raises:
+            PackDecodeError: If the records contain duplicate paths
         """
         info = self.idx_info
-        return info[:self._len_refinfo]
+        return self._to_dict(info[:self._len_refinfo], 'refinfo')
 
     @cached_property
-    def fileinfo(self) -> "list[IdxInfo]":
+    def fileinfo(self) -> "dict[str, IdxInfo]":
         """
         New file records.
 
         Returns:
-            list[IdxInfo]: fileinfo entries
+            dict[str, IdxInfo]: {filepath: IdxInfo}
+
+        Raises:
+            PackDecodeError: If the records contain duplicate paths
         """
         info = self.idx_info
-        return info[self._len_refinfo:]
+        return self._to_dict(info[self._len_refinfo:], 'fileinfo')
+
+    @staticmethod
+    def _to_dict(records, section):
+        """
+        Index records by path, rejecting duplicate paths.
+
+        A well-formed pack never contains the same path twice, a duplicate
+        here means the pack is corrupt: silently overwriting would lose a
+        record.
+
+        Args:
+            records (list[IdxInfo]): Records to index
+            section (str): Section name for the error message
+
+        Returns:
+            dict[str, IdxInfo]: {filepath: IdxInfo}
+
+        Raises:
+            PackDecodeError: If a path appears more than once
+        """
+        out = {}
+        for info in records:
+            if info.path in out:
+                raise PackDecodeError(
+                    f'Failed to decode {section}: duplicate path {info.path!r}'
+                )
+            out[info.path] = info
+        return out

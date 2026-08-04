@@ -102,6 +102,18 @@ class TestPackDecodeErrorType:
         with pytest.raises(PackDecodeError, match='source lookback out of range'):
             _ = decoder.idx_info
 
+    def test_duplicate_path(self):
+        """Two records sharing a path must raise instead of overwriting."""
+        pack = PackFull(WEBSITE_REPO, commit=COMMIT)
+        # tamper two records to share the same path, then encode
+        files = list(pack.fileinfo.values())
+        files[1].path = files[0].path
+        data = b''.join(pack.iter_pack_data())
+
+        decoder = PackDecodeBase(data)
+        with pytest.raises(PackDecodeError, match='duplicate path'):
+            _ = decoder.fileinfo
+
 
 class TestCatfileError:
     """catfile failures on unsupported data."""
@@ -109,7 +121,7 @@ class TestCatfileError:
     def test_catfile_zstd_patch_raises(self):
         """zstd patch data (needs the old file) must raise PackDecodeError."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        info = next(i for i in decoder.fileinfo if i.path == 'backend/main.py')
+        info = decoder.fileinfo['backend/main.py']
         info.algo = 2
         info.source_lookback = 1
         with pytest.raises(PackDecodeError, match='requires the old file'):
@@ -118,7 +130,7 @@ class TestCatfileError:
     def test_catfile_unknown_algo_raises(self):
         """Unknown algo must raise PackDecodeError."""
         decoder = PackDecodeBase(WEBSITE_PACK)
-        info = next(i for i in decoder.fileinfo if i.path == 'backend/main.py')
+        info = decoder.fileinfo['backend/main.py']
         info.algo = 99
         with pytest.raises(PackDecodeError, match='unknown algo'):
             decoder.catfile(info)
