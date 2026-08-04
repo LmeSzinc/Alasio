@@ -255,3 +255,58 @@ class TestZstdRoundtrip:
             chunks.append(chunk)
         result = b"".join(chunks)
         assert result == data
+
+
+class TestZstdMemoryview:
+    """Tests for memoryview input support in compress and decompress."""
+
+    @pytest.mark.parametrize("data", [
+        pytest.param(b"", id="empty"),
+        pytest.param(b"Hello Alasio!", id="short"),
+        pytest.param(b"Hello Alasio! " * 100, id="medium"),
+        pytest.param(b"\x00\x01\x02\x03\xff\xfe\xfd\xfc" * 50, id="all-byte-values"),
+        pytest.param(b"A" * 100000, id="highly-compressible"),
+    ])
+    def test_compress_memoryview(self, data):
+        """Compress should accept memoryview input."""
+        compressed = zstd_compress(memoryview(data))
+        assert zstd_decompress(compressed) == data
+
+    @pytest.mark.parametrize("data", [
+        pytest.param(b"", id="empty"),
+        pytest.param(b"Hello Alasio!", id="short"),
+        pytest.param(b"Hello Alasio! " * 100, id="medium"),
+    ])
+    def test_decompress_memoryview(self, data):
+        """Decompress should accept memoryview input."""
+        compressed = zstd_compress(data)
+        assert zstd_decompress(memoryview(compressed)) == data
+
+    def test_decompress_memoryview_normal_frame(self):
+        """Decompress memoryview of a standard zstd frame with magic header."""
+        data = b"Hello Alasio!" * 100
+        compressed = zstd_compress(data, magicless=False)
+        assert compressed[:4] == zstd.FRAME_HEADER
+        assert zstd_decompress(memoryview(compressed)) == data
+
+    def test_memoryview_source(self):
+        """source as memoryview should work as zstd dictionary (patch-from)."""
+        source = b"Original content that was used for the patch. " * 50
+        new_data = b"Modified content that builds upon the original. " * 50
+        compressed = zstd_compress(memoryview(new_data), source=memoryview(source))
+        assert zstd_decompress(memoryview(compressed), source=memoryview(source)) == new_data
+
+    @pytest.mark.parametrize("level", [1, 3, 22])
+    def test_compress_memoryview_with_level(self, level):
+        """Compress memoryview with explicit level should roundtrip correctly."""
+        data = b"Hello Alasio LZMA! " * 200
+        compressed = zstd_compress(memoryview(data), level=level)
+        assert zstd_decompress(memoryview(compressed)) == data
+
+    def test_memoryview_slice(self):
+        """Memoryview slice of a larger buffer should roundtrip correctly."""
+        data = b"prefix" + b"Hello Alasio! " * 100 + b"suffix"
+        view = memoryview(data)[6:-6]
+        compressed = zstd_compress(view)
+        assert zstd_decompress(memoryview(compressed)) == bytes(view)
+        assert zstd_decompress(compressed) == b"Hello Alasio! " * 100

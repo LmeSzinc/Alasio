@@ -6,8 +6,8 @@ def zstd_compress(data, source=None, level=22, magicless=True):
     Compress data using zstd with the best compression ratio
 
     Args:
-        data (bytes):
-        source (bytes): Old file data as zstd dictionary to compress like `zstd --patch-from`
+        data (bytes | memoryview): Data to compress
+        source (bytes | memoryview): Old file data as zstd dictionary to compress like `zstd --patch-from`
         level (int): Compression level, 1-22. Defaults to 22.
         magicless (bool): Whether to omit the 4-byte magic header. Defaults to True.
 
@@ -40,8 +40,9 @@ def zstd_compress(data, source=None, level=22, magicless=True):
 def zstd_decompress(data, source=None):
     """
     Args:
-        data (bytes):
-        source (bytes): Old file data as zstd dictionary to decompress like `zstd -d --patch-from`
+        data (bytes | memoryview): Compressed data, accepts any bytes-like
+        source (bytes | memoryview): Old file data as zstd dictionary to
+            decompress like `zstd -d --patch-from`
 
     Returns:
         bytes:
@@ -53,7 +54,7 @@ def zstd_decompress(data, source=None):
 
     # Auto-detect format: if data starts with zstd magic header, use default format,
     # otherwise treat as magicless (FORMAT_ZSTD1_MAGICLESS).
-    if data.startswith(zstd.FRAME_HEADER):
+    if data[:len(zstd.FRAME_HEADER)] == zstd.FRAME_HEADER:
         fmt = zstd.FORMAT_ZSTD1
     else:
         fmt = zstd.FORMAT_ZSTD1_MAGICLESS

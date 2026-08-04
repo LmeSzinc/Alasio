@@ -144,3 +144,49 @@ class TestLzmaCompress:
             compressed = lzma_compress(data)
             decompressed = lzma_decompress(compressed)
             assert decompressed == data
+
+
+class TestLzmaMemoryview:
+    """Tests for memoryview input support in compress and decompress."""
+
+    @pytest.mark.parametrize("data", [
+        pytest.param(b"", id="empty"),
+        pytest.param(b"Hello Alasio!", id="short"),
+        pytest.param(b"Hello Alasio LZMA! " * 500, id="medium"),
+        pytest.param(b"\x00\x01\x02\x03\xff\xfe\xfd\xfc" * 50, id="all-byte-values"),
+        pytest.param(b"A" * 100000, id="highly-compressible"),
+    ])
+    def test_compress_memoryview(self, data):
+        """Compress should accept memoryview input."""
+        compressed = lzma_compress(memoryview(data))
+        assert lzma_decompress(compressed) == data
+
+    @pytest.mark.parametrize("data", [
+        pytest.param(b"", id="empty"),
+        pytest.param(b"Hello Alasio!", id="short"),
+        pytest.param(b"Hello Alasio LZMA! " * 500, id="medium"),
+        pytest.param(b"\x00\x01\x02\x03\xff\xfe\xfd\xfc" * 50, id="all-byte-values"),
+    ])
+    def test_decompress_memoryview(self, data):
+        """Decompress should accept memoryview input."""
+        compressed = lzma_compress(data)
+        assert lzma_decompress(memoryview(compressed)) == data
+
+    @pytest.mark.parametrize("max_dict_size", [
+        pytest.param(None, id="no-cap"),
+        pytest.param(65536, id="64k"),
+        pytest.param(50000, id="not-power-of-2"),
+    ])
+    def test_memoryview_with_max_dict_size(self, max_dict_size):
+        """Compress memoryview with max_dict_size should roundtrip correctly."""
+        data = b"Hello Alasio LZMA! " * 200
+        compressed = lzma_compress(memoryview(data), max_dict_size=max_dict_size)
+        assert lzma_decompress(memoryview(compressed)) == data
+
+    def test_memoryview_slice(self):
+        """Memoryview slice of a larger buffer should roundtrip correctly."""
+        data = b"prefix" + b"Hello Alasio LZMA! " * 100 + b"suffix"
+        view = memoryview(data)[6:-6]
+        compressed = lzma_compress(view)
+        assert lzma_decompress(memoryview(compressed)) == bytes(view)
+        assert lzma_decompress(compressed) == b"Hello Alasio LZMA! " * 100

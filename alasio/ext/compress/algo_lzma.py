@@ -46,7 +46,7 @@ def lzma_compress(data, max_dict_size=None):
     Compress data using lzma with the best compression ratio
 
     Args:
-        data (bytes):
+        data (bytes | memoryview): Data to compress
         max_dict_size (int, optional): Maximum dictionary size cap, 4096 ~ 67108864
 
     Returns:
@@ -73,7 +73,7 @@ def lzma_decompress(data):
     Decompress data compressed by lzma_compress
 
     Args:
-        data (bytes): Compressed data.
+        data (bytes | memoryview): Compressed data.
 
     Returns:
         bytes: Decompressed data.
