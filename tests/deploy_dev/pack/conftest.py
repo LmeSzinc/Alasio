@@ -10,8 +10,6 @@ The file list is designed to cover every record type produced by PackFull:
 - algo: 0 (raw, small/incompressible files), 1 (lzma, big compressible files)
 - empty files (size = 0, sha1 = ''), deep paths, duplicate contents (C)
 """
-import pytest
-
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
 
@@ -72,31 +70,12 @@ WEBSITE_FILES = {
     'docs/README.md': (b'# Website\n\nModern full-stack site.\n', 644),
 }
 
-
-@pytest.fixture
-def website_repo():
-    """
-    MockGitRepo containing a modern full-stack website file list.
-
-    Returns:
-        MockGitRepo: Repo with all files registered under COMMIT
-    """
-    repo = MockGitRepo()
-    for path, (content, mode) in WEBSITE_FILES.items():
-        repo.register_file(COMMIT, path, content, mode=mode)
-    return repo
-
-
-@pytest.fixture
-def website_pack(website_repo):
-    """
-    Full pack bytes encoded from the website repo.
-
-    Args:
-        website_repo (MockGitRepo): Fixture repo
-
-    Returns:
-        bytes: Full pack file content
-    """
-    pack = PackFull(website_repo, commit=COMMIT)
-    return b''.join(pack.iter_pack_data())
+# Module level singletons shared by all tests in this folder.
+# The repo and the encoded pack are treated as read-only test data:
+# registering more files or mutating the pack bytes would affect every
+# test, create a fresh MockGitRepo instead. Building the pack once here
+# avoids re-encoding it in every test.
+WEBSITE_REPO = MockGitRepo()
+for path, (content, mode) in WEBSITE_FILES.items():
+    WEBSITE_REPO.register_file(COMMIT, path, content, mode=mode)
+WEBSITE_PACK = b''.join(PackFull(WEBSITE_REPO, commit=COMMIT).iter_pack_data())

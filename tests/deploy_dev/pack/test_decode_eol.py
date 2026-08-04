@@ -15,7 +15,6 @@ Chain under test:
         -> pack (blob content + eol rule from the builtin gitattributes)
         -> PackDecodeBase.catfile() -> working tree content
 """
-import pytest
 from conftest import COMMIT
 
 from alasio.deploy.decode_base import PackDecodeBase
@@ -42,60 +41,38 @@ EOL_FILES = {
 }
 
 
-@pytest.fixture
-def eol_repo():
-    """
-    MockGitRepo with files covering the builtin EOL rule suffixes.
-
-    Returns:
-        MockGitRepo: Repo with all EOL_FILES registered under COMMIT
-    """
-    repo = MockGitRepo()
-    for path, content in EOL_FILES.items():
-        repo.register_file(COMMIT, path, content)
-    return repo
-
-
-@pytest.fixture
-def eol_pack(eol_repo):
-    """
-    Full pack bytes encoded from the EOL repo.
-
-    Args:
-        eol_repo (MockGitRepo): Fixture repo
-
-    Returns:
-        bytes: Full pack file content
-    """
-    pack = PackFull(eol_repo, commit=COMMIT)
-    return b''.join(pack.iter_pack_data())
+# Module level singletons, read-only test data (see conftest.py).
+EOL_REPO = MockGitRepo()
+for path, content in EOL_FILES.items():
+    EOL_REPO.register_file(COMMIT, path, content)
+EOL_PACK = b''.join(PackFull(EOL_REPO, commit=COMMIT).iter_pack_data())
 
 
 class TestMockEolNormalize:
     """MockGitRepo must normalize line endings like git does."""
 
-    def test_crlf_bat_becomes_lf(self, eol_repo):
+    def test_crlf_bat_becomes_lf(self):
         """CRLF text input must be stored as LF in the blob."""
-        entry = eol_repo.list_files(COMMIT)['scripts/run.bat']
-        blob = eol_repo.cat(entry.sha1).decoded
+        entry = EOL_REPO.list_files(COMMIT)['scripts/run.bat']
+        blob = EOL_REPO.cat(entry.sha1).decoded
         assert blob == b'@echo off\necho hi\n'
 
-    def test_lf_text_stays_lf(self, eol_repo):
+    def test_lf_text_stays_lf(self):
         """LF text input must stay LF in the blob."""
-        entry = eol_repo.list_files(COMMIT)['docs/readme.txt']
-        blob = eol_repo.cat(entry.sha1).decoded
+        entry = EOL_REPO.list_files(COMMIT)['docs/readme.txt']
+        blob = EOL_REPO.cat(entry.sha1).decoded
         assert blob == b'line1\nline2\n'
 
-    def test_mixed_text_normalized(self, eol_repo):
+    def test_mixed_text_normalized(self):
         """Mixed line endings must be normalized to LF in the blob."""
-        entry = eol_repo.list_files(COMMIT)['docs/mixed.txt']
-        blob = eol_repo.cat(entry.sha1).decoded
+        entry = EOL_REPO.list_files(COMMIT)['docs/mixed.txt']
+        blob = EOL_REPO.cat(entry.sha1).decoded
         assert blob == b'mix1\nmix2\nmix3\n'
 
-    def test_binary_stays_as_is(self, eol_repo):
+    def test_binary_stays_as_is(self):
         """Binary content (NUL bytes) must be stored as-is, CRLF kept."""
-        entry = eol_repo.list_files(COMMIT)['data/cache.pkl']
-        blob = eol_repo.cat(entry.sha1).decoded
+        entry = EOL_REPO.list_files(COMMIT)['data/cache.pkl']
+        blob = EOL_REPO.cat(entry.sha1).decoded
         assert blob == EOL_FILES['data/cache.pkl']
         assert b'\r\n' in blob
 
@@ -103,9 +80,9 @@ class TestMockEolNormalize:
 class TestPackEolRules:
     """The eol field must follow the builtin gitattributes rules."""
 
-    def test_eol_by_rule(self, eol_pack):
+    def test_eol_by_rule(self):
         """Every file must get the eol value from its builtin rule."""
-        decoder = PackDecodeBase(eol_pack)
+        decoder = PackDecodeBase(EOL_PACK)
         by_path = {info.path: info.eol for info in decoder.fileinfo}
         assert by_path['scripts/run.bat'] == 1  # *.bat eol=crlf
         assert by_path['scripts/run.cmd'] == 1  # *.cmd eol=crlf
@@ -119,43 +96,43 @@ class TestPackEolRules:
 class TestCatfileWorkingTree:
     """catfile must return the working tree content (rule applied)."""
 
-    def test_crlf_bat_roundtrip(self, eol_pack):
+    def test_crlf_bat_roundtrip(self):
         """CRLF input under eol=crlf: blob LF, catfile restores CRLF."""
-        decoder = PackDecodeBase(eol_pack)
+        decoder = PackDecodeBase(EOL_PACK)
         info = next(i for i in decoder.fileinfo if i.path == 'scripts/run.bat')
         assert bytes(decoder.catdata(info)) == b'@echo off\necho hi\n'
         assert bytes(decoder.catfile(info)) == EOL_FILES['scripts/run.bat']
 
-    def test_ps1_crlf(self, eol_pack):
+    def test_ps1_crlf(self):
         """CRLF powershell file roundtrips through the working tree."""
-        decoder = PackDecodeBase(eol_pack)
+        decoder = PackDecodeBase(EOL_PACK)
         info = next(i for i in decoder.fileinfo if i.path == 'scripts/deploy.ps1')
         assert bytes(decoder.catdata(info)) == b'Write-Host "deploy"\n'
         assert bytes(decoder.catfile(info)) == EOL_FILES['scripts/deploy.ps1']
 
-    def test_crlf_input_under_lf_rule(self, eol_pack):
+    def test_crlf_input_under_lf_rule(self):
         """CRLF input under the default LF rule: working tree is LF."""
-        decoder = PackDecodeBase(eol_pack)
+        decoder = PackDecodeBase(EOL_PACK)
         info = next(i for i in decoder.fileinfo if i.path == 'docs/windows.txt')
         assert bytes(decoder.catdata(info)) == b'crlf one\ncrlf two\n'
         assert bytes(decoder.catfile(info)) == b'crlf one\ncrlf two\n'
 
-    def test_mixed_input_gets_lf(self, eol_pack):
+    def test_mixed_input_gets_lf(self):
         """Mixed input under the default LF rule: working tree is all LF."""
-        decoder = PackDecodeBase(eol_pack)
+        decoder = PackDecodeBase(EOL_PACK)
         info = next(i for i in decoder.fileinfo if i.path == 'docs/mixed.txt')
         assert bytes(decoder.catdata(info)) == b'mix1\nmix2\nmix3\n'
         assert bytes(decoder.catfile(info)) == b'mix1\nmix2\nmix3\n'
 
-    def test_lf_text_stays_lf(self, eol_pack):
+    def test_lf_text_stays_lf(self):
         """LF text under the default rule stays LF."""
-        decoder = PackDecodeBase(eol_pack)
+        decoder = PackDecodeBase(EOL_PACK)
         info = next(i for i in decoder.fileinfo if i.path == 'docs/readme.txt')
         assert bytes(decoder.catfile(info)) == b'line1\nline2\n'
 
-    def test_binary_untouched(self, eol_pack):
+    def test_binary_untouched(self):
         """Binary files are stored and returned as-is."""
-        decoder = PackDecodeBase(eol_pack)
+        decoder = PackDecodeBase(EOL_PACK)
         info = next(i for i in decoder.fileinfo if i.path == 'data/cache.pkl')
         assert bytes(decoder.catdata(info)) == EOL_FILES['data/cache.pkl']
         assert bytes(decoder.catfile(info)) == EOL_FILES['data/cache.pkl']
