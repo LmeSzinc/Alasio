@@ -145,6 +145,47 @@ class TestPackDecodeRoundtrip:
         assert by_mode['backend/main.py'] == 0  # 644
 
 
+class TestSourcePath:
+    """source_path must point at a mock repo file with the same blob sha1."""
+
+    def test_source_matches_mock_repo_sha1(self):
+        """Every record with a lookback must reference a file with the same sha1."""
+        repo_files = WEBSITE_REPO.list_files(COMMIT)
+        sha1_to_paths = {}
+        for path, entry in repo_files.items():
+            sha1_to_paths.setdefault(entry.sha1, []).append(path)
+
+        decoder = PackDecodeBase(WEBSITE_PACK)
+        for info in decoder.fileinfo:
+            if info.source_lookback:
+                # the source must be another file with identical content
+                same_sha1 = sha1_to_paths[repo_files[info.path].sha1]
+                assert info.source_path in same_sha1, (
+                    f'source_path mismatch for {info.path}: '
+                    f'{info.source_path!r} not in {same_sha1}'
+                )
+                assert info.source_path != info.path
+            else:
+                assert info.source_path == '', (
+                    f'unexpected source_path for {info.path}: {info.source_path!r}'
+                )
+
+    def test_known_sources(self):
+        """C files must reference their duplicate-content source file."""
+        decoder = PackDecodeBase(WEBSITE_PACK)
+        paths = {info.path: info for info in decoder.fileinfo}
+        assert paths['backend/utils.py'].source_path == 'backend/config.py'
+        assert paths['frontend/src/lib/Button.svelte'].source_path == 'frontend/src/App.svelte'
+        assert paths['scripts/run.sh'].source_path == 'scripts/deploy.sh'
+
+    def test_deleted_has_no_source(self):
+        """D records have no source_lookback and no source_path."""
+        decoder = PackDecodeBase(WEBSITE_PACK)
+        info = next(i for i in decoder.fileinfo if i.edit == 2)
+        assert info.source_lookback == 0
+        assert info.source_path == ''
+
+
 class TestApplyEol:
     """apply_eol must convert LF blob content to the checkout form."""
 

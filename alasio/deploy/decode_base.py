@@ -315,17 +315,33 @@ class PackDecodeBase:
             edit = edits[i]
             lookback = source_lookbacks[i]
             meta = metas[i]
+            # source_path is the path of the record this file references
+            # (C / R / RM / zstd patch), resolved through source_lookback,
+            # a 1-based lookback into the records decoded so far
+            source_path = ''
+            if lookback:
+                source_index = len_refinfo + i - lookback
+                if source_index < 0:
+                    raise PackDecodeError(
+                        f'Failed to decode index data: source lookback out of range: '
+                        f'{lookback} > {len_refinfo + i}, path={path}'
+                    )
+                source_path = info_list[source_index].path
             if edit == 2:
                 # deleted: no meta, no size, no sha1, no data
                 info = IdxInfo(path=path, edit=edit)
             elif meta is None:
                 # copied: reuse the info of the source file, no data in pack
-                info = IdxInfo(path=path, edit=edit, source_lookback=lookback)
+                info = IdxInfo(
+                    path=path, edit=edit, source_lookback=lookback,
+                    source_path=source_path,
+                )
             else:
                 eol, mode, algo, size, data_size = meta
                 info = IdxInfo(
                     path=path, edit=edit, eol=eol, mode=mode, algo=algo,
                     size=size, source_lookback=lookback, data_size=data_size,
+                    source_path=source_path,
                 )
                 if data_size:
                     info.sha1 = next(sha1s)

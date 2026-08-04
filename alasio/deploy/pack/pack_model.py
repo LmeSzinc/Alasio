@@ -81,3 +81,6 @@ class IdxInfo(FileInfo):
     # real value will be calculated in decoding
     # file data can be indexed with `data_start` and `data_size`
     data_start: int = 0
+    # path of reffile
+    # real value will be calculated from `source_lookback` in decoding
+    source_path: str = ''

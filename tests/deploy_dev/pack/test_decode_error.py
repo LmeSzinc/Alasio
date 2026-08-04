@@ -6,9 +6,10 @@ website) and verifies that every failure path raises PackDecodeError with
 a message naming the failing section.
 """
 import pytest
-from conftest import WEBSITE_PACK
+from conftest import COMMIT, WEBSITE_PACK, WEBSITE_REPO
 
 from alasio.deploy.decode_base import PackDecodeBase, PackDecodeError
+from alasio.deploy_dev.pack.pack_repo import PackFull
 
 
 class TestPackDecodeStructureError:
@@ -76,7 +77,7 @@ class TestPackDecodeErrorType:
 
         decoder = PackDecodeBase(data)
         with pytest.raises(PackDecodeError, match='prefix comb'):
-            decoder.idx_info
+            _ = decoder.idx_info
 
     def test_validate_error_message(self):
         """Checksum failure must be reported as PackDecodeError."""
@@ -85,6 +86,21 @@ class TestPackDecodeErrorType:
         decoder = PackDecodeBase(data)
         with pytest.raises(PackDecodeError):
             decoder.validate()
+
+    def test_source_lookback_out_of_range(self):
+        """A source lookback pointing before the first record must raise."""
+        pack = PackFull(WEBSITE_REPO, commit=COMMIT)
+        # tamper a C file's source_lookback to point before the first
+        # record, then encode the modified records into a new pack
+        for i, file in enumerate(pack.fileinfo.values()):
+            if file.source_lookback:
+                file.source_lookback = i + 1
+                break
+        data = b''.join(pack.iter_pack_data())
+
+        decoder = PackDecodeBase(data)
+        with pytest.raises(PackDecodeError, match='source lookback out of range'):
+            _ = decoder.idx_info
 
 
 class TestCatfileError:
