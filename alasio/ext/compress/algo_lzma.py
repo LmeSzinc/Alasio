@@ -67,6 +67,17 @@ def lzma_compress(data, max_dict_size=None):
     compressed = lzma.compress(data, format=lzma.FORMAT_RAW, filters=my_filters, check=lzma.CHECK_NONE)
     return compressed
 
-# Note that there is no lzma_decompress()
-# just use ``lzma.decompress(data)`` to decompress
-# no need to set the same parameters in decompress, lzma can auto handle it
+
+def lzma_decompress(data):
+    """
+    Decompress data compressed by lzma_compress
+
+    Args:
+        data (bytes): Compressed data.
+
+    Returns:
+        bytes: Decompressed data.
+    """
+    # LZMA2 raw stream contains the dictionary size in its header
+    # so only the filter id is required for decompression
+    return lzma.decompress(data, format=lzma.FORMAT_RAW, filters=[{"id": lzma.FILTER_LZMA2}])

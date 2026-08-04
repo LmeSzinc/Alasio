@@ -1,8 +1,6 @@
-import lzma
-
 import pytest
 
-from alasio.ext.compress.algo_lzma import _lzma_dictsize, lzma_compress
+from alasio.ext.compress.algo_lzma import _lzma_dictsize, lzma_compress, lzma_decompress
 
 
 class TestLzmaDictsize:
@@ -98,11 +96,7 @@ class TestLzmaCompress:
     def test_compress_decompress_roundtrip(self, data):
         """Compress then decompress should return original data."""
         compressed = lzma_compress(data)
-        decompressed = lzma.decompress(
-            compressed,
-            format=lzma.FORMAT_RAW,
-            filters=[{"id": lzma.FILTER_LZMA2}],
-        )
+        decompressed = lzma_decompress(compressed)
         assert decompressed == data
 
     @pytest.mark.parametrize("data", [
@@ -114,11 +108,7 @@ class TestLzmaCompress:
     def test_small_data_roundtrip(self, data):
         """Small data should survive roundtrip."""
         compressed = lzma_compress(data)
-        decompressed = lzma.decompress(
-            compressed,
-            format=lzma.FORMAT_RAW,
-            filters=[{"id": lzma.FILTER_LZMA2}],
-        )
+        decompressed = lzma_decompress(compressed)
         assert decompressed == data
 
     @pytest.mark.parametrize("max_dict_size", [
@@ -133,11 +123,7 @@ class TestLzmaCompress:
         """Compress with max_dict_size should roundtrip correctly."""
         data = b"Hello Alasio LZMA! " * 200
         compressed = lzma_compress(data, max_dict_size=max_dict_size)
-        decompressed = lzma.decompress(
-            compressed,
-            format=lzma.FORMAT_RAW,
-            filters=[{"id": lzma.FILTER_LZMA2}],
-        )
+        decompressed = lzma_decompress(compressed)
         assert decompressed == data
 
     def test_compress_less_than_raw(self):
@@ -156,9 +142,5 @@ class TestLzmaCompress:
         ]
         for data in datasets:
             compressed = lzma_compress(data)
-            decompressed = lzma.decompress(
-                compressed,
-                format=lzma.FORMAT_RAW,
-                filters=[{"id": lzma.FILTER_LZMA2}],
-            )
+            decompressed = lzma_decompress(compressed)
             assert decompressed == data
