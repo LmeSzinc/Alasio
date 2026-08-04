@@ -14,11 +14,21 @@ class Generator(IndexGenerator):
         # copy scheduler name and help to variants
         for group in [
             'SchedulerStatic',
+            'SchedulerEnable',
         ]:
             for lang in ModEntryInfo.alasio().gui_language:
                 for prop in ['name', 'help']:
                     value = deep_get(data, keys=['Scheduler', 'Enable', lang, prop], default='')
                     deep_set(data, keys=[group, 'Enable', lang, prop], value=value)
+        # SchedulerEnable shares the same options as Scheduler, copy option translations
+        for lang in ModEntryInfo.alasio().gui_language:
+            value = deep_get(data, keys=['Scheduler', 'Enable', lang, 'option_i18n'], default='')
+            deep_set(data, keys=['SchedulerEnable', 'Enable', lang, 'option_i18n'], value=value)
+        # SchedulerEnableUedit has an editable ServerUpdate, copy from SchedulerUedit
+        for lang in ModEntryInfo.alasio().gui_language:
+            for prop in ['name', 'help']:
+                value = deep_get(data, keys=['SchedulerUedit', 'ServerUpdate', lang, prop], default='')
+                deep_set(data, keys=['SchedulerEnableUedit', 'ServerUpdate', lang, prop], value=value)
         # copy group into to all scheduler
         for group in deep_keys_depth1(data):
             if group == 'Scheduler':

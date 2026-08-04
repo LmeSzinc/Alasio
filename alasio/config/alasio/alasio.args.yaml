@@ -45,18 +45,26 @@ SchedulerU04:
 SchedulerStaticU04:
   parent: [ SchedulerStatic, SchedulerU04 ]
 
-#设备设置
-#Alas设置
-#
-#主线图
-#活动
-#紧急委托
-#退役设置
-#
-#收获，委托技能科研后宅
-#每日任务，每日困难演习
-#商店，商店商店船坞
-#白嫖，白嫖抽卡小游戏
-#
-#大世界每日
-#大世界高难
+# SchedulerEnable is a default-enabled Scheduler
+SchedulerEnable:
+  parent: Scheduler
+  args:
+    Enable:
+      dt: enable
+      value: true
+
+# SchedulerEnable is an alias of SchedulerEnableU00
+SchedulerEnableU00:
+  parent: SchedulerEnable
+
+SchedulerEnableUedit:
+  parent: SchedulerEnable
+  args:
+    ServerUpdate: "00:00"
+
+SchedulerEnableU04:
+  parent: SchedulerEnable
+  args:
+    ServerUpdate:
+      dt: static-hide
+      value: "04:00"

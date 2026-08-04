@@ -48,3 +48,19 @@ class SchedulerU04(Scheduler):
 
 class SchedulerStaticU04(SchedulerStatic, SchedulerU04):
     pass
+
+
+class SchedulerEnable(Scheduler):
+    Enable: bool = True
+
+
+class SchedulerEnableU00(SchedulerEnable):
+    pass
+
+
+class SchedulerEnableUedit(SchedulerEnable):
+    ServerUpdate: str = '00:00'
+
+
+class SchedulerEnableU04(SchedulerEnable):
+    ServerUpdate: t.Literal['04:00'] = '04:00'
