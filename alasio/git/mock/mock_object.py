@@ -1,5 +1,7 @@
 import msgspec
 
+from alasio.ext.cache import cached_property
+from alasio.git.attr.attr import GitAttributes
 from alasio.git.mock.mock_base import MockGitRepoBase
 from alasio.git.obj.obj import GitLooseObject
 from alasio.git.stage.gitreset import FileEntry
@@ -36,12 +38,20 @@ class MockGitObject(MockGitRepoBase):
         # blob_sha1 -> MockBlobEntry
         self._objects: "dict[str, MockBlobEntry]" = {}
 
+    @cached_property
+    def _gitattr(self):
+        return GitAttributes()
+
     def register_file(self, sha1, path, content, mode=644):
         """
         Register a file under a commit sha1.
 
-        The sha1 of the file content (blob sha1) is computed from the content
-        automatically.
+        The sha1 of the file content (blob sha1) is computed from the content automatically.
+
+        To replicate git's EOL handling, MockGitObject always store LF in objects
+        using the default rules in GitAttributes().
+        Note that if registering a .gitattributes, its rules will be ignored,
+        MockGitObject always uses the default rules, which is enough for testing.
 
         Args:
             sha1 (str): Commit sha1 that identifies the tree
@@ -57,6 +67,9 @@ class MockGitObject(MockGitRepoBase):
         else:
             raise ValueError(f'Unsupported file mode: {mode}. Only 644 and 755 are accepted.')
 
+        # Replicate git's EOL handling: always store LF in objects
+        content = self._normalize_eol(path, content)
+
         blob_sha1 = blob_hash(content)
 
         if sha1 not in self._files:
@@ -64,6 +77,34 @@ class MockGitObject(MockGitRepoBase):
         entry = MockBlobEntry(content=content, mode=mode, blob_sha1=blob_sha1)
         self._files[sha1][path] = entry
         self._objects[blob_sha1] = entry
+
+    def _normalize_eol(self, path, content):
+        """
+        Normalize line endings of file content for storage in git objects.
+
+        Text files are stored with LF only, binary files are stored as-is.
+        The text/binary decision follows the default rules in GitAttributes().
+
+        Args:
+            path (str): File path relative to repo root
+            content (bytes): File content
+
+        Returns:
+            bytes: Content with CRLF converted to LF for text files,
+                unchanged for binary files
+        """
+        attrs_dict = self._gitattr.apply_files([path])[0].attrs_dict
+        mode = attrs_dict.get('text', 'auto')
+        if mode == 'set':
+            is_text = True
+        elif mode == 'unset':
+            is_text = False
+        else:
+            # text="auto", decide by content
+            is_text = b'\x00' not in content
+        if is_text:
+            return content.replace(b'\r\n', b'\n')
+        return content
 
     def compare_commit(self, old, new):
         """

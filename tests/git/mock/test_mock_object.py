@@ -108,6 +108,108 @@ class TestRegisterFile:
         assert len(m._files['c']) == 1
 
 
+class TestRegisterFileEol:
+    """
+    Tests for EOL normalization in MockGitObject.register_file.
+
+    Replicates git's EOL handling: text files are stored with LF only
+    following the default rules in GitAttributes(), binary files are
+    stored as-is.
+    """
+
+    def test_text_file_crlf_converted(self):
+        """*.py is text: CRLF content should be stored as LF."""
+        m = MockGitObject()
+        m.register_file('c', 'main.py', b'print(1)\r\nprint(2)\r\n')
+        entry = m._files['c']['main.py']
+        expected = b'print(1)\nprint(2)\n'
+        assert entry.content == expected
+        assert entry.blob_sha1 == blob_hash(expected)
+
+    def test_text_file_eol_crlf_rule_still_lf(self):
+        """*.bat is text eol=crlf: blob should still store LF only."""
+        m = MockGitObject()
+        m.register_file('c', 'run.bat', b'echo a\r\necho b\r\n')
+        entry = m._files['c']['run.bat']
+        expected = b'echo a\necho b\n'
+        assert entry.content == expected
+        assert entry.blob_sha1 == blob_hash(expected)
+
+    def test_binary_file_kept_as_is(self):
+        """*.db is binary: content should not be modified."""
+        m = MockGitObject()
+        content = b'raw\x00data\r\nline\r\n'
+        m.register_file('c', 'data.db', content)
+        entry = m._files['c']['data.db']
+        assert entry.content == content
+        assert entry.blob_sha1 == blob_hash(content)
+
+    def test_auto_text_without_nul_converted(self):
+        """No specific rule means text=auto: content without NUL is text."""
+        m = MockGitObject()
+        m.register_file('c', 'archive.bin', b'head\r\ntail\r\n')
+        entry = m._files['c']['archive.bin']
+        assert entry.content == b'head\ntail\n'
+
+    def test_auto_with_nul_kept_as_is(self):
+        """text=auto with NUL byte in content means binary."""
+        m = MockGitObject()
+        content = b'head\r\n\x00tail\r\n'
+        m.register_file('c', 'archive.bin', content)
+        entry = m._files['c']['archive.bin']
+        assert entry.content == content
+
+    def test_lf_only_content_unchanged(self):
+        """Already LF-only text content should be stored unchanged."""
+        m = MockGitObject()
+        content = b'line1\nline2\n'
+        m.register_file('c', 'main.py', content)
+        entry = m._files['c']['main.py']
+        assert entry.content == content
+        assert entry.blob_sha1 == blob_hash(content)
+
+    def test_mixed_line_endings(self):
+        """Only CRLF pairs are converted, lone CR is preserved."""
+        m = MockGitObject()
+        m.register_file('c', 'main.py', b'a\r\nb\rc\r\n')
+        assert m._files['c']['main.py'].content == b'a\nb\rc\n'
+
+    def test_cat_returns_normalized_content(self):
+        """cat() should return the normalized LF-only content."""
+        m = MockGitObject()
+        m.register_file('c', 'main.py', b'a\r\nb\r\n')
+        sha1 = m._files['c']['main.py'].blob_sha1
+        assert m.cat(sha1).data == b'a\nb\n'
+
+    def test_crlf_and_lf_share_same_blob(self):
+        """Same text content with different EOL should dedup to one blob."""
+        m = MockGitObject()
+        m.register_file('c', 'a.py', b'a\r\nb\r\n')
+        m.register_file('c', 'b.py', b'a\nb\n')
+        sha1_a = m._files['c']['a.py'].blob_sha1
+        sha1_b = m._files['c']['b.py'].blob_sha1
+        assert sha1_a == sha1_b
+        assert sha1_a in m._objects
+        assert m._objects[sha1_a].content == b'a\nb\n'
+
+    def test_compare_commit_eol_insensitive(self):
+        """Commits differing only in EOL should not be marked modified."""
+        m = MockGitObject()
+        m.register_file('old', 'main.py', b'a\r\nb\r\n')
+        m.register_file('new', 'main.py', b'a\nb\n')
+        added, modified, deleted = m.compare_commit('old', 'new')
+        assert added == {}
+        assert modified == {}
+        assert deleted == {}
+
+    def test_registered_gitattributes_rules_ignored(self):
+        """Registering a .gitattributes should not change EOL rules for other files."""
+        m = MockGitObject()
+        m.register_file('c', '.gitattributes', b'*.py -text\r\n')
+        m.register_file('c', 'main.py', b'a\r\nb\r\n')
+        assert m._files['c']['main.py'].content == b'a\nb\n'
+
+
 class TestListFiles:
     """Tests for MockGitObject.list_files."""
 

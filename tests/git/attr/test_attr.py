@@ -8,8 +8,9 @@ Tests cover:
 
 from alasio.ext.cache import cached_property
 from alasio.git.attr.attr import GitAttributes
-from alasio.git.attr.attrfile import (FileAttrs, PatternAny, PatternFileContain, PatternFileName, PatternFileSuffix,
-                                      PatternPathPrefix, PatternRegex)
+from alasio.git.attr.attrfile import (
+    FileAttrs, PatternAny, PatternFileContain, PatternFileName, PatternFileSuffix, PatternPathPrefix, PatternRegex
+)
 
 
 # ==========================================

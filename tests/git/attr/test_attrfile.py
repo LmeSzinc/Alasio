@@ -16,8 +16,10 @@ Tests cover:
 
 import re
 
-from alasio.git.attr.attrfile import (FileAttrs, PatternAny, PatternBase, PatternFileContain, PatternFileName,
-                                      PatternFileSuffix, PatternPathPrefix, PatternRegex, get_pattern)
+from alasio.git.attr.attrfile import (
+    FileAttrs, PatternAny, PatternBase, PatternFileContain, PatternFileName, PatternFileSuffix, PatternPathPrefix,
+    PatternRegex, get_pattern
+)
 
 
 # ==========================================

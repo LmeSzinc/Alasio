@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from alasio.git.attr.pathregex import (_convert_normal_chunk, _split_pathspec, gitattributes_to_regex)
+from alasio.git.attr.pathregex import _convert_normal_chunk, _split_pathspec, gitattributes_to_regex
 
 
 # ==========================================
