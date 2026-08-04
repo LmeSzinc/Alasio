@@ -67,7 +67,7 @@ class PackDecodeBase:
         index_section (memoryview): Index section, from the length vint to the
             end of its checksum digest (excluding the header).
         data_section (memoryview): Data section, from the length vint to the
-            end of its checksum digest.
+            end of its checksum digest. Empty in index pack.
         refinfo (dict[str, IdxInfo]): Old file records (empty in full pack).
         fileinfo (dict[str, IdxInfo]): New file records, keyed by path.
         idx_info (list[IdxInfo]): All records, refinfo entries first then
@@ -119,18 +119,25 @@ class PackDecodeBase:
                 f'{index_end} - {offset} != 20'
             )
 
-        # data section
+        # data section (optional, index pack has no data section)
         data_offset = index_end
-        length, read = _decode('data section: length', decode_vint, data[data_offset:])
-        data_offset += read
-        data_end = data_offset + length
-        if data_end > len(data):
-            raise PackDecodeError(
-                f'Failed to decode data section: out of range: {data_end} > {len(data)}'
-            )
-        self.data_section = data[index_end:data_end]
-        # file offset where the actual file data begins (after the length vint)
-        self._data_start = data_offset
+        if data_offset >= len(data):
+            # index pack: header + index section only, file data unavailable
+            self._has_data = False
+            self.data_section = data[index_end:index_end]
+            self._data_start = data_offset
+        else:
+            self._has_data = True
+            length, read = _decode('data section: length', decode_vint, data[data_offset:])
+            data_offset += read
+            data_end = data_offset + length
+            if data_end > len(data):
+                raise PackDecodeError(
+                    f'Failed to decode data section: out of range: {data_end} > {len(data)}'
+                )
+            self.data_section = data[index_end:data_end]
+            # file offset where the actual file data begins (after the length vint)
+            self._data_start = data_offset
 
     @staticmethod
     def _read_part(data, offset):
@@ -156,7 +163,18 @@ class PackDecodeBase:
         Validate the checksums of index section and data section.
 
         Raises:
-            PackDecodeError: If any checksum mismatches
+            PackDecodeError: If any checksum mismatches, or the pack has
+                no data section (index pack)
+        """
+        self.validate_index()
+        self.validate_data()
+
+    def validate_index(self):
+        """
+        Validate the checksum of index section.
+
+        Raises:
+            PackDecodeError: If the checksum mismatches
         """
         # index section checksum covers: header + length vint + parts
         digest = sha1()
@@ -165,6 +183,21 @@ class PackDecodeBase:
         if digest.digest() != bytes(self.index_section[-20:]):
             raise PackDecodeError('Failed to validate index checksum: checksum mismatch')
 
+    def validate_data(self):
+        """
+        Validate the checksum of data section.
+
+        Index packs have no data section, callers must not call this on
+        them.
+
+        Raises:
+            PackDecodeError: If the checksum mismatches, or the pack has
+                no data section (index pack)
+        """
+        if not self._has_data:
+            raise PackDecodeError(
+                'Failed to validate data checksum: pack has no data section (index pack)'
+            )
         # data section checksum covers: header + index section + length vint + data
         digest = sha1()
         digest.update(self.data[:5])
@@ -432,7 +465,14 @@ class PackDecodeBase:
 
         Returns:
             memoryview: Raw bytes in the data section
+
+        Raises:
+            PackDecodeError: If the pack has no data section (index pack)
         """
+        if not self._has_data:
+            raise PackDecodeError(
+                'Failed to read data: pack has no data section (index pack)'
+            )
         return self.data[info.data_start:info.data_start + info.data_size]
 
     def catfile(self, info) -> memoryview:
@@ -464,7 +504,8 @@ class PackDecodeBase:
 
         Raises:
             PackDecodeError: If algo is unknown or the data is a zstd patch
-                that requires the old file
+                that requires the old file, or the pack has no data section
+                (index pack)
         """
         content = self.catdata(info)
         if info.algo == 0:

@@ -8,7 +8,7 @@ the data section via data_start / data_size.
 
 PackDecodeError tests live in test_decode_error.py.
 """
-from conftest import COMMIT, WEBSITE_FILES, WEBSITE_PACK, WEBSITE_REPO
+from conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_REPO
 
 from alasio.deploy.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import IdxInfo
@@ -20,18 +20,18 @@ class TestPackDecodeBasic:
 
     def test_validate_passes(self):
         """A well-formed pack must validate."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         decoder.validate()  # must not raise
 
     def test_header(self):
         """Header magic and pack version must be decoded."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         assert decoder.pack_version == b'\x00'
         assert decoder.version == COMMIT
 
     def test_sections_are_memoryview(self):
         """index_section / data_section must be memoryview slices."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         assert isinstance(decoder.index_section, memoryview)
         assert isinstance(decoder.data_section, memoryview)
         assert len(decoder.index_section) > 0
@@ -39,7 +39,7 @@ class TestPackDecodeBasic:
 
     def test_refinfo_empty_in_full_pack(self):
         """Full pack has no refinfo, all files are in fileinfo."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         assert decoder.refinfo == {}
         assert len(decoder.fileinfo) == len(WEBSITE_FILES) + 1  # + D marker
 
@@ -49,7 +49,7 @@ class TestFullDecode:
 
     def test_full_decode_all_data(self):
         """Every record must decode to the hard-coded expected IdxInfo."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         decoder.validate()
 
         # hard-coded expectation per file, derived from WEBSITE_FILES:
@@ -190,7 +190,7 @@ class TestPackDecodeRoundtrip:
 
     def test_edit_types_covered(self):
         """Full pack must cover A, C and D edits."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         paths = decoder.fileinfo
         # C (copied) files with correct lookback chains
         assert paths['backend/utils.py'].edit == 0
@@ -202,7 +202,7 @@ class TestPackDecodeRoundtrip:
 
     def test_copied_content_matches_source(self):
         """C files must reference a file with identical content."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         files = decoder.fileinfo
         for info in files.values():
             if info.edit == 0 and info.source_lookback:
@@ -211,7 +211,7 @@ class TestPackDecodeRoundtrip:
 
     def test_eol_covered(self):
         """eol 0/1/2 must be covered."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         files = decoder.fileinfo
         assert files['backend/requirements.txt'].eol == 1  # CRLF via gitattributes
         assert files['scripts/run.bat'].eol == 1  # CRLF batch file
@@ -220,7 +220,7 @@ class TestPackDecodeRoundtrip:
 
     def test_algo_covered(self):
         """algo 0 (raw) and 1 (lzma) must be covered."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         files = decoder.fileinfo
         css = files['frontend/src/lib/styles.css']
         assert css.algo == 1
@@ -231,7 +231,7 @@ class TestPackDecodeRoundtrip:
 
     def test_empty_file(self):
         """Empty files have size 0, no sha1 and no data."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         info = decoder.fileinfo['backend/__init__.py']
         assert info.edit == 0
         assert info.size == 0
@@ -241,7 +241,7 @@ class TestPackDecodeRoundtrip:
 
     def test_mode_covered(self):
         """mode 0 (644) and 1 (755) must come from the git entry mode."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         files = decoder.fileinfo
         assert files['scripts/deploy.sh'].mode == 1  # 755
         assert files['backend/main.py'].mode == 0  # 644
@@ -257,7 +257,7 @@ class TestSourcePath:
         for path, entry in repo_files.items():
             sha1_to_paths.setdefault(entry.sha1, []).append(path)
 
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         for info in decoder.fileinfo.values():
             if info.source_lookback:
                 # the source must be another file with identical content
@@ -274,7 +274,7 @@ class TestSourcePath:
 
     def test_known_sources(self):
         """C files must reference their duplicate-content source file."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         paths = decoder.fileinfo
         # cascade chain: utils.py -> settings.py -> config.py
         assert paths['backend/settings.py'].source_path == 'backend/config.py'
@@ -284,7 +284,7 @@ class TestSourcePath:
 
     def test_deleted_has_no_source(self):
         """D records have no source_lookback and no source_path."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         info = decoder.fileinfo['backend/tools/__init__.py']
         assert info.source_lookback == 0
         assert info.source_path == ''
@@ -319,7 +319,7 @@ class TestPackDecodeData:
 
     def test_all_contents_extract(self):
         """Every file with data must restore its original content."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         for info in decoder.fileinfo.values():
             if not info.data_size:
                 continue
@@ -328,7 +328,7 @@ class TestPackDecodeData:
 
     def test_catfile_returns_memoryview(self):
         """catfile must return a memoryview for both raw and lzma files."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         for info in decoder.fileinfo.values():
             if not info.data_size:
                 continue
@@ -338,13 +338,13 @@ class TestPackDecodeData:
 
     def test_catfile_empty_file(self):
         """Files without data return an empty memoryview."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         info = decoder.fileinfo['backend/__init__.py']
         assert bytes(decoder.catfile(info)) == b''
 
     def test_catfile_copied_returns_source_content(self):
         """catfile of a copied file must return the source file content."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         for info in decoder.fileinfo.values():
             if info.edit == 0 and info.source_lookback:
                 expected = WEBSITE_FILES[info.source_path][0]
@@ -354,7 +354,7 @@ class TestPackDecodeData:
 
     def test_catdata_raw(self):
         """catdata of a raw file returns the plain content."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         info = decoder.fileinfo['backend/main.py']
         data = decoder.catdata(info)
         assert isinstance(data, memoryview)
@@ -362,7 +362,7 @@ class TestPackDecodeData:
 
     def test_catdata_compressed(self):
         """catdata of a compressed file returns the compressed bytes."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         info = decoder.fileinfo['frontend/src/lib/styles.css']
         data = decoder.catdata(info)
         assert isinstance(data, memoryview)
@@ -372,7 +372,7 @@ class TestPackDecodeData:
 
     def test_catfile_applies_eol(self):
         """catfile must apply the checkout line ending rule."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         info = decoder.fileinfo['backend/main.py']
         lf_content = bytes(decoder.catdata(info))
         assert lf_content == WEBSITE_FILES['backend/main.py'][0]
@@ -384,7 +384,7 @@ class TestPackDecodeData:
 
     def test_data_start_is_file_offset(self):
         """data_start must be an offset into the pack file."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         for info in decoder.fileinfo.values():
             if info.data_size:
                 assert info.data_start + info.data_size <= len(decoder.data)
@@ -392,7 +392,7 @@ class TestPackDecodeData:
 
     def test_data_start_strictly_increasing(self):
         """Records with data must occupy continuous ranges."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         prev_end = None
         for info in decoder.fileinfo.values():
             if not info.data_size or info.source_lookback:
@@ -408,12 +408,12 @@ class TestPackDecodeCached:
 
     def test_lazy(self):
         """Constructing the decoder must not decode idx_info."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         assert '_len_refinfo' not in decoder.__dict__
 
     def test_cached(self):
         """Repeated access must return the same list object."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         first = decoder.idx_info
         assert decoder.idx_info is first
 

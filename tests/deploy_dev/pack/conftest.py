@@ -80,4 +80,6 @@ WEBSITE_FILES = {
 WEBSITE_REPO = MockGitRepo()
 for path, (content, mode) in WEBSITE_FILES.items():
     WEBSITE_REPO.register_file(COMMIT, path, content, mode=mode)
-WEBSITE_PACK = b''.join(PackFull(WEBSITE_REPO, commit=COMMIT).iter_pack_data())
+WEBSITE_FULL_PACK = b''.join(PackFull(WEBSITE_REPO, commit=COMMIT).iter_pack_data())
+# index pack: header + index section only, no data section
+WEBSITE_INDEX_PACK = b''.join(PackFull(WEBSITE_REPO, commit=COMMIT).iter_packidx_data())

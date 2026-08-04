@@ -1,12 +1,12 @@
 """
 Tests for PackDecodeError: malformed packs and checksum failures.
 
-Uses conftest.WEBSITE_PACK (a full pack of the mock modern full-stack
+Uses conftest.WEBSITE_FULL_PACK (a full pack of the mock modern full-stack
 website) and verifies that every failure path raises PackDecodeError with
 a message naming the failing section.
 """
 import pytest
-from conftest import COMMIT, WEBSITE_PACK, WEBSITE_REPO
+from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_REPO
 
 from alasio.deploy.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy_dev.pack.pack_repo import PackFull
@@ -23,7 +23,7 @@ class TestPackDecodeStructureError:
     def test_truncated(self):
         """Truncated pack must raise PackDecodeError with the section name."""
         with pytest.raises(PackDecodeError, match='index section'):
-            PackDecodeBase(WEBSITE_PACK[:100])
+            PackDecodeBase(WEBSITE_FULL_PACK[:100])
 
 
 class TestPackDecodeChecksumFail:
@@ -31,7 +31,7 @@ class TestPackDecodeChecksumFail:
 
     def test_index_tampered(self):
         """Modifying index bytes must fail validation."""
-        data = bytearray(WEBSITE_PACK)
+        data = bytearray(WEBSITE_FULL_PACK)
         data[20] ^= 0xFF  # inside index_data, structure stays parseable
         decoder = PackDecodeBase(data)
         with pytest.raises(PackDecodeError, match='index checksum'):
@@ -39,7 +39,7 @@ class TestPackDecodeChecksumFail:
 
     def test_data_tampered(self):
         """Modifying file data must fail validation."""
-        data = bytearray(WEBSITE_PACK)
+        data = bytearray(WEBSITE_FULL_PACK)
         # last file data byte is right before the data digest
         data[-21] ^= 0xFF
         decoder = PackDecodeBase(data)
@@ -58,7 +58,7 @@ class TestPackDecodeErrorType:
         """A wrong value count must raise with the section name."""
         from alasio.ext.algorithm.vint import decode_vint
 
-        data = bytearray(WEBSITE_PACK)
+        data = bytearray(WEBSITE_FULL_PACK)
         decoder = PackDecodeBase(data)
 
         # locate index_data inside the pack: skip index length vint and
@@ -81,7 +81,7 @@ class TestPackDecodeErrorType:
 
     def test_validate_error_message(self):
         """Checksum failure must be reported as PackDecodeError."""
-        data = bytearray(WEBSITE_PACK)
+        data = bytearray(WEBSITE_FULL_PACK)
         data[20] ^= 0xFF
         decoder = PackDecodeBase(data)
         with pytest.raises(PackDecodeError):
@@ -120,7 +120,7 @@ class TestCatfileError:
 
     def test_catfile_zstd_patch_raises(self):
         """zstd patch data (needs the old file) must raise PackDecodeError."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         info = decoder.fileinfo['backend/main.py']
         info.algo = 2
         info.source_lookback = 1
@@ -129,7 +129,7 @@ class TestCatfileError:
 
     def test_catfile_unknown_algo_raises(self):
         """Unknown algo must raise PackDecodeError."""
-        decoder = PackDecodeBase(WEBSITE_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         info = decoder.fileinfo['backend/main.py']
         info.algo = 99
         with pytest.raises(PackDecodeError, match='unknown algo'):
