@@ -123,6 +123,17 @@ class TestDecodeBit2:
         with pytest.raises(ValueError, match="Value count mismatch"):
             decode_bit2(b"\x03\x82")
 
+    def test_copy_crossing_declared_count_raises(self):
+        """A copy opcode crossing the declared count raises ValueError.
+
+        Like a run opcode, a copy opcode adds its full length to the count
+        at once and may jump from below total to above it, expanding more
+        values than the prefix declares (corrupted or truncated input).
+        """
+        # count=2, literal [1], then copy offset=1 length=4 -> 5 values total
+        with pytest.raises(ValueError, match="Value count mismatch"):
+            decode_bit2(b"\x02\x01\x43\x00")
+
     def test_pack_padding_slots_do_not_add_values(self):
         """Corrupting the padding slots of a pack byte never changes the count.
 

@@ -68,4 +68,5 @@ def lzma_compress(data, max_dict_size=None):
     return compressed
 
 # Note that there is no lzma_decompress()
-# just use ``lzma.decompress()`` to decompress
+# just use ``lzma.decompress(data)`` to decompress
+# no need to set the same parameters in decompress, lzma can auto handle it

@@ -77,3 +77,7 @@ class FileInfo(RefInfo):
 
 class IdxInfo(FileInfo):
     data: UnsetType = UNSET
+    # start offset of the compressed data in full pack
+    # real value will be calculated in decoding
+    # file data can be indexed with `data_start` and `data_size`
+    data_start: int = 0
