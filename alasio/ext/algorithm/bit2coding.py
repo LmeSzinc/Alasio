@@ -24,7 +24,7 @@ def encode_bit2_opcode_iter(data):
     if n == 0:
         return
 
-    INF = 2 ** 32 - 1
+    INF = MAX_UINT32
 
     # ==========================================
     # 1. 预计算 Run 长度 (逆向扫描, 时间 O(N))
@@ -54,11 +54,11 @@ def encode_bit2_opcode_iter(data):
     # 变长小端整数对应的 d 字节开销表
     L_D_TABLE = [0] * (n + 2)
     for val in range(n + 2):
-        if val <= 255:
+        if val <= MAX_UINT8:
             l_d = 0
-        elif val <= 65535:
+        elif val <= MAX_UINT16:
             l_d = 1
-        elif val <= 16777215:
+        elif val <= MAX_UINT24:
             l_d = 2
         else:
             l_d = 3
@@ -403,7 +403,7 @@ def encode_length_int(length):
         second = first // 256
         return d, length % 256, first % 256, second % 256, second // 256
     else:
-        raise ValueError(f"Length is too large: {length}")
+        raise ValueError(f"[encode_bit2] Length is too large: {length}")
 
 
 def _encode_literal_iter(items):
@@ -537,7 +537,7 @@ def encode_bit2_stream_iter(opcodes, ext8=False):
 
         # this shouldn't happen
         else:
-            raise ValueError(f"Invalid opcode: {opcode}")
+            raise ValueError(f"[encode_bit2] Invalid opcode: {opcode}")
 
 
 def decode_bit2_stream_iter(data, total, ext8=False):
@@ -562,7 +562,7 @@ def decode_bit2_stream_iter(data, total, ext8=False):
         try:
             byte = data[read]
         except IndexError:
-            raise ValueError(f"Data truncated, expected {total} numbers, got {count}")
+            raise ValueError(f"[decode_bit2] Data truncated, expected {total} numbers, got {count}")
         read += 1
         # 1XXNNNNN: run XX for N+3 times, N (0~31)
         if byte >= 128:
@@ -648,7 +648,7 @@ def decode_bit2_stream_iter(data, total, ext8=False):
                 count += 1
             # invalid: byte>=000000XX
             else:
-                raise ValueError(f"Invalid opcode: {byte}")
+                raise ValueError(f"[decode_bit2] Invalid opcode: {byte}")
         # 000000XX: 1 item
         elif byte >= 0:
             opcodes.append((0, [byte]))
@@ -677,13 +677,13 @@ def _encode_value_check(data, ext8=False):
     min_val = min(data)
     max_val = max(data)
     if min_val < 0:
-        raise ValueError(f"Invalid value: {min_val}, value must be >= 0")
+        raise ValueError(f"[encode_bit2] Invalid value: {min_val}, value must be >= 0")
     if ext8:
         if max_val > 7:
-            raise ValueError(f"Invalid value: {max_val}, value must be <= 7 if ext8 is enabled")
+            raise ValueError(f"[encode_bit2] Invalid value: {max_val}, value must be <= 7 if ext8 is enabled")
     else:
         if max_val > 3:
-            raise ValueError(f"Invalid value: {max_val}, value must be <= 3 if ext8 is disabled")
+            raise ValueError(f"[encode_bit2] Invalid value: {max_val}, value must be <= 3 if ext8 is disabled")
 
 
 def encode_bit2(data, ext8=False):
@@ -727,7 +727,7 @@ def decode_bit2(data, ext8=False):
     if isinstance(data, bytes):
         data = memoryview(data)
     if not data:
-        raise ValueError('Data truncated: missing vint count prefix')
+        raise ValueError('[decode_bit2] Data truncated: missing vint count prefix')
     total, read = decode_vint(data)
     opcodes, read_stream = decode_bit2_stream_iter(data[read:], total, ext8=ext8)
     read += read_stream
@@ -738,5 +738,5 @@ def decode_bit2(data, ext8=False):
     # because the input was truncated, raise instead of truncating silently.
     if len(values) != total:
         raise ValueError(
-            f'Value count mismatch: decoded {len(values)} values, prefix declares {total}')
+            f'[decode_bit2] Value count mismatch: decoded {len(values)} values, prefix declares {total}')
     return values, read
