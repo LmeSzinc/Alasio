@@ -177,6 +177,13 @@ class RuffFormatter:
             print()
             return
 
+        # ---------- line endings ----------
+        # convert CRLF to LF, so files stay consistent across platforms
+        # origin keeps the raw bytes, so line-ending-only changes still trigger a write
+        code = code.replace(b'\r\n', b'\n')
+        if code != origin:
+            print('CRLF line endings converted to LF')
+
         # ---------- ruff format ----------
         temp_config_file = self.cwd / '_temp_config.toml'
         cmd = [

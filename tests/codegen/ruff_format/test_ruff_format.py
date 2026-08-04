@@ -205,6 +205,26 @@ y = 2
         formatter.format_code('test.py')
         mock_write.assert_not_called()
 
+    # ---- CRLF -> LF conversion ----------------------------------------------
+
+    @patch('alasio.codegen.ruff.ruff_format.atomic_read_bytes')
+    @patch('alasio.codegen.ruff.ruff_format.atomic_write')
+    def test_crlf_converted_to_lf(self, mock_write, mock_read, formatter):
+        """CRLF line endings are converted to LF even when code is otherwise clean."""
+        mock_read.return_value = b'x = 1\r\ny = 2\r\n'
+        formatter.format_code('test.py')
+        mock_write.assert_called_once()
+        self._assert_written(mock_write, b'x = 1\ny = 2\n')
+
+    @patch('alasio.codegen.ruff.ruff_format.atomic_read_bytes')
+    @patch('alasio.codegen.ruff.ruff_format.atomic_write')
+    def test_crlf_converted_with_ruff_fix(self, mock_write, mock_read, formatter):
+        """CRLF input that also needs a ruff fix is written with LF only."""
+        mock_read.return_value = b'x=1\r\n'
+        formatter.format_code('test.py')
+        mock_write.assert_called_once()
+        self._assert_written(mock_write, b'x = 1\n')
+
 
 class TestFormatCodePrints:
     """Tests for format_code's print() output."""
@@ -263,6 +283,17 @@ class TestFormatCodePrints:
             assert 'Writing: test.py' not in out
             assert out.endswith('\n\n')
             mock_write.assert_not_called()
+
+    def test_print_crlf_conversion(self, formatter, capsys):
+        """CRLF input prints the conversion message and writes the file."""
+        with patch('alasio.codegen.ruff.ruff_format.atomic_read_bytes') as mock_read, \
+             patch('alasio.codegen.ruff.ruff_format.atomic_write'):
+            mock_read.return_value = b'x = 1\r\ny = 2\r\n'
+            capsys.readouterr()
+            formatter.format_code('test.py')
+            out, _ = capsys.readouterr()
+            assert 'CRLF line endings converted to LF' in out
+            assert 'Writing: test.py' in out
 
     def test_print_ruff_stderr_is_visible(self, formatter, capsys):
         """Ruff's stderr output is printed (at least non-empty)."""
