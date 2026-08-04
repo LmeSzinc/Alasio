@@ -22,7 +22,7 @@ class TestSplitPathspec:
         assert _split_pathspec(r"a\/b/c") == [r"a\/b", "c"]
 
     def test_trailing_escape(self):
-        """覆盖分支：以转义符 \ 结尾的孤立情况"""
+        r"""覆盖分支：以转义符 \ 结尾的孤立情况"""
         assert _split_pathspec(r"a\\") == [r"a\\"]
         assert _split_pathspec(r"a\\\\") == [r"a\\\\"]
 
@@ -51,7 +51,7 @@ class TestConvertNormalChunk:
         assert _convert_normal_chunk("[a/b/c]") == r"(?=[^/])[abc]"
 
     def test_charset_ignore_escaped_slash(self):
-        """覆盖分支：字符集内混入转义的 \/ 同样丢弃 / """
+        r"""覆盖分支：字符集内混入转义的 \/ 同样丢弃 / """
         # 转义状态下遇到 /，执行 pass 分支
         assert _convert_normal_chunk(r"[a\/b]") == r"(?=[^/])[ab]"
 
