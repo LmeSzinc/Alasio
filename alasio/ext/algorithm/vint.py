@@ -10,7 +10,7 @@ def decode_vint(data):
     You should use + - * / % instead of & | >>
 
     Args:
-        data (bytearray | bytes):
+        data (bytearray | bytes | memoryview):
 
     Returns:
         tuple[int, int]: (decoded_integer, bytes_read)
@@ -69,7 +69,7 @@ def decode_vint_list(data, total):
     Decode a sequence of vint-encoded integers from bytes.
 
     Args:
-        data (bytearray | bytes): Encoded data containing total vint-encoded integers
+        data (bytearray | bytes| memoryview): Encoded data containing total vint-encoded integers
         total (int): Number of integers to decode
 
     Returns:

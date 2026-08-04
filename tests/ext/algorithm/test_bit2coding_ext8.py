@@ -9,7 +9,7 @@ representation.
 Functions tested:
   - ``encode_bit2_stream_iter(opcodes, ext8=True)``
   - ``decode_bit2_stream_iter(data, total, ext8=True)``
-  - ``encode_bit2(data, ext8=True)`` / ``decode_bit2(data, total, ext8=True)``
+  - ``encode_bit2(data, ext8=True)`` / ``decode_bit2(data, ext8=True)``
   - Round-trip consistency across the full pipeline
 
 Notes on error behaviour:
@@ -30,14 +30,9 @@ Notes on error behaviour:
 import pytest
 
 from alasio.ext.algorithm.bit2coding import (
-    decode_bit2,
-    decode_bit2_opcode,
-    decode_bit2_stream_iter,
-    encode_bit2,
-    encode_bit2_opcode_iter,
-    encode_bit2_stream_iter,
+    decode_bit2, decode_bit2_opcode, decode_bit2_stream_iter, encode_bit2, encode_bit2_opcode_iter,
+    encode_bit2_stream_iter
 )
-
 
 # ==============================================================================
 # encode_bit2_stream_iter — ext8 literal encoding
@@ -387,18 +382,18 @@ class TestEncodeBit2Ext8:
         data = [4, 5, 6, 7]
         result = encode_bit2(data, ext8=True)
         assert isinstance(result, bytes)
-        assert result == bytes([4, 5, 6, 7])
+        assert result == bytes([4, 4, 5, 6, 7])
 
     def test_ext8_mixed_with_normal(self):
         """Encode data mixing 0-3 and 4-7."""
         data = [0, 4, 1, 5]
         result = encode_bit2(data, ext8=True)
         assert isinstance(result, bytes)
-        assert result == bytes([0, 4, 1, 5])
+        assert result == bytes([4, 0, 4, 1, 5])
 
     def test_ext8_empty(self):
-        """Empty input with ext8=True returns empty bytes."""
-        assert encode_bit2([], ext8=True) == b""
+        """Empty input with ext8=True encodes the count prefix alone."""
+        assert encode_bit2([], ext8=True) == b"\x00"
 
     def test_ext8_normal_values_unchanged(self):
         """Normal 0-3 data is encoded identically with ext8=True."""
@@ -409,12 +404,12 @@ class TestEncodeBit2Ext8:
 
 
 class TestDecodeBit2Ext8:
-    """``decode_bit2(data, total, ext8=True)``."""
+    """``decode_bit2(data, ext8=True)``."""
 
     def test_decode_ext8_values(self):
         """Decode ext8-encoded data with ext8=True."""
         encoded = encode_bit2([4, 5, 6, 7], ext8=True)
-        decoded, read = decode_bit2(encoded, 4, ext8=True)
+        decoded, read = decode_bit2(encoded, ext8=True)
         assert decoded == [4, 5, 6, 7]
         assert read == len(encoded)
 
@@ -422,7 +417,7 @@ class TestDecodeBit2Ext8:
         """Decode mixed normal/ext8 data."""
         data = [1, 4, 2, 5, 3, 6]
         encoded = encode_bit2(data, ext8=True)
-        decoded, read = decode_bit2(encoded, len(data), ext8=True)
+        decoded, read = decode_bit2(encoded, ext8=True)
         assert decoded == data
         assert read == len(encoded)
 
@@ -430,7 +425,7 @@ class TestDecodeBit2Ext8:
         """Decoding ext8-encoded data without ext8 flag raises."""
         encoded = encode_bit2([4], ext8=True)
         with pytest.raises(ValueError, match="Invalid opcode"):
-            decode_bit2(encoded, 1, ext8=False)
+            decode_bit2(encoded, ext8=False)
 
 
 # ==============================================================================
@@ -439,7 +434,7 @@ class TestDecodeBit2Ext8:
 
 
 class TestRoundtripExt8:
-    """``decode_bit2(encode_bit2(data, ext8=True), len(data), ext8=True)[0] == data``."""
+    """``decode_bit2(encode_bit2(data, ext8=True))[0] == data``."""
 
     ROUNDTRIP_CASES = [
         # Empty
@@ -473,7 +468,7 @@ class TestRoundtripExt8:
     def test_roundtrip(self, data):
         """Round-trip with ext8=True."""
         encoded = encode_bit2(data, ext8=True)
-        decoded, read = decode_bit2(encoded, len(data), ext8=True)
+        decoded, read = decode_bit2(encoded, ext8=True)
         assert decoded == data, f"Failed for {data}"
         assert read == len(encoded)
 
@@ -486,7 +481,7 @@ class TestRoundtripExt8:
             else:
                 data.append(4 + (i % 4))
         encoded = encode_bit2(data, ext8=True)
-        decoded, _ = decode_bit2(encoded, len(data), ext8=True)
+        decoded, _ = decode_bit2(encoded, ext8=True)
         assert decoded == data
 
     def test_roundtrip_alternating_ext8_and_run_patterns(self):
@@ -503,7 +498,7 @@ class TestRoundtripExt8:
                 # literal normal
                 data.append(i % 4)
         encoded = encode_bit2(data, ext8=True)
-        decoded, _ = decode_bit2(encoded, len(data), ext8=True)
+        decoded, _ = decode_bit2(encoded, ext8=True)
         assert decoded == data
 
     def test_roundtrip_all_ext8_values_no_runs(self):
@@ -512,7 +507,7 @@ class TestRoundtripExt8:
         # (ext8 only supports 4-7 as literals, not runs).
         data = [4, 5, 6, 7] * 100
         encoded = encode_bit2(data, ext8=True)
-        decoded, _ = decode_bit2(encoded, len(data), ext8=True)
+        decoded, _ = decode_bit2(encoded, ext8=True)
         assert decoded == data
 
     def test_roundtrip_deterministic(self):
@@ -524,7 +519,7 @@ class TestRoundtripExt8:
         """Data with runs of normal values (0-3) and interspersed ext8."""
         data = [0, 0, 0, 0, 4, 1, 1, 1, 1, 5, 2, 2, 2, 2, 6]
         encoded = encode_bit2(data, ext8=True)
-        decoded, _ = decode_bit2(encoded, len(data), ext8=True)
+        decoded, _ = decode_bit2(encoded, ext8=True)
         assert decoded == data
 
     def test_normal_data_roundtrip_unchanged(self):
@@ -539,8 +534,8 @@ class TestRoundtripExt8:
         encoded_ext8 = encode_bit2(data, ext8=True)
         encoded_no_ext8 = encode_bit2(data, ext8=False)
         assert encoded_ext8 == encoded_no_ext8
-        decoded_ext8, _ = decode_bit2(encoded_ext8, len(data), ext8=True)
-        decoded_no_ext8, _ = decode_bit2(encoded_no_ext8, len(data), ext8=False)
+        decoded_ext8, _ = decode_bit2(encoded_ext8, ext8=True)
+        decoded_no_ext8, _ = decode_bit2(encoded_no_ext8, ext8=False)
         assert decoded_ext8 == data
         assert decoded_no_ext8 == data
 
@@ -573,9 +568,9 @@ class TestExt8ErrorHandling:
             decode_bit2_stream_iter(data, 1, ext8=True)
 
     def test_truncated_data_with_ext8(self):
-        """Not enough data for requested total still raises with ext8=True."""
+        """Not enough data for the count in the prefix still raises with ext8=True."""
         with pytest.raises(ValueError, match="Data truncated"):
-            decode_bit2(b"\x04", total=10, ext8=True)
+            decode_bit2(b"\x04", ext8=True)
 
     def test_encode_then_decode_without_ext8_fails(self):
         """Encoding value 4 (even without ext8 flag) produces a byte that
@@ -646,7 +641,7 @@ class TestCopyWithExt8Values:
         """Copy of 4-7 values round-trips correctly through ext8 pipeline."""
         data = [4, 5, 6, 7, 4, 5, 6, 7]
         encoded = encode_bit2(data, ext8=True)
-        decoded, _ = decode_bit2(encoded, len(data), ext8=True)
+        decoded, _ = decode_bit2(encoded, ext8=True)
         assert decoded == data
 
     def test_copy_longer_pattern_with_ext8(self):
@@ -659,14 +654,14 @@ class TestCopyWithExt8Values:
             "repeating pattern with ext8 values"
         )
         encoded = encode_bit2(data, ext8=True)
-        decoded, _ = decode_bit2(encoded, len(data), ext8=True)
+        decoded, _ = decode_bit2(encoded, ext8=True)
         assert decoded == data
 
     def test_copy_rolling_with_ext8_values(self):
         """Rolling copy (offset < length) with ext8 values."""
         data = [4, 4, 4, 4, 4, 4, 4, 4]  # 8 identical ext8 values
         encoded = encode_bit2(data, ext8=True)
-        decoded, _ = decode_bit2(encoded, len(data), ext8=True)
+        decoded, _ = decode_bit2(encoded, ext8=True)
         assert decoded == data
 
     def test_run_of_4_to_7_does_not_overflow(self):
@@ -674,7 +669,7 @@ class TestCopyWithExt8Values:
         ValueError: bytes must be in range(0, 256))."""
         data = [4, 4, 4, 4]
         encoded = encode_bit2(data, ext8=True)
-        decoded, _ = decode_bit2(encoded, len(data), ext8=True)
+        decoded, _ = decode_bit2(encoded, ext8=True)
         assert decoded == data
 
     def test_run_of_4_to_7_produces_no_run_opcode(self):

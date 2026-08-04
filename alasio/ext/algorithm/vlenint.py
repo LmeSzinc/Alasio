@@ -9,10 +9,10 @@ MAX_INT32 = 2 ** 32
 def vlenint_value_check(data):
     """
     Check if the values in data are valid for vlenint encoding
-    
+
     Args:
         data (Iterable[int]): list of values to encode
-    
+
     Raises:
         ValueError: if any value is negative
     """
@@ -28,7 +28,7 @@ def vlenint_value_check(data):
 
 def encode_vlenint(data):
     """
-    Encode numbers to variable length int. vlenint have 2 section
+    Encode numbers to variable length int. vlenint have 2 sections
     [byte_length]: bytes length of each value compressed in bit2coding
         byte_length indicates the bytes length of each value in the following section
         value=0 -> byte_length=0
@@ -38,14 +38,17 @@ def encode_vlenint(data):
         value=16777216..4294967295 -> byte_length=4
     [values]: values in little-endian
 
+    bit2coding adds a vint count prefix of its own (see encode_bit2), so
+    the number of values is stored once, not twice. decode_vlenint reads
+    the count from the bit2 prefix and does not need external input.
+
     Args:
         data (Iterable[int]): list of values to encode
 
     Returns:
         bytes: vlenint encoded data
     """
-    if not data:
-        return b''
+    data = list(data)
     vlenint_value_check(data)
     lengths = deque()
     value_bytes = deque()
@@ -62,13 +65,14 @@ def encode_vlenint(data):
     return b''.join([section_lengths, section_values])
 
 
-def decode_vlenint(data, total):
+def decode_vlenint(data):
     """
-    Decode vlenint encoded data to a list of integers
+    Decode vlenint encoded data to a list of integers.
+    The number of values is read from the vint count prefix of the bit2
+    section (see decode_bit2), the caller does not need to pass it in.
 
     Args:
         data (memoryview | bytes): vlenint encoded data
-        total (int): total number of values to decode
 
     Returns:
         tuple[list[int], int]: (decoded integers, bytes consumed)
@@ -78,13 +82,14 @@ def decode_vlenint(data, total):
     """
     if isinstance(data, bytes):
         data = memoryview(data)
-    byte_lengths, read = decode_bit2(data, total, ext8=True)
+    byte_lengths, read = decode_bit2(data, ext8=True)
     values = []
     values_append = values.append
     for length in byte_lengths:
         if length == 0:
             values_append(0)
         else:
+            # raises ValueError if the values section is truncated
             value = unpack_little_int(data, read, length)
             values_append(value)
             read += length

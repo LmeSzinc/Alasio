@@ -2,6 +2,7 @@ from collections import deque
 
 from alasio.backport.batch import batched
 from alasio.ext.algorithm.unpack import unpack_little_int
+from alasio.ext.algorithm.vint import decode_vint, encode_vint
 
 
 def encode_bit2_opcode_iter(data):
@@ -686,7 +687,12 @@ def _encode_value_check(data, ext8=False):
 
 def encode_bit2(data, ext8=False):
     """
-    Encode data to bit2 format
+    Encode data to bit2 format with a vint count prefix (see encode_vint):
+    [count]: number of values
+    [stream]: bit2 compressed values
+
+    The count prefix makes the encoding self-describing, decode_bit2 does
+    not need to know the number of values in advance.
 
     Args:
         data (list[int] | deque[int]): Data to encode
@@ -698,16 +704,17 @@ def encode_bit2(data, ext8=False):
     _encode_value_check(data, ext8)
     opcodes = encode_bit2_opcode_iter(data)
     stream = encode_bit2_stream_iter(opcodes, ext8=ext8)
-    return bytes(stream)
+    return encode_vint(len(data)) + bytes(stream)
 
 
-def decode_bit2(data, total, ext8=False):
+def decode_bit2(data, ext8=False):
     """
-    Decode bit2 format data to list[int]
+    Decode bit2 format data to list[int].
+    The number of values is read from the vint count prefix, the caller
+    does not need to pass it in.
 
     Args:
         data (memoryview | bytes): Encoded data
-        total (int): Total numbers
         ext8 (bool): True to enable ext8 support to allow 4/5/6/7 as literal values
 
     Returns:
@@ -718,6 +725,17 @@ def decode_bit2(data, total, ext8=False):
     """
     if isinstance(data, bytes):
         data = memoryview(data)
-    opcodes, read = decode_bit2_stream_iter(data, total, ext8=ext8)
-    data = decode_bit2_opcode(opcodes)
-    return data, read
+    if not data:
+        raise ValueError('Data truncated: missing vint count prefix')
+    total, read = decode_vint(data)
+    opcodes, read_stream = decode_bit2_stream_iter(data[read:], total, ext8=ext8)
+    read += read_stream
+    values = decode_bit2_opcode(opcodes)
+    # decode_bit2_stream_iter stops at count >= total, so a run opcode can
+    # cross the total boundary and yield more values than declared. This
+    # only happens when the stream does not match the count prefix, usually
+    # because the input was truncated, raise instead of truncating silently.
+    if len(values) != total:
+        raise ValueError(
+            f'Value count mismatch: decoded {len(values)} values, prefix declares {total}')
+    return values, read
