@@ -13,6 +13,7 @@ The file list is designed to cover every record type produced by PackFull:
 """
 import pytest
 
+from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
 
 COMMIT = 'c1'
@@ -20,7 +21,7 @@ COMMIT = 'c1'
 # {path: (content, mode)}
 WEBSITE_FILES = {
     '.gitattributes': (
-        b'*.py text eol=lf\n*.txt text eol=crlf\n*.png binary\n',
+        b'*.py text eol=lf\n*.txt text eol=crlf\n*.bat text eol=crlf\n*.png binary\n',
         644,
     ),
     # python backend
@@ -67,6 +68,8 @@ WEBSITE_FILES = {
     'scripts/deploy.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
     # same content as deploy.sh -> C (copied)
     'scripts/run.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
+    # windows batch file, CRLF line endings -> eol = 1
+    'scripts/run.bat': (b'@echo off\r\npython -m website\r\n', 644),
     'docs/README.md': (b'# Website\n\nModern full-stack site.\n', 644),
 }
 
@@ -83,3 +86,18 @@ def website_repo():
     for path, (content, mode) in WEBSITE_FILES.items():
         repo.register_file(COMMIT, path, content, mode=mode)
     return repo
+
+
+@pytest.fixture
+def website_pack(website_repo):
+    """
+    Full pack bytes encoded from the website repo.
+
+    Args:
+        website_repo (MockGitRepo): Fixture repo
+
+    Returns:
+        bytes: Full pack file content
+    """
+    pack = PackFull(website_repo, commit=COMMIT)
+    return b''.join(pack.iter_pack_data())

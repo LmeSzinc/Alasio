@@ -7,6 +7,8 @@ from alasio.ext.algorithm.pathlen_coding import decode_prefix_comb, decode_suffi
 from alasio.ext.algorithm.vint import decode_vint
 from alasio.ext.algorithm.vlenint import decode_vlenint
 from alasio.ext.cache import cached_property
+from alasio.ext.compress.algo_lzma import lzma_decompress
+from alasio.ext.compress.algo_zstd import zstd_decompress
 
 
 class PackDecodeError(ValueError):
@@ -377,6 +379,61 @@ class PackDecodeBase:
             paths.append(path)
             prev = path
         return paths
+
+    def catdata(self, info) -> memoryview:
+        """
+        Get the raw bytes of this file from the data section.
+
+        The data may be uncompressed, or lzma/zstd compressed -- no
+        decompression is performed. See catfile() to get the content.
+
+        Args:
+            info (IdxInfo): Record with data_start / data_size
+
+        Returns:
+            memoryview: Raw bytes in the data section
+        """
+        return self.data[info.data_start:info.data_start + info.data_size]
+
+    def catfile(self, info) -> memoryview:
+        """
+        Extract the file content from the data section.
+
+        Files stored raw (algo == 0) are returned as a zero-copy memoryview
+        slice of the pack. lzma (algo == 1) and full zstd (algo == 2 with
+        source_lookback == 0) data are decompressed automatically.
+
+        zstd patch data (algo == 2 with source_lookback != 0) must be
+        decompressed with the old file content, which this method cannot
+        provide, so it raises PackDecodeError.
+
+        Files without data (empty, deleted, copied) return an empty
+        memoryview. Copied files must be resolved through source_lookback
+        before calling this method.
+
+        Args:
+            info (IdxInfo): Record with data_start / data_size / algo
+
+        Returns:
+            memoryview: File content
+
+        Raises:
+            PackDecodeError: If algo is unknown or the data is a zstd patch
+                that requires the old file
+        """
+        if info.algo == 0:
+            return self.catdata(info)
+        chunk = self.catdata(info)
+        if info.algo == 1:
+            return memoryview(lzma_decompress(chunk))
+        if info.algo == 2:
+            if info.source_lookback:
+                raise PackDecodeError(
+                    f'Failed to decompress {info.path}: zstd patch data '
+                    f'requires the old file content'
+                )
+            return memoryview(zstd_decompress(chunk))
+        raise PackDecodeError(f'Failed to decompress {info.path}: unknown algo {info.algo}')
 
     @cached_property
     def refinfo(self) -> "list[IdxInfo]":
