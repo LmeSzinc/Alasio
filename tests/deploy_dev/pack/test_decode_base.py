@@ -8,9 +8,10 @@ the data section via data_start / data_size.
 
 PackDecodeError tests live in test_decode_error.py.
 """
+import pytest
 from conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_REPO
 
-from alasio.deploy.pack.decode_base import PackDecodeBase
+from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull
 
@@ -381,6 +382,36 @@ class TestPackDecodeData:
         crlf_content = bytes(decoder.catfile(info))
         assert crlf_content == lf_content.replace(b'\n', b'\r\n')
         assert b'\r\n' in crlf_content
+
+    def test_catfile_tampered_last_data_raises(self):
+        """Tampering the last file's data byte must raise PackDecodeError."""
+        # the last data byte of the pack sits right before the 20-byte data
+        # checksum and belongs to scripts/run.bat (raw): tampering it keeps
+        # the length but changes the content, so the sha1 check must fail
+        data = bytearray(WEBSITE_FULL_PACK)
+        data[-21] ^= 0xFF
+        decoder = PackDecodeBase(data)
+        info = decoder.fileinfo['scripts/run.bat']
+        with pytest.raises(PackDecodeError, match='sha1'):
+            decoder.catfile(info)
+
+    def test_catfile_tampered_lzma_raises(self):
+        """Tampering lzma data must raise PackDecodeError, not LZMAError."""
+        data = bytearray(WEBSITE_FULL_PACK)
+        info = PackDecodeBase(WEBSITE_FULL_PACK).fileinfo['frontend/src/lib/styles.css']
+        data[info.data_start] ^= 0xFF
+        decoder = PackDecodeBase(data)
+        info = decoder.fileinfo['frontend/src/lib/styles.css']
+        with pytest.raises(PackDecodeError, match='decompress'):
+            decoder.catfile(info)
+
+    def test_catfile_size_mismatch_raises(self):
+        """A recorded size that does not match the decoded content must raise."""
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
+        info = decoder.fileinfo['scripts/run.bat']
+        info.size += 1
+        with pytest.raises(PackDecodeError, match='size'):
+            decoder.catfile(info)
 
     def test_data_start_is_file_offset(self):
         """data_start must be an offset into the pack file."""

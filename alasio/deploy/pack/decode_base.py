@@ -229,11 +229,13 @@ class PackDecodeBase:
         prefix_comb, read = _decode('index data: prefix comb', decode_vlenint, data[offset:])
         offset += read
         _check_length('index data: prefix comb', len(prefix_comb), total)
-        prefix_reuse, path_len = decode_prefix_comb(prefix_comb)
+        prefix_reuse, path_len = _decode(
+            'index data: prefix comb', decode_prefix_comb, prefix_comb)
         suffix_comb, read = _decode('index data: suffix comb', decode_vlenint, data[offset:])
         offset += read
         _check_length('index data: suffix comb', len(suffix_comb), total)
-        suffix_reuse, suffix_lookback = decode_suffix_comb(suffix_comb)
+        suffix_reuse, suffix_lookback = _decode(
+            'index data: suffix comb', decode_suffix_comb, suffix_comb)
         path_bytes = sum(path_len)
         if offset + path_bytes > len(data):
             raise PackDecodeError(
@@ -503,26 +505,80 @@ class PackDecodeBase:
             memoryview: Working tree file content
 
         Raises:
-            PackDecodeError: If algo is unknown or the data is a zstd patch
-                that requires the old file, or the pack has no data section
-                (index pack)
+            PackDecodeError: If algo is unknown, the data is a zstd patch
+                that requires the old file, the pack has no data section
+                (index pack), decompression fails, or the decoded content
+                does not match the recorded size / sha1
         """
         content = self.catdata(info)
-        if info.algo == 0:
-            return memoryview(self.apply_eol(content, info.eol))
-        content = bytes(content)
-        if info.algo == 1:
-            content = lzma_decompress(content)
-        elif info.algo == 2:
-            if info.source_lookback:
-                raise PackDecodeError(
-                    f'Failed to decompress {info.path}: zstd patch data '
-                    f'requires the old file content'
-                )
-            content = zstd_decompress(content)
-        else:
-            raise PackDecodeError(f'Failed to decompress {info.path}: unknown algo {info.algo}')
+        if info.algo != 0:
+            content = self._decompress(info, content)
+        self._check_content(info, content)
         return memoryview(self.apply_eol(content, info.eol))
+
+    @staticmethod
+    def _decompress(info, data, source=None):
+        """
+        Decompress the data of info, wrapping errors into PackDecodeError.
+
+        algo == 1 data is lzma compressed, algo == 2 data is zstd
+        compressed. source provides the old file content as the zstd
+        dictionary for zstd patch data, callers that have it can pass it.
+
+        Args:
+            info (IdxInfo): Record being decompressed
+            data (memoryview): Raw data of the file from catdata
+            source (bytes | memoryview, optional): Old file content as the
+                zstd dictionary for zstd patch data. Defaults to None.
+
+        Returns:
+            bytes: Decompressed content
+
+        Raises:
+            PackDecodeError: If the data is a zstd patch without source,
+                or algo is unknown or decompression fails
+        """
+        if info.algo == 2 and info.source_lookback and source is None:
+            raise PackDecodeError(
+                f'Failed to decompress {info.path}: zstd patch data '
+                f'requires the old file content'
+            )
+        try:
+            if info.algo == 1:
+                return lzma_decompress(data)
+            if info.algo == 2:
+                return zstd_decompress(data, source)
+        except Exception as e:
+            raise PackDecodeError(f'Failed to decompress {info.path}: {e}') from e
+        raise PackDecodeError(f'Failed to decompress {info.path}: unknown algo {info.algo}')
+
+    @staticmethod
+    def _check_content(info, content):
+        """
+        Verify decoded content against the recorded size and sha1.
+
+        Checked in git blob form (LF normalized), before apply_eol converts
+        to the working tree form: size is the blob length and sha1 is the
+        blob sha1. Records without data (empty, deleted) have size 0 and an
+        empty sha1, which always pass.
+
+        Args:
+            info (IdxInfo): Record being decoded
+            content (bytes | memoryview): Decoded blob content
+
+        Raises:
+            PackDecodeError: If the size or sha1 mismatch
+        """
+        if len(content) != info.size:
+            raise PackDecodeError(
+                f'Failed to decode {info.path}: size mismatch: '
+                f'decoded {len(content)} bytes, expected {info.size}'
+            )
+        if info.sha1 and sha1(content).hexdigest() != info.sha1:
+            raise PackDecodeError(
+                f'Failed to decode {info.path}: sha1 mismatch: '
+                f'decoded {sha1(content).hexdigest()}, expected {info.sha1}'
+            )
 
     @cached_property
     def refinfo(self) -> "dict[str, IdxInfo]":

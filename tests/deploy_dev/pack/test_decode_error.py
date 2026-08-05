@@ -6,7 +6,7 @@ website) and verifies that every failure path raises PackDecodeError with
 a message naming the failing section.
 """
 import pytest
-from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_REPO
+from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_REPO
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy_dev.pack.pack_repo import PackFull
@@ -134,3 +134,79 @@ class TestCatfileError:
         info.algo = 99
         with pytest.raises(PackDecodeError, match='unknown algo'):
             decoder.catfile(info)
+
+
+def _assert_truncations_fail(pack):
+    """
+    Every truncation of pack must raise PackDecodeError.
+
+    Both validate() and the full decode path (fileinfo + catfile) must
+    raise PackDecodeError for any end in range(len(pack)), never another
+    exception and never succeed silently.
+
+    Args:
+        pack (bytes): Intact pack to truncate
+    """
+    pack = memoryview(pack)
+    for end in range(len(pack)):
+        truncated = pack[:end]
+        try:
+            PackDecodeBase(truncated).validate()
+        except PackDecodeError:
+            pass
+        except Exception as e:
+            raise AssertionError(
+                f'truncate at {end}: validate raised {type(e).__name__}: {e}'
+            ) from e
+        else:
+            raise AssertionError(f'truncate at {end}: validate did not raise')
+        try:
+            decoder = PackDecodeBase(truncated)
+            for info in decoder.fileinfo.values():
+                decoder.catfile(info)
+        except PackDecodeError:
+            pass
+        except Exception as e:
+            raise AssertionError(
+                f'truncate at {end}: decode raised {type(e).__name__}: {e}'
+            ) from e
+        else:
+            raise AssertionError(f'truncate at {end}: decode did not raise')
+
+
+class TestPackDecodeTruncate:
+    """Truncation at any byte must fail with PackDecodeError, never with
+    another exception and never succeed silently.
+
+    Full and index packs are tested separately because an index pack has
+    no data section: validate_data and catfile raise on it by design.
+    Both packs are small (1859 / 705 bytes), brute forcing every truncation
+    point takes milliseconds, so no sampling is needed.
+    """
+
+    def test_full_intact(self):
+        """An intact full pack must validate and decode every file."""
+        PackDecodeBase(WEBSITE_FULL_PACK).validate()
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
+        infos = list(decoder.fileinfo.values())
+        assert infos
+        for info in infos:
+            decoder.catfile(info)
+
+    def test_full_any_truncation(self):
+        """Every truncation of the full pack must raise PackDecodeError."""
+        _assert_truncations_fail(WEBSITE_FULL_PACK)
+
+    def test_index_intact(self):
+        """An intact index pack must validate its index and decode records.
+
+        The index pack has no data section, so validate_data and catfile
+        raise by design (covered in test_decode_index.py).
+        """
+        decoder = PackDecodeBase(WEBSITE_INDEX_PACK)
+        decoder.validate_index()
+        assert decoder.fileinfo
+
+    def test_index_any_truncation(self):
+        """Every truncation of the index pack must raise PackDecodeError."""
+        _assert_truncations_fail(WEBSITE_INDEX_PACK)
