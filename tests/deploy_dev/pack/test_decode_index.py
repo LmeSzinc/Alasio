@@ -9,7 +9,7 @@ raise PackDecodeError.
 import pytest
 from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK
 
-from alasio.deploy.decode_base import PackDecodeBase, PackDecodeError
+from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 
 
 class TestPackDecodeIndex:

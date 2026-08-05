@@ -8,7 +8,7 @@ a message naming the failing section.
 import pytest
 from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_REPO
 
-from alasio.deploy.decode_base import PackDecodeBase, PackDecodeError
+from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy_dev.pack.pack_repo import PackFull
 
 

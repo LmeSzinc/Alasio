@@ -17,7 +17,7 @@ Chain under test:
 """
 from conftest import COMMIT
 
-from alasio.deploy.decode_base import PackDecodeBase
+from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
 

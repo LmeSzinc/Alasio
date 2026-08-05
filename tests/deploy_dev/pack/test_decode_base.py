@@ -10,7 +10,7 @@ PackDecodeError tests live in test_decode_error.py.
 """
 from conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_REPO
 
-from alasio.deploy.decode_base import PackDecodeBase
+from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull
 
