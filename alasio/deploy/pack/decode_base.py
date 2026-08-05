@@ -206,6 +206,19 @@ class PackDecodeBase:
         if digest.digest() != bytes(self.data_section[-20:]):
             raise PackDecodeError('Failed to validate data checksum: checksum mismatch')
 
+    def extract_index_pack(self):
+        """
+        Extract the index pack from this pack.
+
+        The index pack is the header plus the index section, which is a
+        prefix of every pack: extracting from a full pack drops the data
+        section, and an index pack extracts to itself.
+
+        Returns:
+            memoryview: Index pack bytes, a zero-copy slice of the pack
+        """
+        return self.data[:5 + len(self.index_section)]
+
     @cached_property
     def idx_info(self) -> "list[IdxInfo]":
         """

@@ -70,3 +70,21 @@ class TestPackDecodeIndex:
         info = decoder.fileinfo['backend/main.py']
         with pytest.raises(PackDecodeError, match='no data section'):
             decoder.catfile(info)
+
+
+class TestExtractIndexPack:
+    """extract_index_pack must produce the index pack from any pack."""
+
+    def test_extract_from_full(self):
+        """Extracting from a full pack must yield the index pack."""
+        full = PackDecodeBase(WEBSITE_FULL_PACK)
+        extracted = full.extract_index_pack()
+        assert isinstance(extracted, memoryview)
+        assert extracted == WEBSITE_INDEX_PACK
+        # the extracted pack must decode the same records as the source
+        assert list(PackDecodeBase(extracted).fileinfo) == list(full.fileinfo)
+
+    def test_extract_from_index(self):
+        """An index pack must extract to itself, without error."""
+        decoder = PackDecodeBase(WEBSITE_INDEX_PACK)
+        assert decoder.extract_index_pack() == WEBSITE_INDEX_PACK
