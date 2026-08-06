@@ -24,14 +24,18 @@ def joinpath(root: str, path: str) -> str:
 
     Args:
         root: Base path, needs to be normalized first
-        path: Relative path
+        path: Relative path, needs to be normalized first
 
     Returns:
         str:
     """
     if root:
         if path:
-            return f'{root}/{path}'
+            if root == '/':
+                # linux root, don't create '//path'
+                return f'/{path}'
+            else:
+                return f'{root}/{path}'
         else:
             return root
     else:

@@ -9,6 +9,7 @@ from alasio.ext import env
 from alasio.ext.path.atomic import (
     atomic_open, atomic_read_bytes, atomic_remove, atomic_replace, atomic_rmtree, atomic_write
 )
+from alasio.ext.path.makedir import batch_makedirs
 
 
 class PendingFile(Struct):
@@ -162,6 +163,13 @@ class UnpackJob:
         when it differs from the record. The workspace is cleaned up at
         the end.
         """
+        # create the parent folders of all targets in one batch
+        batch_makedirs([
+            env.PROJECT_ROOT.joinpath(pending.info.path)
+            for pending in self.pending
+            if pending.info.edit != 2
+        ])
+
         for pending in self.pending:
             info = pending.info
             target = env.PROJECT_ROOT.joinpath(info.path)
@@ -169,7 +177,6 @@ class UnpackJob:
                 # deleted marker, the file should not exist
                 atomic_remove(target)
                 continue
-            os.makedirs(target.uppath(), exist_ok=True)
             atomic_replace(pending.tmp, target)
             self._adjust_mode(target, info, pending.current_mode)
 
