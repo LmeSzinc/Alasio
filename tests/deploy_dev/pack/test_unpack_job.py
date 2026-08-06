@@ -110,9 +110,8 @@ class TestUnpack:
         assert len(deleted) == 1
         assert deleted[0].info.edit == 2
         assert deleted[0].tmp == ''
-        assert deleted[0].current_mode == -1
         # a normal record carries the file info, the tmp file and the
-        # current mode of the target (-1 since the target does not exist)
+        # mode after replace(), python writes 666 by default
         normal = [
             item for item in job.pending
             if item.info.path == 'backend/main.py'
@@ -121,28 +120,10 @@ class TestUnpack:
         assert normal[0].info.edit == 0
         assert isinstance(normal[0].info, IdxInfo)
         assert normal[0].tmp
-        assert normal[0].current_mode == -1
+        assert normal[0].current_mode == 0o666
         # tmp file name is built from the record and the index
         info = normal[0].info
         assert os.path.exists(normal[0].tmp)
-
-    def test_current_mode_recorded(self, app_folder):
-        """unpack() records the mode of an existing target file."""
-        # stale content, the file will be replaced
-        target = env.PROJECT_ROOT / 'backend/config.py'
-        os.makedirs(target.uppath(), exist_ok=True)
-        with open(target, 'wb') as f:
-            f.write(b'stale content, should be replaced')
-        job = UnpackJob(WEBSITE_FULL_PACK)
-        job.write()
-        job.unpack()
-        pending = [
-            item for item in job.pending
-            if item.info.path == 'backend/config.py'
-        ]
-        assert len(pending) == 1
-        # st_mode of the default file mode in pyfakefs
-        assert pending[0].current_mode == 0o100666
 
 
 class TestUnpackReplace:
@@ -410,3 +391,74 @@ class TestExecutableMode:
         """Files with mode 644 are not executable after replace()."""
         run_job()
         assert not os.stat(env.PROJECT_ROOT / 'backend/main.py').st_mode & 0o111
+
+
+class TestFileMode:
+    """File mode adjustment rules: the execute bits must match the record.
+
+    os.chmod is patched to capture the calls, so the decision logic can
+    be verified on every platform, the actual chmod effect is covered
+    by TestExecutableMode on POSIX platforms.
+    """
+
+    @staticmethod
+    def _patch_chmod(monkeypatch):
+        """Capture os.chmod calls, no real chmod happens."""
+        calls = []
+        monkeypatch.setattr(os, 'chmod', lambda path, mode: calls.append((path, mode)))
+        return calls
+
+    @staticmethod
+    def _info(path):
+        """FileInfo of a file in the pack."""
+        return PackDecodeBase(WEBSITE_FULL_PACK).fileinfo[path]
+
+    def test_755_new_file_chmod(self, app_folder, monkeypatch):
+        """A new 755 file (written 666) is chmod-ed to 755."""
+        calls = self._patch_chmod(monkeypatch)
+        info = self._info('scripts/deploy.sh')
+        target = env.PROJECT_ROOT / 'scripts/deploy.sh'
+        UnpackJob._adjust_mode(target, info, 0o666)
+        assert calls == [(target, 0o755)]
+
+    def test_644_new_file_kept(self, app_folder, monkeypatch):
+        """A new 644 file (written 666) needs no chmod."""
+        calls = self._patch_chmod(monkeypatch)
+        info = self._info('backend/config.py')
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        UnpackJob._adjust_mode(target, info, 0o666)
+        assert calls == []
+
+    @pytest.mark.parametrize('current', [0o644, 0o666, 0o646, 0o664])
+    def test_644_record_accepts_no_exec(self, app_folder, monkeypatch, current):
+        """A 644 record accepts any mode without execute bits."""
+        calls = self._patch_chmod(monkeypatch)
+        info = self._info('backend/config.py')
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        UnpackJob._adjust_mode(target, info, current)
+        assert calls == []
+
+    @pytest.mark.parametrize('current', [0o755, 0o777, 0o757, 0o775])
+    def test_755_record_accepts_exec(self, app_folder, monkeypatch, current):
+        """A 755 record accepts any mode with execute bits."""
+        calls = self._patch_chmod(monkeypatch)
+        info = self._info('scripts/deploy.sh')
+        target = env.PROJECT_ROOT / 'scripts/deploy.sh'
+        UnpackJob._adjust_mode(target, info, current)
+        assert calls == []
+
+    def test_644_record_rejects_755(self, app_folder, monkeypatch):
+        """A 644 record, a 755 file is chmod-ed to 644."""
+        calls = self._patch_chmod(monkeypatch)
+        info = self._info('backend/config.py')
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        UnpackJob._adjust_mode(target, info, 0o755)
+        assert calls == [(target, 0o644)]
+
+    def test_755_record_rejects_644(self, app_folder, monkeypatch):
+        """A 755 record, a 644 file is chmod-ed to 755."""
+        calls = self._patch_chmod(monkeypatch)
+        info = self._info('scripts/deploy.sh')
+        target = env.PROJECT_ROOT / 'scripts/deploy.sh'
+        UnpackJob._adjust_mode(target, info, 0o644)
+        assert calls == [(target, 0o755)]

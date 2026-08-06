@@ -17,14 +17,15 @@ class PendingFile(Struct):
 
     The tmp file is moved to the target path, deleted records
     (edit == 2) have empty tmp, their targets are removed instead.
-    current_mode is the mode of the current target file, -1 if the
-    target does not exist.
+    current_mode is the file mode after replace(): the file is written
+    by python with the default mode 666, a 644 record needs no further
+    operation, a 755 record is chmod-ed in replace().
     """
     # record of the file to apply
     info: IdxInfo
     # tmp file path in the workspace, empty for deleted markers
     tmp: str
-    # file mode of the current target file, -1 if it does not exist
+    # file mode after replace(), python writes 666 by default
     current_mode: int
 
 
@@ -138,7 +139,7 @@ class UnpackJob:
             target = env.PROJECT_ROOT.joinpath(path)
             if info.edit == 2:
                 # deleted marker, its target is removed in replace()
-                self.pending.append(PendingFile(info=info, tmp='', current_mode=-1))
+                self.pending.append(PendingFile(info=info, tmp='', current_mode=0))
                 continue
             current = self._read_current(target)
             if self._matches(info, current):
@@ -148,8 +149,9 @@ class UnpackJob:
             if not self._matches(info, self._read_current(tmp)):
                 # decompress and write to the tmp file
                 atomic_write(tmp, decoder.catfile(info))
-            current_mode = current.mode if current.exist else -1
-            self.pending.append(PendingFile(info=info, tmp=tmp, current_mode=current_mode))
+            # the file is written by python with the default mode 666,
+            # a 755 record is chmod-ed in replace()
+            self.pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
 
     def replace(self):
         """
@@ -169,9 +171,7 @@ class UnpackJob:
                 continue
             os.makedirs(target.uppath(), exist_ok=True)
             atomic_replace(pending.tmp, target)
-            if info.mode == 1 and pending.current_mode & 0o777 != 0o755:
-                # executable, adjust the mode if it differs
-                os.chmod(target, 0o755)
+            self._adjust_mode(target, info, pending.current_mode)
 
         # all changes applied, clean the workspace atomically
         self.cleanup()
@@ -247,3 +247,29 @@ class UnpackJob:
         if info.sha1:
             return sha1(data).hexdigest() == info.sha1
         return True
+
+    @staticmethod
+    def _adjust_mode(target, info, current_mode):
+        """
+        Adjust the file mode if the execute bits differ from the record.
+
+        A 644 record (mode=0) accepts any current mode without execute
+        bits, e.g. 666/646/664, a 755 record (mode=1) accepts any with
+        execute bits, e.g. 777/757/775. Otherwise the file is chmod-ed
+        to the record mode, 644 or 755.
+
+        Args:
+            target (str): Target file path
+            info (IdxInfo): File record
+            current_mode (int): st_mode of the current file, or 0o666
+                for a new file written with the python default mode
+        """
+        current_exec = current_mode & 0o111
+        if info.mode == 1:
+            if current_exec != 0o111:
+                # 755 record, the file is not executable
+                os.chmod(target, 0o755)
+        else:
+            if current_exec:
+                # 644 record, the file is executable
+                os.chmod(target, 0o644)
