@@ -212,9 +212,11 @@ class UnpackJob:
         Check if a current file matches a record: exists, same size,
         same sha1.
 
-        Working tree files of eol=1 records are CRLF, the blob sha1 is
-        LF, so CRLF is normalized before hashing. Records with empty
-        sha1 (empty files) match on size only.
+        The EOL of the working tree file must match the record: eol=1
+        expects CRLF, eol=0 expects LF, eol=2 (binary) is compared
+        as-is. Working tree CRLF is normalized to LF before hashing,
+        the blob sha1 is LF. Records with empty sha1 (empty files)
+        match on size only.
 
         Args:
             info (IdxInfo): Record to check against
@@ -226,9 +228,20 @@ class UnpackJob:
         if not current.exist:
             return False
         data = current.data
+        # the EOL of the working tree file must match the record
         if info.eol == 1:
-            # working tree files are CRLF, blob content is LF
+            if data and b'\r' not in data:
+                # record expects CRLF, the file is LF
+                return False
+            if data.count(b'\n') != data.count(b'\r\n'):
+                # record expects CRLF, the file has mixed line endings
+                return False
+            # normalize the working tree CRLF to LF for comparison
             data = data.replace(b'\r\n', b'\n')
+        elif info.eol == 0:
+            if b'\r' in data:
+                # record expects LF, the file has CR
+                return False
         if len(data) != info.size:
             return False
         if info.sha1:

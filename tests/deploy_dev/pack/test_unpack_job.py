@@ -275,6 +275,56 @@ class TestUnpackSkip:
         run_job()
         assert file_read_bytes(target) == content
 
+    def test_eol_mismatch_lf_vs_crlf(self, app_folder):
+        """A LF file is replaced when the record expects CRLF (eol=1)."""
+        # backend/requirements.txt is eol=1 (CRLF), the local file is LF
+        lf_content = WEBSITE_FILES['backend/requirements.txt'][0].replace(b'\r\n', b'\n')
+        target = env.PROJECT_ROOT / 'backend/requirements.txt'
+        os.makedirs(target.uppath(), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(lf_content)
+        run_job()
+        # replaced with the CRLF content of the record
+        assert file_read_bytes(target) == WEBSITE_FILES['backend/requirements.txt'][0]
+
+    def test_eol_mismatch_crlf_vs_lf(self, app_folder):
+        """A CRLF file is replaced when the record expects LF (eol=0)."""
+        # backend/config.py is eol=0 (LF), the local file is CRLF
+        crlf_content = WEBSITE_FILES['backend/config.py'][0].replace(b'\n', b'\r\n')
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        os.makedirs(target.uppath(), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(crlf_content)
+        run_job()
+        # replaced with the LF content of the record
+        assert file_read_bytes(target) == WEBSITE_FILES['backend/config.py'][0]
+
+    def test_eol_mismatch_mixed_vs_crlf(self, app_folder):
+        """A mixed LF/CRLF file is replaced when the record expects CRLF."""
+        # backend/requirements.txt is eol=1 (CRLF), the local file is mixed
+        content = WEBSITE_FILES['backend/requirements.txt'][0]
+        mixed = content.replace(b'\r\n', b'\n', 1)
+        target = env.PROJECT_ROOT / 'backend/requirements.txt'
+        os.makedirs(target.uppath(), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(mixed)
+        run_job()
+        # replaced with the pure CRLF content of the record
+        assert file_read_bytes(target) == content
+
+    def test_eol_mismatch_mixed_vs_lf(self, app_folder):
+        """A mixed LF/CRLF file is replaced when the record expects LF."""
+        # backend/config.py is eol=0 (LF), the local file is mixed
+        content = WEBSITE_FILES['backend/config.py'][0]
+        mixed = content.replace(b'\n', b'\r\n', 1)
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        os.makedirs(target.uppath(), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(mixed)
+        run_job()
+        # replaced with the pure LF content of the record
+        assert file_read_bytes(target) == content
+
     def test_overwrite_invalid_file(self, app_folder):
         """A file with wrong content is overwritten by the pack data."""
         target = env.PROJECT_ROOT / 'backend/config.py'
