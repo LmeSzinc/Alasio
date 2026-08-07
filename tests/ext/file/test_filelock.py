@@ -302,6 +302,81 @@ class TestThreads:
         assert not thread.is_alive()
         assert results == ["acquired"]
 
+    def test_concurrent_acquire_on_same_instance(self, tmp_path):
+        """Concurrent acquires on the same instance must race on the SQLite lock,
+        each thread failing on its own timeout budget without waiting for others"""
+        lock_file = tmp_path / "a.lock"
+        holder = SQLiteFileLock(lock_file, timeout=0)
+        shared = SQLiteFileLock(lock_file, timeout=0)
+        holder.acquire()
+        results = []
+        c_elapsed = []
+
+        def thread_b():
+            # Waits 0.5s on the SQLite lock
+            try:
+                shared.acquire(timeout=0.5)
+            except Timeout:
+                results.append("b:timeout")
+
+        def thread_c():
+            # Non-blocking, must fail fast even though thread B is also waiting
+            start = time.monotonic()
+            try:
+                shared.acquire(timeout=0)
+            except Timeout:
+                c_elapsed.append(time.monotonic() - start)
+                results.append("c:timeout")
+
+        b = threading.Thread(target=thread_b)
+        c = threading.Thread(target=thread_c)
+        b.start()
+        # Wait until thread B is inside the SQLite wait
+        time.sleep(0.15)
+        c.start()
+        c.join(timeout=10)
+        b.join(timeout=10)
+        holder.release()
+        assert not c.is_alive()
+        assert not b.is_alive()
+        assert results == ["c:timeout", "b:timeout"]
+        # Thread C must not wait for thread B's SQLite wait to finish
+        assert c_elapsed[0] < 0.3
+
+    def test_concurrent_acquire_has_single_winner(self, tmp_path):
+        """Concurrent acquires on the same instance must yield exactly one winner,
+        the loser timing out on its own budget"""
+        lock_file = tmp_path / "a.lock"
+        holder = SQLiteFileLock(lock_file, timeout=0)
+        # Loser budget 0.2s must be shorter than the winner's hold time of 0.5s
+        shared = SQLiteFileLock(lock_file, timeout=0.2)
+        holder.acquire()
+        results = []
+
+        def try_acquire(tag):
+            try:
+                with shared:
+                    results.append(f"{tag}:acquired")
+                    # Hold the lock long enough to force the loser to time out
+                    time.sleep(0.5)
+            except Timeout:
+                results.append(f"{tag}:timeout")
+
+        b = threading.Thread(target=try_acquire, args=("b",))
+        c = threading.Thread(target=try_acquire, args=("c",))
+        b.start()
+        c.start()
+        time.sleep(0.1)
+        holder.release()
+        b.join(timeout=10)
+        c.join(timeout=10)
+        assert not b.is_alive()
+        assert not c.is_alive()
+        winners = [r for r in results if r.endswith(":acquired")]
+        losers = [r for r in results if r.endswith(":timeout")]
+        assert len(winners) == 1
+        assert len(losers) == 1
+
 
 class TestCrossProcess:
     """Test cases for locking across processes"""

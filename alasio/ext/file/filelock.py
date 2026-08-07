@@ -111,54 +111,62 @@ class SQLiteFileLock:
         Raises:
             Timeout: If the lock cannot be acquired within the timeout
         """
-        with self._thread_lock:
-            if timeout is None:
-                timeout = self._default_timeout
+        if timeout is None:
+            timeout = self._default_timeout
 
+        with self._thread_lock:
             # Reentrant lock: repeated acquire() on the same instance must not deadlock
             if self._lock_counter > 0:
                 self._lock_counter += 1
                 return self
 
-            # Ensure the parent directory exists
-            parent_dir = os.path.dirname(self._lock_file)
-            if parent_dir:
-                os.makedirs(parent_dir, exist_ok=True)
+        # The thread lock above only guards the shared state. The SQLite lock
+        # itself is acquired outside the thread lock, so a thread waiting on
+        # the SQLite lock never blocks other threads of the same instance,
+        # and every thread waits on its own timeout budget.
+        parent_dir = os.path.dirname(self._lock_file)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
 
-            # Convert to the SQLite C API timeout in seconds:
-            # < 0 waits forever, 0 is non-blocking.
-            # 315360000.0 is 10 years, effectively infinite for a blocking wait
-            sql_timeout = 315360000.0 if timeout < 0 else max(0.0, float(timeout))
+        # Convert to the SQLite C API timeout in seconds:
+        # < 0 waits forever, 0 is non-blocking.
+        # 315360000.0 is 10 years, effectively infinite for a blocking wait
+        sql_timeout = 315360000.0 if timeout < 0 else max(0.0, float(timeout))
 
-            conn = None
-            try:
-                # Open a connection and rely on SQLite's native busy_timeout mechanism
-                conn = sqlite3.connect(
-                    self._lock_file,
-                    timeout=sql_timeout,
-                    check_same_thread=False,
-                )
+        conn = None
+        try:
+            # Open a connection and rely on SQLite's native busy_timeout mechanism
+            conn = sqlite3.connect(
+                self._lock_file,
+                timeout=sql_timeout,
+                check_same_thread=False,
+            )
 
-                # Start an exclusive transaction, which takes an OS-level exclusive file lock
-                conn.execute("BEGIN EXCLUSIVE")
+            # Start an exclusive transaction, which takes an OS-level exclusive file lock
+            conn.execute("BEGIN EXCLUSIVE")
 
-                self._conn = conn
-                self._lock_counter = 1
-                return self
+        except sqlite3.OperationalError as e:
+            # Close the connection that failed to acquire the lock
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
-            except sqlite3.OperationalError as e:
-                # Close the connection that failed to acquire the lock
-                if conn is not None:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+            # Convert the "database is locked" error to Timeout
+            err_msg = str(e).lower()
+            if "locked" in err_msg or "busy" in err_msg:
+                raise Timeout(self._lock_file) from e
+            raise e
 
-                # Convert the "database is locked" error to Timeout
-                err_msg = str(e).lower()
-                if "locked" in err_msg or "busy" in err_msg:
-                    raise Timeout(self._lock_file) from e
-                raise e
+        # Register the connection and the counter atomically. BEGIN EXCLUSIVE
+        # is globally exclusive, so while this connection holds the lock no
+        # other thread can have set the counter, and no other thread can
+        # succeed before this registration.
+        with self._thread_lock:
+            self._conn = conn
+            self._lock_counter = 1
+        return self
 
     def release(self, force=False):
         """
