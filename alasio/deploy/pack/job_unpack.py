@@ -128,18 +128,24 @@ class UnpackJob(JobBase):
         try:
             if not self._resume:
                 self.write()
+            logger.info(f'Unpacking data to "{env.PROJECT_ROOT}"')
             self.unpack()
         except Exception as e:
             # no real file was written, safe to clean up
+            logger.warning(f'Failed to unpack: {e}')
             self.cleanup()
-            logger.warning(f'Failed to prepare job: {e}')
             return
         try:
+            logger.info(f'Replacing files to "{env.PROJECT_ROOT}"')
             self.replace()
         except Exception as e:
             # real files may be partially replaced
+            logger.error(f'Failed to replace file: {e}')
             self.cleanup()
-            logger.error(f'Failed to apply job: {e}')
+            return
+        # all changes applied, clean the workspace atomically
+        self.cleanup()
+        logger.info(f'Unpack done')
 
     def write(self):
         """
@@ -182,12 +188,12 @@ class UnpackJob(JobBase):
 
     def replace(self):
         """
-        Apply the pending changes, then clean the workspace.
+        Apply the pending changes to the real files.
 
         Every tmp file is moved to the target path atomically and the
         deleted markers are removed. The file mode is adjusted only
-        when it differs from the record. The workspace is cleaned up at
-        the end.
+        when it differs from the record. The workspace is kept, the
+        caller (run()) cleans it up after all changes are applied.
         """
         # create the parent folders of all targets in one batch
         batch_makedirs([
@@ -205,9 +211,6 @@ class UnpackJob(JobBase):
                 continue
             atomic_replace(pending.tmp, target)
             self._adjust_mode(target, info, pending.current_mode)
-
-        # all changes applied, clean the workspace atomically
-        self.cleanup()
 
     def cleanup(self):
         """

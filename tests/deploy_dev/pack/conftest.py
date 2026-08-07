@@ -10,10 +10,21 @@ The file list is designed to cover every record type produced by PackFull:
 - algo: 0 (raw, small/incompressible files), 1 (lzma, big compressible files)
 - empty files (size = 0, sha1 = ''), deep paths, duplicate contents (C)
 """
+import pytest
+
 from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.ext import env
+from alasio.ext.path import PathStr
 from alasio.git.mock.mock_repo import MockGitRepo
 
 COMMIT = 'c1'
+
+
+@pytest.fixture
+def app_folder(fs, monkeypatch):
+    """Set PROJECT_ROOT to a fresh folder in the fake filesystem."""
+    monkeypatch.setattr(env, 'PROJECT_ROOT', PathStr.new(fs.root_dir.path))
+
 
 # {path: (content, mode)}
 WEBSITE_FILES = {

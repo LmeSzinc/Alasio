@@ -306,7 +306,7 @@ class PackEncodeBase:
             - file_data
             - checksum (checksum of above, including all)
         """
-        # header and index sectin
+        # header and index section
         checksum = sha1()
         for row in self.iter_packidx_data():
             yield row
