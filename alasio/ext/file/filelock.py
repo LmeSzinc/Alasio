@@ -17,7 +17,6 @@ Notes:
 import os
 import sqlite3
 import threading
-from pathlib import Path
 
 
 class Timeout(Exception):
@@ -54,7 +53,7 @@ class SQLiteFileLock:
                    cannot be acquired;
                 > 0 waits at most N seconds
         """
-        self._lock_file = str(Path(lock_file).resolve())
+        self._lock_file = os.path.abspath(lock_file)
         self._default_timeout = timeout
 
         # Internal state, supports reentrant locking within the same instance
@@ -124,15 +123,52 @@ class SQLiteFileLock:
         # itself is acquired outside the thread lock, so a thread waiting on
         # the SQLite lock never blocks other threads of the same instance,
         # and every thread waits on its own timeout budget.
-        parent_dir = os.path.dirname(self._lock_file)
-        if parent_dir:
-            os.makedirs(parent_dir, exist_ok=True)
-
         # Convert to the SQLite C API timeout in seconds:
         # < 0 waits forever, 0 is non-blocking.
         # 315360000.0 is 10 years, effectively infinite for a blocking wait
         sql_timeout = 315360000.0 if timeout < 0 else max(0.0, float(timeout))
 
+        # Optimistically assume the parent directory exists to save IO.
+        # Create it and retry once only if connect fails with
+        # "unable to open database file".
+        conn = None
+        for attempt in range(2):
+            try:
+                conn = self.__begin_exclusive(sql_timeout)
+                break
+            except sqlite3.OperationalError as e:
+                if attempt == 0 and str(e).lower() == "unable to open database file":
+                    # Create the missing parent directory and retry once
+                    parent_dir = os.path.dirname(self._lock_file)
+                    if parent_dir:
+                        os.makedirs(parent_dir, exist_ok=True)
+                    continue
+                raise
+
+        # Register the connection and the counter atomically. BEGIN EXCLUSIVE
+        # is globally exclusive, so while this connection holds the lock no
+        # other thread can have set the counter, and no other thread can
+        # succeed before this registration.
+        with self._thread_lock:
+            self._conn = conn
+            self._lock_counter = 1
+        return self
+
+    def __begin_exclusive(self, sql_timeout):
+        """
+        Open a connection and start an exclusive transaction.
+
+        Args:
+            sql_timeout (float): SQLite C API timeout in seconds
+
+        Returns:
+            sqlite3.Connection: Connection holding the exclusive lock
+
+        Raises:
+            Timeout: If the lock cannot be acquired within the timeout
+            sqlite3.OperationalError: If the database cannot be opened,
+                e.g. "unable to open database file" when the directory is missing
+        """
         conn = None
         try:
             # Open a connection and rely on SQLite's native busy_timeout mechanism
@@ -144,6 +180,7 @@ class SQLiteFileLock:
 
             # Start an exclusive transaction, which takes an OS-level exclusive file lock
             conn.execute("BEGIN EXCLUSIVE")
+            return conn
 
         except sqlite3.OperationalError as e:
             # Close the connection that failed to acquire the lock
@@ -157,16 +194,7 @@ class SQLiteFileLock:
             err_msg = str(e).lower()
             if "locked" in err_msg or "busy" in err_msg:
                 raise Timeout(self._lock_file) from e
-            raise e
-
-        # Register the connection and the counter atomically. BEGIN EXCLUSIVE
-        # is globally exclusive, so while this connection holds the lock no
-        # other thread can have set the counter, and no other thread can
-        # succeed before this registration.
-        with self._thread_lock:
-            self._conn = conn
-            self._lock_counter = 1
-        return self
+            raise
 
     def release(self, force=False):
         """

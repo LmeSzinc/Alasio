@@ -1,4 +1,5 @@
 import gc
+import os
 import sqlite3
 import subprocess
 import sys
@@ -33,16 +34,16 @@ class TestTimeout:
         lock_file = tmp_path / "a.lock"
         with pytest.raises(Timeout, match="Timeout occurred trying to acquire lock") as excinfo:
             raise Timeout(str(lock_file))
-        assert excinfo.value.lock_file == str(lock_file.resolve())
+        assert excinfo.value.lock_file == os.path.abspath(str(lock_file))
 
 
 class TestProperties:
     """Test cases for the constructor and properties"""
 
     def test_lock_file_is_absolute(self, tmp_path):
-        """lock_file should be the resolved absolute path"""
+        """lock_file should be the absolute path"""
         lock = SQLiteFileLock(tmp_path / "sub" / "a.lock")
-        assert lock.lock_file == str((tmp_path / "sub" / "a.lock").resolve())
+        assert lock.lock_file == os.path.abspath(str(tmp_path / "sub" / "a.lock"))
 
     def test_default_timeout_get_and_set(self, tmp_path):
         """timeout should store the constructor value and be mutable"""
@@ -55,7 +56,7 @@ class TestProperties:
     def test_accepts_str_and_path(self, tmp_path, lock_file):
         """Constructor should accept both str and Path lock files"""
         lock = SQLiteFileLock(tmp_path / lock_file, timeout=0)
-        assert lock.lock_file == str((tmp_path / "a.lock").resolve())
+        assert lock.lock_file == os.path.abspath(str(tmp_path / "a.lock"))
 
     def test_initial_state(self, tmp_path):
         """A new lock should not be locked"""
