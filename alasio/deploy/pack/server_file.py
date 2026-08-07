@@ -102,8 +102,10 @@ class ServerFile:
         base_url/{version}/full.pack.
 
         The index pack is the front part of the full pack: the header
-        plus the index section. Two range requests are made, as
-        planned in PackEncodeBase:
+        plus the index section. The section length includes the
+        trailing 20 bytes checksum, so the downloaded index pack is
+        complete and self-validating with PackDecodeBase. Two range
+        requests are made, as planned in PackEncodeBase:
         1. range 0~63, the header and the index section length
         2. range 0 ~ len(header) + len(index section), the index pack
 
@@ -120,14 +122,11 @@ class ServerFile:
         """
         header = self.get_file_content(version, 0, self.HEADER_REQUEST_SIZE)
         try:
+            # decode_vint raises on a truncated stream (a high byte at the
+            # end of the header response), the vint is always terminated here
             length, read = decode_vint(header[5:])
         except ValueError as e:
             raise PackDecodeError(f'Failed to decode index section length: {e}') from e
-        # the vint must be terminated inside the header response
-        if 5 + read > len(header) or header[5 + read - 1] >= 128:
-            raise PackDecodeError(
-                f'Failed to decode index section length: incomplete vint: {header[5:]}'
-            )
         # the index pack is the header plus the index section, including
         # the length vint itself
         return self.get_file_content(version, 0, 5 + read + length)

@@ -8,7 +8,7 @@ filesystem.
 """
 import os
 
-from conftest import WEBSITE_FILES, WEBSITE_FULL_PACK
+from conftest import WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_SERVER
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job import DeployJob
@@ -45,16 +45,16 @@ class TestDeployJob:
 
     def test_get_unfinished_job_reset(self, app_folder):
         """A REST marker job file is a reset job."""
-        ResetJob().write()
-        job = DeployJob.get_unfinished_job()
+        ResetJob(WEBSITE_SERVER).write()
+        job = DeployJob.get_unfinished_job(WEBSITE_SERVER)
         assert job is not None
         assert isinstance(job, ResetJob)
-        job.run()
+        assert job.run()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_unpack_finishes_reset_job(self, app_folder):
         """unpack() finishes the unfinished reset job first."""
-        ResetJob().write()
+        ResetJob(WEBSITE_SERVER).write()
         DeployJob.unpack(WEBSITE_FULL_PACK)
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path

@@ -108,12 +108,17 @@ class TestServerFile:
             server.get_file_content(COMMIT, 0, 10)
 
     def test_get_index_pack(self):
-        """Two range requests download the index pack."""
+        """Two range requests download the self-validating index pack."""
         requests = []
         server = ServerFile(
             'http://test', client=make_client(range_handler(requests, WEBSITE_FULL_PACK)))
         index_pack = server.get_index_pack(COMMIT)
         assert index_pack == WEBSITE_INDEX_PACK
+        # the trailing checksum is included, the index pack validates
+        # itself with PackDecodeBase
+        decoder = PackDecodeBase(index_pack)
+        decoder.validate_index()
+        assert decoder.version == COMMIT
         # first request: the header and the index section length
         assert requests[0].headers['Range'] == f'bytes=0-{ServerFile.HEADER_REQUEST_SIZE - 1}'
         # second request: the exact range of the index pack

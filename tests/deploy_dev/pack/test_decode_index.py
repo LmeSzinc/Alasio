@@ -46,13 +46,13 @@ class TestPackDecodeIndex:
         full = PackDecodeBase(WEBSITE_FULL_PACK)
         assert list(idx.fileinfo) == list(full.fileinfo)
         assert idx.refinfo == full.refinfo
-        # every field except data_start, which is meaningless without data
+        # every field, data_start is an offset into the full pack file
+        # and must match the full pack decode, it is used by range
+        # requests directly
         for path in idx.fileinfo:
             left = idx.fileinfo[path]
             right = full.fileinfo[path]
             for field in left.__struct_fields__:
-                if field == 'data_start':
-                    continue
                 assert getattr(left, field) == getattr(right, field), (
                     f'{field} mismatch for {path}'
                 )

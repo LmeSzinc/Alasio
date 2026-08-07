@@ -18,7 +18,7 @@ class DeployJob:
     """
 
     @staticmethod
-    def get_unfinished_job():
+    def get_unfinished_job(server=None):
         """
         Check if there is an unfinished job, read it and create the
         job object of the corresponding type.
@@ -28,6 +28,10 @@ class DeployJob:
         update part is an update pack (the future UpdateJob), a pack
         without it is a full pack (UnpackJob). A corrupted job file is
         cleaned up with a warning.
+
+        Args:
+            server (ServerFile, optional): Server to download the
+                missing files for a resumed validation job
 
         Returns:
             JobBase: The unfinished job, or None if there is no
@@ -40,7 +44,7 @@ class DeployJob:
             return None
         if data == ResetJob.MARK:
             # a validation job, its data comes from the local index pack
-            return ResetJob(resume=True)
+            return ResetJob(server, resume=True)
         try:
             decoder = PackDecodeBase(data)
         except PackDecodeError as e:

@@ -4,7 +4,7 @@ from hashlib import sha1
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext.algorithm.bit2coding import decode_bit2
 from alasio.ext.algorithm.pathlen_coding import decode_prefix_comb, decode_suffix_comb
-from alasio.ext.algorithm.vint import decode_vint
+from alasio.ext.algorithm.vint import decode_vint, encode_vint
 from alasio.ext.algorithm.vlenint import decode_vlenint
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_lzma import lzma_decompress
@@ -379,12 +379,20 @@ class PackDecodeBase:
 
         # data: sha1 and data_start for files with data
         data_offset = 0
+        # data_start is an offset into the full pack file, used directly
+        # by range requests. An index pack has no data section, the data
+        # section length vint of the full pack is missing from it,
+        # re-calculate the vint length
+        data_start = self._data_start
+        if not self._has_data:
+            data_len = sum(info.data_size for info in non_dc) + 20
+            data_start += len(encode_vint(data_len))
         for info in non_dc:
             if info.data_size:
                 info.sha1 = next(sha1s)
-                # offset in the pack file, data can be indexed with
+                # offset in the full pack file, data can be indexed with
                 # data_start and data_size directly on the pack bytes
-                info.data_start = self._data_start + data_offset
+                info.data_start = data_start + data_offset
                 data_offset += info.data_size
 
         # copied: no data in pack, restore the attributes omitted by the
@@ -524,10 +532,35 @@ class PackDecodeBase:
                 does not match the recorded size / sha1
         """
         content = self.catdata(info)
+        return memoryview(self.decode_content(info, content))
+
+    @staticmethod
+    def decode_content(info, data):
+        """
+        Decompress the raw file data and check it against the record.
+
+        The data is the raw content of the file in the full pack:
+        uncompressed for algo == 0, lzma/zstd compressed otherwise.
+        The decoded blob content must match the recorded size and
+        sha1, then the checkout line ending is applied.
+
+        Args:
+            info (IdxInfo): Record of the file
+            data (bytes | memoryview): Raw file data in the full pack
+
+        Returns:
+            bytes: Working tree file content
+
+        Raises:
+            PackDecodeError: If algo is unknown, the data is a zstd
+                patch that requires the old file, decompression fails,
+                or the decoded content does not match the recorded
+                size / sha1
+        """
         if info.algo != 0:
-            content = self._decompress(info, content)
-        self._check_content(info, content)
-        return memoryview(self.apply_eol(content, info.eol))
+            data = PackDecodeBase._decompress(info, data)
+        PackDecodeBase._check_content(info, data)
+        return PackDecodeBase.apply_eol(data, info.eol)
 
     @staticmethod
     def _decompress(info, data, source=None):

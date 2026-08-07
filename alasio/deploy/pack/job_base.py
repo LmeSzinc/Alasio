@@ -5,7 +5,8 @@ from msgspec import Struct
 
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext import env
-from alasio.ext.path.atomic import atomic_open, atomic_rmtree
+from alasio.ext.path.atomic import atomic_open, atomic_remove, atomic_replace, atomic_rmtree
+from alasio.ext.path.makedir import batch_makedirs
 
 
 class CurrentFile(Struct):
@@ -65,6 +66,7 @@ class JobBase:
         """
         self._data = data
         self.workspace = env.PROJECT_ROOT.joinpath(self.WORKSPACE)
+        self.pending: "list[PendingFile]" = []
 
     def run(self):
         """
@@ -74,6 +76,32 @@ class JobBase:
             NotImplementedError: Subclasses must implement run()
         """
         raise NotImplementedError
+
+    def replace(self):
+        """
+        Apply the pending changes to the real files.
+
+        Every tmp file is moved to the target path atomically and the
+        deleted markers are removed. The file mode is adjusted only
+        when it differs from the record. The workspace is kept, the
+        caller (run()) cleans it up after all changes are applied.
+        """
+        # create the parent folders of all targets in one batch
+        batch_makedirs([
+            env.PROJECT_ROOT.joinpath(pending.info.path)
+            for pending in self.pending
+            if pending.info.edit != 2
+        ])
+
+        for pending in self.pending:
+            info = pending.info
+            target = env.PROJECT_ROOT.joinpath(info.path)
+            if info.edit == 2:
+                # deleted marker, the file should not exist
+                atomic_remove(target)
+                continue
+            atomic_replace(pending.tmp, target)
+            self._adjust_mode(target, info, pending.current_mode)
 
     def cleanup(self):
         """
@@ -146,3 +174,29 @@ class JobBase:
         if info.sha1:
             return sha1(data).hexdigest() == info.sha1
         return True
+
+    @staticmethod
+    def _adjust_mode(target, info, current_mode):
+        """
+        Adjust the file mode if the execute bits differ from the record.
+
+        A 644 record (mode=0) accepts any current mode without execute
+        bits, e.g. 666/646/664, a 755 record (mode=1) accepts any with
+        execute bits, e.g. 777/757/775. Otherwise the file is chmod-ed
+        to the record mode, 644 or 755.
+
+        Args:
+            target (str): Target file path
+            info (IdxInfo): File record
+            current_mode (int): st_mode of the current file, or 0o666
+                for a new file written with the python default mode
+        """
+        current_exec = current_mode & 0o111
+        if info.mode == 1:
+            if current_exec != 0o111:
+                # 755 record, the file is not executable
+                os.chmod(target, 0o755)
+        else:
+            if current_exec:
+                # 644 record, the file is executable
+                os.chmod(target, 0o644)
