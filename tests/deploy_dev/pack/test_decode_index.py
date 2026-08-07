@@ -10,6 +10,7 @@ import pytest
 from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
+from alasio.ext.algorithm.vint import decode_vint
 
 
 class TestPackDecodeIndex:
@@ -56,6 +57,19 @@ class TestPackDecodeIndex:
                 assert getattr(left, field) == getattr(right, field), (
                     f'{field} mismatch for {path}'
                 )
+
+    def test_data_length_part(self):
+        """The data length part stores the length vint of the data section."""
+        idx = PackDecodeBase(WEBSITE_INDEX_PACK)
+        full = PackDecodeBase(WEBSITE_FULL_PACK)
+        # use the module-decoded part instead of re-parsing the section layout
+        part = bytes(idx._data_length)
+        # the part is the length vint of the data section in the full
+        # pack, stored at the beginning of the data section
+        assert part == bytes(full.data_section[:len(part)])
+        # the vint decodes to the data section length (data + checksum)
+        length, _ = decode_vint(part)
+        assert length + len(part) == len(full.data_section)
 
     def test_catdata_raises(self):
         """catdata on an index pack must raise."""

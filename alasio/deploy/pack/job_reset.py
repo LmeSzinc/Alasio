@@ -238,6 +238,7 @@ class ResetJob(JobBase):
             # the file is written by python with the default mode 666,
             # a 755 record is chmod-ed in replace()
             pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+
         self.pending = pending
         self.error = error
 

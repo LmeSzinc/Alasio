@@ -4,7 +4,7 @@ from hashlib import sha1
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext.algorithm.bit2coding import decode_bit2
 from alasio.ext.algorithm.pathlen_coding import decode_prefix_comb, decode_suffix_comb
-from alasio.ext.algorithm.vint import decode_vint, encode_vint
+from alasio.ext.algorithm.vint import decode_vint
 from alasio.ext.algorithm.vlenint import decode_vlenint
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_lzma import lzma_decompress
@@ -107,6 +107,8 @@ class PackDecodeBase:
         # index parts
         part, offset = _decode('index section: version part', self._read_part, data, offset)
         self.version = bytes(part).decode('utf-8', errors='replace')
+        self._data_length, offset = _decode(
+            'index section: data length part', self._read_part, data, offset)
         self._index_part, offset = _decode(
             'index section: index part', self._read_part, data, offset)
         self._sha1_part, offset = _decode(
@@ -125,7 +127,10 @@ class PackDecodeBase:
             # index pack: header + index section only, file data unavailable
             self._has_data = False
             self.data_section = data[index_end:index_end]
-            self._data_start = data_offset
+            # the data section of the full pack is behind the data
+            # section length vint, which is stored in the data length
+            # part of the index section
+            self._data_start = data_offset + len(self._data_length)
         else:
             self._has_data = True
             length, read = _decode('data section: length', decode_vint, data[data_offset:])
@@ -380,13 +385,8 @@ class PackDecodeBase:
         # data: sha1 and data_start for files with data
         data_offset = 0
         # data_start is an offset into the full pack file, used directly
-        # by range requests. An index pack has no data section, the data
-        # section length vint of the full pack is missing from it,
-        # re-calculate the vint length
+        # by range requests
         data_start = self._data_start
-        if not self._has_data:
-            data_len = sum(info.data_size for info in non_dc) + 20
-            data_start += len(encode_vint(data_len))
         for info in non_dc:
             if info.data_size:
                 info.sha1 = next(sha1s)

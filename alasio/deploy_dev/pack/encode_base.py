@@ -38,6 +38,11 @@ class PackEncodeBase:
         # version part
         - length
             - latest commit sha1 in string
+        # data length part
+        - length
+            - data_section_length_vint
+            (the length vint of the data section, so the data section
+            offset can be derived from an index pack directly)
         # index part
         - length
             - index_data
@@ -235,6 +240,16 @@ class PackEncodeBase:
             latest_commit = self.latest_commit.encode('utf-8')
             yield encode_vint(len(latest_commit))
             yield latest_commit
+
+            # data length
+            # the length vint of the data section, so the data section
+            # offset can be derived from an index pack directly
+            data_length = sum(
+                file.data_size for file in self._iterfile_with_content(iter_file=True)
+            ) + 20
+            data_length_vint = encode_vint(data_length)
+            yield encode_vint(len(data_length_vint))
+            yield data_length_vint
 
             # index data
             index_data = b''.join(self.iter_index_data())

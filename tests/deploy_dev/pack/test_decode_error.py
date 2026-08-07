@@ -61,14 +61,17 @@ class TestPackDecodeErrorType:
         data = bytearray(WEBSITE_FULL_PACK)
         decoder = PackDecodeBase(data)
 
-        # locate index_data inside the pack: skip index length vint and
-        # the version part, then the index part length vint
+        # locate index_data inside the pack: skip index length vint,
+        # the version part and the data length part, then the index
+        # part length vint
         sec = decoder.index_section
         offset = 0
         _, read = decode_vint(sec[offset:])
         offset += read
         ver_len, read = decode_vint(sec[offset:])
         offset += read + ver_len
+        data_len, read = decode_vint(sec[offset:])
+        offset += read + data_len
         _, read = decode_vint(sec[offset:])
         offset += read
         # flip the second vint in index_data: len_fileinfo 20 -> 21,

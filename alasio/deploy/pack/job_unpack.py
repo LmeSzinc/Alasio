@@ -108,7 +108,7 @@ class UnpackJob(JobBase):
         # the front part of a full pack is an index pack
         atomic_write(env.PROJECT_ROOT.joinpath(self.INDEX_PACK), decoder.extract_index_pack())
 
-        self.pending = []
+        pending = []
         for index, (path, info) in enumerate(decoder.fileinfo.items()):
             target = env.PROJECT_ROOT.joinpath(path)
             if info.edit == 2:
@@ -125,4 +125,6 @@ class UnpackJob(JobBase):
                 atomic_write(tmp, decoder.catfile(info))
             # the file is written by python with the default mode 666,
             # a 755 record is chmod-ed in replace()
-            self.pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+            pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+
+        self.pending = pending
