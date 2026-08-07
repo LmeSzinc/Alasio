@@ -35,8 +35,8 @@ class TestGetKey:
         ("foo/bar/baz.py",         ".py",        "z", "a"),
         ("foo/bar/baz.txt",        ".txt",       "z", "a"),
         ("/etc/config.yaml",       ".yaml",      "g", "i"),
-        # No extension
-        ("foo/bar/baz",            "",           "",  ""),
+        # No extension — stem keeps last and second-to-the-last chars
+        ("foo/bar/baz",            "",           "z", "a"),
         # Multiple dots — last dot wins
         ("foo/bar.baz.tar.gz",     ".gz",        "r", "a"),
         ("some.dir/file.txt",      ".txt",       "e", "l"),
@@ -1047,3 +1047,64 @@ class TestGetLcsMaxLookback:
         lookback, length = lcs.get_lcs("xx__common.py", max_lookback=2)
         assert lookback == 1
         assert length == len("__common.py")
+
+
+# ---------------------------------------------------------------------------
+# Real-world regression: call-site input consistency (not a PathLookbackLCS bug)
+# ---------------------------------------------------------------------------
+
+
+class TestRealWorldSuffixReuse:
+    """Regression tests from production pack encoding.
+
+    ``encode_base.py iter_index_data()`` was observed emitting ``N png 0 0``
+    (no suffix reuse) for high-frequency extensions like ``.png``:
+
+        assets/character/Firefly.2.png 18 irefly 6 13
+        assets/character/Firefly.png   25 png    0 0
+
+    The root causes were fixed in two places:
+    - call site (encode_base.py): ``get_lcs()`` now queries the full path,
+      consistent with ``add_path()`` and with the decoder, which takes
+      suffixes from full lookback paths;
+    - PathLookbackLCS itself: ``get_key()`` no longer clears the stem of a
+      dot-less path, and Level 3 compares a dot-less query path against the
+      bucket suffix, so a stripped path like ``"png"`` still finds the
+      ``('.png', ...)`` bucket.
+
+    These tests feed full paths to both methods — the contract the decoder
+    (``decode_base._decode_paths``) relies on — and assert the class matches
+    correctly.
+    """
+
+    @pytest.mark.parametrize("paths, query, expected", [
+        # Multi-dot basename pair: LCP of the two full paths stops right before
+        # the final dot, so a prefix-stripped query would be "png" (no dot).
+        # With consistent full-path input the suffix ".png" is reused.
+        (["assets/character/Firefly.2.png"], "assets/character/Firefly.png", (1, 4)),
+        (["assets/cn/assignment/dispatch/ASSIGNMENT_START.SEARCH.png"],
+         "assets/cn/assignment/dispatch/ASSIGNMENT_START.png", (1, 4)),
+        # Same-stem different-extension pair: ".bmp" and ".png" suffixes differ,
+        # no cross-suffix match is expected by design.
+        (["f/foo.bmp"], "f/foo.png", (0, 0)),
+        # Same-stem pair after earlier ".png" files: matches the nearest ".png"
+        # bucket (Level 3 suffix match), lookback spans the ".bmp" entry.
+        (["a/1.png", "b/2.png", "f/foo.bmp"], "f/foo.png", (2, 4)),
+    ])
+    def test_consistent_full_path_input(self, paths, query, expected):
+        lcs = PathLookbackLCS()
+        for path in paths:
+            lcs.add_path(path)
+        assert lcs.get_lcs(query, min_length=3) == expected
+
+    def test_stripped_query_matches_same_suffix_bucket(self):
+        """A dot-less stripped query (e.g. "png" from ".png") still matches:
+        Level 3 compares the path itself against bucket suffixes, so the
+        ('.png', ...) bucket of a stored full path is found."""
+        lcs = PathLookbackLCS()
+        lcs.add_path("assets/character/Firefly.2.png")
+        # "png" is the prefix-stripped form of "assets/character/Firefly.png";
+        # LCS("png", ".png") == 3 >= min_length, matched via Level 3
+        lookback, length = lcs.get_lcs("png", min_length=3)
+        assert lookback == 1
+        assert length == 3

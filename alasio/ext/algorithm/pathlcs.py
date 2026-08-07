@@ -26,6 +26,10 @@ class PathLookbackLCS:
         if dot:
             suffix = f'.{suffix}'
         else:
+            # rpartition() returns ('', '', s) when '.' is not found,
+            # keep the whole string as the stem instead of clearing it,
+            # so last/second chars of dot-less paths are not lost
+            path = suffix
             suffix = ''
         last = path[-1] if path else ''
         try:
@@ -103,7 +107,13 @@ class PathLookbackLCS:
         best_length = 0  # Reset from Level 2; Level 3 tracks suffix LCS independently
         best_index = -1  # Reset from Level 2; Level 3 finds max index in suffix bucket
         for cand_suffix, dict_suffix in self.dict_suffix.items():
-            length = get_lcs_length(suffix, cand_suffix)
+            if suffix:
+                length = get_lcs_length(suffix, cand_suffix)
+            else:
+                # dot-less query (e.g. a prefix-stripped path like "png" from
+                # ".png"): its key suffix is empty, so compare the path itself
+                # against the bucket suffix instead of losing the match
+                length = get_lcs_length(path, cand_suffix)
             if max_length is not None and length > max_length:
                 continue
             if length > best_length:

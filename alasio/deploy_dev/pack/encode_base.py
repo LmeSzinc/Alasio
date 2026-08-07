@@ -167,9 +167,23 @@ class PackEncodeBase:
             prev = file.path
 
             # suffix
+            # query with the full path, consistent with add_path() below and
+            # with the decoder, which takes suffixes from full lookback paths;
+            # a prefix-stripped path may lose its extension dot (e.g. "png")
+            # and can never match the ('.png', ...) buckets of stored paths
             suffix_lookback, suffix_reuse = lcs_lookback.get_lcs(
-                path, min_length=3, max_length=MAX_SUFFIX_REUSE, max_lookback=MAX_SUFFIX_LOOKBACK,
+                file.path, min_length=3, max_length=MAX_SUFFIX_REUSE, max_lookback=MAX_SUFFIX_LOOKBACK,
             )
+            # the LCS of full paths may extend beyond the prefix-stripped path
+            # (e.g. ".png" vs stripped "png"); cap it so the suffix always fits
+            # the remaining path, keeping prefix and suffix non-overlapping
+            if suffix_reuse > len(path):
+                suffix_reuse = len(path)
+                # a zero-length reuse must not keep a lookback: the decoder
+                # takes ``paths[i-lookback][-suffix_reuse:]`` and ``[-0:]``
+                # would yield the whole referenced path instead of nothing
+                if not suffix_reuse:
+                    suffix_lookback = 0
             if suffix_reuse:
                 path = path[:-suffix_reuse]
             lcs_lookback.add_path(file.path)
