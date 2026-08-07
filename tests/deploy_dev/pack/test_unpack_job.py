@@ -12,11 +12,13 @@ import pytest
 from conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
+from alasio.deploy.pack.job import DeployJob
+from alasio.deploy.pack.job_unpack import CurrentFile, PendingFile, UnpackJob
 from alasio.deploy.pack.pack_model import IdxInfo
-from alasio.deploy.pack.unpack_job import CurrentFile, PendingFile, UnpackJob
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import file_read_bytes
+from alasio.logger import logger
 
 
 @pytest.fixture
@@ -26,11 +28,8 @@ def app_folder(fs, monkeypatch):
 
 
 def run_job(data=WEBSITE_FULL_PACK):
-    """The caller flow: write(), unpack() then replace()."""
-    job = UnpackJob(data)
-    job.write()
-    job.unpack()
-    job.replace()
+    """The caller flow: run() does write, unpack and replace."""
+    UnpackJob(data).run()
 
 
 class TestJobFile:
@@ -52,8 +51,7 @@ class TestJobFile:
         job = UnpackJob.get_unfinished_job()
         assert job is not None
         # resume does not need write() again, the data comes from the file
-        job.unpack()
-        job.replace()
+        job.run()
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         # the finished job is cleaned
@@ -221,16 +219,106 @@ class TestCallerFlow:
         # finish the unfinished job first
         job = UnpackJob.get_unfinished_job()
         if job is not None:
-            job.unpack()
-            job.replace()
+            job.run()
         # then unpack the new data
         job = UnpackJob(WEBSITE_FULL_PACK)
-        job.write()
-        job.unpack()
-        job.replace()
+        job.run()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
+
+
+class TestDeployJob:
+    """The unified entry of DeployJob."""
+
+    def test_unpack(self, app_folder):
+        """DeployJob.unpack() writes the job file and unpacks all files."""
+        DeployJob.unpack(WEBSITE_FULL_PACK)
+        for path, (content, _) in WEBSITE_FILES.items():
+            assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_get_unfinished_job_none(self, app_folder):
+        """No job file, DeployJob.get_unfinished_job() returns None."""
+        assert DeployJob.get_unfinished_job() is None
+
+    def test_get_unfinished_job(self, app_folder):
+        """A leftover job file is found and resumed."""
+        UnpackJob(WEBSITE_FULL_PACK).write()
+        job = DeployJob.get_unfinished_job()
+        assert job is not None
+        assert isinstance(job, UnpackJob)
+        job.run()
+        assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
+            WEBSITE_FILES['backend/main.py'][0]
+
+    def test_get_unfinished_job_corrupted(self, app_folder):
+        """A corrupted job file is cleaned up with a warning."""
+        job_file = env.PROJECT_ROOT / '.pack/workspace/job.pack'
+        os.makedirs(job_file.uppath(), exist_ok=True)
+        with open(job_file, 'wb') as f:
+            f.write(b'garbage')
+        with logger.mock_capture_writer() as capture:
+            job = DeployJob.get_unfinished_job()
+        assert job is None
+        assert any(log['l'] == 'WARNING' for log in capture.backend.logs)
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_unpack_finishes_unfinished_job(self, app_folder):
+        """unpack() finishes the unfinished job first, no extra call."""
+        UnpackJob(WEBSITE_FULL_PACK).write()
+        DeployJob.unpack(WEBSITE_FULL_PACK)
+        for path, (content, _) in WEBSITE_FILES.items():
+            assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_run_resumed_skips_write(self, app_folder, monkeypatch):
+        """A resumed job skips write(), the data is already in the file."""
+        UnpackJob(WEBSITE_FULL_PACK).write()
+
+        def _fail(self):
+            raise AssertionError('write() should not be called on resume')
+        monkeypatch.setattr(UnpackJob, 'write', _fail)
+        job = UnpackJob.get_unfinished_job()
+        assert job is not None
+        job.run()
+        assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
+            WEBSITE_FILES['backend/main.py'][0]
+
+    def test_unpack_corrupted_job_file(self, app_folder):
+        """A corrupted job file is cleaned up, the new job still runs."""
+        job_file = env.PROJECT_ROOT / '.pack/workspace/job.pack'
+        os.makedirs(job_file.uppath(), exist_ok=True)
+        with open(job_file, 'wb') as f:
+            f.write(b'garbage')
+        with logger.mock_capture_writer() as capture:
+            DeployJob.unpack(WEBSITE_FULL_PACK)
+        assert any(log['l'] == 'WARNING' for log in capture.backend.logs)
+        # the new job still unpacked all files
+        assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
+            WEBSITE_FILES['backend/main.py'][0]
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_unpack_error_logged_warning(self, app_folder):
+        """A write/unpack error is logged as warning and cleaned up."""
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
+        index_end = 5 + len(decoder.index_section)
+        bad = bytearray(WEBSITE_FULL_PACK)
+        bad[index_end + 100] ^= 0xFF
+        with logger.mock_capture_writer() as capture:
+            DeployJob.unpack(bytes(bad))
+        assert any(log['l'] == 'WARNING' for log in capture.backend.logs)
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_replace_error_logged_error(self, app_folder, monkeypatch):
+        """A replace error is logged as error and cleaned up."""
+        def _raise(self):
+            raise RuntimeError('replace failed')
+        monkeypatch.setattr(UnpackJob, 'replace', _raise)
+        with logger.mock_capture_writer() as capture:
+            DeployJob.unpack(WEBSITE_FULL_PACK)
+        assert any(log['l'] == 'ERROR' for log in capture.backend.logs)
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
 
 class TestUnpackSkip:
@@ -320,8 +408,7 @@ class TestUnpackSkip:
         UnpackJob(WEBSITE_FULL_PACK).write()
         job = UnpackJob.get_unfinished_job()
         assert job is not None
-        job.unpack()
-        job.replace()
+        job.run()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
             WEBSITE_FILES['backend/main.py'][0]
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')

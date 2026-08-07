@@ -4,12 +4,14 @@ from hashlib import sha1
 from msgspec import Struct
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
+from alasio.deploy.pack.job_base import JobBase
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext import env
 from alasio.ext.path.atomic import (
     atomic_open, atomic_read_bytes, atomic_remove, atomic_replace, atomic_rmtree, atomic_write
 )
 from alasio.ext.path.makedir import batch_makedirs
+from alasio.logger import logger
 
 
 class PendingFile(Struct):
@@ -45,7 +47,7 @@ class CurrentFile(Struct):
     mode: int
 
 
-class UnpackJob:
+class UnpackJob(JobBase):
     """
     A full pack unpack task, interruptible and resumable.
 
@@ -85,18 +87,15 @@ class UnpackJob:
     the caller is responsible for it.
     """
 
-    # pack structure, relative to the app root folder (env.PROJECT_ROOT)
-    INDEX_PACK = '.pack/index.pack'
-    WORKSPACE = '.pack/workspace'
-    JOB_FILE = '.pack/workspace/job.pack'
-
-    def __init__(self, data):
+    def __init__(self, data, resume=False):
         """
         Args:
             data (bytes): Full pack data
+            resume (bool): True if the data was read from the job file,
+                run() does not write the job file again then
         """
-        self._data = data
-        self.workspace = env.PROJECT_ROOT.joinpath(self.WORKSPACE)
+        super().__init__(data)
+        self._resume = resume
         self.pending: "list[PendingFile]" = []
 
     @classmethod
@@ -113,7 +112,34 @@ class UnpackJob:
             data = atomic_read_bytes(env.PROJECT_ROOT.joinpath(cls.JOB_FILE))
         except FileNotFoundError:
             return None
-        return cls(data)
+        return cls(data, resume=True)
+
+    def run(self):
+        """
+        Execute the full unpack flow.
+
+        Writes the job file first unless the job was resumed from it,
+        then unpacks and replaces all files. On failure the workspace
+        is cleaned up: errors during write() and unpack() are safe
+        because no real file was written and are logged as warning,
+        errors during replace() leave partially replaced files and are
+        logged as error.
+        """
+        try:
+            if not self._resume:
+                self.write()
+            self.unpack()
+        except Exception as e:
+            # no real file was written, safe to clean up
+            self.cleanup()
+            logger.warning(f'Failed to prepare job: {e}')
+            return
+        try:
+            self.replace()
+        except Exception as e:
+            # real files may be partially replaced
+            self.cleanup()
+            logger.error(f'Failed to apply job: {e}')
 
     def write(self):
         """

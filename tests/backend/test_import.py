@@ -22,5 +22,7 @@ def test_backend_no_heavy_import():
         'requests',
         # no device connection
         'adbutils', 'uiautomator2',
+        # no other async library, since we use trio
+        'asyncio', 'greenlet',
     })
     run.run_test(import_backend)
