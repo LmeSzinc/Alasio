@@ -1,4 +1,4 @@
-from alasio.ext.locale.accept_language import negotiate_accept_language, negotiate_locale, parse_accept_language
+from alasio.backend.locale.accept_language import negotiate_accept_language, negotiate_locale, parse_accept_language
 
 
 class TestParseAcceptLanguage:
