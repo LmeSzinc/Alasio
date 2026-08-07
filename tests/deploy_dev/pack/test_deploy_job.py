@@ -12,6 +12,7 @@ from conftest import WEBSITE_FILES, WEBSITE_FULL_PACK
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job import DeployJob
+from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes
@@ -42,6 +43,23 @@ class TestDeployJob:
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
             WEBSITE_FILES['backend/main.py'][0]
 
+    def test_get_unfinished_job_reset(self, app_folder):
+        """A REST marker job file is a reset job."""
+        ResetJob().write()
+        job = DeployJob.get_unfinished_job()
+        assert job is not None
+        assert isinstance(job, ResetJob)
+        job.run()
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_unpack_finishes_reset_job(self, app_folder):
+        """unpack() finishes the unfinished reset job first."""
+        ResetJob().write()
+        DeployJob.unpack(WEBSITE_FULL_PACK)
+        for path, (content, _) in WEBSITE_FILES.items():
+            assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
     def test_get_unfinished_job_corrupted(self, app_folder):
         """A corrupted job file is cleaned up with a warning."""
         job_file = env.PROJECT_ROOT / '.pack/workspace/job.pack'
@@ -69,7 +87,7 @@ class TestDeployJob:
         def _fail(self):
             raise AssertionError('write() should not be called on resume')
         monkeypatch.setattr(UnpackJob, 'write', _fail)
-        job = UnpackJob.get_unfinished_job()
+        job = DeployJob.get_unfinished_job()
         assert job is not None
         job.run()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \

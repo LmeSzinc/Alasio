@@ -1,5 +1,6 @@
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase
+from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.ext import env
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_rmtree
@@ -22,10 +23,11 @@ class DeployJob:
         Check if there is an unfinished job, read it and create the
         job object of the corresponding type.
 
-        The job type is decided by the pack content: a pack with an
-        index update part is an update pack (the future UpdateJob), a
-        pack without it is a full pack (UnpackJob). A corrupted job
-        file is cleaned up with a warning.
+        The job type is decided by the job file content: the REST
+        marker is a validation job (ResetJob), a pack with an index
+        update part is an update pack (the future UpdateJob), a pack
+        without it is a full pack (UnpackJob). A corrupted job file is
+        cleaned up with a warning.
 
         Returns:
             JobBase: The unfinished job, or None if there is no
@@ -36,6 +38,9 @@ class DeployJob:
             data = atomic_read_bytes(env.PROJECT_ROOT.joinpath(JobBase.JOB_FILE))
         except FileNotFoundError:
             return None
+        if data == ResetJob.MARK:
+            # a validation job, its data comes from the local index pack
+            return ResetJob(resume=True)
         try:
             decoder = PackDecodeBase(data)
         except PackDecodeError as e:

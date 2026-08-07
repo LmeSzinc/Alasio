@@ -12,11 +12,12 @@ import pytest
 from conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
-from alasio.deploy.pack.job_unpack import CurrentFile, PendingFile, UnpackJob
+from alasio.deploy.pack.job import DeployJob
+from alasio.deploy.pack.job_base import CurrentFile
+from alasio.deploy.pack.job_unpack import PendingFile, UnpackJob
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes
-from alasio.logger import logger
 
 
 def run_job(data=WEBSITE_FULL_PACK):
@@ -25,29 +26,13 @@ def run_job(data=WEBSITE_FULL_PACK):
 
 
 class TestJobFile:
-    """write() and get_unfinished_job()."""
+    """write()."""
 
     def test_write_creates_job_file(self, app_folder):
         """write() stores the data to the job file for crash recovery."""
         UnpackJob(WEBSITE_FULL_PACK).write()
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == \
             WEBSITE_FULL_PACK
-
-    def test_get_unfinished_job_none(self, app_folder):
-        """No job file, get_unfinished_job() returns None."""
-        assert UnpackJob.get_unfinished_job() is None
-
-    def test_get_unfinished_job_resumes(self, app_folder):
-        """A leftover job file is read into an UnpackJob and resumed."""
-        UnpackJob(WEBSITE_FULL_PACK).write()
-        job = UnpackJob.get_unfinished_job()
-        assert job is not None
-        # resume does not need write() again, the data comes from the file
-        job.run()
-        for path, (content, _) in WEBSITE_FILES.items():
-            assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
-        # the finished job is cleaned
-        assert UnpackJob.get_unfinished_job() is None
 
 
 class TestUnpack:
@@ -209,7 +194,7 @@ class TestCallerFlow:
         # a previous run was interrupted, the job file is left behind
         UnpackJob(WEBSITE_FULL_PACK).write()
         # finish the unfinished job first
-        job = UnpackJob.get_unfinished_job()
+        job = DeployJob.get_unfinished_job()
         if job is not None:
             job.run()
         # then unpack the new data
@@ -305,7 +290,7 @@ class TestUnpackSkip:
     def test_resume_from_job_file(self, app_folder):
         """get_unfinished_job() resumes the interrupted unpack."""
         UnpackJob(WEBSITE_FULL_PACK).write()
-        job = UnpackJob.get_unfinished_job()
+        job = DeployJob.get_unfinished_job()
         assert job is not None
         job.run()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
@@ -361,7 +346,7 @@ class TestFailure:
             job.unpack()
         assert os.path.exists(env.PROJECT_ROOT / '.pack/workspace/job.pack')
         # the unfinished job can still be found
-        assert UnpackJob.get_unfinished_job() is not None
+        assert DeployJob.get_unfinished_job() is not None
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='file mode is meaningless on Windows')
