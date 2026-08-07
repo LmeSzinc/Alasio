@@ -22,21 +22,24 @@ from alasio.ext.algorithm.pathlen_coding import MAX_PREFIX_REUSE, MAX_SUFFIX_LOO
 
 def iter_path_comb(
         paths: "Iterable[str]",
-        min_length=3,
-        max_length=MAX_SUFFIX_REUSE,
-        max_lookback=MAX_SUFFIX_LOOKBACK,
         max_prefix_reuse=MAX_PREFIX_REUSE,
+        min_suffix_reuse=3,
+        max_suffix_reuse=MAX_SUFFIX_REUSE,
+        max_suffix_lookback=MAX_SUFFIX_LOOKBACK,
 ) -> "Iterator[Tuple[int, str, int, int]]":
     """
     Encode an ordered path list into prefix/suffix combination values.
 
     Args:
         paths (Iterable[str]): Full paths in encoded order
-        min_length (int): Minimum LCS length for a suffix candidate
-        max_length (int): Maximum LCS length for a suffix candidate
-        max_lookback (int): Maximum lookback distance for a suffix candidate
         max_prefix_reuse (int): Maximum prefix length reused from the
             previous path. Defaults to MAX_PREFIX_REUSE.
+        min_suffix_reuse (int): Minimum LCS length for a suffix candidate.
+            Defaults to 3.
+        max_suffix_reuse (int): Maximum LCS length for a suffix candidate.
+            Defaults to MAX_SUFFIX_REUSE.
+        max_suffix_lookback (int): Maximum lookback distance for a suffix
+            candidate. Defaults to MAX_SUFFIX_LOOKBACK.
 
     Yields:
         tuple[int, str, int, int]: prefix_reuse, remaining path, suffix_reuse,
@@ -58,7 +61,7 @@ def iter_path_comb(
         # a prefix-stripped path may lose its extension dot (e.g. "png")
         # and can never match the ('.png', ...) buckets of stored paths
         suffix_lookback, suffix_reuse = lcs_lookback.get_lcs(
-            path, min_length=min_length, max_length=max_length, max_lookback=max_lookback,
+            path, min_length=min_suffix_reuse, max_length=max_suffix_reuse, max_lookback=max_suffix_lookback,
         )
         # the LCS of full paths may extend beyond the prefix-stripped path
         # (e.g. ".png" vs stripped "png"); cap it so the suffix always fits

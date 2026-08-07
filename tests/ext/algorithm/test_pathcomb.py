@@ -120,10 +120,10 @@ class TestIterPathCombEdgeCases:
             (17, '', 0, 0),
         ]
 
-    def test_min_length_parameter(self):
-        """A custom min_length filters shorter suffixes: '.png' is only 4
-        chars, so min_length=5 disables the reuse."""
-        result = list(iter_path_comb(['a/1.png', 'b/2.png'], min_length=5))
+    def test_min_suffix_reuse_parameter(self):
+        """A custom min_suffix_reuse filters shorter suffixes: '.png' is only
+        4 chars, so min_suffix_reuse=5 disables the reuse."""
+        result = list(iter_path_comb(['a/1.png', 'b/2.png'], min_suffix_reuse=5))
         assert result[1][2] == 0
 
 
