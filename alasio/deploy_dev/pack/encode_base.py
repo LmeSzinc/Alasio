@@ -2,14 +2,10 @@ from collections import deque
 from hashlib import sha1
 from typing import Dict, Iterator
 
-from alasio.backport import removeprefix
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.ext.algorithm.bit2coding import encode_bit2
-from alasio.ext.algorithm.lcp import get_lcp
-from alasio.ext.algorithm.pathlcs import PathLookbackLCS
-from alasio.ext.algorithm.pathlen_coding import (
-    MAX_PREFIX_REUSE, MAX_SUFFIX_LOOKBACK, MAX_SUFFIX_REUSE, encode_prefix_comb, encode_suffix_comb
-)
+from alasio.ext.algorithm.pathcomb import iter_path_comb
+from alasio.ext.algorithm.pathlen_coding import encode_prefix_comb, encode_suffix_comb
 from alasio.ext.algorithm.vint import encode_vint
 from alasio.ext.algorithm.vlenint import encode_vlenint
 from alasio.ext.cache import cached_property
@@ -147,56 +143,20 @@ class PackEncodeBase:
         yield encode_vint(len(self.fileinfo))
 
         # filepath
-        prev = ''
         list_path: "deque[bytes]" = deque()
         list_prefix_reuse = deque()
-        list_path_length = deque()
         list_suffix_lookback = deque()
         list_suffix_reuse = deque()
-        lcs_lookback = PathLookbackLCS()
-        for file in self._iterfile(iter_ref=True, iter_file=True):
-            # prefix
-            path = file.path
-            prefix_reuse = get_lcp(prev, path)
-            # prefix_reuse must <= MAX_PREFIX_REUSE
-            # otherwise the zigzag diff may overflow the combined-int encoding
-            if len(prefix_reuse) > MAX_PREFIX_REUSE:
-                prefix_reuse = prefix_reuse[:MAX_PREFIX_REUSE]
-            path = removeprefix(path, prefix_reuse)
-            list_prefix_reuse.append(len(prefix_reuse))
-            prev = file.path
-
-            # suffix
-            # query with the full path, consistent with add_path() below and
-            # with the decoder, which takes suffixes from full lookback paths;
-            # a prefix-stripped path may lose its extension dot (e.g. "png")
-            # and can never match the ('.png', ...) buckets of stored paths
-            suffix_lookback, suffix_reuse = lcs_lookback.get_lcs(
-                file.path, min_length=3, max_length=MAX_SUFFIX_REUSE, max_lookback=MAX_SUFFIX_LOOKBACK,
-            )
-            # the LCS of full paths may extend beyond the prefix-stripped path
-            # (e.g. ".png" vs stripped "png"); cap it so the suffix always fits
-            # the remaining path, keeping prefix and suffix non-overlapping
-            if suffix_reuse > len(path):
-                suffix_reuse = len(path)
-                # a zero-length reuse must not keep a lookback: the decoder
-                # takes ``paths[i-lookback][-suffix_reuse:]`` and ``[-0:]``
-                # would yield the whole referenced path instead of nothing
-                if not suffix_reuse:
-                    suffix_lookback = 0
-            if suffix_reuse:
-                path = path[:-suffix_reuse]
-            lcs_lookback.add_path(file.path)
+        for prefix_reuse, path, suffix_reuse, suffix_lookback in iter_path_comb(
+                (file.path for file in self._iterfile(iter_ref=True, iter_file=True))):
+            list_prefix_reuse.append(prefix_reuse)
             list_suffix_lookback.append(suffix_lookback)
             list_suffix_reuse.append(suffix_reuse)
+            # remaining path, empty when fully reused by prefix + suffix
+            list_path.append(path.encode())
 
-            # remaining path
-            if path:
-                path = path.encode()
-                list_path.append(path)
-                list_path_length.append(len(path))
-            else:
-                list_path_length.append(0)
+        # remaining path byte lengths, 0 for fully reused paths
+        list_path_length = [len(path) for path in list_path]
 
         list_prefix_comb = encode_prefix_comb(list_prefix_reuse, list_path_length)
         yield encode_vlenint(list_prefix_comb)
