@@ -19,7 +19,11 @@ def decode_vint(data):
 
     Raises:
         ValueError: If the decoded value exceeds INT64
+        ValueError: If the data is truncated, empty or a high byte at the
+            end of the stream without a following terminating byte
     """
+    if not data:
+        raise ValueError("[decode_vint] Data truncated: empty input")
     num = 0
     read = 1
     for byte in data:
@@ -40,6 +44,9 @@ def decode_vint(data):
             if read > 8 and num > MAX_INT64:
                 raise ValueError(f"[decode_vint] Decoded value exceeds INT64: {num}")
             break
+    else:
+        # no terminating byte (MSB clear) found, the stream ended inside the vint
+        raise ValueError("[decode_vint] Data truncated: stream ended inside the vint")
 
     return num, read
 
@@ -95,8 +102,15 @@ def decode_vint_list(data, total):
         tuple[list[int], int]: (list[decoded_integer], total_bytes_read)
 
     Raises:
+        ValueError: If total is not positive
         ValueError: If any decoded value exceeds INT64
+        ValueError: If the data is truncated, empty or a high byte at the
+            end of the stream without a following terminating byte
     """
+    if total <= 0:
+        raise ValueError(f"[decode_vint_list] Total must be positive: {total}")
+    if not data:
+        raise ValueError("[decode_vint_list] Data truncated: empty input")
     num_list = []
     num = 0
     read = 0
@@ -128,6 +142,11 @@ def decode_vint_list(data, total):
             read = 0
         if count >= total:
             break
+
+    # the stream ended inside a vint: the last byte had its MSB set and
+    # promised more bytes that are not there
+    if read > 0:
+        raise ValueError("[decode_vint_list] Data truncated: stream ended inside a vint")
 
     return num_list, total_read
 

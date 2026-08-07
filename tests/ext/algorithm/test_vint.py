@@ -62,6 +62,23 @@ class TestDecodeVint:
         assert val == MAX_INT64
         assert read == len(encoded)
 
+    @pytest.mark.parametrize("data", [
+        b'\x80',        # one high byte, no terminating byte
+        b'\x80\x80',    # two high bytes
+        b'\xff',        # high byte with the max payload
+        b'\x80' * 8,  # 8 high bytes, value would stay within INT64
+        b'\xff\xff\xff',  # three high bytes
+    ])
+    def test_decode_truncated_raises(self, data):
+        """decode_vint should raise ValueError when the stream ends inside a vint."""
+        with pytest.raises(ValueError):
+            decode_vint(data)
+
+    def test_decode_empty_data_raises(self):
+        """decode_vint should raise ValueError on empty data: calling the function implies data is expected."""
+        with pytest.raises(ValueError):
+            decode_vint(b'')
+
 
 class TestEncodeVint:
     """Tests for encode_vint()"""
@@ -214,7 +231,6 @@ class TestDecodeVintList:
         (b'\x80\x00\x80\x01', 2, [128, 129]),
         (b'\xff\x00\x00', 2, [16384, 0]),
         (b'\x01\x02\x03', 3, [1, 2, 3]),
-        (b'', 0, []),
     ])
     def test_decode_values(self, data, total, expected):
         """Parametrized decode test for vint list."""
@@ -237,10 +253,18 @@ class TestDecodeVintList:
         result, _ = decode_vint_list(b'\x80\x01', 5)
         assert result == [129]
 
-    def test_decode_empty_data_with_nonzero_total(self):
-        """Decoding with total > 0 on empty data returns empty list."""
-        result, _ = decode_vint_list(b'', 3)
-        assert result == []
+    @pytest.mark.parametrize("total", [1, 3])
+    def test_decode_empty_data_raises(self, total):
+        """decode_vint_list should raise ValueError on empty data: calling
+        the function implies data is expected."""
+        with pytest.raises(ValueError):
+            decode_vint_list(b'', total)
+
+    @pytest.mark.parametrize("total", [0, -1, -128, -100000])
+    def test_decode_non_positive_total_raises(self, total):
+        """decode_vint_list should raise ValueError when total is not positive."""
+        with pytest.raises(ValueError):
+            decode_vint_list(b'\x00', total)
 
     @pytest.mark.parametrize("data", [
         b'\xff' * 8 + b'\x00',  # 8 high bytes, max value exceeds INT64
@@ -277,6 +301,18 @@ class TestDecodeVintList:
         assert result == [129]
         assert total_read == 2
 
+    @pytest.mark.parametrize("data, total", [
+        (b'\x80', 1),            # one high byte, no terminating byte
+        (b'\x80\x80', 1),        # two high bytes
+        (b'\xff', 1),            # high byte with the max payload
+        (b'\x00\x80', 2),        # complete vint followed by a truncated one
+        (b'\x80\x01\x80', 3),    # complete vint followed by a truncated one
+    ])
+    def test_decode_truncated_raises(self, data, total):
+        """decode_vint_list should raise ValueError when the stream ends inside a vint."""
+        with pytest.raises(ValueError):
+            decode_vint_list(data, total)
+
 
 class TestVintListRoundTrip:
     """Round-trip tests for encode_vint_list / decode_vint_list."""
@@ -288,7 +324,6 @@ class TestVintListRoundTrip:
         [16383, 16384, 16385],
         [16512, 16513, 16514],
         [500000, 1048576, 16777216],
-        [],
         list(range(100)),
     ])
     def test_round_trip(self, nums):
