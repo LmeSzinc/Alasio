@@ -19,7 +19,7 @@ import sqlite3
 import threading
 
 
-class Timeout(Exception):
+class FilelockTimeout(Exception):
     """
     Raised when the lock cannot be acquired within the timeout
     (consistent with filelock.Timeout).
@@ -40,6 +40,42 @@ class SQLiteFileLock:
 
     The interface is fully compatible with the third-party filelock.FileLock
     library.
+
+    Examples:
+        Use as a context manager, the lock is released automatically on exit:
+
+            with SQLiteFileLock("app.lock") as lock:
+                # critical section
+
+        Acquire and release manually, each acquire() must pair with a release():
+
+            lock = SQLiteFileLock("app.lock")
+            lock.acquire()
+            try:
+                # critical section
+            finally:
+                lock.release()
+
+        Handle the timeout when the lock is held by another process:
+
+            from alasio.ext.file.filelock import SQLiteFileLock, FilelockTimeout
+
+            try:
+                with SQLiteFileLock("app.lock", timeout=0.5):
+                    # critical section
+            except FilelockTimeout:
+                # the lock is held elsewhere
+
+        The lock is reentrant within one instance. For mutual exclusion across
+        threads, each thread should use its own instance:
+
+            # thread 1
+            with SQLiteFileLock("app.lock", timeout=1.0):
+                # critical section
+
+            # thread 2
+            with SQLiteFileLock("app.lock", timeout=1.0):
+                # critical section
     """
 
     def __init__(self, lock_file, timeout=-1):
@@ -49,10 +85,19 @@ class SQLiteFileLock:
                 created automatically if missing
             timeout (float): Timeout in seconds. Defaults to -1.
                 -1 waits indefinitely (blocking);
-                 0 is non-blocking, raises Timeout immediately if the lock
+                 0 is non-blocking, raises FilelockTimeout immediately if the lock
                    cannot be acquired;
                 > 0 waits at most N seconds
+
+        Raises:
+            ValueError: If lock_file is an in-memory database ":memory:"
         """
+        lock_file = str(lock_file)
+        if lock_file == ':memory:':
+            raise ValueError('Cannot lock an in-memory database, the lock must be on a file')
+
+        # Absolute path without symlink resolution (os.path.abspath does no IO),
+        # so instances in different working directories still lock the same file
         self._lock_file = os.path.abspath(lock_file)
         self._default_timeout = timeout
 
@@ -108,7 +153,7 @@ class SQLiteFileLock:
             SQLiteFileLock: self
 
         Raises:
-            Timeout: If the lock cannot be acquired within the timeout
+            FilelockTimeout: If the lock cannot be acquired within the timeout
         """
         if timeout is None:
             timeout = self._default_timeout
@@ -165,7 +210,7 @@ class SQLiteFileLock:
             sqlite3.Connection: Connection holding the exclusive lock
 
         Raises:
-            Timeout: If the lock cannot be acquired within the timeout
+            FilelockTimeout: If the lock cannot be acquired within the timeout
             sqlite3.OperationalError: If the database cannot be opened,
                 e.g. "unable to open database file" when the directory is missing
         """
@@ -190,10 +235,10 @@ class SQLiteFileLock:
                 except Exception:
                     pass
 
-            # Convert the "database is locked" error to Timeout
+            # Convert the "database is locked" error to FilelockTimeout
             err_msg = str(e).lower()
             if "locked" in err_msg or "busy" in err_msg:
-                raise Timeout(self._lock_file) from e
+                raise FilelockTimeout(self._lock_file) from e
             raise
 
     def release(self, force=False):
@@ -247,4 +292,7 @@ class SQLiteFileLock:
 
     def __del__(self):
         """Safe fallback to release the lock when the object is destroyed."""
-        self.release(force=True)
+        # __del__ is also called on partially initialized objects when
+        # __init__ raises, so guard against missing attributes
+        if hasattr(self, '_thread_lock'):
+            self.release(force=True)

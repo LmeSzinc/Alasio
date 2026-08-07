@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from alasio.ext.file.filelock import SQLiteFileLock, Timeout
+from alasio.ext.file.filelock import FilelockTimeout, SQLiteFileLock
 
 CHILD_HOLD = (
     "import os, sys, time\n"
@@ -26,14 +26,14 @@ CHILD_HOLD = (
 )
 
 
-class TestTimeout:
-    """Test cases for the Timeout exception"""
+class TestFilelockTimeout:
+    """Test cases for the FilelockTimeout exception"""
 
     def test_exception_message_and_lock_file(self, tmp_path):
-        """Timeout should carry the lock file path in its message and attribute"""
+        """FilelockTimeout should carry the lock file path in its message and attribute"""
         lock_file = tmp_path / "a.lock"
-        with pytest.raises(Timeout, match="Timeout occurred trying to acquire lock") as excinfo:
-            raise Timeout(str(lock_file))
+        with pytest.raises(FilelockTimeout, match="Timeout occurred trying to acquire lock") as excinfo:
+            raise FilelockTimeout(str(lock_file))
         assert excinfo.value.lock_file == os.path.abspath(str(lock_file))
 
 
@@ -62,6 +62,12 @@ class TestProperties:
         """A new lock should not be locked"""
         lock = SQLiteFileLock(tmp_path / "a.lock", timeout=0)
         assert not lock.is_locked
+
+    @pytest.mark.parametrize("lock_file", [":memory:", Path(":memory:")])
+    def test_rejects_memory_database(self, lock_file):
+        """Constructor should reject the in-memory database, the lock is on a file"""
+        with pytest.raises(ValueError):
+            SQLiteFileLock(lock_file)
 
 
 class TestAcquireRelease:
@@ -141,14 +147,14 @@ class TestExclusion:
     """Test cases for mutual exclusion between instances"""
 
     def test_timeout_zero_is_non_blocking(self, tmp_path):
-        """acquire() with timeout=0 should fail fast with Timeout when the lock is busy"""
+        """acquire() with timeout=0 should fail fast with FilelockTimeout when the lock is busy"""
         lock_file = tmp_path / "a.lock"
         lock1 = SQLiteFileLock(lock_file, timeout=0)
         lock2 = SQLiteFileLock(lock_file, timeout=0)
         lock1.acquire()
         try:
             start = time.monotonic()
-            with pytest.raises(Timeout) as excinfo:
+            with pytest.raises(FilelockTimeout) as excinfo:
                 lock2.acquire()
             elapsed = time.monotonic() - start
             assert excinfo.value.lock_file == lock1.lock_file
@@ -157,14 +163,14 @@ class TestExclusion:
             lock1.release()
 
     def test_positive_timeout_waits_then_raises(self, tmp_path):
-        """acquire() with a positive timeout should wait and then raise Timeout"""
+        """acquire() with a positive timeout should wait and then raise FilelockTimeout"""
         lock_file = tmp_path / "a.lock"
         lock1 = SQLiteFileLock(lock_file, timeout=0)
         lock2 = SQLiteFileLock(lock_file, timeout=0.2)
         lock1.acquire()
         try:
             start = time.monotonic()
-            with pytest.raises(Timeout):
+            with pytest.raises(FilelockTimeout):
                 lock2.acquire()
             elapsed = time.monotonic() - start
             assert elapsed >= 0.15
@@ -213,7 +219,7 @@ class TestDefaultTimeout:
         lock1.acquire()
         try:
             start = time.monotonic()
-            with pytest.raises(Timeout):
+            with pytest.raises(FilelockTimeout):
                 lock2.acquire()
             assert time.monotonic() - start >= 0.15
         finally:
@@ -228,7 +234,7 @@ class TestDefaultTimeout:
         lock1.acquire()
         try:
             start = time.monotonic()
-            with pytest.raises(Timeout):
+            with pytest.raises(FilelockTimeout):
                 lock2.acquire(timeout=0.2)
             assert time.monotonic() - start >= 0.15
         finally:
@@ -271,7 +277,7 @@ class TestThreads:
         def try_acquire():
             try:
                 contender.acquire()
-            except Timeout:
+            except FilelockTimeout:
                 results.append("timeout")
             else:
                 results.append("acquired")
@@ -317,7 +323,7 @@ class TestThreads:
             # Waits 0.5s on the SQLite lock
             try:
                 shared.acquire(timeout=0.5)
-            except Timeout:
+            except FilelockTimeout:
                 results.append("b:timeout")
 
         def thread_c():
@@ -325,7 +331,7 @@ class TestThreads:
             start = time.monotonic()
             try:
                 shared.acquire(timeout=0)
-            except Timeout:
+            except FilelockTimeout:
                 c_elapsed.append(time.monotonic() - start)
                 results.append("c:timeout")
 
@@ -360,7 +366,7 @@ class TestThreads:
                     results.append(f"{tag}:acquired")
                     # Hold the lock long enough to force the loser to time out
                     time.sleep(0.5)
-            except Timeout:
+            except FilelockTimeout:
                 results.append(f"{tag}:timeout")
 
         b = threading.Thread(target=try_acquire, args=("b",))
@@ -389,11 +395,11 @@ class TestCrossProcess:
         lock.acquire()
         code = (
             "import sys\n"
-            "from alasio.ext.file.filelock import SQLiteFileLock, Timeout\n"
+            "from alasio.ext.file.filelock import SQLiteFileLock, FilelockTimeout\n"
             "try:\n"
             "    with SQLiteFileLock(sys.argv[1], timeout=0.5):\n"
             "        print('ACQUIRED')\n"
-            "except Timeout:\n"
+            "except FilelockTimeout:\n"
             "    print('TIMEOUT')\n"
         )
         result = subprocess.run(
