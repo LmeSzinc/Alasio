@@ -10,8 +10,12 @@ The file list is designed to cover every record type produced by PackFull:
 - algo: 0 (raw, small/incompressible files), 1 (lzma, big compressible files)
 - empty files (size = 0, sha1 = ''), deep paths, duplicate contents (C)
 """
+from hashlib import sha1
+
+import httpx
 import pytest
 
+from alasio.deploy.pack.server_file import ServerFile
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.ext import env
 from alasio.ext.path import PathStr
@@ -94,3 +98,65 @@ for path, (content, mode) in WEBSITE_FILES.items():
 WEBSITE_FULL_PACK = b''.join(PackFull(WEBSITE_REPO, commit=COMMIT).iter_pack_data())
 # index pack: header + index section only, no data section
 WEBSITE_INDEX_PACK = b''.join(PackFull(WEBSITE_REPO, commit=COMMIT).iter_packidx_data())
+
+
+class MockServerFile(ServerFile):
+    """
+    In-memory ServerFile for tests, serves the pack data without http.
+
+    The http requests are intercepted by an httpx.MockTransport client
+    created in __init__, so the whole ServerFile logic (range requests,
+    index pack assembly) runs as-is and only the transport differs.
+    register_version() stores the full pack and the index pack of a
+    version, the transport handler serves latest.pack and the range
+    requests from the memory.
+    """
+
+    def __init__(self, base_url='http://mock'):
+        super().__init__(
+            base_url, client=httpx.Client(transport=httpx.MockTransport(self._handle)))
+        # {version: full pack}
+        self.full_packs = {}
+        # {version: index pack}
+        self.index_packs = {}
+        # the latest registered version
+        self.latest_version = ''
+
+    def register_version(self, version, full_pack, index_pack):
+        """
+        Register the packs of a version, it becomes the latest one.
+
+        Args:
+            version (str): Version to register
+            full_pack (bytes): Full pack of the version
+            index_pack (bytes): Index pack of the version
+        """
+        self.full_packs[version] = full_pack
+        self.index_packs[version] = index_pack
+        self.latest_version = version
+
+    def _handle(self, request):
+        """
+        MockTransport handler, serves the packs from the memory.
+
+        Args:
+            request (httpx.Request): The request
+
+        Returns:
+            httpx.Response: The response
+        """
+        path = request.url.path
+        if path.endswith('/latest.pack'):
+            index_pack = self.index_packs[self.latest_version]
+            content = self.latest_version.encode() + sha1(index_pack).digest()
+            return httpx.Response(200, content=content)
+        # base_url/{version}/full.pack, served as a range request
+        version = path.strip('/').partition('/')[0]
+        start, _, end = request.headers['Range'].partition('=')[2].partition('-')
+        content = self.full_packs[version][int(start):int(end) + 1]
+        return httpx.Response(206, content=content)
+
+
+# MockServerFile serving the website packs in memory, read-only test data
+WEBSITE_SERVER = MockServerFile()
+WEBSITE_SERVER.register_version(COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK)
