@@ -1,6 +1,6 @@
 import os
 from itertools import chain
-from typing import Generic, List, Literal, TYPE_CHECKING, TypeVar, Union
+from typing import TYPE_CHECKING, Generic, List, Literal, TypeVar, Union
 
 import msgspec
 from msgspec.structs import asdict, fields
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 T = TypeVar('T', bound=msgspec.Struct)
 
 
-class FieldFormatExtra(msgspec.Struct):
+class FieldFormatExtra(msgspec.Struct, dict=True):
     """
     Per-field formatting options for markdown table output.
 
@@ -26,13 +26,29 @@ class FieldFormatExtra(msgspec.Struct):
             name: Annotated[str, Meta(extra={"width": 20, "align": "center"})]
 
     Args:
-        align (str): Column alignment. Defaults to 'left'.
+        align (str): Column alignment. 'unset' renders a plain separator
+            (e.g. ``|---|``); 'left', 'center' and 'right' render
+            alignment markers (e.g. ``|:---|``, ``|:---:|``, ``|---:|``).
+            Defaults to 'unset'.
         width (str | int): 'auto' = adjust to longest content;
             int = fixed minimum width (extended if content is longer).
             Defaults to 'auto'.
     """
-    align: Literal['left', 'center', 'right'] = 'left'
+    align: Literal['unset', 'left', 'center', 'right'] = 'unset'
     width: Union[Literal['auto'], int] = 'auto'
+
+    @cached_property
+    def pad_align(self):
+        """
+        Alignment value for :func:`cjk_pad`.
+
+        ``'unset'`` pads like ``'left'``; only the separator row
+        distinguishes the two.
+
+        Returns:
+            str: ``'left'``, ``'center'`` or ``'right'``.
+        """
+        return 'left' if self.align == 'unset' else self.align
 
 
 class MarkdownTable(Generic[T]):
@@ -163,9 +179,9 @@ class MarkdownTable(Generic[T]):
 
         Built from each field's ``Meta(extra=...)`` dict via
         :func:`get_field_metadata`.  Supported keys are ``width``
-        (``'auto'`` or ``int``) and ``align`` (``'left'``,
-        ``'center'``, ``'right'``).  Fields without metadata get
-        a default ``FieldFormatExtra()``.
+        (``'auto'`` or ``int``) and ``align`` (``'unset'``,
+        ``'left'``, ``'center'``, ``'right'``).  Fields without
+        metadata get a default ``FieldFormatExtra()``.
         """
         result = {}
         for name, meta in get_field_metadata(self.model).items():
@@ -423,7 +439,7 @@ class MarkdownTable(Generic[T]):
 
         # Header row
         parts = [
-            f' {cjk_pad(h, cf.width, cf.align)} '
+            f' {cjk_pad(h, cf.width, cf.pad_align)} '
             for h, cf in zip(self.headers, col_fmt)
         ]
         yield f'|{"|".join(parts)}|'
@@ -432,18 +448,20 @@ class MarkdownTable(Generic[T]):
         sep_parts = []
         for cf in col_fmt:
             w: int = cf.width
-            if cf.align == 'center':
-                sep_parts.append(f':{"-" * w}:')
-            elif cf.align == 'right':
-                sep_parts.append(f'{"-" * (w + 1)}:')
-            else:
+            if cf.align == 'unset':
                 sep_parts.append('-' * (w + 2))
+            elif cf.align == 'left':
+                sep_parts.append(f':{"-" * (w + 1)}')
+            elif cf.align == 'center':
+                sep_parts.append(f':{"-" * w}:')
+            else:
+                sep_parts.append(f'{"-" * (w + 1)}:')
         yield f'|{"|".join(sep_parts)}|'
 
         # Data rows
         for vals in all_rows[1:]:
             parts = [
-                f' {cjk_pad(v, cf.width, cf.align)} '
+                f' {cjk_pad(v, cf.width, cf.pad_align)} '
                 for v, cf in zip(vals, col_fmt)
             ]
             yield f'|{"|".join(parts)}|'

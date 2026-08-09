@@ -10,8 +10,8 @@ from alasio.logger import logger
 
 class TestMarkdownTableFormat:
 
-    def test_default_format_left_auto(self):
-        """Default formatting: left-aligned, auto width."""
+    def test_default_format_unset_auto(self):
+        """Default formatting: no alignment marker, auto width."""
 
         class Model(msgspec.Struct):
             name: str
@@ -143,17 +143,18 @@ class TestMarkdownTableFormat:
         assert f.getvalue() == expected
 
     def test_mixed_alignment(self):
-        """Different alignments per column."""
+        """Different alignments per column, including unset."""
 
         class Model(msgspec.Struct):
+            unset: Annotated[str, Meta(extra={"align": "unset"})]
             left: Annotated[str, Meta(extra={"align": "left"})]
             center: Annotated[str, Meta(extra={"align": "center"})]
             right: Annotated[str, Meta(extra={"align": "right"})]
 
         content = """\
-| left | center | right |
-|------|--------|-------|
-| a | b | c |
+| unset | left | center | right |
+|-------|------|--------|-------|
+| a | b | c | d |
 """
         f = StringIO(content)
         table = MarkdownTable(f, "", Model).read()
@@ -163,9 +164,9 @@ class TestMarkdownTableFormat:
             assert capture.stdout.any_contains("Write file")
 
         expected = """\
-| left | center | right |
-|------|:------:|------:|
-| a    |   b    |     c |
+| unset | left | center | right |
+|-------|:-----|:------:|------:|
+| a     | b    |   c    |     d |
 """
         assert f.getvalue() == expected
 
