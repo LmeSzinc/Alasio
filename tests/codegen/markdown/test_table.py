@@ -352,7 +352,7 @@ Some footer text
 Some intro text
 
 | name  | age |
-|-------|-----|
+| ----- | --- |
 | Alice | 30  |
 | Bob   | 25  |
 
@@ -377,7 +377,7 @@ Some footer text
 
         expected = """\
 | name  | age |
-|-------|-----|
+| ----- | --- |
 | Alice | 30  |
 """
         assert f.getvalue() == expected
@@ -408,7 +408,7 @@ After
 Before
 
 | name           | age |
-|----------------|-----|
+| -------------- | --- |
 | Alice Modified | 31  |
 
 After
@@ -435,7 +435,7 @@ After
 
         expected = """\
 | name    | age |
-|---------|-----|
+| ------- | --- |
 | Alice   | 30  |
 | Bob     | 25  |
 | Charlie | 35  |
@@ -464,7 +464,7 @@ After
 
         expected = """\
 | name  | age |
-|-------|-----|
+| ----- | --- |
 | Alice | 30  |
 """
         assert f.getvalue() == expected
@@ -488,7 +488,7 @@ After
 
         expected = """\
 | name | age |
-|------|-----|
+| ---- | --- |
 """
         assert f.getvalue() == expected
 
@@ -519,7 +519,7 @@ Some text
 # Config
 
 | name  | age |
-|-------|-----|
+| ----- | --- |
 | Alice | 31  |
 
 # Other
@@ -616,7 +616,7 @@ After
 
         expected = """\
 | name | age |
-|------|-----|
+| ---- | --- |
 | Bob  | 25  |
 """
         assert f.getvalue() == expected

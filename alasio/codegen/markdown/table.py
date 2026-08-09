@@ -27,9 +27,9 @@ class FieldFormatExtra(msgspec.Struct, dict=True):
 
     Args:
         align (str): Column alignment. 'unset' renders a plain separator
-            (e.g. ``|---|``); 'left', 'center' and 'right' render
-            alignment markers (e.g. ``|:---|``, ``|:---:|``, ``|---:|``).
-            Defaults to 'unset'.
+            (e.g. ``| --- |``); 'left', 'center' and 'right' render
+            alignment markers (e.g. ``| :--- |``, ``| :---: |``,
+            ``| ---: |``). Defaults to 'unset'.
         width (str | int): 'auto' = adjust to longest content;
             int = fixed minimum width (extended if content is longer).
             Defaults to 'auto'.
@@ -199,7 +199,7 @@ class MarkdownTable(Generic[T]):
 
     @staticmethod
     def _is_dash_line(stripped):
-        """Return True if *stripped* is a table separator (``|---|``)."""
+        """Return True if *stripped* is a table separator (``| --- |``)."""
         return (
                 stripped.startswith('|')
                 and '---' in stripped
@@ -429,13 +429,15 @@ class MarkdownTable(Generic[T]):
                 str(obj_dict.get(into_header[h], '')) for h in self.headers
             ])
 
-        # Resolve auto widths using display width; enforce minimum 3
+        # Resolve auto widths using display width; enforce minimum width
+        # for the separator: 3 hyphens plus any alignment colons
+        min_width = {'unset': 3, 'left': 4, 'right': 4, 'center': 5}
         for i in range(num_cols):
             cf = col_fmt[i]
             if cf.width == 'auto':
                 cf.width = max(cjk_width(r[i]) for r in all_rows)
-            if cf.width < 3:
-                cf.width = 3
+            if cf.width < min_width[cf.align]:
+                cf.width = min_width[cf.align]
 
         # Header row
         parts = [
@@ -444,18 +446,18 @@ class MarkdownTable(Generic[T]):
         ]
         yield f'|{"|".join(parts)}|'
 
-        # Separator row (total width = cf.width + 2)
+        # Separator row, space-padded like data cells (total width = cf.width + 2)
         sep_parts = []
         for cf in col_fmt:
             w: int = cf.width
             if cf.align == 'unset':
-                sep_parts.append('-' * (w + 2))
+                sep_parts.append(f' {"-" * w} ')
             elif cf.align == 'left':
-                sep_parts.append(f':{"-" * (w + 1)}')
+                sep_parts.append(f' :{"-" * (w - 1)} ')
             elif cf.align == 'center':
-                sep_parts.append(f':{"-" * w}:')
+                sep_parts.append(f' :{"-" * (w - 2)}: ')
             else:
-                sep_parts.append(f'{"-" * (w + 1)}:')
+                sep_parts.append(f' {"-" * (w - 1)}: ')
         yield f'|{"|".join(sep_parts)}|'
 
         # Data rows

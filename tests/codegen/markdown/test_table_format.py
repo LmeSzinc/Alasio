@@ -1,6 +1,7 @@
 from io import StringIO
 
 import msgspec
+import pytest
 from msgspec import Meta
 from typing_extensions import Annotated
 
@@ -31,7 +32,7 @@ class TestMarkdownTableFormat:
 
         expected = """\
 | name  | age |
-|-------|-----|
+| ----- | --- |
 | Alice | 30  |
 """
         assert f.getvalue() == expected
@@ -57,7 +58,7 @@ class TestMarkdownTableFormat:
 
         expected = """\
 | name                 | age |
-|----------------------|-----|
+| -------------------- | --- |
 | Alice                | 30  |
 """
         assert f.getvalue() == expected
@@ -84,7 +85,7 @@ class TestMarkdownTableFormat:
 
         expected = """\
 | name | age |
-|-----|-----|
+| --- | --- |
 | LongLongLongName | 30  |
 | A   | 25  |
 """
@@ -111,7 +112,7 @@ class TestMarkdownTableFormat:
 
         expected = """\
 | name  | age |
-|:-----:|-----|
+| :---: | --- |
 | Alice | 30  |
 """
         assert f.getvalue() == expected
@@ -137,7 +138,7 @@ class TestMarkdownTableFormat:
 
         expected = """\
 |  name | age |
-|------:|-----|
+| ----: | --- |
 | Alice | 30  |
 """
         assert f.getvalue() == expected
@@ -165,7 +166,7 @@ class TestMarkdownTableFormat:
 
         expected = """\
 | unset | left | center | right |
-|-------|:-----|:------:|------:|
+| ----- | :--- | :----: | ----: |
 | a     | b    |   c    |     d |
 """
         assert f.getvalue() == expected
@@ -191,7 +192,7 @@ class TestMarkdownTableFormat:
 
         expected = """\
 |       name       | age |
-|:----------------:|-----|
+| :--------------: | --- |
 |      Alice       | 30  |
 """
         assert f.getvalue() == expected
@@ -218,7 +219,7 @@ class TestMarkdownTableFormat:
         # Column width = max(4, 8, 1) = 8 -> ljust pads CJK (len=4) to 8
         expected = """\
 | name     | age |
-|----------|-----|
+| -------- | --- |
 | 你好世界 | 30  |
 | a        | 25  |
 """
@@ -245,7 +246,7 @@ class TestMarkdownTableFormat:
         # "你好" display width = 4, fixed width = 10 -> padding = 6
         expected = """\
 | name       | age |
-|------------|-----|
+| ---------- | --- |
 | 你好       | 30  |
 """
         assert f.getvalue() == expected
@@ -274,7 +275,7 @@ class TestMarkdownTableFormat:
         # "name" display width = 4 = width -> exact fit
         expected = """\
 | name | age |
-|------|-----|
+| ---- | --- |
 | 你好世界 | 30  |
 | a    | 25  |
 """
@@ -302,7 +303,7 @@ class TestMarkdownTableFormat:
         # "abc" = 3 display width, padding = 9
         expected = """\
 | mixed        |
-|--------------|
+| ------------ |
 | hello你好    |
 | abc          |
 """
@@ -328,10 +329,10 @@ class TestMarkdownTableMinWidth:
             table.write()
             assert capture.fd.any_contains("Write file")
             assert capture.stdout.any_contains("Write file")
-        # width=1 -> clamped to 3; separator = 5 dashes
+        # width=1 -> clamped to 3; separator = ' --- '
         expected = """\
 | x   |
-|-----|
+| --- |
 | a   |
 """
         assert f.getvalue() == expected
@@ -353,10 +354,38 @@ class TestMarkdownTableMinWidth:
             table.write()
             assert capture.fd.any_contains("Write file")
             assert capture.stdout.any_contains("Write file")
-        # auto max=1 -> clamped to 3; separator = 5 dashes
+        # auto max=1 -> clamped to 3; separator = ' --- '
         expected = """\
 | x   |
-|-----|
+| --- |
 | a   |
 """
+        assert f.getvalue() == expected
+
+    @pytest.mark.parametrize("align, header, sep, body", [
+        # left/right need width 4 to fit ':---' / '---:'
+        ("left", "| x    |", "| :--- |", "| a    |"),
+        ("right", "|    x |", "| ---: |", "|    a |"),
+        # center needs width 5 to fit ':---:'
+        ("center", "|   x   |", "| :---: |", "|   a   |"),
+    ])
+    def test_alignment_marker_minimum_width(self, align, header, sep, body):
+        """Alignment columns are widened to keep at least 3 hyphens."""
+
+        class Model(msgspec.Struct):
+            x: Annotated[str, Meta(extra={"align": align})]
+
+        content = """\
+| x |
+|---|
+| a |
+"""
+        f = StringIO(content)
+        table = MarkdownTable(f, "", Model).read()
+        with logger.mock_capture_writer() as capture:
+            table.write()
+            assert capture.fd.any_contains("Write file")
+            assert capture.stdout.any_contains("Write file")
+
+        expected = f"{header}\n{sep}\n{body}\n"
         assert f.getvalue() == expected
