@@ -22,13 +22,13 @@
     { path: "/dev/compat", name: "Browser Compatibility" },
   ]);
   const debugNavItems = $derived([
-    { path: "/dev/ws", name: t.WebsocketTest.Title() },
-    { path: "/dev/workerstatus", name: "Worker Status" },
-    { path: "/dev/scheduler", name: "Scheduler" },
-    { path: "/dev/preview", name: "Preview" },
-    { path: "/dev/dashboard", name: "Dashboard" },
-    { path: "/dev/dashboardgroup", name: "Dashboard Group" },
-    { path: "/dev/log", name: "Log Viewer" },
+    { path: "/dev/debug/ws", name: t.WebsocketTest.Title() },
+    { path: "/dev/debug/workerstatus", name: "Worker Status" },
+    { path: "/dev/debug/scheduler", name: "Scheduler" },
+    { path: "/dev/debug/preview", name: "Preview" },
+    { path: "/dev/debug/dashboard", name: "Dashboard" },
+    { path: "/dev/debug/dashboardgroup", name: "Dashboard Group" },
+    { path: "/dev/debug/log", name: "Log Viewer" },
   ]);
 
   // --- Derived State ---
