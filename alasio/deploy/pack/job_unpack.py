@@ -100,8 +100,11 @@ class UnpackJob(JobBase):
         Prepare all files in the workspace, real files are untouched.
 
         Writes the index section to .pack/index.pack and decompresses
-        every file to .pack/workspace/{size}_{sha1}_{index}.tmp, filling
-        self.pending with the changes to apply in replace().
+        every file to .pack/workspace/{size}_{sha1}_{index}.tmp,
+        filling self.pending with the changes to apply in replace().
+        A target file whose content matches the record only after
+        converting its EOL is written to the tmp file with the
+        converted content, no decompression is needed.
         """
         decoder = PackDecodeBase(self._data)
         decoder.validate()
@@ -113,14 +116,19 @@ class UnpackJob(JobBase):
             target = env.PROJECT_ROOT.joinpath(path)
             if info.edit == 2:
                 # deleted marker, its target is removed in replace()
-                self.pending.append(PendingFile(info=info, tmp='', current_mode=0))
+                pending.append(PendingFile(info=info, tmp='', current_mode=0))
                 continue
             current = self._read_current(target)
-            if self._matches(info, current):
+            result = self._matches(info, current)
+            if result.match:
                 # target file exists and passes the size + sha1 check
                 continue
             tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
-            if not self._matches(info, self._read_current(tmp)):
+            if result.match_data:
+                # only the EOL differs, write the converted content
+                # to the tmp file without decompressing
+                atomic_write(tmp, result.match_data)
+            elif not self._matches(info, self._read_current(tmp)).match:
                 # decompress and write to the tmp file
                 atomic_write(tmp, decoder.catfile(info))
             # the file is written by python with the default mode 666,

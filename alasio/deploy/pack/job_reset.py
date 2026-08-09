@@ -84,6 +84,7 @@ class ResetJob(JobBase):
             return False
         # the job is finished, clean the workspace atomically
         self.cleanup()
+        logger.info(f'Reset done')
         return not self.error
 
     def write(self):
@@ -142,8 +143,11 @@ class ResetJob(JobBase):
         against the file at its path: size and sha1 must match (line
         endings are normalized like unpack), the file mode must match
         the record, a deleted marker expects the file to not exist.
-        Failed files are collected in self.error with an empty tmp,
-        the caller repairs them.
+        A file whose content matches only after converting its EOL to
+        the record EOL is written to a tmp file with the converted
+        content and recorded with the tmp set, download() moves it to
+        pending without a download. Other failed files are collected
+        in self.error with an empty tmp, the caller repairs them.
 
         Returns:
             bool: True if every file matches its record, False
@@ -158,14 +162,24 @@ class ResetJob(JobBase):
                     # the file should be removed by the caller
                     self.error.append(PendingFile(info=info, tmp='', current_mode=0))
                 continue
-            if not self._matches(info, current):
-                # missing or wrong size + sha1, the file is rewritten
-                # by python with the default mode 666
-                self.error.append(PendingFile(info=info, tmp='', current_mode=0o666))
+            result = self._matches(info, current)
+            if result.match:
+                if not self._mode_matches(info, current):
+                    # the mode differs, the current mode guides the fix
+                    self.error.append(PendingFile(info=info, tmp='', current_mode=current.mode))
                 continue
-            if not self._mode_matches(info, current):
-                # the mode differs, the current mode guides the fix
-                self.error.append(PendingFile(info=info, tmp='', current_mode=current.mode))
+            if result.match_data:
+                # only the EOL differs, write the converted content
+                # to a tmp file, download() moves it to pending
+                # the tmp name is built from the index of the record
+                # in self.error, matching the download() convention
+                tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{len(self.error)}.tmp')
+                atomic_write(tmp, result.match_data)
+                self.error.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+                continue
+            # missing or wrong size + sha1, the file is rewritten
+            # by python with the default mode 666
+            self.error.append(PendingFile(info=info, tmp='', current_mode=0o666))
         return not self.error
 
     def download_index(self):
@@ -206,11 +220,12 @@ class ResetJob(JobBase):
         Every failed file is fetched from the full pack of the index
         pack version with a range request, decompressed and written to
         .pack/workspace/{size}_{sha1}_{index}.tmp, the record is moved
-        to self.pending for replace(). Deleted markers need no
-        download, their targets are removed in replace(). Files that
-        cannot be downloaded or fail the size + sha1 check stay in
-        self.error with an empty tmp, this is an unsolvable problem
-        per the draft of PackEncodeBase.
+        to self.pending for replace(). Records that already carry a
+        tmp (an EOL mismatch fixed in validate_files()) and deleted
+        markers need no download and are moved to pending directly.
+        Files that cannot be downloaded or fail the size + sha1 check
+        stay in self.error with an empty tmp, this is an unsolvable
+        problem per the draft of PackEncodeBase.
 
         Raises:
             PackDecodeError: If the server is missing
@@ -225,6 +240,11 @@ class ResetJob(JobBase):
             info = item.info
             if info.edit == 2:
                 # deleted marker, no download, its target is removed
+                pending.append(item)
+                continue
+            if item.tmp:
+                # the tmp was already written during validation, the
+                # EOL of the file was fixed, no download is needed
                 pending.append(item)
                 continue
             try:
@@ -262,7 +282,7 @@ class ResetJob(JobBase):
                 sha1 check
         """
         tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
-        if self._matches(info, self._read_current(tmp)):
+        if self._matches(info, self._read_current(tmp)).match:
             # a leftover tmp file passes the size + sha1 check, reuse it
             return tmp
         # data_start is an offset into the full pack file, range requests

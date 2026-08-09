@@ -211,6 +211,75 @@ class TestValidateFiles:
             ResetJob(WEBSITE_SERVER).validate_files()
 
 
+class TestValidateEolFix:
+    """validate_files(): a fixable EOL mismatch is written to a tmp file."""
+
+    def test_eol_fix_writes_tmp(self, app_folder, fs):
+        """The converted content is written to a tmp, the record has it set."""
+        setup_app(fs)
+        # backend/config.py is eol=0 (LF), the local file is CRLF
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        with open(target, 'wb') as f:
+            f.write(WEBSITE_FILES['backend/config.py'][0].replace(b'\n', b'\r\n'))
+        job = ResetJob(WEBSITE_SERVER)
+        assert not job.validate_files()
+        assert len(job.error) == 1
+        item = job.error[0]
+        assert item.info.path == 'backend/config.py'
+        assert item.tmp
+        assert item.current_mode == 0o666
+        # the tmp carries the converted content, it passes the check
+        assert file_read_bytes(item.tmp) == WEBSITE_FILES['backend/config.py'][0]
+        assert job._matches(item.info, job._read_current(item.tmp)).match
+
+    def test_eol_fix_no_download(self, app_folder, fs):
+        """download() moves a validation-fixed tmp to pending directly."""
+        setup_app(fs)
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        with open(target, 'wb') as f:
+            f.write(WEBSITE_FILES['backend/config.py'][0].replace(b'\n', b'\r\n'))
+        job = ResetJob(WEBSITE_SERVER)
+        job.validate_index()
+        job.validate_files()
+        job.download()
+        assert job.error == []
+        assert len(job.pending) == 1
+        item = job.pending[0]
+        assert item.info.path == 'backend/config.py'
+        assert file_read_bytes(item.tmp) == WEBSITE_FILES['backend/config.py'][0]
+
+    def test_run_eol_fix_without_download(self, app_folder, fs, monkeypatch):
+        """run() repairs an EOL mismatch locally, no download is needed."""
+        setup_app(fs)
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        with open(target, 'wb') as f:
+            f.write(WEBSITE_FILES['backend/config.py'][0].replace(b'\n', b'\r\n'))
+
+        def _fail(self, *a, **k):
+            raise AssertionError('no download expected for an EOL mismatch')
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_content', _fail)
+        job = ResetJob(WEBSITE_SERVER)
+        assert job.run()
+        assert job.error == []
+        assert file_read_bytes(target) == WEBSITE_FILES['backend/config.py'][0]
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_run_eol_fix_755_record(self, app_folder, fs, monkeypatch):
+        """An EOL-fixed 755 file keeps the execute bits after replace()."""
+        setup_app(fs)
+        target = env.PROJECT_ROOT / 'scripts/deploy.sh'
+        # deploy.sh is eol=0 (LF) mode=755, the local file is CRLF
+        with open(target, 'wb') as f:
+            f.write(WEBSITE_FILES['scripts/deploy.sh'][0].replace(b'\n', b'\r\n'))
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_content', lambda *a, **k: b'bad data')
+        job = ResetJob(WEBSITE_SERVER)
+        assert job.run()
+        assert file_read_bytes(target) == WEBSITE_FILES['scripts/deploy.sh'][0]
+        if os.name != 'nt':
+            # pyfakefs does not apply os.chmod on Windows
+            assert os.stat(target).st_mode & 0o111 == 0o111
+
+
 class TestDownloadIndex:
     """download_index(): download the index pack from the server."""
 

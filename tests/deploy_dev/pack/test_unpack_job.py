@@ -7,13 +7,14 @@ written: the app_folder fixture points env.PROJECT_ROOT at the fake
 filesystem.
 """
 import os
+from hashlib import sha1
 
 import pytest
 from conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job import DeployJob
-from alasio.deploy.pack.job_base import CurrentFile
+from alasio.deploy.pack.job_base import CurrentFile, MatchResult
 from alasio.deploy.pack.job_unpack import PendingFile, UnpackJob
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext import env
@@ -186,6 +187,110 @@ class TestCurrentRead:
         assert not job._matches(info, current)
 
 
+class TestMatchResult:
+    """_matches() returns MatchResult: match and fixable match_data."""
+
+    @staticmethod
+    def _match(path, content):
+        """_matches() of a record against an existing file content."""
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        info = PackDecodeBase(WEBSITE_FULL_PACK).fileinfo[path]
+        current = CurrentFile(exist=True, data=content, mode=0o100644)
+        return job._matches(info, current)
+
+    def test_exact_match(self, app_folder):
+        """A file with the record EOL matches, match_data is empty."""
+        # backend/config.py is eol=0 (LF)
+        result = self._match('backend/config.py', WEBSITE_FILES['backend/config.py'][0])
+        assert isinstance(result, MatchResult)
+        assert result.match
+        assert result.match_data == b''
+
+    def test_crlf_record_crlf_file(self, app_folder):
+        """A clean CRLF file of a CRLF record matches as-is."""
+        result = self._match(
+            'backend/requirements.txt', WEBSITE_FILES['backend/requirements.txt'][0])
+        assert result.match
+        assert result.match_data == b''
+
+    def test_eol_mismatch_lf_vs_crlf(self, app_folder):
+        """A LF file of a CRLF record matches after converting to CRLF."""
+        content = WEBSITE_FILES['backend/requirements.txt'][0].replace(b'\r\n', b'\n')
+        result = self._match('backend/requirements.txt', content)
+        assert not result.match
+        assert result.match_data == WEBSITE_FILES['backend/requirements.txt'][0]
+
+    def test_eol_mismatch_crlf_vs_lf(self, app_folder):
+        """A CRLF file of a LF record matches after converting to LF."""
+        content = WEBSITE_FILES['backend/config.py'][0].replace(b'\n', b'\r\n')
+        result = self._match('backend/config.py', content)
+        assert not result.match
+        assert result.match_data == WEBSITE_FILES['backend/config.py'][0]
+
+    def test_eol_mismatch_mixed_vs_crlf(self, app_folder):
+        """A mixed LF/CRLF file of a CRLF record matches after converting."""
+        content = WEBSITE_FILES['backend/requirements.txt'][0].replace(b'\r\n', b'\n', 1)
+        result = self._match('backend/requirements.txt', content)
+        assert not result.match
+        assert result.match_data == WEBSITE_FILES['backend/requirements.txt'][0]
+
+    def test_eol_mismatch_mixed_vs_lf(self, app_folder):
+        """A mixed LF/CRLF file of a LF record matches after converting."""
+        content = WEBSITE_FILES['backend/config.py'][0].replace(b'\n', b'\r\n', 1)
+        result = self._match('backend/config.py', content)
+        assert not result.match
+        assert result.match_data == WEBSITE_FILES['backend/config.py'][0]
+
+    def test_lone_cr_not_fixable(self, app_folder):
+        """A lone CR cannot be converted cleanly, no match_data."""
+        content = b'HOST = "0.0.0.0"\rPORT = 8000\nDEBUG = False\n'
+        result = self._match('backend/config.py', content)
+        assert not result.match
+        assert result.match_data == b''
+
+    def test_wrong_content_not_fixable(self, app_folder):
+        """Wrong content with an EOL mismatch is not fixable."""
+        result = self._match('backend/config.py', b'wrong\r\ncontent\r\n')
+        assert not result.match
+        assert result.match_data == b''
+
+    def test_binary_compared_as_is(self, app_folder):
+        """Binary (eol=2) is compared as-is, never converted."""
+        content = WEBSITE_FILES['backend/static/logo.png'][0]
+        result = self._match('backend/static/logo.png', content)
+        assert result.match
+        assert result.match_data == b''
+
+    def test_eol0_file_equals_blob_with_cr(self, app_folder):
+        """A file that is exactly the record blob matches, even with CR."""
+        # a pathological LF record whose blob contains a lone CR
+        content = b'HOST = "0.0.0.0"\rPORT = 8000\n'
+        info = IdxInfo(path='x', size=len(content), sha1=sha1(content).hexdigest(), eol=0)
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        current = CurrentFile(exist=True, data=content, mode=0o100644)
+        result = job._matches(info, current)
+        assert result.match
+        assert result.match_data == b''
+
+    def test_missing_file(self, app_folder):
+        """A missing file never matches and has no match_data."""
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        info = PackDecodeBase(WEBSITE_FULL_PACK).fileinfo['backend/config.py']
+        result = job._matches(info, CurrentFile(exist=False, data=b'', mode=0))
+        assert not result.match
+        assert result.match_data == b''
+
+    def test_truthy_is_match_flag(self, app_folder):
+        """A result can be used as the old boolean return of _matches()."""
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        info = PackDecodeBase(WEBSITE_FULL_PACK).fileinfo['backend/config.py']
+        match = CurrentFile(exist=True, data=WEBSITE_FILES['backend/config.py'][0],
+                            mode=0o100644)
+        mismatch = CurrentFile(exist=True, data=b'wrong', mode=0o100644)
+        assert bool(job._matches(info, match))
+        assert not bool(job._matches(info, mismatch))
+
+
 class TestCallerFlow:
     """The exact caller usage of UnpackJob."""
 
@@ -277,6 +382,25 @@ class TestUnpackSkip:
         run_job()
         # replaced with the pure LF content of the record
         assert file_read_bytes(target) == content
+
+    def test_eol_mismatch_fixed_without_decompress(self, app_folder, monkeypatch):
+        """A fixable EOL mismatch is converted, catfile is not called."""
+        # backend/config.py is eol=0 (LF), the local file is CRLF
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        os.makedirs(target.uppath(), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(WEBSITE_FILES['backend/config.py'][0].replace(b'\n', b'\r\n'))
+        calls = []
+        original = PackDecodeBase.catfile
+
+        def _counting(self, info):
+            calls.append(info.path)
+            return original(self, info)
+        monkeypatch.setattr(PackDecodeBase, 'catfile', _counting)
+        run_job()
+        # the EOL conversion must not decompress the record
+        assert 'backend/config.py' not in calls
+        assert file_read_bytes(target) == WEBSITE_FILES['backend/config.py'][0]
 
     def test_overwrite_invalid_file(self, app_folder):
         """A file with wrong content is overwritten by the pack data."""
