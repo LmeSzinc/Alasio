@@ -58,7 +58,9 @@
   }
 </script>
 
-<Card.Root class={cn("group/card neushadow relative mx-auto gap-0 border-none", flashing && "animate-flash-primary", className)}>
+<Card.Root
+  class={cn("group/card neushadow relative mx-auto gap-0 border-none", flashing && "animate-flash-primary", className)}
+>
   <!-- Group name and help -->
   <Card.Header class="flex flex-col gap-y-1.5">
     <!-- Group name -->
@@ -69,6 +71,12 @@
     </div>
     {#if Object.keys(SchedulerRest).length > 0 || InfoHelp}
       <div class="flex w-full flex-col gap-y-1">
+        <!-- Group help -->
+        {#if InfoHelp}
+          <Card.Description>
+            <I18nText text={InfoHelp} />
+          </Card.Description>
+        {/if}
         <!-- Other scheduler args -->
         {#if Object.keys(SchedulerRest).length > 0}
           <div class="flex w-full flex-col gap-y-1">
@@ -76,12 +84,6 @@
               <Arg bind:data={cardData.Scheduler[argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
             {/each}
           </div>
-        {/if}
-        <!-- Group help -->
-        {#if InfoHelp}
-          <Card.Description>
-            <I18nText text={InfoHelp} />
-          </Card.Description>
         {/if}
       </div>
     {/if}
