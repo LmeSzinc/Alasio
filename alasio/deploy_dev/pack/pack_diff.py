@@ -1,21 +1,22 @@
 """
 Compare the fileinfo of two versions, produce the diff records.
 
-The comparison follows a git diff-like flow:
+The diff records are built step by step:
 
-1. files in both versions with the same sha1 / mode / eol are
-   unchanged and left out of the diff
-2. files in both versions with different content become M (modified)
-   records, their data is a zstd patch-from of the old blob
-3. files only in the new version are matched against files only in the
-   old version to detect renames: pairs with the same blob sha1 are
-   pure renames (R), other pairs are scored by zstd dictionary
-   compression (see PackDiff.similarity), pairs above min_similarity
-   become R / RM records, unmatched new files become A (added),
-   unmatched old files become D (deleted)
-4. A records whose content already exists in an unchanged old file or
-   an earlier new file become C (copied) records, referencing the
-   source instead of carrying data
+1. rename: files only in the old version are matched against files
+   only in the new version, the matched pairs become R (renamed)
+   records when the content is identical, or RM (renamed + modified)
+   records with a zstd patch otherwise; an RM whose patch is not
+   worthwhile becomes A + D instead
+2. deleted: the remaining files only in the old version become D
+   (deleted) records
+3. copied: the remaining files only in the new version become A
+   (added) records, converted to C (copied) records when their
+   content already exists in an unchanged old file or an earlier
+   record
+4. edit: files in both versions with different content become M
+   (modified) records, their data is a zstd patch-from of the old
+   blob, converted to C records when their new content already exists
 
 All content is compared and patched in the git blob form (LF
 normalized, no checkout line ending): the zstd patch of an M / RM
@@ -27,13 +28,27 @@ The blob content is read through the decoder's catdata and verified
 against the record, so the diff logic works on any decoder-like object:
 PackDecodeBase, or MockDecodeBase in tests.
 """
-from hashlib import sha1
-
 from alasio.deploy.pack.decode_base import PackDecodeBase
-from alasio.deploy.pack.pack_model import IdxInfo
+from alasio.deploy.pack.pack_model import FileInfo
+from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.ext.cache import cached_property
-from alasio.ext.compress.algo_lzma import lzma_compress
 from alasio.ext.compress.algo_zstd import zstd_compress
+
+
+class UpdateInfo(FileInfo):
+    """
+    A record of a file change in the update pack.
+
+    The diff records are built in memory, so unlike IdxInfo the data
+    is always present (bytes, not an unset marker) and there is no
+    data_start offset. source_path is set by the diff logic: the old
+    file of the same path for M with patch data, the rename source
+    for R / RM, the copied file for C, empty for A / D and for M
+    records with plain data.
+    """
+    # path of reffile
+    # real value will be calculated from `source_lookback` in decoding
+    source_path: str = ''
 
 
 class PackDiff:
@@ -42,7 +57,7 @@ class PackDiff:
 
     The input is the decoder of the old version and the decoder of the
     new version (PackDecodeBase or MockDecodeBase, providing idx_info
-    and catdata), the output is diff_info ({path: IdxInfo}) and
+    and catdata), the output is diff_info ({path: UpdateInfo}) and
     ref_paths (the old files referenced by the diff).
     """
 
@@ -94,9 +109,22 @@ class PackDiff:
         self._real_new = {info.path: info for info in new.idx_info if info.edit != 2}
 
     @cached_property
-    def diff_info(self) -> "dict[str, IdxInfo]":
+    def diff_info(self) -> "dict[str, UpdateInfo]":
         """
         File changes from the old version to the new version.
+
+        The records are built step by step: rename (R / RM), deleted
+        (D), copied (A / C), edit (M / C). The rename records are
+        built first, so the deleted / added sets below only contain
+        pure deletes / adds. The copy detection runs while the added
+        and modified records are built, so a file modified to match an
+        existing file is recognized as a copy instead of carrying
+        patch data.
+
+        The rename records come first in the rename matching order,
+        the other records follow the pack order of the old / new
+        idx_info, so a copied record always finds its source in an
+        earlier record and the update pack needs no extra sort.
 
         Keyed by the new path, deleted records are keyed by the old
         path. source_path points to the old file that the record
@@ -105,66 +133,102 @@ class PackDiff:
         is empty for A / D and for M records with plain data.
 
         Returns:
-            dict[str, IdxInfo]: {path: IdxInfo}
+            dict[str, UpdateInfo]: {path: UpdateInfo}
 
         Raises:
             PackDecodeError: If a file fails to load from a decoder
         """
         real_old = self._real_old
         real_new = self._real_new
+        # files that stay identical in both versions
+        unchanged = {
+            path for path in real_old.keys() & real_new.keys()
+            if self._is_unchanged(real_old[path], real_new[path])
+        }
+        # {sha1: (source path, restored eol, restored mode)} for copy detection
+        source_map = {}
+        for info in self.old.idx_info:
+            if (
+                    info.path in unchanged
+                    and info.edit != 2
+                    and info.sha1
+                    and info.eol == 0
+                    and info.mode == 0
+            ):
+                # the restored meta of a refinfo copy is eol=0 mode=0
+                source_map.setdefault(info.sha1, (info.path, 0, 0))
 
         out = {}
-        # modified in place
-        for path in real_old.keys() & real_new.keys():
-            old_info = real_old[path]
-            new_info = real_new[path]
-            if self._is_unchanged(old_info, new_info):
-                continue
-            info = IdxInfo(path=path, edit=1, eol=new_info.eol, mode=new_info.mode)
-            if self._load_modified(info, old_info, new_info):
-                info.source_path = path
-            else:
-                # plain data wins, the old file is not referenced
-                info.source_path = ''
-            out[path] = info
 
-        # rename detection between files only in the old version and files only in the new version
+        # 1. rename: rename records are built first, the deleted / added
+        # sets below only contain the remaining pure deletes / adds
         renames = self._find_renames(real_old, real_new)
         renamed_old = set(renames.values())
-
-        # deleted
-        for path in real_old.keys() - real_new.keys() - renamed_old:
-            out[path] = self._new_deleted(path)
-
-        # renamed and added
         for path, old_path in renames.items():
             old_info = real_old[old_path]
             new_info = real_new[path]
             if old_info.sha1 == new_info.sha1 and old_info.eol == new_info.eol:
                 # pure rename, the content is identical, no data needed
-                info = IdxInfo(path=path, edit=3, eol=new_info.eol, mode=new_info.mode)
-                info.source_path = old_path
-                info.size = new_info.size
-                info.sha1 = new_info.sha1
-                info.data = b''
-                out[path] = info
+                record = UpdateInfo(path=path, edit=3, eol=new_info.eol, mode=new_info.mode)
+                record.source_path = old_path
+                record.size = new_info.size
+                record.sha1 = new_info.sha1
+                record.data = b''
+                out[path] = record
             else:
                 # rename and modify, data is a zstd patch from the old file
-                info = IdxInfo(path=path, edit=3, eol=new_info.eol, mode=new_info.mode)
-                info.source_path = old_path
-                if not self._load_modified(info, old_info, new_info):
+                record = UpdateInfo(path=path, edit=3, eol=new_info.eol, mode=new_info.mode)
+                record.source_path = old_path
+                if not self._load_modified(record, old_info, new_info):
                     # plain compression beats the patch, add + delete instead
-                    info.edit = 0
-                    info.source_path = ''
+                    record.edit = 0
+                    record.source_path = ''
                     out[old_path] = self._new_deleted(old_path)
-                out[path] = info
-        for path in real_new.keys() - real_old.keys() - renames.keys():
-            info = IdxInfo(path=path, edit=0, eol=real_new[path].eol, mode=real_new[path].mode)
-            self._load_added(info, real_new[path])
-            out[path] = info
+                    if record.sha1:
+                        # the downgraded record is an A record, it joins
+                        # the copy detection like other added records
+                        eol, mode = self._try_copy(record, source_map)
+                        source_map[record.sha1] = (path, eol, mode)
+                out[path] = record
 
-        # content dedup: A records whose content already exists are copied
-        self._populate_edit_copied(out, real_old, real_new)
+        # 2. deleted: files only in the old version become D records
+        deleted = real_old.keys() - real_new.keys() - renamed_old
+        for info in self.old.idx_info:
+            if info.path in deleted:
+                out[info.path] = self._new_deleted(info.path)
+
+        # 3. copied: added records, converted to copies when the content already exists
+        added = real_new.keys() - real_old.keys() - renames.keys()
+        for info in self.new.idx_info:
+            path = info.path
+            if path not in added:
+                continue
+            new_info = real_new[path]
+            record = UpdateInfo(path=path, edit=0, eol=new_info.eol, mode=new_info.mode)
+            self._load_added(record, new_info)
+            if record.sha1:
+                eol, mode = self._try_copy(record, source_map)
+                source_map[record.sha1] = (path, eol, mode)
+            out[path] = record
+
+        # 4. edit: modified records, converted to copies when the new content already exists
+        modified = (real_old.keys() & real_new.keys()) - unchanged
+        for info in self.old.idx_info:
+            path = info.path
+            if path not in modified:
+                continue
+            old_info = real_old[path]
+            new_info = real_new[path]
+            record = UpdateInfo(path=path, edit=1, eol=new_info.eol, mode=new_info.mode)
+            if self._load_modified(record, old_info, new_info):
+                record.source_path = path
+            else:
+                # plain data wins, the old file is not referenced
+                record.source_path = ''
+            if record.sha1:
+                eol, mode = self._try_copy(record, source_map)
+                source_map[record.sha1] = (path, eol, mode)
+            out[path] = record
         return out
 
     @cached_property
@@ -225,7 +289,7 @@ class PackDiff:
         case of M and RM records.
 
         Args:
-            info (IdxInfo): Record to load, edit must be M or RM
+            info (UpdateInfo): Record to load, edit must be M or RM
             old_info (IdxInfo): Old record, the patch source
             new_info (IdxInfo): New record
 
@@ -235,18 +299,19 @@ class PackDiff:
         """
         new_blob = self._read_blob(self._new_blob_cache, self.new, new_info)
         old_blob = self._read_blob(self._old_blob_cache, self.old, old_info) if old_info.sha1 else b''
-        return self._load_data_best(info, new_blob, source=old_blob or None)
+        algo_name = PackFull._load_data(info, new_blob, source=old_blob or None, level=self.zstd_level)
+        return algo_name == 'zstd_patch'
 
     def _load_added(self, info, new_info):
         """
         Load the data of an added file, the best of raw / lzma / zstd.
 
         Args:
-            info (IdxInfo): Record to load, edit must be A
+            info (UpdateInfo): Record to load, edit must be A
             new_info (IdxInfo): New record
         """
         new_blob = self._read_blob(self._new_blob_cache, self.new, new_info)
-        self._load_data_best(info, new_blob, source=None)
+        PackFull._load_data(info, new_blob, source=None, level=self.zstd_level)
 
     def _read_blob(self, cache, decoder, info):
         """
@@ -275,67 +340,6 @@ class PackDiff:
             blob = bytes(data)
             cache[info.path] = blob
         return blob
-
-    def _load_data_best(self, info, data, source):
-        """
-        Store the best of raw / lzma / zstd patch-from / plain zstd data.
-
-        Mirrors PackFull._load_data, additionally reports whether the
-        zstd patch-from data won so the caller knows whether the old
-        file must be referenced. Empty data is stored raw.
-
-        Args:
-            info (IdxInfo): Record to update
-            data (bytes): File content to store, the new blob
-            source (bytes, optional): Old blob as the zstd patch-from
-                dictionary
-
-        Returns:
-            bool: True if the zstd patch-from data won
-        """
-        best_length = len(data)
-        # empty file, treat as raw
-        if best_length == 0:
-            info.algo = 0
-            info.data = data
-            info.data_size = 0
-            info.size = 0
-            info.sha1 = ''
-            return False
-        best_data = data
-        algo = 0
-        patch_used = False
-
-        # try lzma compression
-        compressed_data = lzma_compress(data)
-        if len(compressed_data) < best_length:
-            best_length = len(compressed_data)
-            best_data = compressed_data
-            algo = 1
-
-        # try zstd patch-from
-        if source is not None:
-            compressed_data = zstd_compress(data, source=source, level=self.zstd_level)
-            if len(compressed_data) < best_length:
-                best_length = len(compressed_data)
-                best_data = compressed_data
-                algo = 2
-                patch_used = True
-
-        # try plain zstd compression
-        compressed_data = zstd_compress(data, level=self.zstd_level)
-        if len(compressed_data) < best_length:
-            best_length = len(compressed_data)
-            best_data = compressed_data
-            algo = 2
-
-        # set
-        info.algo = algo
-        info.data = best_data
-        info.data_size = best_length
-        info.size = len(data)
-        info.sha1 = sha1(data).hexdigest()
-        return patch_used
 
     def _find_renames(self, real_old, real_new):
         """
@@ -415,78 +419,50 @@ class PackDiff:
         patch = zstd_compress(new_content, source=old_content, level=level)
         return 1 - len(patch) / len(new_content)
 
-    def _populate_edit_copied(self, diff_info, real_old, real_new):
+    def _try_copy(self, info, source_map):
         """
-        Convert A records to C (copied) records when the content already exists.
+        Convert a record to a copied record when its content already exists.
 
-        A new file whose content matches an unchanged old file (kept in
-        the new version) or an earlier new file references the source
-        instead of carrying data.
+        A record whose content matches an unchanged old file (kept in
+        the new version) or an earlier record references the source
+        instead of carrying data: a new file that duplicates an
+        existing file, a modified file whose new content matches an
+        existing file, or a modified file whose new content matches
+        another modified file.
 
-        The source is limited to LF files (eol=0) with mode 0: the
-        decoder restores the meta of a copied record from its source
-        record, and a refinfo entry only carries size and sha1, so a
-        copy from a CRLF or 755 old file cannot be represented
-        correctly. Records in the new fileinfo keep their own meta, so
-        copies between new files only require equal eol and mode.
+        The converted record keeps its own info (size / eol / mode /
+        algo / data): the encoder ignores the info of copied records
+        and the decoder restores it from the source record. The source
+        is limited to LF files (eol=0) with mode 0: the decoder
+        restores the meta of a copied record from its source record,
+        and a refinfo entry only carries size and sha1, so a copy from
+        a CRLF or 755 old file cannot be represented correctly.
+        Records in the new fileinfo keep their own meta, so copies
+        between new files only require equal eol and mode.
 
         Args:
-            diff_info (dict[str, IdxInfo]): Diff records to update
-            real_old (dict[str, IdxInfo]): Old files that exist
-            real_new (dict[str, IdxInfo]): New files that exist
-        """
-        # unchanged old files, candidates for copy sources
-        unchanged = set(real_old) & set(real_new) - set(diff_info)
-        # {sha1: (source path, restored eol, restored mode)}
-        source_map = {}
-        for info in self.old.idx_info:
-            if (
-                    info.path in unchanged
-                    and info.edit != 2
-                    and info.sha1
-                    and info.eol == 0
-                    and info.mode == 0
-            ):
-                # the restored meta of a refinfo copy is eol=0 mode=0
-                source_map.setdefault(info.sha1, (info.path, 0, 0))
-
-        records = sorted(diff_info.values(), key=self._sort_key)
-        for record in records:
-            eol = record.eol
-            mode = record.mode
-            if record.edit == 0 and record.sha1:
-                source = source_map.get(record.sha1)
-                if source is not None:
-                    source_path, source_eol, source_mode = source
-                    if eol == source_eol and mode == source_mode:
-                        # copied, the data is not stored in the pack
-                        record.source_path = source_path
-                        record.size = 0
-                        record.eol = 0
-                        record.mode = 0
-                        record.algo = 0
-                        record.data = b''
-                        record.data_size = 0
-                        # the decoder restores the meta from the source
-                        eol = source_eol
-                        mode = source_mode
-            # the record can be a copy source for later files
-            if record.edit != 2 and record.sha1:
-                source_map[record.sha1] = (record.path, eol, mode)
-
-    @staticmethod
-    def _sort_key(info):
-        """
-        Sort records like PackFull.fileinfo: by parent path, then depth, then path.
-
-        Args:
-            info (IdxInfo): Record to sort
+            info (UpdateInfo): Record to convert
+            source_map (dict[str, tuple]): {sha1: (source path,
+                restored eol, restored mode)}
 
         Returns:
-            tuple: Sort key
+            tuple[int, int]: (eol, mode), the values the decoder
+                restores for the record, the source values when the
+                record is converted to a copy
         """
-        path = tuple(info.path.split('/'))
-        return path[:-1], len(path), path
+        if not info.sha1:
+            # empty files are not considered as copies
+            return info.eol, info.mode
+        source = source_map.get(info.sha1)
+        if source is None:
+            return info.eol, info.mode
+        source_path, source_eol, source_mode = source
+        if info.eol != source_eol or info.mode != source_mode:
+            return info.eol, info.mode
+        # copied, the data is not stored in the pack
+        info.edit = 0
+        info.source_path = source_path
+        return source_eol, source_mode
 
     @staticmethod
     def _new_deleted(path):
@@ -497,8 +473,8 @@ class PackDiff:
             path (str):
 
         Returns:
-            IdxInfo:
+            UpdateInfo:
         """
-        info = IdxInfo(path=path, edit=2)
+        info = UpdateInfo(path=path, edit=2)
         info.data = b''
         return info

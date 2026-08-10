@@ -252,7 +252,8 @@ class TestPackDiffCopied:
         info = diff.diff_info['copy.txt']
         assert info.edit == 0
         assert info.source_path == 'keep.txt'
-        assert info.data_size == 0
+        # the copied record keeps its own info, the encoder ignores it
+        assert info.data_size == len(b'copy me\n')
         assert 'keep.txt' in diff.ref_paths
 
     def test_copy_chain_new_files(self):
@@ -286,6 +287,69 @@ class TestPackDiffCopied:
             MockDecodeBase.from_data(files, modes=modes),
         )
         assert diff.diff_info['copy.sh'].source_path == ''
+
+    def test_modified_to_existing_is_copied(self):
+        """A file modified to match an unchanged old file becomes a C record."""
+        diff = make_diff(
+            {'a.txt': b'content x\n' * 5, 'keep.txt': b'content y\n' * 5},
+            {'a.txt': b'content y\n' * 5, 'keep.txt': b'content y\n' * 5},
+        )
+        info = diff.diff_info['a.txt']
+        assert info.edit == 0
+        assert info.source_path == 'keep.txt'
+        assert 'keep.txt' in diff.ref_paths
+
+    def test_modified_to_added_is_copied(self):
+        """A file modified to match a new file is copied from it."""
+        diff = make_diff(
+            {'a.txt': b'old content\n' * 10},
+            {'a.txt': b'new content\n' * 10, 'copy.txt': b'new content\n' * 10},
+        )
+        diff_info = diff.diff_info
+        # copy.txt is added in the copied step, it keeps the data
+        assert diff_info['copy.txt'].edit == 0
+        assert diff_info['copy.txt'].source_path == ''
+        # a.txt is modified to the same content, it is copied from copy.txt
+        assert diff_info['a.txt'].edit == 0
+        assert diff_info['a.txt'].source_path == 'copy.txt'
+
+    def test_modified_files_dedup(self):
+        """Two files modified to the same content: the later one is copied from the earlier."""
+        diff = make_diff(
+            {'aa.txt': b'old aa\n' * 10, 'bb.txt': b'old bb\n' * 10},
+            {'aa.txt': b'same new\n' * 10, 'bb.txt': b'same new\n' * 10},
+        )
+        diff_info = diff.diff_info
+        # aa.txt sorts first, it keeps the M record, bb.txt copies from it
+        assert diff_info['aa.txt'].edit == 1
+        assert diff_info['bb.txt'].edit == 0
+        assert diff_info['bb.txt'].source_path == 'aa.txt'
+
+    def test_copy_chain_nearest(self):
+        """Identical records reference the nearest source, the first is the unchanged old file."""
+        content = b'shared content\n'
+        diff = make_diff(
+            {'orig.txt': content},
+            {'orig.txt': content, 'a1.txt': content, 'a2.txt': content, 'a3.txt': content},
+        )
+        diff_info = diff.diff_info
+        assert diff_info['a1.txt'].source_path == 'orig.txt'
+        assert diff_info['a2.txt'].source_path == 'a1.txt'
+        assert diff_info['a3.txt'].source_path == 'a2.txt'
+        assert 'orig.txt' in diff.ref_paths
+
+    def test_copy_keeps_info(self):
+        """A copied record keeps its own info, the encoder ignores it."""
+        content = b'shared content\n' * 50
+        diff = make_diff({}, {'first.txt': content, 'second.txt': content})
+        first = diff.diff_info['first.txt']
+        second = diff.diff_info['second.txt']
+        assert second.edit == 0
+        assert second.source_path == 'first.txt'
+        # the copied record keeps its own size and data
+        assert second.size == len(content)
+        assert second.data_size > 0
+        assert second.sha1 == first.sha1
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -330,10 +394,13 @@ class TestPackDiffRefPaths:
         assert diff.diff_info['second.txt'].source_path == 'first.txt'
         assert diff.ref_paths == set()
 
-    def test_copy_from_modified_not_referenced(self):
-        """A copy source that is the new content of a modified file is not a ref path."""
+    def test_copy_modified_releases_old_source(self):
+        """A modified file converted to a copy releases its old file reference."""
         diff = make_diff({'a.txt': b'x'}, {'a.txt': b'y', 'b.txt': b'y'})
-        assert diff.diff_info['b.txt'].source_path == 'a.txt'
+        # a.txt is modified to the content of the new b.txt, it is copied from it
+        assert diff.diff_info['a.txt'].edit == 0
+        assert diff.diff_info['a.txt'].source_path == 'b.txt'
+        # the old a.txt is not referenced by any record
         assert diff.ref_paths == set()
 
 

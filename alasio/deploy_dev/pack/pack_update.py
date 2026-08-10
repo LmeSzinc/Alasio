@@ -21,9 +21,9 @@ refinfo order follows the old pack decode order (old.idx_info), a
 convention shared with the client's local old index.
 """
 
-from alasio.deploy.pack.pack_model import FileInfo, IdxInfo, RefInfo
+from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
-from alasio.deploy_dev.pack.pack_diff import PackDiff
+from alasio.deploy_dev.pack.pack_diff import PackDiff, UpdateInfo
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_zstd import zstd_compress
 
@@ -91,14 +91,14 @@ class PackUpdate(PackEncodeBase):
     # ════════════════════════════════════════════════════════════════════════
 
     @cached_property
-    def diff_info(self) -> "dict[str, IdxInfo]":
+    def diff_info(self) -> "dict[str, UpdateInfo]":
         """
         File changes from the old version to the new version.
 
         See PackDiff.diff_info for the record semantics.
 
         Returns:
-            dict[str, IdxInfo]: {path: IdxInfo}
+            dict[str, UpdateInfo]: {path: UpdateInfo}
         """
         return self._diff.diff_info
 
@@ -135,11 +135,19 @@ class PackUpdate(PackEncodeBase):
     @cached_property
     def fileinfo(self) -> "dict[str, FileInfo]":
         """
-        New file records of the update pack, sorted like PackFull.
+        New file records of the update pack.
+
+        The records keep the order of diff_info, which is built step by
+        step (rename / deleted / copied / edit), so no extra sort is
+        needed.
 
         source_lookback is the distance to the referenced record in the
-        merged refinfo + fileinfo sequence, computed from source_path.
-        C records have their meta reset like the full pack, the decoder
+        merged refinfo + fileinfo sequence, computed from source_path:
+        a copied record resolves its source in the fileinfo first (the
+        source can be an earlier new file), then in the refinfo (the
+        source is an unchanged old file); modified / renamed records
+        always resolve their source in the refinfo. Copied records
+        keep their own info, the encoder ignores it and the decoder
         restores it from the source record.
 
         Returns:
@@ -152,23 +160,25 @@ class PackUpdate(PackEncodeBase):
         diff = self.diff_info
         ref = self.refinfo
         ref_index = {path: i for i, path in enumerate(ref)}
-        records = sorted(diff.values(), key=PackDiff._sort_key)
         file_index = {}
         out = {}
-        for i, info in enumerate(records):
+        for i, info in enumerate(diff.values()):
             index = len(ref) + i
             if info.edit != 2:
                 if info.source_path:
-                    source_index = ref_index.get(info.source_path)
+                    if info.edit == 0:
+                        # copied: the source is an earlier new file, or an old file in refinfo
+                        source_index = file_index.get(info.source_path)
+                        if source_index is None:
+                            source_index = ref_index.get(info.source_path)
+                    else:
+                        # modified / renamed: the source is an old file in refinfo
+                        source_index = ref_index.get(info.source_path)
                     if source_index is None:
-                        # the source is an earlier new file
-                        try:
-                            source_index = file_index[info.source_path]
-                        except KeyError:
-                            raise ValueError(
-                                f'Failed to build fileinfo: source of {info.path} not found: '
-                                f'{info.source_path}'
-                            ) from None
+                        raise ValueError(
+                            f'Failed to build fileinfo: source of {info.path} not found: '
+                            f'{info.source_path}'
+                        )
                     info.source_lookback = index - source_index
                     if info.source_lookback <= 0:
                         raise ValueError(

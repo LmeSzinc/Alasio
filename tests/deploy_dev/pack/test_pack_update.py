@@ -8,6 +8,7 @@ compared to the new working tree (round-trip). The apply flow follows
 the client design: all sources are read from the original working tree
 in the unpack phase, then all changes are written in the replace phase.
 """
+import copy
 from hashlib import sha1
 
 import pytest
@@ -483,7 +484,8 @@ class TestPackUpdateCopied:
         assert info.edit == 0
         assert info.source_path == 'keep.txt'
         assert info.source_lookback > 0
-        assert info.data_size == 0
+        # the copied record keeps its own info, the encoder ignores it
+        assert info.data_size == len(b'copy me\n')
         # the source is kept in refinfo
         assert updater.refinfo['keep.txt'].size == len(b'copy me\n')
         # the decoder restores the meta of the copied record
@@ -545,6 +547,53 @@ class TestPackUpdateCopied:
         assert updater.fileinfo['second.py'].source_lookback == 0
         assert updater.diff_info['third.py'].source_path == 'second.py'
         assert updater.fileinfo['third.py'].source_lookback == 1
+        assert_roundtrip(old, new)
+
+    def test_modified_to_existing_is_copied(self):
+        """A file modified to match an unchanged old file is copied, not patched."""
+        old = {'a.txt': b'content x\n' * 5, 'keep.txt': b'content y\n' * 5}
+        new = {'a.txt': b'content y\n' * 5, 'keep.txt': b'content y\n' * 5}
+        _, updater, _, _, update_decoder = build_update(old, new)
+        info = updater.diff_info['a.txt']
+        assert info.edit == 0
+        assert info.source_path == 'keep.txt'
+        assert updater.fileinfo['a.txt'].source_lookback > 0
+        assert 'keep.txt' in updater.refinfo
+        # the decoded record restores the meta from the source
+        decoded = update_decoder.fileinfo['a.txt']
+        assert decoded.size == len(b'content y\n' * 5)
+        assert decoded.sha1 == sha1(b'content y\n' * 5).hexdigest()
+        assert_roundtrip(old, new)
+
+    def test_modified_to_added_is_copied(self):
+        """A file modified to match a new file is copied from it."""
+        new_content = b'new content\n' * 10
+        old = {'a.txt': b'old content\n' * 10}
+        new = {'a.txt': new_content, 'copy.txt': new_content}
+        _, updater, _, _, update_decoder = build_update(old, new)
+        diff_info = updater.diff_info
+        # copy.txt is added in the copied step, it keeps the data
+        assert diff_info['copy.txt'].edit == 0
+        assert diff_info['copy.txt'].source_path == ''
+        # a.txt is modified to the same content, it is copied from copy.txt
+        assert diff_info['a.txt'].edit == 0
+        assert diff_info['a.txt'].source_path == 'copy.txt'
+        # the copy resolves to the A record (new content), not the refinfo entry
+        decoded = update_decoder.fileinfo['a.txt']
+        assert decoded.size == len(new_content)
+        assert decoded.sha1 == sha1(new_content).hexdigest()
+        assert decoded.source_path == 'copy.txt'
+        assert_roundtrip(old, new)
+
+    def test_modified_files_dedup(self):
+        """Two files modified to the same content: the later one is copied from the earlier."""
+        old = {'aa.txt': b'old aa\n' * 10, 'bb.txt': b'old bb\n' * 10}
+        new = {'aa.txt': b'same new\n' * 10, 'bb.txt': b'same new\n' * 10}
+        _, updater, *_ = build_update(old, new)
+        assert updater.diff_info['aa.txt'].edit == 1
+        assert updater.diff_info['bb.txt'].edit == 0
+        assert updater.diff_info['bb.txt'].source_path == 'aa.txt'
+        assert updater.fileinfo['bb.txt'].source_lookback == 1
         assert_roundtrip(old, new)
 
 
@@ -857,3 +906,59 @@ class TestPackUpdateIntegration:
         # the new full pack is built directly from the same files
         full = make_pack(new, commit='new')
         assert len(update) < len(full) * 0.8
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  input read-only
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestPackUpdateInputsReadOnly:
+    """PackUpdate reads the input idx_info records, it never modifies them."""
+
+    def test_input_idx_info_not_modified(self):
+        """The old / new idx_info records stay identical after the full pipeline."""
+        old = {
+            'keep.txt': b'keep content\n' * 10,
+            'mod.txt': b'version 1\n' * 100,
+            'small.txt': b'x',
+            'gone.txt': random_bytes(4096, 'gone'),
+            'move.txt': b'pure rename\n' * 10,
+            'rm.txt': b'def old():\n    return 1\n' * 100,
+            'copy_src.txt': b'shared copy\n' * 10,
+            'a.txt': b'old a\n' * 5,
+        }
+        new = {
+            'keep.txt': b'keep content\n' * 10,
+            'mod.txt': b'version 2\n' * 100,
+            'small.txt': b'y',
+            'moved.txt': b'pure rename\n' * 10,
+            'rm_moved.txt': b'def old():\n    return 2\n' * 100,
+            'copy_src.txt': b'shared copy\n' * 10,
+            'copy_dst.txt': b'shared copy\n' * 10,
+            'a.txt': b'new content\n' * 5,
+            'b.txt': b'new content\n' * 5,
+            'new.txt': b'brand new\n' * 5,
+        }
+        old_pack = make_pack(old, commit='old')
+        new_pack = make_pack(new, commit='new')
+        old_decoder = decode(old_pack)
+        new_decoder = decode(new_pack)
+        old_snapshot = copy.deepcopy(old_decoder.idx_info)
+        new_snapshot = copy.deepcopy(new_decoder.idx_info)
+
+        # run the full pipeline: diff, refinfo, fileinfo, index update, pack bytes
+        updater = PackUpdate(old_decoder, new_decoder)
+        _ = updater.diff_info
+        _ = updater.refinfo
+        _ = updater.fileinfo
+        _ = updater.index_update
+        update = b''.join(updater.iter_pack_data())
+        assert update
+        # every record type is exercised: A / C, M, D, R / RM
+        edits = {info.edit for info in updater.diff_info.values()}
+        assert edits == {0, 1, 2, 3}
+
+        # the input records are read-only
+        assert old_decoder.idx_info == old_snapshot
+        assert new_decoder.idx_info == new_snapshot

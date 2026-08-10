@@ -57,15 +57,22 @@ class PackFull(PackEncodeBase):
             return 0
 
     @staticmethod
-    def _load_data(file, data, source=None, zstd=True):
+    def _load_data(file, data, source=None, zstd=True, level=22):
         """
         Find the best compress algorithm to store data, and set fields on file_info
 
         Args:
             file (FileInfo): FileInfo object to update
             data (bytes): File content
-            source (bytes): Optional old file content for zstd patch-from
+            source (bytes | None): Optional old file content for zstd patch-from
             zstd (bool): Whether to try zstd compression
+            level (int): Zstd level for zstd compression. Defaults to 22.
+
+        Returns:
+            str: algo name of the stored data, 'raw' / 'lzma' / 'zstd' /
+                'zstd_patch'. 'zstd_patch' means the zstd patch-from
+                data won, the caller must keep the old file as the
+                decompression dictionary
         """
         best_length = len(data)
         # empty file, treat as raw
@@ -75,9 +82,10 @@ class PackFull(PackEncodeBase):
             file.data_size = 0
             file.size = 0
             file.sha1 = ''
-            return
+            return 'raw'
         best_data = data
         algo = 0
+        patch_used = False
 
         # try lzma compression
         compressed_data = lzma_compress(data)
@@ -93,18 +101,19 @@ class PackFull(PackEncodeBase):
         if zstd:
             # try zstd --patch-from
             if source is not None:
-                compressed_data = zstd_compress(data, source=source)
+                compressed_data = zstd_compress(data, source=source, level=level)
                 compressed_length = len(compressed_data)
                 if compressed_length < best_length:
                     best_length = compressed_length
                     best_data = compressed_data
                     algo = 2
+                    patch_used = True
                 else:
                     del compressed_length
                     del compressed_data
 
             # try plain zstd compression
-            compressed_data = zstd_compress(data, source=source)
+            compressed_data = zstd_compress(data, level=level)
             compressed_length = len(compressed_data)
             if compressed_length < best_length:
                 best_length = compressed_length
@@ -120,6 +129,9 @@ class PackFull(PackEncodeBase):
         file.data_size = best_length
         file.size = len(data)
         file.sha1 = sha1(data).hexdigest()
+        if patch_used:
+            return 'zstd_patch'
+        return ('raw', 'lzma', 'zstd')[algo]
 
     @staticmethod
     def _new_deleted(path):
