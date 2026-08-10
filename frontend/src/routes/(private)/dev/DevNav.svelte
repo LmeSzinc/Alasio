@@ -29,6 +29,7 @@
     { path: "/dev/debug/dashboard", name: "Dashboard" },
     { path: "/dev/debug/dashboardgroup", name: "Dashboard Group" },
     { path: "/dev/debug/log", name: "Log Viewer" },
+    { path: "/dev/debug/configdisplay", name: "Config Display" },
   ]);
 
   // --- Derived State ---
