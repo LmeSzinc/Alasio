@@ -196,7 +196,8 @@ class PackEncodeBase:
             list_size.append(file.size)
             # skip data_size for raw files
             # encode size diff as data_size
-            if file.algo != 0:
+            # R (renamed) records have no data, their diff is the full size
+            if file.algo != 0 or file.edit == 3:
                 if file.data_size > file.size:
                     raise ValueError(f'File data_size must be <= size: {file}')
                 list_data_size.append(file.size - file.data_size)

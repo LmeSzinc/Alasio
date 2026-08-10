@@ -302,7 +302,7 @@ class PackDecodeBase:
         offset += read
         _check_length('index data: size', len(sizes), len_refinfo + non_dc)
 
-        # data_size diff (non-D non-C fileinfo with algo != 0)
+        # data_size diff (non-D non-C fileinfo with algo != 0, or R records)
         diffs, read = _decode('index data: data_size', decode_vlenint, data[offset:])
         offset += read
 
@@ -362,7 +362,8 @@ class PackDecodeBase:
         for info, size in zip(non_dc, sizes[len_refinfo:]):
             info.size = size
             info.data_size = size
-        diff_infos = [info for info in non_dc if info.algo]
+        # R (renamed) records have no data, their diff is the full size
+        diff_infos = [info for info in non_dc if info.algo or info.edit == 3]
         _check_length('index data: data_size', len(diff_infos), len(diffs))
         for info, diff in zip(diff_infos, diffs):
             info.data_size -= diff

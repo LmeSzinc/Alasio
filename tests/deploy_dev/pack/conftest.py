@@ -11,10 +11,12 @@ The file list is designed to cover every record type produced by PackFull:
 - empty files (size = 0, sha1 = ''), deep paths, duplicate contents (C)
 """
 from hashlib import sha1
+from random import Random
 
 import httpx
 import pytest
 
+from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.deploy.pack.server_file import ServerFile
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.ext import env
@@ -160,3 +162,166 @@ class MockServerFile(ServerFile):
 # MockServerFile serving the website packs in memory, read-only test data
 WEBSITE_SERVER = MockServerFile()
 WEBSITE_SERVER.register_version(COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  shared content helpers
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def damage(content, ratio, seed=0):
+    """
+    Modify a ratio of the bytes of a content with a fixed random seed.
+
+    Args:
+        content (bytes): Content to damage
+        ratio (float): Ratio of bytes to change
+        seed (int): Random seed. Defaults to 0.
+
+    Returns:
+        bytes: Damaged content
+    """
+    rng = Random(seed)
+    out = bytearray(content)
+    for _ in range(int(len(out) * ratio)):
+        index = rng.randrange(len(out))
+        out[index] = rng.randrange(256)
+    return bytes(out)
+
+
+def random_bytes(size, seed='random'):
+    """
+    Generate deterministic incompressible content.
+
+    Args:
+        size (int): Content size
+        seed (str): Seed of the content. Defaults to 'random'.
+
+    Returns:
+        bytes: Pseudo random content
+    """
+    count = (size + 19) // 20
+    return b''.join(sha1(f'{seed}-{i}'.encode()).digest() for i in range(count))[:size]
+
+
+def code_lines(count):
+    """
+    Generate realistic code lines with unique identifiers per block.
+
+    Each block has its own identifiers, so plain compression cannot
+    exploit repetition across blocks and a zstd patch from the old
+    version wins for small edits.
+
+    Args:
+        count (int): Number of code blocks
+
+    Returns:
+        list[bytes]: One 4-line code block per entry
+    """
+    return [
+        (
+            f'    # handler {i}\n'
+            f'    value_{i} = compute_{i}(input_{i}, offset={i})\n'
+            f'    result_{i} = value_{i} * {i} + {i}\n'
+            f'    store_{i}(result_{i})\n'
+        ).encode()
+        for i in range(count)
+    ]
+
+
+def damage_lines(lines, ratio, seed=0):
+    """
+    Replace a ratio of the code blocks with different blocks, like a real edit.
+
+    Args:
+        lines (list[bytes]): Code blocks
+        ratio (float): Ratio of blocks to replace
+        seed (int): Random seed. Defaults to 0.
+
+    Returns:
+        bytes: Damaged content
+    """
+    rng = Random(seed)
+    out = list(lines)
+    count = max(1, int(len(out) * ratio))
+    for _ in range(count):
+        index = rng.randrange(len(out))
+        number = rng.randrange(100000)
+        out[index] = (
+            f'    # handler {number}\n'
+            f'    value_{number} = compute_{number}(input_{number}, offset={number})\n'
+            f'    result_{number} = value_{number} * {number} + {number}\n'
+            f'    store_{number}(result_{number})\n'
+        ).encode()
+    return b''.join(out)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  mock decoder
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class MockDecodeBase:
+    """
+    Mock of PackDecodeBase for tests: idx_info records and catdata content.
+
+    The records are built from {path: content} test data with
+    from_data, catdata returns the content directly. Records are
+    stored raw (algo=0), the mock has no compressed data.
+    """
+
+    def __init__(self, idx_info, data):
+        """
+        Args:
+            idx_info (list[IdxInfo]): Records of the version
+            data (dict[str, bytes]): {path: content} of the version
+        """
+        self.idx_info = idx_info
+        self._data = data
+
+    def catdata(self, info):
+        """
+        Get the raw bytes of a file, the content in the mock.
+
+        Args:
+            info (IdxInfo): Record of the file
+
+        Returns:
+            bytes: File content
+        """
+        return self._data[info.path]
+
+    @classmethod
+    def from_data(cls, files, eols=None, modes=None, edits=None):
+        """
+        Build a mock decoder from {path: content} test data.
+
+        Args:
+            files (dict[str, bytes]): {path: blob content}
+            eols (dict[str, int], optional): Per-path eol values.
+                Defaults to None, all files are eol=0.
+            modes (dict[str, int], optional): Per-path mode values.
+                Defaults to None, all files are mode=0.
+            edits (dict[str, int], optional): Per-path edit values.
+                Defaults to None, all files are edit=0.
+
+        Returns:
+            MockDecodeBase:
+        """
+        eols = eols or {}
+        modes = modes or {}
+        edits = edits or {}
+        idx_info = []
+        data = {}
+        for path, content in files.items():
+            info = IdxInfo(
+                path=path,
+                size=len(content),
+                sha1=sha1(content).hexdigest() if content else '',
+                eol=eols.get(path, 0),
+                mode=modes.get(path, 0),
+                edit=edits.get(path, 0),
+            )
+            idx_info.append(info)
+            data[path] = content
+        return cls(idx_info=idx_info, data=data)
