@@ -123,9 +123,9 @@ class PackUpdate(PackEncodeBase):
         """
         New file records of the update pack.
 
-        The records keep the order of diff_info, which is built step by
-        step (rename / deleted / copied / edit), so no extra sort is
-        needed.
+        The records keep the order of diff_info, which follows the DFS
+        path order of the new pack (new.idx_info) with the deleted
+        records last, so no extra sort is needed.
 
         source_lookback is the distance to the referenced record in the
         merged refinfo + fileinfo sequence, computed from source_path:

@@ -305,18 +305,18 @@ class TestPackDiffCopied:
         assert 'keep.txt' in diff.refinfo
 
     def test_modified_to_added_is_copied(self):
-        """A file modified to match a new file is copied from it."""
+        """A modified file keeps the data, the new file with the same content copies from it."""
         diff = make_diff(
             {'a.txt': b'old content\n' * 10},
             {'a.txt': b'new content\n' * 10, 'copy.txt': b'new content\n' * 10},
         )
         diff_info = diff.diff_info
-        # copy.txt is added in the copied step, it keeps the data
+        # a.txt is modified first (new pack order), it keeps the patch data
+        assert diff_info['a.txt'].edit == 1
+        assert diff_info['a.txt'].source_path == 'a.txt'
+        # copy.txt is added with the same content, it is copied from a.txt
         assert diff_info['copy.txt'].edit == 0
-        assert diff_info['copy.txt'].source_path == ''
-        # a.txt is modified to the same content, it is copied from copy.txt
-        assert diff_info['a.txt'].edit == 0
-        assert diff_info['a.txt'].source_path == 'copy.txt'
+        assert diff_info['copy.txt'].source_path == 'a.txt'
 
     def test_modified_files_dedup(self):
         """Two files modified to the same content: the later one is copied from the earlier."""
@@ -400,11 +400,14 @@ class TestPackDiffRefinfo:
         assert diff.refinfo == {}
 
     def test_copy_modified_releases_old_source(self):
-        """A modified file converted to a copy releases its old file reference."""
+        """A modified file keeps the data, the old file is not referenced."""
         diff = make_diff({'a.txt': b'x'}, {'a.txt': b'y', 'b.txt': b'y'})
-        # a.txt is modified to the content of the new b.txt, it is copied from it
-        assert diff.diff_info['a.txt'].edit == 0
-        assert diff.diff_info['a.txt'].source_path == 'b.txt'
+        # a.txt is modified first (new pack order), it keeps the data
+        assert diff.diff_info['a.txt'].edit == 1
+        assert diff.diff_info['a.txt'].source_path == ''
+        # b.txt is added with the same content, it is copied from a.txt
+        assert diff.diff_info['b.txt'].edit == 0
+        assert diff.diff_info['b.txt'].source_path == 'a.txt'
         # the old a.txt is not referenced by any record
         assert diff.refinfo == {}
 

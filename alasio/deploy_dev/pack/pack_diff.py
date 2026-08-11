@@ -8,15 +8,13 @@ The diff records are built step by step:
    records when the content is identical, or RM (renamed + modified)
    records with a zstd patch otherwise; an RM whose patch is not
    worthwhile becomes A + D instead
-2. deleted: the remaining files only in the old version become D
-   (deleted) records
-3. copied: the remaining files only in the new version become A
-   (added) records, converted to C (copied) records when their
-   content already exists in an unchanged old file or an earlier
-   record
-4. edit: files in both versions with different content become M
-   (modified) records, their data is a zstd patch-from of the old
-   blob, converted to C records when their new content already exists
+2. the records of the new version (renamed, added, modified) follow
+   the DFS path order of the new pack (same as pack_repo), the added
+   and modified records are converted to C (copied) records when
+   their content already exists in an unchanged old file or an
+   earlier record
+3. deleted: the remaining files only in the old version become D
+   (deleted) records, they come last
 
 All content is compared and patched in the git blob form (LF
 normalized, no checkout line ending): the zstd patch of an M / RM
@@ -30,7 +28,7 @@ PackDecodeBase, or MockDecodeBase in tests.
 """
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_zstd import zstd_compress
 
@@ -113,18 +111,16 @@ class PackDiff:
         """
         File changes from the old version to the new version.
 
-        The records are built step by step: rename (R / RM), deleted
-        (D), copied (A / C), edit (M / C). The rename records are
-        built first, so the deleted / added sets below only contain
-        pure deletes / adds. The copy detection runs while the added
-        and modified records are built, so a file modified to match an
-        existing file is recognized as a copy instead of carrying
-        patch data.
+        The records are built step by step: the records of the new
+        version (rename R / RM, copied A / C, edit M / C) follow the
+        DFS path order of the new pack (same as pack_repo), then the
+        deleted (D) records come last. The copy detection runs while
+        the records are built, so a file modified to match an existing
+        file is recognized as a copy instead of carrying patch data.
 
-        The rename records come first in the rename matching order,
-        the other records follow the pack order of the old / new
-        idx_info, so a copied record always finds its source in an
-        earlier record and the update pack needs no extra sort.
+        The records follow the DFS path order of the new pack, so a
+        copied record always finds its source in an earlier record
+        and the update pack needs no extra sort.
 
         Keyed by the new path, deleted records are keyed by the old
         path. source_path points to the old file that the record
@@ -153,75 +149,73 @@ class PackDiff:
 
         out = {}
 
-        # 1. rename: rename records are built first, the deleted / added
-        # sets below only contain the remaining pure deletes / adds
+        # 1. rename: match files only in the old version with files only
+        # in the new version, the matched records are built below in the
+        # new pack order
         renames = self._find_renames(real_old, real_new)
         renamed_old = set(renames.values())
-        for path, old_path in renames.items():
-            old_info = real_old[old_path]
+
+        # 2. records of the new version: renamed (R / RM), added (A / C)
+        # and modified (M / C) records follow the DFS path order of the
+        # new pack (same as pack_repo), so a copied record always finds
+        # its source in an earlier record
+        added = real_new.keys() - real_old.keys() - renames.keys()
+        modified = (real_old.keys() & real_new.keys()) - unchanged
+        downgraded_old = set()
+        for path in sorted(real_new.keys(), key=_dfs_path_key):
             new_info = real_new[path]
-            if old_info.sha1 == new_info.sha1 and old_info.eol == new_info.eol:
-                # pure rename, the content is identical, no data needed
-                record = UpdateInfo(path=path, edit=3, eol=new_info.eol, mode=new_info.mode)
-                record.source_path = old_path
-                record.size = new_info.size
-                record.sha1 = new_info.sha1
-                record.data = b''
+            if path in renames:
+                old_path = renames[path]
+                old_info = real_old[old_path]
+                if old_info.sha1 == new_info.sha1 and old_info.eol == new_info.eol:
+                    # pure rename, the content is identical, no data needed
+                    record = UpdateInfo(path=path, edit=3, eol=new_info.eol, mode=new_info.mode)
+                    record.source_path = old_path
+                    record.size = new_info.size
+                    record.sha1 = new_info.sha1
+                    record.data = b''
+                    out[path] = record
+                else:
+                    # rename and modify, data is a zstd patch from the old file
+                    record = UpdateInfo(path=path, edit=3, eol=new_info.eol, mode=new_info.mode)
+                    record.source_path = old_path
+                    if not self._load_modified(record, old_info, new_info):
+                        # plain compression beats the patch, add + delete instead
+                        record.edit = 0
+                        record.source_path = ''
+                        downgraded_old.add(old_path)
+                        if record.sha1:
+                            # the downgraded record is an A record, it joins
+                            # the copy detection like other added records
+                            self._try_copy(record, source_map)
+                            source_map[record.sha1] = path
+                    out[path] = record
+            elif path in added:
+                record = UpdateInfo(path=path, edit=0, eol=new_info.eol, mode=new_info.mode)
+                self._load_added(record, new_info)
+                if record.sha1:
+                    self._try_copy(record, source_map)
+                    source_map[record.sha1] = path
                 out[path] = record
-            else:
-                # rename and modify, data is a zstd patch from the old file
-                record = UpdateInfo(path=path, edit=3, eol=new_info.eol, mode=new_info.mode)
-                record.source_path = old_path
-                if not self._load_modified(record, old_info, new_info):
-                    # plain compression beats the patch, add + delete instead
-                    record.edit = 0
+            elif path in modified:
+                old_info = real_old[path]
+                record = UpdateInfo(path=path, edit=1, eol=new_info.eol, mode=new_info.mode)
+                if self._load_modified(record, old_info, new_info):
+                    record.source_path = path
+                else:
+                    # plain data wins, the old file is not referenced
                     record.source_path = ''
-                    out[old_path] = self._new_deleted(old_path)
-                    if record.sha1:
-                        # the downgraded record is an A record, it joins
-                        # the copy detection like other added records
-                        self._try_copy(record, source_map)
-                        source_map[record.sha1] = path
+                if record.sha1:
+                    self._try_copy(record, source_map)
+                    source_map[record.sha1] = path
                 out[path] = record
 
-        # 2. deleted: files only in the old version become D records
-        deleted = real_old.keys() - real_new.keys() - renamed_old
+        # 3. deleted: files only in the old version become D records,
+        # including the sources of renames downgraded to add + delete
+        deleted = (real_old.keys() - real_new.keys() - renamed_old) | downgraded_old
         for info in self.old.idx_info:
             if info.path in deleted:
                 out[info.path] = self._new_deleted(info.path)
-
-        # 3. copied: added records, converted to copies when the content already exists
-        added = real_new.keys() - real_old.keys() - renames.keys()
-        for info in self.new.idx_info:
-            path = info.path
-            if path not in added:
-                continue
-            new_info = real_new[path]
-            record = UpdateInfo(path=path, edit=0, eol=new_info.eol, mode=new_info.mode)
-            self._load_added(record, new_info)
-            if record.sha1:
-                self._try_copy(record, source_map)
-                source_map[record.sha1] = path
-            out[path] = record
-
-        # 4. edit: modified records, converted to copies when the new content already exists
-        modified = (real_old.keys() & real_new.keys()) - unchanged
-        for info in self.old.idx_info:
-            path = info.path
-            if path not in modified:
-                continue
-            old_info = real_old[path]
-            new_info = real_new[path]
-            record = UpdateInfo(path=path, edit=1, eol=new_info.eol, mode=new_info.mode)
-            if self._load_modified(record, old_info, new_info):
-                record.source_path = path
-            else:
-                # plain data wins, the old file is not referenced
-                record.source_path = ''
-            if record.sha1:
-                self._try_copy(record, source_map)
-                source_map[record.sha1] = path
-            out[path] = record
         return out
 
     @cached_property
@@ -234,8 +228,9 @@ class PackDiff:
         files. A copied record whose source is a new file (an earlier
         record of the new version) is not a ref record.
 
-        The order follows the old pack decode order (old.idx_info), a
-        convention shared with the client's local old index.
+        The order follows the DFS path sort of pack_repo (old.idx_info
+        in production), a convention shared with the client's local
+        old index.
 
         Returns:
             dict[str, RefInfo]: {filepath: RefInfo}
@@ -259,13 +254,13 @@ class PackDiff:
             elif info.source_path in unchanged:
                 # copied from an unchanged old file
                 ref_paths.add(info.source_path)
-        out = {}
-        for info in self.old.idx_info:
-            if info.edit != 2 and info.path in ref_paths:
-                out[info.path] = RefInfo(path=info.path, size=info.size, sha1=info.sha1)
-        missing = ref_paths - set(out)
+        missing = ref_paths - set(self._real_old)
         if missing:
             raise ValueError(f'Failed to build refinfo: missing old files: {sorted(missing)}')
+        out = {}
+        for path in sorted(ref_paths, key=_dfs_path_key):
+            old_info = self._real_old[path]
+            out[path] = RefInfo(path=path, size=old_info.size, sha1=old_info.sha1)
         return out
 
     @staticmethod

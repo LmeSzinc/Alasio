@@ -575,23 +575,23 @@ class TestPackUpdateCopied:
         assert_roundtrip(old, new)
 
     def test_modified_to_added_is_copied(self):
-        """A file modified to match a new file is copied from it."""
+        """A modified file keeps the data, the new file with the same content copies from it."""
         new_content = b'new content\n' * 10
         old = {'a.txt': b'old content\n' * 10}
         new = {'a.txt': new_content, 'copy.txt': new_content}
         _, updater, _, _, update_decoder = build_update(old, new)
         diff_info = updater.diff_info
-        # copy.txt is added in the copied step, it keeps the data
+        # a.txt is modified first (new pack order), it keeps the patch data
+        assert diff_info['a.txt'].edit == 1
+        assert diff_info['a.txt'].source_path == 'a.txt'
+        # copy.txt is added with the same content, it is copied from a.txt
         assert diff_info['copy.txt'].edit == 0
-        assert diff_info['copy.txt'].source_path == ''
-        # a.txt is modified to the same content, it is copied from copy.txt
-        assert diff_info['a.txt'].edit == 0
-        assert diff_info['a.txt'].source_path == 'copy.txt'
-        # the copy resolves to the A record (new content), not the refinfo entry
-        decoded = update_decoder.fileinfo['a.txt']
+        assert diff_info['copy.txt'].source_path == 'a.txt'
+        # the copy resolves to the M record (new content), not the refinfo entry
+        decoded = update_decoder.fileinfo['copy.txt']
         assert decoded.size == len(new_content)
         assert decoded.sha1 == sha1(new_content).hexdigest()
-        assert decoded.source_path == 'copy.txt'
+        assert decoded.source_path == 'a.txt'
         assert_roundtrip(old, new)
 
     def test_modified_files_dedup(self):
@@ -971,3 +971,61 @@ class TestPackUpdateInputsReadOnly:
         # the input records are read-only
         assert old_decoder.idx_info == old_snapshot
         assert new_decoder.idx_info == new_snapshot
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  record order
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestPackUpdateOrder:
+    """The output records follow the pack order of the full packs."""
+
+    def test_refinfo_follows_old_pack_order(self):
+        """refinfo paths keep the old pack decode order (old.idx_info)."""
+        old = {
+            'z_old.txt': b'patch me\n' * 20,
+            'a_old.txt': b'rename me\n' * 10,
+            'm_old.txt': b'copy me\n' * 10,
+        }
+        new = {
+            'z_old.txt': b'patched\n' * 20,
+            'a_new.txt': b'rename me\n' * 10,
+            'm_old.txt': b'copy me\n' * 10,
+            'm_new.txt': b'copy me\n' * 10,
+        }
+        _, updater, old_decoder, *_ = build_update(old, new)
+        # the referenced old files: M patch source, R source, C source
+        assert set(updater.refinfo) == {'z_old.txt', 'a_old.txt', 'm_old.txt'}
+        # refinfo keeps the old pack order (old.idx_info)
+        old_order = [info.path for info in old_decoder.idx_info if info.edit != 2]
+        assert list(updater.refinfo) == [path for path in old_order if path in updater.refinfo]
+
+    def test_fileinfo_follows_new_pack_order(self):
+        """fileinfo paths follow the new pack order, deleted records last."""
+        old = {
+            'a.txt': b'old a\n' * 5,
+            'b.txt': b'version 1\n' * 100,
+            'c.txt': b'keep\n' * 3,
+            'e.txt': b'rename me\n' * 5,
+            'gone.txt': b'delete me\n' * 7,
+        }
+        new = {
+            'b.txt': b'version 2\n' * 100,
+            'c.txt': b'keep\n' * 3,
+            'd.txt': b'brand new\n' * 4,
+            'f.txt': b'rename me\n' * 5,
+        }
+        _, updater, old_decoder, new_decoder, update_decoder = build_update(old, new)
+        fileinfo = updater.fileinfo
+        # non-deleted records follow the new pack order (new.idx_info)
+        new_order = [info.path for info in new_decoder.idx_info if info.edit != 2]
+        alive = [path for path in fileinfo if fileinfo[path].edit != 2]
+        assert alive == [path for path in new_order if path in alive]
+        # deleted records come last, in the old pack order
+        old_order = [info.path for info in old_decoder.idx_info if info.edit != 2]
+        deleted = [path for path in fileinfo if fileinfo[path].edit == 2]
+        assert deleted == [path for path in old_order if path in deleted]
+        # the encoded update pack decodes to the same order
+        assert list(update_decoder.fileinfo) == list(fileinfo)
+        assert_roundtrip(old, new)

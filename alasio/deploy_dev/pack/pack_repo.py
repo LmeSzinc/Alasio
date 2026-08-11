@@ -16,6 +16,20 @@ from alasio.git.repo import GitRepo
 from alasio.logger import logger
 
 
+def _dfs_path_key(path):
+    """
+    DFS path sort key, files of a folder come before its subfolders.
+
+    Args:
+        path (str): File path
+
+    Returns:
+        tuple: Sort key
+    """
+    parts = tuple(path.split('/'))
+    return (parts[:-1], len(parts), parts)
+
+
 class PackFull(PackEncodeBase):
     def __init__(self, repo: Union[GitRepo, MockGitRepo], commit=''):
         """
@@ -200,7 +214,7 @@ class PackFull(PackEncodeBase):
 
         # sort by path, but deeper path goes behind
         # which is like DFS file iterating of parent path
-        out = {v.path: v for k, v in sorted(out.items(), key=lambda x: (x[0][:-1], len(x[0]), x))}
+        out = {v.path: v for k, v in sorted(out.items(), key=lambda x: _dfs_path_key(x[1].path))}
         # update EOL
         self._populate_eol(out)
         # convert edit to C (copied)
