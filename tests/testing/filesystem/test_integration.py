@@ -18,6 +18,7 @@ from alasio.ext.path.atomic import (
     file_write_stream, folder_rmtree, is_empty_folder
 )
 from alasio.ext.path.makedir import batch_makedirs
+from alasio.testing.filesystem import fs  # noqa: F401
 
 
 class TestAtomicPath:

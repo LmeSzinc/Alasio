@@ -2,7 +2,7 @@
 Tests for the command line entry of unpack.py.
 
 Uses conftest.WEBSITE_FULL_PACK (mock modern full-stack website).
-Every test runs in a pyfakefs in-memory filesystem, no real files are
+Every test runs in the in-memory fake filesystem, no real files are
 written: the app_folder fixture points env.PROJECT_ROOT at the fake
 filesystem.
 """
@@ -15,6 +15,7 @@ from conftest import WEBSITE_FILES, WEBSITE_FULL_PACK
 from alasio.deploy.unpack import main
 from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes
+from alasio.testing.filesystem import fs  # noqa: F401
 
 
 class TestUnpackCli:

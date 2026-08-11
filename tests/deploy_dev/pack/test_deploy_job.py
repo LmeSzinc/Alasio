@@ -2,7 +2,7 @@
 Tests for DeployJob: the unified entry of deploy jobs.
 
 Uses conftest.WEBSITE_FULL_PACK (mock modern full-stack website).
-Every test runs in a pyfakefs in-memory filesystem, no real files are
+Every test runs in the in-memory fake filesystem, no real files are
 written: the app_folder fixture points env.PROJECT_ROOT at the fake
 filesystem.
 """
@@ -17,6 +17,7 @@ from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.logger import logger
+from alasio.testing.filesystem import fs  # noqa: F401
 
 
 class TestDeployJob:

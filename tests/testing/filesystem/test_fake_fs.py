@@ -13,7 +13,7 @@ from conftest import join
 
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import file_read_bytes
-from alasio.testing.filesystem import FakeDir, FakeFile, FakeFilesystem
+from alasio.testing.filesystem import FakeDir, FakeFile, FakeFilesystem, fs  # noqa: F401
 
 FILE = os.path.abspath(__file__)
 

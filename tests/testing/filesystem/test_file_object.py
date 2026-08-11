@@ -10,6 +10,8 @@ import stat as statmod
 import pytest
 from conftest import join
 
+from alasio.testing.filesystem import fs  # noqa: F401
+
 
 class TestFileObject:
     """The file object returned by open()."""

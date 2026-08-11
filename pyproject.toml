@@ -56,6 +56,11 @@ all = ["alasio[image,backend,test]"]
 packages = ["alasio"]
 
 [tool.pytest.ini_options]
+# Disable the pyfakefs pytest plugin globally: the project implements its own
+# in-memory fake filesystem (alasio.testing.filesystem.fs), and the plugin's
+# "fs" fixture would silently inject pyfakefs into tests. The project fixture
+# is imported explicitly in test modules, never registered by the plugin.
+addopts = ["-p", "no:fakefs"]
 tmp_path_retention_count = 1
 tmp_path_retention_policy = "failed"
 markers = [

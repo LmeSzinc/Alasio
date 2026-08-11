@@ -28,7 +28,11 @@ COMMIT = 'c1'
 
 @pytest.fixture
 def app_folder(fs, monkeypatch):
-    """Set PROJECT_ROOT to a fresh folder in the fake filesystem."""
+    """Set PROJECT_ROOT to a fresh folder in the fake filesystem.
+
+    The fs fixture is imported explicitly in the test modules, see
+    the usage notes in alasio/testing/filesystem/__init__.py.
+    """
     monkeypatch.setattr(env, 'PROJECT_ROOT', PathStr.new(fs.root_dir.path))
 
 

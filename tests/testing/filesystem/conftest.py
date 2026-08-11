@@ -1,5 +1,6 @@
-# register the fs fixture of the in-memory fake filesystem
-from alasio.testing.filesystem import fs  # noqa: F401
+# The fs fixture is not registered here: every test module imports it
+# explicitly (from alasio.testing.filesystem import fs), see the usage
+# notes in alasio/testing/filesystem/__init__.py.
 
 
 def join(fs, *parts):

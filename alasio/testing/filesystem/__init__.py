@@ -7,15 +7,27 @@ stored in flat dicts keyed by normalized absolute path, so path
 lookups are O(1) dict hits instead of the per-segment tree walks of
 pyfakefs.
 
-Usage as a pytest fixture: add the fixture to a conftest.py, then the
-file functions are mocked in every test that requests it.
+Usage as a pytest fixture: import the fixture at the top of the test
+module, then the file functions are mocked in every test that
+requests it.
 
-    from alasio.testing.filesystem import fs
+    from alasio.testing.filesystem import fs  # noqa: F401
 
     def test_write(fs):
         fs.create_file('/data.txt', contents='hello')
         with open('/data.txt') as f:
             assert f.read() == 'hello'
+
+The `# noqa: F401` is required: pytest injects the fixture through the
+argument name, so the import has no visible reference in the module
+and ruff would remove it as an unused import otherwise.
+
+The fixture is imported explicitly in every test module that uses it,
+never registered in a conftest.py nor installed as a pytest plugin.
+The explicit import keeps the fake filesystem visible in the test
+source, and avoids any confusion with the "fs" fixture of the
+pyfakefs pytest plugin (the plugin is disabled globally in
+pyproject.toml).
 
 The fixture is a full replacement of the filesystem: every path is
 served by the fake filesystem, nothing touches the real disk. Python

@@ -2,7 +2,7 @@
 Tests for UnpackJob: interruptible and resumable full pack unpack.
 
 Uses conftest.WEBSITE_FULL_PACK (mock modern full-stack website).
-Every test runs in a pyfakefs in-memory filesystem, no real files are
+Every test runs in the in-memory fake filesystem, no real files are
 written: the app_folder fixture points env.PROJECT_ROOT at the fake
 filesystem.
 """
@@ -19,6 +19,7 @@ from alasio.deploy.pack.job_unpack import PendingFile, UnpackJob
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes
+from alasio.testing.filesystem import fs  # noqa: F401
 
 
 def run_job(data=WEBSITE_FULL_PACK):

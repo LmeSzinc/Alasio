@@ -11,7 +11,7 @@ import pytest
 from conftest import join
 
 from alasio.ext.path import PathStr
-from alasio.testing.filesystem import FakeDir, FakeFile
+from alasio.testing.filesystem import FakeDir, FakeFile, fs  # noqa: F401
 from alasio.testing.filesystem.base import IS_WINDOWS, _normpath
 
 

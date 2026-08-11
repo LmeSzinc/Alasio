@@ -9,7 +9,7 @@ import stat as statmod
 import pytest
 from conftest import join
 
-from alasio.testing.filesystem import FakeDirEntry, FakeScandirIterator
+from alasio.testing.filesystem import FakeDirEntry, FakeScandirIterator, fs  # noqa: F401
 
 
 def make_stat(st_mode, size=0):
