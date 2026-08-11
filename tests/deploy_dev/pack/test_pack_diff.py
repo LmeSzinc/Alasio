@@ -79,7 +79,7 @@ class TestPackDiffBasic:
         """Unchanged files are left out of the diff."""
         diff = make_diff({'a.txt': b'hello'}, {'a.txt': b'hello'})
         assert diff.diff_info == {}
-        assert diff.ref_paths == set()
+        assert diff.refinfo == {}
 
     def test_added(self):
         """A new file becomes an A record with data."""
@@ -168,7 +168,7 @@ class TestPackDiffRename:
         assert info.data_size == 0
         # the old path is moved, not deleted
         assert 'a.txt' not in diff.diff_info
-        assert 'a.txt' in diff.ref_paths
+        assert 'a.txt' in diff.refinfo
 
     def test_rename_modify(self):
         """A renamed file with changes becomes an RM record with a patch."""
@@ -182,7 +182,7 @@ class TestPackDiffRename:
         assert info.source_path == 'a.txt'
         assert info.algo == 2
         assert info.data_size > 0
-        assert 'a.txt' in diff.ref_paths
+        assert 'a.txt' in diff.refinfo
 
     def test_unrelated_not_renamed(self):
         """Unrelated contents are not matched, the files become D and A."""
@@ -192,7 +192,7 @@ class TestPackDiffRename:
         )
         assert diff.diff_info['a.txt'].edit == 2
         assert diff.diff_info['b.txt'].edit == 0
-        assert diff.ref_paths == set()
+        assert diff.refinfo == {}
 
     def test_min_similarity(self):
         """min_similarity controls whether a pair is matched as a rename."""
@@ -254,7 +254,7 @@ class TestPackDiffCopied:
         assert info.source_path == 'keep.txt'
         # the copied record keeps its own info, the encoder ignores it
         assert info.data_size == len(b'copy me\n')
-        assert 'keep.txt' in diff.ref_paths
+        assert 'keep.txt' in diff.refinfo
 
     def test_copy_chain_new_files(self):
         """Identical new files reference the nearest earlier record."""
@@ -263,7 +263,7 @@ class TestPackDiffCopied:
         assert diff.diff_info['a1.txt'].source_path == ''
         assert diff.diff_info['a2.txt'].source_path == 'a1.txt'
         assert diff.diff_info['a3.txt'].source_path == 'a2.txt'
-        assert diff.ref_paths == set()
+        assert diff.refinfo == {}
 
     def test_crlf_source_copied(self):
         """A CRLF old file can be a copy source, the copy keeps its own eol."""
@@ -278,7 +278,7 @@ class TestPackDiffCopied:
         assert info.source_path == 'keep.txt'
         # only the content matters, the copy keeps its own eol
         assert info.eol == 1
-        assert 'keep.txt' in diff.ref_paths
+        assert 'keep.txt' in diff.refinfo
 
     def test_755_source_copied(self):
         """A 755 old file can be a copy source, the copy keeps its own mode."""
@@ -302,7 +302,7 @@ class TestPackDiffCopied:
         info = diff.diff_info['a.txt']
         assert info.edit == 0
         assert info.source_path == 'keep.txt'
-        assert 'keep.txt' in diff.ref_paths
+        assert 'keep.txt' in diff.refinfo
 
     def test_modified_to_added_is_copied(self):
         """A file modified to match a new file is copied from it."""
@@ -341,7 +341,7 @@ class TestPackDiffCopied:
         assert diff_info['a1.txt'].source_path == 'orig.txt'
         assert diff_info['a2.txt'].source_path == 'a1.txt'
         assert diff_info['a3.txt'].source_path == 'a2.txt'
-        assert 'orig.txt' in diff.ref_paths
+        assert 'orig.txt' in diff.refinfo
 
     def test_copy_keeps_info(self):
         """A copied record keeps its own info, the encoder ignores it."""
@@ -362,8 +362,8 @@ class TestPackDiffCopied:
 # ════════════════════════════════════════════════════════════════════════════
 
 
-class TestPackDiffRefPaths:
-    """ref_paths reports the old files referenced by the diff."""
+class TestPackDiffRefinfo:
+    """refinfo reports the old file records referenced by the diff."""
 
     def test_modified_patch_source(self):
         """An M record with patch data references the old file."""
@@ -372,12 +372,12 @@ class TestPackDiffRefPaths:
             {'a.txt': b''.join(lines)},
             {'a.txt': damage_lines(lines, 0.05, seed=1)},
         )
-        assert diff.ref_paths == {'a.txt'}
+        assert set(diff.refinfo) == {'a.txt'}
 
     def test_modified_plain_no_source(self):
         """An M record with plain data references no old file."""
         diff = make_diff({'a.txt': b'x'}, {'a.txt': b'y'})
-        assert diff.ref_paths == set()
+        assert diff.refinfo == {}
 
     def test_rename_sources(self):
         """R and RM records reference their old files."""
@@ -390,14 +390,14 @@ class TestPackDiffRefPaths:
             'mod_moved.txt': b'def old():\n    return 2\n' * 100,
         }
         diff = make_diff(old, new)
-        assert diff.ref_paths == {'pure.txt', 'mod.txt'}
+        assert set(diff.refinfo) == {'pure.txt', 'mod.txt'}
 
     def test_copy_from_new_not_referenced(self):
         """A copy source that is a new file is not a ref path."""
         content = b'shared\n'
         diff = make_diff({}, {'first.txt': content, 'second.txt': content})
         assert diff.diff_info['second.txt'].source_path == 'first.txt'
-        assert diff.ref_paths == set()
+        assert diff.refinfo == {}
 
     def test_copy_modified_releases_old_source(self):
         """A modified file converted to a copy releases its old file reference."""
@@ -406,7 +406,7 @@ class TestPackDiffRefPaths:
         assert diff.diff_info['a.txt'].edit == 0
         assert diff.diff_info['a.txt'].source_path == 'b.txt'
         # the old a.txt is not referenced by any record
-        assert diff.ref_paths == set()
+        assert diff.refinfo == {}
 
 
 # ════════════════════════════════════════════════════════════════════════════

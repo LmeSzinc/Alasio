@@ -111,26 +111,12 @@ class PackUpdate(PackEncodeBase):
         """
         Old file records referenced by the update pack.
 
-        Files that the client needs to verify and read to apply the
-        update: the sources of M (patch) / R / RM / C records. The
-        order follows the old pack decode order (old.idx_info), a
-        convention shared with the client's local old index.
+        See PackDiff.refinfo for the record semantics.
 
         Returns:
             dict[str, RefInfo]: {filepath: RefInfo}
-
-        Raises:
-            ValueError: If a referenced old file is missing from the old pack
         """
-        ref_paths = self._diff.ref_paths
-        out = {}
-        for info in self.old.idx_info:
-            if info.edit != 2 and info.path in ref_paths:
-                out[info.path] = RefInfo(path=info.path, size=info.size, sha1=info.sha1)
-        missing = ref_paths - set(out)
-        if missing:
-            raise ValueError(f'Failed to build refinfo: missing old files: {sorted(missing)}')
-        return out
+        return self._diff.refinfo
 
     @cached_property
     def fileinfo(self) -> "dict[str, FileInfo]":

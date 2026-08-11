@@ -29,7 +29,7 @@ against the record, so the diff logic works on any decoder-like object:
 PackDecodeBase, or MockDecodeBase in tests.
 """
 from alasio.deploy.pack.decode_base import PackDecodeBase
-from alasio.deploy.pack.pack_model import FileInfo
+from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_zstd import zstd_compress
@@ -58,7 +58,7 @@ class PackDiff:
     The input is the decoder of the old version and the decoder of the
     new version (PackDecodeBase or MockDecodeBase, providing idx_info
     and catdata), the output is diff_info ({path: UpdateInfo}) and
-    ref_paths (the old files referenced by the diff).
+    refinfo (the old file records referenced by the diff).
     """
 
     def __init__(
@@ -225,33 +225,47 @@ class PackDiff:
         return out
 
     @cached_property
-    def ref_paths(self) -> "set[str]":
+    def refinfo(self) -> "dict[str, RefInfo]":
         """
-        Old file paths referenced by the diff records.
+        Old file records referenced by the diff records.
 
-        These paths must appear in the refinfo of the update pack: the
-        sources of M (patch) / R / RM records and the copied old files.
-        A copied record whose source is a new file (an earlier record
-        of the new version) is not a ref path.
+        These records must appear in the refinfo of the update pack:
+        the sources of M (patch) / R / RM records and the copied old
+        files. A copied record whose source is a new file (an earlier
+        record of the new version) is not a ref record.
+
+        The order follows the old pack decode order (old.idx_info), a
+        convention shared with the client's local old index.
 
         Returns:
-            set[str]: Old file paths referenced by the diff
+            dict[str, RefInfo]: {filepath: RefInfo}
+
+        Raises:
+            ValueError: If a referenced old file is missing from the
+                old pack
         """
         diff = self.diff_info
         unchanged = set(self._real_old) & set(self._real_new) - set(diff)
-        out = set()
+        ref_paths = set()
         for info in diff.values():
             if not info.source_path:
                 continue
             if info.edit == 1:
                 # M records only reference the old file when patch data is used
-                out.add(info.source_path)
+                ref_paths.add(info.source_path)
             elif info.edit == 3:
                 # R / RM records always reference the old file
-                out.add(info.source_path)
+                ref_paths.add(info.source_path)
             elif info.source_path in unchanged:
                 # copied from an unchanged old file
-                out.add(info.source_path)
+                ref_paths.add(info.source_path)
+        out = {}
+        for info in self.old.idx_info:
+            if info.edit != 2 and info.path in ref_paths:
+                out[info.path] = RefInfo(path=info.path, size=info.size, sha1=info.sha1)
+        missing = ref_paths - set(out)
+        if missing:
+            raise ValueError(f'Failed to build refinfo: missing old files: {sorted(missing)}')
         return out
 
     @staticmethod
@@ -290,8 +304,8 @@ class PackDiff:
             bool: True if the zstd patch-from data was stored, the old
                 file is then referenced by the record
         """
-        new_blob = self._read_blob(self._new_blob_cache, self.new, new_info)
-        old_blob = self._read_blob(self._old_blob_cache, self.old, old_info) if old_info.sha1 else b''
+        new_blob = self._read_new_blob(new_info)
+        old_blob = self._read_old_blob(old_info) if old_info.sha1 else b''
         algo_name = PackFull._load_data(info, new_blob, source=old_blob or None, level=self.zstd_level)
         return algo_name == 'zstd_patch'
 
@@ -303,8 +317,38 @@ class PackDiff:
             info (UpdateInfo): Record to load, edit must be A
             new_info (IdxInfo): New record
         """
-        new_blob = self._read_blob(self._new_blob_cache, self.new, new_info)
+        new_blob = self._read_new_blob(new_info)
         PackFull._load_data(info, new_blob, source=None, level=self.zstd_level)
+
+    def _read_old_blob(self, info):
+        """
+        Read the git blob content of an old file, cached by path.
+
+        Args:
+            info (IdxInfo): Record of the file
+
+        Returns:
+            bytes: Blob content
+
+        Raises:
+            PackDecodeError: If the content fails to decode or verify
+        """
+        return self._read_blob(self._old_blob_cache, self.old, info)
+
+    def _read_new_blob(self, info):
+        """
+        Read the git blob content of a new file, cached by path.
+
+        Args:
+            info (IdxInfo): Record of the file
+
+        Returns:
+            bytes: Blob content
+
+        Raises:
+            PackDecodeError: If the content fails to decode or verify
+        """
+        return self._read_blob(self._new_blob_cache, self.new, info)
 
     def _read_blob(self, cache, decoder, info):
         """
@@ -312,6 +356,7 @@ class PackDiff:
 
         The pack stores git blob content (LF normalized for text files),
         the content is verified against the record's size and sha1.
+        See _read_old_blob / _read_new_blob for the public wrappers.
 
         Args:
             cache (dict[str, bytes]): Blob cache of the decoder
@@ -370,8 +415,8 @@ class PackDiff:
                     if not (1 / self.max_size_ratio <= ratio <= self.max_size_ratio):
                         continue
                     if new_blob is None:
-                        new_blob = self._read_blob(self._new_blob_cache, self.new, new_info)
-                    old_blob = self._read_blob(self._old_blob_cache, self.old, old_info)
+                        new_blob = self._read_new_blob(new_info)
+                    old_blob = self._read_old_blob(old_info)
                     sim = self.similarity(old_blob, new_blob, level=self.similarity_level)
                 if sim >= self.min_similarity:
                     candidates.append((sim, new_path, old_path))
