@@ -5,10 +5,16 @@ The tests build the versions with MockDecodeBase.from_data, without the
 pack machinery, so the diff logic (unchanged / modified / added /
 deleted / renamed / copied) can be exercised in isolation.
 """
+import random
+
 import pytest
 from conftest import MockDecodeBase, code_lines, damage, damage_lines, random_bytes
 
-from alasio.deploy_dev.pack.pack_diff import PackDiff
+from alasio.deploy.pack.decode_base import PackDecodeBase
+from alasio.deploy.pack.pack_model import RefInfo
+from alasio.deploy_dev.pack.pack_diff import PackDiff, UpdateInfo
+from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.git.mock.mock_repo import MockGitRepo
 
 
 def make_diff(old, new, **kwargs):
@@ -430,3 +436,303 @@ class TestPackDiffValidation:
             PackDiff(old, new, min_similarity=-0.1)
         with pytest.raises(ValueError, match='max_size_ratio'):
             PackDiff(old, new, max_size_ratio=0.5)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  full scenario
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _random_bytes(size, seed):
+    """
+    Deterministic pseudo-random bytes for binary test files.
+
+    Args:
+        size (int): Byte count
+        seed (int): Random seed
+
+    Returns:
+        bytes:
+    """
+    rng = random.Random(seed)
+    return bytes(rng.randrange(256) for _ in range(size))
+
+
+def _no_data(info):
+    """
+    A copy of a diff record without the compressed data.
+
+    The data bytes are compression output: hard-coding them would be
+    unreadable and fragile to compression library upgrades, the
+    expectations check the data by algo / data_size instead.
+
+    Args:
+        info (UpdateInfo): Record to copy
+
+    Returns:
+        UpdateInfo: Record with data = b''
+    """
+    return UpdateInfo(
+        path=info.path, edit=info.edit, eol=info.eol, mode=info.mode,
+        algo=info.algo, size=info.size, data_size=info.data_size,
+        sha1=info.sha1, source_path=info.source_path,
+    )
+
+
+class TestPackDiffFullScenario:
+    """A real upgrade between two full packs, every diff type at once.
+
+    The versions are built with MockGitRepo and PackFull like the
+    server pipeline, the diff output is hard-coded per record like
+    test_full_decode_all_data on the decode side. The scenario covers:
+    M (patch / plain), A, C (from an unchanged old file, from an
+    earlier new file, cross eol / mode), D, R, RM, empty files, binary
+    files, copy chains, and eol / mode-only changes.
+    """
+
+    OLD = {
+        '.gitattributes':
+            b'*.py text eol=lf\n*.txt text eol=crlf\n*.bat text eol=crlf\n*.sh text eol=lf\n*.png binary\n',
+        'backend/__init__.py': b'',
+        'backend/main.py':
+            b'import uvicorn\n\nVERSION = 1\n\nif __name__ == "__main__":\n    uvicorn.run("app:app", port=8000)\n',
+        'backend/tiny.py': b'x',
+        'backend/config.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
+        'backend/utils.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
+        'backend/legacy.py': b'def legacy():\n    return 42\n',
+        'docs/guide.txt': b'# Guide\n\nstep 1\nstep 2\nstep 3\n',
+        'frontend/App.svelte': b'<script>let count = 0</script>\n<button>{count}</button>\n',
+        'frontend/Button.svelte': b'<script>let count = 0</script>\n<button>{count}</button>\n',
+        'scripts/run.sh': b'#!/bin/sh\nset -e\necho "run"\n',
+        'scripts/old_tool.py': b'def tool():\n    return 1\n' * 30,
+        'scripts/run.bat': b'@echo off\npython -m website\n',
+        'tools/tool.sh': (b'#!/bin/sh\nset -e\necho "tool"\n', 755),
+        'tools/deploy.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
+        'data/blob.png': bytes(range(256)) * 100,
+        'data/cache.pkl': _random_bytes(6400, 42),
+    }
+    NEW = {
+        '.gitattributes':
+            b'*.py text eol=lf\n*.txt text eol=crlf\n*.bat text eol=lf\n*.sh text eol=lf\n*.png binary\n',
+        'backend/__init__.py': b'',
+        'backend/main.py':
+            b'import uvicorn\n\nVERSION = 2\n\nif __name__ == "__main__":\n    uvicorn.run("app:app", port=9000)\n',
+        'backend/tiny.py': b'y',
+        'backend/config.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
+        'backend/utils.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
+        'backend/copy.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
+        'backend/empty.txt': b'',
+        'backend/a1.py': b'def shared():\n    return 0\n' * 20,
+        'backend/a2.py': b'def shared():\n    return 0\n' * 20,
+        'backend/a3.py': b'def shared():\n    return 0\n' * 20,
+        'docs/guide.txt': b'# Guide\n\nstep 1\nstep 2\nstep 3\n',
+        'docs/guide2.txt': b'# Guide\n\nstep 1\nstep 2\nstep 3\n',
+        'frontend/App.svelte': b'<script>let count = 1</script>\n<button>new</button>\n',
+        'frontend/App2.svelte': b'<script>let count = 1</script>\n<button>new</button>\n',
+        'frontend/Button.svelte': b'<script>let count = 0</script>\n<button>{count}</button>\n',
+        'scripts/runner.sh': b'#!/bin/sh\nset -e\necho "run"\n',
+        'scripts/new_tool.py': b'def tool():\n    return 2\n' * 30,
+        'scripts/run.bat': b'@echo off\npython -m website\n',
+        'tools/tool.sh': (b'#!/bin/sh\nset -e\necho "tool"\n', 644),
+        'tools/deploy.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
+        'tools/run.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
+        'data/blob.png': bytes(range(256)) * 100,
+        'data/new_blob.bin': _random_bytes(12800, 43),
+    }
+
+    def _diff(self):
+        """
+        Build the PackDiff of the scenario, like the server pipeline.
+
+        Returns:
+            PackDiff:
+        """
+
+        def make_pack(files, commit):
+            """
+            Build a full pack of a version.
+
+            Args:
+                files (dict): {path: content} or {path: (content, mode)}
+                commit (str): Version of the pack
+
+            Returns:
+                bytes: Full pack data
+            """
+            repo = MockGitRepo()
+            for path, value in files.items():
+                if isinstance(value, tuple):
+                    content, mode = value
+                else:
+                    content, mode = value, 644
+                repo.register_file(commit, path, content, mode=mode)
+            return b''.join(PackFull(repo, commit=commit).iter_pack_data())
+
+        old = PackDecodeBase(make_pack(self.OLD, 'old'))
+        new = PackDecodeBase(make_pack(self.NEW, 'new'))
+        return PackDiff(old, new)
+
+    def test_diff_info_records(self):
+        """Every diff record is exact: path order, edit, meta, data and source."""
+        diff = self._diff()
+        diff_info = diff.diff_info
+        # every record type is exercised
+        assert {info.edit for info in diff_info.values()} == {0, 1, 2, 3}
+        # the records follow the DFS path order of the new pack,
+        # the deleted records come last
+        assert list(diff_info) == [
+            '.gitattributes',
+            'backend/a1.py', 'backend/a2.py', 'backend/a3.py',
+            'backend/copy.py', 'backend/empty.txt', 'backend/main.py',
+            'backend/tiny.py', 'data/new_blob.bin', 'docs/guide2.txt',
+            'frontend/App.svelte', 'frontend/App2.svelte',
+            'scripts/new_tool.py', 'scripts/run.bat', 'scripts/runner.sh',
+            'tools/run.sh', 'tools/tool.sh',
+            'backend/legacy.py', 'data/cache.pkl',
+        ]
+        # per-record hard-coded expectations, data is compressed and
+        # checked by algo / data_size
+        # M (patch): modified, the zstd patch-from wins
+        assert _no_data(diff_info['.gitattributes']) == UpdateInfo(
+            path='.gitattributes', edit=1, eol=0, mode=0, algo=2,
+            size=85, data_size=14,
+            sha1='4864d5ef0b398e6c74051b4612982e1a5f818f29', source_path='.gitattributes')
+        # A: added, carries the data, the first of the copy chain
+        assert _no_data(diff_info['backend/a1.py']) == UpdateInfo(
+            path='backend/a1.py', edit=0, eol=0, mode=0, algo=2,
+            size=540, data_size=40,
+            sha1='bcfd6ec09f6db21da66c3e3e67d0c474dda5b5e5', source_path='')
+        # C: copied from the earlier new file (copy chain)
+        assert _no_data(diff_info['backend/a2.py']) == UpdateInfo(
+            path='backend/a2.py', edit=0, eol=0, mode=0, algo=2,
+            size=540, data_size=40,
+            sha1='bcfd6ec09f6db21da66c3e3e67d0c474dda5b5e5', source_path='backend/a1.py')
+        # C: copied from the earlier new file (copy chain)
+        assert _no_data(diff_info['backend/a3.py']) == UpdateInfo(
+            path='backend/a3.py', edit=0, eol=0, mode=0, algo=2,
+            size=540, data_size=40,
+            sha1='bcfd6ec09f6db21da66c3e3e67d0c474dda5b5e5', source_path='backend/a2.py')
+        # C: copied from the unchanged old file (refinfo)
+        assert _no_data(diff_info['backend/copy.py']) == UpdateInfo(
+            path='backend/copy.py', edit=0, eol=0, mode=0, algo=0,
+            size=43, data_size=43,
+            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', source_path='backend/config.py')
+        # A: added, empty file
+        assert _no_data(diff_info['backend/empty.txt']) == UpdateInfo(
+            path='backend/empty.txt', edit=0, eol=1, mode=0, algo=0,
+            size=0, data_size=0,
+            sha1='', source_path='')
+        # M (patch): modified, the zstd patch-from wins
+        assert _no_data(diff_info['backend/main.py']) == UpdateInfo(
+            path='backend/main.py', edit=1, eol=0, mode=0, algo=2,
+            size=94, data_size=21,
+            sha1='3216f7cf6a0d9caef5c769f38c1dd0ee69fac744', source_path='backend/main.py')
+        # M (plain): modified, too small to compress
+        assert _no_data(diff_info['backend/tiny.py']) == UpdateInfo(
+            path='backend/tiny.py', edit=1, eol=0, mode=0, algo=0,
+            size=1, data_size=1,
+            sha1='95cb0bfd2977c761298d9624e4b4d4c72a39974a', source_path='')
+        # A: added, incompressible binary, stored raw
+        assert _no_data(diff_info['data/new_blob.bin']) == UpdateInfo(
+            path='data/new_blob.bin', edit=0, eol=2, mode=0, algo=0,
+            size=12800, data_size=12800,
+            sha1='724cdc6bf591d5edaa9f8394c38bf516f1f0a4ed', source_path='')
+        # C: copied from the unchanged old file, CRLF on both sides
+        assert _no_data(diff_info['docs/guide2.txt']) == UpdateInfo(
+            path='docs/guide2.txt', edit=0, eol=1, mode=0, algo=0,
+            size=30, data_size=30,
+            sha1='fe8170a5c33baa1a71d1913fea45de3734c4fdfa', source_path='docs/guide.txt')
+        # M (patch): modified, the new content of the copy that follows
+        assert _no_data(diff_info['frontend/App.svelte']) == UpdateInfo(
+            path='frontend/App.svelte', edit=1, eol=0, mode=0, algo=2,
+            size=52, data_size=20,
+            sha1='c797b6c4c27f268e5e6c2181ba7ce52f0a7327d0', source_path='frontend/App.svelte')
+        # C: copied from the modified new file
+        assert _no_data(diff_info['frontend/App2.svelte']) == UpdateInfo(
+            path='frontend/App2.svelte', edit=0, eol=0, mode=0, algo=0,
+            size=52, data_size=52,
+            sha1='c797b6c4c27f268e5e6c2181ba7ce52f0a7327d0', source_path='frontend/App.svelte')
+        # RM: renamed + modified, patched from the old file
+        assert _no_data(diff_info['scripts/new_tool.py']) == UpdateInfo(
+            path='scripts/new_tool.py', edit=3, eol=0, mode=0, algo=2,
+            size=750, data_size=22,
+            sha1='74d902ad26e3c957239cf22ab92efab8f67c95f5', source_path='scripts/old_tool.py')
+        # M: eol-only change, CRLF (v1) to LF (v2), same content
+        assert _no_data(diff_info['scripts/run.bat']) == UpdateInfo(
+            path='scripts/run.bat', edit=1, eol=0, mode=0, algo=2,
+            size=28, data_size=11,
+            sha1='30c7e458805ec8f7c2335f2d26b01f2ba8d66c16', source_path='scripts/run.bat')
+        # R: pure rename, no data
+        assert _no_data(diff_info['scripts/runner.sh']) == UpdateInfo(
+            path='scripts/runner.sh', edit=3, eol=0, mode=0, algo=0,
+            size=28, data_size=0,
+            sha1='e0cb6eaf13a42970a3d71a53fe36ac851fa09e95', source_path='scripts/run.sh')
+        # C: copied from the unchanged 755 old file (refinfo)
+        assert _no_data(diff_info['tools/run.sh']) == UpdateInfo(
+            path='tools/run.sh', edit=0, eol=0, mode=1, algo=0,
+            size=31, data_size=31,
+            sha1='2690963383249907ec8304c2f09e5d0a5d86f24d', source_path='tools/deploy.sh')
+        # M: mode-only change, 755 to 644, same content
+        assert _no_data(diff_info['tools/tool.sh']) == UpdateInfo(
+            path='tools/tool.sh', edit=1, eol=0, mode=0, algo=2,
+            size=29, data_size=11,
+            sha1='c3e8889ba5dbcf9068862da9336f09491c2ab027', source_path='tools/tool.sh')
+        # D: deleted
+        assert _no_data(diff_info['backend/legacy.py']) == UpdateInfo(
+            path='backend/legacy.py', edit=2, eol=0, mode=0, algo=0,
+            size=0, data_size=0,
+            sha1='', source_path='')
+        # D: deleted, binary
+        assert _no_data(diff_info['data/cache.pkl']) == UpdateInfo(
+            path='data/cache.pkl', edit=2, eol=0, mode=0, algo=0,
+            size=0, data_size=0,
+            sha1='', source_path='')
+        # R / D / empty records carry no data
+        for path in ('scripts/runner.sh', 'backend/legacy.py', 'data/cache.pkl', 'backend/empty.txt'):
+            assert diff_info[path].data == b''
+
+    def test_refinfo_records(self):
+        """Every refinfo record is exact, in the DFS path order."""
+        diff = self._diff()
+        assert diff.refinfo == {
+            # M (patch) source
+            '.gitattributes': RefInfo(
+                path='.gitattributes', size=87,
+                sha1='6d71afb94811acaa6f1021f95718d19aeefee5de'),
+            # C source, copied by backend/copy.py
+            'backend/config.py': RefInfo(
+                path='backend/config.py', size=43,
+                sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5'),
+            # M (patch) source
+            'backend/main.py': RefInfo(
+                path='backend/main.py', size=94,
+                sha1='01408d658d83912219e67c2d1141640cb4eb643b'),
+            # C source, copied by docs/guide2.txt
+            'docs/guide.txt': RefInfo(
+                path='docs/guide.txt', size=30,
+                sha1='fe8170a5c33baa1a71d1913fea45de3734c4fdfa'),
+            # M (patch) source
+            'frontend/App.svelte': RefInfo(
+                path='frontend/App.svelte', size=56,
+                sha1='b9bdefd8b362e86cf6af8b127f5d2d6855b7d631'),
+            # RM source, renamed + modified to scripts/new_tool.py
+            'scripts/old_tool.py': RefInfo(
+                path='scripts/old_tool.py', size=750,
+                sha1='4c9e1b37edb31e5a5f7879d7fedd777281ca0f68'),
+            # M (patch) source
+            'scripts/run.bat': RefInfo(
+                path='scripts/run.bat', size=28,
+                sha1='30c7e458805ec8f7c2335f2d26b01f2ba8d66c16'),
+            # R source, renamed to scripts/runner.sh
+            'scripts/run.sh': RefInfo(
+                path='scripts/run.sh', size=28,
+                sha1='e0cb6eaf13a42970a3d71a53fe36ac851fa09e95'),
+            # C source, copied by tools/run.sh
+            'tools/deploy.sh': RefInfo(
+                path='tools/deploy.sh', size=31,
+                sha1='2690963383249907ec8304c2f09e5d0a5d86f24d'),
+            # M (patch) source
+            'tools/tool.sh': RefInfo(
+                path='tools/tool.sh', size=29,
+                sha1='c3e8889ba5dbcf9068862da9336f09491c2ab027'),
+        }
