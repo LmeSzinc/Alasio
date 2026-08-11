@@ -265,8 +265,8 @@ class TestPackDiffCopied:
         assert diff.diff_info['a3.txt'].source_path == 'a2.txt'
         assert diff.ref_paths == set()
 
-    def test_crlf_source_not_copied(self):
-        """A CRLF old file cannot be a copy source, the new file is added."""
+    def test_crlf_source_copied(self):
+        """A CRLF old file can be a copy source, the copy keeps its own eol."""
         files = {'keep.txt': b'copy me\n', 'copy.txt': b'copy me\n'}
         eols = {'keep.txt': 1, 'copy.txt': 1}
         diff = PackDiff(
@@ -275,18 +275,23 @@ class TestPackDiffCopied:
         )
         info = diff.diff_info['copy.txt']
         assert info.edit == 0
-        assert info.source_path == ''
-        assert info.data_size > 0
+        assert info.source_path == 'keep.txt'
+        # only the content matters, the copy keeps its own eol
+        assert info.eol == 1
+        assert 'keep.txt' in diff.ref_paths
 
-    def test_755_source_not_copied(self):
-        """A 755 old file cannot be a copy source, the new file is added."""
+    def test_755_source_copied(self):
+        """A 755 old file can be a copy source, the copy keeps its own mode."""
         files = {'keep.sh': b'#!/bin/sh\n', 'copy.sh': b'#!/bin/sh\n'}
         modes = {'keep.sh': 1, 'copy.sh': 1}
         diff = PackDiff(
             MockDecodeBase.from_data({'keep.sh': b'#!/bin/sh\n'}, modes=modes),
             MockDecodeBase.from_data(files, modes=modes),
         )
-        assert diff.diff_info['copy.sh'].source_path == ''
+        info = diff.diff_info['copy.sh']
+        assert info.edit == 0
+        assert info.source_path == 'keep.sh'
+        assert info.mode == 1
 
     def test_modified_to_existing_is_copied(self):
         """A file modified to match an unchanged old file becomes a C record."""

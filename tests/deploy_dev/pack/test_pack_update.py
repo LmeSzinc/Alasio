@@ -121,12 +121,19 @@ def apply_update(update_pack, old_pack, old_tree):
             changes[path] = None
             continue
         if info.edit == 0 and info.source_lookback:
-            # copied, content of the source (an old file or an earlier new file)
+            # copied: the source is an unchanged old file or an earlier
+            # new file, the content is checked out with the own eol
             content = changes.get(info.source_path)
             if content is None:
                 # the source is an unchanged old file, verify it first
                 content = read_blob(info.source_path)
-            changes[path] = content
+            else:
+                # the earlier new file content is in the working tree
+                # form, normalize it back to the LF blob first
+                source_info = decoder.fileinfo[info.source_path]
+                if source_info.eol == 1:
+                    content = content.replace(b'\r\n', b'\n')
+            changes[path] = PackDecodeBase.apply_eol(content, info.eol)
             continue
         if info.edit == 3 and info.data_size == 0:
             # pure rename, move the source file
@@ -509,28 +516,30 @@ class TestPackUpdateCopied:
         assert updater.refinfo == {}
         assert_roundtrip(old, new)
 
-    def test_crlf_file_not_copied(self):
-        """A CRLF old file cannot be a copy source, the new file is added."""
+    def test_crlf_source_copied(self):
+        """A CRLF old file can be a copy source, the copy keeps its own eol."""
         attr = b'*.txt text eol=crlf\n'
         old = {'.gitattributes': attr, 'keep.txt': b'copy me\n'}
         new = {'.gitattributes': attr, 'keep.txt': b'copy me\n', 'copy.txt': b'copy me\n'}
         _, updater, *_ = build_update(old, new)
         info = updater.fileinfo['copy.txt']
         assert info.edit == 0
-        assert info.source_lookback == 0
-        assert info.data_size > 0
-        assert updater.refinfo == {}
+        assert info.source_lookback > 0
+        # the copy keeps its own eol, only the content matches
+        assert info.eol == 1
+        assert 'keep.txt' in updater.refinfo
         assert_roundtrip(old, new)
 
-    def test_755_file_not_copied(self):
-        """A 755 old file cannot be a copy source, the new file is added."""
+    def test_755_source_copied(self):
+        """A 755 old file can be a copy source, the copy keeps its own mode."""
         old = {'keep.sh': (b'#!/bin/sh\n', 755)}
         new = {'keep.sh': (b'#!/bin/sh\n', 755), 'copy.sh': (b'#!/bin/sh\n', 755)}
         _, updater, *_ = build_update(old, new)
         info = updater.fileinfo['copy.sh']
         assert info.edit == 0
-        assert info.source_lookback == 0
-        assert updater.refinfo == {}
+        assert info.source_lookback > 0
+        assert info.mode == 1
+        assert 'keep.sh' in updater.refinfo
         assert_roundtrip(old, new)
 
     def test_copy_from_modified_source(self):

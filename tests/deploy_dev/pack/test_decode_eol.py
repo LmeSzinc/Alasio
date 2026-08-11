@@ -162,7 +162,7 @@ class TestEolCopiedFile:
         assert bytes(decoder.catfile(files['b.bat'])) == b'same line\r\n'
 
     def test_eol_value_of_copied_file(self):
-        """Copied files restore eol from the source record."""
+        """Copied files carry their own eol, decoded from the pack."""
         repo = MockGitRepo()
         repo.register_file(COMMIT, 'a.bat', b'same line\n')
         repo.register_file(COMMIT, 'b.bat', b'same line\r\n')
@@ -172,8 +172,8 @@ class TestEolCopiedFile:
         files = decoder.fileinfo
         source = files['a.bat']
         copied = files['b.bat']
-        # the real rule (builtin *.bat eol=crlf) lives on the source file,
-        # the copied file restores it through the source record
+        # the real rule (builtin *.bat eol=crlf) applies to both files,
+        # the copied file keeps its own eol from the pack
         assert source.eol == 1
         assert copied.eol == 1
         # working tree content comes from the source through the chain

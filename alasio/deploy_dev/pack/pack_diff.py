@@ -145,18 +145,11 @@ class PackDiff:
             path for path in real_old.keys() & real_new.keys()
             if self._is_unchanged(real_old[path], real_new[path])
         }
-        # {sha1: (source path, restored eol, restored mode)} for copy detection
+        # {sha1: source path} for copy detection, only the content matters
         source_map = {}
         for info in self.old.idx_info:
-            if (
-                    info.path in unchanged
-                    and info.edit != 2
-                    and info.sha1
-                    and info.eol == 0
-                    and info.mode == 0
-            ):
-                # the restored meta of a refinfo copy is eol=0 mode=0
-                source_map.setdefault(info.sha1, (info.path, 0, 0))
+            if info.path in unchanged and info.edit != 2 and info.sha1:
+                source_map.setdefault(info.sha1, info.path)
 
         out = {}
 
@@ -187,8 +180,8 @@ class PackDiff:
                     if record.sha1:
                         # the downgraded record is an A record, it joins
                         # the copy detection like other added records
-                        eol, mode = self._try_copy(record, source_map)
-                        source_map[record.sha1] = (path, eol, mode)
+                        self._try_copy(record, source_map)
+                        source_map[record.sha1] = path
                 out[path] = record
 
         # 2. deleted: files only in the old version become D records
@@ -207,8 +200,8 @@ class PackDiff:
             record = UpdateInfo(path=path, edit=0, eol=new_info.eol, mode=new_info.mode)
             self._load_added(record, new_info)
             if record.sha1:
-                eol, mode = self._try_copy(record, source_map)
-                source_map[record.sha1] = (path, eol, mode)
+                self._try_copy(record, source_map)
+                source_map[record.sha1] = path
             out[path] = record
 
         # 4. edit: modified records, converted to copies when the new content already exists
@@ -226,8 +219,8 @@ class PackDiff:
                 # plain data wins, the old file is not referenced
                 record.source_path = ''
             if record.sha1:
-                eol, mode = self._try_copy(record, source_map)
-                source_map[record.sha1] = (path, eol, mode)
+                self._try_copy(record, source_map)
+                source_map[record.sha1] = path
             out[path] = record
         return out
 
@@ -430,39 +423,24 @@ class PackDiff:
         existing file, or a modified file whose new content matches
         another modified file.
 
-        The converted record keeps its own info (size / eol / mode /
-        algo / data): the encoder ignores the info of copied records
-        and the decoder restores it from the source record. The source
-        is limited to LF files (eol=0) with mode 0: the decoder
-        restores the meta of a copied record from its source record,
-        and a refinfo entry only carries size and sha1, so a copy from
-        a CRLF or 755 old file cannot be represented correctly.
-        Records in the new fileinfo keep their own meta, so copies
-        between new files only require equal eol and mode.
+        Only the content matters: the converted record keeps its own
+        eol / mode, encoded in the pack, so a copy across eol or mode
+        differences is exact. The size / sha1 / data attributes are
+        restored from the source record by the decoder.
 
         Args:
             info (UpdateInfo): Record to convert
-            source_map (dict[str, tuple]): {sha1: (source path,
-                restored eol, restored mode)}
-
-        Returns:
-            tuple[int, int]: (eol, mode), the values the decoder
-                restores for the record, the source values when the
-                record is converted to a copy
+            source_map (dict[str, str]): {sha1: source path}
         """
         if not info.sha1:
             # empty files are not considered as copies
-            return info.eol, info.mode
-        source = source_map.get(info.sha1)
-        if source is None:
-            return info.eol, info.mode
-        source_path, source_eol, source_mode = source
-        if info.eol != source_eol or info.mode != source_mode:
-            return info.eol, info.mode
+            return
+        source_path = source_map.get(info.sha1)
+        if source_path is None:
+            return
         # copied, the data is not stored in the pack
         info.edit = 0
         info.source_path = source_path
-        return source_eol, source_mode
 
     @staticmethod
     def _new_deleted(path):

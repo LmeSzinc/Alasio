@@ -279,10 +279,9 @@ class PackFull(PackEncodeBase):
                 source_index = dict_sha1_to_index[sha]
                 file.edit = 0
                 file.source_lookback = index - source_index
-                # reuse data info of source file
+                # reuse data info of source file, eol / mode stay the
+                # values of this file, encoded in the pack
                 file.size = 0
-                file.mode = 0
-                file.eol = 0
                 file.algo = 0
                 file.data = b''
                 file.data_size = 0

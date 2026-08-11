@@ -189,9 +189,13 @@ class PackEncodeBase:
         list_data_size = deque()
         for file in self._iterfile_with_content(iter_ref=True):
             list_size.append(file.size)
-        for file in self._iterfile_with_content(iter_file=True):
+        # eol / mode of all non-D fileinfo, C (copied) records carry their own
+        for file in self._iterfile(iter_file=True):
+            if file.edit == 2:
+                continue
             list_eol.append(file.eol)
             list_mode.append(file.mode)
+        for file in self._iterfile_with_content(iter_file=True):
             list_algo.append(file.algo)
             list_size.append(file.size)
             # skip data_size for raw files

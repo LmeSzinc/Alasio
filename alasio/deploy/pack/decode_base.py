@@ -282,17 +282,20 @@ class PackDecodeBase:
             else:
                 source_lookbacks.append(next(it_lookback))
 
-        # file meta (fileinfo, excluded D and C)
+        # file meta: eol / mode of all non-D fileinfo, C (copied) records
+        # carry their own; algo / size of non-D non-C fileinfo, C records
+        # restore the rest from the source record
+        non_d = sum(1 for edit in edits if edit != 2)
         non_dc = sum(
             1 for edit, lookback in zip(edits, source_lookbacks)
             if not (edit == 2 or (edit == 0 and lookback))
         )
         eols, read = _decode('index data: eol', decode_bit2, data[offset:])
         offset += read
-        _check_length('index data: eol', len(eols), non_dc)
+        _check_length('index data: eol', len(eols), non_d)
         modes, read = _decode('index data: mode', decode_bit2, data[offset:])
         offset += read
-        _check_length('index data: mode', len(modes), non_dc)
+        _check_length('index data: mode', len(modes), non_d)
         algos, read = _decode('index data: algo', decode_bit2, data[offset:])
         offset += read
         _check_length('index data: algo', len(algos), non_dc)
@@ -339,20 +342,19 @@ class PackDecodeBase:
                     )
                 info.source_path = info_list[source_index].path
 
-        # meta of non-D non-C fileinfo
-        non_dc = [
-            info for info in info_list[len_refinfo:]
-            if info.edit != 2 and not (info.edit == 0 and info.source_lookback)
-        ]
+        # meta of non-D fileinfo, C (copied) records carry their own eol / mode
+        non_d = [info for info in info_list[len_refinfo:] if info.edit != 2]
+        # C records restore the remaining attributes from the source record
+        non_dc = [info for info in non_d if not (info.edit == 0 and info.source_lookback)]
         # check the attribute list lengths before assigning
-        _check_length('index data: eol', len(non_dc), len(eols))
-        _check_length('index data: mode', len(non_dc), len(modes))
+        _check_length('index data: eol', len(non_d), len(eols))
+        _check_length('index data: mode', len(non_d), len(modes))
         _check_length('index data: algo', len(non_dc), len(algos))
         _check_length('index data: size', len(sizes), len_refinfo + len(non_dc))
 
-        for info, eol in zip(non_dc, eols):
+        for info, eol in zip(non_d, eols):
             info.eol = eol
-        for info, mode in zip(non_dc, modes):
+        for info, mode in zip(non_d, modes):
             info.mode = mode
         for info, algo in zip(non_dc, algos):
             info.algo = algo
@@ -397,13 +399,12 @@ class PackDecodeBase:
                 data_offset += info.data_size
 
         # copied: no data in pack, restore the attributes omitted by the
-        # encoder from the source record (identical content)
+        # encoder from the source record (identical content); eol / mode
+        # keep the values decoded from the pack
         for i, info in enumerate(info_list[len_refinfo:], start=len_refinfo):
             if info.edit == 0 and info.source_lookback:
                 source = info_list[i - info.source_lookback]
                 info.size = source.size
-                info.eol = source.eol
-                info.mode = source.mode
                 info.algo = source.algo
                 info.data_size = source.data_size
                 info.data_start = source.data_start
