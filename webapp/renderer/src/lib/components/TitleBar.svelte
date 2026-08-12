@@ -1,70 +1,23 @@
 <script lang="ts">
-  import { Minus, Square, X, Minimize2, Copy } from "@lucide/svelte";
-  import CloseDialog from "./CloseDialog.svelte";
+  import WindowControls from "./WindowControls.svelte";
 
-  let isMaximized = $state(false);
-  let showCloseDialog = $state(false);
-
-  function handleHide() {
-    window.electronAPI.hideWindow();
-  }
-
-  function handleMinimize() {
-    window.electronAPI.minimizeWindow();
-  }
-
-  function handleMaximize() {
-    isMaximized = !isMaximized;
-    window.electronAPI.maximizeWindow();
-  }
-
-  function handleClose() {
-    showCloseDialog = true;
-  }
+  let { floating = false } = $props();
 </script>
 
-<!-- Keep h-12 aligned with AppHeader bottom in the embedded web app -->
-<div class="flex h-12 select-none items-center bg-background border-b border-border z-100">
-  <div class="flex-1 px-4 cursor-move" style="-webkit-app-region: drag">
-    <span class="text-sm font-semibold">Alasio</span>
+{#if floating}
+  <!-- Floating mode: the embedded web app provides its own header,
+       only the transparent drag strip and window controls are overlaid. -->
+  <div class="fixed top-0 left-0 right-0 z-100 flex h-12 select-none items-center">
+    <div class="flex-1 self-stretch" style="-webkit-app-region: drag"></div>
+    <WindowControls />
   </div>
-
-  <div class="flex" style="-webkit-app-region: no-drag">
-    <button
-      onclick={handleHide}
-      class="flex h-12 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
-      title="Hide to tray"
-    >
-      <Minimize2 size={16} />
-    </button>
-    <button
-      onclick={handleMinimize}
-      class="flex h-12 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
-      title="Minimize"
-    >
-      <Minus size={16} />
-    </button>
-    <button
-      onclick={handleMaximize}
-      class="flex h-12 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
-      title="Maximize"
-    >
-      {#if isMaximized}
-        <Copy size={14} />
-      {:else}
-        <Square size={14} />
-      {/if}
-    </button>
-    <button
-      onclick={handleClose}
-      class="flex h-12 w-12 items-center justify-center hover:bg-destructive hover:text-destructive-foreground transition-colors"
-      title="Close"
-    >
-      <X size={16} />
-    </button>
+{:else}
+  <!-- Keep h-12 aligned with AppHeader bottom in the embedded web app -->
+  <div class="flex h-12 select-none items-center bg-background border-b border-border z-100">
+    <!-- self-stretch makes the drag region span the full 48px title bar height -->
+    <div class="flex flex-1 items-center self-stretch px-4" style="-webkit-app-region: drag">
+      <span class="text-sm font-semibold">Alasio</span>
+    </div>
+    <WindowControls />
   </div>
-</div>
-
-{#if showCloseDialog}
-  <CloseDialog bind:show={showCloseDialog} />
 {/if}
