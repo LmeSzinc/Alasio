@@ -252,7 +252,9 @@ class JobBase:
         A 644 record (mode == 0) accepts any current mode without
         execute bits, e.g. 666/646/664, a 755 record (mode == 1)
         accepts any with execute bits, e.g. 777/757/775. Any other
-        mode is a mismatch.
+        mode is a mismatch. On Windows the mode always matches:
+        executability is determined by the file extension, the exec
+        bits cannot be set.
 
         Args:
             info (IdxInfo): Record to check against
@@ -261,6 +263,9 @@ class JobBase:
         Returns:
             bool: True if the file mode matches the record
         """
+        if not env.POSIX:
+            # Windows cannot set the exec bits, the mode always matches
+            return True
         current_exec = current.mode & 0o111
         if info.mode == 1:
             return current_exec == 0o111

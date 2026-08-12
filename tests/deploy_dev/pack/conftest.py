@@ -36,6 +36,19 @@ def app_folder(fs, monkeypatch):
     monkeypatch.setattr(env, 'PROJECT_ROOT', PathStr.new(fs.root_dir.path))
 
 
+@pytest.fixture(autouse=True)
+def _posix_exec_bits(monkeypatch):
+    """
+    Run the mode matching in the POSIX branch on every host.
+
+    The fake filesystem simulates the POSIX file modes, so the mode
+    behavior of the tests is POSIX; the Windows branch (the exec
+    bits are not applicable) is covered by the tests that override
+    env.POSIX.
+    """
+    monkeypatch.setattr(env, 'POSIX', True)
+
+
 # {path: (content, mode)}
 WEBSITE_FILES = {
     '.gitattributes': (

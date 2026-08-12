@@ -162,7 +162,7 @@ class UpdateJob(JobBase):
         if not decoder.refinfo:
             raise ValueError('UpdateJob requires an update pack, got a full pack')
         self._version = decoder.version
-        self._file_index = {path: index for index, (path, _) in enumerate(decoder.fileinfo.items())}
+        self._file_index = {path: index for index, path in enumerate(decoder.fileinfo)}
         self.error = []
         self._index_tmp = ''
 

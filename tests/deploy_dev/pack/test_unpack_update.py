@@ -360,7 +360,6 @@ class TestUpdateRoundtrip:
         assert not os.path.exists(env.PROJECT_ROOT / 'scripts/run.sh')
         assert not os.path.exists(env.PROJECT_ROOT / 'scripts/old_tool.py')
 
-    @pytest.mark.skipif(os.name == 'nt', reason='file mode is meaningless on Windows')
     def test_mode_change_applied(self, app_folder):
         """A mode change (755 -> 644) is applied to a file whose
         content is unchanged, without rewriting the content."""

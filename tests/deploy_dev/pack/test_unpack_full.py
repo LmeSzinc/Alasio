@@ -476,9 +476,12 @@ class TestFailure:
         assert DeployJob.get_unfinished_job() is not None
 
 
-@pytest.mark.skipif(os.name == 'nt', reason='file mode is meaningless on Windows')
 class TestExecutableMode:
-    """Executable bit handling."""
+    """Executable bit handling.
+
+    The fake filesystem simulates the POSIX file modes, so the tests
+    run on every platform.
+    """
 
     def test_mode_755_is_executable(self, app_folder):
         """Files with mode 755 are executable after replace()."""
@@ -549,6 +552,13 @@ class TestFileMode:
         result = JobBase._matches(info, CurrentFile(exist=True, data=data, mode=0o644))
         assert result.match
         assert result.mode_matched
+
+    def test_mode_ignored_on_windows(self, app_folder, monkeypatch):
+        """Windows determines executability by the file extension, the
+        exec bits cannot be set, the mode always matches."""
+        monkeypatch.setattr(env, 'POSIX', False)
+        assert JobBase._mode_matches(self._info('backend/config.py'), self._current(0o777))
+        assert JobBase._mode_matches(self._info('scripts/deploy.sh'), self._current(0o644))
 
     @pytest.mark.parametrize('current', [0o644, 0o666, 0o646, 0o664])
     def test_644_record_accepts_no_exec(self, app_folder, current):

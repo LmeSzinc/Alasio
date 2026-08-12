@@ -163,7 +163,6 @@ class TestValidateFiles:
         assert error.tmp == ''
         assert error.mode == 0o644
 
-    @pytest.mark.skipif(os.name == 'nt', reason='file mode is meaningless on Windows')
     def test_mode_755_matches(self, app_folder, fs):
         """A 755 record with execute bits passes."""
         setup_app(fs)
@@ -279,9 +278,8 @@ class TestValidateEolFix:
         job = ResetJob(WEBSITE_SERVER)
         assert job.run()
         assert file_read_bytes(target) == WEBSITE_FILES['scripts/deploy.sh'][0]
-        if os.name != 'nt':
-            # pyfakefs does not apply os.chmod on Windows
-            assert os.stat(target).st_mode & 0o111 == 0o111
+        # the fake filesystem simulates the POSIX file modes
+        assert os.stat(target).st_mode & 0o111 == 0o111
 
 
 class TestDownloadIndex:
@@ -425,7 +423,6 @@ class TestReplace:
         job.replace()
         assert not os.path.exists(stale)
 
-    @pytest.mark.skipif(os.name == 'nt', reason='file mode is meaningless on Windows')
     def test_replace_mode(self, app_folder, fs):
         """A downloaded 755 file is executable after replace."""
         setup_app(fs)
