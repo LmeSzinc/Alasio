@@ -291,25 +291,3 @@ class ResetJob(JobBase):
         content = decoder.decode_content(info, data)
         atomic_write(tmp, content)
         return tmp
-
-    @staticmethod
-    def _mode_matches(info, current):
-        """
-        Check if the file mode of a current file matches a record.
-
-        A 644 record (mode == 0) accepts any current mode without
-        execute bits, e.g. 666/646/664, a 755 record (mode == 1)
-        accepts any with execute bits, e.g. 777/757/775. Any other
-        mode is a mismatch.
-
-        Args:
-            info (IdxInfo): Record to check against
-            current (CurrentFile): Current file read from the path
-
-        Returns:
-            bool: True if the file mode matches the record
-        """
-        current_exec = current.mode & 0o111
-        if info.mode == 1:
-            return current_exec == 0o111
-        return current_exec == 0

@@ -488,6 +488,34 @@ class TestExecutableMode:
         run_job()
         assert not os.stat(env.PROJECT_ROOT / 'backend/main.py').st_mode & 0o111
 
+    def test_mode_only_fixed(self, app_folder):
+        """A file with the right content but the wrong mode is fixed
+        without rewriting the content."""
+        # backend/config.py is a 644 record, the local file is 755
+        content = WEBSITE_FILES['backend/config.py'][0]
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        os.makedirs(target.uppath(), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(content)
+        os.chmod(target, 0o755)
+        run_job()
+        assert not os.stat(target).st_mode & 0o111
+        assert file_read_bytes(target) == content
+
+    def test_mode_755_restored(self, app_folder):
+        """A 755 record whose file lost the execute bit is fixed
+        without rewriting the content."""
+        # scripts/deploy.sh is a 755 record, the local file is 644
+        content = WEBSITE_FILES['scripts/deploy.sh'][0]
+        target = env.PROJECT_ROOT / 'scripts/deploy.sh'
+        os.makedirs(target.uppath(), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(content)
+        os.chmod(target, 0o644)
+        run_job()
+        assert os.stat(target).st_mode & 0o111
+        assert file_read_bytes(target) == content
+
 
 class TestFileMode:
     """File mode adjustment rules: the execute bits must match the record.

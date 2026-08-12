@@ -120,10 +120,18 @@ class UnpackJob(JobBase):
                 continue
             current = self._read_current(target)
             result = self._matches(info, current)
-            if result.match:
-                # target file exists and passes the size + sha1 check
-                continue
             tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
+            if result.match:
+                # the target file exists and passes the size + sha1 check
+                if self._mode_matches(info, current):
+                    continue
+                # only the mode differs, the content is verified:
+                # write the current content to the tmp file, replace()
+                # fixes the mode
+                if not self._matches(info, self._read_current(tmp)).match:
+                    atomic_write(tmp, current.data)
+                pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+                continue
             if result.match_data:
                 # only the EOL differs, write the converted content
                 # to the tmp file without decompressing

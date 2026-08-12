@@ -359,6 +359,18 @@ class TestUpdateRoundtrip:
         assert not os.path.exists(env.PROJECT_ROOT / 'scripts/run.sh')
         assert not os.path.exists(env.PROJECT_ROOT / 'scripts/old_tool.py')
 
+    @pytest.mark.skipif(os.name == 'nt', reason='file mode is meaningless on Windows')
+    def test_mode_change_applied(self, app_folder):
+        """A mode change (755 -> 644) is applied to a file whose
+        content is unchanged, without rewriting the content."""
+        # tools/tool.sh is 755 in the old version, 644 in the new one
+        setup_app()
+        target = env.PROJECT_ROOT / 'tools/tool.sh'
+        assert os.stat(target).st_mode & 0o111
+        run_update()
+        assert not os.stat(target).st_mode & 0o111
+        assert file_read_bytes(target) == NEW['tools/tool.sh'][0]
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  index pack update
