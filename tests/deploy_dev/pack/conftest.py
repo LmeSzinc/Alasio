@@ -261,6 +261,74 @@ def damage_lines(lines, ratio, seed=0):
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  full upgrade scenario
+# ════════════════════════════════════════════════════════════════════════════
+
+# A real upgrade between two full packs, shared by TestPackDiffFullScenario
+# (the diff side) and test_unpack_update (the update job side). Covers every
+# diff type: M (patch / plain / eol-only / mode-only), A, C (from an
+# unchanged old file, from an earlier new file, cross eol / mode, copy
+# chains), D, R, RM, empty files, binary files and CRLF content changes.
+FULL_SCENARIO_OLD = {
+    '.gitattributes':
+        b'*.py text eol=lf\n*.txt text eol=crlf\n*.bat text eol=crlf\n*.sh text eol=lf\n*.png binary\n',
+    'backend/__init__.py': b'',
+    'backend/main.py':
+        b'import uvicorn\n\nVERSION = 1\n\nif __name__ == "__main__":\n    uvicorn.run("app:app", port=8000)\n',
+    'backend/tiny.py': b'x',
+    'backend/config.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
+    'backend/utils.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
+    'backend/legacy.py': b'def legacy():\n    return 42\n',
+    'docs/guide.txt': b'# Guide\n\nstep 1\nstep 2\nstep 3\n',
+    'docs/notes.txt': b'old note\r\n',
+    'docs/readme.md': b'# Website\n',
+    'frontend/App.svelte': b'<script>let count = 0</script>\n<button>{count}</button>\n',
+    'frontend/Button.svelte': b'<script>let count = 0</script>\n<button>{count}</button>\n',
+    'scripts/run.sh': b'#!/bin/sh\nset -e\necho "run"\n',
+    'scripts/old_tool.py': b'def tool():\n    return 1\n' * 30,
+    'scripts/run.bat': b'@echo off\npython -m website\n',
+    'tools/tool.sh': (b'#!/bin/sh\nset -e\necho "tool"\n', 755),
+    'tools/deploy.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
+    'data/blob.png': bytes(range(256)) * 100,
+    'data/cache.pkl': random_bytes(6400, 42),
+}
+
+FULL_SCENARIO_NEW = {
+    '.gitattributes':
+        b'*.py text eol=lf\n*.txt text eol=crlf\n*.bat text eol=lf\n*.sh text eol=lf\n*.png binary\n',
+    'backend/__init__.py': b'',
+    'backend/main.py':
+        b'import uvicorn\n\nVERSION = 2\n\nif __name__ == "__main__":\n    uvicorn.run("app:app", port=9000)\n',
+    'backend/tiny.py': b'y',
+    'backend/config.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
+    'backend/utils.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
+    'backend/copy.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
+    'backend/empty.txt': b'',
+    'backend/a1.py': b'def shared():\n    return 0\n' * 20,
+    'backend/a2.py': b'def shared():\n    return 0\n' * 20,
+    'backend/a3.py': b'def shared():\n    return 0\n' * 20,
+    'docs/guide.txt': b'# Guide\n\nstep 1\nstep 2\nstep 3\n',
+    'docs/guide2.txt': b'# Guide\n\nstep 1\nstep 2\nstep 3\n',
+    'docs/notes.txt': b'updated note\r\n',
+    'docs/readme.md': b'# Website\n',
+    # copied from the unchanged LF readme.md, keeps its own eol (crlf)
+    'docs/readme_copy.txt': b'# Website\n',
+    # copied from the earlier new file, a copy chain
+    'docs/readme_copy2.txt': b'# Website\n',
+    'frontend/App.svelte': b'<script>let count = 1</script>\n<button>new</button>\n',
+    'frontend/App2.svelte': b'<script>let count = 1</script>\n<button>new</button>\n',
+    'frontend/Button.svelte': b'<script>let count = 0</script>\n<button>{count}</button>\n',
+    'scripts/runner.sh': b'#!/bin/sh\nset -e\necho "run"\n',
+    'scripts/new_tool.py': b'def tool():\n    return 2\n' * 30,
+    'scripts/run.bat': b'@echo off\npython -m website\n',
+    'tools/tool.sh': (b'#!/bin/sh\nset -e\necho "tool"\n', 644),
+    'tools/deploy.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
+    'tools/run.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
+    'data/blob.png': bytes(range(256)) * 100,
+    'data/new_blob.bin': random_bytes(12800, 43),
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 #  mock decoder
 # ════════════════════════════════════════════════════════════════════════════
 

@@ -2,11 +2,13 @@
 Tests for UpdateJob: update pack unpack, interruptible and resumable,
 with source repair from the server like ResetJob.
 
-The update pack is built with PackUpdate from two full packs (built
-with PackFull + MockGitRepo), the old pack is unpacked into the fake
-filesystem with UnpackJob, then the update is applied with UpdateJob
-and the result is compared to the new version (round-trip). The
-server is an in-memory MockServerFile serving the old and new packs.
+The update pack is built with PackUpdate from the shared
+FULL_SCENARIO_OLD / FULL_SCENARIO_NEW of conftest (the same versions
+as TestPackDiffFullScenario on the diff side), the old pack is
+unpacked into the fake filesystem with UnpackJob, then the update is
+applied with UpdateJob and the result is compared to the new version
+(round-trip). The server is an in-memory MockServerFile serving the
+old and new packs.
 
 The packs are module level singletons, built before the fake
 filesystem is active: MockGitRepo reads the real .gitattributes file,
@@ -15,7 +17,7 @@ which the fake filesystem does not provide.
 import os
 
 import pytest
-from conftest import MockServerFile, code_lines, damage_lines
+from conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job import DeployJob
@@ -34,51 +36,13 @@ from alasio.testing.filesystem import fs  # noqa: F401
 #  shared versions
 # ════════════════════════════════════════════════════════════════════════════
 
-# A realistic website upgrade covering every record type of the update
-# pack: A (added), C (copied), M (modified), D (deleted), R (renamed),
-# RM (renamed + modified), eol 0 / 1 / 2, mode 644 / 755, empty files
-# and a copy chain of the new files.
-OLD = {
-    '.gitattributes': b'*.py text eol=lf\n*.txt text eol=crlf\n*.sh text eol=lf\n',
-    'README.md': b'# Old Project\n',
-    'src/main.py': b'def main():\n    print("old")\n',
-    'src/patchme.py': b''.join(code_lines(200)),
-    'src/utils.py': b'def util():\n    return 1\n',
-    'src/old_name.py': b'def old_name():\n    return "old"\n',
-    'src/deleted.py': b''.join(code_lines(400)),
-    'scripts/run.sh': (b'#!/bin/sh\necho run\n', 755),
-    'scripts/run.bat': b'@echo off\r\necho run\r\n',
-    'docs/notes.txt': b'old note\r\n',
-    'config.json': b'{"version": 1}\n',
-    'data/blob.bin': bytes(range(256)) * 20,
-    'pkg/__init__.py': b'',
-    'pkg/mod.py': b'VALUE = 1\n',
-    'tools/tool.sh': (b'#!/bin/sh\necho tool\n', 644),
-}
-
-NEW = {
-    '.gitattributes': b'*.py text eol=lf\n*.txt text eol=crlf\n*.sh text eol=lf\n',
-    'README.md': b'# Old Project\n',
-    'src/main.py': b'def main():\n    print("new")\n',
-    'src/patchme.py': damage_lines(code_lines(200), 0.02, seed=7),
-    'src/utils.py': b'def util():\n    return 1\n',
-    'src/new_name.py': b'def old_name():\n    return "old"\n',
-    'src/renamed_modified.py': damage_lines(code_lines(400), 0.05, seed=3),
-    'scripts/run.sh': (b'#!/bin/sh\necho run\n', 755),
-    'scripts/run.bat': b'@echo off\r\necho run\r\n',
-    'docs/notes.txt': b'updated note\r\n',
-    'config.json': b'{"version": 2}\n',
-    'data/blob.bin': bytes(range(256)) * 20,
-    'data/new_blob.bin': bytes(range(128)) * 40,
-    'pkg/mod.py': b'VALUE = 2\n',
-    'src/added.py': b'def new_func():\n    return 3\n',
-    'src/empty.py': b'',
-    # copied from the unchanged README.md (eol 0 source, eol 1 copy)
-    'docs/readme_copy.txt': b'# Old Project\n',
-    # copied from the earlier new file, a copy chain
-    'docs/readme_copy2.txt': b'# Old Project\n',
-    'tools/tool.sh': (b'#!/bin/sh\necho tool\n', 755),
-}
+# The shared full upgrade scenario of conftest, covering every record
+# type of the update pack: M (patch / plain / eol-only / mode-only),
+# A, C (from an unchanged old file, from an earlier new file, cross
+# eol / mode, copy chains), D, R, RM, empty files, binary files and
+# CRLF content changes.
+OLD = FULL_SCENARIO_OLD
+NEW = FULL_SCENARIO_NEW
 
 # ════════════════════════════════════════════════════════════════════════════
 #  helpers
@@ -292,12 +256,12 @@ class TestUnpack:
         pending = {item.info.path: item for item in job.pending}
         assert all(isinstance(item.info, IdxInfo) for item in job.pending)
         # deleted marker record, its target is removed in replace()
-        deleted = pending['pkg/__init__.py']
+        deleted = pending['backend/legacy.py']
         assert deleted.info.edit == 2
         assert deleted.tmp == ''
         # the R / RM source files are moved, their deletion is scheduled
-        assert pending['src/old_name.py'].info.edit == 2
-        assert pending['src/deleted.py'].info.edit == 2
+        assert pending['scripts/run.sh'].info.edit == 2
+        assert pending['scripts/old_tool.py'].info.edit == 2
         # the index pack is updated like a normal file
         index_pack = pending['.pack/index.pack']
         assert index_pack.info.edit == 1
@@ -305,7 +269,7 @@ class TestUnpack:
         assert os.path.exists(index_pack.tmp)
         # a normal record carries the file info, the tmp file and the
         # mode after replace(), python writes 666 by default
-        added = pending['src/added.py']
+        added = pending['backend/a1.py']
         assert added.info.edit == 0
         assert added.tmp
         assert added.current_mode == 0o666
@@ -330,15 +294,15 @@ class TestUpdateRoundtrip:
         assert edits == {0, 1, 2, 3}
         fileinfo = decoder.fileinfo
         # M with a zstd patch from the old file
-        assert fileinfo['src/patchme.py'].algo == 2
-        assert fileinfo['src/patchme.py'].source_lookback > 0
+        assert fileinfo['backend/main.py'].algo == 2
+        assert fileinfo['backend/main.py'].source_lookback > 0
         # R (pure rename) and RM (renamed + modified)
-        assert fileinfo['src/new_name.py'].edit == 3
-        assert fileinfo['src/new_name.py'].data_size == 0
-        assert fileinfo['src/renamed_modified.py'].edit == 3
-        assert fileinfo['src/renamed_modified.py'].source_path == 'src/deleted.py'
-        # C records: from an unchanged old file, and a copy chain
-        assert fileinfo['docs/readme_copy.txt'].source_path == 'README.md'
+        assert fileinfo['scripts/runner.sh'].edit == 3
+        assert fileinfo['scripts/runner.sh'].data_size == 0
+        assert fileinfo['scripts/new_tool.py'].edit == 3
+        assert fileinfo['scripts/new_tool.py'].source_path == 'scripts/old_tool.py'
+        # C records: from an unchanged old file (cross eol), and a copy chain
+        assert fileinfo['docs/readme_copy.txt'].source_path == 'docs/readme.md'
         assert fileinfo['docs/readme_copy2.txt'].source_path == 'docs/readme_copy.txt'
         # the index pack is updated like a normal file, the old index
         # is recorded in the refinfo
@@ -369,31 +333,31 @@ class TestUpdateRoundtrip:
         notes = env.PROJECT_ROOT / 'docs/notes.txt'
         with open(notes, 'wb') as f:
             f.write(b'updated note\r\n')
-        added = env.PROJECT_ROOT / 'src/added.py'
+        added = env.PROJECT_ROOT / 'backend/a1.py'
         with open(added, 'wb') as f:
-            f.write(NEW['src/added.py'])
+            f.write(NEW['backend/a1.py'])
         run_update()
         assert file_read_bytes(notes) == b'updated note\r\n'
-        assert file_read_bytes(added) == NEW['src/added.py']
+        assert file_read_bytes(added) == NEW['backend/a1.py']
 
     def test_empty_file(self, app_folder):
         """An empty added file is created as an empty file."""
         setup_app()
         run_update()
-        assert file_read_bytes(env.PROJECT_ROOT / 'src/empty.py') == b''
+        assert file_read_bytes(env.PROJECT_ROOT / 'backend/empty.txt') == b''
 
     def test_deleted_marker_removes_file(self, app_folder):
         """D (deleted) marker files must not exist after replace()."""
         setup_app()
         run_update()
-        assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
+        assert not os.path.exists(env.PROJECT_ROOT / 'backend/legacy.py')
 
     def test_renamed_source_removed(self, app_folder):
         """R / RM records move the source file, it must not exist."""
         setup_app()
         run_update()
-        assert not os.path.exists(env.PROJECT_ROOT / 'src/old_name.py')
-        assert not os.path.exists(env.PROJECT_ROOT / 'src/deleted.py')
+        assert not os.path.exists(env.PROJECT_ROOT / 'scripts/run.sh')
+        assert not os.path.exists(env.PROJECT_ROOT / 'scripts/old_tool.py')
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -483,22 +447,22 @@ class TestSourceDownload:
         """A missing old file of a C record: the copy is downloaded,
         the source file is left as-is."""
         setup_app()
-        os.remove(env.PROJECT_ROOT / 'README.md')
+        os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         job = UpdateJob(UPDATE, server=SERVER)
         assert job.run()
         assert job.error == []
         # the copies are downloaded from the new full pack, the source
         # is not repaired (it is checked by ResetJob)
-        assert not os.path.exists(env.PROJECT_ROOT / 'README.md')
-        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Old Project\r\n'
-        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy2.txt') == b'# Old Project\r\n'
+        assert not os.path.exists(env.PROJECT_ROOT / 'docs/readme.md')
+        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Website\r\n'
+        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy2.txt') == b'# Website\r\n'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_damaged_patch_source_downloaded(self, app_folder):
         """A wrong old file of an M record: the record is downloaded,
         its target path is the source path, the tree is complete."""
         setup_app()
-        with open(env.PROJECT_ROOT / 'src/patchme.py', 'wb') as f:
+        with open(env.PROJECT_ROOT / 'backend/main.py', 'wb') as f:
             f.write(b'corrupt content')
         run_update()
 
@@ -506,21 +470,21 @@ class TestSourceDownload:
         """A missing old file of an R record: the moved file is
         downloaded, the tree is complete."""
         setup_app()
-        os.remove(env.PROJECT_ROOT / 'src/old_name.py')
+        os.remove(env.PROJECT_ROOT / 'scripts/run.sh')
         run_update()
 
     def test_missing_rm_source_downloaded(self, app_folder):
         """A missing old file of an RM record: the moved file is
         downloaded, the tree is complete."""
         setup_app()
-        os.remove(env.PROJECT_ROOT / 'src/deleted.py')
+        os.remove(env.PROJECT_ROOT / 'scripts/old_tool.py')
         run_update()
 
     def test_eol_mismatch_source_fixed_without_download(self, app_folder, monkeypatch):
         """A source whose EOL differs is converted, no download happens."""
         setup_app()
-        with open(env.PROJECT_ROOT / 'README.md', 'wb') as f:
-            f.write(b'# Old Project\r\n')
+        with open(env.PROJECT_ROOT / 'docs/readme.md', 'wb') as f:
+            f.write(b'# Website\r\n')
 
         def _fail(self, *a, **k):
             raise AssertionError('no download expected for an EOL mismatch')
@@ -530,13 +494,13 @@ class TestSourceDownload:
         assert job.error == []
         # the copy records are computed from the converted source blob,
         # the copies keep their own eol (crlf)
-        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Old Project\r\n'
-        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy2.txt') == b'# Old Project\r\n'
+        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Website\r\n'
+        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy2.txt') == b'# Website\r\n'
 
     def test_unsolvable_stays_in_error(self, app_folder, monkeypatch):
         """A record that cannot be downloaded stays in error."""
         setup_app()
-        os.remove(env.PROJECT_ROOT / 'README.md')
+        os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         monkeypatch.setattr(SERVER, 'get_file_content', lambda *a, **k: b'bad data')
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
@@ -545,13 +509,13 @@ class TestSourceDownload:
         assert [item.info.path for item in job.error] == \
             ['docs/readme_copy.txt', 'docs/readme_copy2.txt']
         # the other changes are still applied, the workspace is cleaned
-        assert file_read_bytes(env.PROJECT_ROOT / 'src/added.py') == NEW['src/added.py']
+        assert file_read_bytes(env.PROJECT_ROOT / 'backend/a1.py') == NEW['backend/a1.py']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_no_server_sources_unsolvable(self, app_folder):
         """A missing server leaves the failed records in error."""
         setup_app()
-        os.remove(env.PROJECT_ROOT / 'README.md')
+        os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         job = UpdateJob(UPDATE)
         with logger.mock_capture_writer() as capture:
             assert not job.run()
@@ -572,7 +536,7 @@ class TestDownload:
     def test_download_failed_records(self, app_folder):
         """The failed records are downloaded to tmp files."""
         setup_app()
-        os.remove(env.PROJECT_ROOT / 'README.md')
+        os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
         job.unpack()
@@ -584,18 +548,18 @@ class TestDownload:
         # the records are downloaded from the new full pack, the source
         # is not in pending
         paths = {item.info.path for item in job.pending}
-        assert 'README.md' not in paths
+        assert 'docs/readme.md' not in paths
         copy = next(item for item in job.pending if item.info.path == 'docs/readme_copy.txt')
         assert copy.tmp
         assert os.path.exists(copy.tmp)
-        assert file_read_bytes(copy.tmp) == b'# Old Project\r\n'
+        assert file_read_bytes(copy.tmp) == b'# Website\r\n'
         copy2 = next(item for item in job.pending if item.info.path == 'docs/readme_copy2.txt')
-        assert file_read_bytes(copy2.tmp) == b'# Old Project\r\n'
+        assert file_read_bytes(copy2.tmp) == b'# Website\r\n'
 
     def test_download_reuse_tmp(self, app_folder, monkeypatch):
         """A leftover tmp file that passes the check is reused."""
         setup_app()
-        os.remove(env.PROJECT_ROOT / 'README.md')
+        os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         # write a valid tmp file at the record tmp name, download()
         # should reuse it
         decoder = PackDecodeBase(UPDATE)
@@ -604,7 +568,7 @@ class TestDownload:
         tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1}_{index}.tmp'
         os.makedirs(tmp.uppath(), exist_ok=True)
         with open(tmp, 'wb') as f:
-            f.write(b'# Old Project\r\n')
+            f.write(b'# Website\r\n')
 
         def _fail(self, *a, **k):
             raise AssertionError('no download expected, the tmp file is reused')
@@ -612,7 +576,7 @@ class TestDownload:
         job = UpdateJob(UPDATE, server=SERVER)
         assert job.run()
         assert job.error == []
-        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Old Project\r\n'
+        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Website\r\n'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_download_no_error_is_noop(self, app_folder, monkeypatch):

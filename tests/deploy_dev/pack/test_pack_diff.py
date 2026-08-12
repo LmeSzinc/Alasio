@@ -5,10 +5,10 @@ The tests build the versions with MockDecodeBase.from_data, without the
 pack machinery, so the diff logic (unchanged / modified / added /
 deleted / renamed / copied) can be exercised in isolation.
 """
-import random
-
 import pytest
-from conftest import MockDecodeBase, code_lines, damage, damage_lines, random_bytes
+from conftest import (
+    FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockDecodeBase, code_lines, damage, damage_lines, random_bytes
+)
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import RefInfo
@@ -443,21 +443,6 @@ class TestPackDiffValidation:
 # ════════════════════════════════════════════════════════════════════════════
 
 
-def _random_bytes(size, seed):
-    """
-    Deterministic pseudo-random bytes for binary test files.
-
-    Args:
-        size (int): Byte count
-        seed (int): Random seed
-
-    Returns:
-        bytes:
-    """
-    rng = random.Random(seed)
-    return bytes(rng.randrange(256) for _ in range(size))
-
-
 def _no_data(info):
     """
     A copy of a diff record without the compressed data.
@@ -482,63 +467,19 @@ def _no_data(info):
 class TestPackDiffFullScenario:
     """A real upgrade between two full packs, every diff type at once.
 
-    The versions are built with MockGitRepo and PackFull like the
-    server pipeline, the diff output is hard-coded per record like
+    The versions are the shared FULL_SCENARIO_OLD / FULL_SCENARIO_NEW
+    of conftest, also used by test_unpack_update on the update job
+    side. The versions are built with MockGitRepo and PackFull like
+    the server pipeline, the diff output is hard-coded per record like
     test_full_decode_all_data on the decode side. The scenario covers:
-    M (patch / plain), A, C (from an unchanged old file, from an
-    earlier new file, cross eol / mode), D, R, RM, empty files, binary
-    files, copy chains, and eol / mode-only changes.
+    M (patch / plain / eol-only / mode-only), A, C (from an unchanged
+    old file, from an earlier new file, cross eol / mode, copy
+    chains), D, R, RM, empty files, binary files and CRLF content
+    changes.
     """
 
-    OLD = {
-        '.gitattributes':
-            b'*.py text eol=lf\n*.txt text eol=crlf\n*.bat text eol=crlf\n*.sh text eol=lf\n*.png binary\n',
-        'backend/__init__.py': b'',
-        'backend/main.py':
-            b'import uvicorn\n\nVERSION = 1\n\nif __name__ == "__main__":\n    uvicorn.run("app:app", port=8000)\n',
-        'backend/tiny.py': b'x',
-        'backend/config.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
-        'backend/utils.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
-        'backend/legacy.py': b'def legacy():\n    return 42\n',
-        'docs/guide.txt': b'# Guide\n\nstep 1\nstep 2\nstep 3\n',
-        'frontend/App.svelte': b'<script>let count = 0</script>\n<button>{count}</button>\n',
-        'frontend/Button.svelte': b'<script>let count = 0</script>\n<button>{count}</button>\n',
-        'scripts/run.sh': b'#!/bin/sh\nset -e\necho "run"\n',
-        'scripts/old_tool.py': b'def tool():\n    return 1\n' * 30,
-        'scripts/run.bat': b'@echo off\npython -m website\n',
-        'tools/tool.sh': (b'#!/bin/sh\nset -e\necho "tool"\n', 755),
-        'tools/deploy.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
-        'data/blob.png': bytes(range(256)) * 100,
-        'data/cache.pkl': _random_bytes(6400, 42),
-    }
-    NEW = {
-        '.gitattributes':
-            b'*.py text eol=lf\n*.txt text eol=crlf\n*.bat text eol=lf\n*.sh text eol=lf\n*.png binary\n',
-        'backend/__init__.py': b'',
-        'backend/main.py':
-            b'import uvicorn\n\nVERSION = 2\n\nif __name__ == "__main__":\n    uvicorn.run("app:app", port=9000)\n',
-        'backend/tiny.py': b'y',
-        'backend/config.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
-        'backend/utils.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
-        'backend/copy.py': b'HOST = "0.0.0.0"\nPORT = 8000\nDEBUG = False\n',
-        'backend/empty.txt': b'',
-        'backend/a1.py': b'def shared():\n    return 0\n' * 20,
-        'backend/a2.py': b'def shared():\n    return 0\n' * 20,
-        'backend/a3.py': b'def shared():\n    return 0\n' * 20,
-        'docs/guide.txt': b'# Guide\n\nstep 1\nstep 2\nstep 3\n',
-        'docs/guide2.txt': b'# Guide\n\nstep 1\nstep 2\nstep 3\n',
-        'frontend/App.svelte': b'<script>let count = 1</script>\n<button>new</button>\n',
-        'frontend/App2.svelte': b'<script>let count = 1</script>\n<button>new</button>\n',
-        'frontend/Button.svelte': b'<script>let count = 0</script>\n<button>{count}</button>\n',
-        'scripts/runner.sh': b'#!/bin/sh\nset -e\necho "run"\n',
-        'scripts/new_tool.py': b'def tool():\n    return 2\n' * 30,
-        'scripts/run.bat': b'@echo off\npython -m website\n',
-        'tools/tool.sh': (b'#!/bin/sh\nset -e\necho "tool"\n', 644),
-        'tools/deploy.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
-        'tools/run.sh': (b'#!/bin/sh\nset -e\necho "deploy"\n', 755),
-        'data/blob.png': bytes(range(256)) * 100,
-        'data/new_blob.bin': _random_bytes(12800, 43),
-    }
+    OLD = FULL_SCENARIO_OLD
+    NEW = FULL_SCENARIO_NEW
 
     def _diff(self):
         """
@@ -584,7 +525,9 @@ class TestPackDiffFullScenario:
             '.gitattributes',
             'backend/a1.py', 'backend/a2.py', 'backend/a3.py',
             'backend/copy.py', 'backend/empty.txt', 'backend/main.py',
-            'backend/tiny.py', 'data/new_blob.bin', 'docs/guide2.txt',
+            'backend/tiny.py', 'data/new_blob.bin',
+            'docs/guide2.txt', 'docs/notes.txt',
+            'docs/readme_copy.txt', 'docs/readme_copy2.txt',
             'frontend/App.svelte', 'frontend/App2.svelte',
             'scripts/new_tool.py', 'scripts/run.bat', 'scripts/runner.sh',
             'tools/run.sh', 'tools/tool.sh',
@@ -636,12 +579,28 @@ class TestPackDiffFullScenario:
         assert _no_data(diff_info['data/new_blob.bin']) == UpdateInfo(
             path='data/new_blob.bin', edit=0, eol=2, mode=0, algo=0,
             size=12800, data_size=12800,
-            sha1='724cdc6bf591d5edaa9f8394c38bf516f1f0a4ed', source_path='')
+            sha1='554c3af44eba0c91d80abd712f1a01fc84097af1', source_path='')
         # C: copied from the unchanged old file, CRLF on both sides
         assert _no_data(diff_info['docs/guide2.txt']) == UpdateInfo(
             path='docs/guide2.txt', edit=0, eol=1, mode=0, algo=0,
             size=30, data_size=30,
             sha1='fe8170a5c33baa1a71d1913fea45de3734c4fdfa', source_path='docs/guide.txt')
+        # M (plain): modified CRLF content, too small to compress
+        assert _no_data(diff_info['docs/notes.txt']) == UpdateInfo(
+            path='docs/notes.txt', edit=1, eol=1, mode=0, algo=0,
+            size=13, data_size=13,
+            sha1='04cfda732a5e72c4f024e19fb65c4bd9e33a1d44', source_path='')
+        # C: copied from the unchanged LF old file, the copy keeps its
+        # own eol (crlf), a cross eol copy
+        assert _no_data(diff_info['docs/readme_copy.txt']) == UpdateInfo(
+            path='docs/readme_copy.txt', edit=0, eol=1, mode=0, algo=0,
+            size=10, data_size=10,
+            sha1='2cb9d0884150f87ef58e08e6517c854ee00b90c6', source_path='docs/readme.md')
+        # C: copied from the earlier new file (copy chain)
+        assert _no_data(diff_info['docs/readme_copy2.txt']) == UpdateInfo(
+            path='docs/readme_copy2.txt', edit=0, eol=1, mode=0, algo=0,
+            size=10, data_size=10,
+            sha1='2cb9d0884150f87ef58e08e6517c854ee00b90c6', source_path='docs/readme_copy.txt')
         # M (patch): modified, the new content of the copy that follows
         assert _no_data(diff_info['frontend/App.svelte']) == UpdateInfo(
             path='frontend/App.svelte', edit=1, eol=0, mode=0, algo=2,
@@ -711,6 +670,10 @@ class TestPackDiffFullScenario:
             'docs/guide.txt': RefInfo(
                 path='docs/guide.txt', size=30,
                 sha1='fe8170a5c33baa1a71d1913fea45de3734c4fdfa'),
+            # C source, copied by docs/readme_copy.txt (cross eol)
+            'docs/readme.md': RefInfo(
+                path='docs/readme.md', size=10,
+                sha1='2cb9d0884150f87ef58e08e6517c854ee00b90c6'),
             # M (patch) source
             'frontend/App.svelte': RefInfo(
                 path='frontend/App.svelte', size=56,
