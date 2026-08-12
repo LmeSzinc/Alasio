@@ -537,18 +537,24 @@ class PackDecodeBase:
         return memoryview(self.decode_content(info, content))
 
     @staticmethod
-    def decode_content(info, data):
+    def decode_content(info, data, source=None):
         """
         Decompress the raw file data and check it against the record.
 
         The data is the raw content of the file in the full pack:
         uncompressed for algo == 0, lzma/zstd compressed otherwise.
-        The decoded blob content must match the recorded size and
-        sha1, then the checkout line ending is applied.
+        source provides the old file content as the zstd dictionary
+        for zstd patch data (algo == 2 with source_lookback), the
+        records of an update pack need it, other records decompress
+        without it. The decoded blob content must match the recorded
+        size and sha1, then the checkout line ending is applied.
 
         Args:
             info (IdxInfo): Record of the file
             data (bytes | memoryview): Raw file data in the full pack
+            source (bytes | memoryview, optional): Old file content as
+                the zstd dictionary for zstd patch data. Defaults to
+                None.
 
         Returns:
             bytes: Working tree file content
@@ -560,7 +566,7 @@ class PackDecodeBase:
                 size / sha1
         """
         if info.algo != 0:
-            data = PackDecodeBase._decompress(info, data)
+            data = PackDecodeBase._decompress(info, data, source=source)
         PackDecodeBase._check_content(info, data)
         return PackDecodeBase.apply_eol(data, info.eol)
 

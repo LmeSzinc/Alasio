@@ -2,6 +2,7 @@ from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
+from alasio.deploy.pack.job_update import UpdateJob
 from alasio.ext import env
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_rmtree
 from alasio.logger import logger
@@ -25,9 +26,9 @@ class DeployJob:
 
         The job type is decided by the job file content: the REST
         marker is a validation job (ResetJob), a pack with an index
-        update part is an update pack (the future UpdateJob), a pack
-        without it is a full pack (UnpackJob). A corrupted job file is
-        cleaned up with a warning.
+        update part is an update pack (UpdateJob), a pack without it
+        is a full pack (UnpackJob). A corrupted job file is cleaned up
+        with a warning.
 
         Args:
             server (ServerFile, optional): Server to download the
@@ -53,11 +54,8 @@ class DeployJob:
             atomic_rmtree(workspace)
             return None
         if decoder._index_update:
-            # an update pack, the update job is not implemented yet,
-            # clean it up and unpack the full pack instead
-            logger.warning(f'Update job is not supported yet: {decoder.version}')
-            atomic_rmtree(workspace)
-            return None
+            # an update pack, resume the update job
+            return UpdateJob(data, server=server, resume=True)
         return UnpackJob(data, resume=True)
 
     @staticmethod
