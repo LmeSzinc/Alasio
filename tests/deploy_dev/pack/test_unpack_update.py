@@ -16,6 +16,7 @@ which the fake filesystem does not provide.
 """
 import os
 
+import httpx
 import pytest
 from conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile
 
@@ -602,6 +603,68 @@ class TestDownload:
         assert job.run()
         assert job.error == []
         assert read_tree() == NEW_TREE
+
+    def test_index_download_failed_stays_in_error(self, app_folder, monkeypatch):
+        """A broken index pack that cannot be downloaded stays in error."""
+        setup_app()
+        # corrupt the local index so the index record fails the
+        # refinfo check in unpack()
+        bad = bytearray(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
+        bad[-5] ^= 0xFF
+        with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
+            f.write(bad)
+        # the server index pack is broken too, the record is unsolvable
+        monkeypatch.setattr(SERVER, 'get_index_pack', lambda version: b'bad data')
+        job = UpdateJob(UPDATE, server=SERVER)
+        with logger.mock_capture_writer() as capture:
+            assert not job.run()
+        assert capture.backend.any_contains('Failed to download .pack/index.pack:')
+        assert [item.info.path for item in job.error] == ['.pack/index.pack']
+        # the local index is not replaced, the workspace is cleaned
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == bytes(bad)
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_index_download_http_error_stays_in_error(self, app_folder, monkeypatch):
+        """A network error while downloading the index pack keeps the
+        record in error."""
+        setup_app()
+        # corrupt the local index so the index record fails the
+        # refinfo check in unpack()
+        bad = bytearray(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
+        bad[-5] ^= 0xFF
+        with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
+            f.write(bad)
+
+        def _raise(version):
+            request = httpx.Request('GET', 'http://mock/new/full.pack')
+            response = httpx.Response(500, request=request)
+            raise httpx.HTTPStatusError(
+                '500 Internal Server Error', request=request, response=response)
+        monkeypatch.setattr(SERVER, 'get_index_pack', _raise)
+        job = UpdateJob(UPDATE, server=SERVER)
+        with logger.mock_capture_writer() as capture:
+            assert not job.run()
+        assert capture.backend.any_contains('Failed to download .pack/index.pack:')
+        assert [item.info.path for item in job.error] == ['.pack/index.pack']
+
+    def test_missing_index_and_download_failed(self, app_folder, monkeypatch):
+        """The index pack cannot be downloaded and the local index is
+        missing: every failed record stays in error."""
+        setup_app()
+        # the local index is missing and the copied records cannot be
+        # computed without their source
+        os.remove(env.PROJECT_ROOT / '.pack/index.pack')
+        os.remove(env.PROJECT_ROOT / 'docs/readme.md')
+        monkeypatch.setattr(SERVER, 'get_index_pack', lambda version: b'bad data')
+        job = UpdateJob(UPDATE, server=SERVER)
+        with logger.mock_capture_writer() as capture:
+            assert not job.run()
+        assert capture.backend.any_contains('Failed to download .pack/index.pack:')
+        # the offsets are unavailable: the index record and every
+        # record that could not be computed locally stay in error
+        assert [item.info.path for item in job.error] == [
+            '.pack/index.pack', 'docs/readme_copy.txt', 'docs/readme_copy2.txt']
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
 
 # ════════════════════════════════════════════════════════════════════════════
