@@ -26,11 +26,14 @@ class ResetJob(JobBase):
     The local index pack .pack/index.pack is read once and cached.
     validate_index() checks the index pack itself, a failed index pack
     is downloaded again from the server (download_index()). Then
-    validate_files() checks every file recorded in it, failed files
-    are downloaded to tmp files by download() and replaced to the
-    real files by replace(). Files that cannot be downloaded or fail
-    the size + sha1 check stay in self.error with an empty tmp, this
-    is an unsolvable problem per the draft of PackEncodeBase.
+    validate_latest() compares the local index pack checksum with the
+    latest index pack checksum of the server, an outdated (self-
+    consistent but not the latest) index pack is downloaded again too.
+    Then validate_files() checks every file recorded in it, failed
+    files are downloaded to tmp files by download() and replaced to
+    the real files by replace(). Files that cannot be downloaded or
+    fail the size + sha1 check stay in self.error with an empty tmp,
+    this is an unsolvable problem per the draft of PackEncodeBase.
 
     Note: the exclusive lock on .pack/index.pack in the draft is shared
     by the whole update flow (full pack, update pack and file check),
@@ -59,10 +62,12 @@ class ResetJob(JobBase):
 
         Writes the job marker first unless the job was resumed from it,
         then validates and repairs: a failed index pack is downloaded
-        again from the server, failed files are downloaded to tmp
-        files and replaced to the real files. On failure the workspace
-        is cleaned up: errors during write() and validate() are safe
-        and are logged as warning.
+        again from the server, an outdated index pack (self-consistent
+        but not the latest, see validate_latest) is downloaded again
+        too, failed files are downloaded to tmp files and replaced to
+        the real files. On failure the workspace is cleaned up: errors
+        during write() and validate() are safe and are logged as
+        warning.
 
         Returns:
             bool: True if every file is repaired, False otherwise
@@ -73,6 +78,10 @@ class ResetJob(JobBase):
             logger.info(f'Resetting files to "{env.PROJECT_ROOT}"')
             if not self.validate_index():
                 # the index pack is broken, download it again
+                self.download_index()
+            elif not self.validate_latest():
+                # the index pack is self-consistent but outdated,
+                # download the latest index pack
                 self.download_index()
             self.validate_files()
             self.download()
@@ -131,6 +140,42 @@ class ResetJob(JobBase):
         except (FileNotFoundError, PackDecodeError) as e:
             logger.warning(f'Failed to validate the index pack: {e}')
             return False
+
+    def validate_latest(self):
+        """
+        Check the local index pack against the latest index pack of
+        the server.
+
+        The local index pack must be self-consistent first (see
+        validate_index): a self-consistent but outdated index pack
+        passes its own checksum and is only detected by comparing its
+        checksum with the checksum of the latest index pack recorded
+        in latest.pack. The comparison uses the checksum of the pack
+        format itself: the trailing 20 bytes of the index section,
+        the same digest validate_index() verifies, not a checksum of
+        the whole index pack file. A mismatch means the local index
+        is not the latest one, the caller repairs it with
+        download_index().
+
+        Returns:
+            bool: True if the local index pack is the latest one
+
+        Raises:
+            PackDecodeError: If the server is missing
+        """
+        server = self.server
+        if server is None:
+            raise PackDecodeError('Failed to validate the latest index: no server provided')
+        info = server.get_latest_info()
+        # the checksum of the pack format: the trailing 20 bytes of
+        # the index section, kept in the decoder cache
+        local = self._index_pack.index_checksum
+        if local == info.checksum:
+            return True
+        logger.warning(
+            f'Failed to validate the latest index: local checksum {local} != {info.checksum}'
+        )
+        return False
 
     def validate_files(self):
         """

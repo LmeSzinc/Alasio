@@ -16,6 +16,7 @@ from random import Random
 import httpx
 import pytest
 
+from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.deploy.pack.server_file import ServerFile
 from alasio.deploy_dev.pack.pack_repo import PackFull
@@ -167,7 +168,11 @@ class MockServerFile(ServerFile):
         path = request.url.path
         if path.endswith('/latest.pack'):
             index_pack = self.index_packs[self.latest_version]
-            content = self.latest_version.encode() + sha1(index_pack).digest()
+            # the checksum of the pack format: the trailing 20 bytes
+            # of the index section, the same digest the decoder
+            # validates
+            checksum = bytes.fromhex(PackDecodeBase(index_pack).index_checksum)
+            content = self.latest_version.encode() + checksum
             return httpx.Response(200, content=content)
         # base_url/{version}/full.pack, served as a range request
         version = path.strip('/').partition('/')[0]

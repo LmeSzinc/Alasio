@@ -13,16 +13,35 @@ import os
 import pytest
 from conftest import WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER
 
-from alasio.deploy.pack.decode_base import PackDecodeError
+from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_base import PendingFile
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.pack_model import IdxInfo
+from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes
+from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+
+
+def make_pack(files, commit='c1'):
+    """
+    Build a full pack of a version.
+
+    Args:
+        files (dict[str, bytes]): {path: content}
+        commit (str): Version of the pack. Defaults to 'c1'.
+
+    Returns:
+        bytes: Full pack data
+    """
+    repo = MockGitRepo()
+    for path, content in files.items():
+        repo.register_file(commit, path, content)
+    return b''.join(PackFull(repo, commit=commit).iter_pack_data())
 
 
 def setup_app(fs):
@@ -38,6 +57,13 @@ def setup_app(fs):
         target = env.PROJECT_ROOT / path
         fs.remove(target)
         fs.create_file(target, st_mode=0o100755, contents=WEBSITE_FILES[path][0])
+
+
+# a valid index pack of another version, its own checksum passes but
+# the latest checksum differs, built before the fake filesystem is
+# active (MockGitRepo reads the real .gitattributes file)
+OTHER_INDEX = bytes(PackDecodeBase(
+    make_pack({'x.txt': b'x'}, commit='other')).extract_index_pack())
 
 
 class TestJobFile:
@@ -114,6 +140,32 @@ class TestValidateIndex:
         assert job.validate_index()
         assert job.validate_files()
         assert len(reads) == 1
+
+
+class TestValidateLatest:
+    """validate_latest(): compare the local index pack with the latest one."""
+
+    def test_latest_matches(self, app_folder, fs):
+        """A fresh index pack matches the server checksum."""
+        setup_app(fs)
+        assert ResetJob(WEBSITE_SERVER).validate_latest()
+
+    def test_latest_outdated(self, app_folder, fs):
+        """A self-consistent but outdated index pack fails the check."""
+        setup_app(fs)
+        # a valid index pack of another version, its own checksum
+        # passes but the latest checksum differs
+        with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
+            f.write(OTHER_INDEX)
+        job = ResetJob(WEBSITE_SERVER)
+        with logger.mock_capture_writer() as capture:
+            assert not job.validate_latest()
+        assert capture.backend.any_contains('Failed to validate the latest index:')
+
+    def test_no_server(self, app_folder):
+        """A missing server raises PackDecodeError."""
+        with pytest.raises(PackDecodeError, match='no server provided'):
+            ResetJob(None).validate_latest()
 
 
 class TestValidateFiles:
@@ -540,6 +592,20 @@ class TestRun:
             f.write(bad)
         job = ResetJob(WEBSITE_SERVER)
         assert job.run()
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == WEBSITE_INDEX_PACK
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_run_outdated_index_repaired(self, app_folder, fs):
+        """A self-consistent but outdated index pack is downloaded
+        again, the files are checked against the latest index."""
+        setup_app(fs)
+        # a valid index pack of another version, its own checksum
+        # passes but the latest checksum differs
+        with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
+            f.write(OTHER_INDEX)
+        job = ResetJob(WEBSITE_SERVER)
+        assert job.run()
+        assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == WEBSITE_INDEX_PACK
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 

@@ -8,6 +8,8 @@ the data section via data_start / data_size.
 
 PackDecodeError tests live in test_decode_error.py.
 """
+from hashlib import sha1
+
 import pytest
 from conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_REPO
 
@@ -37,6 +39,19 @@ class TestPackDecodeBasic:
         assert isinstance(decoder.data_section, memoryview)
         assert len(decoder.index_section) > 0
         assert len(decoder.data_section) > 0
+
+    def test_index_checksum(self):
+        """index_checksum is the trailing 20 bytes digest of the index
+        section, the same value validate_index() verifies."""
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
+        # the digest validate_index() verifies: header + length + parts
+        digest = sha1()
+        digest.update(decoder.data[:5])
+        digest.update(decoder.index_section[:-20])
+        assert decoder.index_checksum == digest.hexdigest()
+        assert len(decoder.index_checksum) == 40
+        # the checksum is valid, validate_index() must pass
+        decoder.validate_index()
 
     def test_refinfo_empty_in_full_pack(self):
         """Full pack has no refinfo, all files are in fileinfo."""

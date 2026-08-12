@@ -5,8 +5,6 @@ Uses conftest.WEBSITE_SERVER (in-memory MockServerFile) and an
 httpx.MockTransport client to exercise the http request logic of
 ServerFile without a real server.
 """
-from hashlib import sha1
-
 import httpx
 import pytest
 from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER
@@ -38,7 +36,10 @@ class TestMockServerFile:
         info = WEBSITE_SERVER.get_latest_info()
         assert isinstance(info, LatestInfo)
         assert info.version == COMMIT
-        assert info.checksum == sha1(WEBSITE_INDEX_PACK).hexdigest()
+        # the checksum of the pack format: the trailing 20 bytes of
+        # the index section, not a checksum of the whole index file
+        checksum = bytes.fromhex(PackDecodeBase(WEBSITE_INDEX_PACK).index_checksum)
+        assert info.checksum == checksum.hex()
 
     def test_get_file_content(self):
         """A range of the full pack is sliced from the memory."""
@@ -63,16 +64,19 @@ class TestServerFile:
     def test_get_latest_info(self):
         """latest.pack is parsed as version + 20 bytes checksum."""
         requests = []
+        # the checksum of the pack format: the trailing 20 bytes of
+        # the index section
+        checksum = bytes.fromhex(PackDecodeBase(WEBSITE_INDEX_PACK).index_checksum)
 
         def handler(request):
             requests.append(request)
-            content = COMMIT.encode() + sha1(WEBSITE_INDEX_PACK).digest()
+            content = COMMIT.encode() + checksum
             return httpx.Response(200, content=content)
 
         server = ServerFile('http://test', client=make_client(handler))
         info = server.get_latest_info()
         assert info.version == COMMIT
-        assert info.checksum == sha1(WEBSITE_INDEX_PACK).hexdigest()
+        assert info.checksum == checksum.hex()
         assert str(requests[0].url) == 'http://test/latest.pack'
 
     def test_get_latest_info_too_short(self):

@@ -66,6 +66,8 @@ class PackDecodeBase:
         version (str): Latest commit sha1 recorded in the pack.
         index_section (memoryview): Index section, from the length vint to the
             end of its checksum digest (excluding the header).
+        index_checksum (str): Checksum of the index section, the trailing
+            20 bytes digest in hex, the same value validate_index() verifies.
         data_section (memoryview): Data section, from the length vint to the
             end of its checksum digest. Empty in index pack.
         refinfo (dict[str, IdxInfo]): Old file records (empty in full pack).
@@ -103,6 +105,8 @@ class PackDecodeBase:
                 f'Failed to decode index section: out of range: {index_end} > {len(data)}'
             )
         self.index_section = data[5:index_end]
+        # checksum of the index section, the trailing 20 bytes in hex
+        self.index_checksum = bytes(self.index_section[-20:]).hex()
 
         # index parts
         part, offset = _decode('index section: version part', self._read_part, data, offset)
