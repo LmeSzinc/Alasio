@@ -14,7 +14,7 @@ from conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_INDEX_PAC
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job import DeployJob
-from alasio.deploy.pack.job_base import CurrentFile, MatchResult
+from alasio.deploy.pack.job_base import CurrentFile, JobBase, MatchResult
 from alasio.deploy.pack.job_unpack import PendingFile, UnpackJob
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext import env
@@ -97,7 +97,9 @@ class TestUnpack:
         assert normal[0].info.edit == 0
         assert isinstance(normal[0].info, IdxInfo)
         assert normal[0].tmp
-        assert normal[0].current_mode == 0o666
+        # backend/main.py is a 644 record, python writes 666 which is
+        # accepted as-is
+        assert normal[0].mode is None
         # tmp file name is built from the record and the index
         info = normal[0].info
         assert os.path.exists(normal[0].tmp)
@@ -518,71 +520,52 @@ class TestExecutableMode:
 
 
 class TestFileMode:
-    """File mode adjustment rules: the execute bits must match the record.
+    """File mode matching rules: the execute bits must match the record.
 
-    os.chmod is patched to capture the calls, so the decision logic can
-    be verified on every platform, the actual chmod effect is covered
-    by TestExecutableMode on POSIX platforms.
+    The mode check is embedded in MatchResult.mode_matched by
+    _matches(), replace() chmod-ed the target to pending.mode when it
+    is set. The decision rules are verified on every platform, the
+    actual chmod effect is covered by TestExecutableMode on POSIX
+    platforms.
     """
 
     @staticmethod
-    def _patch_chmod(monkeypatch):
-        """Capture os.chmod calls, no real chmod happens."""
-        calls = []
-        monkeypatch.setattr(os, 'chmod', lambda path, mode: calls.append((path, mode)))
-        return calls
+    def _current(mode):
+        """CurrentFile with a given mode, the content does not matter."""
+        return CurrentFile(exist=True, data=b'x', mode=mode)
 
     @staticmethod
     def _info(path):
         """FileInfo of a file in the pack."""
         return PackDecodeBase(WEBSITE_FULL_PACK).fileinfo[path]
 
-    def test_755_new_file_chmod(self, app_folder, monkeypatch):
-        """A new 755 file (written 666) is chmod-ed to 755."""
-        calls = self._patch_chmod(monkeypatch)
-        info = self._info('scripts/deploy.sh')
-        target = env.PROJECT_ROOT / 'scripts/deploy.sh'
-        UnpackJob._adjust_mode(target, info, 0o666)
-        assert calls == [(target, 0o755)]
-
-    def test_644_new_file_kept(self, app_folder, monkeypatch):
-        """A new 644 file (written 666) needs no chmod."""
-        calls = self._patch_chmod(monkeypatch)
+    def test_match_embeds_mode(self, app_folder):
+        """_matches() embeds the mode check in mode_matched."""
         info = self._info('backend/config.py')
-        target = env.PROJECT_ROOT / 'backend/config.py'
-        UnpackJob._adjust_mode(target, info, 0o666)
-        assert calls == []
+        data = WEBSITE_FILES['backend/config.py'][0]
+        result = JobBase._matches(info, CurrentFile(exist=True, data=data, mode=0o755))
+        assert result.match
+        assert not result.mode_matched
+        result = JobBase._matches(info, CurrentFile(exist=True, data=data, mode=0o644))
+        assert result.match
+        assert result.mode_matched
 
     @pytest.mark.parametrize('current', [0o644, 0o666, 0o646, 0o664])
-    def test_644_record_accepts_no_exec(self, app_folder, monkeypatch, current):
+    def test_644_record_accepts_no_exec(self, app_folder, current):
         """A 644 record accepts any mode without execute bits."""
-        calls = self._patch_chmod(monkeypatch)
-        info = self._info('backend/config.py')
-        target = env.PROJECT_ROOT / 'backend/config.py'
-        UnpackJob._adjust_mode(target, info, current)
-        assert calls == []
+        assert JobBase._mode_matches(self._info('backend/config.py'), self._current(current))
 
     @pytest.mark.parametrize('current', [0o755, 0o777, 0o757, 0o775])
-    def test_755_record_accepts_exec(self, app_folder, monkeypatch, current):
+    def test_644_record_rejects_exec(self, app_folder, current):
+        """A 644 record rejects any mode with execute bits."""
+        assert not JobBase._mode_matches(self._info('backend/config.py'), self._current(current))
+
+    @pytest.mark.parametrize('current', [0o755, 0o777, 0o757, 0o775])
+    def test_755_record_accepts_exec(self, app_folder, current):
         """A 755 record accepts any mode with execute bits."""
-        calls = self._patch_chmod(monkeypatch)
-        info = self._info('scripts/deploy.sh')
-        target = env.PROJECT_ROOT / 'scripts/deploy.sh'
-        UnpackJob._adjust_mode(target, info, current)
-        assert calls == []
+        assert JobBase._mode_matches(self._info('scripts/deploy.sh'), self._current(current))
 
-    def test_644_record_rejects_755(self, app_folder, monkeypatch):
-        """A 644 record, a 755 file is chmod-ed to 644."""
-        calls = self._patch_chmod(monkeypatch)
-        info = self._info('backend/config.py')
-        target = env.PROJECT_ROOT / 'backend/config.py'
-        UnpackJob._adjust_mode(target, info, 0o755)
-        assert calls == [(target, 0o644)]
-
-    def test_755_record_rejects_644(self, app_folder, monkeypatch):
-        """A 755 record, a 644 file is chmod-ed to 755."""
-        calls = self._patch_chmod(monkeypatch)
-        info = self._info('scripts/deploy.sh')
-        target = env.PROJECT_ROOT / 'scripts/deploy.sh'
-        UnpackJob._adjust_mode(target, info, 0o644)
-        assert calls == [(target, 0o755)]
+    @pytest.mark.parametrize('current', [0o644, 0o666, 0o646, 0o664])
+    def test_755_record_rejects_no_exec(self, app_folder, current):
+        """A 755 record rejects any mode without execute bits."""
+        assert not JobBase._mode_matches(self._info('scripts/deploy.sh'), self._current(current))

@@ -171,7 +171,7 @@ class UpdateJob(JobBase):
             target = env.PROJECT_ROOT.joinpath(path)
             if info.edit == 2:
                 # deleted marker, its target is removed in replace()
-                pending.append(PendingFile(info=info, tmp='', current_mode=0))
+                pending.append(PendingFile(info=info, tmp=''))
                 continue
             # R / RM records move the source file, its deletion is
             # scheduled in replace() on every path
@@ -183,14 +183,15 @@ class UpdateJob(JobBase):
                 # the target file exists and passes the size + sha1 check
                 if deleted:
                     self._append_deleted(pending, deleted)
-                if self._mode_matches(info, current):
+                if result.mode_matched:
                     continue
                 # only the mode differs, the content is verified:
                 # write the current content to the tmp file, replace()
-                # fixes the mode
+                # chmod-ed the target to the record mode
                 if not self._matches(info, self._read_current(tmp)).match:
                     atomic_write(tmp, current.data)
-                pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+                pending.append(PendingFile(
+                    info=info, tmp=tmp, mode=info.mode_decoded))
                 continue
             if result.match_data:
                 # only the EOL differs, write the converted content
@@ -198,14 +199,15 @@ class UpdateJob(JobBase):
                 atomic_write(tmp, result.match_data)
                 if deleted:
                     self._append_deleted(pending, deleted)
-                pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+                pending.append(PendingFile(
+                    info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
                 continue
             try:
                 content = self._read_file(decoder, info)
             except SourceError:
                 # the source fails the size + sha1 check, download()
                 # fetches the content of the record instead
-                self.error.append(PendingFile(info=info, tmp='', current_mode=0))
+                self.error.append(PendingFile(info=info, tmp=''))
                 continue
             if not self._matches(info, self._read_current(tmp)).match:
                 # decompress and write to the tmp file
@@ -219,7 +221,8 @@ class UpdateJob(JobBase):
                 self._append_deleted(pending, deleted)
             # the file is written by python with the default mode 666,
             # a 755 record is chmod-ed in replace()
-            pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+            pending.append(PendingFile(
+                info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
 
         self.pending = pending
 
@@ -263,7 +266,8 @@ class UpdateJob(JobBase):
             tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
             if self._matches(info, self._read_current(tmp)).match:
                 # a leftover tmp file passes the size + sha1 check, reuse it
-                pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+                pending.append(PendingFile(
+                    info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
                 continue
             try:
                 # the index pack is self-validating, the trailing
@@ -278,7 +282,8 @@ class UpdateJob(JobBase):
                 failed.append(item)
             else:
                 atomic_write(tmp, new_index_data)
-                pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+                pending.append(PendingFile(
+                    info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
             break
         # the other records, downloaded from the new full pack with
         # the offsets of the new index records
@@ -310,7 +315,8 @@ class UpdateJob(JobBase):
             tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
             if self._matches(info, self._read_current(tmp)).match:
                 # a leftover tmp file passes the size + sha1 check, reuse it
-                pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+                pending.append(PendingFile(
+                    info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
                 continue
             new_info = new_index.fileinfo.get(info.path)
             if new_info is None:
@@ -331,7 +337,8 @@ class UpdateJob(JobBase):
                 failed.append(item)
                 continue
             atomic_write(tmp, content)
-            pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+            pending.append(PendingFile(
+                info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
         self.pending += pending
         self.error = failed
 
@@ -458,4 +465,4 @@ class UpdateJob(JobBase):
             pending (list[PendingFile]): Pending list to append to
             path (str): Path of the renamed source
         """
-        pending.append(PendingFile(info=IdxInfo(path=path, edit=2), tmp='', current_mode=0))
+        pending.append(PendingFile(info=IdxInfo(path=path, edit=2), tmp=''))

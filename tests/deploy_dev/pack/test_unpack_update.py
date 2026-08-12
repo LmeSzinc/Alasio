@@ -267,12 +267,13 @@ class TestUnpack:
         assert index_pack.info.edit == 1
         assert index_pack.tmp
         assert os.path.exists(index_pack.tmp)
-        # a normal record carries the file info, the tmp file and the
-        # mode after replace(), python writes 666 by default
+        # a normal record carries the file info and the tmp file,
+        # backend/a1.py is a 644 record, python writes 666 which is
+        # accepted as-is, no mode change is scheduled
         added = pending['backend/a1.py']
         assert added.info.edit == 0
         assert added.tmp
-        assert added.current_mode == 0o666
+        assert added.mode is None
         assert os.path.exists(added.tmp)
 
 

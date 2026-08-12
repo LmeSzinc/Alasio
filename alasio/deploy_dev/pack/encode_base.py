@@ -66,7 +66,9 @@ class PackEncodeBase:
       申请到锁的进程需要先检查 job.pack 是否有未完成的任务，需要先完成未完成的任务
     - 在全量包中解压索引块写入 .pack/index.pack，就是全量包的前面部分
       在增量包中 .pack/index.pack 是普通文件记录，像其他文件一样更新
-      refinfo 非空就是增量包，为空则是全量包
+    - 索引块可解码出 refinfo 和 fileinfo
+      fileinfo 是当前包拥有的数据的索引
+      refinfo 是解压数据需要参照的旧文件的索引，refinfo非空就是增量包，为空则是全量包
     - 根据索引块尝试读取目标文件，如果目标文件存在且size+sha1校验通过则跳过
     - 将文件解压到临时文件 .pack/workspace/{size}_{sha1}_{index}.tmp
       如果临时文件存在且size+sha1校验通过则跳过

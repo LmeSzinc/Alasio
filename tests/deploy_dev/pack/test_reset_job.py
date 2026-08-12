@@ -158,10 +158,10 @@ class TestValidateFiles:
         job = ResetJob(WEBSITE_SERVER)
         assert not job.validate_files()
         error = job.error[0]
-        # the current mode is recorded, it guides the caller to fix the mode
+        # the target mode is recorded, replace() would chmod to it
         assert error.info.path == 'backend/main.py'
         assert error.tmp == ''
-        assert error.current_mode & 0o111 == 0o111
+        assert error.mode == 0o644
 
     @pytest.mark.skipif(os.name == 'nt', reason='file mode is meaningless on Windows')
     def test_mode_755_matches(self, app_folder, fs):
@@ -204,7 +204,8 @@ class TestValidateFiles:
             assert isinstance(item, PendingFile)
             assert isinstance(item.info, IdxInfo)
             assert item.tmp == ''
-            assert item.current_mode == 0o666
+            # 644 records, the rewrite with mode 666 needs no chmod
+            assert item.mode is None
 
     def test_files_without_index_raises(self, app_folder):
         """validate_files() assumes the caller validated the index pack."""
@@ -228,7 +229,9 @@ class TestValidateEolFix:
         item = job.error[0]
         assert item.info.path == 'backend/config.py'
         assert item.tmp
-        assert item.current_mode == 0o666
+        # backend/config.py is a 644 record, the converted content is
+        # written with mode 666 which needs no chmod
+        assert item.mode is None
         # the tmp carries the converted content, it passes the check
         assert file_read_bytes(item.tmp) == WEBSITE_FILES['backend/config.py'][0]
         assert job._matches(item.info, job._read_current(item.tmp)).match

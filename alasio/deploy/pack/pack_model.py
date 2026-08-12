@@ -1,5 +1,7 @@
 from msgspec import UNSET, Struct, UnsetType
 
+from alasio.ext.cache import cached_property
+
 
 class RefInfo(Struct):
     """
@@ -75,7 +77,7 @@ class FileInfo(RefInfo):
     __str__ = __repr__
 
 
-class IdxInfo(FileInfo):
+class IdxInfo(FileInfo, dict=True):
     data: UnsetType = UNSET
     # start offset of the compressed data in full pack
     # real value will be calculated in decoding
@@ -84,3 +86,16 @@ class IdxInfo(FileInfo):
     # path of reffile
     # real value will be calculated from `source_lookback` in decoding
     source_path: str = ''
+
+    @cached_property
+    def mode_decoded(self) -> int:
+        """
+        File mode decoded to the chmod value.
+
+        mode is stored as a flag: 0 for 644, 1 for 755. mode_decoded
+        returns the chmod value of the record.
+
+        Returns:
+            int: 0o755 for mode 1, 0o644 for mode 0
+        """
+        return 0o755 if self.mode == 1 else 0o644

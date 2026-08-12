@@ -1,5 +1,6 @@
 import os
 from hashlib import sha1
+from typing import Optional
 
 from msgspec import Struct
 
@@ -30,16 +31,18 @@ class PendingFile(Struct):
 
     The tmp file is moved to the target path, deleted records
     (edit == 2) have empty tmp, their targets are removed instead.
-    current_mode is the file mode after replace(): the file is written
-    by python with the default mode 666, a 644 record needs no further
-    operation, a 755 record is chmod-ed in replace().
+    mode is the mode to chmod the target to after the move, None when
+    the mode is already correct: a file written by python with the
+    default mode 666 is accepted by a 644 record as-is, a 755 record
+    sets 0o755; a file whose mode differs from the record sets the
+    record mode (644 or 755).
     """
     # record of the file to apply
     info: IdxInfo
     # tmp file path in the workspace, empty for deleted markers
     tmp: str
-    # file mode after replace(), python writes 666 by default
-    current_mode: int
+    # mode to chmod the target to, None when the mode is already correct
+    mode: Optional[int] = None
 
 
 class MatchResult(Struct):
@@ -52,11 +55,16 @@ class MatchResult(Struct):
     caller writes it to a tmp file and replaces the target without a
     download. match_data is empty when the file is missing, has the
     wrong content or cannot be fixed by converting the EOL.
+    mode_matched is True when the file mode matches the record, it is
+    only meaningful when match is True.
     """
     # whether the file matches the record as-is
     match: bool
     # content converted to the record EOL, empty when not fixable
     match_data: bytes = b''
+    # whether the file mode matches the record, only meaningful when
+    # match is True
+    mode_matched: bool = True
 
     def __bool__(self):
         """
@@ -107,9 +115,10 @@ class JobBase:
         Apply the pending changes to the real files.
 
         Every tmp file is moved to the target path atomically and the
-        deleted markers are removed. The file mode is adjusted only
-        when it differs from the record. The workspace is kept, the
-        caller (run()) cleans it up after all changes are applied.
+        deleted markers are removed. The target is chmod-ed when
+        pending.mode is set, the mode decision is made by the job that
+        prepared the pending list. The workspace is kept, the caller
+        (run()) cleans it up after all changes are applied.
         """
         # create the parent folders of all targets in one batch
         batch_makedirs([
@@ -126,7 +135,8 @@ class JobBase:
                 atomic_remove(target)
                 continue
             atomic_replace(pending.tmp, target)
-            self._adjust_mode(target, info, pending.current_mode)
+            if pending.mode is not None:
+                os.chmod(target, pending.mode)
 
     def cleanup(self):
         """
@@ -205,7 +215,7 @@ class JobBase:
             # normalization removed exactly one byte per \r\n
             if data.count(b'\n') == len(data) - len(blob):
                 # clean CRLF (or empty), the file matches as-is
-                return MatchResult(match=True)
+                return MatchResult(match=True, mode_matched=JobBase._mode_matches(info, current))
             # the file is LF or mixed, convert the LF blob to CRLF
             return MatchResult(match=False, match_data=blob.replace(b'\n', b'\r\n'))
         if info.eol == 0:
@@ -213,7 +223,7 @@ class JobBase:
             # a CRLF file is longer than the LF blob and falls through
             if len(data) == info.size and (
                     not info.sha1 or sha1(data).hexdigest() == info.sha1):
-                return MatchResult(match=True)
+                return MatchResult(match=True, mode_matched=JobBase._mode_matches(info, current))
             if b'\r' not in data:
                 # no CR, the content itself differs from the record
                 return MatchResult(match=False)
@@ -232,33 +242,7 @@ class JobBase:
             return MatchResult(match=False)
         if info.sha1 and sha1(data).hexdigest() != info.sha1:
             return MatchResult(match=False)
-        return MatchResult(match=True)
-
-    @staticmethod
-    def _adjust_mode(target, info, current_mode):
-        """
-        Adjust the file mode if the execute bits differ from the record.
-
-        A 644 record (mode=0) accepts any current mode without execute
-        bits, e.g. 666/646/664, a 755 record (mode=1) accepts any with
-        execute bits, e.g. 777/757/775. Otherwise the file is chmod-ed
-        to the record mode, 644 or 755.
-
-        Args:
-            target (str): Target file path
-            info (IdxInfo): File record
-            current_mode (int): st_mode of the current file, or 0o666
-                for a new file written with the python default mode
-        """
-        current_exec = current_mode & 0o111
-        if info.mode == 1:
-            if current_exec != 0o111:
-                # 755 record, the file is not executable
-                os.chmod(target, 0o755)
-        else:
-            if current_exec:
-                # 644 record, the file is executable
-                os.chmod(target, 0o644)
+        return MatchResult(match=True, mode_matched=JobBase._mode_matches(info, current))
 
     @staticmethod
     def _mode_matches(info, current):

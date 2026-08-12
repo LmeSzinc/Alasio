@@ -160,13 +160,14 @@ class ResetJob(JobBase):
                 # deleted marker, the file should not exist
                 if current.exist:
                     # the file should be removed by the caller
-                    self.error.append(PendingFile(info=info, tmp='', current_mode=0))
+                    self.error.append(PendingFile(info=info, tmp=''))
                 continue
             result = self._matches(info, current)
             if result.match:
-                if not self._mode_matches(info, current):
-                    # the mode differs, the current mode guides the fix
-                    self.error.append(PendingFile(info=info, tmp='', current_mode=current.mode))
+                if not result.mode_matched:
+                    # the mode differs, the record mode is the target
+                    self.error.append(PendingFile(
+                        info=info, tmp='', mode=info.mode_decoded))
                 continue
             if result.match_data:
                 # only the EOL differs, write the converted content
@@ -175,11 +176,13 @@ class ResetJob(JobBase):
                 # in self.error, matching the download() convention
                 tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{len(self.error)}.tmp')
                 atomic_write(tmp, result.match_data)
-                self.error.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+                self.error.append(PendingFile(
+                    info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
                 continue
             # missing or wrong size + sha1, the file is rewritten
             # by python with the default mode 666
-            self.error.append(PendingFile(info=info, tmp='', current_mode=0o666))
+            self.error.append(PendingFile(
+                info=info, tmp='', mode=info.mode_decoded if info.mode == 1 else None))
         return not self.error
 
     def download_index(self):
@@ -257,7 +260,8 @@ class ResetJob(JobBase):
                 continue
             # the file is written by python with the default mode 666,
             # a 755 record is chmod-ed in replace()
-            pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+            pending.append(PendingFile(
+                info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
 
         self.pending = pending
         self.error = error

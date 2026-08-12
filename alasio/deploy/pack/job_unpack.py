@@ -116,21 +116,22 @@ class UnpackJob(JobBase):
             target = env.PROJECT_ROOT.joinpath(path)
             if info.edit == 2:
                 # deleted marker, its target is removed in replace()
-                pending.append(PendingFile(info=info, tmp='', current_mode=0))
+                pending.append(PendingFile(info=info, tmp=''))
                 continue
             current = self._read_current(target)
             result = self._matches(info, current)
             tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
             if result.match:
                 # the target file exists and passes the size + sha1 check
-                if self._mode_matches(info, current):
+                if result.mode_matched:
                     continue
                 # only the mode differs, the content is verified:
                 # write the current content to the tmp file, replace()
-                # fixes the mode
+                # chmod-ed the target to the record mode
                 if not self._matches(info, self._read_current(tmp)).match:
                     atomic_write(tmp, current.data)
-                pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+                pending.append(PendingFile(
+                    info=info, tmp=tmp, mode=info.mode_decoded))
                 continue
             if result.match_data:
                 # only the EOL differs, write the converted content
@@ -141,6 +142,7 @@ class UnpackJob(JobBase):
                 atomic_write(tmp, decoder.catfile(info))
             # the file is written by python with the default mode 666,
             # a 755 record is chmod-ed in replace()
-            pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+            pending.append(PendingFile(
+                info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
 
         self.pending = pending
