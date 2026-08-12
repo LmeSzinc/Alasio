@@ -23,6 +23,6 @@
       "$routes/*": ["./renderer/src/routes/*"]
     }
   },
-  "include": ["main/**/*", "preload/**/*", "renderer/src/**/*", "*.ts", "vite.config.mts"],
+  "include": ["main/**/*", "preload/**/*", "renderer/src/**/*", "shared/**/*", "*.ts", "vite.config.mts"],
   "exclude": ["node_modules", "dist"]
 }

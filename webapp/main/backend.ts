@@ -1,5 +1,6 @@
 import { ChildProcess, spawn } from 'child_process';
 import { BrowserWindow } from 'electron';
+import { IPC_BACKEND_LOG, IPC_BACKEND_READY } from '../shared/ipc';
 import kill from 'tree-kill';
 
 export enum ShutdownStage {
@@ -34,13 +35,13 @@ export function startBackend(
       
       // Only push logs before backend is ready (prevent memory growth)
       if (!isBackendReady) {
-        mainWindow?.webContents.send('backend:log', text);
+        mainWindow?.webContents.send(IPC_BACKEND_LOG, text);
       }
       
       // Check for startup completion signal
       if (text.includes('Running on')) {
         isBackendReady = true;
-        mainWindow?.webContents.send('backend:ready');
+        mainWindow?.webContents.send(IPC_BACKEND_READY);
         resolve();
       }
     });
@@ -48,16 +49,12 @@ export function startBackend(
     backendProcess.stderr?.on('data', (data) => {
       const text = data.toString();
       if (!isBackendReady) {
-        mainWindow?.webContents.send('backend:log', text);
+        mainWindow?.webContents.send(IPC_BACKEND_LOG, text);
       }
     });
 
     backendProcess.on('error', (err) => {
       reject(err);
-    });
-
-    backendProcess.on('exit', (code) => {
-      mainWindow?.webContents.send('backend:exit', code);
     });
   });
 }

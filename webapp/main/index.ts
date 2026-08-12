@@ -3,7 +3,7 @@ import * as path from 'path';
 import { loadConfig, saveFirstTimeConfig, AppConfig, ConfigError } from './config';
 import { initSharedState, setRoute, setupSharedStateIPC, setMainWindow as setSharedStateWindow } from './shared-state';
 import { createWindow, setupWindowIPC } from './window';
-import { createTray, setupTrayIPC, setMainWindow as setTrayWindow } from './tray';
+import { createTray, setMainWindow as setTrayWindow } from './tray';
 import { startBackend, setMainWindow as setBackendWindow } from './backend';
 
 // Disable GPU and configure Electron
@@ -50,7 +50,6 @@ if (!gotTheLock) {
       
       setupSharedStateIPC();
       setupWindowIPC();
-      setupTrayIPC();
       
       const iconPath = path.join(__dirname, '../resources/icon.png');
       createTray(iconPath, 'en-US');
@@ -94,7 +93,6 @@ if (!gotTheLock) {
     // Setup IPC
     setupSharedStateIPC();
     setupWindowIPC();
-    setupTrayIPC();
     
     // Handle first-time config save
     ipcMain.handle('config:save-first-time', async (_, language: string) => {

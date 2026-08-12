@@ -1,4 +1,4 @@
-import { Tray, Menu, nativeImage, app, ipcMain, BrowserWindow } from 'electron';
+import { Tray, Menu, nativeImage, app, BrowserWindow } from 'electron';
 import * as path from 'path';
 import { getTrayTranslations } from './i18n';
 
@@ -60,10 +60,4 @@ export function updateTrayMenu(lang: string) {
   ]);
   
   tray.setContextMenu(contextMenu);
-}
-
-export function setupTrayIPC() {
-  ipcMain.on('tray:update-language', (_, lang: string) => {
-    updateTrayMenu(lang);
-  });
 }

@@ -11,5 +11,4 @@ export const i18nState = $state({ l: L_en_US });
 export function setLanguage(lang: string) {
   i18nState.l = lang;
   window.electronAPI?.setLanguage(lang);
-  window.electronAPI?.updateTrayLanguage(lang);
 }

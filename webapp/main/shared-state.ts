@@ -1,4 +1,10 @@
 import { ipcMain, BrowserWindow } from 'electron';
+import {
+  IPC_SHARED_STATE_GET,
+  IPC_SHARED_STATE_SET_LANGUAGE,
+  IPC_SHARED_STATE_UPDATE,
+} from '../shared/ipc';
+import { updateTrayMenu } from './tray';
 
 export type RouteType = 'setup' | 'loading' | 'app' | 'error';
 
@@ -43,6 +49,7 @@ export function setRoute(route: RouteType, errorMessage?: string) {
 
 export function setLanguage(lang: string) {
   state.language = lang;
+  updateTrayMenu(lang);
   notifyRenderer();
 }
 
@@ -52,14 +59,14 @@ export function getState(): SharedState {
 
 function notifyRenderer() {
   if (mainWindow) {
-    mainWindow.webContents.send('shared-state:update', state);
+    mainWindow.webContents.send(IPC_SHARED_STATE_UPDATE, state);
   }
 }
 
 export function setupSharedStateIPC() {
-  ipcMain.handle('shared-state:get', () => state);
-  
-  ipcMain.on('shared-state:set-language', (_, lang: string) => {
+  ipcMain.handle(IPC_SHARED_STATE_GET, () => state);
+
+  ipcMain.on(IPC_SHARED_STATE_SET_LANGUAGE, (_, lang: string) => {
     setLanguage(lang);
   });
 }

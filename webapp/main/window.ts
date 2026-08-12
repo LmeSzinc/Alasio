@@ -1,5 +1,13 @@
 import { BrowserWindow, app, ipcMain } from 'electron';
 import * as path from 'path';
+import {
+  IPC_CONFIRM_CLOSE,
+  IPC_SHUTDOWN_STAGE,
+  IPC_WINDOW_CONFIRM_CLOSE,
+  IPC_WINDOW_HIDE,
+  IPC_WINDOW_MAXIMIZE,
+  IPC_WINDOW_MINIMIZE,
+} from '../shared/ipc';
 import { shutdownBackend, ShutdownStage } from './backend';
 
 let mainWindow: BrowserWindow | null = null;
@@ -30,7 +38,7 @@ export function createWindow(): BrowserWindow {
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault();
-      mainWindow?.webContents.send('confirm-close');
+      mainWindow?.webContents.send(IPC_CONFIRM_CLOSE);
     }
   });
 
@@ -42,11 +50,11 @@ export function getMainWindow(): BrowserWindow | null {
 }
 
 export function setupWindowIPC() {
-  ipcMain.on('window:minimize', () => {
+  ipcMain.on(IPC_WINDOW_MINIMIZE, () => {
     mainWindow?.minimize();
   });
 
-  ipcMain.on('window:maximize', () => {
+  ipcMain.on(IPC_WINDOW_MAXIMIZE, () => {
     if (mainWindow?.isMaximized()) {
       mainWindow.unmaximize();
     } else {
@@ -54,16 +62,16 @@ export function setupWindowIPC() {
     }
   });
 
-  ipcMain.on('window:hide', () => {
+  ipcMain.on(IPC_WINDOW_HIDE, () => {
     mainWindow?.hide();
   });
 
-  ipcMain.handle('window:confirm-close', async () => {
+  ipcMain.handle(IPC_WINDOW_CONFIRM_CLOSE, async () => {
     isQuitting = true;
     
     return new Promise<void>((resolve) => {
       shutdownBackend((stage) => {
-        mainWindow?.webContents.send('shutdown:stage', stage);
+        mainWindow?.webContents.send(IPC_SHUTDOWN_STAGE, stage);
         
         if (stage === ShutdownStage.Done) {
           // Resolve first so the IPC reply is sent to the renderer
