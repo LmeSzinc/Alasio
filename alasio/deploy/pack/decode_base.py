@@ -113,8 +113,6 @@ class PackDecodeBase:
             'index section: index part', self._read_part, data, offset)
         self._sha1_part, offset = _decode(
             'index section: sha1 part', self._read_part, data, offset)
-        self._index_update, offset = _decode(
-            'index section: index update part', self._read_part, data, offset)
         if index_end - offset != 20:
             raise PackDecodeError(
                 f'Failed to decode index section: checksum out of range: '

@@ -25,10 +25,10 @@ class DeployJob:
         job object of the corresponding type.
 
         The job type is decided by the job file content: the REST
-        marker is a validation job (ResetJob), a pack with an index
-        update part is an update pack (UpdateJob), a pack without it
-        is a full pack (UnpackJob). A corrupted job file is cleaned up
-        with a warning.
+        marker is a validation job (ResetJob), a pack with refinfo is
+        an update pack (UpdateJob), a pack without it is a full pack
+        (UnpackJob). A corrupted job file is cleaned up with a
+        warning.
 
         Args:
             server (ServerFile, optional): Server to download the
@@ -53,7 +53,13 @@ class DeployJob:
             logger.warning(f'Failed to read the unfinished job: {e}')
             atomic_rmtree(workspace)
             return None
-        if decoder._index_update:
+        try:
+            is_update = bool(decoder.refinfo)
+        except PackDecodeError:
+            # the index data is malformed, the unpack job fails on
+            # validation and cleans up
+            is_update = False
+        if is_update:
             # an update pack, resume the update job
             return UpdateJob(data, server=server, resume=True)
         return UnpackJob(data, resume=True)

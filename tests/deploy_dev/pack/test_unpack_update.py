@@ -173,8 +173,8 @@ SIMPLE_SERVER.register_version(
     'new', _simple_new_pack, bytes(PackDecodeBase(_simple_new_pack).extract_index_pack()))
 SIMPLE_NEW_INDEX = bytes(PackDecodeBase(_simple_new_pack).extract_index_pack())
 
-# a valid index pack of another version, the index update with it as
-# the dictionary produces garbage
+# a valid index pack of another version: self-consistent, but its
+# size + sha1 fails the refinfo check of the update pack
 OTHER_INDEX = bytes(
     PackDecodeBase(make_pack({'x.txt': b'x'}, commit='other')).extract_index_pack())
 
@@ -238,10 +238,11 @@ class TestUnpack:
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
         job.unpack()
-        # real files are not applied yet
+        # real files are not applied yet, the index is written by
+        # replace() like any other file
         assert read_tree() == OLD_TREE
-        # the index pack is written in unpack()
-        assert os.path.exists(env.PROJECT_ROOT / '.pack/index.pack')
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
+            bytes(OLD_DECODER.extract_index_pack())
         # the workspace has the job file and the tmp files
         assert os.listdir(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -251,12 +252,29 @@ class TestUnpack:
         UpdateJob(UPDATE, server=SERVER).unpack()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace/job.pack')
 
-    def test_index_pack_written(self, app_folder):
-        """The local index pack is patched to the new index pack."""
+    def test_index_pack_prepared(self, app_folder):
+        """unpack() decompresses the index record to a tmp file."""
         setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
         job.unpack()
+        # find the tmp file of the index record, it must be the new
+        # index pack
+        decoder = PackDecodeBase(UPDATE)
+        index = list(decoder.fileinfo).index('.pack/index.pack')
+        info = decoder.fileinfo['.pack/index.pack']
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1}_{index}.tmp'
+        data = file_read_bytes(tmp)
+        assert data == bytes(NEW_DECODER.extract_index_pack())
+        # the tmp file is a valid index pack of the new version
+        index_decoder = PackDecodeBase(data)
+        index_decoder.validate_index()
+        assert index_decoder.version == 'new'
+
+    def test_index_pack_written_after_run(self, app_folder):
+        """After run() the local index pack is the new index pack."""
+        setup_app()
+        run_update()
         data = file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack')
         assert data == bytes(NEW_DECODER.extract_index_pack())
         # it must be a valid index pack of the new version
@@ -280,6 +298,11 @@ class TestUnpack:
         # the R / RM source files are moved, their deletion is scheduled
         assert pending['src/old_name.py'].info.edit == 2
         assert pending['src/deleted.py'].info.edit == 2
+        # the index pack is updated like a normal file
+        index_pack = pending['.pack/index.pack']
+        assert index_pack.info.edit == 1
+        assert index_pack.tmp
+        assert os.path.exists(index_pack.tmp)
         # a normal record carries the file info, the tmp file and the
         # mode after replace(), python writes 666 by default
         added = pending['src/added.py']
@@ -317,6 +340,11 @@ class TestUpdateRoundtrip:
         # C records: from an unchanged old file, and a copy chain
         assert fileinfo['docs/readme_copy.txt'].source_path == 'README.md'
         assert fileinfo['docs/readme_copy2.txt'].source_path == 'docs/readme_copy.txt'
+        # the index pack is updated like a normal file, the old index
+        # is recorded in the refinfo
+        assert fileinfo['.pack/index.pack'].edit == 1
+        assert fileinfo['.pack/index.pack'].source_path == '.pack/index.pack'
+        assert '.pack/index.pack' in decoder.refinfo
 
     def test_roundtrip_twice_is_idempotent(self, app_folder):
         """Running into a folder with valid files succeeds and skips."""
@@ -374,16 +402,16 @@ class TestUpdateRoundtrip:
 
 
 class TestIndexUpdate:
-    """The local index pack is patched with the index_update part."""
+    """The index pack is updated like a normal file of the update,
+    the local index is verified against the refinfo."""
 
     def test_missing_index_downloaded(self, app_folder):
         """A missing local index pack is downloaded from the server."""
         setup_app(_simple_old_pack)
         os.remove(env.PROJECT_ROOT / '.pack/index.pack')
         job = UpdateJob(SIMPLE_UPDATE, server=SIMPLE_SERVER)
-        with logger.mock_capture_writer() as capture:
-            assert job.run()
-        assert capture.backend.any_contains('Failed to read the local index pack:')
+        assert job.run()
+        assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == SIMPLE_NEW_INDEX
         assert read_tree() == {'keep.txt': b'keep\n', 'add.txt': b'hello\n'}
 
@@ -395,51 +423,50 @@ class TestIndexUpdate:
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(bad)
         job = UpdateJob(SIMPLE_UPDATE, server=SIMPLE_SERVER)
-        with logger.mock_capture_writer() as capture:
-            assert job.run()
-        assert capture.backend.any_contains('Failed to validate the old index pack:')
+        assert job.run()
+        assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == SIMPLE_NEW_INDEX
         assert read_tree() == {'keep.txt': b'keep\n', 'add.txt': b'hello\n'}
 
-    def test_index_update_garbage_downloaded(self, app_folder):
-        """A local index that cannot be patched is downloaded again."""
-        # the local index is valid but of another version, the index
-        # update with it as the dictionary produces garbage
+    def test_foreign_index_downloaded(self, app_folder):
+        """A self-consistent but wrong local index is downloaded: it
+        fails the refinfo size + sha1 check of the update pack."""
         setup_app(_simple_old_pack)
+        # the local index is a valid index pack of another version,
+        # its own checksum passes but the refinfo check does not
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(OTHER_INDEX)
         job = UpdateJob(SIMPLE_UPDATE, server=SIMPLE_SERVER)
-        with logger.mock_capture_writer() as capture:
-            assert job.run()
-        assert capture.backend.any_contains('Failed to update the index pack:')
+        assert job.run()
+        assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == SIMPLE_NEW_INDEX
         assert read_tree() == {'keep.txt': b'keep\n', 'add.txt': b'hello\n'}
 
     def test_corrupt_index_still_updates(self, app_folder):
-        """A corrupt local index does not stop the update: the pack is
-        self-describing, only the index is downloaded again."""
+        """A corrupt local index does not stop the update, the index
+        is downloaded again."""
         setup_app()
         bad = bytearray(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         bad[-5] ^= 0xFF
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(bad)
         job = UpdateJob(UPDATE, server=SERVER)
-        with logger.mock_capture_writer() as capture:
-            assert job.run()
-        assert capture.backend.any_contains('Failed to validate the old index pack:')
+        assert job.run()
         assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
             bytes(NEW_DECODER.extract_index_pack())
         assert read_tree() == NEW_TREE
 
     def test_missing_index_no_server(self, app_folder):
-        """A missing index pack and no server fails the run."""
+        """A missing index pack and no server leaves the record in
+        error."""
         setup_app()
         os.remove(env.PROJECT_ROOT / '.pack/index.pack')
         job = UpdateJob(UPDATE)
         with logger.mock_capture_writer() as capture:
             assert not job.run()
-        assert capture.backend.any_contains('Failed to update:')
+        assert capture.backend.any_contains('no server provided')
+        assert [item.info.path for item in job.error] == ['.pack/index.pack']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
 
@@ -621,20 +648,24 @@ class TestCallerFlow:
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_interrupted_unpack_resumed(self, app_folder):
-        """A run interrupted after unpack() is resumed: the index is
-        already the new one and is kept, the tmp files are reused."""
+        """A run interrupted after unpack() is resumed: the local
+        index is not touched yet (replace() writes it), the tmp files
+        are reused."""
         setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
         job.unpack()
-        # the index is already updated, the resumed run keeps it
+        # the local index is still the old one, the resumed run
+        # verifies it against the refinfo and reuses the tmp files
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
-            bytes(NEW_DECODER.extract_index_pack())
+            bytes(OLD_DECODER.extract_index_pack())
         job = DeployJob.get_unfinished_job(SERVER)
         assert job is not None
         assert isinstance(job, UpdateJob)
         assert job.run()
         assert read_tree() == NEW_TREE
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
+            bytes(NEW_DECODER.extract_index_pack())
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_resume_skips_write(self, app_folder, monkeypatch):
@@ -672,7 +703,7 @@ class TestFailure:
             UpdateJob(b'not a pack file').unpack()
 
     def test_full_pack_rejected(self, app_folder):
-        """A full pack without an index update part is rejected."""
+        """A full pack without refinfo is rejected."""
         with pytest.raises(ValueError, match='update pack'):
             UpdateJob(OLD_PACK).unpack()
 

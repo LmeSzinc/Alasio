@@ -21,12 +21,14 @@ class PackEncodeBase:
     - 索引包 (index pack)，记录版本中所有文件的信息，作为普通文件储存在 .pack/index.pack
 
     三种文件共享如下数据结构：
-    - 全量包中没有 index update part
+    - 全量包 (full pack)
       data section 中记录的是完整文件
       index section 中记录的是 data section 的信息，也就是当前版本所有文件的信息
-    - 增量包中有 index update part
+      refinfo 为空
+    - 增量包 (update pack)
       data section 是 zstd 增量更新数据，增量更新数据必须输入旧文件才能解压，无法独立解压
       index section 中记录的是 data section 的信息，也就是所有增量数据的信息
+      refinfo 记录旧版本文件，.pack/index.pack 作为普通文件记录在 refinfo / fileinfo 中
     - 全量包的前面部分就是索引包，去除 data section 之后的部分
 
     # header
@@ -49,9 +51,6 @@ class PackEncodeBase:
         # sha1 part
         - length
             - sha1
-        # index update part
-        - length
-            - index_update
         # checksum
         - checksum (checksum of above, including header and length)
 
@@ -66,8 +65,8 @@ class PackEncodeBase:
       这样即使解压中断 在下一次运行也能恢复
       申请到锁的进程需要先检查 job.pack 是否有未完成的任务，需要先完成未完成的任务
     - 在全量包中解压索引块写入 .pack/index.pack，就是全量包的前面部分
-      在增量包中使用 index update part 更新 .pack/index.pack
-      存在index update part就是增量包，不存在则是全量包
+      在增量包中 .pack/index.pack 是普通文件记录，像其他文件一样更新
+      refinfo 非空就是增量包，为空则是全量包
     - 根据索引块尝试读取目标文件，如果目标文件存在且size+sha1校验通过则跳过
     - 将文件解压到临时文件 .pack/workspace/{size}_{sha1}_{index}.tmp
       如果临时文件存在且size+sha1校验通过则跳过
@@ -112,14 +111,6 @@ class PackEncodeBase:
     @cached_property
     def fileinfo(self) -> "Dict[str, FileInfo]":
         return {}
-
-    @cached_property
-    def index_update(self) -> bytes:
-        """
-        zstd compressed data to update index_data
-        used in update pack only, empty in idx pack and full pack
-        """
-        return b''
 
     def _iterfile(self, iter_ref=False, iter_file=False) -> "Iterator[FileInfo]":
         if iter_ref and self.refinfo:
@@ -265,11 +256,6 @@ class PackEncodeBase:
             sha1_data = b''.join(self.iter_sha1_data())
             yield encode_vint(len(sha1_data))
             yield sha1_data
-
-            # index update
-            index_update = self.index_update
-            yield encode_vint(len(index_update))
-            yield index_update
 
         # header
         checksum = sha1()

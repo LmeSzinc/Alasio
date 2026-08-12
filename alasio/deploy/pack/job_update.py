@@ -1,13 +1,11 @@
 from hashlib import sha1
 
 import httpx
-import zstandard as zstd
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext import env
-from alasio.ext.compress.algo_zstd import zstd_decompress
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.logger import logger
 
@@ -39,35 +37,36 @@ class UpdateJob(JobBase):
     The update pack upgrades the local working tree from the old
     version to the new version, every file follows the same flow:
     read - verify - decompress to a tmp file, file content never
-    stays in memory:
+    stays in memory. The index pack .pack/index.pack is a normal
+    record of the update:
 
-    1. unpack() updates the index pack: the local .pack/index.pack
-       is patched with the index_update part in memory and written
-       back immediately, a missing or corrupt local index pack is
-       downloaded from the server. The update pack is
-       self-describing, only the refinfo (path / size / sha1 of the
-       old files it references) is needed to verify the sources, so
-       the unpack does not depend on the old index pack.
-    2. unpack() decompresses every file to .pack/workspace/
+    1. unpack() decompresses every file to .pack/workspace/
        {size}_{sha1}_{index}.tmp, real files are untouched. Records
        are computed from the update pack data and the old files
        recorded in refinfo: A records are decompressed directly, C
        (copied) records copy the source blob (read from the tmp file
        of the earlier new file, or from the verified working tree
        file), M / RM records decompress a zstd patch from the old
-       file, R (renamed) records move the old file. A source that
-       fails the size + sha1 check (missing, wrong content or
-       unfixable EOL) is kept in self.error.
-    3. download() fetches the content of the failed records from the
+       file, R (renamed) records move the old file. The record of
+       the index pack is an M record from the old index to the new
+       index: the local .pack/index.pack is verified against the
+       refinfo like any other old file, a self-consistent but wrong
+       local index fails the check. A source that fails the size +
+       sha1 check (missing, wrong content or unfixable EOL) is kept
+       in self.error.
+    2. download() fetches the content of the failed records from the
        full pack of the new version (the new index pack records
        carry the offsets), like ResetJob, and writes their tmp
-       files. The local source file is not repaired: the update
-       brings the records of the update pack to the new version, the
-       other files are checked by ResetJob. Records that cannot be
-       downloaded or fail the size + sha1 check stay in self.error,
-       this is an unsolvable problem per the draft of PackEncodeBase.
-    4. replace() moves every tmp file to the target path atomically,
-       removes the deleted markers and the renamed sources.
+       files. The index pack record is downloaded as a whole index
+       pack, it is not a file of the new full pack. The local source
+       files are not repaired: the update brings the records of the
+       update pack to the new version, the other files are checked
+       by ResetJob. Records that cannot be downloaded or fail the
+       size + sha1 check stay in self.error, this is an unsolvable
+       problem per the draft of PackEncodeBase.
+    3. replace() moves every tmp file to the target path atomically,
+       removes the deleted markers and the renamed sources, and
+       writes the new index pack like any other file.
 
     On failure the workspace is kept, the next run resumes from it.
 
@@ -91,6 +90,11 @@ class UpdateJob(JobBase):
         self.error: "list[PendingFile]" = []
         # {path: index} of fileinfo, used to build the tmp file names
         self._file_index: "dict[str, int]" = {}
+        # version of the update pack, used to download the index pack
+        self._version = ''
+        # tmp file of the index record prepared in unpack(), the new
+        # index pack, only the path is kept, the content is on disk
+        self._index_tmp = ''
 
     def run(self):
         """
@@ -142,23 +146,25 @@ class UpdateJob(JobBase):
         """
         Prepare all files in the workspace, real files are untouched.
 
-        Updates the index pack first (see _update_index), then
-        computes every record: files that exist and pass the size +
-        sha1 check are skipped, the others are decompressed to tmp
-        files, filling self.pending with the changes to apply in
-        replace(). Every file follows the same flow: read the source,
-        verify it, decompress to a tmp file, the content never stays
-        in memory. Records whose source fails the size + sha1 check
-        are kept in self.error, download() fetches their content from
-        the new full pack instead.
+        Computes every record of the update pack: files that exist and
+        pass the size + sha1 check are skipped, the others are
+        decompressed to tmp files, filling self.pending with the
+        changes to apply in replace(). Every file follows the same
+        flow: read the source, verify it, decompress to a tmp file,
+        the content never stays in memory. The index pack is updated
+        like a normal file, its local copy is verified against the
+        refinfo. Records whose source fails the size + sha1 check are
+        kept in self.error, download() fetches their content from the
+        new full pack instead.
         """
         decoder = PackDecodeBase(self._data)
         decoder.validate()
-        if not decoder._index_update:
+        if not decoder.refinfo:
             raise ValueError('UpdateJob requires an update pack, got a full pack')
+        self._version = decoder.version
         self._file_index = {path: index for index, (path, _) in enumerate(decoder.fileinfo.items())}
         self.error = []
-        self._update_index(decoder)
+        self._index_tmp = ''
 
         pending = []
         for index, (path, info) in enumerate(decoder.fileinfo.items()):
@@ -196,6 +202,11 @@ class UpdateJob(JobBase):
             if not self._matches(info, self._read_current(tmp)).match:
                 # decompress and write to the tmp file
                 atomic_write(tmp, content)
+            if path == self.INDEX_PACK:
+                # the tmp file of the index record is the new index
+                # pack, download() reads it from the disk for the
+                # offsets of the failed records
+                self._index_tmp = tmp
             if deleted:
                 self._append_deleted(pending, deleted)
             # the file is written by python with the default mode 666,
@@ -213,10 +224,13 @@ class UpdateJob(JobBase):
         computed locally: its content is fetched from the full pack of
         the new version (the new index pack records carry the
         offsets), decompressed, verified and written to its tmp file
-        like ResetJob. The local source file is not repaired. Records
-        that cannot be downloaded or fail the size + sha1 check stay
-        in self.error, this is an unsolvable problem per the draft of
-        PackEncodeBase.
+        like ResetJob. The index pack record is downloaded as a whole
+        index pack: it is not a file of the new full pack, and it is
+        downloaded first because the other records need the new index
+        for their offsets. The local source files are not repaired.
+        Records that cannot be downloaded or fail the size + sha1
+        check stay in self.error, this is an unsolvable problem per
+        the draft of PackEncodeBase.
         """
         if not self.error:
             return
@@ -228,12 +242,61 @@ class UpdateJob(JobBase):
                 f'no server provided'
             )
             return
-        # the new index pack records carry the offsets into the new
-        # full pack, read it once from the disk
-        new_index = PackDecodeBase(atomic_read_bytes(env.PROJECT_ROOT.joinpath(self.INDEX_PACK)))
         pending = []
         failed = []
+        # the index pack record first: it is not a file of the new
+        # full pack, the whole index pack is downloaded
+        new_index_data = None
         for item in self.error:
+            if item.info.path != self.INDEX_PACK:
+                continue
+            info = item.info
+            index = self._file_index[info.path]
+            tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
+            if self._matches(info, self._read_current(tmp)).match:
+                # a leftover tmp file passes the size + sha1 check, reuse it
+                pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+                continue
+            try:
+                # the index pack is self-validating, the trailing
+                # checksum covers the header, the length and the whole
+                # index section
+                new_index_data = server.get_index_pack(self._version)
+                PackDecodeBase(new_index_data).validate_index()
+            except (PackDecodeError, httpx.HTTPError) as e:
+                # cannot be downloaded or fails the size + sha1 check,
+                # the record stays in error, this is unsolvable
+                logger.warning(f'Failed to download {self.INDEX_PACK}: {e}')
+                failed.append(item)
+            else:
+                atomic_write(tmp, new_index_data)
+                pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
+            break
+        # the other records, downloaded from the new full pack with
+        # the offsets of the new index records
+        if new_index_data is None:
+            # the new index pack: the tmp file prepared in unpack(),
+            # or the local index (already the new one when the index
+            # record was skipped on a resumed run)
+            if self._index_tmp:
+                try:
+                    new_index_data = atomic_read_bytes(self._index_tmp)
+                except FileNotFoundError:
+                    pass
+        if new_index_data is None:
+            try:
+                new_index_data = atomic_read_bytes(env.PROJECT_ROOT.joinpath(self.INDEX_PACK))
+            except FileNotFoundError:
+                # the local index is missing and could not be
+                # downloaded, the offsets are unavailable
+                failed += [item for item in self.error if item.info.path != self.INDEX_PACK]
+                self.pending += pending
+                self.error = failed
+                return
+        new_index = PackDecodeBase(new_index_data)
+        for item in self.error:
+            if item.info.path == self.INDEX_PACK:
+                continue
             info = item.info
             index = self._file_index[info.path]
             tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
@@ -263,87 +326,6 @@ class UpdateJob(JobBase):
             pending.append(PendingFile(info=info, tmp=tmp, current_mode=0o666))
         self.pending += pending
         self.error = failed
-
-    def _update_index(self, decoder):
-        """
-        Update .pack/index.pack to the new index pack.
-
-        The index_update part patches the local index pack in memory,
-        the result is written back immediately, nothing is kept in
-        memory. The update pack is self-describing, so a missing or
-        corrupt local index pack, or a failed index update, falls back
-        to downloading the index pack of the update version like
-        ResetJob. When the local index pack is already the new index
-        (a resumed run after the previous run updated it), it is kept
-        as-is.
-
-        Args:
-            decoder (PackDecodeBase): Decoder of the update pack
-
-        Raises:
-            PackDecodeError: If the local index is unusable and the
-                index pack cannot be downloaded (no server, or the
-                downloaded index pack fails to decode or validate)
-        """
-        try:
-            old_data = atomic_read_bytes(env.PROJECT_ROOT.joinpath(self.INDEX_PACK))
-        except FileNotFoundError as e:
-            logger.warning(f'Failed to read the local index pack: {e}')
-            old_data = None
-        if old_data is not None:
-            try:
-                old_decoder = PackDecodeBase(old_data)
-                old_decoder.validate_index()
-            except PackDecodeError as e:
-                logger.warning(f'Failed to validate the old index pack: {e}')
-                old_decoder = None
-            if old_decoder is not None and old_decoder.version == decoder.version:
-                # the local index pack is already the new index, keep it
-                return
-            if old_decoder is not None:
-                try:
-                    # the index_update part patches the old index pack
-                    # to the new index pack
-                    new_data = zstd_decompress(decoder._index_update, source=old_data)
-                    new_decoder = PackDecodeBase(new_data)
-                    new_decoder.validate_index()
-                except (PackDecodeError, zstd.ZstdError) as e:
-                    logger.warning(f'Failed to update the index pack: {e}')
-                else:
-                    atomic_write(env.PROJECT_ROOT.joinpath(self.INDEX_PACK), new_data)
-                    return
-        # the local index pack is missing, corrupt, or cannot be
-        # patched, download the new one
-        new_data = self._download_index(decoder.version)
-        atomic_write(env.PROJECT_ROOT.joinpath(self.INDEX_PACK), new_data)
-
-    def _download_index(self, version):
-        """
-        Download the index pack of a version from the server.
-
-        The downloaded index pack is checked with PackDecodeBase: it
-        is self-validating, its trailing checksum covers the header,
-        the length and the whole index section.
-
-        Args:
-            version (str): Version of the index pack to download
-
-        Returns:
-            bytes: Index pack data
-
-        Raises:
-            PackDecodeError: If the server is missing, or the
-                downloaded index pack fails to decode or validate
-        """
-        server = self.server
-        if server is None:
-            raise PackDecodeError('Failed to download the index pack: no server provided')
-        index_pack = server.get_index_pack(version)
-        # the index pack is self-validating, the trailing checksum
-        # covers the header, the length and the whole index section
-        decoder = PackDecodeBase(index_pack)
-        decoder.validate_index()
-        return index_pack
 
     def _read_file(self, decoder, info):
         """
