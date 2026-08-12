@@ -158,10 +158,13 @@ class TestValidateFiles:
         job = ResetJob(WEBSITE_SERVER)
         assert not job.validate_files()
         error = job.error[0]
-        # the target mode is recorded, replace() would chmod to it
         assert error.info.path == 'backend/main.py'
-        assert error.tmp == ''
+        # the current content is written to a tmp file, replace()
+        # chmod-ed the target to the record mode, no download is needed
+        assert error.tmp
         assert error.mode == 0o644
+        assert file_read_bytes(error.tmp) == WEBSITE_FILES['backend/main.py'][0]
+        assert job._matches(error.info, job._read_current(error.tmp)).match
 
     def test_mode_755_matches(self, app_folder, fs):
         """A 755 record with execute bits passes."""
@@ -279,6 +282,59 @@ class TestValidateEolFix:
         assert job.run()
         assert file_read_bytes(target) == WEBSITE_FILES['scripts/deploy.sh'][0]
         # the fake filesystem simulates the POSIX file modes
+        assert os.stat(target).st_mode & 0o111 == 0o111
+
+
+class TestValidateModeFix:
+    """validate_files(): a mode-only mismatch is fixed without a download."""
+
+    def test_mode_fix_no_download(self, app_folder, fs, monkeypatch):
+        """download() moves a validation-fixed tmp to pending directly."""
+        setup_app(fs)
+        target = env.PROJECT_ROOT / 'backend/main.py'
+        # 644 record, the local file has the execute bits
+        fs.remove(target)
+        fs.create_file(target, st_mode=0o100755, contents=WEBSITE_FILES['backend/main.py'][0])
+        job = ResetJob(WEBSITE_SERVER)
+        job.validate_index()
+        job.validate_files()
+        job.download()
+        assert job.error == []
+        assert len(job.pending) == 1
+        item = job.pending[0]
+        assert item.info.path == 'backend/main.py'
+        assert item.mode == 0o644
+        assert file_read_bytes(item.tmp) == WEBSITE_FILES['backend/main.py'][0]
+
+    def test_run_mode_fix_without_download(self, app_folder, fs, monkeypatch):
+        """run() fixes a mode mismatch locally, no download is needed."""
+        setup_app(fs)
+        target = env.PROJECT_ROOT / 'backend/main.py'
+        fs.remove(target)
+        fs.create_file(target, st_mode=0o100755, contents=WEBSITE_FILES['backend/main.py'][0])
+
+        def _fail(self, *a, **k):
+            raise AssertionError('no download expected for a mode mismatch')
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_content', _fail)
+        job = ResetJob(WEBSITE_SERVER)
+        assert job.run()
+        assert job.error == []
+        assert file_read_bytes(target) == WEBSITE_FILES['backend/main.py'][0]
+        # the fake filesystem simulates the POSIX file modes, the
+        # target is chmod-ed to the record mode
+        assert os.stat(target).st_mode & 0o111 == 0
+
+    def test_run_mode_fix_755_record(self, app_folder, fs, monkeypatch):
+        """A mode-only mismatch of a 755 record sets the execute bits."""
+        setup_app(fs)
+        target = env.PROJECT_ROOT / 'scripts/deploy.sh'
+        # deploy.sh is mode=755, the local file has no execute bits
+        fs.remove(target)
+        fs.create_file(target, st_mode=0o100644, contents=WEBSITE_FILES['scripts/deploy.sh'][0])
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_content', lambda *a, **k: b'bad data')
+        job = ResetJob(WEBSITE_SERVER)
+        assert job.run()
+        assert file_read_bytes(target) == WEBSITE_FILES['scripts/deploy.sh'][0]
         assert os.stat(target).st_mode & 0o111 == 0o111
 
 

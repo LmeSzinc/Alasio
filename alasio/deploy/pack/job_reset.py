@@ -146,8 +146,12 @@ class ResetJob(JobBase):
         A file whose content matches only after converting its EOL to
         the record EOL is written to a tmp file with the converted
         content and recorded with the tmp set, download() moves it to
-        pending without a download. Other failed files are collected
-        in self.error with an empty tmp, the caller repairs them.
+        pending without a download. A file whose content matches but
+        whose mode differs is written to a tmp file with the current
+        content, replace() chmod-ed the target to the record mode,
+        no download is needed either. Other failed files are
+        collected in self.error with an empty tmp, the caller repairs
+        them.
 
         Returns:
             bool: True if every file matches its record, False
@@ -164,10 +168,19 @@ class ResetJob(JobBase):
                 continue
             result = self._matches(info, current)
             if result.match:
-                if not result.mode_matched:
-                    # the mode differs, the record mode is the target
-                    self.error.append(PendingFile(
-                        info=info, tmp='', mode=info.mode_decoded))
+                if result.mode_matched:
+                    continue
+                # only the mode differs, the content is verified:
+                # write the current content to a tmp file, download()
+                # moves it to pending without a download, replace()
+                # chmod-ed the target to the record mode
+                # the tmp name is built from the index of the record
+                # in self.error, matching the download() convention
+                tmp = self.workspace.joinpath(
+                    f'{info.size}_{info.sha1}_{len(self.error)}.tmp')
+                if not self._matches(info, self._read_current(tmp)).match:
+                    atomic_write(tmp, current.data)
+                self.error.append(PendingFile(info=info, tmp=tmp, mode=info.mode_decoded))
                 continue
             if result.match_data:
                 # only the EOL differs, write the converted content
@@ -224,8 +237,9 @@ class ResetJob(JobBase):
         pack version with a range request, decompressed and written to
         .pack/workspace/{size}_{sha1}_{index}.tmp, the record is moved
         to self.pending for replace(). Records that already carry a
-        tmp (an EOL mismatch fixed in validate_files()) and deleted
-        markers need no download and are moved to pending directly.
+        tmp (an EOL or mode mismatch fixed in validate_files()) and
+        deleted markers need no download and are moved to pending
+        directly.
         Files that cannot be downloaded or fail the size + sha1 check
         stay in self.error with an empty tmp, this is an unsolvable
         problem per the draft of PackEncodeBase.
@@ -247,7 +261,8 @@ class ResetJob(JobBase):
                 continue
             if item.tmp:
                 # the tmp was already written during validation, the
-                # EOL of the file was fixed, no download is needed
+                # EOL or mode of the file was fixed, no download is
+                # needed
                 pending.append(item)
                 continue
             try:
