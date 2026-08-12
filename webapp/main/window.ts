@@ -31,7 +31,10 @@ export function createWindow(): BrowserWindow {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+    // app:// is registered by main/index.ts; the custom scheme is required
+    // because SvelteKit's client-side router uses history.pushState, which
+    // fails on the file:// protocol. The root path maps to index.html.
+    mainWindow.loadURL('app://bundle/');
   }
 
   // Prevent default close behavior

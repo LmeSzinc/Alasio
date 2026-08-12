@@ -5,6 +5,7 @@ import { initSharedState, setRoute, setupSharedStateIPC, setMainWindow as setSha
 import { createWindow, setupWindowIPC } from './window';
 import { createTray, setMainWindow as setTrayWindow } from './tray';
 import { startBackend, setMainWindow as setBackendWindow } from './backend';
+import { registerAppProtocol } from './protocol';
 
 // Disable GPU and configure Electron
 app.disableHardwareAcceleration();
@@ -14,6 +15,9 @@ app.commandLine.appendSwitch('no-proxy-server');
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
+
+// Register the app:// protocol serving the built renderer (must be before app ready)
+registerAppProtocol(path.join(__dirname, '../renderer'));
 
 if (!gotTheLock) {
   app.quit();
