@@ -1,4 +1,5 @@
 <script lang="ts">
+  // !!![svelte-drop-dev-page]!!!
   import LogDisplay from "$private/config/[config_name]/overview/LogDisplay.svelte";
   import type { LogDataProps } from "$private/config/[config_name]/overview/types";
 

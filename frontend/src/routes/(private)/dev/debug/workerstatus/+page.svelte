@@ -1,4 +1,5 @@
 <script lang="ts">
+  // !!![svelte-drop-dev-page]!!!
   import Arg from "$lib/components/arg/Arg.svelte";
   import ConfigItem from "$lib/components/aside/ConfigItem.svelte";
   import type { ArgData } from "$lib/components/arg/utils.svelte";

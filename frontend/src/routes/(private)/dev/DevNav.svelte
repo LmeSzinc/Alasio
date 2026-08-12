@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { dev } from "$app/environment";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { Button } from "$lib/components/ui/button";
@@ -21,16 +22,22 @@
     { path: "/dev/assets", name: t.AssetManager.AssetManager() },
     { path: "/dev/compat", name: "Browser Compatibility" },
   ]);
-  const debugNavItems = $derived([
-    { path: "/dev/debug/ws", name: t.WebsocketTest.Title() },
-    { path: "/dev/debug/workerstatus", name: "Worker Status" },
-    { path: "/dev/debug/scheduler", name: "Scheduler" },
-    { path: "/dev/debug/preview", name: "Preview" },
-    { path: "/dev/debug/dashboard", name: "Dashboard" },
-    { path: "/dev/debug/dashboardgroup", name: "Dashboard Group" },
-    { path: "/dev/debug/log", name: "Log Viewer" },
-    { path: "/dev/debug/configdisplay", name: "Config Display" },
-  ]);
+  const debugNavItems = $derived(
+    // /dev/debug/* routes are dropped from the production build by the
+    // svelte-drop-dev-page plugin, so only show them in development
+    dev
+      ? [
+          { path: "/dev/debug/ws", name: t.WebsocketTest.Title() },
+          { path: "/dev/debug/workerstatus", name: "Worker Status" },
+          { path: "/dev/debug/scheduler", name: "Scheduler" },
+          { path: "/dev/debug/preview", name: "Preview" },
+          { path: "/dev/debug/dashboard", name: "Dashboard" },
+          { path: "/dev/debug/dashboardgroup", name: "Dashboard Group" },
+          { path: "/dev/debug/log", name: "Log Viewer" },
+          { path: "/dev/debug/configdisplay", name: "Config Display" },
+        ]
+      : [],
+  );
 
   // --- Derived State ---
   const currentPath = $derived(page.url.pathname);
@@ -86,6 +93,8 @@
   <aside class={cn("w-full space-y-4 p-4", className)} role="navigation" aria-label="Main navigation">
     {@render navSection(t.DevTool.AlasioTool(), alasioNavItems)}
     {@render navSection(t.DevTool.DevTool(), devNavItems)}
-    {@render navSection(t.DevTool.DebugTool(), debugNavItems)}
+    {#if dev}
+      {@render navSection(t.DevTool.DebugTool(), debugNavItems)}
+    {/if}
   </aside>
 </ScrollArea>

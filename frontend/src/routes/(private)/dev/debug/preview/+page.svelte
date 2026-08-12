@@ -1,4 +1,5 @@
 <script lang="ts">
+  // !!![svelte-drop-dev-page]!!!
   import type { WORKER_STATE } from "$lib/components/aside/types";
   import PreviewDisplay from "$private/config/[config_name]/overview/PreviewDisplay.svelte";
 

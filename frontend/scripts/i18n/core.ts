@@ -199,7 +199,10 @@ export class I18nGenerator {
   private async syncJsonAndGen(mod: string, keys: Set<string>) {
     const jsonPath = resolvePath(this.config.i18nPath, `${mod}.json`);
 
-    // Build new data from all keys, preserving existing translations
+    // Build new data by merging scanned keys into the on-disk state,
+    // preserving existing translations. Keys that are not scanned right
+    // now (e.g. files temporarily renamed during build) are kept as-is,
+    // so translations are never lost to a temporary filesystem state.
     let currentContent = "";
     let currentOnDisk: Record<string, Record<string, string>> = {};
     try {
@@ -207,7 +210,7 @@ export class I18nGenerator {
       currentOnDisk = JSON.parse(currentContent);
     } catch {}
 
-    const newData: Record<string, Record<string, string>> = {};
+    const newData: Record<string, Record<string, string>> = { ...currentOnDisk };
 
     keys.forEach((k) => {
       if (currentOnDisk[k]) {
