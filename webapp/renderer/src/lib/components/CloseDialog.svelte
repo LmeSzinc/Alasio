@@ -10,7 +10,7 @@
   let isClosing = $state(false);
   let shutdownStage = $state<string>("");
 
-  const stageMessages = $derived({
+  const stageMessages = $derived<Record<string, string>>({
     waiting: t.WaitingBackend(),
     forcing: t.ForcingBackend(),
     killing: t.KillingBackend(),
