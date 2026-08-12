@@ -130,8 +130,8 @@ class PackUpdate(PackEncodeBase):
             UpdateInfo | None: The M record of the index pack, or
                 None when the index pack did not change
         """
-        old_index = bytes(self.old.extract_index_pack())
-        new_index = bytes(self.new.extract_index_pack())
+        old_index = self.old.extract_index_pack()
+        new_index = self.new.extract_index_pack()
         if old_index == new_index:
             return None
         info = UpdateInfo(path='.pack/index.pack', edit=1, eol=2, mode=0)
@@ -163,7 +163,7 @@ class PackUpdate(PackEncodeBase):
         diff = self.diff_info
         index_info = diff.get('.pack/index.pack')
         if index_info is not None and index_info.source_path:
-            old_index = bytes(self.old.extract_index_pack())
+            old_index = self.old.extract_index_pack()
             ref = dict(ref)
             ref['.pack/index.pack'] = RefInfo(
                 path='.pack/index.pack', size=len(old_index), sha1=sha1(old_index).hexdigest())

@@ -444,14 +444,14 @@ class UpdateJob(JobBase):
         Convert working tree content back to the LF blob.
 
         Args:
-            content (bytes | memoryview): Working tree file content
+            content (bytes): Working tree file content, the callers
+                pass the verified file data
             eol (int): Line ending rule, 0 for LF, 1 for CRLF, 2 for
                 binary
 
         Returns:
             bytes: Content in the LF blob form
         """
-        content = bytes(content)
         if eol == 1:
             return content.replace(b'\r\n', b'\n')
         return content

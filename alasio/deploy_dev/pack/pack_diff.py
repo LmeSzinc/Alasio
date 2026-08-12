@@ -100,8 +100,8 @@ class PackDiff:
         self.zstd_level = zstd_level
         self.similarity_level = similarity_level
         # blob content caches (git blob form, LF normalized), keyed by path
-        self._old_blob_cache: "dict[str, bytes]" = {}
-        self._new_blob_cache: "dict[str, bytes]" = {}
+        self._old_blob_cache: "dict[str, bytes | memoryview]" = {}
+        self._new_blob_cache: "dict[str, bytes | memoryview]" = {}
         # files that exist, deleted markers (edit=2) are excluded
         self._real_old = {info.path: info for info in old.idx_info if info.edit != 2}
         self._real_new = {info.path: info for info in new.idx_info if info.edit != 2}
@@ -323,7 +323,8 @@ class PackDiff:
             info (IdxInfo): Record of the file
 
         Returns:
-            bytes: Blob content
+            bytes | memoryview: Blob content, the cached memoryview is
+                a zero-copy slice of the pack data
 
         Raises:
             PackDecodeError: If the content fails to decode or verify
@@ -338,7 +339,8 @@ class PackDiff:
             info (IdxInfo): Record of the file
 
         Returns:
-            bytes: Blob content
+            bytes | memoryview: Blob content, the cached memoryview is
+                a zero-copy slice of the pack data
 
         Raises:
             PackDecodeError: If the content fails to decode or verify
@@ -354,12 +356,13 @@ class PackDiff:
         See _read_old_blob / _read_new_blob for the public wrappers.
 
         Args:
-            cache (dict[str, bytes]): Blob cache of the decoder
+            cache (dict[str, bytes | memoryview]): Blob cache of the decoder
             decoder (PackDecodeBase | MockDecodeBase): Decoder to read from
             info (IdxInfo): Record of the file
 
         Returns:
-            bytes: Blob content
+            bytes | memoryview: Blob content, the cached memoryview is
+                a zero-copy slice of the pack data
 
         Raises:
             PackDecodeError: If the content fails to decode or verify
@@ -370,7 +373,7 @@ class PackDiff:
             if info.algo:
                 data = PackDecodeBase._decompress(info, data)
             PackDecodeBase._check_content(info, data)
-            blob = bytes(data)
+            blob = data
             cache[info.path] = blob
         return blob
 

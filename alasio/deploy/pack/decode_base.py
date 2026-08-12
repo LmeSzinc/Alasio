@@ -89,7 +89,7 @@ class PackDecodeBase:
         self.data = data
 
         # header
-        if len(data) < 5 or bytes(data[:4]) != b'PACK':
+        if len(data) < 5 or data[:4] != b'PACK':
             raise PackDecodeError(f'Failed to decode header: not a pack file: {bytes(data[:4])!r}')
         self.pack_version = bytes(data[4:5])
 
@@ -183,7 +183,7 @@ class PackDecodeBase:
         digest = sha1()
         digest.update(self.data[:5])
         digest.update(self.index_section[:-20])
-        if digest.digest() != bytes(self.index_section[-20:]):
+        if digest.digest() != self.index_section[-20:]:
             raise PackDecodeError('Failed to validate index checksum: checksum mismatch')
 
     def validate_data(self):
@@ -206,7 +206,7 @@ class PackDecodeBase:
         digest.update(self.data[:5])
         digest.update(self.index_section)
         digest.update(self.data_section[:-20])
-        if digest.digest() != bytes(self.data_section[-20:]):
+        if digest.digest() != self.data_section[-20:]:
             raise PackDecodeError('Failed to validate data checksum: checksum mismatch')
 
     def extract_index_pack(self):
@@ -377,7 +377,7 @@ class PackDecodeBase:
                 f'expected {count_sha1 * 20}'
             )
         sha1s = iter(
-            bytes(self._sha1_part[offset:offset + 20]).hex()
+            self._sha1_part[offset:offset + 20].hex()
             for offset in range(0, len(self._sha1_part), 20)
         )
         for info in info_list[:len_refinfo]:
