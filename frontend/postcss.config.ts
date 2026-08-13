@@ -127,10 +127,12 @@ const oklchToRgbDoubleDefPlugin = () => {
 
           // 5. Insert the NEW *-rgb variable AFTER the current one
           // This allows Tailwind to find --var-rgb
-          decl.parent!.insertAfter(decl, {
-            prop: `${decl.prop}-rgb`,
-            value: channelString,
-          });
+          // clone() keeps `source` (and thus `source.input.file`), otherwise
+          // vite warns about a PostCSS plugin not passing `from` to postcss.parse
+          decl.parent!.insertAfter(
+            decl,
+            decl.clone({ prop: `${decl.prop}-rgb`, value: channelString, important: false }),
+          );
 
           // 6. Update the ORIGINAL variable to be a standard Hex string
           // This ensures broad compatibility (Chrome 108, older Safari, etc.)
@@ -138,10 +140,10 @@ const oklchToRgbDoubleDefPlugin = () => {
           if (alpha < 1) {
             alphaVariables.add(decl.prop);
             decl.value = culori.formatHex8(rgbColor);
-            decl.parent!.insertAfter(decl, {
-              prop: `${decl.prop}-a`,
-              value: alpha.toString(),
-            });
+            decl.parent!.insertAfter(
+              decl,
+              decl.clone({ prop: `${decl.prop}-a`, value: alpha.toString(), important: false }),
+            );
           } else {
             decl.value = culori.formatHex(rgbColor);
           }
@@ -260,10 +262,14 @@ const transformShortcutPlugin = () => {
             selector: rule.selector,
             source: rule.source,
           });
-          fallbackRule.append({
+          const fallbackDecl = postcss.decl({
             prop: "transform",
             value: transformFunctions.join(" "),
           });
+          // Assign `source` explicitly, otherwise vite warns about a PostCSS
+          // plugin not passing `from` to postcss.parse
+          fallbackDecl.source = rule.source;
+          fallbackRule.append(fallbackDecl);
           fallbackAtRule.append(fallbackRule);
         }
       });
