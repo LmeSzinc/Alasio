@@ -223,12 +223,9 @@ class TestUnpack:
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
         job.unpack()
-        # find the tmp file of the index record, it must be the new
-        # index pack
-        decoder = PackDecodeBase(UPDATE)
-        index = list(decoder.fileinfo).index('.pack/index.pack')
-        info = decoder.fileinfo['.pack/index.pack']
-        tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1}_{index}.tmp'
+        # the index record is always written to the fixed new_index.pack
+        # in the workspace, it must be the new index pack
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{UpdateJob.NEW_INDEX}'
         data = file_read_bytes(tmp)
         assert data == bytes(NEW_DECODER.extract_index_pack())
         # the tmp file is a valid index pack of the new version
@@ -458,17 +455,18 @@ class TestSourceDownload:
 
     def test_missing_copied_source_downloaded(self, app_folder):
         """A missing old file of a C record: the copy is downloaded,
-        the source file is left as-is."""
+        the missing source is repaired by the remaining check."""
         setup_app()
         os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         job = UpdateJob(UPDATE, server=SERVER)
         assert job.run()
         assert job.error == []
-        # the copies are downloaded from the new full pack, the source
-        # is not repaired (it is checked by ResetJob)
-        assert not os.path.exists(env.PROJECT_ROOT / 'docs/readme.md')
+        # the copies are downloaded from the new full pack
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Website\r\n'
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy2.txt') == b'# Website\r\n'
+        # the missing unchanged source is repaired by the remaining
+        # check against the new index
+        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme.md') == b'# Website\n'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_damaged_patch_source_downloaded(self, app_folder):
@@ -519,8 +517,10 @@ class TestSourceDownload:
         with logger.mock_capture_writer() as capture:
             assert not job.run()
         assert capture.backend.any_contains('Failed to download docs/readme_copy.txt:')
+        # the failed copies and the missing unchanged source (failed
+        # in the remaining check) stay in error
         assert [item.info.path for item in job.error] == \
-            ['docs/readme_copy.txt', 'docs/readme_copy2.txt']
+            ['docs/readme_copy.txt', 'docs/readme_copy2.txt', 'docs/readme.md']
         # the other changes are still applied, the workspace is cleaned
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/a1.py') == NEW['backend/a1.py']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -535,6 +535,66 @@ class TestSourceDownload:
         assert capture.backend.any_contains('no server provided')
         assert [item.info.path for item in job.error] == \
             ['docs/readme_copy.txt', 'docs/readme_copy2.txt']
+
+
+class TestValidateRemaining:
+    """UpdateJob verifies the local files not covered by the update pack."""
+
+    def test_damaged_unchanged_file_repaired(self, app_folder):
+        """A damaged unchanged file is repaired with the new index."""
+        setup_app()
+        # data/blob.png is unchanged between the versions, it is not a
+        # record of the update pack
+        target = env.PROJECT_ROOT / 'data/blob.png'
+        with open(target, 'wb') as f:
+            f.write(b'corrupt content')
+        run_update()
+        assert file_read_bytes(target) == NEW['data/blob.png']
+
+    def test_remaining_download_failed_stays_in_error(self, app_folder, monkeypatch):
+        """A remaining file that cannot be downloaded stays in error."""
+        setup_app()
+        target = env.PROJECT_ROOT / 'data/blob.png'
+        with open(target, 'wb') as f:
+            f.write(b'corrupt content')
+        monkeypatch.setattr(SERVER, 'get_file_content', lambda *a, **k: b'bad data')
+        job = UpdateJob(UPDATE, server=SERVER)
+        with logger.mock_capture_writer() as capture:
+            assert not job.run()
+        assert capture.backend.any_contains('Failed to download data/blob.png:')
+        assert [item.info.path for item in job.error] == ['data/blob.png']
+
+    def test_index_failed_skips_remaining(self, app_folder, monkeypatch):
+        """The remaining check is skipped when the index record failed."""
+        setup_app()
+        bad = bytearray(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
+        bad[-5] ^= 0xFF
+        with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
+            f.write(bad)
+        # the damaged unchanged file stays damaged: the remaining check
+        # is skipped, the local index is not the new one
+        target = env.PROJECT_ROOT / 'data/blob.png'
+        with open(target, 'wb') as f:
+            f.write(b'corrupt content')
+        monkeypatch.setattr(SERVER, 'get_index_pack', lambda version: b'bad data')
+        job = UpdateJob(UPDATE, server=SERVER)
+        with logger.mock_capture_writer() as capture:
+            assert not job.run()
+        assert capture.backend.any_contains('the index pack record failed')
+        assert [item.info.path for item in job.error] == ['.pack/index.pack']
+        assert file_read_bytes(target) == b'corrupt content'
+
+    def test_no_server_skips_remaining(self, app_folder):
+        """The remaining check is skipped without a server."""
+        setup_app()
+        target = env.PROJECT_ROOT / 'data/blob.png'
+        with open(target, 'wb') as f:
+            f.write(b'corrupt content')
+        job = UpdateJob(UPDATE)
+        assert job.run()
+        assert job.error == []
+        # the damaged remaining file is left as-is, no server to repair it
+        assert file_read_bytes(target) == b'corrupt content'
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -583,13 +643,24 @@ class TestDownload:
         with open(tmp, 'wb') as f:
             f.write(b'# Website\r\n')
 
-        def _fail(self, *a, **k):
-            raise AssertionError('no download expected, the tmp file is reused')
-        monkeypatch.setattr(SERVER, 'get_file_content', _fail)
+        # the copy record is served from the leftover tmp without a
+        # download; only the missing readme.md is downloaded by the
+        # remaining check (its data range is the same as the copy's,
+        # the copy restores the data range of its source)
+        original = SERVER.get_file_content
+        calls = []
+
+        def _serve(version, offset, size):
+            calls.append(offset)
+            return original(version, offset, size)
+        monkeypatch.setattr(SERVER, 'get_file_content', _serve)
         job = UpdateJob(UPDATE, server=SERVER)
         assert job.run()
         assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Website\r\n'
+        # the missing unchanged source is repaired by the remaining check
+        assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme.md') == b'# Website\n'
+        assert len(calls) == 1
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_download_no_error_is_noop(self, app_folder, monkeypatch):

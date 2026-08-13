@@ -4,8 +4,10 @@ import httpx
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
+from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext import env
+from alasio.ext.cache import InstanceCacheOperation
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
 from alasio.logger import logger
 
@@ -75,6 +77,11 @@ class UpdateJob(JobBase):
     the caller is responsible for it.
     """
 
+    # fixed name of the new index pack in the workspace: the index
+    # record is always written to this file, so the new index can be
+    # found without tracking the tmp name
+    NEW_INDEX = 'new_index.pack'
+
     def __init__(self, data, server=None, resume=False):
         """
         Args:
@@ -92,20 +99,18 @@ class UpdateJob(JobBase):
         self._file_index: "dict[str, int]" = {}
         # version of the update pack, used to download the index pack
         self._version = ''
-        # tmp file of the index record prepared in unpack(), the new
-        # index pack, only the path is kept, the content is on disk
-        self._index_tmp = ''
 
     def run(self):
         """
         Execute the full update flow.
 
         Writes the job file first unless the job was resumed from it,
-        then unpacks, downloads the failed records and replaces all
-        files. On failure the workspace is cleaned up: errors during
-        write() and unpack() are safe because no real file was written
-        and are logged as warning, errors during replace() leave
-        partially replaced files and are logged as error.
+        then unpacks, downloads the failed records, verifies the
+        remaining local files and replaces all files in one pass.
+        On failure the workspace is cleaned up: errors during write()
+        and unpack() are safe because no real file was written and are
+        logged as warning, errors during replace() leave partially
+        replaced files and are logged as error.
 
         Returns:
             bool: True if every file is updated, False if some records
@@ -117,6 +122,7 @@ class UpdateJob(JobBase):
             logger.info(f'Updating files to "{env.PROJECT_ROOT}"')
             self.unpack()
             self.download()
+            self._validate_remaining()
         except Exception as e:
             # no real file was written, safe to clean up
             logger.warning(f'Failed to update: {e}')
@@ -164,7 +170,6 @@ class UpdateJob(JobBase):
         self._version = decoder.version
         self._file_index = {path: index for index, path in enumerate(decoder.fileinfo)}
         self.error = []
-        self._index_tmp = ''
 
         pending = []
         for index, (path, info) in enumerate(decoder.fileinfo.items()):
@@ -178,7 +183,13 @@ class UpdateJob(JobBase):
             deleted = info.source_path if info.edit == 3 else ''
             current = self._read_current(target)
             result = self._matches(info, current)
-            tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
+            if path == self.INDEX_PACK:
+                # the index record is always written to the fixed
+                # new_index.pack, so the new index can be found
+                # without tracking the tmp name
+                tmp = self.workspace.joinpath(self.NEW_INDEX)
+            else:
+                tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
             if result.match:
                 # the target file exists and passes the size + sha1 check
                 if deleted:
@@ -212,11 +223,6 @@ class UpdateJob(JobBase):
             if not self._matches(info, self._read_current(tmp)).match:
                 # decompress and write to the tmp file
                 atomic_write(tmp, content)
-            if path == self.INDEX_PACK:
-                # the tmp file of the index record is the new index
-                # pack, download() reads it from the disk for the
-                # offsets of the failed records
-                self._index_tmp = tmp
             if deleted:
                 self._append_deleted(pending, deleted)
             # the file is written by python with the default mode 666,
@@ -262,8 +268,7 @@ class UpdateJob(JobBase):
             if item.info.path != self.INDEX_PACK:
                 continue
             info = item.info
-            index = self._file_index[info.path]
-            tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
+            tmp = self.workspace.joinpath(self.NEW_INDEX)
             if self._matches(info, self._read_current(tmp)).match:
                 # a leftover tmp file passes the size + sha1 check, reuse it
                 pending.append(PendingFile(
@@ -279,6 +284,7 @@ class UpdateJob(JobBase):
                 # cannot be downloaded or fails the size + sha1 check,
                 # the record stays in error, this is unsolvable
                 logger.warning(f'Failed to download {self.INDEX_PACK}: {e}')
+                new_index_data = None
                 failed.append(item)
             else:
                 atomic_write(tmp, new_index_data)
@@ -288,14 +294,14 @@ class UpdateJob(JobBase):
         # the other records, downloaded from the new full pack with
         # the offsets of the new index records
         if new_index_data is None:
-            # the new index pack: the tmp file prepared in unpack(),
-            # or the local index (already the new one when the index
-            # record was skipped on a resumed run)
-            if self._index_tmp:
-                try:
-                    new_index_data = atomic_read_bytes(self._index_tmp)
-                except FileNotFoundError:
-                    pass
+            # the new index pack: the fixed tmp file prepared in
+            # unpack() or download(), or the local index (already the
+            # new one when the index record was skipped on a resumed
+            # run)
+            try:
+                new_index_data = atomic_read_bytes(self.workspace.joinpath(self.NEW_INDEX))
+            except FileNotFoundError:
+                pass
         if new_index_data is None:
             try:
                 new_index_data = atomic_read_bytes(env.PROJECT_ROOT.joinpath(self.INDEX_PACK))
@@ -341,6 +347,55 @@ class UpdateJob(JobBase):
                 info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
         self.pending += pending
         self.error = failed
+
+    def _validate_remaining(self):
+        """
+        Verify the local files not covered by the update pack.
+
+        The records of the update pack were verified in unpack(), they
+        are filtered out of the index view passed to ResetJob: the
+        local .pack/index.pack is replaced in replace() with the other
+        files, so the new index is passed in directly with only the
+        remaining files. The repaired records are merged into
+        self.pending, replace() applies them together with the update
+        records, so the real files are touched only once.
+
+        Skipped when the update has no server, or the index pack record
+        failed (the local index is not the new one then).
+        """
+        if self.server is None:
+            return
+        if '.pack/index.pack' in [item.info.path for item in self.error]:
+            # the index record failed, the local index is not the new
+            # one, it cannot be trusted for the remaining check
+            logger.warning('Failed to validate the remaining files: '
+                           'the index pack record failed')
+            return
+        # the new index pack: the fixed tmp file prepared in unpack()
+        # or download(), or the local index when the index record was
+        # skipped (it is already the new one then)
+        try:
+            data = atomic_read_bytes(self.workspace.joinpath(self.NEW_INDEX))
+        except FileNotFoundError:
+            try:
+                data = atomic_read_bytes(env.PROJECT_ROOT.joinpath(self.INDEX_PACK))
+            except FileNotFoundError:
+                return
+        new_index = PackDecodeBase(data)
+        # the records of the update pack were verified in unpack(),
+        # keep only the remaining files in the index view, so ResetJob
+        # validates exactly them
+        fileinfo = {
+            path: info for path, info in new_index.fileinfo.items()
+            if path not in self._file_index
+        }
+        InstanceCacheOperation.set(new_index, 'fileinfo', fileinfo)
+        reset = ResetJob(self.server)
+        InstanceCacheOperation.set(reset, '_index_pack', new_index)
+        reset.validate_files()
+        reset.download()
+        self.pending += reset.pending
+        self.error += reset.error
 
     def _read_file(self, decoder, info):
         """
