@@ -9,20 +9,20 @@ from alasio.git.obj.objcommit import CommitObj, parse_commit, parse_commit_tree,
 class TestTz2delta:
     def test_positive_timezone(self):
         """Test timezone conversion for positive values with '+' prefix."""
-        assert tz2delta(b"+0800") == 28800  # 8 hours in seconds
+        assert tz2delta(b"+0800") == 480  # 8 hours in minutes
         assert tz2delta(b"+0000") == 0
-        assert tz2delta(b"+0430") == 16200  # 4 hours 30 minutes in seconds
+        assert tz2delta(b"+0430") == 270  # 4 hours 30 minutes in minutes
 
     def test_negative_timezone(self):
         """Test timezone conversion for negative values with '-' prefix."""
-        assert tz2delta(b"-0800") == -28800
-        assert tz2delta(b"-0430") == -16200
+        assert tz2delta(b"-0800") == -480
+        assert tz2delta(b"-0430") == -270
 
     def test_no_prefix_timezone(self):
         """Test timezone conversion for values without prefix (new case in updated function)."""
-        assert tz2delta(b"0800") == 28800  # 8 hours in seconds
+        assert tz2delta(b"0800") == 480  # 8 hours in minutes
         assert tz2delta(b"0000") == 0
-        assert tz2delta(b"0430") == 16200  # 4 hours 30 minutes in seconds
+        assert tz2delta(b"0430") == 270  # 4 hours 30 minutes in minutes
 
     def test_invalid_format(self):
         """Test timezone conversion with invalid format raises ValueError."""
@@ -134,6 +134,12 @@ class TestParseCommit:
         assert isinstance(commit.author_time, int)
         assert isinstance(commit.committer_time, int)
         assert isinstance(commit.message, str)
+        # obj_chinese uses +0800
+        # author 1585635715 +0800, committer 1585635824 +0800
+        assert commit.author_tz == 480
+        assert commit.committer_tz == 480
+        assert commit.author_time == 1585635715 + 480 * 60
+        assert commit.committer_time == 1585635824 + 480 * 60
 
     def test_parse_commit_merge(self):
         """Test parsing merge commit (with two parents)."""
@@ -153,6 +159,9 @@ class TestParseCommit:
         assert isinstance(commit.author_time, int)
         assert isinstance(commit.committer_time, int)
         assert isinstance(commit.message, str)
+        # obj_merge uses +0800
+        assert commit.author_tz == 480
+        assert commit.committer_tz == 480
 
     def test_parse_commit_initial(self):
         """Test parsing initial commit (no parent)."""
@@ -171,6 +180,9 @@ class TestParseCommit:
         assert isinstance(commit.author_time, int)
         assert isinstance(commit.committer_time, int)
         assert isinstance(commit.message, str)
+        # obj_initial uses +0800
+        assert commit.author_tz == 480
+        assert commit.committer_tz == 480
 
     def test_missing_author(self):
         """Test handling of commits with no author."""

@@ -17,11 +17,15 @@ class CommitObj(msgspec.Struct):
     author_name: str
     author_email: str
     author_time: int
+    # timezone offset in minutes
+    author_tz: int
     # note that time is in UTC+0
 
     committer_name: str
     committer_email: str
     committer_time: int
+    # timezone offset in minutes
+    committer_tz: int
 
     # Do we need this?
     # gpgsig: Union[bytes, None]
@@ -30,7 +34,7 @@ class CommitObj(msgspec.Struct):
 
 def tz2delta(tz):
     """
-    Convert timezone bytes like b"+0800" or b"-0430" to seconds as int.
+    Convert timezone bytes like b"+0800" or b"-0430" to minutes as int.
 
     Args:
         tz (bytes):
@@ -44,14 +48,14 @@ def tz2delta(tz):
     if tz.startswith(b'+'):
         hour = int(tz[1:3])
         minute = int(tz[3:5])
-        return hour * 3600 + minute * 60
+        return hour * 60 + minute
     if tz.startswith(b'-'):
         hour = int(tz[1:3])
         minute = int(tz[3:5])
-        return hour * -3600 + minute * -60
+        return -(hour * 60 + minute)
     hour = int(tz[0:2])
     minute = int(tz[2:4])
-    return hour * 3600 + minute * 60
+    return hour * 60 + minute
 
 
 def parse_commit_tree(data):
@@ -144,7 +148,8 @@ def parse_commit(data):
         tz = tz2delta(tz)
     except ValueError:
         raise ObjectBroken(f'Failed to parse author timezone: {tz}', data)
-    author_time += tz
+    author_tz = tz
+    author_time += tz * 60
 
     # committer
     # keep \n in the remains
@@ -172,7 +177,8 @@ def parse_commit(data):
         tz = tz2delta(tz)
     except ValueError:
         raise ObjectBroken(f'Failed to parse committer timezone: {tz}', data)
-    committer_time += tz
+    committer_tz = tz
+    committer_time += tz * 60
 
     # message
     _, _, message = remain.partition(b'\n\n')
@@ -187,8 +193,10 @@ def parse_commit(data):
         author_name=author_name,
         author_email=author_email,
         author_time=author_time,
+        author_tz=author_tz,
         committer_name=committer_name,
         committer_email=committer_email,
         committer_time=committer_time,
+        committer_tz=committer_tz,
         message=message,
     )

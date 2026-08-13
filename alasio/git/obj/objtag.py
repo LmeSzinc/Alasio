@@ -15,6 +15,8 @@ class TagObject(msgspec.Struct):
     tagger_name: str
     tagger_email: str
     tagger_time: int
+    # timezone offset in minutes
+    tagger_tz: int
     # note that time is in UTC+0
 
     # usually to be a GPG key
@@ -84,7 +86,9 @@ def parse_tag(data):
 
     # tagger
     # same format as tagger in commit
-    row, _, remain = remain.partition(b'\n')
+    # keep \n in the remains
+    row, sep, remain = remain.partition(b'\n')
+    remain = sep + remain
     key, _, row = row.partition(b' ')
     if key != b'tagger':
         raise ObjectBroken(f'Commit object has no "tagger": {row}', data)
@@ -107,7 +111,9 @@ def parse_tag(data):
         tz = tz2delta(tz)
     except ValueError:
         raise ObjectBroken(f'Failed to parse tagger timezone: "{tz}"', data)
-    tagger_time += tz
+    tagger_tz = tz
+    # tz is in minutes, convert to seconds
+    tagger_time += tz * 60
 
     # message
     _, _, message = remain.partition(b'\n\n')
@@ -122,6 +128,7 @@ def parse_tag(data):
         tag=tag,
         tagger_name=tagger_name,
         tagger_email=tagger_email,
-        tagger_time=tagger_name,
+        tagger_time=tagger_time,
+        tagger_tz=tagger_tz,
         message=message,
     )
