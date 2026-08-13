@@ -33,9 +33,12 @@ export function i18nPlugin(): Plugin {
         command = env.command;
         // During build, scan source files before dev route files are
         // renamed by svelte-drop-dev-page, so the scan sees every i18n
-        // usage and the JSON files stay in sync with the source. Only
-        // runs once per process (the second, client build pass re-bundles
-        // the config and would rescan with route files already renamed).
+        // usage. Stale-key cleanup only runs against a complete scan,
+        // otherwise translations of temporarily hidden route files would
+        // be dropped and re-created as defaults when the files come back.
+        // Only runs once per process (the second, client build pass
+        // re-bundles the config and would rescan with route files already
+        // renamed).
         if (command === "build" && !process.env[BUILD_INIT_FLAG]) {
           await generator.init();
           process.env[BUILD_INIT_FLAG] = "1";

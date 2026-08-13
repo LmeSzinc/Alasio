@@ -1,6 +1,7 @@
 import fs from "fs-extra";
 import path from "path";
 import glob from "fast-glob";
+import { DROPPED_SUFFIX } from "../svelte-drop-dev-page/files";
 import { type I18nConfig, resolvePath } from "./config";
 
 // Matches usage like: t.Home.Hello(
@@ -44,19 +45,31 @@ export class I18nGenerator {
       await this.createEmptyEntry();
     }
 
-    const files = await glob(`${this.config.srcPath}/**/*.{svelte,ts,js}`, {
-      cwd: this.config.cwd,
-      absolute: true,
-      ignore: [
-        // Ignore generated files
-        this.config.genPath,
-        // Optional: Ignore tests
-        "**/*.test.ts",
-        "**/*.test.js",
-        "**/*.spec.ts",
-        "**/*.spec.js",
+    // Also scan files with the svelte-drop-dev-page temporary suffix
+    // (e.g. `+page.svelte.dropped`). They are route files temporarily
+    // renamed out of sveltekit's sight during a build; an interrupted
+    // build may leave them behind, so stale-key cleanup must still see
+    // their i18n usage or their translations would be dropped.
+    const files = await glob(
+      [
+        `${this.config.srcPath}/**/*.{svelte,ts,js}`,
+        `${this.config.srcPath}/**/*.svelte${DROPPED_SUFFIX}`,
+        `${this.config.srcPath}/**/*.ts${DROPPED_SUFFIX}`,
       ],
-    });
+      {
+        cwd: this.config.cwd,
+        absolute: true,
+        ignore: [
+          // Ignore generated files
+          this.config.genPath,
+          // Optional: Ignore tests
+          "**/*.test.ts",
+          "**/*.test.js",
+          "**/*.spec.ts",
+          "**/*.spec.js",
+        ],
+      },
+    );
 
     await Promise.all(files.map((file) => this.scanFile(file, false)));
     await this.reconcileAll();
@@ -166,11 +179,11 @@ export class I18nGenerator {
       if (changed) this.fileCache.set(filePath, modules);
       return returnAffected ? affected : null;
     } catch (e) {
-      if (this.fileCache.has(filePath)) {
-        const oldKeys = Object.keys(this.fileCache.get(filePath)!);
-        this.fileCache.delete(filePath);
-        return new Set(oldKeys);
-      }
+      // Read failure: the file may be temporarily renamed (e.g. by
+      // svelte-drop-dev-page during a concurrent build, or an editor's
+      // atomic save). Treat it as a transient state: keep the cached
+      // usage and report no change, so stale-key cleanup never deletes
+      // translations based on a file we could not read.
       return null;
     }
   }
@@ -194,15 +207,17 @@ export class I18nGenerator {
   }
 
   /**
-   * Logic: Read JSON -> Merge Keys -> Write JSON -> Generate TS
+   * Logic: Read JSON -> Keep Scanned Keys -> Write JSON -> Generate TS
    */
   private async syncJsonAndGen(mod: string, keys: Set<string>) {
     const jsonPath = resolvePath(this.config.i18nPath, `${mod}.json`);
 
-    // Build new data by merging scanned keys into the on-disk state,
-    // preserving existing translations. Keys that are not scanned right
-    // now (e.g. files temporarily renamed during build) are kept as-is,
-    // so translations are never lost to a temporary filesystem state.
+    // Rebuild the JSON from the scanned keys only. Keys that are no
+    // longer referenced by any source file are dropped, while the
+    // translations of keys that still exist are preserved. The full scan
+    // always covers every logical source file (including files under the
+    // svelte-drop-dev-page temporary suffix), so a missing key means it
+    // is genuinely unused and safe to remove.
     let currentContent = "";
     let currentOnDisk: Record<string, Record<string, string>> = {};
     try {
@@ -210,7 +225,12 @@ export class I18nGenerator {
       currentOnDisk = JSON.parse(currentContent);
     } catch {}
 
-    const newData: Record<string, Record<string, string>> = { ...currentOnDisk };
+    const removed = Object.keys(currentOnDisk).filter((k) => !keys.has(k));
+    if (removed.length > 0) {
+      console.log(`[i18n] ${mod}: removed ${removed.length} stale key(s): ${removed.join(", ")}`);
+    }
+
+    const newData: Record<string, Record<string, string>> = {};
 
     keys.forEach((k) => {
       if (currentOnDisk[k]) {
