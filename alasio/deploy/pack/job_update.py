@@ -77,11 +77,6 @@ class UpdateJob(JobBase):
     the caller is responsible for it.
     """
 
-    # fixed name of the new index pack in the workspace: the index
-    # record is always written to this file, so the new index can be
-    # found without tracking the tmp name
-    NEW_INDEX = 'new_index.pack'
-
     def __init__(self, data, server=None, resume=False):
         """
         Args:

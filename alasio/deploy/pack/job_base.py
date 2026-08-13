@@ -91,6 +91,10 @@ class JobBase:
     INDEX_PACK = '.pack/index.pack'
     WORKSPACE = '.pack/workspace'
     JOB_FILE = '.pack/workspace/job.pack'
+    # fixed name of the new index pack in the workspace: the index
+    # pack is always prepared to this file, replace() applies it
+    # together with the other files
+    NEW_INDEX = 'new_index.tmp'
 
     def __init__(self, data):
         """

@@ -394,7 +394,7 @@ class TestDownloadIndex:
     """download_index(): download the index pack from the server."""
 
     def test_download_index(self, app_folder, monkeypatch):
-        """A corrupted index pack is replaced by the download."""
+        """The new index pack is prepared in the workspace."""
         bad = bytearray(WEBSITE_INDEX_PACK)
         bad[-5] ^= 0xFF
         os.makedirs(env.PROJECT_ROOT / '.pack', exist_ok=True)
@@ -413,8 +413,13 @@ class TestDownloadIndex:
         # the decoder of the downloaded index pack is cached, the next
         # validation reads it without the file again
         assert job.validate_index()
-        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == WEBSITE_INDEX_PACK
-        assert len(reads) == 1
+        # the local index pack is not replaced directly, the new index
+        # pack is prepared in the workspace and replace() applies it
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == bytes(bad)
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{ResetJob.NEW_INDEX}'
+        assert file_read_bytes(tmp) == WEBSITE_INDEX_PACK
+        # one read of the local index, one probe of the workspace tmp
+        assert len(reads) == 2
 
     def test_download_index_invalid(self, app_folder, monkeypatch):
         """An index pack that fails to decode or validate raises."""
@@ -423,6 +428,53 @@ class TestDownloadIndex:
         job = ResetJob(server)
         with pytest.raises(PackDecodeError):
             job.download_index()
+
+    def test_download_index_reuse_tmp(self, app_folder, monkeypatch):
+        """A leftover tmp file that matches the latest checksum is
+        reused without a download."""
+        # a valid new index pack in the workspace, the download is skipped
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{ResetJob.NEW_INDEX}'
+        os.makedirs(tmp.uppath(), exist_ok=True)
+        with open(tmp, 'wb') as f:
+            f.write(WEBSITE_INDEX_PACK)
+
+        def _fail(self, *a, **k):
+            raise AssertionError('no download expected, the tmp file is reused')
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_index_pack', _fail)
+        job = ResetJob(WEBSITE_SERVER)
+        job.download_index()
+        # the reused decoder is cached, the next validation passes
+        assert job.validate_index()
+        # the local index pack is not replaced, the tmp file is kept
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/index.pack')
+        assert file_read_bytes(tmp) == WEBSITE_INDEX_PACK
+        # replace() applies the tmp file to the local index pack
+        assert [item.info.path for item in job.pending] == ['.pack/index.pack']
+
+    def test_download_index_outdated_tmp_redownloaded(self, app_folder):
+        """A leftover tmp file that mismatches the latest checksum is
+        downloaded again."""
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{ResetJob.NEW_INDEX}'
+        os.makedirs(tmp.uppath(), exist_ok=True)
+        with open(tmp, 'wb') as f:
+            f.write(OTHER_INDEX)
+        job = ResetJob(WEBSITE_SERVER)
+        job.download_index()
+        # the outdated tmp file is replaced by the download
+        assert file_read_bytes(tmp) == WEBSITE_INDEX_PACK
+        assert job.validate_index()
+
+    def test_download_index_broken_tmp_redownloaded(self, app_folder):
+        """A leftover tmp file that fails to decode is downloaded again."""
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{ResetJob.NEW_INDEX}'
+        os.makedirs(tmp.uppath(), exist_ok=True)
+        with open(tmp, 'wb') as f:
+            f.write(b'garbage')
+        job = ResetJob(WEBSITE_SERVER)
+        job.download_index()
+        # the broken tmp file is replaced by the download
+        assert file_read_bytes(tmp) == WEBSITE_INDEX_PACK
+        assert job.validate_index()
 
 
 class TestDownload:
@@ -592,6 +644,33 @@ class TestRun:
             f.write(bad)
         job = ResetJob(WEBSITE_SERVER)
         assert job.run()
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == WEBSITE_INDEX_PACK
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_run_reuses_leftover_tmp(self, app_folder, fs, monkeypatch):
+        """A run resumed from an interruption reuses the leftover
+        new index tmp instead of downloading it again."""
+        setup_app(fs)
+        # the local index is broken (an interruption after
+        # download_index(), before replace())
+        bad = bytearray(WEBSITE_INDEX_PACK)
+        bad[-5] ^= 0xFF
+        with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
+            f.write(bad)
+        # the new index tmp left by the interruption, self-consistent
+        # and matching the latest checksum
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{ResetJob.NEW_INDEX}'
+        os.makedirs(tmp.uppath(), exist_ok=True)
+        with open(tmp, 'wb') as f:
+            f.write(WEBSITE_INDEX_PACK)
+
+        def _fail(self, *a, **k):
+            raise AssertionError('no download expected, the tmp file is reused')
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_index_pack', _fail)
+        job = ResetJob(WEBSITE_SERVER)
+        assert job.run()
+        assert job.error == []
+        # the new index pack is applied by replace()
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == WEBSITE_INDEX_PACK
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 

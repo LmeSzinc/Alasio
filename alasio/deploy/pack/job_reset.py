@@ -2,6 +2,7 @@ import httpx
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
+from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext import env
 from alasio.ext.cache import InstanceCacheOperation, cached_property
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write
@@ -25,15 +26,19 @@ class ResetJob(JobBase):
 
     The local index pack .pack/index.pack is read once and cached.
     validate_index() checks the index pack itself, a failed index pack
-    is downloaded again from the server (download_index()). Then
+    is prepared again from the server (download_index()). Then
     validate_latest() compares the local index pack checksum with the
     latest index pack checksum of the server, an outdated (self-
-    consistent but not the latest) index pack is downloaded again too.
-    Then validate_files() checks every file recorded in it, failed
-    files are downloaded to tmp files by download() and replaced to
-    the real files by replace(). Files that cannot be downloaded or
-    fail the size + sha1 check stay in self.error with an empty tmp,
-    this is an unsolvable problem per the draft of PackEncodeBase.
+    consistent but not the latest) index pack is prepared again too.
+    The new index pack is downloaded to the workspace new_index.tmp
+    instead of replacing the local index directly, replace() applies
+    it together with the repaired files, so the real files are
+    touched only once. Then validate_files() checks every file
+    recorded in the index, failed files are downloaded to tmp files
+    by download() and replaced to the real files by replace(). Files
+    that cannot be downloaded or fail the size + sha1 check stay in
+    self.error with an empty tmp, this is an unsolvable problem per
+    the draft of PackEncodeBase.
 
     Note: the exclusive lock on .pack/index.pack in the draft is shared
     by the whole update flow (full pack, update pack and file check),
@@ -122,6 +127,27 @@ class ResetJob(JobBase):
         data = atomic_read_bytes(env.PROJECT_ROOT.joinpath(self.INDEX_PACK))
         return PackDecodeBase(data)
 
+    @cached_property
+    def _latest_info(self):
+        """
+        The latest version and index pack checksum from the server.
+
+        Fetched once per job and shared by validate_latest() and
+        download_index(), so the latest info is requested only once
+        even when both the local index and the workspace tmp file are
+        checked.
+
+        Returns:
+            LatestInfo: Latest version and index pack checksum
+
+        Raises:
+            PackDecodeError: If the server is missing
+        """
+        server = self.server
+        if server is None:
+            raise PackDecodeError('Failed to validate the latest index: no server provided')
+        return server.get_latest_info()
+
     def validate_index(self):
         """
         Validate the local index pack .pack/index.pack itself.
@@ -150,12 +176,12 @@ class ResetJob(JobBase):
         validate_index): a self-consistent but outdated index pack
         passes its own checksum and is only detected by comparing its
         checksum with the checksum of the latest index pack recorded
-        in latest.pack. The comparison uses the checksum of the pack
-        format itself: the trailing 20 bytes of the index section,
-        the same digest validate_index() verifies, not a checksum of
-        the whole index pack file. A mismatch means the local index
-        is not the latest one, the caller repairs it with
-        download_index().
+        in latest.pack (fetched once per job, see _latest_info). The
+        comparison uses the checksum of the pack format itself: the
+        trailing 20 bytes of the index section, the same digest
+        validate_index() verifies, not a checksum of the whole index
+        pack file. A mismatch means the local index is not the latest
+        one, the caller repairs it with download_index().
 
         Returns:
             bool: True if the local index pack is the latest one
@@ -163,10 +189,7 @@ class ResetJob(JobBase):
         Raises:
             PackDecodeError: If the server is missing
         """
-        server = self.server
-        if server is None:
-            raise PackDecodeError('Failed to validate the latest index: no server provided')
-        info = server.get_latest_info()
+        info = self._latest_info
         # the checksum of the pack format: the trailing 20 bytes of
         # the index section, kept in the decoder cache
         local = self._index_pack.index_checksum
@@ -245,34 +268,57 @@ class ResetJob(JobBase):
 
     def download_index(self):
         """
-        Download the index pack of the latest version and replace the
-        local .pack/index.pack.
+        Prepare the new index pack of the latest version in the
+        workspace.
 
-        The version comes from latest.pack on the server. The
-        downloaded index pack is checked with PackDecodeBase: it is
-        self-validating, its trailing checksum covers the header, the
-        length and the whole index section. The decoder of the
-        downloaded index pack is set into the cache directly, the next
-        validation reads it without the file again.
+        The index pack is downloaded to .pack/workspace/new_index.tmp
+        instead of replacing the local .pack/index.pack directly:
+        replace() applies it together with the repaired files, so the
+        real files are touched only once. A leftover tmp file that is
+        self-consistent and matches the latest checksum is reused, a
+        missing or broken one is downloaded again. The version and the
+        checksum come from latest.pack, fetched once per job (see
+        _latest_info). The decoder of the new index pack is set into
+        the cache directly, the next validation reads it without the
+        file again, and a pending record replaces the local index pack
+        in replace().
 
         Raises:
-            PackDecodeError: If the server is missing, or the
-                downloaded index pack fails to decode or validate
+            PackDecodeError: If the server is missing, or the new
+                index pack fails to decode or validate
         """
         server = self.server
         if server is None:
             raise PackDecodeError('Failed to download the index pack: no server provided')
-        info = server.get_latest_info()
-        index_pack = server.get_index_pack(info.version)
-        # the index pack is self-validating, the trailing checksum
-        # covers the header, the length and the whole index section
-        # note that the downloaded index.pack may also fail to validate
-        decoder = PackDecodeBase(index_pack)
-        decoder.validate_index()
-        atomic_write(env.PROJECT_ROOT.joinpath(self.INDEX_PACK), index_pack)
-        # set the decoder of the downloaded index pack into the cache,
-        # the next validation reads it without the file again
+        info = self._latest_info
+        tmp = self.workspace.joinpath(self.NEW_INDEX)
+        # reuse a leftover tmp file that is self-consistent and matches
+        # the latest checksum, download again otherwise
+        try:
+            data = atomic_read_bytes(tmp)
+            decoder = PackDecodeBase(data)
+            decoder.validate_index()
+        except (FileNotFoundError, PackDecodeError):
+            decoder = None
+        if decoder is None or decoder.index_checksum != info.checksum:
+            # the index pack is self-validating, the trailing checksum
+            # covers the header, the length and the whole index section
+            data = server.get_index_pack(info.version)
+            decoder = PackDecodeBase(data)
+            decoder.validate_index()
+            if decoder.index_checksum != info.checksum:
+                # a downloaded index pack that mismatches the latest
+                # checksum is not the latest one, this is unsolvable
+                raise PackDecodeError(
+                    f'Failed to download the index pack: checksum mismatch, '
+                    f'expected {info.checksum}, got {decoder.index_checksum}'
+                )
+            atomic_write(tmp, data)
+        # set the decoder of the new index pack into the cache, the
+        # next validation reads it without the file again
         InstanceCacheOperation.set(self, '_index_pack', decoder)
+        # replace() moves the tmp file to the local index pack
+        self.pending.append(PendingFile(info=IdxInfo(path=self.INDEX_PACK), tmp=tmp))
 
     def download(self):
         """
@@ -323,7 +369,9 @@ class ResetJob(JobBase):
             pending.append(PendingFile(
                 info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
 
-        self.pending = pending
+        # keep the pending records prepared before download(), e.g.
+        # the new index pack of download_index()
+        self.pending += pending
         self.error = error
 
     def _download_file(self, decoder, server, info, index):
