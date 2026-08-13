@@ -1,6 +1,7 @@
 <script lang="ts">
   import ThemeToggle from "$lib/components/ui/theme/theme-toggle.svelte";
   import LangSelector from "$lib/i18n/LangSelector.svelte";
+  import { electronEnv, WINDOW_CONTROLS_WIDTH } from "$lib/use/useElectronEnv.svelte";
   import { cn } from "$lib/utils.js";
   import type { Snippet } from "svelte";
   import type { HTMLAttributes } from "svelte/elements";
@@ -20,6 +21,7 @@
     "bg-card flex h-12 w-full items-center gap-1 px-4",
     className,
   )}
+  style={electronEnv.shouldAvoid ? `padding-right: ${WINDOW_CONTROLS_WIDTH}px` : undefined}
 >
   <!-- header content -->
   {@render children?.()}

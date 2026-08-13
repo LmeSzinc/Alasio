@@ -47,5 +47,47 @@
     "ja-JP": "ログインに戻る",
     "zh-TW": "返回登入",
     "es-ES": "Volver al Inicio de Sesión"
+  },
+  "AvoidAuto": {
+    "en-US": "Auto avoid",
+    "zh-CN": "自动回避",
+    "ja-JP": "自動回避",
+    "zh-TW": "自動回避",
+    "es-ES": "Evitar automáticamente"
+  },
+  "AvoidAlways": {
+    "en-US": "Always avoid",
+    "zh-CN": "总是回避",
+    "ja-JP": "常に回避",
+    "zh-TW": "總是回避",
+    "es-ES": "Evitar siempre"
+  },
+  "AvoidNever": {
+    "en-US": "Never avoid",
+    "zh-CN": "不回避",
+    "ja-JP": "回避しない",
+    "zh-TW": "不回避",
+    "es-ES": "No evitar"
+  },
+  "WindowControlsAvoid": {
+    "en-US": "Window Controls Avoid",
+    "zh-CN": "窗口按钮回避",
+    "ja-JP": "ウィンドウボタン回避",
+    "zh-TW": "視窗按鈕回避",
+    "es-ES": "Evitar Controles de Ventana"
+  },
+  "SessionElectron": {
+    "en-US": "Electron session",
+    "zh-CN": "Electron 会话",
+    "ja-JP": "Electron セッション",
+    "zh-TW": "Electron 工作階段",
+    "es-ES": "Sesión de Electron"
+  },
+  "SessionBrowser": {
+    "en-US": "Browser session",
+    "zh-CN": "浏览器会话",
+    "ja-JP": "ブラウザセッション",
+    "zh-TW": "瀏覽器工作階段",
+    "es-ES": "Sesión de navegador"
   }
 }
