@@ -1,6 +1,12 @@
 import pytest
 
-from alasio.git.stage.gitref import LooseRef, parse_loose_ref, parse_packed_refs
+from alasio.git.stage.gitref import GitRef, LooseRef, parse_loose_ref, parse_packed_refs
+from alasio.logger import logger
+from alasio.testing.filesystem import fs  # noqa: F401
+
+SHA_MASTER = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+SHA_ORIG = "ac7d554f78e6529b706617cb7b601cd4cdc65f7d"
+SHA_DEV = "17eb307dd538860f62ac32808706f1cebc34149b"
 
 
 # --- Tests for parse_loose_ref ---
@@ -168,3 +174,315 @@ def test_parse_packed_refs_empty_and_comment_only_cases(content, expected):
     that is empty or contains no valid ref lines.
     """
     assert parse_packed_refs(content) == expected
+
+
+@pytest.fixture
+def git_repo(fs):
+    """
+    Create a repository with .git structure in the in-memory filesystem.
+
+    Args:
+        fs (FakeFilesystem): The in-memory filesystem fixture
+
+    Returns:
+        str: Path of the repository root
+    """
+    root = fs.root_dir.path.rstrip('/\\')
+    repo = f'{root}/repo'
+    fs.create_dir(f'{repo}/.git/refs/heads')
+    return repo
+
+
+class TestHeadGet:
+    def test_detached(self, git_repo, fs):
+        """HEAD stores a commit sha1 directly."""
+        fs.create_file(f'{git_repo}/.git/HEAD', contents=SHA_MASTER)
+
+        gitref = GitRef(git_repo)
+        assert gitref.head_get() == SHA_MASTER
+
+    def test_symbolic_loose(self, git_repo, fs):
+        """HEAD points to a loose ref."""
+        fs.create_file(f'{git_repo}/.git/HEAD', contents='ref: refs/heads/master')
+        fs.create_file(f'{git_repo}/.git/refs/heads/master', contents=SHA_MASTER)
+
+        gitref = GitRef(git_repo)
+        assert gitref.head_get() == SHA_MASTER
+
+    def test_symbolic_packed(self, git_repo, fs):
+        """HEAD points to a ref that only exists in packed-refs."""
+        fs.create_file(f'{git_repo}/.git/HEAD', contents='ref: refs/heads/master')
+        fs.create_file(f'{git_repo}/.git/packed-refs', contents=f'{SHA_MASTER} refs/heads/master\n')
+
+        gitref = GitRef(git_repo)
+        assert gitref.head_get() == SHA_MASTER
+
+    def test_orig_head_fallback(self, git_repo, fs):
+        """Fall back to ORIG_HEAD when HEAD is missing."""
+        fs.create_file(f'{git_repo}/.git/ORIG_HEAD', contents=SHA_ORIG)
+
+        gitref = GitRef(git_repo)
+        assert gitref.head_get() == SHA_ORIG
+
+    def test_head_priority(self, git_repo, fs):
+        """HEAD takes priority over ORIG_HEAD."""
+        fs.create_file(f'{git_repo}/.git/HEAD', contents=SHA_MASTER)
+        fs.create_file(f'{git_repo}/.git/ORIG_HEAD', contents=SHA_ORIG)
+
+        gitref = GitRef(git_repo)
+        assert gitref.head_get() == SHA_MASTER
+
+    def test_missing(self, git_repo):
+        """No HEAD and no ORIG_HEAD, return empty string."""
+        gitref = GitRef(git_repo)
+        assert gitref.head_get() == ''
+
+    def test_invalid_head(self, git_repo, fs):
+        """Invalid HEAD content, log error and return empty string."""
+        fs.create_file(f'{git_repo}/.git/HEAD', contents='not a ref')
+
+        gitref = GitRef(git_repo)
+        with logger.mock_capture_writer() as capture:
+            assert gitref.head_get() == ''
+            assert capture.fd.any_contains('GitRef.head_get error')
+            capture.clear()
+
+    def test_invalid_head_no_fallback(self, git_repo, fs):
+        """Invalid HEAD does not fall back to ORIG_HEAD."""
+        fs.create_file(f'{git_repo}/.git/HEAD', contents='not a ref')
+        fs.create_file(f'{git_repo}/.git/ORIG_HEAD', contents=SHA_ORIG)
+
+        gitref = GitRef(git_repo)
+        with logger.mock_capture_writer() as capture:
+            assert gitref.head_get() == ''
+            assert capture.fd.any_contains('GitRef.head_get error')
+            capture.clear()
+
+    def test_specific_head(self, git_repo, fs):
+        """head_get with a specific head, no fallback between the two."""
+        fs.create_file(f'{git_repo}/.git/HEAD', contents=SHA_MASTER)
+        fs.create_file(f'{git_repo}/.git/ORIG_HEAD', contents=SHA_ORIG)
+
+        gitref = GitRef(git_repo)
+        assert gitref.head_get('HEAD') == SHA_MASTER
+        assert gitref.head_get('ORIG_HEAD') == SHA_ORIG
+
+    def test_specific_head_missing(self, git_repo):
+        """head_get with a specific head that does not exist."""
+        gitref = GitRef(git_repo)
+        assert gitref.head_get('ORIG_HEAD') == ''
+
+
+class TestRefGet:
+    def test_loose_sha1(self, git_repo, fs):
+        """Get a loose ref with a commit sha1."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/master', contents=SHA_MASTER)
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_get('refs/heads/master') == SHA_MASTER
+
+    def test_symbolic_recursive(self, git_repo, fs):
+        """A ref pointing to another ref is resolved recursively."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/dev', contents='ref: refs/heads/master')
+        fs.create_file(f'{git_repo}/.git/refs/heads/master', contents=SHA_MASTER)
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_get('refs/heads/dev') == SHA_MASTER
+
+    def test_symbolic_chain_broken(self, git_repo, fs):
+        """A symbolic ref pointing to a missing ref returns empty string."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/dev', contents='ref: refs/heads/nonexist')
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_get('refs/heads/dev') == ''
+
+    def test_packed_fallback(self, git_repo, fs):
+        """No loose ref, lookup in packed-refs."""
+        fs.create_file(f'{git_repo}/.git/packed-refs', contents=f'{SHA_MASTER} refs/heads/master\n')
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_get('refs/heads/master') == SHA_MASTER
+
+    def test_missing(self, git_repo):
+        """No loose ref and no packed ref, return empty string."""
+        gitref = GitRef(git_repo)
+        assert gitref.ref_get('refs/heads/master') == ''
+
+    def test_invalid(self, git_repo, fs):
+        """Invalid loose ref content, log error and return empty string."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/master', contents='not a ref')
+
+        gitref = GitRef(git_repo)
+        with logger.mock_capture_writer() as capture:
+            assert gitref.ref_get('refs/heads/master') == ''
+            assert capture.fd.any_contains('GitRef error')
+            capture.clear()
+
+    def test_cyclic(self, git_repo, fs):
+        """A cyclic symbolic ref chain returns empty string with an error log."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/a', contents='ref: refs/heads/b')
+        fs.create_file(f'{git_repo}/.git/refs/heads/b', contents='ref: refs/heads/a')
+
+        gitref = GitRef(git_repo)
+        with logger.mock_capture_writer() as capture:
+            assert gitref.ref_get('refs/heads/a') == ''
+            assert gitref.ref_get('refs/heads/b') == ''
+            assert capture.fd.any_contains('cyclic ref')
+            capture.clear()
+
+    def test_self_cyclic(self, git_repo, fs):
+        """A ref pointing to itself returns empty string with an error log."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/a', contents='ref: refs/heads/a')
+
+        gitref = GitRef(git_repo)
+        with logger.mock_capture_writer() as capture:
+            assert gitref.ref_get('refs/heads/a') == ''
+            assert capture.fd.any_contains('cyclic ref')
+            capture.clear()
+
+
+class TestRefSet:
+    def test_set_sha1(self, git_repo, fs):
+        """Write a commit sha1 to a ref."""
+        gitref = GitRef(git_repo)
+        gitref.ref_set('refs/heads/master', target_sha1=SHA_MASTER)
+
+        file = fs.get_file(f'{git_repo}/.git/refs/heads/master')
+        assert file.content == f'{SHA_MASTER}\n'.encode()
+
+    def test_set_ref(self, git_repo, fs):
+        """Write a symbolic ref."""
+        gitref = GitRef(git_repo)
+        gitref.ref_set('HEAD', target_ref='refs/heads/master')
+
+        file = fs.get_file(f'{git_repo}/.git/HEAD')
+        assert file.content == b'ref: refs/heads/master\n'
+
+    def test_set_empty_noop(self, git_repo, fs):
+        """No target, no file is written."""
+        gitref = GitRef(git_repo)
+        assert gitref.ref_set('refs/heads/master') is None
+        assert not fs.exists(f'{git_repo}/.git/refs/heads/master')
+
+    def test_set_sha1_priority(self, git_repo, fs):
+        """target_sha1 takes priority when both targets are given."""
+        gitref = GitRef(git_repo)
+        gitref.ref_set('refs/heads/master', target_sha1=SHA_MASTER, target_ref='refs/heads/dev')
+
+        file = fs.get_file(f'{git_repo}/.git/refs/heads/master')
+        assert file.content == f'{SHA_MASTER}\n'.encode()
+
+    def test_set_deep_path(self, git_repo, fs):
+        """Parent directories are created automatically for a deep ref path."""
+        gitref = GitRef(git_repo)
+        gitref.ref_set('refs/remotes/origin/master', target_sha1=SHA_MASTER)
+
+        file = fs.get_file(f'{git_repo}/.git/refs/remotes/origin/master')
+        assert file.content == f'{SHA_MASTER}\n'.encode()
+
+
+class TestRefDel:
+    def test_del_existing(self, git_repo, fs):
+        """Delete an existing ref."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/master', contents=SHA_MASTER)
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_del('refs/heads/master')
+        assert not fs.exists(f'{git_repo}/.git/refs/heads/master')
+
+    def test_del_missing(self, git_repo):
+        """Delete a missing ref, return False."""
+        gitref = GitRef(git_repo)
+        assert not gitref.ref_del('refs/heads/master')
+
+
+class TestRefExist:
+    def test_exist_true(self, git_repo, fs):
+        """An existing ref returns True."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/master', contents=SHA_MASTER)
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_exist('refs/heads/master')
+
+    def test_exist_false(self, git_repo):
+        """A missing ref returns False."""
+        gitref = GitRef(git_repo)
+        assert not gitref.ref_exist('refs/heads/master')
+
+
+class TestRefAll:
+    def test_packed_and_loose(self, git_repo, fs):
+        """packed-refs and loose refs are merged."""
+        fs.create_file(
+            f'{git_repo}/.git/packed-refs',
+            contents=f'{SHA_MASTER} refs/heads/master\n{SHA_ORIG} refs/tags/v1.0\n',
+        )
+        fs.create_file(f'{git_repo}/.git/refs/heads/dev', contents=SHA_DEV)
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_all == {
+            'refs/heads/master': SHA_MASTER,
+            'refs/tags/v1.0': SHA_ORIG,
+            'refs/heads/dev': SHA_DEV,
+        }
+
+    def test_loose_overrides_packed(self, git_repo, fs):
+        """A loose ref overrides the same ref in packed-refs."""
+        fs.create_file(f'{git_repo}/.git/packed-refs', contents=f'{SHA_MASTER} refs/heads/master\n')
+        fs.create_file(f'{git_repo}/.git/refs/heads/master', contents=SHA_DEV)
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_all['refs/heads/master'] == SHA_DEV
+
+    def test_symbolic_solved(self, git_repo, fs):
+        """A symbolic ref is solved to the sha1 of the target ref."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/master', contents=SHA_MASTER)
+        fs.create_file(f'{git_repo}/.git/refs/remotes/origin/master', contents='ref: refs/heads/master')
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_all['refs/remotes/origin/master'] == SHA_MASTER
+
+    def test_unsolved_symbolic(self, git_repo, fs):
+        """A symbolic ref to a missing ref is dropped with an error log."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/dev', contents='ref: refs/heads/nonexist')
+
+        gitref = GitRef(git_repo)
+        with logger.mock_capture_writer() as capture:
+            assert 'refs/heads/dev' not in gitref.ref_all
+            assert capture.fd.any_contains('failed to solve ref')
+            capture.clear()
+
+    def test_invalid_loose_ref(self, git_repo, fs):
+        """An invalid loose ref file is skipped with an error log."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/master', contents='not a ref')
+
+        gitref = GitRef(git_repo)
+        with logger.mock_capture_writer() as capture:
+            assert gitref.ref_all == {}
+            assert capture.fd.any_contains('GitRef error')
+            capture.clear()
+
+    def test_cyclic_symbolic(self, git_repo, fs):
+        """A cyclic symbolic ref chain is dropped with an error log."""
+        fs.create_file(f'{git_repo}/.git/refs/heads/a', contents='ref: refs/heads/b')
+        fs.create_file(f'{git_repo}/.git/refs/heads/b', contents='ref: refs/heads/a')
+
+        gitref = GitRef(git_repo)
+        with logger.mock_capture_writer() as capture:
+            assert gitref.ref_all == {}
+            assert capture.fd.any_contains('failed to solve ref')
+            capture.clear()
+
+
+class TestPackedRefs:
+    def test_missing_file(self, git_repo):
+        """No packed-refs file, return empty dict."""
+        gitref = GitRef(git_repo)
+        assert gitref._packed_refs == {}
+
+    def test_read(self, git_repo, fs):
+        """Read the packed-refs file."""
+        fs.create_file(f'{git_repo}/.git/packed-refs', contents=f'{SHA_MASTER} refs/heads/master\n')
+
+        gitref = GitRef(git_repo)
+        assert gitref._packed_refs == {'refs/heads/master': SHA_MASTER}

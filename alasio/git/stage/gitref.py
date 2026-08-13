@@ -146,29 +146,42 @@ class GitRef(GitRepoBase):
 
     def ref_get(self, ref):
         """
+        Solve symbolic refs in a loop instead of recursion, so cyclic refs
+        can be caught with a visited set.
+
         Args:
             ref (str): E.g. refs/heads/master, HEAD
 
         Returns:
             str: sha1, or empty string ""
         """
-        file = joinnormpath(self.path, f'.git/{ref}')
-        try:
-            content = atomic_read_bytes(file)
-            loose = parse_loose_ref(content)
-        except FileNotFoundError:
-            # no loose ref. lookup packed refs
-            return self._packed_refs.get(ref, '')
-        except ValueError as e:
-            logger.error(f'GitRef error, {e}, at file "{file}"')
+        # solve symbolic refs in a loop, the visited set catches cyclic refs
+        visited = set()
+        while 1:
+            if ref in visited:
+                # cyclic ref, cannot be solved
+                logger.error(f'GitRef error, cyclic ref, at ref "{ref}"')
+                return ''
+            visited.add(ref)
+            file = joinnormpath(self.path, f'.git/{ref}')
+            try:
+                content = atomic_read_bytes(file)
+                loose = parse_loose_ref(content)
+            except FileNotFoundError:
+                # no loose ref. lookup packed refs
+                return self._packed_refs.get(ref, '')
+            except ValueError as e:
+                logger.error(f'GitRef error, {e}, at file "{file}"')
+                return ''
+            if loose.sha1:
+                return loose.sha1
+            if loose.ref:
+                # solve the target ref in the next loop
+                ref = loose.ref
+                continue
+            # this shouldn't happen
+            logger.error(f'GitRef error, no sha1 nor ref, at file {file}')
             return ''
-        if loose.sha1:
-            return loose.sha1
-        if loose.ref:
-            # solve recursively, recursion is ok because refs won't get over 1000 depth
-            return self.ref_get(loose.ref)
-        # this shouldn't happen
-        logger.error(f'GitRef error, no sha1 nor ref, at file {file}')
 
     def head_get(self, head: Literal['HEAD', 'ORIG_HEAD'] = None):
         """
