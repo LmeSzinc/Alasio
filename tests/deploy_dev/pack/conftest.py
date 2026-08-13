@@ -139,6 +139,8 @@ class MockServerFile(ServerFile):
         self.full_packs = {}
         # {version: index pack}
         self.index_packs = {}
+        # {(old_version, new_version): update pack}
+        self.update_packs = {}
         # the latest registered version
         self.latest_version = ''
 
@@ -154,6 +156,17 @@ class MockServerFile(ServerFile):
         self.full_packs[version] = full_pack
         self.index_packs[version] = index_pack
         self.latest_version = version
+
+    def register_update(self, old_version, new_version, update_pack):
+        """
+        Register the update pack from an old version to a new version.
+
+        Args:
+            old_version (str): Version of the local files
+            new_version (str): Version to update to
+            update_pack (bytes): Update pack data
+        """
+        self.update_packs[(old_version, new_version)] = update_pack
 
     def _handle(self, request):
         """
@@ -173,6 +186,11 @@ class MockServerFile(ServerFile):
             # validates
             checksum = bytes.fromhex(PackDecodeBase(index_pack).index_checksum)
             content = self.latest_version.encode() + checksum
+            return httpx.Response(200, content=content)
+        # base_url/{new_version}/from_{old_version}.pack
+        version, _, old = path.strip('/').partition('/from_')
+        if old:
+            content = self.update_packs[(old[: -len('.pack')], version)]
             return httpx.Response(200, content=content)
         # base_url/{version}/full.pack, served as a range request
         version = path.strip('/').partition('/')[0]

@@ -135,3 +135,23 @@ class TestServerFile:
         server = ServerFile('http://test', client=make_client(handler))
         with pytest.raises(PackDecodeError):
             server.get_index_pack(COMMIT)
+
+    def test_get_update_pack(self):
+        """The update pack url is {new}/from_{old}.pack."""
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(200, content=b'update pack data')
+
+        server = ServerFile('http://test', client=make_client(handler))
+        assert server.get_update_pack('old', 'new') == b'update pack data'
+        assert str(requests[0].url) == 'http://test/new/from_old.pack'
+
+    def test_get_update_pack_error(self):
+        """A 404 response raises HTTPStatusError."""
+        def handler(request):
+            return httpx.Response(404)
+        server = ServerFile('http://test', client=make_client(handler))
+        with pytest.raises(httpx.HTTPStatusError):
+            server.get_update_pack('old', 'new')

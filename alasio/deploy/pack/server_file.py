@@ -26,6 +26,8 @@ class ServerFile:
       20 bytes sha1 checksum of the index pack of that version
     - base_url/{version}/full.pack: full pack of a version, the front
       part of it is the index pack of that version
+    - base_url/{new_version}/from_{old_version}.pack: update pack
+      from the old version to the new version
 
     get_index_pack() downloads the index section with two range
     requests: the header plus the index section length first, then
@@ -130,6 +132,25 @@ class ServerFile:
         # the index pack is the header plus the index section, including
         # the length vint itself
         return self.get_file_content(version, 0, 5 + read + length)
+
+    def get_update_pack(self, old_version, new_version):
+        """
+        Get the update pack from an old version to a new version from
+        base_url/{new_version}/from_{old_version}.pack.
+
+        Args:
+            old_version (str): Version of the local files
+            new_version (str): Version to update to
+
+        Returns:
+            bytes: Update pack data
+
+        Raises:
+            httpx.HTTPStatusError: If the request fails
+        """
+        url = f'{self.base_url}/{new_version}/from_{old_version}.pack'
+        response = self._http_get(url)
+        return response.content
 
     def _http_get(self, url, headers=None):
         """

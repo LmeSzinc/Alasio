@@ -25,7 +25,8 @@ class TestDeployJob:
 
     def test_unpack(self, app_folder):
         """DeployJob.unpack() writes the job file and unpacks all files."""
-        DeployJob.unpack(WEBSITE_FULL_PACK)
+        with logger.mock_capture_writer():
+            DeployJob.unpack(WEBSITE_FULL_PACK)
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -40,7 +41,8 @@ class TestDeployJob:
         job = DeployJob.get_unfinished_job()
         assert job is not None
         assert isinstance(job, UnpackJob)
-        job.run()
+        with logger.mock_capture_writer():
+            job.run()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
             WEBSITE_FILES['backend/main.py'][0]
 
@@ -50,13 +52,15 @@ class TestDeployJob:
         job = DeployJob.get_unfinished_job(WEBSITE_SERVER)
         assert job is not None
         assert isinstance(job, ResetJob)
-        assert job.run()
+        with logger.mock_capture_writer():
+            assert job.run()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_unpack_finishes_reset_job(self, app_folder):
         """unpack() finishes the unfinished reset job first."""
         ResetJob(WEBSITE_SERVER).write()
-        DeployJob.unpack(WEBSITE_FULL_PACK)
+        with logger.mock_capture_writer():
+            DeployJob.unpack(WEBSITE_FULL_PACK)
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -76,7 +80,8 @@ class TestDeployJob:
     def test_unpack_finishes_unfinished_job(self, app_folder):
         """unpack() finishes the unfinished job first, no extra call."""
         UnpackJob(WEBSITE_FULL_PACK).write()
-        DeployJob.unpack(WEBSITE_FULL_PACK)
+        with logger.mock_capture_writer():
+            DeployJob.unpack(WEBSITE_FULL_PACK)
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -90,7 +95,8 @@ class TestDeployJob:
         monkeypatch.setattr(UnpackJob, 'write', _fail)
         job = DeployJob.get_unfinished_job()
         assert job is not None
-        job.run()
+        with logger.mock_capture_writer():
+            job.run()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
             WEBSITE_FILES['backend/main.py'][0]
 
