@@ -16,7 +16,10 @@
   let { class: className }: $$props = $props();
 
   // --- Navigation Items ---
-  const alasioNavItems = $derived([{ path: "/dev/config", name: t.ConfigScan.ConfigManager() }]);
+  const alasioNavItems = $derived([
+    { path: "/dev/config", name: t.ConfigScan.ConfigManager() },
+    { path: "/dev/mod", name: t.Mod.Title() },
+  ]);
   const devNavItems = $derived([
     { path: "/dev/tools", name: t.DevTool.SystemTool() },
     { path: "/dev/assets", name: t.AssetManager.AssetManager() },
@@ -28,6 +31,7 @@
     dev
       ? [
           { path: "/dev/debug/ws", name: t.WebsocketTest.Title() },
+          { path: "/dev/debug/modmanager", name: "Mod Manager" },
           { path: "/dev/debug/workerstatus", name: "Worker Status" },
           { path: "/dev/debug/scheduler", name: "Scheduler" },
           { path: "/dev/debug/preview", name: "Preview" },

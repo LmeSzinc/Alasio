@@ -13,11 +13,88 @@
     "zh-TW": "沒有可用插件",
     "es-ES": "No hay mod disponible"
   },
+  "Title": {
+    "en-US": "Mod Manager",
+    "zh-CN": "插件管理",
+    "ja-JP": "Mod マネージャー",
+    "zh-TW": "插件管理",
+    "es-ES": "Administrador de Mods"
+  },
   "ModName": {
     "en-US": "Mod Name",
     "zh-CN": "插件名称",
     "ja-JP": "Mod名",
     "zh-TW": "插件名稱",
     "es-ES": "Nombre del Mod"
+  },
+  "CollapseDetail": {
+    "en-US": "CollapseDetail",
+    "zh-CN": "CollapseDetail",
+    "ja-JP": "CollapseDetail",
+    "zh-TW": "CollapseDetail",
+    "es-ES": "CollapseDetail"
+  },
+  "ExpandDetail": {
+    "en-US": "ExpandDetail",
+    "zh-CN": "ExpandDetail",
+    "ja-JP": "ExpandDetail",
+    "zh-TW": "ExpandDetail",
+    "es-ES": "ExpandDetail"
+  },
+  "NoMod": {
+    "en-US": "NoMod",
+    "zh-CN": "NoMod",
+    "ja-JP": "NoMod",
+    "zh-TW": "NoMod",
+    "es-ES": "NoMod"
+  },
+  "NoHistory": {
+    "en-US": "NoHistory",
+    "zh-CN": "NoHistory",
+    "ja-JP": "NoHistory",
+    "zh-TW": "NoHistory",
+    "es-ES": "NoHistory"
+  },
+  "Version": {
+    "en-US": "Version",
+    "zh-CN": "Version",
+    "ja-JP": "Version",
+    "zh-TW": "Version",
+    "es-ES": "Version"
+  },
+  "Author": {
+    "en-US": "Author",
+    "zh-CN": "Author",
+    "ja-JP": "Author",
+    "zh-TW": "Author",
+    "es-ES": "Author"
+  },
+  "Time": {
+    "en-US": "Time",
+    "zh-CN": "Time",
+    "ja-JP": "Time",
+    "zh-TW": "Time",
+    "es-ES": "Time"
+  },
+  "CommitTitle": {
+    "en-US": "CommitTitle",
+    "zh-CN": "CommitTitle",
+    "ja-JP": "CommitTitle",
+    "zh-TW": "CommitTitle",
+    "es-ES": "CommitTitle"
+  },
+  "CollapseAll": {
+    "en-US": "CollapseAll",
+    "zh-CN": "CollapseAll",
+    "ja-JP": "CollapseAll",
+    "zh-TW": "CollapseAll",
+    "es-ES": "CollapseAll"
+  },
+  "ExpandAll": {
+    "en-US": "ExpandAll",
+    "zh-CN": "ExpandAll",
+    "ja-JP": "ExpandAll",
+    "zh-TW": "ExpandAll",
+    "es-ES": "ExpandAll"
   }
 }
