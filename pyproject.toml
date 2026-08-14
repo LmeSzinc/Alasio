@@ -19,6 +19,9 @@ dependencies = [
     # 0.18.6 is the last version that support python3.8
     "msgspec>=0.18.6,<=0.21.1",
     "msgspecerror>=0.21.1.1",
+    # just to ensure not too old
+    # 0.23.0 is the last version that support python3.8
+    "zstandard>=0.23.0",
     "PyYAML",
     "httpx",
     "psutil",
@@ -45,7 +48,7 @@ test = [
     # pytest 7 added MonkeyPatch, and pytest 7 is the last version that supports py3.7
     "pytest>=7.4.4",
     "pytest-trio",
-    # just to ensure not to old
+    # just to ensure not too old
     "ruff>=0.16.0",
     # alasio/codegen/ruff/ruff_format.py requires isort>=5.2.0
     "isort>=5.2.0",
