@@ -17,6 +17,7 @@
 # files in releases
 /toolkit
 /screenshots
+/.pack
 console.bat
 
 # The rest of the gitignore comes from:
