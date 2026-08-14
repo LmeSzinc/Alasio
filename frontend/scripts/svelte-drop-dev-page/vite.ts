@@ -112,7 +112,8 @@ export function svelteDropDevPage(options: SvelteDropDevPageOptions = {}): Plugi
 
     configResolved(config) {
       command = config.command;
-      ssr = config.build.ssr;
+      // build.ssr is boolean | string; any non-false value means an SSR pass
+      ssr = config.build.ssr !== false;
       routesRoot = path.resolve(config.root, routesDir);
     },
 

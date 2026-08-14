@@ -28,13 +28,13 @@ export const ROUTE_FILES = new Set([
 ]);
 
 /** Recursively collect all files under dir, returns absolute paths. */
-function walkFiles(dir, out = []) {
-  let entries;
+function walkFiles(dir: string, out: string[] = []): string[] {
+  let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch (error) {
     // Routes directory may not exist yet
-    if (error.code === "ENOENT") return out;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return out;
     throw error;
   }
   for (const entry of entries) {
@@ -63,8 +63,8 @@ function walkFiles(dir, out = []) {
  * Returns:
  *     list[str]: Absolute paths of the files renamed in this call
  */
-export function dropMarkedRoutes(routesDir, marker) {
-  const dropped = [];
+export function dropMarkedRoutes(routesDir: string, marker: string): string[] {
+  const dropped: string[] = [];
   for (const file of walkFiles(routesDir)) {
     const basename = path.basename(file);
     // Already dropped by an interrupted build, keep it dropped
@@ -75,14 +75,15 @@ export function dropMarkedRoutes(routesDir, marker) {
     try {
       content = fs.readFileSync(file, "utf8");
     } catch (error) {
-      if (error.code === "ENOENT") continue;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
       throw error;
     }
     if (!content.includes(marker)) continue;
     try {
       fs.renameSync(file, file + DROPPED_SUFFIX);
     } catch (error) {
-      throw new Error(`svelte-drop-dev-page: failed to drop route file ${file}: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`svelte-drop-dev-page: failed to drop route file ${file}: ${message}`);
     }
     dropped.push(file);
   }
@@ -103,8 +104,8 @@ export function dropMarkedRoutes(routesDir, marker) {
  * Returns:
  *     list[str]: Absolute paths of the restored files
  */
-export function restoreDroppedRoutes(routesDir) {
-  const restored = [];
+export function restoreDroppedRoutes(routesDir: string): string[] {
+  const restored: string[] = [];
   for (const file of walkFiles(routesDir)) {
     if (!file.endsWith(DROPPED_SUFFIX)) continue;
     const original = file.slice(0, -DROPPED_SUFFIX.length);
@@ -114,7 +115,8 @@ export function restoreDroppedRoutes(routesDir) {
       fs.renameSync(file, original);
     } catch (error) {
       // Target may already exist, or the file is locked; leave it and warn
-      console.warn(`[svelte-drop-dev-page] failed to restore ${file}: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[svelte-drop-dev-page] failed to restore ${file}: ${message}`);
       continue;
     }
     restored.push(original);
