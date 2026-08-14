@@ -1,17 +1,13 @@
-from datetime import datetime, timedelta, timezone
+import calendar
+from datetime import datetime, timedelta, timezone, tzinfo
 from unittest.mock import patch
 
 import pytest
 
+from alasio.base import servertime
 from alasio.base.servertime import (
-    ServerTime,
-    ServerUpdateCondition,
-    nearest_future,
-    parse_second,
-    parse_server_update,
-    parse_server_update_list,
-    parse_timezone,
-    random_time,
+    ServerTime, ServerUpdateCondition, nearest_future, parse_second, parse_server_update, parse_server_update_list,
+    parse_timezone, random_time
 )
 from alasio.testing.patch_time import PatchTime
 
@@ -578,7 +574,7 @@ class TestServerUpdateComplex:
 
     @pytest.mark.parametrize("now_time, expected_next, expected_last", [
         # Server updates at 00:00 (Daily) and Mon 04:00 (Weekly)
-        # In May 2026: 
+        # In May 2026:
         # 1st is Friday
         # 4th is Monday
         # 11th, 18th, 25th are Mondays
@@ -622,6 +618,262 @@ class TestServerUpdateComplex:
         with patch.object(ServerTime, 'now', return_value=now_time):
             assert to_utc(server.get_next_update(updates)) == to_utc(expected_next)
             assert to_utc(server.get_last_update(updates)) == to_utc(expected_last)
+
+
+class _FakeLocalTz(tzinfo):
+    """
+    Fake local timezone with real European DST rules (CET/CEST, UTC+1/+2).
+
+    DST starts at 01:00 UTC on the last Sunday of March and ends at
+    01:00 UTC on the last Sunday of October.
+    """
+
+    def utcoffset(self, dt):
+        if dt is None:
+            return None
+        return timedelta(hours=2) if self._in_dst(dt) else timedelta(hours=1)
+
+    def dst(self, dt):
+        if dt is None:
+            return None
+        return timedelta(hours=1) if self._in_dst(dt) else timedelta(hours=0)
+
+    def tzname(self, dt):
+        if dt is None:
+            return 'FAKE'
+        return 'FAKEDST' if self._in_dst(dt) else 'FAKESTD'
+
+    def fromutc(self, dt):
+        """
+        Convert a naive UTC datetime to local time, honoring the DST rules.
+
+        Args:
+            dt (datetime): Naive UTC datetime with tzinfo=self
+
+        Returns:
+            datetime: Local datetime with tzinfo=self
+        """
+        if dt.tzinfo is not self:
+            raise ValueError('fromutc: dt.tzinfo is not self')
+        year = dt.year
+        start = self._last_sunday(year, 3).replace(hour=1)
+        end = self._last_sunday(year, 10).replace(hour=1)
+        utc = dt.replace(tzinfo=None)
+        if start <= utc < end:
+            return (dt + timedelta(hours=2)).replace(tzinfo=self)
+        if end <= utc < end + timedelta(hours=1):
+            # Repeated hour after fall-back: the second occurrence is standard time
+            return (dt + timedelta(hours=1)).replace(tzinfo=self, fold=1)
+        return (dt + timedelta(hours=1)).replace(tzinfo=self)
+
+    @staticmethod
+    def _last_sunday(year, month):
+        """
+        Get the last Sunday of a month.
+
+        Args:
+            year (int): Year
+            month (int): Month
+
+        Returns:
+            datetime: Last Sunday of the month at 00:00
+        """
+        last_day = calendar.monthrange(year, month)[1]
+        d = datetime(year, month, last_day)
+        return d - timedelta(days=(d.weekday() + 1) % 7)
+
+    def _in_dst(self, dt):
+        """
+        Check whether a local time is in DST.
+
+        Args:
+            dt (datetime): Local time with tzinfo=self
+
+        Returns:
+            bool: True if DST applies
+        """
+        if dt.fold:
+            # Second occurrence of the repeated hour after fall-back
+            return False
+        year = dt.year
+        start = self._last_sunday(year, 3).replace(hour=1)
+        end = self._last_sunday(year, 10).replace(hour=1)
+        utc_dst = dt.replace(tzinfo=None) - timedelta(hours=2)
+        return start <= utc_dst < end
+
+
+FAKE_LOCAL_TZ = _FakeLocalTz()
+
+
+class _FakeLocalDatetime(datetime):
+    """
+    datetime subclass whose parameterless astimezone() converts to the fake
+    DST local timezone instead of the system local timezone.
+    """
+
+    def astimezone(self, tz=None):
+        if tz is None:
+            tz = FAKE_LOCAL_TZ
+        return super().astimezone(tz)
+
+
+class TestServerTimeLocalDst:
+    """
+    Tests for local DST (daylight saving time) handling in ServerTime.
+
+    ServerTime performs all arithmetic in the fixed-offset server timezone and
+    only converts to the local timezone in the final astimezone() call. The
+    host timezone cannot be controlled from a test, so the module's datetime
+    is replaced with a subclass whose parameterless astimezone() converts to a
+    fake local timezone with real European DST rules (UTC+1 winter, UTC+2
+    summer). This makes DST behaviour deterministic on any host, including
+    hosts without DST (e.g. UTC+8).
+    """
+
+    @pytest.fixture
+    def dst_local_datetime(self, monkeypatch):
+        """
+        Replace servertime.datetime so parameterless astimezone() calls
+        convert to the fake DST local timezone.
+        """
+        monkeypatch.setattr(servertime, 'datetime', _FakeLocalDatetime)
+
+    def test_server_offset_fixed_across_seasons(self):
+        """
+        Server-side time is a fixed offset; it must not follow the local
+        season, so all calculations stay on a continuous timeline.
+        """
+        st = ServerTime(8)
+        winter = datetime(2026, 1, 15, 12, 0, tzinfo=st.tz)
+        summer = datetime(2026, 7, 15, 12, 0, tzinfo=st.tz)
+        assert winter.utcoffset() == summer.utcoffset() == timedelta(hours=8)
+
+    def test_local_conversion_offsets_by_season(self, dst_local_datetime):
+        """
+        The same server moment maps to different local offsets in winter
+        (UTC+1) and summer (UTC+2).
+        """
+        st = ServerTime(8)
+        # server 12:00 +08 = 04:00 UTC
+        winter = servertime.datetime(2026, 1, 15, 12, 0, tzinfo=st.tz).astimezone()
+        summer = servertime.datetime(2026, 7, 15, 12, 0, tzinfo=st.tz).astimezone()
+        assert winter.utcoffset() == timedelta(hours=1)
+        assert winter.hour == 5
+        assert summer.utcoffset() == timedelta(hours=2)
+        assert summer.hour == 6
+
+    def test_get_next_update_winter(self, dst_local_datetime):
+        """Daily update converted to local time in winter (CET, UTC+1)."""
+        st = ServerTime(8)
+        now = servertime.datetime(2026, 1, 15, 20, 0, tzinfo=st.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            result = st.get_next_update("04:00")
+        # server 2026-01-16 04:00 +08 = 2026-01-15 20:00 UTC -> local 21:00 +1
+        assert to_utc(result) == datetime(2026, 1, 15, 20, 0, tzinfo=timezone.utc)
+        assert result.utcoffset() == timedelta(hours=1)
+        assert result.hour == 21
+
+    def test_get_next_update_summer(self, dst_local_datetime):
+        """Daily update converted to local time in summer (CEST, UTC+2)."""
+        st = ServerTime(8)
+        now = servertime.datetime(2026, 7, 15, 20, 0, tzinfo=st.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            result = st.get_next_update("04:00")
+        # server 2026-07-16 04:00 +08 = 2026-07-15 20:00 UTC -> local 22:00 +2
+        assert to_utc(result) == datetime(2026, 7, 15, 20, 0, tzinfo=timezone.utc)
+        assert result.utcoffset() == timedelta(hours=2)
+        assert result.hour == 22
+
+    def test_get_next_update_monthday_in_summer(self, dst_local_datetime):
+        """Monthly update (monthday branch constructs new datetimes) also
+        converts to the DST local timezone."""
+        st = ServerTime(8)
+        now = servertime.datetime(2026, 8, 15, 20, 0, tzinfo=st.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            result = st.get_next_update("monthday31-04:00")
+        # server 2026-08-31 04:00 +08 = 2026-08-30 20:00 UTC -> local 22:00 +2
+        assert to_utc(result) == datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        assert result.utcoffset() == timedelta(hours=2)
+        assert result.hour == 22
+
+    def test_get_next_update_spring_forward(self, dst_local_datetime):
+        """
+        On spring-forward day (2026-03-29 01:00 UTC, CET -> CEST) the local
+        hour 02:00-02:59 does not exist; the update lands at 03:00 +2.
+        """
+        st = ServerTime(8)
+        now = servertime.datetime(2026, 3, 29, 8, 0, tzinfo=st.tz)  # 00:00 UTC
+        with patch.object(ServerTime, 'now', return_value=now):
+            result = st.get_next_update("09:00")
+        # server 09:00 +08 = 01:00 UTC -> local jumps to 03:00 +2
+        assert to_utc(result) == datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc)
+        assert result.utcoffset() == timedelta(hours=2)
+        assert result.hour == 3
+
+    def test_get_next_update_fall_back(self, dst_local_datetime):
+        """
+        On fall-back day (2026-10-25 01:00 UTC, CEST -> CET) the local hour
+        02:00-02:59 occurs twice; the update resolves to the second occurrence
+        (fold=1) with the standard offset +1.
+        """
+        st = ServerTime(8)
+        now = servertime.datetime(2026, 10, 25, 8, 0, tzinfo=st.tz)  # 00:00 UTC
+        with patch.object(ServerTime, 'now', return_value=now):
+            result = st.get_next_update("09:00")
+        # server 09:00 +08 = 01:00 UTC -> local 02:00 +1 (second occurrence)
+        assert to_utc(result) == datetime(2026, 10, 25, 1, 0, tzinfo=timezone.utc)
+        assert result.utcoffset() == timedelta(hours=1)
+        assert result.hour == 2
+        assert result.fold == 1
+
+    def test_get_last_update_around_fall_back(self, dst_local_datetime):
+        """
+        The last update before/after the fall-back boundary keeps the correct
+        local offset on both sides of the transition.
+        """
+        st = ServerTime(8)
+
+        # On the fall-back day, the last 04:00 (+08) update is still in DST
+        now = servertime.datetime(2026, 10, 25, 20, 0, tzinfo=st.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            result = st.get_last_update("04:00")
+        # server 2026-10-25 04:00 +08 = 2026-10-24 20:00 UTC -> local 22:00 +2
+        assert to_utc(result) == datetime(2026, 10, 24, 20, 0, tzinfo=timezone.utc)
+        assert result.utcoffset() == timedelta(hours=2)
+        assert result.hour == 22
+
+        # After the fall-back, the last 04:00 (+08) update is in standard time
+        now = servertime.datetime(2026, 10, 26, 20, 0, tzinfo=st.tz)
+        with patch.object(ServerTime, 'now', return_value=now):
+            result = st.get_last_update("04:00")
+        # server 2026-10-26 04:00 +08 = 2026-10-25 20:00 UTC -> local 21:00 +1
+        assert to_utc(result) == datetime(2026, 10, 25, 20, 0, tzinfo=timezone.utc)
+        assert result.utcoffset() == timedelta(hours=1)
+        assert result.hour == 21
+
+    def test_delta_to_update_unaffected_by_local_dst(self, dst_local_datetime):
+        """
+        get_delta_to_update() works entirely in the server timezone, so the
+        local DST must not change the result across seasons.
+        """
+        st = ServerTime(8)
+        winter_now = servertime.datetime(2026, 1, 15, 20, 0, tzinfo=st.tz)
+        summer_now = servertime.datetime(2026, 7, 15, 20, 0, tzinfo=st.tz)
+        with patch.object(ServerTime, 'now', return_value=winter_now):
+            winter_delta = st.get_delta_to_update("04:00")
+        with patch.object(ServerTime, 'now', return_value=summer_now):
+            summer_delta = st.get_delta_to_update("04:00")
+        assert winter_delta == summer_delta == timedelta(hours=8)
+
+    def test_get_next_update_uses_system_local_timezone(self):
+        """
+        Without the fake patch, get_next_update() converts to the real system
+        local timezone (whatever it is on the host).
+        """
+        st = ServerTime(8)
+        result = st.get_next_update("04:00")
+        assert result.tzinfo is not None
+        assert result.utcoffset() == datetime.now().astimezone().utcoffset()
 
 
 class TestRandomTime:
