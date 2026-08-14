@@ -18,7 +18,7 @@ def patch_context_cls():
     Patch should before hypercorn.trio.serve() runs
     """
     # local import
-    from hypercorn.trio import worker_context, run
+    from hypercorn.trio import run, worker_context
 
     class WorkerContextTracking(worker_context.WorkerContext):
         def __init__(self, *args, **kwargs):
@@ -38,7 +38,7 @@ def restore_context_cls():
     but for safety we restore it asap.
     """
     # local import
-    from hypercorn.trio import worker_context, run
+    from hypercorn.trio import run, worker_context
     run.WorkerContext = worker_context.WorkerContext
 
 
@@ -96,6 +96,8 @@ def sync_task_gc(wait=8):
     SQLITE_POOL.gc(wait)
     from alasio.config.entry.model import MOD_JSON_CACHE
     MOD_JSON_CACHE.gc(wait)
+    from alasio.backend.topic.mod import HISTORY_CACHE
+    HISTORY_CACHE.gc(wait)
 
 
 async def task_gc(wait=8):
@@ -173,7 +175,7 @@ def create_app():
     app.add_router('/api', auth.router)
 
     # Global websocket
-    from alasio.backend.ws.topic import WebsocketServer, PreviewServer
+    from alasio.backend.ws.topic import PreviewServer, WebsocketServer
     app.routes.append(WebSocketRoute('/api/ws', WebsocketServer.endpoint))
     app.routes.append(WebSocketRoute('/api/preview', PreviewServer.endpoint))
 
@@ -188,8 +190,8 @@ def create_app():
     # Mound dev files
     from alasio.backend.dev.assets import NoCacheStaticFiles, SPANoCacheStaticFiles
     from alasio.config.entry.loader import MOD_LOADER
-    from alasio.ext.starapi.router import APIRouter
     from alasio.ext.path.calc import joinnormpath
+    from alasio.ext.starapi.router import APIRouter
 
     # Mount all mod assets
     assets_router = APIRouter('/dev_assets')
@@ -207,6 +209,7 @@ def create_app():
 
     # Mount static files
     from alasio.ext.path import PathStr
+
     # for frontend local builds
     root = PathStr(__file__).uppath(3).joinpath('frontend/build')
     SPANoCacheStaticFiles.mount(app, '/', directory=root, name='static')
@@ -219,9 +222,11 @@ def apply_hypercorn_exclusivity_patch():
     """
     Apply cross-platform port exclusivity patch to Hypercorn Config class
     """
-    import socket
     import platform
+    import socket
+
     from hypercorn import Config
+
     from alasio.logger import logger
     original_create_sockets = Config._create_sockets
     system_platform = platform.system()

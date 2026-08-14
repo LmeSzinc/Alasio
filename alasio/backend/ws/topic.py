@@ -1,16 +1,17 @@
 from typing import Type
 
 from alasio.backend.locale.accept_language import negotiate_accept_language
-from alasio.backend.reactive.base_topic import MSGBUS_CONFIG_HANDLERS, MSGBUS_CONFIG_RECV, MSGBUS_GLOBAL_HANDLERS, \
-    MSGBUS_GLOBAL_RECV
+from alasio.backend.reactive.base_topic import (
+    MSGBUS_CONFIG_HANDLERS, MSGBUS_CONFIG_RECV, MSGBUS_GLOBAL_HANDLERS, MSGBUS_GLOBAL_RECV
+)
 from alasio.backend.topic.config import ConfigArg, ConfigNav
 from alasio.backend.topic.dashboard import Dashboard
 from alasio.backend.topic.log import Log
-from alasio.backend.topic.mod import ModList
+from alasio.backend.topic.mod import ModHistory, ModList
 from alasio.backend.topic.preview import Preview
 from alasio.backend.topic.que import TaskQueue, TaskQueueI18n
 from alasio.backend.topic.scan import ConfigScan
-from alasio.backend.topic.state import ConnState, DICT_CONFIG_TO_CONN
+from alasio.backend.topic.state import DICT_CONFIG_TO_CONN, ConnState
 from alasio.backend.topic.worker import Worker
 from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_server import WebsocketTopicServer
@@ -38,6 +39,7 @@ class WebsocketServer(WebsocketTopicServer):
         # must contain ConnState
         ConnState,
         ModList,
+        ModHistory,
         ConfigScan,
         ConfigNav,
         ConfigArg,
