@@ -37,6 +37,10 @@ class MockGitObject(MockGitRepoBase):
         self._files: "dict[str, dict[str, MockBlobEntry]]" = {}
         # blob_sha1 -> MockBlobEntry
         self._objects: "dict[str, MockBlobEntry]" = {}
+        # commit_sha1 -> commit object content in bytes
+        self._commits: "dict[str, bytes]" = {}
+        # current head commit sha1
+        self._head: str = ''
 
     @cached_property
     def _gitattr(self):
@@ -77,6 +81,97 @@ class MockGitObject(MockGitRepoBase):
         entry = MockBlobEntry(content=content, mode=mode, blob_sha1=blob_sha1)
         self._files[sha1][path] = entry
         self._objects[blob_sha1] = entry
+
+    def register_commit(self, sha1, parents=None, tree='tree',
+                        author_name='', author_email='', author_time=0, author_tz=0,
+                        committer_name=None, committer_email=None,
+                        committer_time=None, committer_tz=None,
+                        message=''):
+        """
+        Register a commit object under a commit sha1.
+
+        The sha1 is an identifier like in register_file(), it does not
+        have to be a real git sha1, e.g. 'c1'.
+
+        The committer attributes default to the author attributes.
+
+        Args:
+            sha1 (str): Commit sha1 that identifies the commit
+            parents (list[str], optional): Parent commit sha1s, empty for
+                the initial commit
+            tree (str): Tree sha1 that identifies the tree
+            author_name (str): Author name
+            author_email (str): Author email
+            author_time (int): Author time, unix timestamp in seconds
+            author_tz (int): Author timezone offset in minutes
+            committer_name (str, optional): Committer name,
+                defaults to the author name
+            committer_email (str, optional): Committer email,
+                defaults to the author email
+            committer_time (int, optional): Committer time,
+                defaults to the author time
+            committer_tz (int, optional): Committer timezone offset,
+                defaults to the author timezone
+            message (str): Commit message
+        """
+        if committer_name is None:
+            committer_name = author_name
+        if committer_email is None:
+            committer_email = author_email
+        if committer_time is None:
+            committer_time = author_time
+        if committer_tz is None:
+            committer_tz = author_tz
+
+        rows = [f'tree {tree}']
+        for parent in parents or []:
+            rows.append(f'parent {parent}')
+        rows.append(
+            f'author {author_name} <{author_email}> {author_time} '
+            f'{self._format_tz(author_tz)}'
+        )
+        rows.append(
+            f'committer {committer_name} <{committer_email}> {committer_time} '
+            f'{self._format_tz(committer_tz)}'
+        )
+        content = '\n'.join(rows).encode() + b'\n\n' + message.encode()
+        self._commits[sha1] = content
+
+    @staticmethod
+    def _format_tz(tz):
+        """
+        Format timezone offset in minutes to git format like "+0800".
+
+        Args:
+            tz (int): Timezone offset in minutes
+
+        Returns:
+            str: Timezone in git format
+        """
+        sign = '+' if tz >= 0 else '-'
+        tz = abs(tz)
+        return f'{sign}{tz // 60:02d}{tz % 60:02d}'
+
+    def register_head(self, sha1):
+        """
+        Set the repo head.
+
+        Args:
+            sha1 (str): Commit sha1
+        """
+        self._head = sha1
+
+    def head_get(self, head=None):
+        """
+        Get current git HEAD.
+
+        Args:
+            head: Ignored, the mock has a single head
+
+        Returns:
+            str: sha1, or empty string ""
+        """
+        return self._head
 
     def _normalize_eol(self, path, content):
         """
@@ -177,14 +272,23 @@ class MockGitObject(MockGitRepoBase):
         Get object from given sha1.
 
         Args:
-            sha1 (str): Blob sha1
+            sha1 (str): Commit or blob sha1
 
         Returns:
-            GitLooseObject: Blob object
+            GitLooseObject: Commit or blob object
 
         Raises:
-            KeyError: If sha1 is not found in any registered file
+            KeyError: If sha1 is not found in any registered object
         """
+        # commit
+        try:
+            content = self._commits[sha1]
+        except KeyError:
+            pass
+        else:
+            return GitLooseObject(type=1, size=len(content), data=content)
+
+        # blob
         blob_entry = self._objects.get(sha1)
         if blob_entry is not None:
             return GitLooseObject(type=3, size=len(blob_entry.content), data=blob_entry.content)
@@ -228,6 +332,48 @@ class MockGitObject(MockGitRepoBase):
         for path, entry in files.items():
             result[path] = FileEntry(sha1=entry.blob_sha1, mode=entry.mode, path=path)
         return result
+
+    def list_commit_have(self, sha1, have_lookback=20):
+        """
+        List commits before given sha1 (include given sha1) on the same branch.
+
+        Merge commits follow the first parent.
+
+        Args:
+            sha1 (str): Commit sha1
+            have_lookback (int): Maximum lookback, 0 to return all
+
+        Returns:
+            dict[str, CommitObj]: Key: sha1 in str, value: CommitObj
+
+        Raises:
+            KeyError: If sha1 is not a registered commit
+        """
+        out = {}
+        count = 0
+        while True:
+            obj = self.cat(sha1)
+            commit = obj.decoded
+            out[sha1] = commit
+            count += 1
+
+            parent = commit.parent
+            parent_type = type(parent)
+            if parent_type is str:
+                sha1 = parent
+            elif parent_type is list:
+                # merge commit, pick the first parent
+                sha1 = parent[0]
+            elif not parent:
+                # initial commit, no parent
+                break
+
+            # check if reached limit
+            if have_lookback:
+                if count >= have_lookback:
+                    break
+
+        return out
 
     def get_file(self, sha1, filepath):
         """

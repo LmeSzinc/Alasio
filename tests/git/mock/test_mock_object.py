@@ -287,6 +287,170 @@ class TestCat:
             mock.cat('0' * 40)
 
 
+class TestRegisterCommit:
+    """Tests for MockGitObject.register_commit."""
+
+    def test_register_single_commit(self):
+        """Register a commit and verify it's stored."""
+        m = MockGitObject()
+        m.register_commit('c1', author_name='Author', author_time=1000, message='Title')
+        assert 'c1' in m._commits
+
+    def test_cat_returns_commit(self):
+        """cat returns a commit object that decodes to a CommitObj."""
+        m = MockGitObject()
+        m.register_commit('c1', author_name='Author', author_time=1000, message='Title')
+        obj = m.cat('c1')
+        assert isinstance(obj, GitLooseObject)
+        assert obj.type == 1
+        assert obj.decoded.author_name == 'Author'
+        assert obj.decoded.author_time == 1000
+        assert obj.decoded.message == 'Title'
+
+    def test_register_single_parent(self):
+        """A single parent is stored as a str."""
+        m = MockGitObject()
+        m.register_commit('c1', author_name='A1', message='1')
+        m.register_commit('c2', parents=['c1'], author_name='A2', message='2')
+        assert m.cat('c2').decoded.parent == 'c1'
+
+    def test_register_merge_parents(self):
+        """Multiple parents are stored as a list."""
+        m = MockGitObject()
+        m.register_commit('c1', author_name='A1', message='1')
+        m.register_commit('c2', parents=['c1'], author_name='A2', message='2')
+        m.register_commit('c3', parents=['c2', 'c1'], author_name='A3', message='3')
+        assert m.cat('c3').decoded.parent == ['c2', 'c1']
+
+    def test_committer_defaults_to_author(self):
+        """Committer attributes default to the author attributes."""
+        m = MockGitObject()
+        m.register_commit(
+            'c1', author_name='Author', author_email='a@example.com',
+            author_time=1000, author_tz=480, message='',
+        )
+        commit = m.cat('c1').decoded
+        assert commit.committer_name == 'Author'
+        assert commit.committer_email == 'a@example.com'
+        # both times are converted by the timezone offset, same as author_time
+        assert commit.committer_time == commit.author_time == 1000 + 480 * 60
+        assert commit.committer_tz == 480
+
+    def test_committer_override(self):
+        """Committer attributes can be set explicitly."""
+        m = MockGitObject()
+        m.register_commit(
+            'c1', author_name='Author', author_time=1000,
+            committer_name='Committer', committer_time=2000, message='',
+        )
+        commit = m.cat('c1').decoded
+        assert commit.committer_name == 'Committer'
+        assert commit.committer_time == 2000
+        assert commit.author_time == 1000
+
+    def test_timezone_conversion(self):
+        """Author time is converted by the timezone offset like parse_commit."""
+        m = MockGitObject()
+        m.register_commit('c1', author_time=1000, author_tz=480, message='')
+        assert m.cat('c1').decoded.author_time == 1000 + 480 * 60
+
+    def test_negative_timezone(self):
+        """A negative timezone offset is formatted correctly."""
+        m = MockGitObject()
+        m.register_commit('c1', author_time=1000, author_tz=-270, message='')
+        assert m.cat('c1').decoded.author_time == 1000 - 270 * 60
+
+    def test_message_with_chinese(self):
+        """UTF-8 message and author name are supported."""
+        m = MockGitObject()
+        m.register_commit('c1', author_name='作者', message='标题\n正文')
+        commit = m.cat('c1').decoded
+        assert commit.author_name == '作者'
+        assert commit.message == '标题\n正文'
+
+    def test_cat_unknown_commit(self):
+        """cat should raise KeyError for an unregistered commit."""
+        m = MockGitObject()
+        with pytest.raises(KeyError):
+            m.cat('unknown')
+
+
+class TestListCommitHave:
+    """Tests for MockGitObject.list_commit_have."""
+
+    @staticmethod
+    def _make_chain():
+        """
+        Build a repo with a chain of 3 commits.
+
+        c1 -> c2 -> c3
+
+        Returns:
+            MockGitObject:
+        """
+        m = MockGitObject()
+        m.register_commit('c1', author_name='A1', message='1')
+        m.register_commit('c2', parents=['c1'], author_name='A2', message='2')
+        m.register_commit('c3', parents=['c2'], author_name='A3', message='3')
+        return m
+
+    def test_single_commit(self):
+        """A commit without parents returns only itself."""
+        m = MockGitObject()
+        m.register_commit('c1', author_name='A1', message='Title')
+        out = m.list_commit_have('c1')
+        assert list(out) == ['c1']
+        assert out['c1'].message == 'Title'
+
+    def test_commit_chain(self):
+        """The commit and its parents are listed, head first."""
+        m = self._make_chain()
+        assert list(m.list_commit_have('c3')) == ['c3', 'c2', 'c1']
+
+    def test_merge_takes_first_parent(self):
+        """A merge commit follows its first parent."""
+        m = self._make_chain()
+        m.register_commit('merge', parents=['c3', 'c2'], author_name='A4', message='4')
+        assert list(m.list_commit_have('merge')) == ['merge', 'c3', 'c2', 'c1']
+
+    def test_lookback_limit(self):
+        """have_lookback limits the listed commits, head is included."""
+        m = self._make_chain()
+        assert list(m.list_commit_have('c3', have_lookback=2)) == ['c3', 'c2']
+
+    def test_lookback_zero_means_all(self):
+        """have_lookback=0 lists all commits."""
+        m = self._make_chain()
+        assert list(m.list_commit_have('c3', have_lookback=0)) == ['c3', 'c2', 'c1']
+
+    def test_unknown_commit(self):
+        """An unregistered commit raises KeyError."""
+        m = MockGitObject()
+        with pytest.raises(KeyError):
+            m.list_commit_have('unknown')
+
+
+class TestHead:
+    """Tests for MockGitObject head support."""
+
+    def test_head_default_empty(self):
+        """The head is empty when not registered."""
+        m = MockGitObject()
+        assert m.head_get() == ''
+
+    def test_register_head(self):
+        """register_head sets the head, head_get reads it back."""
+        m = MockGitObject()
+        m.register_head('c1')
+        assert m.head_get() == 'c1'
+
+    def test_head_get_ignores_head_argument(self):
+        """head_get accepts the head argument like GitRef.head_get."""
+        m = MockGitObject()
+        m.register_head('c1')
+        assert m.head_get('HEAD') == 'c1'
+
+
 class TestReadFullAndLazy:
     """Tests for MockGitObject.read_full and read_lazy."""
 
