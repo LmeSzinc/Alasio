@@ -42,12 +42,19 @@ class DashboardBase(a.GroupBase):
     def is_expired(self):
         """
         Check if record time is expired
+
+        The record is expired if it has not been updated since the last
+        server update, e.g. a daily record is expired when the 04:00
+        reset has passed.
+
+        Returns:
+            bool: True if the record time is before the last server update
         """
         if not self.ServerUpdate:
             return False
         servertime = self.get_servertime()
-        update = servertime.get_next_update(self.ServerUpdate)
-        return self.Time > update
+        update = servertime.get_last_update(self.ServerUpdate)
+        return self.Time < update
 
 
 class DashboardAmount(DashboardBase, dict=True):

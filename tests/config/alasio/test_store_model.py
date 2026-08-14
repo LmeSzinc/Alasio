@@ -1,9 +1,12 @@
 import datetime as d
+import typing as t
+from datetime import timedelta, timezone
 
 import msgspec as m
 import pytest
 import typing_extensions as e
 
+from alasio.base.servertime import ServerTime
 from alasio.config.alasio.store_model import (
     DashboardAmount,
     DashboardDynamicTotal,
@@ -152,6 +155,57 @@ class TestDashboardBaseIsExpired:
         default_time = d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
         obj = _DashboardAmountLimited(Value=50, Time=default_time)
         assert obj.is_expired() is False
+
+
+class _DashboardDailyTotal(DashboardTotal):
+    """
+    Test helper: DashboardTotal with a daily 04:00 server update
+    """
+
+    Value: e.Annotated[int, m.Meta(ge=0, le=15)] = 0
+    ServerUpdate: t.Literal['04:00'] = '04:00'
+
+    def get_servertime(self):
+        return ServerTime(8)
+
+
+class TestDashboardBaseIsExpiredWithServerUpdate:
+    """Test suite for DashboardBase.is_expired with ServerUpdate set"""
+
+    def test_not_expired_after_last_update(self):
+        """Record updated after the last server update is not expired"""
+        obj = _DashboardDailyTotal(Value=5)
+        last_update = obj.get_servertime().get_last_update('04:00')
+        obj.Time = (last_update + timedelta(hours=1)).astimezone(timezone.utc)
+        assert obj.is_expired() is False
+
+    def test_expired_before_last_update(self):
+        """Record from a previous period is expired"""
+        obj = _DashboardDailyTotal(Value=5)
+        last_update = obj.get_servertime().get_last_update('04:00')
+        obj.Time = (last_update - timedelta(hours=1)).astimezone(timezone.utc)
+        assert obj.is_expired() is True
+
+    def test_expired_with_default_time(self):
+        """Default record time (2020) is expired"""
+        obj = _DashboardDailyTotal(Value=5)
+        assert obj.is_expired() is True
+
+    def test_update_resets_expired_record(self):
+        """update() resets Value when the record is expired"""
+        obj = _DashboardDailyTotal(Value=5)
+        last_update = obj.get_servertime().get_last_update('04:00')
+        obj.Time = (last_update - timedelta(hours=1)).astimezone(timezone.utc)
+        obj.update()
+        assert obj.Value == 0
+
+    def test_update_keeps_valid_record(self):
+        """update() keeps Value when the record is not expired"""
+        obj = _DashboardDailyTotal(Value=5)
+        last_update = obj.get_servertime().get_last_update('04:00')
+        obj.Time = (last_update + timedelta(hours=1)).astimezone(timezone.utc)
+        obj.update()
+        assert obj.Value == 5
 
 
 # ---- Tests: DashboardAmount.meta ----
