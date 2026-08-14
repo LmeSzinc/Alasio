@@ -106,7 +106,7 @@ if (!gotTheLock) {
         
         // Start backend after config is saved
         try {
-          await startBackend(config.pythonExecutable, config.rootPath);
+          await startBackend(config.pythonExecutable, config.rootPath, config.webuiPort);
           setRoute('app');
         } catch (err) {
           console.error('Failed to start backend:', err);
@@ -122,7 +122,7 @@ if (!gotTheLock) {
     // Start backend if not first time setup
     if (!config.isFirstTimeSetup) {
       try {
-        await startBackend(config.pythonExecutable, config.rootPath);
+        await startBackend(config.pythonExecutable, config.rootPath, config.webuiPort);
         setRoute('app');
       } catch (err) {
         console.error('Failed to start backend:', err);

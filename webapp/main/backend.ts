@@ -10,8 +10,12 @@ export enum ShutdownStage {
   Done = 'done'
 }
 
+// Timeout for backend startup. The backend imports heavy modules (alasio,
+// hypercorn, trio) and spawns a multiprocessing child process, which can take
+// a while on slow machines.
+const BACKEND_START_TIMEOUT = 30_000;
+
 let backendProcess: ChildProcess | null = null;
-let isBackendReady = false;
 let mainWindow: BrowserWindow | null = null;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -22,39 +26,71 @@ export function setMainWindow(window: BrowserWindow) {
 
 export function startBackend(
   pythonExecutable: string,
-  rootPath: string
+  rootPath: string,
+  webuiPort: number
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    backendProcess = spawn(pythonExecutable, ['gui.py'], {
+    // gui.py forwards sys.argv to the backend supervisor, which passes them
+    // down to the hypercorn config parser (--host/--port in create_config).
+    // Without --port the backend would listen on hypercorn's default 8000
+    // instead of the configured webuiPort.
+    const child = spawn(pythonExecutable, ['gui.py', '--port', String(webuiPort)], {
       cwd: rootPath,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    backendProcess = child;
 
-    backendProcess.stdout?.on('data', (data) => {
-      const text = data.toString();
-      
-      // Only push logs before backend is ready (prevent memory growth)
-      if (!isBackendReady) {
-        mainWindow?.webContents.send(IPC_BACKEND_LOG, text);
-      }
-      
-      // Check for startup completion signal
-      if (text.includes('Running on')) {
-        isBackendReady = true;
-        mainWindow?.webContents.send(IPC_BACKEND_READY);
+    let isReady = false;
+    let settled = false;
+
+    const settle = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error) {
+        // Clean up the process on startup failure so no orphan python remains
+        if (child.exitCode === null && child.pid) {
+          kill(child.pid, 'SIGKILL', () => {});
+        }
+        reject(error);
+      } else {
         resolve();
       }
-    });
+    };
 
-    backendProcess.stderr?.on('data', (data) => {
+    // Fallback in case the ready message is never observed
+    const timeout = setTimeout(() => {
+      settle(new Error(`Backend startup timed out after ${BACKEND_START_TIMEOUT} ms`));
+    }, BACKEND_START_TIMEOUT);
+
+    // Forward logs to the renderer and watch for hypercorn's ready message.
+    // The supervisor prints "[Supervisor] Running on PID: xxx" to stdout before
+    // the backend subprocess is even spawned, so we match the exact hypercorn
+    // message "Running on http://..." (printed to stderr) instead of a plain
+    // "Running on". Both streams are watched in case hypercorn logging moves.
+    const handleOutput = (data: Buffer) => {
       const text = data.toString();
-      if (!isBackendReady) {
-        mainWindow?.webContents.send(IPC_BACKEND_LOG, text);
-      }
-    });
 
-    backendProcess.on('error', (err) => {
-      reject(err);
+      // Only push logs before backend is ready (prevent memory growth)
+      if (isReady) return;
+      mainWindow?.webContents.send(IPC_BACKEND_LOG, text);
+
+      if (text.includes('Running on http')) {
+        isReady = true;
+        mainWindow?.webContents.send(IPC_BACKEND_READY);
+        settle();
+      }
+    };
+
+    child.stdout?.on('data', handleOutput);
+    child.stderr?.on('data', handleOutput);
+
+    child.on('error', (err) => settle(err));
+
+    child.on('exit', (code) => {
+      if (!isReady) {
+        settle(new Error(`Backend exited before ready (code: ${code})`));
+      }
     });
   });
 }
@@ -62,8 +98,14 @@ export function startBackend(
 export async function shutdownBackend(
   onStageChange?: (stage: ShutdownStage) => void
 ): Promise<void> {
-  // If backend was never started or never became ready, mark shutdown success immediately
-  if (!backendProcess || !backendProcess.pid || !isBackendReady) {
+  // If backend was never started or has already exited, mark shutdown success immediately.
+  // signalCode is set when the process was terminated by a signal (exitCode stays null).
+  if (
+    !backendProcess ||
+    !backendProcess.pid ||
+    backendProcess.exitCode !== null ||
+    backendProcess.signalCode !== null
+  ) {
     onStageChange?.(ShutdownStage.Done);
     return;
   }
