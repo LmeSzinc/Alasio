@@ -27,20 +27,6 @@
     "zh-TW": "插件名稱",
     "es-ES": "Nombre del Mod"
   },
-  "CollapseDetail": {
-    "en-US": "CollapseDetail",
-    "zh-CN": "CollapseDetail",
-    "ja-JP": "CollapseDetail",
-    "zh-TW": "CollapseDetail",
-    "es-ES": "CollapseDetail"
-  },
-  "ExpandDetail": {
-    "en-US": "ExpandDetail",
-    "zh-CN": "ExpandDetail",
-    "ja-JP": "ExpandDetail",
-    "zh-TW": "ExpandDetail",
-    "es-ES": "ExpandDetail"
-  },
   "NoMod": {
     "en-US": "NoMod",
     "zh-CN": "NoMod",
@@ -96,5 +82,19 @@
     "ja-JP": "ExpandAll",
     "zh-TW": "ExpandAll",
     "es-ES": "ExpandAll"
+  },
+  "CollapseDetail": {
+    "en-US": "CollapseDetail",
+    "zh-CN": "CollapseDetail",
+    "ja-JP": "CollapseDetail",
+    "zh-TW": "CollapseDetail",
+    "es-ES": "CollapseDetail"
+  },
+  "ExpandDetail": {
+    "en-US": "ExpandDetail",
+    "zh-CN": "ExpandDetail",
+    "ja-JP": "ExpandDetail",
+    "zh-TW": "ExpandDetail",
+    "es-ES": "ExpandDetail"
   }
 }
