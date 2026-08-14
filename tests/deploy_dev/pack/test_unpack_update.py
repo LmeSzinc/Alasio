@@ -69,6 +69,7 @@ def make_pack(files, commit='c1'):
         else:
             content, mode = value, 644
         repo.register_file(commit, path, content, mode=mode)
+    repo.register_commit(commit, author_name='Author', message='')
     return b''.join(PackFull(repo, commit=commit).iter_pack_data())
 
 
@@ -85,7 +86,7 @@ def unpack_tree(decoder):
     return {
         path: bytes(decoder.catfile(info))
         for path, info in decoder.fileinfo.items()
-        if info.edit != 2
+        if info.edit != 2 and not path.startswith('.pack/')
     }
 
 

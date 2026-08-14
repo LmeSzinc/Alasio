@@ -4,7 +4,7 @@ Generate the commit history pack from the command line.
     python -m alasio.deploy_dev.history.cli gen
 
 Read the git repository in the current directory and write the
-history of the latest 30 commits into .pack/history.pack.
+history of the latest 20 commits into .pack/history.pack.
 
     python -m alasio.deploy_dev.history.cli gen -c /path/to/repo
 

@@ -11,6 +11,23 @@ from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.stage.gitreset import FileEntry
 
+COMMIT = 'c1'
+
+
+def _make_repo():
+    """
+    Build a MockGitRepo with a registered commit.
+
+    PackFull.fileinfo packs the commit history of the repo, so the
+    mock repo must have the commit object registered.
+
+    Returns:
+        MockGitRepo:
+    """
+    mock = MockGitRepo()
+    mock.register_commit(COMMIT, author_name='Author', message='')
+    return mock
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  filelist
@@ -22,7 +39,7 @@ class TestFilelist:
 
     def test_filelist_known_commit(self):
         """Filelist returns files registered for a commit."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'a.txt', b'hello')
         pack = PackFull(mock, commit='c1')
         flist = pack.filelist
@@ -33,13 +50,13 @@ class TestFilelist:
 
     def test_filelist_unknown_commit(self):
         """Filelist returns empty dict for unknown commit."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         pack = PackFull(mock, commit='nonexistent')
         assert pack.filelist == {}
 
     def test_filelist_multiple_files(self):
         """Filelist returns all registered files."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'a.txt', b'aaa')
         mock.register_file('c1', 'b/b.txt', b'bbb')
         mock.register_file('c1', 'c/c/c.txt', b'ccc')
@@ -59,12 +76,12 @@ class TestGitattributes:
     def test_repo_gitattributes_patterns_loaded(self):
         """Repo .gitattributes patterns should be loaded."""
         # Build two identical packs — one with .gitattributes, one without
-        mock_with = MockGitRepo()
+        mock_with = _make_repo()
         mock_with.register_file('c1', '.gitattributes', b'*.foo text eol=crlf')
         mock_with.register_file('c1', 'a.foo', b'content')
         pack_with = PackFull(mock_with, commit='c1')
 
-        mock_without = MockGitRepo()
+        mock_without = _make_repo()
         mock_without.register_file('c1', 'a.foo', b'content')
         pack_without = PackFull(mock_without, commit='c1')
 
@@ -76,18 +93,18 @@ class TestGitattributes:
 
     def test_root_gitattributes_loaded(self):
         """Root .gitattributes should be loaded as a repo pattern."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo text')
         mock.register_file('c1', 'a.foo', b'content')
         pack = PackFull(mock, commit='c1')
         # Pattern count should be > builtin-only count
-        attrs_no = PackFull(MockGitRepo(), commit='not-there').gitattributes
+        attrs_no = PackFull(_make_repo(), commit='not-there').gitattributes
         # Just confirm it loaded without error
         assert pack.gitattributes is pack.gitattributes  # cached
 
     def test_subdir_gitattributes_loaded(self):
         """Subdirectory .gitattributes should be loaded."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'sub/.gitattributes', b'*.bar binary')
         mock.register_file('c1', 'sub/a.bar', b'\x00')
         pack = PackFull(mock, commit='c1')
@@ -113,12 +130,14 @@ class TestFileinfoBasic:
 
     def test_single_file(self):
         """A single file produces one FileInfo with correct metadata."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         content = b'hello world'
         mock.register_file('c1', 'hello.txt', content)
         pack = PackFull(mock, commit='c1')
         info = pack.fileinfo
-        assert len(info) == 1
+        # + 1 for the packed commit history
+        assert len(info) == 2
+        assert '.pack/history.pack' in info
         entry = info['hello.txt']
         assert entry.path == 'hello.txt'
         # load_data() sets sha1 to sha1(content).hexdigest() (raw content hash)
@@ -130,16 +149,16 @@ class TestFileinfoBasic:
 
     def test_multiple_files(self):
         """Multiple files all appear in fileinfo."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'a.txt', b'aaa')
         mock.register_file('c1', 'b.txt', b'bbb')
         pack = PackFull(mock, commit='c1')
         info = pack.fileinfo
-        assert set(info) == {'a.txt', 'b.txt'}
+        assert set(info) == {'a.txt', 'b.txt', '.pack/history.pack'}
 
     def test_file_ordering_shallow_first(self):
         """Files are sorted DFS: shallower parents come before deeper ones."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'a/b/c.txt', b'c')
         mock.register_file('c1', 'a/b.txt', b'b')
         mock.register_file('c1', 'a.txt', b'a')
@@ -153,7 +172,7 @@ class TestFileinfoBasic:
 
     def test_empty_file(self):
         """Empty file: size=0, sha1='' after load_data."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'empty.txt', b'')
         pack = PackFull(mock, commit='c1')
         entry = pack.fileinfo['empty.txt']
@@ -164,7 +183,7 @@ class TestFileinfoBasic:
 
     def test_mode_755(self):
         """Mode 755 file is handled correctly (load_git_mode sets eol)."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'script.sh', b'#!/bin/sh', mode=755)
         pack = PackFull(mock, commit='c1')
         entry = pack.fileinfo['script.sh']
@@ -186,7 +205,7 @@ class TestFileinfoInitGeneration:
 
     def test_python_file_adds_init(self):
         """A .py file should generate deleted __init__.py for parent dir."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'module/script.py', b'print(1)')
         pack = PackFull(mock, commit='c1')
         info = pack.fileinfo
@@ -196,7 +215,7 @@ class TestFileinfoInitGeneration:
 
     def test_existing_init_not_duplicated(self):
         """If __init__.py already exists, don't generate a duplicate."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'module/script.py', b'x')
         mock.register_file('c1', 'module/__init__.py', b'')
         pack = PackFull(mock, commit='c1')
@@ -208,7 +227,7 @@ class TestFileinfoInitGeneration:
 
     def test_nested_python_generates_init_chain(self):
         """Nested .py files generate __init__.py for all parent dirs."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'a/b/c/d.py', b'x')
         pack = PackFull(mock, commit='c1')
         info = pack.fileinfo
@@ -218,16 +237,17 @@ class TestFileinfoInitGeneration:
 
     def test_non_python_no_init_generation(self):
         """Non-python files do not generate __init__.py."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'data.json', b'{}')
         pack = PackFull(mock, commit='c1')
         info = pack.fileinfo
-        assert len(info) == 1
+        # + 1 for the packed commit history
+        assert len(info) == 2
         assert 'data.json' in info
 
     def test_root_level_py_no_init(self):
         """A .py file at root has no parent directory, so no init generated."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'app.py', b'print("hello")')
         pack = PackFull(mock, commit='c1')
         info = pack.fileinfo
@@ -246,7 +266,7 @@ class TestFileinfoEol:
 
     def test_text_set_eol_default(self):
         """text=set without explicit eol → eol=0 (LF)."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo text')
         mock.register_file('c1', 'a.foo', b'hello')
         pack = PackFull(mock, commit='c1')
@@ -255,7 +275,7 @@ class TestFileinfoEol:
 
     def test_text_unset_binary(self):
         """-text → binary → eol=2."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo -text')
         mock.register_file('c1', 'a.foo', b'hello')
         pack = PackFull(mock, commit='c1')
@@ -263,7 +283,7 @@ class TestFileinfoEol:
 
     def test_binary_macro(self):
         """binary macro → -text -diff -merge → eol=2."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo binary')
         mock.register_file('c1', 'a.foo', b'\x00')
         pack = PackFull(mock, commit='c1')
@@ -271,7 +291,7 @@ class TestFileinfoEol:
 
     def test_eol_crlf(self):
         """eol=crlf with implicit text=auto → eol=1."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo eol=crlf')
         mock.register_file('c1', 'a.foo', b'hello')
         pack = PackFull(mock, commit='c1')
@@ -279,7 +299,7 @@ class TestFileinfoEol:
 
     def test_eol_lf(self):
         """eol=lf → eol=0."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo eol=lf')
         mock.register_file('c1', 'a.foo', b'hello')
         pack = PackFull(mock, commit='c1')
@@ -287,7 +307,7 @@ class TestFileinfoEol:
 
     def test_auto_binary_by_content(self):
         """text=auto + null byte in content → binary → eol=2."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         # Only builtin * text=auto eol=lf applies; use an extension
         # that does NOT match any builtin specific rule (only the
         # catch-all `*` matches, giving text=auto).
@@ -297,14 +317,14 @@ class TestFileinfoEol:
 
     def test_auto_text_by_content(self):
         """text=auto without null bytes → text → eol=0."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'a.xxx', b'hello world')
         pack = PackFull(mock, commit='c1')
         assert pack.fileinfo['a.xxx'].eol == 0
 
     def test_subdir_gitattributes_overrides_root(self):
         """Subdirectory .gitattributes overrides root for files in that dir."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo eol=crlf')
         mock.register_file('c1', 'sub/.gitattributes', b'*.foo eol=lf')
         mock.register_file('c1', 'root.foo', b'hello')
@@ -327,7 +347,7 @@ class TestFileinfoEditCopied:
 
     def test_duplicate_content_marked_copied(self):
         """Files with identical sha1: first is source, later are copies."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         content_a = b'same content'
         mock.register_file('c1', 'a.py', content_a)
         mock.register_file('c1', 'b.py', content_a)  # same
@@ -350,7 +370,7 @@ class TestFileinfoEditCopied:
 
     def test_empty_file_not_copied(self):
         """Empty files (size=0) are not considered as copies."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', 'a.txt', b'')
         mock.register_file('c1', 'b.txt', b'')
         pack = PackFull(mock, commit='c1')
@@ -363,7 +383,7 @@ class TestFileinfoEditCopied:
 
     def test_duplicate_chain(self):
         """Multiple copies in sequence: each references the nearest source."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         content = b'shared content'
         mock.register_file('c1', 'a.txt', b'unique a')
         mock.register_file('c1', 'b.txt', content)
@@ -404,7 +424,7 @@ class TestFileinfoData:
 
     def test_new_file_has_data(self):
         """A new (A) file gets its content loaded and potentially compressed."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         content = b'hello world' * 100  # 1100 bytes – large enough for lzma
         mock.register_file('c1', 'big.txt', content)
         pack = PackFull(mock, commit='c1')
@@ -417,7 +437,7 @@ class TestFileinfoData:
 
     def test_deleted_file_no_data(self):
         """A deleted (D) file should not have data loaded."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         # Use a subdirectory .py file so __init__.py is generated (deleted)
         mock.register_file('c1', 'pkg/module.py', b'print(1)')
         pack = PackFull(mock, commit='c1')
@@ -430,7 +450,7 @@ class TestFileinfoData:
 
     def test_copied_file_no_data(self):
         """A copied (C) file should not have own data loaded."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         content = b'shared content for copy test'
         # Use names where source sorts before copy
         mock.register_file('c1', 'alpha.txt', content)
@@ -449,7 +469,7 @@ class TestFileinfoData:
 
     def test_new_file_reports_blob_sha1(self):
         """After load_data, sha1 should be the SHA-1 of the content."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         content = b'content with known sha1'
         mock.register_file('c1', 'data.txt', content)
         pack = PackFull(mock, commit='c1')
@@ -461,7 +481,7 @@ class TestFileinfoData:
 
     def test_lzma_compression_large_file(self):
         """Large content should be lzma-compressed (algo=1)."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         # Build content large enough to benefit from lzma
         content = (b'print("hello world")\n' * 5000)
         mock.register_file('c1', 'large.py', content)
@@ -483,7 +503,7 @@ class TestFileinfoIntegration:
 
     def test_python_project_structure(self):
         """Realistic Python project structure produces correct output."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.py text eol=lf')
         mock.register_file('c1', 'src/main.py', b'def main():\n    pass\n')
         mock.register_file('c1', 'src/utils/helper.py', b'def help():\n    return 1\n')
@@ -524,7 +544,7 @@ class TestFileinfoIntegration:
 
     def test_large_project_with_duplicates(self):
         """Large project with duplicated content across files."""
-        mock = MockGitRepo()
+        mock = _make_repo()
         content_a = b'print("module a")\n'
         content_b = b'print("module b")\n'
 

@@ -26,13 +26,13 @@ class PackHistory:
         if not self.latest_commit:
             raise ValueError(f'Empty latest commit at repo {repo}')
 
-    def iter_commit_history(self, lookback=30):
+    def iter_commit_history(self, lookback=20):
         """
         Pack the history of the latest commits.
 
         Args:
             lookback (int): Maximum number of commits to pack,
-                0 for all commits. Defaults to 30.
+                0 for all commits. Defaults to 20.
 
         Returns:
             Iterator[bytes]: msgpack encoded history data

@@ -29,6 +29,7 @@ def _make_pack(files, commit):
     repo = MockGitRepo()
     for path, content in files.items():
         repo.register_file(commit, path, content)
+    repo.register_commit(commit, author_name='Author', message='')
     return PackDecodeBase(b''.join(PackFull(repo, commit=commit).iter_pack_data()))
 
 

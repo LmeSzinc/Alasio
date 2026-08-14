@@ -5,6 +5,7 @@ from tqdm import tqdm
 
 from alasio.backport import removesuffix
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
+from alasio.deploy_dev.history.encode_history import encode_commit_history
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_lzma import lzma_compress
@@ -31,6 +32,9 @@ def _dfs_path_key(path):
 
 
 class PackFull(PackEncodeBase):
+    # the history of the latest commits, packed as a normal file
+    HISTORY_FILE = '.pack/history.pack'
+
     def __init__(self, repo: Union[GitRepo, MockGitRepo], commit=''):
         """
         Args:
@@ -221,6 +225,8 @@ class PackFull(PackEncodeBase):
         self._populate_edit_copied(dict_fileinfo=out)
         # set data, algo, sha1, size, data_size
         self._populate_data(out)
+        # add the history of the latest commits
+        self._populate_history(out)
         return out
 
     def _populate_eol(self, dict_fileinfo: "dict[str, FileInfo]"):
@@ -304,6 +310,29 @@ class PackFull(PackEncodeBase):
             # update dict_known_file in both cases
             # so when having multiple same files, the latter ones can reference the nearest source file
             dict_sha1_to_index[sha] = index
+
+    @cached_property
+    def history_data(self):
+        """
+        Encode the history of the latest commits.
+
+        The history is stored in the pack as HISTORY_FILE, so the
+        unpacked project has the commit history of the packed version.
+
+        Returns:
+            bytes: msgpack encoded history data
+        """
+        commits = self.repo.list_commit_have(self.latest_commit, have_lookback=20)
+        return encode_commit_history(commits)
+
+    def _populate_history(self, dict_fileinfo: "dict[str, FileInfo]"):
+        """
+        Add the history of the latest commits to the pack as a normal file
+        """
+        data = self.history_data
+        file = FileInfo(path=self.HISTORY_FILE, eol=2)
+        self._load_data(file, data, zstd=False)
+        dict_fileinfo[self.HISTORY_FILE] = file
 
     def _populate_data(self, dict_fileinfo: "dict[str, FileInfo]"):
         """

@@ -78,7 +78,8 @@ class TestUnpack:
         assert job.pending
         assert all(isinstance(item, PendingFile) for item in job.pending)
         # every fileinfo record is in pending, refinfo is not unpacked
-        assert len(job.pending) == len(WEBSITE_FILES) + 1  # + D marker
+        # + 2 for the D marker and the packed commit history
+        assert len(job.pending) == len(WEBSITE_FILES) + 2
         # deleted marker record, its target is removed in replace()
         deleted = [
             item for item in job.pending

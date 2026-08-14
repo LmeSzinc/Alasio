@@ -57,7 +57,8 @@ class TestPackDecodeBasic:
         """Full pack has no refinfo, all files are in fileinfo."""
         decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         assert decoder.refinfo == {}
-        assert len(decoder.fileinfo) == len(WEBSITE_FILES) + 1  # + D marker
+        # + 2 for the D marker and the packed commit history
+        assert len(decoder.fileinfo) == len(WEBSITE_FILES) + 2
 
 
 class TestFullDecode:
@@ -76,7 +77,7 @@ class TestFullDecode:
         assert files['.gitattributes'] == IdxInfo(
             path='.gitattributes', edit=0, eol=0, mode=0, algo=1,
             size=70, data_size=55, source_lookback=0, source_path='',
-            sha1='37b6876fc38b3e141141270502ca0bc70339060c', data_start=710,
+            sha1='37b6876fc38b3e141141270502ca0bc70339060c', data_start=753,
         )
         assert files['backend/__init__.py'] == IdxInfo(
             path='backend/__init__.py', edit=0, eol=0, mode=0, algo=0,
@@ -86,42 +87,42 @@ class TestFullDecode:
         assert files['backend/config.py'] == IdxInfo(
             path='backend/config.py', edit=0, eol=0, mode=0, algo=0,
             size=43, data_size=43, source_lookback=0, source_path='',
-            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', data_start=765,
+            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', data_start=808,
         )
         assert files['backend/main.py'] == IdxInfo(
             path='backend/main.py', edit=0, eol=0, mode=0, algo=0,
             size=70, data_size=70, source_lookback=0, source_path='',
-            sha1='a936d96edd251c2a5e78812a430076a528fc88e9', data_start=808,
+            sha1='a936d96edd251c2a5e78812a430076a528fc88e9', data_start=851,
         )
         assert files['backend/requirements.txt'] == IdxInfo(
             path='backend/requirements.txt', edit=0, eol=1, mode=0, algo=0,
             size=33, data_size=33, source_lookback=0, source_path='',
-            sha1='3f5ff3ff1bd1a310ba43a663e7cb0fb946de82e6', data_start=878,
+            sha1='3f5ff3ff1bd1a310ba43a663e7cb0fb946de82e6', data_start=921,
         )
         assert files['backend/settings.py'] == IdxInfo(
             path='backend/settings.py', edit=0, eol=0, mode=0, algo=0,
             size=43, data_size=43, source_lookback=3, source_path='backend/config.py',
-            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', data_start=765,
+            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', data_start=808,
         )
         assert files['backend/utils.py'] == IdxInfo(
             path='backend/utils.py', edit=0, eol=0, mode=0, algo=0,
             size=43, data_size=43, source_lookback=1, source_path='backend/settings.py',
-            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', data_start=765,
+            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', data_start=808,
         )
         assert files['backend/api/__init__.py'] == IdxInfo(
             path='backend/api/__init__.py', edit=0, eol=0, mode=0, algo=0,
             size=27, data_size=27, source_lookback=0, source_path='',
-            sha1='5382076fa462350af2aa921c35ab72e2c8c8002f', data_start=911,
+            sha1='5382076fa462350af2aa921c35ab72e2c8c8002f', data_start=954,
         )
         assert files['backend/api/routes.py'] == IdxInfo(
             path='backend/api/routes.py', edit=0, eol=0, mode=0, algo=0,
             size=77, data_size=77, source_lookback=0, source_path='',
-            sha1='b3817c4fecaed2e877549b0afdef93e41b7dbc7d', data_start=938,
+            sha1='b3817c4fecaed2e877549b0afdef93e41b7dbc7d', data_start=981,
         )
         assert files['backend/static/logo.png'] == IdxInfo(
             path='backend/static/logo.png', edit=0, eol=2, mode=0, algo=1,
             size=25600, data_size=302, source_lookback=0, source_path='',
-            sha1='bee4c060ee5e5290ab433d49d1c5676b6e57261e', data_start=1015,
+            sha1='bee4c060ee5e5290ab433d49d1c5676b6e57261e', data_start=1058,
         )
         assert files['backend/tools/__init__.py'] == IdxInfo(
             path='backend/tools/__init__.py', edit=2, eol=0, mode=0, algo=0,
@@ -131,63 +132,66 @@ class TestFullDecode:
         assert files['backend/tools/helper.py'] == IdxInfo(
             path='backend/tools/helper.py', edit=0, eol=0, mode=0, algo=0,
             size=28, data_size=28, source_lookback=0, source_path='',
-            sha1='2ba0e2135cea164cafcd2e9bdceb9789ef953133', data_start=1317,
+            sha1='2ba0e2135cea164cafcd2e9bdceb9789ef953133', data_start=1360,
         )
         assert files['docs/README.md'] == IdxInfo(
             path='docs/README.md', edit=0, eol=0, mode=0, algo=0,
             size=35, data_size=35, source_lookback=0, source_path='',
-            sha1='8f95d6e53d81d2ae147cf083560cbce33b55d266', data_start=1345,
+            sha1='8f95d6e53d81d2ae147cf083560cbce33b55d266', data_start=1388,
         )
         assert files['frontend/package.json'] == IdxInfo(
             path='frontend/package.json', edit=0, eol=0, mode=0, algo=0,
             size=44, data_size=44, source_lookback=0, source_path='',
-            sha1='da2f8d9497d709fa5d98bf97429ff211fd485673', data_start=1380,
+            sha1='da2f8d9497d709fa5d98bf97429ff211fd485673', data_start=1423,
         )
         assert files['frontend/tsconfig.json'] == IdxInfo(
             path='frontend/tsconfig.json', edit=0, eol=0, mode=0, algo=0,
             size=50, data_size=50, source_lookback=0, source_path='',
-            sha1='3587dbace20bd384c164cf5f4b242fa7f2a48fb1', data_start=1424,
+            sha1='3587dbace20bd384c164cf5f4b242fa7f2a48fb1', data_start=1467,
         )
         assert files['frontend/src/App.svelte'] == IdxInfo(
             path='frontend/src/App.svelte', edit=0, eol=0, mode=0, algo=1,
             size=104, data_size=99, source_lookback=0, source_path='',
-            sha1='d6aef44bc7a8fde97945171a59aac8d6b1cea8fb', data_start=1474,
+            sha1='d6aef44bc7a8fde97945171a59aac8d6b1cea8fb', data_start=1517,
         )
         assert files['frontend/src/lib/Button.svelte'] == IdxInfo(
             path='frontend/src/lib/Button.svelte', edit=0, eol=0, mode=0, algo=1,
             size=104, data_size=99, source_lookback=1, source_path='frontend/src/App.svelte',
-            sha1='d6aef44bc7a8fde97945171a59aac8d6b1cea8fb', data_start=1474,
+            sha1='d6aef44bc7a8fde97945171a59aac8d6b1cea8fb', data_start=1517,
         )
         assert files['frontend/src/lib/styles.css'] == IdxInfo(
             path='frontend/src/lib/styles.css', edit=0, eol=0, mode=0, algo=1,
             size=120000, data_size=135, source_lookback=0, source_path='',
-            sha1='d77a6725ecb2a2798d1df284b809de51da3e0399', data_start=1573,
+            sha1='d77a6725ecb2a2798d1df284b809de51da3e0399', data_start=1616,
         )
         assert files['frontend/src/routes/+page.svelte'] == IdxInfo(
             path='frontend/src/routes/+page.svelte', edit=0, eol=0, mode=0, algo=0,
             size=75, data_size=75, source_lookback=0, source_path='',
-            sha1='7263ba1458fa5627d3c966251db887e0f518288e', data_start=1708,
+            sha1='7263ba1458fa5627d3c966251db887e0f518288e', data_start=1751,
         )
         assert files['scripts/deploy.sh'] == IdxInfo(
             path='scripts/deploy.sh', edit=0, eol=0, mode=1, algo=0,
             size=31, data_size=31, source_lookback=0, source_path='',
-            sha1='2690963383249907ec8304c2f09e5d0a5d86f24d', data_start=1783,
+            sha1='2690963383249907ec8304c2f09e5d0a5d86f24d', data_start=1826,
         )
         assert files['scripts/run.bat'] == IdxInfo(
             path='scripts/run.bat', edit=0, eol=1, mode=0, algo=0,
             size=28, data_size=28, source_lookback=0, source_path='',
-            sha1='30c7e458805ec8f7c2335f2d26b01f2ba8d66c16', data_start=1814,
+            sha1='30c7e458805ec8f7c2335f2d26b01f2ba8d66c16', data_start=1857,
         )
         assert files['scripts/run.sh'] == IdxInfo(
             path='scripts/run.sh', edit=0, eol=0, mode=1, algo=0,
             size=31, data_size=31, source_lookback=2, source_path='scripts/deploy.sh',
-            sha1='2690963383249907ec8304c2f09e5d0a5d86f24d', data_start=1783,
+            sha1='2690963383249907ec8304c2f09e5d0a5d86f24d', data_start=1826,
         )
 
         # every file content, copied files resolved through the source path
         for dec in files.values():
             if dec.edit == 2:
                 # deleted marker: not in WEBSITE_FILES, no content to check
+                continue
+            if dec.path == '.pack/history.pack':
+                # packed commit history, content is checked separately
                 continue
             expected = WEBSITE_FILES[dec.path][0]
             if dec.edit == 0 and dec.source_lookback:
@@ -339,14 +343,31 @@ class TestPackDecodeData:
         for info in decoder.fileinfo.values():
             if not info.data_size:
                 continue
+            if info.path == '.pack/history.pack':
+                # packed commit history, content is checked separately
+                continue
             content = bytes(decoder.catfile(info))
             assert content == WEBSITE_FILES[info.path][0], f'content mismatch: {info.path}'
+
+    def test_history_pack_content(self):
+        """The packed commit history must decode to the commit history."""
+        from alasio.deploy.history.decode_history import HistoryObj, decode_history
+
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
+        info = decoder.fileinfo['.pack/history.pack']
+        history = decode_history(bytes(decoder.catfile(info)))
+        assert history == [
+            HistoryObj(version=COMMIT, author='Author', time=0, title='Initial commit', detail=''),
+        ]
 
     def test_catfile_returns_memoryview(self):
         """catfile must return a memoryview for both raw and lzma files."""
         decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         for info in decoder.fileinfo.values():
             if not info.data_size:
+                continue
+            if info.path == '.pack/history.pack':
+                # packed commit history, content is checked separately
                 continue
             content = decoder.catfile(info)
             assert isinstance(content, memoryview)
@@ -401,12 +422,12 @@ class TestPackDecodeData:
     def test_catfile_tampered_last_data_raises(self):
         """Tampering the last file's data byte must raise PackDecodeError."""
         # the last data byte of the pack sits right before the 20-byte data
-        # checksum and belongs to scripts/run.bat (raw): tampering it keeps
-        # the length but changes the content, so the sha1 check must fail
+        # checksum and belongs to .pack/history.pack (lzma): tampering it
+        # keeps the length but changes the content, so the sha1 check fails
         data = bytearray(WEBSITE_FULL_PACK)
         data[-21] ^= 0xFF
         decoder = PackDecodeBase(data)
-        info = decoder.fileinfo['scripts/run.bat']
+        info = decoder.fileinfo['.pack/history.pack']
         with pytest.raises(PackDecodeError, match='sha1'):
             decoder.catfile(info)
 
@@ -468,13 +489,14 @@ class TestPackDecodeEmptyRepo:
     """A pack with no files must decode."""
 
     def test_empty(self):
-        """Empty repo produces an empty but valid pack."""
+        """Empty repo produces an empty but valid pack, history only."""
         from alasio.git.mock.mock_repo import MockGitRepo
 
         repo = MockGitRepo()
+        repo.register_commit('c1', author_name='Author', message='')
         pack = PackFull(repo, commit='c1')
         data = b''.join(pack.iter_pack_data())
         decoder = PackDecodeBase(data)
         decoder.validate()
-        assert decoder.fileinfo == {}
+        assert list(decoder.fileinfo) == ['.pack/history.pack']
         assert decoder.refinfo == {}

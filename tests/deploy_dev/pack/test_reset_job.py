@@ -41,6 +41,7 @@ def make_pack(files, commit='c1'):
     repo = MockGitRepo()
     for path, content in files.items():
         repo.register_file(commit, path, content)
+    repo.register_commit(commit, author_name='Author', message='')
     return b''.join(PackFull(repo, commit=commit).iter_pack_data())
 
 

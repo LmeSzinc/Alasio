@@ -45,6 +45,7 @@ EOL_FILES = {
 EOL_REPO = MockGitRepo()
 for path, content in EOL_FILES.items():
     EOL_REPO.register_file(COMMIT, path, content)
+EOL_REPO.register_commit(COMMIT, author_name='Author', message='')
 EOL_PACK = b''.join(PackFull(EOL_REPO, commit=COMMIT).iter_pack_data())
 
 
@@ -144,6 +145,7 @@ class TestEolCopiedFile:
     def test_normalized_duplicate_is_copied(self):
         """LF and CRLF inputs with the same text share one blob -> C."""
         repo = MockGitRepo()
+        repo.register_commit(COMMIT, author_name='Author', message='')
         repo.register_file(COMMIT, 'a.bat', b'same line\n')
         repo.register_file(COMMIT, 'b.bat', b'same line\r\n')
         pack = PackFull(repo, commit=COMMIT)
@@ -164,6 +166,7 @@ class TestEolCopiedFile:
     def test_eol_value_of_copied_file(self):
         """Copied files carry their own eol, decoded from the pack."""
         repo = MockGitRepo()
+        repo.register_commit(COMMIT, author_name='Author', message='')
         repo.register_file(COMMIT, 'a.bat', b'same line\n')
         repo.register_file(COMMIT, 'b.bat', b'same line\r\n')
         pack = PackFull(repo, commit=COMMIT)

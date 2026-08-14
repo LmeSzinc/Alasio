@@ -112,7 +112,7 @@ class TestIterCommitHistory:
         assert len(decode_history(data)) == 4
 
     def test_default_lookback(self):
-        """The default lookback packs up to 30 commits."""
+        """The default lookback packs up to 20 commits."""
         pack = PackHistory(_make_repo(), commit='c1')
         data = b''.join(pack.iter_commit_history())
         assert len(decode_history(data)) == 1

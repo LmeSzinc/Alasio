@@ -46,6 +46,7 @@ def make_pack(files, commit='c1'):
         else:
             content, mode = value, 644
         repo.register_file(commit, path, content, mode=mode)
+    repo.register_commit(commit, author_name='Author', message='')
     return b''.join(PackFull(repo, commit=commit).iter_pack_data())
 
 
@@ -79,7 +80,7 @@ UPDATE = b''.join(PackUpdate(OLD_DECODER, NEW_DECODER).iter_pack_data())
 NEW_TREE = {
     path: bytes(NEW_DECODER.catfile(info))
     for path, info in NEW_DECODER.fileinfo.items()
-    if info.edit != 2
+    if info.edit != 2 and not path.startswith('.pack/')
 }
 SERVER = MockServerFile()
 SERVER.register_version('old', OLD_PACK, bytes(OLD_DECODER.extract_index_pack()))

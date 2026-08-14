@@ -501,6 +501,7 @@ class TestPackDiffFullScenario:
                 bytes: Full pack data
             """
             repo = MockGitRepo()
+            repo.register_commit(commit, author_name='Author', message='')
             for path, value in files.items():
                 if isinstance(value, tuple):
                     content, mode = value
@@ -523,6 +524,7 @@ class TestPackDiffFullScenario:
         # the deleted records come last
         assert list(diff_info) == [
             '.gitattributes',
+            '.pack/history.pack',
             'backend/a1.py', 'backend/a2.py', 'backend/a3.py',
             'backend/copy.py', 'backend/empty.txt', 'backend/main.py',
             'backend/tiny.py', 'data/new_blob.bin',
@@ -540,6 +542,11 @@ class TestPackDiffFullScenario:
             path='.gitattributes', edit=1, eol=0, mode=0, algo=2,
             size=85, data_size=14,
             sha1='4864d5ef0b398e6c74051b4612982e1a5f818f29', source_path='.gitattributes')
+        # M (plain): the commit history changed, too small to compress
+        assert _no_data(diff_info['.pack/history.pack']) == UpdateInfo(
+            path='.pack/history.pack', edit=1, eol=2, mode=0, algo=0,
+            size=16, data_size=16,
+            sha1='b24684c28a51fa5809522373b392b988a67de0fc', source_path='')
         # A: added, carries the data, the first of the copy chain
         assert _no_data(diff_info['backend/a1.py']) == UpdateInfo(
             path='backend/a1.py', edit=0, eol=0, mode=0, algo=2,
