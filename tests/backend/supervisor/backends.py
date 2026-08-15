@@ -1,5 +1,3 @@
-import os
-import subprocess
 import sys
 import time
 
@@ -68,7 +66,7 @@ class TestSupervisor(Supervisor):
             while True:
                 if conn.poll(timeout=0.5):
                     msg = conn.recv_bytes()
-                    if msg == b'stop':
+                    if msg == b'command:stop':
                         print("[Backend] Received stop signal, shutting down gracefully")
                         time.sleep(0.1)
                         break
@@ -108,7 +106,7 @@ class TestSupervisor(Supervisor):
             while time.time() - start_time < 8:
                 if conn.poll(timeout=0.5):
                     msg = conn.recv_bytes()
-                    if msg == b'stop':
+                    if msg == b'command:stop':
                         print("[Backend] Received stop signal, shutting down gracefully")
                         break
         except EOFError:
@@ -128,7 +126,7 @@ class TestSupervisor(Supervisor):
             while True:
                 if conn.poll(timeout=0.5):
                     msg = conn.recv_bytes()
-                    if msg == b'stop':
+                    if msg == b'command:stop':
                         print("[Backend] Received stop signal, ignoring for 10s...")
                         time.sleep(10)
                         print("[Backend] Finally exiting")
@@ -144,7 +142,7 @@ class TestSupervisor(Supervisor):
         conn = builtins.__mpipe_conn__
         time.sleep(2)
         print("[Backend] Sending restart request")
-        conn.send_bytes(b'restart')
+        conn.send_bytes(b'command:restart')
         print("[Backend] Exiting after restart request")
         sys.exit(0)
 
@@ -156,7 +154,7 @@ class TestSupervisor(Supervisor):
         conn = builtins.__mpipe_conn__
         time.sleep(8)
         print("[Backend] Sending restart request")
-        conn.send_bytes(b'restart')
+        conn.send_bytes(b'command:restart')
         print("[Backend] Exiting after restart request")
         sys.exit(0)
 
@@ -168,13 +166,13 @@ class TestSupervisor(Supervisor):
         conn = builtins.__mpipe_conn__
         time.sleep(2)
         print("[Backend] Sending stop request")
-        conn.send_bytes(b'stop')
-        # Wait for supervisor to send stop back
+        conn.send_bytes(b'command:stop')
+        # Wait for supervisor to send command:stop back
         try:
             while True:
                 if conn.poll(timeout=0.5):
                     msg = conn.recv_bytes()
-                    if msg == b'stop':
+                    if msg == b'command:stop':
                         print("[Backend] Received stop signal confirmation")
                         break
         except EOFError:
@@ -189,13 +187,13 @@ class TestSupervisor(Supervisor):
         conn = builtins.__mpipe_conn__
         time.sleep(8)
         print("[Backend] Sending stop request")
-        conn.send_bytes(b'stop')
-        # Wait for supervisor to send stop back
+        conn.send_bytes(b'command:stop')
+        # Wait for supervisor to send command:stop back
         try:
             while True:
                 if conn.poll(timeout=0.5):
                     msg = conn.recv_bytes()
-                    if msg == b'stop':
+                    if msg == b'command:stop':
                         print("[Backend] Received stop signal confirmation")
                         break
         except EOFError:
@@ -206,8 +204,8 @@ class TestSupervisor(Supervisor):
     def _crash_after_success_backend():
         """启动后发送消息标记启动成功，然后立即退出"""
         import builtins
-        import time
         import sys
+        import time
         conn = builtins.__mpipe_conn__
         # Send a message to trigger startup success
         conn.send_bytes(b'ok')

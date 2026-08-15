@@ -110,6 +110,36 @@ class TestSupervisor:
             proc.wait_for_output("initiating graceful shutdown", timeout=5)
             proc.wait_for_exit(timeout=5)
 
+    def test_stdin_stop_command(self):
+        """stdin command:stop gracefully stops the backend"""
+        with create_supervisor_process("normal") as proc:
+            proc.wait_for_output("startup successful", timeout=10)
+
+            # Send stop command through stdin
+            proc.process.stdin.write("command:stop\n")
+            proc.process.stdin.flush()
+
+            # Backend should receive the forwarded stop and exit gracefully
+            proc.wait_for_output("Received stop signal, shutting down gracefully", timeout=5)
+            proc.wait_for_exit(timeout=5)
+
+    def test_stdin_unknown_command_ignored(self):
+        """unknown stdin input is silently discarded"""
+        with create_supervisor_process("normal") as proc:
+            proc.wait_for_output("startup successful", timeout=10)
+
+            # Unknown input should be ignored, backend keeps running
+            proc.process.stdin.write("garbage\n")
+            proc.process.stdin.flush()
+            time.sleep(1)
+            assert proc.is_alive()
+
+            # Real stop command still works afterwards
+            proc.process.stdin.write("command:stop\n")
+            proc.process.stdin.flush()
+            proc.wait_for_output("Received stop signal, shutting down gracefully", timeout=5)
+            proc.wait_for_exit(timeout=5)
+
     def test_kill_backend_restart(self):
         """在正常启动之后，直接杀死后端进程，supervisor能够重新拉起后端"""
         with create_supervisor_process("normal") as proc:

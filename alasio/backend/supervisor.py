@@ -17,6 +17,53 @@ def mprint(*args, start=''):
     print(f'{start}[Supervisor]', *args)
 
 
+def _backend_process_entry(conn, args, backend_entry):
+    """
+    Entry point for the backend process.
+
+    Runs in the child process. Sets up the pipe connection as a global
+    variable that the backend code can access, then starts the actual backend
+    application.
+
+    A module-level function instead of a bound method: the process object is
+    pickled into the child, and pickling the Supervisor instance (with its
+    cyclic process/pipe references) makes spawn hang on Windows when stdin is
+    a pipe.
+
+    Args:
+        conn (PipeConnection): Pipe connection to the supervisor
+        args (list[str] | None): Command line args for the backend
+        backend_entry (Callable): The backend entry callable, usually a
+            subclass staticmethod
+    """
+    import builtins
+    builtins.__mpipe_conn__ = conn
+
+    # ignore SIGINT on windows because signal is send to the entire process group
+    # Supervisor should receive SIGINT and backend should ignore, then supervisor tell backend to stop
+    if sys.platform == "win32":
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGBREAK, signal.SIG_IGN)
+
+    # The child inherits the stdin pipe from the supervisor (Windows spawn
+    # inherits stdio regardless of bInheritHandles). The backend never reads
+    # stdin, but point it at devnull anyway so it can never steal commands
+    # meant for the supervisor's stdin listener.
+    try:
+        sys.stdin = open(os.devnull, 'r', encoding='utf-8')
+    except OSError:
+        pass
+
+    try:
+        backend_entry(args)
+    except Exception as e:
+        # Unexpected error in backend
+        print(f"[Backend] Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+    # Note that it's parent's responsibility to close pipe
+
+
 class Supervisor:
     def __init__(
             self,
@@ -63,6 +110,20 @@ class Supervisor:
         # Track SIGINT count to handle multiple CTRL+C presses
         self.sigint_count = 0
 
+        # Set when a stop is requested through stdin, so the supervisor exits
+        # after the backend is gone instead of restarting it
+        self.stop_requested = False
+
+        # stdin listener thread state. The thread must be fully stopped while
+        # a backend process is spawning: on Windows, any thread holding the
+        # inherited stdin pipe handle (read or wait, even non-blocking) makes
+        # multiprocessing spawn hang when duplicating handles into the child.
+        # threading.Event is used because the Supervisor instance is no longer
+        # pickled into the backend child (the process target is a module-level
+        # function), so there is no pickle compatibility constraint.
+        self._stdin_stop = threading.Event()
+        self._stdin_thread = None
+
     def _check_restart_limit(self) -> bool:
         """
         Check if we've hit the restart limit within the time window.
@@ -107,32 +168,6 @@ class Supervisor:
         """
         pass
 
-    def process_entry(self, conn, args):
-        """
-        Entry point for the backend process.
-
-        This function runs in the child process. It sets up the pipe connection
-        as a global variable that the backend code can access, then starts the
-        actual backend application.
-        """
-        import builtins
-        builtins.__mpipe_conn__ = conn
-
-        # ignore SIGINT on windows because signal is send to the entire process group
-        # Supervisor should receive SIGINT and backend should ignore, then supervisor tell backend to stop
-        if sys.platform == "win32":
-            signal.signal(signal.SIGINT, signal.SIG_IGN)
-            signal.signal(signal.SIGBREAK, signal.SIG_IGN)
-
-        try:
-            self.backend_entry(args)
-        except Exception as e:
-            # Unexpected error in backend
-            print(f"[Backend] Fatal error: {e}")
-            import traceback
-            traceback.print_exc()
-        # Note that it's parent's responsibility to close pipe
-
     def start_backend(self, args):
         """
         Start the backend process with pipe communication.
@@ -159,19 +194,116 @@ class Supervisor:
         # and python does not allow daemonic processes to have children
         # It's fine without daemon as backend will exit if pipe broken
         self.process = ctx.Process(
-            target=self.process_entry,
-            args=(child_conn, args),
+            target=_backend_process_entry,
+            args=(child_conn, args, self.backend_entry),
             name='alasio-backend',
             daemon=False,
         )
 
-        # Start the process
-        self.process.start()
+        # The stdin listener thread must be fully stopped while spawning:
+        # on Windows, any thread holding the inherited stdin pipe handle while
+        # the child process initializes its stdio makes multiprocessing spawn
+        # hang. The thread is restarted by recv_loop once the backend has
+        # finished starting up, so buffered commands are not lost.
+        self.stop_stdin_listener()
+        try:
+            self.process.start()
+        finally:
+            pass
+
         # close child_conn of the parent side immediately
         child_conn.close()
         self.parent_conn = parent_conn
 
         mprint(f"Backend running on PID: {self.process.pid}")
+
+    def start_stdin_listener(self):
+        """
+        Start the daemon thread that listens for commands from stdin.
+
+        Only recognized commands are forwarded to the backend process through
+        the pipe, unknown stdin input is silently discarded.
+
+        Recognized commands:
+            command:stop    Gracefully stop the backend
+
+        The thread polls the stdin handle non-blocking and sleeps between
+        polls, and it must be stopped (see stop_stdin_listener) while a
+        backend process is spawning, otherwise multiprocessing spawn hangs on
+        Windows.
+
+        Returns:
+            threading.Thread | None: The listener thread, or None if it was
+                already running
+        """
+        if self._stdin_thread and self._stdin_thread.is_alive():
+            return None
+
+        def _stdin_loop():
+            try:
+                if sys.platform == 'win32':
+                    import ctypes
+                    import msvcrt
+                    handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+                    peek = ctypes.windll.kernel32.PeekNamedPipe
+
+                    def available():
+                        # Non-blocking check. On a broken pipe (EOF) peek fails
+                        # and returns ready so readline observes the EOF and
+                        # exits; a broken pipe also means the parent closed
+                        # stdin. Unlike WaitForMultipleObjects this never
+                        # reports a pipe as readable when it has no data.
+                        count = ctypes.c_ulong(0)
+                        ok = peek(handle, None, 0, None, ctypes.byref(count), None)
+                        if not ok:
+                            return True
+                        return count.value > 0
+                else:
+                    import select
+                    handle = sys.stdin.fileno()
+
+                    def available():
+                        return bool(select.select([handle], [], [], 0)[0])
+            except (AttributeError, OSError):
+                # No stdin available (e.g. launched without a stdin pipe)
+                return
+            while not self._stdin_stop.is_set():
+                if not available():
+                    time.sleep(0.02)
+                    continue
+                line = sys.stdin.buffer.readline()
+                if not line:
+                    # EOF: parent process closed stdin
+                    return
+                msg = line.strip()
+                if msg == b'command:stop':
+                    self.stop_requested = True
+                    if self.parent_conn:
+                        try:
+                            self.parent_conn.send_bytes(msg)
+                        except (EOFError, OSError):
+                            # pipe broken, backend is gone, nothing to forward
+                            return
+                    # Stop requested, no more commands to handle
+                    return
+                # Unknown input is silently discarded
+
+        self._stdin_stop.clear()
+        thread = threading.Thread(target=_stdin_loop, name='stdin_listener', daemon=True)
+        thread.start()
+        self._stdin_thread = thread
+        return thread
+
+    def stop_stdin_listener(self):
+        """
+        Stop the stdin listener thread and wait for it to exit.
+
+        Needed before spawning a backend process, see start_stdin_listener.
+        """
+        self._stdin_stop.set()
+        if self._stdin_thread:
+            self._stdin_thread.join(timeout=1)
+            self._stdin_thread = None
 
     def recv_loop(self) -> bool:
         """
@@ -207,6 +339,12 @@ class Supervisor:
 
             startup_success = True
 
+            # The stdin listener can only be started once the backend has
+            # finished starting up: on Windows, touching the inherited stdin
+            # pipe handle while the child process initializes its stdio makes
+            # multiprocessing spawn hang.
+            self.start_stdin_listener()
+
             # wait infinitely
             while 1:
                 wake = self.parent_conn.poll(timeout=0.2)
@@ -239,10 +377,10 @@ class Supervisor:
         Args:
             msg (bytes): The message received from backend (expected to be bytes)
         """
-        if msg == b'restart':
+        if msg == b'command:restart':
             mprint("Backend requested restart")
             self.restart_requested = True
-        elif msg == b'stop':
+        elif msg == b'command:stop':
             mprint("Backend requested stop")
             self.handle_sigint(signal.SIGINT, None)
         else:
@@ -301,7 +439,7 @@ class Supervisor:
 
     def graceful_shutdown(self):
         """
-        Send 'stop' to the backend process.
+        Send 'command:stop' to the backend process.
 
         Returns:
             bool: If success
@@ -312,7 +450,7 @@ class Supervisor:
 
         if self.parent_conn:
             try:
-                self.parent_conn.send_bytes(b'stop')
+                self.parent_conn.send_bytes(b'command:stop')
             except Exception as e:
                 mprint(f"ERROR: Failed to sending stop to backend: {e}")
 
@@ -409,6 +547,9 @@ class Supervisor:
         if sys.platform == "win32":
             signal.signal(signal.SIGBREAK, self.handle_sigint)
 
+        # The stdin listener thread ("command:stop" from Electron) is started
+        # and stopped by start_backend around every spawn
+
         try:
             # Main supervision loop
             while True:
@@ -420,6 +561,11 @@ class Supervisor:
                 # This blocks until backend exits (pipe closes)
                 startup_success = self.recv_loop()
                 self.wait_for_backend()
+
+                # Stop was requested through stdin, exit without restarting
+                if self.stop_requested:
+                    mprint("Stop requested through stdin, exiting")
+                    break
 
                 # Check if this was a startup failure
                 if not startup_success:

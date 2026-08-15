@@ -36,7 +36,8 @@ export function startBackend(
     // instead of the configured webuiPort.
     const child = spawn(pythonExecutable, ['gui.py', '--port', String(webuiPort)], {
       cwd: rootPath,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // stdin is piped so graceful shutdown can be requested through it
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
     backendProcess = child;
 
@@ -117,22 +118,43 @@ export async function shutdownBackend(
     exited = true;
   });
 
-  // Stage 1: Send SIGINT (0s)
-  onStageChange?.(ShutdownStage.WaitingGraceful);
-  backendProcess.kill('SIGINT');
+  // Send a graceful stop command through stdin. The python supervisor reads
+  // stdin in a background thread and forwards "command:stop" to the backend,
+  // which then shuts down gracefully; unknown stdin input is silently dropped.
+  const sendStop = () => {
+    try {
+      backendProcess?.stdin?.write('command:stop\n');
+    } catch (err) {
+      // stdin is already closed, the process is exiting or already gone
+      console.error('Failed to send stop command:', err);
+    }
+  };
 
-  await sleep(2000);
-  if (exited) {
+  // Poll for the exit event in short intervals instead of sleeping the full
+  // timeout, so each stage finishes as soon as the process is gone.
+  const waitForExit = async (timeoutMs: number): Promise<boolean> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (exited) return true;
+      await sleep(50);
+    }
+    return exited;
+  };
+
+  // Stage 1: Send stop command (0s)
+  onStageChange?.(ShutdownStage.WaitingGraceful);
+  sendStop();
+
+  if (await waitForExit(2000)) {
     onStageChange?.(ShutdownStage.Done);
     return;
   }
 
-  // Stage 2: Send SIGINT again (2s)
+  // Stage 2: Send stop command again (2s)
   onStageChange?.(ShutdownStage.ForcingGraceful);
-  backendProcess.kill('SIGINT');
+  sendStop();
 
-  await sleep(2000);
-  if (exited) {
+  if (await waitForExit(2000)) {
     onStageChange?.(ShutdownStage.Done);
     return;
   }
@@ -146,6 +168,7 @@ export async function shutdownBackend(
     });
   });
 
-  await sleep(500);
+  // tree-kill terminates the process, wait briefly for the exit event
+  await waitForExit(500);
   onStageChange?.(ShutdownStage.Done);
 }

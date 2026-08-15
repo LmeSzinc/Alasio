@@ -18,7 +18,7 @@ def mpipe_recv_loop(conn, trio_token):
             trio.from_thread.run_sync(SHUTDOWN_EVENT.set, trio_token=trio_token)
             break
 
-        if msg == b'stop':
+        if msg == b'command:stop':
             logger.info('Backend received stop request from supervisor, shutting down backend')
             trio.from_thread.run_sync(SHUTDOWN_EVENT.set, trio_token=trio_token)
             break
@@ -39,8 +39,8 @@ async def lifespan_restart():
     from alasio.logger import logger
     logger.info('Backend received restart request from RPC, shutting down backend')
 
-    # Send b'restart' to supervisor
-    await trio.to_thread.run_sync(conn.send_bytes, b'restart')
+    # Send b'command:restart' to supervisor
+    await trio.to_thread.run_sync(conn.send_bytes, b'command:restart')
 
     # stop backend
     SHUTDOWN_EVENT.set()
@@ -59,8 +59,8 @@ async def lifespan_stop():
     from alasio.logger import logger
     logger.info('Backend received stop request from RPC, shutting down backend')
 
-    # Send b'restart' to supervisor
-    await trio.to_thread.run_sync(conn.send_bytes, b'stop')
+    # Send b'command:stop' to supervisor
+    await trio.to_thread.run_sync(conn.send_bytes, b'command:stop')
 
     # stop backend
     SHUTDOWN_EVENT.set()
@@ -72,6 +72,7 @@ def get_shutdown_trigger():
     When shutdown_trigger() runs ended, hypercorn will stop serving connections.
     """
     import builtins
+
     from alasio.logger import logger
     conn = getattr(builtins, '__mpipe_conn__', None)
     if conn is None:
