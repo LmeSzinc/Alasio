@@ -1,130 +1,278 @@
+"""
+Poor yaml read/write module that preserves comments.
+
+Unlike :mod:`alasio.ext.file.yamlfile`, this module validates parsed yaml
+with msgspec structs, and writes comments back into the yaml file.
+
+Comments are defined on the validation model with msgspec annotations::
+
+    class Config(msgspec.Struct):
+        port: Annotated[int, Meta(extra={"help": "Port to listen on"})] = 8080
+
+The yaml text is generated with pyyaml, then comment lines are inserted
+above the line of each key that has help text. Keys are matched by their
+full path in the yaml structure, so keys with the same name at different
+depth won't be confused: ::
+
+    # Port to listen on
+    port: 8080
+
+Nested structures and multiline strings are supported, pyyaml handles the
+parsing and dumping.
+"""
+
 import re
+from collections import deque
 
-from ..path.atomic import atomic_read_text, atomic_write
+import msgspec
+import yaml
+from msgspec import NODEFAULT, Struct
+from msgspec.msgpack import encode as msgpack_encode
+from msgspec.structs import fields
+from msgspecerror import get_class_annotation_dict, load_msgpack_with_default
+from msgspecerror.parse_type import is_struct_type, origin_args
 
-
-def may_int(string):
-    if string.startswith('-') or string.startswith('+'):
-        string = string[1:]
-    return string.isdigit()
-
-
-def may_float(string):
-    if '.' not in string:
-        return False
-    # Check if first character is a digit,
-    # not a rigorous check since float(string) would handle
-    if string.startswith('-') or string.startswith('+') or string.startswith('.'):
-        return string[1].isdigit()
-    else:
-        return string[0].isdigit()
+from alasio.config_dev.format.format_i18n import format_i18n
+from alasio.ext.cache import cached_property
+from alasio.ext.cache.msgspec_meta import get_field_metadata
+from alasio.ext.file.yamlfile import yaml_dumps, yaml_loads
+from alasio.ext.path.atomic import atomic_read_text, atomic_write, atomic_read_bytes
 
 
-def decode_value(string):
+def build_help_map(model, prefix=()):
     """
-    Args:
-        string (str):
-
-    Returns:
-        Any:
-    """
-    string = string.strip()
-    lower = string.lower()
-    if lower == 'null':
-        return None
-    if lower == 'false':
-        return False
-    if lower == 'true':
-        return True
-    if may_int(string):
-        try:
-            return int(string)
-        except ValueError:
-            pass
-    if may_float(string):
-        try:
-            return float(string)
-        except ValueError:
-            pass
-    # list
-    if string.startswith('[') and string.endswith(']'):
-        items = string[1:-1].split(',')
-        return [decode_value(item) for item in items]
-    # fallback, treat as string
-    return string
-
-
-def encode_value(obj):
-    """
-    Args:
-        obj (Any):
-
-    Returns:
-        str:
-    """
-    if obj is None:
-        return 'null'
-    if obj is True:
-        return "true"
-    if obj is False:
-        return "false"
-    # fallback, encode as string
-    return str(obj)
-
-
-def poor_yaml_read(file):
-    """
-    Poor implementation to load yaml without pyyaml dependency, but with re
+    Build ``{path: help_text}`` mapping from model field annotations,
+    path is a tuple of keys, e.g. ('port',), ('inner', 'port').
+    Help text is parsed with ``format_i18n``, multiline help becomes a list of lines.
+    Nested struct fields are collected recursively
 
     Args:
-        file (str):
+        model (type): Subclass of msgspec.Struct
+        prefix (tuple): Path prefix of the model, empty for the root model
 
     Returns:
-        dict:
+        dict: {path: help_text}
     """
-    content = atomic_read_text(file)
-    data = {}
-    regex = re.compile(r'^(.*?):(.*?)$')
-    for line in content.splitlines():
-        line = line.strip()
-        if line.startswith('#'):
+    out = {}
+    metadata = get_field_metadata(model)
+    annotations = get_class_annotation_dict(model)
+    # Map python field name to encode name, as yaml keys are encode names
+    encode_names = {f.name: f.encode_name for f in fields(model)}
+    for name, hint in annotations.items():
+        path = prefix + (encode_names.get(name, name),)
+        meta = metadata.get(name)
+        help_text = meta.extra.get('help') if meta else None
+        if help_text:
+            out[path] = format_i18n(help_text)
+        # Collect help texts of nested struct fields
+        origin, args = origin_args(hint)
+        if is_struct_type(origin):
+            out.update(build_help_map(origin, prefix=path))
+    return out
+
+
+def iter_yaml_rows(text):
+    """
+    Iterate rows of yaml text, yield (key, row) for each line.
+
+    key is the tuple path of the key line, e.g. ('port',), ('inner', 'port').
+    Lines that are not key lines, such as block scalar content, comments
+    and empty lines, have key None. row is the original line content.
+
+    Args:
+        text (str): yaml text
+
+    Yields:
+        tuple: (key, row)
+    """
+    regex_key = re.compile(r'^([^:]+):')
+    regex_multiline_string = re.compile(r'^[|>][+-]?(?:\s+#.*)?$')
+
+    # Stack of (indent, key) of parent mappings
+    stack: "deque[tuple[int, str]]" = deque()
+    # Indent of the current block scalar, None when not inside a block scalar
+    block_indent = None
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        if not stripped:
+            # Empty line, doesn't affect mapping path or block scalar
+            yield None, line
             continue
-        result = re.match(regex, line)
+        if block_indent is not None:
+            if indent > block_indent:
+                # Content line of block scalar
+                yield None, line
+                continue
+            # Exited block scalar
+            block_indent = None
+        # Skip existing comments
+        if stripped.startswith('#'):
+            yield None, line
+            continue
+        result = regex_key.match(stripped)
         if not result:
+            yield None, line
             continue
-        k = result.group(1).strip()
-        v = result.group(2)
-        if v:
-            data[k] = decode_value(v)
+        key = result.group(1).strip()
+        # Pop stack entries deeper than current indent
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        path = tuple([k for _, k in stack] + [key])
+        stack.append((indent, key))
+        # Check if this line starts a block scalar, e.g. 'desc: |-'
+        rest = stripped[len(result.group(0)):].strip()
+        if regex_multiline_string.match(rest):
+            block_indent = indent
+        yield path, line
 
-    return data
 
-
-def poor_yaml_write(file, data, template_file, skip_same=False):
+def insert_comments_iter(rows, help_map):
     """
+    Iterate (key, row) pairs, yield the comment lines of keys that have
+    help text before the row
+
     Args:
-        file (str):
-        data (dict):
-        template_file (str):
-        skip_same (bool):
-            True to skip writing if existing content is the same as content to write.
-            This would reduce disk write but add disk read
+        rows (Iterable): (key, row) pairs from ``iter_yaml_rows()``
+        help_map (dict): {path: help_text}, path is a tuple of keys
+
+    Yields:
+        str: comment lines of keys with help text, and rows
+    """
+    for key, row in rows:
+        if key and key in help_map:
+            help_text = help_map[key]
+            # format_i18n returns a list of lines for multiline help, str for single line
+            comments = [help_text] if isinstance(help_text, str) else help_text
+            indent = row[:len(row) - len(row.lstrip())]
+            for comment in comments:
+                yield f'{indent}# {comment}'
+        yield row
+
+
+def insert_comments(text, help_map):
+    """
+    Insert comment lines above the line of each key that has help text,
+    keys are matched by their full path in the yaml structure
+
+    Args:
+        text (str): yaml text
+        help_map (dict): {path: help_text}, path is a tuple of keys
+            e.g. ('port',), ('inner', 'port'). Comment is inserted above the line of the key
 
     Returns:
-        bool: if write
+        str: yaml text with comments inserted
     """
-    text = atomic_read_text(template_file)
-    old = text
+    if not help_map:
+        return text
+    lines = list(insert_comments_iter(iter_yaml_rows(text), help_map))
+    if lines:
+        return '\n'.join(lines) + '\n'
+    return text
 
-    # Change values with re
-    regex = re.compile(r'^(.*?):(.*?)$')
-    for key, value in data.items():
-        value = encode_value(value)
-        text = regex.sub(f'{key}: {value}\n', text)
 
-    if skip_same:
-        if text == old:
-            return False
+class PoorYaml:
+    """
+    Poor yaml reader/writer with msgspec validation and comment preservation.
 
-    atomic_write(file, text)
-    return True
+    Comments are defined on the validation model fields with
+    ``Annotated[str, Meta(extra={"help": "xxx"})]``, and written into the
+    yaml file above the line of the field key, matched by the full key path.
+
+    Attributes:
+        file (str): YAML file path
+        model (type): Subclass of msgspec.Struct
+        data (msgspec.Struct): Validated data, use ``self.data.attr`` to access fields
+        errors (list[ErrorInfo]): Errors of the last read, empty if none
+        help_map (dict): {path: help_text} mapping of the model, path is a tuple of keys,
+            cached as cached_property
+
+    Args:
+        file (str): YAML file path
+        model (type): Subclass of msgspec.Struct to validate config data.
+            All fields must have default values, so the model can be default constructed
+    """
+
+    def __init__(self, file, model):
+        self.file = file
+        self.model = model
+        self.errors = []
+        # Model must be a msgspec struct
+        if not isinstance(model, type) or not issubclass(model, Struct):
+            raise TypeError(f'Model must be a subclass of msgspec.Struct, got {model!r}')
+        # Model must be default constructible, all fields need default values
+        try:
+            model()
+        except Exception as e:
+            raise ValueError(
+                f'Model {model.__name__} must be default constructible, '
+                f'all fields need default values: {e}'
+            ) from e
+        self.data = self.read()
+
+    @cached_property
+    def help_map(self):
+        """
+        {path: help_text} mapping of the model, path is a tuple of keys
+        """
+        return build_help_map(self.model)
+
+    def read(self):
+        """
+        Read yaml file and validate with model,
+        fields that fail validation fall back to defaults
+
+        Returns:
+            msgspec.Struct: self.data
+        """
+        try:
+            text = atomic_read_bytes(self.file)
+        except (FileNotFoundError, UnicodeDecodeError):
+            # File not found or not utf-8 encoded, use defaults
+            self.errors = []
+            self.data = self.model()
+            return self.data
+        try:
+            data = yaml_loads(text)
+        except yaml.YAMLError:
+            # Invalid yaml, use defaults
+            self.errors = []
+            self.data = self.model()
+            return self.data
+        if data is None:
+            # Empty content or only comments, use defaults
+            data = {}
+        obj, self.errors = load_msgpack_with_default(msgpack_encode(data), self.model)
+        if obj is NODEFAULT:
+            # Shouldn't happen, model is checked default constructible in __init__
+            obj = self.model()
+        self.data = obj
+        return self.data
+
+    def write(self, skip_same=False):
+        """
+        Write self.data into yaml file, comments are inserted above the line
+        of each key from ``Meta(extra={"help": ...})`` annotations, matched
+        by the full key path
+
+        Args:
+            skip_same (bool): True to skip writing if existing content is the same
+                as content to write. This would reduce disk write but add disk read
+
+        Returns:
+            bool: if write
+        """
+        # yaml_dumps from yamlfile returns utf-8 bytes, decode into str
+        data = msgspec.to_builtins(self.data)
+        text = yaml_dumps(data).decode('utf-8')
+        text = insert_comments(text, self.help_map)
+        if skip_same:
+            try:
+                old = atomic_read_text(self.file)
+            except (FileNotFoundError, UnicodeDecodeError):
+                old = None
+            if text == old:
+                return False
+
+        atomic_write(self.file, text)
+        return True
