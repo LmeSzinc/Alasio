@@ -1,7 +1,5 @@
 import builtins
 import io
-import shutil
-from pathlib import Path
 
 import pytest
 import ruff
@@ -17,32 +15,13 @@ _REAL_OPEN = builtins.open
 RUFF_BIN = ruff.find_ruff_bin()
 
 
-@pytest.fixture(scope='module')
-def real_config_dir():
-    """
-    Real directory bridging the ruff temp config to the ruff subprocess.
-
-    The fake filesystem is in-memory only: the ruff subprocess reads its
-    --config file from the real disk, so the same file must exist here.
-    The formatter writes the config into the fake fs under this directory;
-    the fixture keeps the identical content on the real disk. The directory
-    lives under the repo's temp/ folder and is removed after the module.
-    """
-    path = Path(__file__).resolve().parents[3] / 'temp' / 'ruff_format'
-    shutil.rmtree(path, ignore_errors=True)
-    path.mkdir(parents=True, exist_ok=True)
-    yield path
-    shutil.rmtree(path, ignore_errors=True)
-
-
 @pytest.fixture
-def formatter(fs, real_config_dir, monkeypatch):
+def formatter(fs, monkeypatch):
     """
     Build a RuffFormatter working on the in-memory fake filesystem.
 
-    The formatter cwd is the real temp config directory mirrored in the
-    fake fs, so the temp config path is readable by the ruff subprocess.
-    Two bridges are needed because the fake fs cannot serve subprocesses:
+    The formatter cwd is a fresh directory of the fake fs. Two bridges are
+    needed because the fake fs cannot serve subprocesses:
 
     - ruff binary lookup goes through os.path.isfile (mocked by the fake
       fs), so find_ruff_bin() is patched to the real binary path;
@@ -53,15 +32,10 @@ def formatter(fs, real_config_dir, monkeypatch):
 
     monkeypatch.setattr(ruff_format.ruff, 'find_ruff_bin', lambda: RUFF_BIN)
 
-    # mirror the real config dir in the fake fs and make it the formatter cwd
-    fs.create_dir(str(real_config_dir))
-    fs.chdir(str(real_config_dir))
+    # fresh project directory in the fake fs as the formatter cwd
+    fs.create_dir('/project')
+    fs.chdir('/project')
     formatter = RuffFormatter()
-
-    # write the ruff config to the real disk; format_code() writes the same
-    # content to the fake fs path, and the subprocess reads the real one
-    with _REAL_OPEN(real_config_dir / '_temp_config.toml', 'w', encoding='utf-8', newline='') as f:
-        f.write(formatter.ruff_config)
 
     # subprocess opens pipes with io.open(int fd): route int fds to the real
     # open, keep str paths on the fake fs
@@ -132,6 +106,19 @@ class TestRulesParsing:
         tokens = rules.split(',')
         assert all(tok for tok in tokens), 'each token non-empty'
         assert all(tok.isalnum() for tok in tokens), 'each token is alphanumeric rule code'
+
+    def test_ruff_config_args(self, formatter):
+        """ruff_config_args is flattened --config KEY = VALUE pairs."""
+        args = formatter.ruff_config_args
+        assert len(args) >= 2, 'config should not be empty'
+        assert len(args) % 2 == 0, 'config is --config KEY = VALUE pairs'
+        assert args[0::2] == ['--config'] * (len(args) // 2), 'odd items are all --config'
+        for value in args[1::2]:
+            assert '=' in value, 'even items are KEY = VALUE pairs'
+        assert 'line-length = 120' in args
+        assert any(value.startswith('lint.select = ') for value in args[1::2])
+        assert 'lint.isort.combine-as-imports = true' in args
+        assert any(value.startswith('lint.isort.known-first-party = ') for value in args[1::2])
 
 
 class TestFormatCode:
@@ -246,6 +233,13 @@ y = 2
 """)
         formatter.format_code('test.py')
         assert _read(fs) == b'x = 1\ny = 2\n'
+
+    def test_no_temp_config_file(self, fs, formatter):
+        """Config is passed on the command line, no temp config file is written."""
+        fs.create_file('test.py', contents=b'x=1\n')
+        formatter.format_code('test.py')
+        assert _read(fs) == b'x = 1\n'
+        assert not fs.exists('_temp_config.toml'), 'no temp config file on the fake fs'
 
     # ---- CRLF -> LF conversion ----------------------------------------------
 

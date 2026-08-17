@@ -59,7 +59,7 @@ class RuffFormatter:
         _ = self.ruff_bin
         _ = self.rules
         _ = self.known_first_party
-        _ = self.ruff_config
+        _ = self.ruff_config_args
         print()
 
     @staticmethod
@@ -134,27 +134,33 @@ class RuffFormatter:
         return modules
 
     @cached_property
-    def ruff_config(self):
+    def ruff_config_args(self):
         """
-        Returns:
-            str: ruff config in toml
-        """
-        lines = []
-        lines.append(f'line-length = {self.LINE_LENGTH}')
+        Ruff config as command line --config KEY = VALUE pairs.
 
+        Passing the config through the command line avoids writing a temp
+        config file on disk. ruff accepts `--config <KEY> = <VALUE>` pairs,
+        each overriding a specific option, arrays use TOML syntax.
+
+        Returns:
+            list[str]: Flattened ['--config', 'KEY = VALUE', ...] arguments
+        """
         def to_list(text: str):
             items = [f'"{item}"' for item in text.split(',')]
             items = ', '.join(items)
             return f'[{items}]'
 
-        lines.append('[lint]')
-        lines.append(f'select = {to_list(self.rules)}')
-
-        lines.append('[lint.isort]')
-        lines.append('combine-as-imports = true')
-        lines.append(f'known-first-party = {to_list(self.known_first_party)}')
-
-        return '\n'.join(lines)
+        pairs = [
+            f'line-length = {self.LINE_LENGTH}',
+            f'lint.select = {to_list(self.rules)}',
+            'lint.isort.combine-as-imports = true',
+            f'lint.isort.known-first-party = {to_list(self.known_first_party)}',
+        ]
+        args = []
+        for pair in pairs:
+            args.append('--config')
+            args.append(pair)
+        return args
 
     def format_code(self, file: str):
         if os.path.isabs(file):
@@ -185,22 +191,16 @@ class RuffFormatter:
             print('CRLF line endings converted to LF')
 
         # ---------- ruff format ----------
-        temp_config_file = self.cwd / '_temp_config.toml'
         cmd = [
             self.ruff_bin, 'check', '-', '--fix',
             '--preview',  # enable E2 E3 W3
             '--stdin-filename', filename,
             '--select', self.rules,
-            '--config', temp_config_file,
+            *self.ruff_config_args,
         ]
 
         # run_cmd
-        # write config to temp file to avoid command too long
-        temp_config_file.file_write(self.ruff_config)
-        try:
-            result = run_cmd(cmd, text=False, strip=False, check=False, input=code)
-        finally:
-            temp_config_file.file_remove()
+        result = run_cmd(cmd, text=False, strip=False, check=False, input=code)
         result.stderr = parse_result(result.stderr)
         if result.stderr:
             print(result.stderr)
