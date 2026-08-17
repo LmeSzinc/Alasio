@@ -54,6 +54,15 @@ class PathStr(str):
         os.chdir(self)
         return self
 
+    def __fspath__(self):
+        """
+        Path protocol, so PathStr can be used as os.PathLike
+
+        Returns:
+            str: Path string
+        """
+        return str(self)
+
     """
     Path calculations
     """

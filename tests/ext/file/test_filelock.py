@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from alasio.ext.env import ALASIO_ROOT
 from alasio.ext.file.filelock import FilelockTimeout, SQLiteFileLock
 
 CHILD_HOLD = (
@@ -37,9 +38,9 @@ def lock_dir():
     The directory lives under the repo's temp/ folder and is removed after
     the module finishes.
     """
-    path = Path(__file__).resolve().parents[3] / "temp" / "filelock"
+    path = ALASIO_ROOT.joinpath('temp/filelock')
     shutil.rmtree(path, ignore_errors=True)
-    path.mkdir(parents=True, exist_ok=True)
+    os.mkdir(path)
     yield path
     shutil.rmtree(path, ignore_errors=True)
 
@@ -49,10 +50,10 @@ class TestFilelockTimeout:
 
     def test_exception_message_and_lock_file(self, lock_dir):
         """FilelockTimeout should carry the lock file path in its message and attribute"""
-        lock_file = lock_dir / "a.lock"
+        lock_file = os.path.abspath(lock_dir / "a.lock")
         with pytest.raises(FilelockTimeout, match="Timeout occurred trying to acquire lock") as excinfo:
-            raise FilelockTimeout(str(lock_file))
-        assert excinfo.value.lock_file == os.path.abspath(str(lock_file))
+            raise FilelockTimeout(lock_file)
+        assert excinfo.value.lock_file == lock_file
 
 
 class TestProperties:
@@ -73,7 +74,7 @@ class TestProperties:
     @pytest.mark.parametrize("lock_file", ["a.lock", Path("a.lock")])
     def test_accepts_str_and_path(self, lock_dir, lock_file):
         """Constructor should accept both str and Path lock files"""
-        lock = SQLiteFileLock(lock_dir / lock_file, timeout=0)
+        lock = SQLiteFileLock(os.path.join(lock_dir, lock_file), timeout=0)
         assert lock.lock_file == os.path.abspath(str(lock_dir / "a.lock"))
 
     def test_initial_state(self, lock_dir):
@@ -220,7 +221,7 @@ class TestExclusion:
     def test_unrelated_operational_error_is_reraisied(self, lock_dir):
         """OperationalError not related to locking should be propagated as is"""
         dir_path = lock_dir / "adir"
-        dir_path.mkdir()
+        os.mkdir(dir_path)
         lock = SQLiteFileLock(dir_path, timeout=0)
         with pytest.raises(sqlite3.OperationalError):
             lock.acquire()

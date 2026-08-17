@@ -1,15 +1,20 @@
 """
 Tests for AlasioTable.get_data_version()
 """
+import os
+import shutil
+
 import msgspec
 import pytest
 
+from alasio.db.conn import SQLITE_POOL
 from alasio.db.table import AlasioTable
-
+from alasio.ext.env import ALASIO_ROOT
 
 # ============================================================================
 # Test Models and Tables
 # ============================================================================
+
 
 class VersionRow(msgspec.Struct):
     """Simple model for testing data_version"""
@@ -32,6 +37,27 @@ class DataVersionTable(AlasioTable):
 # ============================================================================
 # Fixtures
 # ============================================================================
+
+@pytest.fixture(scope="module")
+def db_dir():
+    """
+    Real filesystem directory for the file-based database tests.
+
+    SQLite opens its database file in the C layer, so the in-memory fake
+    filesystem cannot intercept it: the database tests need a real directory.
+    The directory lives under the repo's temp/ folder and is removed after
+    the module finishes.
+    """
+    path = ALASIO_ROOT.joinpath('temp/db_pargma')
+    shutil.rmtree(path, ignore_errors=True)
+    os.mkdir(path)
+    yield path
+    # Release pooled connections so the database files can be removed on Windows
+    for file in os.listdir(path):
+        if file.endswith('.db'):
+            SQLITE_POOL.delete_file(path / file)
+    shutil.rmtree(path, ignore_errors=True)
+
 
 @pytest.fixture
 def table():
@@ -75,9 +101,9 @@ class TestGetDataVersion:
         v3 = table.get_data_version()
         assert v1 == v2 == v3
 
-    def test_on_file_database(self, tmp_path):
+    def test_on_file_database(self, db_dir):
         """Test data_version works on a file-based database"""
-        db_path = str(tmp_path / 'test_version.db')
+        db_path = str(db_dir / 'test_version.db')
         t = DataVersionTable(db_path)
         t.create_table()
 
@@ -85,10 +111,10 @@ class TestGetDataVersion:
         assert isinstance(result, int)
         assert result >= 0
 
-    def test_on_multiple_file_databases(self, tmp_path):
+    def test_on_multiple_file_databases(self, db_dir):
         """Different file databases have independent data_version"""
-        db1 = str(tmp_path / 'test_version_1.db')
-        db2 = str(tmp_path / 'test_version_2.db')
+        db1 = str(db_dir / 'test_version_1.db')
+        db2 = str(db_dir / 'test_version_2.db')
 
         t1 = DataVersionTable(db1)
         t1.create_table()

@@ -1,11 +1,29 @@
+import os
+import shutil
 import sys
 from unittest.mock import patch
 
 import pytest
 
 from alasio.ext.concurrent.cmd import CmdlineError, CmdlineResultBytes, CmdlineResultStr, run_cmd
+from alasio.ext.env import ALASIO_ROOT
 
 PYTHON = sys.executable
+
+
+@pytest.fixture(scope="module")
+def cmd_dir():
+    """
+    Real filesystem directory for the cwd tests.
+
+    The directory lives under the repo's temp/ folder and is removed after
+    the module finishes.
+    """
+    path = ALASIO_ROOT.joinpath('temp/concurrency_cmd')
+    shutil.rmtree(path, ignore_errors=True)
+    os.mkdir(path)
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
 
 
 class TestRunCmdSuccess:
@@ -211,24 +229,24 @@ class TestRunCmdCwd:
         expected = os.getcwd().replace("\\", "/").lower()
         assert res.stdout.replace("\\", "/").lower() == expected
 
-    def test_cwd_set_to_temp_directory(self, tmp_path):
+    def test_cwd_set_to_temp_directory(self, cmd_dir):
         """
         Test that cwd changes the working directory of the subprocess.
         """
-        res = run_cmd([PYTHON, "-c", "import os; print(os.getcwd())"], cwd=str(tmp_path))
-        expected = str(tmp_path).replace("\\", "/").lower()
+        res = run_cmd([PYTHON, "-c", "import os; print(os.getcwd())"], cwd=str(cmd_dir))
+        expected = str(cmd_dir).replace("\\", "/").lower()
         assert res.stdout.replace("\\", "/").lower() == expected
 
-    def test_cwd_with_bytes_mode(self, tmp_path):
+    def test_cwd_with_bytes_mode(self, cmd_dir):
         """
         Test that cwd works with text=False (bytes mode).
         """
         res = run_cmd(
             [PYTHON, "-c", "import os; print(os.getcwd())"],
             text=False,
-            cwd=str(tmp_path),
+            cwd=str(cmd_dir),
         )
-        expected = str(tmp_path).replace("\\", "/").lower()
+        expected = str(cmd_dir).replace("\\", "/").lower()
         assert res.stdout.decode("utf-8").strip().replace("\\", "/").lower() == expected
         assert isinstance(res, CmdlineResultBytes)
 
