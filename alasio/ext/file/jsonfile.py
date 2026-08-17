@@ -190,7 +190,7 @@ def json_dumps_custom_indent(obj):
             'color': NoIndentNoSpace([255, 255, 255]),
         }
         print(json_dumps_custom_indent(data))
-        # b'{\n  "area": [100, 100, 200, 200],\n  "color": [255, 255, 255]\n}'
+        # b'{\n  "area": [100, 100, 200, 200],\n  "color": [255,255,255]\n}'
     """
     data = dumps(
         obj, cls=CustomIndentEncoder,
