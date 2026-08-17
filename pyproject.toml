@@ -63,7 +63,7 @@ packages = ["alasio"]
 # in-memory fake filesystem (alasio.testing.filesystem.fs), and the plugin's
 # "fs" fixture would silently inject pyfakefs into tests. The project fixture
 # is imported explicitly in test modules, never registered by the plugin.
-addopts = ["-p", "no:fakefs"]
+addopts = ["-p", "no:fakefs", "-p", "no:tmpdir"]
 tmp_path_retention_count = 1
 tmp_path_retention_policy = "failed"
 markers = [
