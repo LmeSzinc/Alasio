@@ -52,6 +52,21 @@ is a drop-in replacement of pyfakefs for the deploy tests:
     fs.remove(target)
     env.PROJECT_ROOT = PathStr.new(fs.root_dir.path)
 
+io.open_code() is NOT mocked by the fixture on purpose: a global patch
+would make the test's own Python imports read from the fake fs and
+fail. Code that loads sources through importlib (e.g. loadpy) can
+opt in with the fs.patch_open_code() context manager, which routes
+io.open_code / _io.open_code to the fake fs for the duration of the
+with block:
+
+    from alasio.ext.file.loadpy import loadpy
+
+    def test_loadpy(fs):
+        fs.create_file('/valid.py', contents='a = 1')
+        with fs.patch_open_code():
+            module = loadpy('/valid.py')
+        assert module.a == 1
+
 Not supported (documented limitations):
 
 - symbolic links, islink() always returns False

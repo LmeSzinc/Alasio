@@ -2,7 +2,9 @@
 The FakeFilesystem class: an in-memory filesystem and the mock of the
 os / builtins file functions.
 """
+import _io
 import builtins
+import contextlib
 import errno
 import io
 import os
@@ -982,6 +984,37 @@ class FakeFilesystem:
     """
     Activate / deactivate the mock
     """
+
+    @contextlib.contextmanager
+    def patch_open_code(self):
+        """
+        Temporarily route io.open_code / _io.open_code to the fake fs.
+
+        The Python import machinery reads source files with
+        _io.open_code() instead of open(), so code that goes through
+        importlib (e.g. alasio.ext.file.loadpy) is not covered by
+        activate(). Entering this context manager patches
+        _io.open_code (and io.open_code, the same underlying function)
+        to the fake fs, and restores the originals on exit.
+
+        It is intentionally not part of activate(): a global patch
+        would make the test's own imports read from the fake fs and
+        fail with FileNotFoundError, because the project sources live
+        on the real disk.
+
+        Example:
+            fs.create_file('/mod.py', contents='a = 1')
+            with fs.patch_open_code():
+                module = loadpy('/mod.py')
+        """
+        originals = (io.open_code, _io.open_code)
+        fake_open_code = lambda path: self.open(path, 'rb')
+        io.open_code = fake_open_code
+        _io.open_code = fake_open_code
+        try:
+            yield
+        finally:
+            io.open_code, _io.open_code = originals
 
     def _iter_patches(self):
         """

@@ -3,6 +3,7 @@ Tests for alasio/testing/filesystem/fake_fs.py.
 
 The FakeFilesystem class and the mocked os / builtins functions.
 """
+import _io
 import builtins
 import io
 import os
@@ -679,3 +680,60 @@ class TestActivate:
         """Python imports inside a test should keep working."""
         import alasio.deploy.pack.job_reset as module
         assert module.__name__ == 'alasio.deploy.pack.job_reset'
+
+
+class TestPatchOpenCode:
+    """patch_open_code() context manager."""
+
+    def test_not_patched_by_default(self, fs):
+        """open_code() should keep reading the real disk outside the context."""
+        real_open_code = _io.open_code
+        assert _io.open_code is real_open_code
+        # FILE is a real file of this test module
+        with _io.open_code(FILE) as f:
+            assert f.read()
+
+    def test_routes_to_fake_inside(self, fs):
+        """Inside the context, open_code() should read the fake fs."""
+        fs.create_file('/x.py', contents='a = 1')
+        with fs.patch_open_code():
+            with _io.open_code('/x.py') as f:
+                assert f.read() == b'a = 1'
+            # io.open_code is the same patched function
+            assert io.open_code is _io.open_code
+            with io.open_code('/x.py') as f:
+                assert f.read() == b'a = 1'
+
+    def test_missing_file_inside(self, fs):
+        """open_code() of a missing file inside the context should raise."""
+        with fs.patch_open_code(), pytest.raises(FileNotFoundError):
+            _io.open_code('/missing.py')
+
+    def test_restores_on_exit(self, fs):
+        """The originals should be restored when the context exits."""
+        real_io_open_code = io.open_code
+        real__io_open_code = _io.open_code
+        with fs.patch_open_code():
+            assert _io.open_code is not real__io_open_code
+        assert io.open_code is real_io_open_code
+        assert _io.open_code is real__io_open_code
+        # the real disk is readable again
+        with _io.open_code(FILE) as f:
+            assert f.read()
+
+    def test_restores_on_exception(self, fs):
+        """The originals should be restored even when the body raises."""
+        real__io_open_code = _io.open_code
+        with pytest.raises(RuntimeError), fs.patch_open_code():
+            raise RuntimeError('boom')
+        assert _io.open_code is real__io_open_code
+        assert io.open_code is _io.open_code
+
+    def test_works_inside_activate(self, fs):
+        """patch_open_code() should combine with the activated fixture."""
+        fs.create_file('/x.py', contents='a = 1')
+        with fs.patch_open_code():
+            with _io.open_code('/x.py') as f:
+                assert f.read() == b'a = 1'
+            # the rest of the mock stays active inside the context
+            assert os.path.exists('/x.py')

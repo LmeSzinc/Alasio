@@ -14,6 +14,7 @@
 /config/reloadalas
 *.lock
 *.tmp
+/temp
 # files in releases
 /toolkit
 /screenshots
