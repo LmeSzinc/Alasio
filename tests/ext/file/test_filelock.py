@@ -313,14 +313,17 @@ class TestThreads:
         contender = SQLiteFileLock(lock_file, timeout=5)
         holder.acquire()
         results = []
+        started = threading.Event()
 
         def try_acquire():
+            started.set()
             with contender:
                 results.append("acquired")
 
         thread = threading.Thread(target=try_acquire)
         thread.start()
-        time.sleep(0.1)
+        # Wait until the contender thread is about to acquire, then release
+        assert started.wait(timeout=10)
         holder.release()
         thread.join(timeout=10)
         assert not thread.is_alive()
@@ -335,8 +338,10 @@ class TestThreads:
         holder.acquire()
         results = []
         c_elapsed = []
+        b_started = threading.Event()
 
         def thread_b():
+            b_started.set()
             # Waits 0.5s on the SQLite lock
             try:
                 shared.acquire(timeout=0.5)
@@ -355,8 +360,8 @@ class TestThreads:
         b = threading.Thread(target=thread_b)
         c = threading.Thread(target=thread_c)
         b.start()
-        # Wait until thread B is inside the SQLite wait
-        time.sleep(0.15)
+        # Wait until thread B has started its acquire
+        assert b_started.wait(timeout=10)
         c.start()
         c.join(timeout=10)
         b.join(timeout=10)
@@ -376,8 +381,11 @@ class TestThreads:
         shared = SQLiteFileLock(lock_file, timeout=0.2)
         holder.acquire()
         results = []
+        b_started = threading.Event()
+        c_started = threading.Event()
 
-        def try_acquire(tag):
+        def try_acquire(tag, started):
+            started.set()
             try:
                 with shared:
                     results.append(f"{tag}:acquired")
@@ -386,11 +394,13 @@ class TestThreads:
             except FilelockTimeout:
                 results.append(f"{tag}:timeout")
 
-        b = threading.Thread(target=try_acquire, args=("b",))
-        c = threading.Thread(target=try_acquire, args=("c",))
+        b = threading.Thread(target=try_acquire, args=("b", b_started))
+        c = threading.Thread(target=try_acquire, args=("c", c_started))
         b.start()
         c.start()
-        time.sleep(0.1)
+        # Wait until both threads have started their acquire, then release
+        assert b_started.wait(timeout=10)
+        assert c_started.wait(timeout=10)
         holder.release()
         b.join(timeout=10)
         c.join(timeout=10)
