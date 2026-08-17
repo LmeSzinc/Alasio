@@ -2,7 +2,6 @@
 The FakeFilesystem class: an in-memory filesystem and the mock of the
 os / builtins file functions.
 """
-import _io
 import builtins
 import contextlib
 import errno
@@ -10,7 +9,9 @@ import io
 import os
 import time
 
-from .base import IS_WINDOWS, FakeDir, FakeFile, _normpath
+import _io
+
+from .base import IS_WINDOWS, FakeDir, FakeFile, FakeSymlink, _normpath
 from .entry import FakeDirEntry, FakeScandirIterator
 from .file_object import FakeFileObject
 
@@ -26,21 +27,27 @@ class FakeFilesystem:
     """
     An in-memory filesystem for tests.
 
-    Files and directories are stored in flat dicts keyed by normalized
-    absolute path, so path lookups are O(1) dict hits instead of the
-    per-segment tree walks of pyfakefs.
+    Files, directories and symbolic links are stored in flat dicts keyed
+    by normalized absolute path, so path lookups are O(1) dict hits
+    instead of the per-segment tree walks of pyfakefs.
 
     activate() replaces the real file functions with the fake ones:
 
     - builtins.open() and io.open(), text and binary modes
-    - os.path.exists / isfile / isdir / islink / lexists / getsize
+    - os.path.exists / isfile / isdir / islink / lexists / getsize / realpath
     - os.stat / lstat / fstat
+    - os.symlink / readlink
     - os.makedirs / mkdir / rmdir / unlink / remove / rename / replace
     - os.scandir / listdir
     - os.open / write / close / fsync, low level fd operations
     - os.utime / chmod / getcwd / chdir
 
     Everything is served from memory, the real disk is never touched.
+
+    Symbolic links are resolved on the path itself and followed by
+    stat() / open() / exists() and friends, like the real os. Symlinks
+    in the middle of a path (a symlinked directory) are only resolved
+    by realpath(), not by the other functions.
     """
 
     def __init__(self, cwd=None):
@@ -64,6 +71,8 @@ class FakeFilesystem:
         self._files: "dict[str, FakeFile]" = {}
         # normalized absolute path -> FakeDir
         self._dirs: "dict[str, FakeDir]" = {root: self.root_dir}
+        # normalized absolute path -> FakeSymlink
+        self._symlinks: "dict[str, FakeSymlink]" = {}
         # fd -> FakeFileObject
         self._fds: "dict[int, FakeFileObject]" = {}
         self._next_fd = 3
@@ -81,7 +90,8 @@ class FakeFilesystem:
     def __repr__(self):
         return (
             f'<FakeFilesystem root={self.root_dir.path!r} cwd={self._cwd!r} '
-            f'files={len(self._files)} dirs={len(self._dirs)}>'
+            f'files={len(self._files)} dirs={len(self._dirs)} '
+            f'symlinks={len(self._symlinks)}>'
         )
 
     """
@@ -142,6 +152,7 @@ class FakeFilesystem:
         return (
             any(key.startswith(prefix) for key in self._files)
             or any(key.startswith(prefix) for key in self._dirs)
+            or any(key.startswith(prefix) for key in self._symlinks)
         )
 
     def _create_parents(self, path):
@@ -152,14 +163,14 @@ class FakeFilesystem:
             path (str): Normalized absolute path
 
         Raises:
-            NotADirectoryError: If a parent path is a file
+            NotADirectoryError: If a parent path is a file or a symlink
         """
         parent, sep, _ = path.rpartition('/')
         if not sep:
             return
         missing = []
         while parent not in self._dirs:
-            if parent in self._files:
+            if parent in self._files or parent in self._symlinks:
                 raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', parent)
             missing.append(parent)
             parent, sep, _ = parent.rpartition('/')
@@ -174,7 +185,7 @@ class FakeFilesystem:
 
     def _get_entry(self, path):
         """
-        Get the record at a path.
+        Get the record at a path, symbolic links are not followed.
 
         Args:
             path (str): Normalized absolute path
@@ -186,6 +197,36 @@ class FakeFilesystem:
         if file is not None:
             return file
         return self._dirs.get(path)
+
+    def _follow_links(self, path):
+        """
+        Resolve the symbolic link chain at the path itself.
+
+        The parent components are not resolved: a path through a
+        symlinked directory is served as-is (the real os resolves the
+        full path, realpath() does that in the fake filesystem too).
+
+        Args:
+            path (str): Normalized absolute path
+
+        Returns:
+            str: The final path after resolving the link chain, may not
+                exist when the chain is dangling
+
+        Raises:
+            OSError: If a symlink loop is detected (errno.ELOOP)
+        """
+        seen = set()
+        while path in self._symlinks:
+            if path in seen:
+                raise OSError(errno.ELOOP, 'Too many levels of symbolic links', path)
+            seen.add(path)
+            target = self._symlinks[path].target
+            if not os.path.isabs(target):
+                # relative target, relative to the directory of the link
+                target = os.path.join(path.rpartition('/')[0], target)
+            path = self._normpath(target)
+        return path
 
     """
     Test data helpers
@@ -214,7 +255,7 @@ class FakeFilesystem:
             NotADirectoryError: If a parent path is a file
         """
         path = self._normpath(path)
-        if path in self._dirs:
+        if path in self._dirs or path in self._symlinks:
             raise IsADirectoryError(errno.EISDIR, 'Is a directory', path)
         if path in self._files:
             raise FileExistsError(errno.EEXIST, 'File exists', path)
@@ -249,7 +290,7 @@ class FakeFilesystem:
             NotADirectoryError: If a parent path is a file
         """
         path = self._normpath(path)
-        if path in self._dirs or path in self._files:
+        if path in self._dirs or path in self._files or path in self._symlinks:
             raise FileExistsError(errno.EEXIST, 'File exists', path)
         self._create_parents(path)
         mode = 0o777 if st_mode is None else st_mode & 0o7777
@@ -260,6 +301,34 @@ class FakeFilesystem:
         )
         self._dirs[path] = folder
         return folder
+
+    def create_symlink(self, path, target):
+        """
+        Create a symbolic link, the parent directories are created automatically.
+
+        Args:
+            path (str): Path of the link
+            target (str): Target path of the link, may be relative or
+                absolute, may point to a missing path (dangling link)
+
+        Returns:
+            FakeSymlink: The created link record
+
+        Raises:
+            FileExistsError: If the path already exists
+            NotADirectoryError: If a parent path is a file
+        """
+        path = self._normpath(path)
+        if path in self._files or path in self._dirs or path in self._symlinks:
+            raise FileExistsError(errno.EEXIST, 'File exists', path)
+        self._create_parents(path)
+        now = time.time()
+        link = FakeSymlink(
+            path=path, target=target, mode=0o777, ino=self._next_ino(), nlink=1,
+            atime=now, mtime=now, ctime=now,
+        )
+        self._symlinks[path] = link
+        return link
 
     def get_object(self, path):
         """
@@ -333,6 +402,9 @@ class FakeFilesystem:
         if path in self._files:
             del self._files[path]
             return
+        if path in self._symlinks:
+            del self._symlinks[path]
+            return
         if path in self._dirs:
             if self._has_children(path):
                 raise OSError(errno.ENOTEMPTY, 'Directory not empty', path)
@@ -354,6 +426,9 @@ class FakeFilesystem:
         path = self._normpath(path)
         if path in self._files:
             del self._files[path]
+            return
+        if path in self._symlinks:
+            del self._symlinks[path]
             return
         if path not in self._dirs:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
@@ -398,6 +473,7 @@ class FakeFilesystem:
             ValueError: If the mode is invalid
         """
         file = self._normpath(file)
+        file = self._follow_links(file)
         mode = str(mode)
         if not mode:
             raise ValueError(f'invalid mode: {mode!r}')
@@ -456,7 +532,7 @@ class FakeFilesystem:
 
     def exists(self, path):
         """
-        Mock of os.path.exists().
+        Mock of os.path.exists(), follows symbolic links.
 
         Args:
             path (str):
@@ -464,11 +540,11 @@ class FakeFilesystem:
         Returns:
             bool: Whether the path exists
         """
-        return self._get_entry(self._normpath(path)) is not None
+        return self._get_entry(self._follow_links(self._normpath(path))) is not None
 
     def isfile(self, path):
         """
-        Mock of os.path.isfile().
+        Mock of os.path.isfile(), follows symbolic links.
 
         Args:
             path (str):
@@ -476,11 +552,11 @@ class FakeFilesystem:
         Returns:
             bool: Whether the path is a file
         """
-        return self._normpath(path) in self._files
+        return self._follow_links(self._normpath(path)) in self._files
 
     def isdir(self, path):
         """
-        Mock of os.path.isdir().
+        Mock of os.path.isdir(), follows symbolic links.
 
         Args:
             path (str):
@@ -488,35 +564,88 @@ class FakeFilesystem:
         Returns:
             bool: Whether the path is a directory
         """
-        return self._normpath(path) in self._dirs
+        return self._follow_links(self._normpath(path)) in self._dirs
 
     def islink(self, path):
         """
-        Mock of os.path.islink(), symlinks are not supported.
+        Mock of os.path.islink().
 
         Args:
             path (str):
 
         Returns:
-            bool: Always False
+            bool: Whether the path is a symbolic link
         """
-        return False
+        return self._normpath(path) in self._symlinks
 
     def lexists(self, path):
         """
-        Mock of os.path.lexists(), no symlinks so same as exists().
+        Mock of os.path.lexists(), True for a dangling symlink too.
 
         Args:
             path (str):
 
         Returns:
-            bool: Whether the path exists
+            bool: Whether the path exists or is a dangling symlink
         """
-        return self.exists(path)
+        path = self._normpath(path)
+        return path in self._symlinks or self._get_entry(self._follow_links(path)) is not None
+
+    def readlink(self, path):
+        """
+        Mock of os.readlink().
+
+        Args:
+            path (str):
+
+        Returns:
+            str: Target of the symbolic link
+
+        Raises:
+            FileNotFoundError: If the path does not exist
+            OSError: If the path is not a symbolic link
+        """
+        path = self._normpath(path)
+        link = self._symlinks.get(path)
+        if link is None:
+            if self._get_entry(path) is None:
+                raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+            raise OSError(errno.EINVAL, 'Invalid argument', path)
+        return link.target
+
+    def symlink(self, src, dst, target_is_directory=False):
+        """
+        Mock of os.symlink(), the parent directory of dst must exist.
+
+        Args:
+            src (str): Target path of the link, may be relative or
+                absolute, may point to a missing path (dangling link)
+            dst (str): Path of the link
+            target_is_directory (bool): Accepted for compatibility,
+                the fake filesystem does not check the target type.
+
+        Raises:
+            FileExistsError: If dst already exists
+            FileNotFoundError: If the parent directory of dst does not exist
+        """
+        dst = self._normpath(dst)
+        if dst in self._files or dst in self._dirs or dst in self._symlinks:
+            raise FileExistsError(errno.EEXIST, 'File exists', dst)
+        parent, sep, _ = dst.rpartition('/')
+        if not sep:
+            parent = '/'
+        if parent not in self._dirs:
+            raise FileNotFoundError(errno.ENOENT, 'No such file or directory', dst)
+        now = time.time()
+        link = FakeSymlink(
+            path=dst, target=src, mode=0o777, ino=self._next_ino(), nlink=1,
+            atime=now, mtime=now, ctime=now,
+        )
+        self._symlinks[dst] = link
 
     def getsize(self, path):
         """
-        Mock of os.path.getsize().
+        Mock of os.path.getsize(), follows symbolic links.
 
         Args:
             path (str):
@@ -535,7 +664,8 @@ class FakeFilesystem:
 
         Args:
             path (str):
-            follow_symlinks (bool): Accepted for compatibility
+            follow_symlinks (bool): False to stat the symbolic link
+                itself. Defaults to True.
             **kwargs: Accepted for compatibility
 
         Returns:
@@ -545,10 +675,133 @@ class FakeFilesystem:
             FileNotFoundError: If the path does not exist
         """
         path = self._normpath(path)
+        if follow_symlinks:
+            path = self._follow_links(path)
+            entry = self._get_entry(path)
+            if entry is None:
+                raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+            return entry.stat()
+        link = self._symlinks.get(path)
+        if link is not None:
+            return link.stat()
         entry = self._get_entry(path)
         if entry is None:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
         return entry.stat()
+
+    def lstat(self, path):
+        """
+        Mock of os.lstat(), never follows symbolic links.
+
+        Args:
+            path (str):
+
+        Returns:
+            os.stat_result:
+
+        Raises:
+            FileNotFoundError: If the path does not exist
+        """
+        path = self._normpath(path)
+        link = self._symlinks.get(path)
+        if link is not None:
+            return link.stat()
+        entry = self._get_entry(path)
+        if entry is None:
+            raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+        return entry.stat()
+
+    def realpath(self, path, strict=False):
+        """
+        Mock of os.path.realpath(), resolves symbolic links component by
+        component and collapses ".." on the resolved prefix, like the
+        real os: a ".." after a symlink goes to the parent of the link
+        target, not of the link itself.
+
+        Args:
+            path (str):
+            strict (bool): Accepted for compatibility, the fake
+                filesystem does not check the existence of intermediate
+                components
+
+        Returns:
+            str: Canonical path with "/" separators
+
+        Raises:
+            OSError: If a symlink loop is detected (errno.ELOOP)
+        """
+        path = str(path)
+        if IS_WINDOWS:
+            path = path.replace('\\', '/')
+        drive = ''
+        if IS_WINDOWS and len(path) > 1 and path[1] == ':':
+            # explicit drive letter, e.g. "C:/a" or "C:a"
+            drive, path = path[:2], path[2:]
+        if drive:
+            if path.startswith('/'):
+                bits = [f'{drive}/'] + path.split('/')[1:]
+            else:
+                # drive-relative path "C:foo", resolve on the drive root
+                bits = [f'{drive}/'] + path.split('/')
+        elif path.startswith('/'):
+            bits = ['/'] + path.split('/')[1:]
+        else:
+            # relative path, resolve against the fake cwd
+            bits = self._cwd.split('/') + path.split('/')
+        if not bits[0]:
+            bits = ['/'] + bits
+        return self._join_realpath(bits[0], bits[1:])
+
+    def _join_realpath(self, resolved, bits):
+        """
+        Walk the path components and resolve symbolic links recursively.
+
+        Args:
+            resolved (str): Resolved path prefix
+            bits (list[str]): Remaining path components
+
+        Returns:
+            str: Canonical path with "/" separators
+
+        Raises:
+            OSError: If a symlink loop is detected (errno.ELOOP)
+        """
+        seen = set()
+        i = 0
+        while i < len(bits):
+            bit = bits[i]
+            if not bit or bit == '.':
+                i += 1
+                continue
+            if bit == '..':
+                # collapse on the resolved prefix, like the real os
+                parent = resolved.rpartition('/')[0]
+                resolved = parent if parent else resolved
+                i += 1
+                continue
+            candidate = self._normpath(f'{resolved}/{bit}')
+            link = self._symlinks.get(candidate)
+            if link is None:
+                resolved = candidate
+                i += 1
+                continue
+            if candidate in seen:
+                raise OSError(errno.ELOOP, 'Too many levels of symbolic links', candidate)
+            seen.add(candidate)
+            target = link.target
+            if os.path.isabs(target):
+                if IS_WINDOWS and len(target) > 1 and target[1] == ':':
+                    resolved = f'{target[:2]}/'
+                    tbits = target[2:].split('/')
+                else:
+                    resolved = '/'
+                    tbits = target.split('/')[1:]
+            else:
+                # relative target, components are joined to the resolved prefix
+                tbits = target.split('/')
+            bits = tbits + bits[i + 1:]
+            i = 0
+        return self._normpath(resolved)
 
     """
     os directory functions
@@ -574,7 +827,7 @@ class FakeFilesystem:
             if exist_ok:
                 return
             raise FileExistsError(errno.EEXIST, 'File exists', path)
-        if path in self._files:
+        if path in self._files or path in self._symlinks:
             raise FileExistsError(errno.EEXIST, 'File exists', path)
         self._create_parents(path)
         now = time.time()
@@ -596,7 +849,7 @@ class FakeFilesystem:
             FileNotFoundError: If the parent directory does not exist
         """
         path = self._normpath(path)
-        if path in self._dirs or path in self._files:
+        if path in self._dirs or path in self._files or path in self._symlinks:
             raise FileExistsError(errno.EEXIST, 'File exists', path)
         parent, sep, _ = path.rpartition('/')
         if not sep:
@@ -618,11 +871,11 @@ class FakeFilesystem:
 
         Raises:
             FileNotFoundError: If the path does not exist
-            NotADirectoryError: If the path is a file
+            NotADirectoryError: If the path is a file or a symlink
             OSError: If the directory is not empty
         """
         path = self._normpath(path)
-        if path in self._files:
+        if path in self._files or path in self._symlinks:
             raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', path)
         if path not in self._dirs:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
@@ -632,7 +885,8 @@ class FakeFilesystem:
 
     def unlink(self, path):
         """
-        Mock of os.unlink() and os.remove().
+        Mock of os.unlink() and os.remove(), removes a symbolic link
+        itself, never the link target.
 
         Args:
             path (str):
@@ -644,6 +898,9 @@ class FakeFilesystem:
         path = self._normpath(path)
         if path in self._files:
             del self._files[path]
+            return
+        if path in self._symlinks:
+            del self._symlinks[path]
             return
         if path in self._dirs:
             raise IsADirectoryError(errno.EISDIR, 'Is a directory', path)
@@ -700,6 +957,20 @@ class FakeFilesystem:
             file = self._files.pop(src)
             file.path = dst
             self._files[dst] = file
+            return
+        if src in self._symlinks:
+            if dst in self._dirs:
+                raise IsADirectoryError(errno.EISDIR, 'Is a directory', dst)
+            if dst in self._files or dst in self._symlinks:
+                if not overwrite:
+                    raise FileExistsError(errno.EEXIST, 'File exists', dst)
+                if dst in self._files:
+                    del self._files[dst]
+                else:
+                    del self._symlinks[dst]
+            link = self._symlinks.pop(src)
+            link.path = dst
+            self._symlinks[dst] = link
             return
         if src in self._dirs:
             if src == self.root_dir.path:
@@ -759,6 +1030,21 @@ class FakeFilesystem:
                 name = key[len(prefix):]
                 if '/' not in name:
                     entries.append(FakeDirEntry(name, key, True, self._dirs[key].stat()))
+        for key, link in self._symlinks.items():
+            if key.startswith(prefix):
+                name = key[len(prefix):]
+                if '/' not in name:
+                    follow_stat = None
+                    try:
+                        target = self._follow_links(key)
+                    except OSError:
+                        target = None
+                    entry = self._get_entry(target) if target is not None else None
+                    if entry is not None:
+                        follow_stat = entry.stat()
+                    entries.append(FakeDirEntry(
+                        name, key, False, link.stat(),
+                        is_symlink=True, follow_stat=follow_stat))
         return FakeScandirIterator(entries)
 
     def listdir(self, path):
@@ -792,6 +1078,11 @@ class FakeFilesystem:
                 name = key[len(prefix):]
                 if '/' not in name:
                     names.append(name)
+        for key in self._symlinks:
+            if key.startswith(prefix):
+                name = key[len(prefix):]
+                if '/' not in name:
+                    names.append(name)
         return sorted(names)
 
     """
@@ -816,6 +1107,7 @@ class FakeFilesystem:
             IsADirectoryError: If the path is a directory
         """
         path = self._normpath(path)
+        path = self._follow_links(path)
         accmode = flags & O_ACCMODE
         readable = accmode == os.O_RDONLY or accmode == os.O_RDWR
         writable = accmode == os.O_WRONLY or accmode == os.O_RDWR
@@ -924,6 +1216,7 @@ class FakeFilesystem:
             FileNotFoundError: If the path does not exist
         """
         path = self._normpath(path)
+        path = self._follow_links(path)
         entry = self._get_entry(path)
         if entry is None:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
@@ -949,6 +1242,7 @@ class FakeFilesystem:
             FileNotFoundError: If the path does not exist
         """
         path = self._normpath(path)
+        path = self._follow_links(path)
         entry = self._get_entry(path)
         if entry is None:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
@@ -975,6 +1269,7 @@ class FakeFilesystem:
             NotADirectoryError: If the path is a file
         """
         path = self._normpath(path)
+        path = self._follow_links(path)
         if path not in self._dirs:
             if path in self._files:
                 raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', path)
@@ -1031,9 +1326,12 @@ class FakeFilesystem:
         yield os.path, 'islink', self.islink
         yield os.path, 'lexists', self.lexists
         yield os.path, 'getsize', self.getsize
+        yield os.path, 'realpath', self.realpath
         yield os, 'stat', self.stat
-        yield os, 'lstat', self.stat
+        yield os, 'lstat', self.lstat
         yield os, 'fstat', self.os_fstat
+        yield os, 'symlink', self.symlink
+        yield os, 'readlink', self.readlink
         yield os, 'scandir', self.scandir
         yield os, 'listdir', self.listdir
         yield os, 'makedirs', self.makedirs

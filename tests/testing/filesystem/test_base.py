@@ -11,7 +11,7 @@ import pytest
 from conftest import join
 
 from alasio.ext.path import PathStr
-from alasio.testing.filesystem import FakeDir, FakeFile, fs  # noqa: F401
+from alasio.testing.filesystem import FakeDir, FakeFile, FakeSymlink, fs  # noqa: F401
 from alasio.testing.filesystem.base import IS_WINDOWS, _normpath
 
 
@@ -138,3 +138,32 @@ class TestFakeFileRecord:
         assert file.atime > 0
         assert file.mtime > 0
         assert file.ctime > 0
+
+
+class TestFakeSymlinkRecord:
+    """FakeSymlink record, msgspec Struct of a symbolic link."""
+
+    def test_fake_symlink_is_msgspec_struct(self, fs):
+        """create_symlink() should return a msgspec Struct record."""
+        link = fs.create_symlink(join(fs, 'link'), join(fs, 'a.txt'))
+        assert isinstance(link, FakeSymlink)
+        assert isinstance(link, msgspec.Struct)
+        assert link.path == join(fs, 'link')
+        assert link.target == join(fs, 'a.txt')
+
+    def test_stat_result(self, fs):
+        """stat() of the link itself should have the S_IFLNK type bit."""
+        link = fs.create_symlink(join(fs, 'link'), join(fs, 'a.txt'))
+        st = link.stat()
+        assert isinstance(st, os.stat_result)
+        assert statmod.S_ISLNK(st.st_mode)
+        assert not statmod.S_ISREG(st.st_mode)
+        assert not statmod.S_ISDIR(st.st_mode)
+        # the size is the length of the target string, like the real os
+        assert st.st_size == len(join(fs, 'a.txt'))
+
+    def test_inode_unique(self, fs):
+        """A symlink should get its own inode number."""
+        file = fs.create_file(join(fs, 'a.txt'))
+        link = fs.create_symlink(join(fs, 'link'), join(fs, 'a.txt'))
+        assert file.ino != link.ino

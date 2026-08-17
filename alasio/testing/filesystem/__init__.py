@@ -37,12 +37,17 @@ sources with io.open_code(), which is not patched.
 Mocked functions:
 
 - builtins.open() and io.open(), text and binary modes
-- os.path.exists / isfile / isdir / islink / lexists / getsize
+- os.path.exists / isfile / isdir / islink / lexists / getsize / realpath
 - os.stat / lstat / fstat
+- os.symlink / readlink
 - os.makedirs / mkdir / rmdir / unlink / remove / rename / replace
 - os.scandir / listdir
 - os.open / write / close / fsync, low level fd operations
 - os.utime / chmod / getcwd / chdir
+
+Symbolic links are supported: os.symlink() / os.readlink() work, and
+stat() / open() / exists() and friends follow the link like the real
+os (os.lstat() and stat(follow_symlinks=False) return the link itself).
 
 The whole alasio/ext/path stack (PathStr, atomic read/write, iter
 folders, makedir) works on the fake filesystem without changes, so it
@@ -69,7 +74,9 @@ with block:
 
 Not supported (documented limitations):
 
-- symbolic links, islink() always returns False
+- symlinks in the middle of a path (a symlinked directory) are only
+  resolved by realpath(), the other functions resolve the link at the
+  path itself
 - os.walk(), os.access() and other rarely used os functions
 - tarfile writes through its own open(), it is not mocked
   (zipfile goes through io.open and works)
@@ -78,7 +85,7 @@ Not supported (documented limitations):
 """
 import pytest
 
-from .base import FakeDir, FakeFile
+from .base import FakeDir, FakeFile, FakeSymlink
 from .entry import FakeDirEntry, FakeScandirIterator
 from .fake_fs import FakeFilesystem
 from .file_object import FakeFileObject
@@ -90,6 +97,7 @@ __all__ = [
     'FakeFileObject',
     'FakeFilesystem',
     'FakeScandirIterator',
+    'FakeSymlink',
     'fs',
 ]
 

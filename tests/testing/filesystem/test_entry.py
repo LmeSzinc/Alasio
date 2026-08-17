@@ -58,6 +58,62 @@ class TestFakeDirEntry:
         assert '/dir/a.txt' in repr(entry)
 
 
+class TestFakeDirEntrySymlink:
+    """Tests for FakeDirEntry of a symbolic link."""
+
+    def _make_link_entry(self, target_stat=None):
+        """
+        Build a symlink entry pointing to a regular file.
+
+        Args:
+            target_stat (os.stat_result | None): Stat of the link target,
+                None for a dangling link
+
+        Returns:
+            FakeDirEntry:
+        """
+        link_stat = make_stat(0o120777, size=8)
+        return FakeDirEntry('link', '/dir/link', False, link_stat, is_symlink=True, follow_stat=target_stat)
+
+    def test_is_symlink(self):
+        """A symlink entry should report is_symlink()."""
+        entry = self._make_link_entry(make_stat(0o100644, size=4))
+        assert entry.is_symlink()
+        assert not entry.is_dir()
+        assert entry.is_file()
+
+    def test_not_follow(self):
+        """With follow_symlinks=False the entry should not be a dir or file."""
+        entry = self._make_link_entry(make_stat(0o100644, size=4))
+        assert not entry.is_dir(follow_symlinks=False)
+        assert not entry.is_file(follow_symlinks=False)
+        assert statmod.S_ISLNK(entry.stat(follow_symlinks=False).st_mode)
+
+    def test_follow_to_file(self):
+        """The followed stat should be the target stat."""
+        target_stat = make_stat(0o100644, size=4)
+        entry = self._make_link_entry(target_stat)
+        assert entry.stat() is target_stat
+        assert entry.stat(follow_symlinks=True) is target_stat
+
+    def test_follow_to_dir(self):
+        """A link to a directory should report is_dir() when followed."""
+        link_stat = make_stat(0o120777, size=4)
+        target_stat = make_stat(0o40755)
+        entry = FakeDirEntry('link', '/dir/link', False, link_stat, is_symlink=True, follow_stat=target_stat)
+        assert entry.is_dir()
+        assert not entry.is_file()
+
+    def test_dangling(self):
+        """A dangling link should not be a dir or file, stat() raises."""
+        entry = self._make_link_entry(None)
+        assert entry.is_symlink()
+        assert not entry.is_dir()
+        assert not entry.is_file()
+        with pytest.raises(FileNotFoundError):
+            entry.stat()
+
+
 class TestFakeScandirIterator:
     """Tests for FakeScandirIterator."""
 

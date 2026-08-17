@@ -3,12 +3,13 @@ Tests for alasio/testing/filesystem/fake_fs.py.
 
 The FakeFilesystem class and the mocked os / builtins functions.
 """
-import _io
 import builtins
+import errno
 import io
 import os
 import stat as statmod
 
+import _io
 import pytest
 from conftest import join
 
@@ -262,13 +263,13 @@ class TestOsPath:
         assert not os.path.isdir(join(fs, 'missing'))
 
     def test_islink(self, fs):
-        """os.path.islink() should always be False."""
+        """os.path.islink() should be False for files and missing paths."""
         fs.create_file(join(fs, 'a.txt'))
         assert not os.path.islink(join(fs, 'a.txt'))
         assert not os.path.islink(join(fs, 'missing'))
 
     def test_lexists(self, fs):
-        """os.path.lexists() should match exists()."""
+        """os.path.lexists() should match exists() without links."""
         fs.create_file(join(fs, 'a.txt'))
         assert os.path.lexists(join(fs, 'a.txt'))
         assert not os.path.lexists(join(fs, 'missing'))
@@ -309,6 +310,223 @@ class TestOsPath:
         assert os.path.exists(join(fs, 'cwd', 'a.txt'))
         assert os.path.isdir('.')
         assert os.path.exists('..')
+
+
+class TestSymlink:
+    """Tests for symbolic link support."""
+
+    def test_create_and_islink(self, fs):
+        """create_symlink() should create a link reported by islink()."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        fs.create_symlink(join(fs, 'link'), join(fs, 'a.txt'))
+        assert os.path.islink(join(fs, 'link'))
+        assert not os.path.islink(join(fs, 'a.txt'))
+
+    def test_os_symlink(self, fs):
+        """os.symlink() should create a link and os.readlink() read it."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        assert os.path.islink(join(fs, 'link'))
+        assert os.readlink(join(fs, 'link')) == join(fs, 'a.txt')
+
+    def test_symlink_relative_target(self, fs):
+        """Relative targets should be stored as-is, like the real os."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink('a.txt', join(fs, 'link'))
+        assert os.readlink(join(fs, 'link')) == 'a.txt'
+
+    def test_symlink_exists(self, fs):
+        """os.symlink() on an existing path should raise FileExistsError."""
+        fs.create_file(join(fs, 'a.txt'))
+        with pytest.raises(FileExistsError):
+            os.symlink(join(fs, 'a.txt'), join(fs, 'a.txt'))
+
+    def test_symlink_missing_parent(self, fs):
+        """os.symlink() without a parent directory should raise FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            os.symlink(join(fs, 'a.txt'), join(fs, 'missing', 'link'))
+
+    def test_readlink_not_link(self, fs):
+        """os.readlink() on a regular file should raise OSError."""
+        fs.create_file(join(fs, 'a.txt'))
+        with pytest.raises(OSError):
+            os.readlink(join(fs, 'a.txt'))
+
+    def test_readlink_missing(self, fs):
+        """os.readlink() on a missing path should raise FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            os.readlink(join(fs, 'missing'))
+
+    def test_exists_follows(self, fs):
+        """exists() should follow the link to the target."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        assert os.path.exists(join(fs, 'link'))
+        assert os.path.isfile(join(fs, 'link'))
+        assert not os.path.isdir(join(fs, 'link'))
+
+    def test_exists_dangling(self, fs):
+        """exists() of a dangling link should be False, lexists() True."""
+        os.symlink(join(fs, 'missing.txt'), join(fs, 'link'))
+        assert not os.path.exists(join(fs, 'link'))
+        assert not os.path.isfile(join(fs, 'link'))
+        assert os.path.lexists(join(fs, 'link'))
+
+    def test_link_to_dir(self, fs):
+        """A link to a directory should report isdir() and not isfile()."""
+        fs.create_dir(join(fs, 'folder'))
+        os.symlink(join(fs, 'folder'), join(fs, 'link'))
+        assert os.path.isdir(join(fs, 'link'))
+        assert not os.path.isfile(join(fs, 'link'))
+
+    def test_stat_follows(self, fs):
+        """stat() should follow the link, lstat() returns the link itself."""
+        fs.create_file(join(fs, 'a.txt'), contents=b'data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        st = os.stat(join(fs, 'link'))
+        assert statmod.S_ISREG(st.st_mode)
+        assert st.st_size == 4
+        lst = os.lstat(join(fs, 'link'))
+        assert statmod.S_ISLNK(lst.st_mode)
+        assert lst.st_size == len(join(fs, 'a.txt'))
+        assert os.stat(join(fs, 'link'), follow_symlinks=False).st_mode == lst.st_mode
+
+    def test_stat_dangling(self, fs):
+        """stat() of a dangling link should raise FileNotFoundError."""
+        os.symlink(join(fs, 'missing.txt'), join(fs, 'link'))
+        with pytest.raises(FileNotFoundError):
+            os.stat(join(fs, 'link'))
+        # lstat still works on the link itself
+        assert statmod.S_ISLNK(os.lstat(join(fs, 'link')).st_mode)
+
+    def test_chained_links(self, fs):
+        """Links to links should resolve through the chain."""
+        fs.create_file(join(fs, 'a.txt'), contents=b'data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link1'))
+        os.symlink(join(fs, 'link1'), join(fs, 'link2'))
+        assert os.path.isfile(join(fs, 'link2'))
+        assert os.path.getsize(join(fs, 'link2')) == 4
+        assert os.path.islink(join(fs, 'link1'))
+        assert os.path.islink(join(fs, 'link2'))
+
+    def test_link_loop(self, fs):
+        """A symlink loop should raise OSError on follow."""
+        os.symlink(join(fs, 'b'), join(fs, 'a'))
+        os.symlink(join(fs, 'a'), join(fs, 'b'))
+        with pytest.raises(OSError) as exc:
+            os.stat(join(fs, 'a'))
+        assert exc.value.errno == errno.ELOOP
+
+    def test_realpath(self, fs):
+        """realpath() should resolve the link to the canonical path."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        assert os.path.realpath(join(fs, 'link')) == join(fs, 'a.txt')
+        assert os.path.realpath(join(fs, 'a.txt')) == join(fs, 'a.txt')
+
+    def test_realpath_relative_target(self, fs):
+        """realpath() should resolve relative targets against the link dir."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink('a.txt', join(fs, 'link'))
+        assert os.path.realpath(join(fs, 'link')) == join(fs, 'a.txt')
+
+    def test_realpath_dotdot(self, fs):
+        """'..' should collapse on the resolved prefix, after the link."""
+        fs.create_dir(join(fs, 'folder'))
+        os.symlink(join(fs, 'folder'), join(fs, 'link'))
+        # link/.. is the parent of the target directory, not of the link
+        assert os.path.realpath(join(fs, 'link', '..')) == fs.root_dir.path
+
+    def test_realpath_dangling(self, fs):
+        """realpath() of a dangling link returns the target path."""
+        os.symlink(join(fs, 'missing.txt'), join(fs, 'link'))
+        assert os.path.realpath(join(fs, 'link')) == join(fs, 'missing.txt')
+
+    def test_realpath_no_link(self, fs):
+        """realpath() without links should collapse '..' only."""
+        assert os.path.realpath(join(fs, 'a', '..', 'b')) == join(fs, 'b')
+
+    def test_open_follows(self, fs):
+        """open() should follow the link to the target file."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        with open(join(fs, 'link')) as f:
+            assert f.read() == 'data'
+
+    def test_open_write_follows(self, fs):
+        """Writing through a link should modify the target file."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        with open(join(fs, 'link'), 'w') as f:
+            f.write('new')
+        with open(join(fs, 'a.txt')) as f:
+            assert f.read() == 'new'
+
+    def test_open_dangling(self, fs):
+        """Reading a dangling link should raise FileNotFoundError."""
+        os.symlink(join(fs, 'missing.txt'), join(fs, 'link'))
+        with pytest.raises(FileNotFoundError):
+            open(join(fs, 'link'))
+
+    def test_unlink_removes_link_only(self, fs):
+        """unlink() should remove the link, never the target."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        os.unlink(join(fs, 'link'))
+        assert not os.path.islink(join(fs, 'link'))
+        assert os.path.isfile(join(fs, 'a.txt'))
+
+    def test_rmtree_removes_link_only(self, fs):
+        """fs.rmtree() of a link should remove the link only."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        fs.rmtree(join(fs, 'link'))
+        assert not os.path.islink(join(fs, 'link'))
+        assert os.path.isfile(join(fs, 'a.txt'))
+
+    def test_rename_link(self, fs):
+        """rename() should move the link itself."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        os.rename(join(fs, 'link'), join(fs, 'link2'))
+        assert os.path.islink(join(fs, 'link2'))
+        assert os.readlink(join(fs, 'link2')) == join(fs, 'a.txt')
+        assert not os.path.exists(join(fs, 'link'))
+
+    def test_listdir_includes_links(self, fs):
+        """listdir() should include symlink names."""
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        names = os.listdir(fs.root_dir.path)
+        assert 'link' in names
+        assert 'a.txt' in names
+
+    def test_scandir_link_entry(self, fs):
+        """scandir() should report the link with is_symlink()."""
+        fs.create_file(join(fs, 'a.txt'), contents=b'data')
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        with os.scandir(fs.root_dir.path) as entries:
+            link_entry = [e for e in entries if e.is_symlink()][0]
+        assert link_entry.name == 'link'
+        assert link_entry.is_file()
+        assert not link_entry.is_dir()
+        assert not link_entry.is_file(follow_symlinks=False)
+        assert link_entry.stat().st_size == 4
+        assert statmod.S_ISLNK(link_entry.stat(follow_symlinks=False).st_mode)
+
+    def test_chdir_through_link(self, fs):
+        """chdir() should follow a link to a directory."""
+        fs.create_dir(join(fs, 'folder'))
+        os.symlink(join(fs, 'folder'), join(fs, 'link'))
+        os.chdir(join(fs, 'link'))
+        assert os.getcwd() == join(fs, 'folder')
+
+    def test_mkdir_on_link(self, fs):
+        """mkdir() on an existing link should raise FileExistsError."""
+        fs.create_file(join(fs, 'a.txt'))
+        os.symlink(join(fs, 'a.txt'), join(fs, 'link'))
+        with pytest.raises(FileExistsError):
+            os.mkdir(join(fs, 'link'))
 
 
 class TestOsDir:

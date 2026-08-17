@@ -168,3 +168,45 @@ class FakeDir(msgspec.Struct):
             stat.S_IFDIR | self.mode, self.ino, self.dev, self.nlink,
             self.uid, self.gid, 0, self.atime, self.mtime, self.ctime,
         )
+
+
+class FakeSymlink(msgspec.Struct):
+    """
+    In-memory record of a symbolic link, nothing is written to the real disk.
+
+    Attributes:
+        path (str): Normalized absolute path of the link
+        target (str): Target path of the link, as passed to symlink()
+        mode (int): Permission bits, e.g. 0o777
+        ino (int): Inode number
+        dev (int): Device number
+        nlink (int): Link count
+        uid (int): Owner user id
+        gid (int): Owner group id
+        atime (float): Last access time
+        mtime (float): Last modification time
+        ctime (float): Creation time
+    """
+    path: str
+    target: str
+    mode: int = 0o777
+    ino: int = 0
+    dev: int = 0
+    nlink: int = 1
+    uid: int = 0
+    gid: int = 0
+    atime: float = 0.0
+    mtime: float = 0.0
+    ctime: float = 0.0
+
+    def stat(self):
+        """
+        Get the stat result of the link itself (S_IFLNK).
+
+        Returns:
+            os.stat_result:
+        """
+        return _build_stat(
+            stat.S_IFLNK | self.mode, self.ino, self.dev, self.nlink,
+            self.uid, self.gid, len(self.target), self.atime, self.mtime, self.ctime,
+        )
