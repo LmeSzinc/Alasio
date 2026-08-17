@@ -23,6 +23,7 @@ parsing and dumping.
 
 import re
 from collections import deque
+from typing import Generic, Type, TypeVar
 
 import msgspec
 import yaml
@@ -37,6 +38,8 @@ from alasio.ext.cache import cached_property
 from alasio.ext.cache.msgspec_meta import get_field_metadata
 from alasio.ext.file.yamlfile import yaml_dumps, yaml_loads
 from alasio.ext.path.atomic import atomic_read_text, atomic_write, atomic_read_bytes
+
+T_model = TypeVar('T_model', bound=Struct)
 
 
 def build_help_map(model, prefix=()):
@@ -171,9 +174,9 @@ def insert_comments(text, help_map):
     return text
 
 
-class PoorYaml:
+class YamlConfig(Generic[T_model]):
     """
-    Poor yaml reader/writer with msgspec validation and comment preservation.
+    Yaml config reader/writer with msgspec validation and comment preservation.
 
     Comments are defined on the validation model fields with
     ``Annotated[str, Meta(extra={"help": "xxx"})]``, and written into the
@@ -181,21 +184,21 @@ class PoorYaml:
 
     Attributes:
         file (str): YAML file path
-        model (type): Subclass of msgspec.Struct
-        data (msgspec.Struct): Validated data, use ``self.data.attr`` to access fields
-        errors (list[ErrorInfo]): Errors of the last read, empty if none
+        model (type[T_model]): Subclass of msgspec.Struct
+        data (T_model): Validated data, use ``self.data.attr`` to access fields
+        errors (list[ErrorInfo]): Errors of the last read or validate, empty if none
         help_map (dict): {path: help_text} mapping of the model, path is a tuple of keys,
             cached as cached_property
 
     Args:
         file (str): YAML file path
-        model (type): Subclass of msgspec.Struct to validate config data.
+        model (type[T_model]): Subclass of msgspec.Struct to validate config data.
             All fields must have default values, so the model can be default constructed
     """
 
-    def __init__(self, file, model):
+    def __init__(self, file, model: Type[T_model]):
         self.file = file
-        self.model = model
+        self.model: Type[T_model] = model
         self.errors = []
         # Model must be a msgspec struct
         if not isinstance(model, type) or not issubclass(model, Struct):
@@ -208,7 +211,7 @@ class PoorYaml:
                 f'Model {model.__name__} must be default constructible, '
                 f'all fields need default values: {e}'
             ) from e
-        self.data = self.read()
+        self.data: T_model = self.read()
 
     @cached_property
     def help_map(self):
@@ -217,13 +220,13 @@ class PoorYaml:
         """
         return build_help_map(self.model)
 
-    def read(self):
+    def read(self) -> T_model:
         """
         Read yaml file and validate with model,
         fields that fail validation fall back to defaults
 
         Returns:
-            msgspec.Struct: self.data
+            T_model: self.data
         """
         try:
             text = atomic_read_bytes(self.file)
@@ -248,6 +251,21 @@ class PoorYaml:
             obj = self.model()
         self.data = obj
         return self.data
+
+    def validate(self):
+        """
+        Validate current self.data with the model, reusing the same loading
+        logic as read(), fields that fail validation fall back to defaults
+
+        Returns:
+            bool: True if self.data is valid, False if errors were found
+        """
+        obj, self.errors = load_msgpack_with_default(msgpack_encode(self.data), self.model)
+        if obj is NODEFAULT:
+            # Shouldn't happen, model is checked default constructible in __init__
+            obj = self.model()
+        self.data = obj
+        return not self.errors
 
     def write(self, skip_same=False):
         """

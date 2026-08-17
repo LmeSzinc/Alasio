@@ -3,8 +3,8 @@ import pytest
 from msgspec import Meta, Struct
 from typing_extensions import Annotated
 
-from alasio.ext.file.yamlpoor import (
-    PoorYaml, build_help_map, insert_comments, insert_comments_iter, iter_yaml_rows
+from alasio.ext.file.yamlconfig import (
+    YamlConfig, build_help_map, insert_comments, insert_comments_iter, iter_yaml_rows
 )
 from alasio.testing.filesystem import fs  # noqa: F401
 
@@ -304,30 +304,30 @@ port: 8080
 """
 
 
-class TestPoorYamlInit:
+class TestYamlConfigInit:
     def test_model_not_struct(self):
         with pytest.raises(TypeError, match="msgspec.Struct"):
-            PoorYaml("config.yaml", dict)
+            YamlConfig("config.yaml", dict)
 
     def test_model_not_default_constructible(self, fs):
         class NoDefault(Struct):
             port: int
 
         with pytest.raises(ValueError, match="default constructible"):
-            PoorYaml('/config.yaml', NoDefault)
+            YamlConfig('/config.yaml', NoDefault)
 
 
-class TestPoorYamlHelpMap:
+class TestYamlConfigHelpMap:
     def test_help_map(self, fs):
-        config = PoorYaml('/config.yaml', CommentedConfig)
+        config = YamlConfig('/config.yaml', CommentedConfig)
         assert config.help_map == {("port",): ["line 1", "line 2"], ("name",): "server name"}
 
     def test_help_map_cached(self, fs):
-        config = PoorYaml('/config.yaml', CommentedConfig)
+        config = YamlConfig('/config.yaml', CommentedConfig)
         assert config.help_map is config.help_map
 
     def test_help_map_no_help(self, fs):
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.help_map == {}
 
     def test_help_map_same_key_different_levels(self, fs):
@@ -338,16 +338,16 @@ class TestPoorYamlHelpMap:
             port: Annotated[int, Meta(extra={"help": "outer port help"})] = 2
             inner: Inner = msgspec.field(default_factory=Inner)
 
-        config = PoorYaml('/config.yaml', Outer)
+        config = YamlConfig('/config.yaml', Outer)
         assert config.help_map == {
             ("port",): "outer port help",
             ("inner", "port"): "inner port help",
         }
 
 
-class TestPoorYamlRead:
+class TestYamlConfigRead:
     def test_missing_file_returns_defaults(self, fs):
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.data == Config()
         assert config.errors == []
 
@@ -357,7 +357,7 @@ class TestPoorYamlRead:
 port: 9090
 name: custom
 """)
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.data.port == 9090
         assert config.data.name == "custom"
         assert config.errors == []
@@ -366,7 +366,7 @@ name: custom
         fs.create_file('/config.yaml', contents="""\
 port: 9090
 """)
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.data.port == 9090
 
     def test_read_invalid_value_falls_back_to_default(self, fs):
@@ -374,7 +374,7 @@ port: 9090
 port: not-a-number
 name: custom
 """)
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.data.port == 8080
         assert config.data.name == "custom"
         assert config.errors
@@ -384,33 +384,33 @@ name: custom
 unknown: 1
 port: 9090
 """)
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.data.port == 9090
 
     def test_read_invalid_yaml(self, fs):
         fs.create_file('/config.yaml', contents="""\
 port: [unclosed
 """)
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.data == Config()
 
     def test_read_non_utf8(self, fs):
         # Invalid utf-8 bytes can't be expressed with multiline string
         fs.create_file('/config.yaml', contents=b"port: \xff\xfe\n")
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.data == Config()
 
     def test_read_bom(self, fs):
         # BOM bytes can't be expressed with multiline string
         fs.create_file('/config.yaml', contents=b"\xef\xbb\xbfport: 9090\n")
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.data.port == 9090
 
     def test_read_numeric_string_keeps_type(self, fs):
         fs.create_file('/config.yaml', contents="""\
 name: '8080'
 """)
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.data.name == "8080"
 
     def test_read_list_value(self, fs):
@@ -420,7 +420,7 @@ name: '8080'
         fs.create_file('/config.yaml', contents="""\
 ports: [4, 5, 6]
 """)
-        config = PoorYaml('/config.yaml', ListConfig)
+        config = YamlConfig('/config.yaml', ListConfig)
         assert config.data.ports == [4, 5, 6]
 
     def test_read_nested_struct(self, fs):
@@ -429,7 +429,7 @@ inner:
   port: 9090
 name: custom
 """)
-        config = PoorYaml('/config.yaml', OuterConfig)
+        config = YamlConfig('/config.yaml', OuterConfig)
         assert config.data == OuterConfig(inner=InnerConfig(port=9090), name="custom")
 
     def test_read_multiline_string(self, fs):
@@ -438,13 +438,13 @@ desc: |-
   hello
   world
 """)
-        config = PoorYaml('/config.yaml', MultiLineConfig)
+        config = YamlConfig('/config.yaml', MultiLineConfig)
         assert config.data.desc == "hello\nworld"
 
 
-class TestPoorYamlWrite:
+class TestYamlConfigWrite:
     def test_write_comments(self, fs):
-        config = PoorYaml('/config.yaml', CommentedConfig)
+        config = YamlConfig('/config.yaml', CommentedConfig)
         config.write()
         text = open('/config.yaml', encoding="utf-8").read()
         assert text == """\
@@ -456,32 +456,32 @@ name: server
 """
 
     def test_write_creates_file(self, fs):
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.write() is True
         assert fs.exists('/config.yaml')
 
     def test_write_round_trip(self, fs):
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         config.data.port = 9090
         config.data.name = "custom"
         config.data.debug = True
         config.write()
 
-        config2 = PoorYaml('/config.yaml', Config)
+        config2 = YamlConfig('/config.yaml', Config)
         assert config2.data == Config(port=9090, name="custom", debug=True)
 
     def test_write_round_trip_numeric_string(self, fs):
         class StringConfig(Struct):
             port: str = "8080"
 
-        config = PoorYaml('/config.yaml', StringConfig)
+        config = YamlConfig('/config.yaml', StringConfig)
         config.write()
 
-        config2 = PoorYaml('/config.yaml', StringConfig)
+        config2 = YamlConfig('/config.yaml', StringConfig)
         assert config2.data == StringConfig(port="8080")
 
     def test_write_nested_round_trip(self, fs):
-        config = PoorYaml('/config.yaml', OuterConfig)
+        config = YamlConfig('/config.yaml', OuterConfig)
         config.data.inner.port = 9090
         config.write()
 
@@ -493,15 +493,15 @@ inner:
 name: server
 """
 
-        config2 = PoorYaml('/config.yaml', OuterConfig)
+        config2 = YamlConfig('/config.yaml', OuterConfig)
         assert config2.data == OuterConfig(inner=InnerConfig(port=9090))
 
     def test_write_multiline_round_trip(self, fs):
-        config = PoorYaml('/config.yaml', MultiLineConfig)
+        config = YamlConfig('/config.yaml', MultiLineConfig)
         config.data.desc = "hello\nworld"
         config.write()
 
-        config2 = PoorYaml('/config.yaml', MultiLineConfig)
+        config2 = YamlConfig('/config.yaml', MultiLineConfig)
         assert config2.data == MultiLineConfig(desc="hello\nworld")
 
     def test_write_same_key_different_levels(self, fs):
@@ -512,7 +512,7 @@ name: server
             port: Annotated[int, Meta(extra={"help": "outer port help"})] = 2
             inner: Inner = msgspec.field(default_factory=Inner)
 
-        config = PoorYaml('/config.yaml', Outer)
+        config = YamlConfig('/config.yaml', Outer)
         config.write()
 
         text = open('/config.yaml', encoding="utf-8").read()
@@ -524,22 +524,22 @@ inner:
   port: 1
 """
 
-        config2 = PoorYaml('/config.yaml', Outer)
+        config2 = YamlConfig('/config.yaml', Outer)
         assert config2.data == Outer(port=2, inner=Inner(port=1))
 
     def test_write_skip_same(self, fs):
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         assert config.write() is True
         assert config.write(skip_same=True) is False
 
     def test_write_skip_same_after_change(self, fs):
-        config = PoorYaml('/config.yaml', Config)
+        config = YamlConfig('/config.yaml', Config)
         config.write()
         config.data.port = 9090
         assert config.write(skip_same=True) is True
 
     def test_write_comments_preserved_after_rewrite(self, fs):
-        config = PoorYaml('/config.yaml', CommentedConfig)
+        config = YamlConfig('/config.yaml', CommentedConfig)
         config.write()
         config.data.port = 9090
         config.write()
@@ -551,3 +551,46 @@ port: 9090
 # server name
 name: server
 """
+
+class TestYamlConfigValidate:
+    def test_validate_valid(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: 9090
+name: custom
+""")
+        config = YamlConfig('/config.yaml', Config)
+        assert config.validate() is True
+        assert config.errors == []
+        assert config.data == Config(port=9090, name="custom")
+
+    def test_validate_invalid_falls_back_to_default(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: 9090
+""")
+        config = YamlConfig('/config.yaml', Config)
+        # set an invalid value on data
+        config.data.port = "not-a-number"
+        assert config.validate() is False
+        assert config.errors
+        assert config.data.port == 8080
+
+    def test_validate_errors_cleared_on_valid(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: not-a-number
+""")
+        config = YamlConfig('/config.yaml', Config)
+        assert config.errors
+        config.data.port = 9090
+        assert config.validate() is True
+        assert config.errors == []
+
+    def test_validate_nested(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+inner:
+  port: 9090
+name: custom
+""")
+        config = YamlConfig('/config.yaml', OuterConfig)
+        config.data.inner.port = "bad"
+        assert config.validate() is False
+        assert config.data.inner.port == 8080
