@@ -10,6 +10,8 @@ a list like ``["a", "b", "c"]``.  Lists in the container may be indexed by
 integer keys.
 """
 
+from collections import deque
+
 import pytest
 
 from alasio.ext.deep import deep_exist, deep_get, deep_get_with_error
@@ -90,6 +92,24 @@ class TestDeepGet:
         # deep_get returns the inner object by reference, not a copy
         d = {'a': {'b': [1, 2]}}
         assert deep_get(d, 'a.b') is d['a']['b']
+
+    def test_deep_get_tuple_keys(self):
+        # keys can be a tuple
+        d = {'a': {'b': 1}}
+        assert deep_get(d, ('a', 'b')) == 1
+        assert deep_get(d, ('a', 'x'), default='miss') == 'miss'
+        assert deep_get_with_error(d, ('a', 'b')) == 1
+        assert deep_exist(d, ('a', 'b')) is True
+        assert deep_exist(d, ('a', 'x')) is False
+
+    def test_deep_get_deque_keys(self):
+        # keys can be a deque
+        d = {'a': {'b': 1}}
+        assert deep_get(d, deque(['a', 'b'])) == 1
+        assert deep_get(d, deque(['a', 'x']), default='miss') == 'miss'
+        assert deep_get_with_error(d, deque(['a', 'b'])) == 1
+        assert deep_exist(d, deque(['a', 'b'])) is True
+        assert deep_exist(d, deque(['a', 'x'])) is False
 
 
 class TestDeepGetWithError:

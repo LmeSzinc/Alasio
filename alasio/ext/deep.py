@@ -21,7 +21,7 @@ def deep_get(d, keys, default=None):
 
     Args:
         d (dict | list):
-        keys (str | list): Such as ['Scheduler', 'NextRun', 'value']
+        keys (str | list | tuple | deque): Such as ['Scheduler', 'NextRun', 'value']
         default: Default return if key not found.
 
     Returns:
@@ -53,7 +53,7 @@ def deep_get_with_error(d, keys):
 
     Args:
         d (dict | list):
-        keys (str | list): Such as ['Scheduler', 'NextRun', 'value']
+        keys (str | list | tuple | deque): Such as ['Scheduler', 'NextRun', 'value']
 
     Returns:
         Value on given keys
@@ -87,7 +87,7 @@ def deep_exist(d, keys):
 
     Args:
         d (dict | list):
-        keys (str | list): Such as `Scheduler.NextRun.value`
+        keys (str | list | tuple | deque): Such as `Scheduler.NextRun.value`
 
     Returns:
         bool: If key exists
@@ -126,7 +126,7 @@ def deep_set(d, keys, value):
 
     Args:
         d (dict | list):
-        keys (str | list)
+        keys (str | list | tuple | deque)
         value:
 
     Returns:
@@ -224,7 +224,7 @@ def deep_default(d, keys, value):
 
     Args:
         d (dict | list):
-        keys (str | list)
+        keys (str | list | tuple | deque)
         value:
 
     Returns:
@@ -316,19 +316,29 @@ def deep_pop(d, keys, default=None):
 
     Args:
         d (dict | list):
-        keys (str | list)
+        keys (str | list | tuple | deque)
         default:
     """
     if type(keys) is str:
         keys = keys.split('.')
 
     try:
-        for k in keys[:-1]:
-            d = d[k]
+        first = True
+        prev_k = None
+        for k in keys:
+            if first:
+                prev_k = k
+                first = False
+                continue
+            d = d[prev_k]
+            prev_k = k
+        # keys is empty, keys[-1] would raise IndexError
+        if first:
+            return default
         # Write ops are dict only, do not pop from list
         if type(d) is not dict:
             return default
-        return d.pop(keys[-1])
+        return d.pop(prev_k)
     # No such key
     except KeyError:
         return default

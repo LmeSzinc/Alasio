@@ -12,7 +12,22 @@ always use the return value:
     d = deep_set(d, keys, value)
 """
 
+from collections import deque
+
+import pytest
+
 from alasio.ext.deep import deep_default, deep_set, dict_update
+
+# Non-dict value types used to exercise the override correction of deep_set()
+NON_DICT_VALUES = [
+    pytest.param(1, id='int'),
+    pytest.param(1.5, id='float'),
+    pytest.param('text', id='str'),
+    pytest.param([1, 2], id='list'),
+    pytest.param(object(), id='object'),
+]
+
+VALUE = 'value'
 
 
 class TestDeepSet:
@@ -102,6 +117,16 @@ class TestDeepSet:
         d = {'a': {}}
         assert deep_set(d, 'a.b', 1) is d
 
+    def test_deep_set_tuple_keys(self):
+        # keys can be a tuple
+        d = {}
+        assert deep_set(d, ('a', 'b'), 1) == {'a': {'b': 1}}
+
+    def test_deep_set_deque_keys(self):
+        # keys can be a deque
+        d = {}
+        assert deep_set(d, deque(['a', 'b']), 1) == {'a': {'b': 1}}
+
 
 class TestDeepDefault:
     def test_deep_default_existing(self):
@@ -142,6 +167,16 @@ class TestDeepDefault:
         d = {'a': None}
         deep_default(d, 'a', 1)
         assert d == {'a': None}
+
+    def test_deep_default_tuple_keys(self):
+        # keys can be a tuple
+        d = {}
+        assert deep_default(d, ('a', 'b'), 1) == {'a': {'b': 1}}
+
+    def test_deep_default_deque_keys(self):
+        # keys can be a deque
+        d = {}
+        assert deep_default(d, deque(['a', 'b']), 1) == {'a': {'b': 1}}
 
     def test_deep_default_unhashable_key(self):
         # A non-hashable key cannot be a dict key: return raw_d unchanged
@@ -187,3 +222,108 @@ class TestDictUpdate:
         d = {'a': 1}
         ret = dict_update(d, {'b': 2})
         assert ret is d
+
+
+class TestDeepSetOverrideNonDict:
+    """
+    deep_set() assumes dict on the whole key path, so any non-dict value met on
+    the path is replaced by a dict. This matrix exercises the override for
+    every non-dict depth (0=root .. 4) against every non-dict value type,
+    setting 4 deeper levels in each function.
+    """
+
+    @pytest.mark.parametrize('non_dict_value', NON_DICT_VALUES)
+    def test_depth_0_override(self, non_dict_value):
+        # Root (depth 0) is non dict
+        # set depth 1
+        assert deep_set(non_dict_value, ['k1'], VALUE) == {'k1': VALUE}
+        # set depth 2
+        assert deep_set(non_dict_value, ['k1', 'k2'], VALUE) == {'k1': {'k2': VALUE}}
+        # set depth 3
+        assert deep_set(non_dict_value, ['k1', 'k2', 'k3'], VALUE) == {'k1': {'k2': {'k3': VALUE}}}
+        # set depth 4
+        assert deep_set(non_dict_value, ['k1', 'k2', 'k3', 'k4'], VALUE) == {
+            'k1': {'k2': {'k3': {'k4': VALUE}}}
+        }
+
+    @pytest.mark.parametrize('non_dict_value', NON_DICT_VALUES)
+    def test_depth_1_override(self, non_dict_value):
+        # Depth 1 is non dict
+        # set depth 1, override the non dict itself
+        d = {'k1': non_dict_value}
+        assert deep_set(d, ['k1'], VALUE) == {'k1': VALUE}
+        # override depth 1, set depth 2
+        d = {'k1': non_dict_value}
+        assert deep_set(d, ['k1', 'k2'], VALUE) == {'k1': {'k2': VALUE}}
+        # override depth 1, set depth 3
+        d = {'k1': non_dict_value}
+        assert deep_set(d, ['k1', 'k2', 'k3'], VALUE) == {'k1': {'k2': {'k3': VALUE}}}
+        # override depth 1, set depth 4
+        d = {'k1': non_dict_value}
+        assert deep_set(d, ['k1', 'k2', 'k3', 'k4'], VALUE) == {
+            'k1': {'k2': {'k3': {'k4': VALUE}}}
+        }
+
+    @pytest.mark.parametrize('non_dict_value', NON_DICT_VALUES)
+    def test_depth_2_override(self, non_dict_value):
+        # Depth 2 is non dict
+        # set depth 2, override the non dict itself
+        d = {'k1': {'k2': non_dict_value}}
+        assert deep_set(d, ['k1', 'k2'], VALUE) == {'k1': {'k2': VALUE}}
+        # override depth 2, set depth 3
+        d = {'k1': {'k2': non_dict_value}}
+        assert deep_set(d, ['k1', 'k2', 'k3'], VALUE) == {'k1': {'k2': {'k3': VALUE}}}
+        # override depth 2, set depth 4
+        d = {'k1': {'k2': non_dict_value}}
+        assert deep_set(d, ['k1', 'k2', 'k3', 'k4'], VALUE) == {
+            'k1': {'k2': {'k3': {'k4': VALUE}}}
+        }
+        # override depth 2, set depth 5
+        d = {'k1': {'k2': non_dict_value}}
+        assert deep_set(d, ['k1', 'k2', 'k3', 'k4', 'k5'], VALUE) == {
+            'k1': {'k2': {'k3': {'k4': {'k5': VALUE}}}}
+        }
+
+    @pytest.mark.parametrize('non_dict_value', NON_DICT_VALUES)
+    def test_depth_3_override(self, non_dict_value):
+        # Depth 3 is non dict
+        # set depth 3, override the non dict itself
+        d = {'k1': {'k2': {'k3': non_dict_value}}}
+        assert deep_set(d, ['k1', 'k2', 'k3'], VALUE) == {'k1': {'k2': {'k3': VALUE}}}
+        # override depth 3, set depth 4
+        d = {'k1': {'k2': {'k3': non_dict_value}}}
+        assert deep_set(d, ['k1', 'k2', 'k3', 'k4'], VALUE) == {
+            'k1': {'k2': {'k3': {'k4': VALUE}}}
+        }
+        # override depth 3, set depth 5
+        d = {'k1': {'k2': {'k3': non_dict_value}}}
+        assert deep_set(d, ['k1', 'k2', 'k3', 'k4', 'k5'], VALUE) == {
+            'k1': {'k2': {'k3': {'k4': {'k5': VALUE}}}}
+        }
+        # override depth 3, set depth 6
+        d = {'k1': {'k2': {'k3': non_dict_value}}}
+        assert deep_set(d, ['k1', 'k2', 'k3', 'k4', 'k5', 'k6'], VALUE) == {
+            'k1': {'k2': {'k3': {'k4': {'k5': {'k6': VALUE}}}}}
+        }
+
+    @pytest.mark.parametrize('non_dict_value', NON_DICT_VALUES)
+    def test_depth_4_override(self, non_dict_value):
+        # Depth 4 is non dict
+        # set depth 4, override the non dict itself
+        d = {'k1': {'k2': {'k3': {'k4': non_dict_value}}}}
+        assert deep_set(d, ['k1', 'k2', 'k3', 'k4'], VALUE) == {'k1': {'k2': {'k3': {'k4': VALUE}}}}
+        # override depth 4, set depth 5
+        d = {'k1': {'k2': {'k3': {'k4': non_dict_value}}}}
+        assert deep_set(d, ['k1', 'k2', 'k3', 'k4', 'k5'], VALUE) == {
+            'k1': {'k2': {'k3': {'k4': {'k5': VALUE}}}}
+        }
+        # override depth 4, set depth 6
+        d = {'k1': {'k2': {'k3': {'k4': non_dict_value}}}}
+        assert deep_set(d, ['k1', 'k2', 'k3', 'k4', 'k5', 'k6'], VALUE) == {
+            'k1': {'k2': {'k3': {'k4': {'k5': {'k6': VALUE}}}}}
+        }
+        # override depth 4, set depth 7
+        d = {'k1': {'k2': {'k3': {'k4': non_dict_value}}}}
+        assert deep_set(d, ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7'], VALUE) == {
+            'k1': {'k2': {'k3': {'k4': {'k5': {'k6': {'k7': VALUE}}}}}}
+        }

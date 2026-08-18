@@ -6,6 +6,8 @@ It supports popping from a list by index as well as from a dict by key, and
 returns ``default`` when the key path does not exist.
 """
 
+from collections import deque
+
 from alasio.ext.deep import deep_pop
 
 
@@ -88,3 +90,15 @@ class TestDeepPop:
         d = {'a': inner}
         assert deep_pop(d, 'a') is inner
         assert d == {}
+
+    def test_deep_pop_tuple_keys(self):
+        # keys can be a tuple
+        d = {'a': {'b': 1}}
+        assert deep_pop(d, ('a', 'b')) == 1
+        assert d == {'a': {}}
+
+    def test_deep_pop_deque_keys(self):
+        # keys can be a deque
+        d = {'a': {'b': 1}}
+        assert deep_pop(d, deque(['a', 'b'])) == 1
+        assert d == {'a': {}}
