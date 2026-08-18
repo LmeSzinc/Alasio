@@ -112,10 +112,20 @@ def fs(monkeypatch):
     and the real disk is never touched. The patches are undone
     automatically when the test finishes.
 
+    The logger caches its log file fd on the LogWriter singleton. The
+    fixture resets the logger caches before and after the test, so logs
+    during the test don't leak into the real log file, and the cached fd
+    left by the test doesn't point into the fake filesystem after
+    deactivation.
+
     Yields:
         FakeFilesystem: The active fake filesystem
     """
+    from alasio.logger.writer import LogWriter
+
     fake = FakeFilesystem()
     fake.activate(monkeypatch)
+    LogWriter().close_fd()
     yield fake
+    LogWriter().close_fd()
     fake.deactivate()

@@ -73,6 +73,24 @@ class LogWriter(metaclass=Singleton):
             except Exception:
                 pass
 
+    def close_fd(self):
+        """
+        Close the cached log file fd, the next write reopens it.
+
+        The log file fd is cached on the singleton. Environments that
+        swap the filesystem (e.g. the in-memory fake filesystem used in
+        tests) must drop the cached fd, or later real logs would keep
+        writing into the swapped filesystem and get lost. Only the file
+        path and fd caches are dropped, stdout and backend stay intact.
+        """
+        cached_property_threadsafe.pop(self, 'file', None)
+        fd = cached_property_threadsafe.pop(self, 'fd', None)
+        if fd is not None:
+            try:
+                fd.close()
+            except Exception:
+                pass
+
     def mute(self, stdout=False, fd=False, backend=False, all=False):
         """
         Mute logging outputs.
