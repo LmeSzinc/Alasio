@@ -16,7 +16,8 @@ OP_DEL = 'del'
 def deep_get(d, keys, default=None):
     """
     Get value from nested dict and list
-    https://stackoverflow.com/questions/25833613/safe-method-to-get-value-of-nested-dictionary
+
+    To get from a list, keys must contain int index, must not be keys='item.0' where index is '0' in str
 
     Args:
         d (dict | list):
@@ -114,7 +115,8 @@ def deep_exist(d, keys):
 def deep_set(d, keys, value):
     """
     Set value into nested dict safely, imitating deep_get().
-    Can only set dict
+    Write operations assume dict only: a list met on the key path is treated
+    as a dict and replaced, so never write into a list.
 
     Note that always use:
         # This guarantee d is dict and deep_set() success
@@ -164,9 +166,15 @@ def deep_set(d, keys, value):
                 try:
                     prev_d[prev_k2] = {prev_k: d}
                 except TypeError:
-                    # `prev_d` is not dict, usually because `raw_d` is not dict
-                    prev_d = {prev_k: d}
-                    raw_d = prev_d
+                    try:
+                        # `prev_d` is not dict, usually because `raw_d` is not dict
+                        prev_d = {prev_k: d}
+                        raw_d = prev_d
+                    except TypeError:
+                        # `prev_k` is not hashable, cannot build a dict
+                        if type(raw_d) is dict:
+                            return raw_d
+                        return {}
 
             prev_k2 = prev_k
             prev_k = k
@@ -176,13 +184,11 @@ def deep_set(d, keys, value):
         pass
     # Input `keys` is empty list
     if first:
-        try:
-            # test if `raw_d` is dict
-            _ = None in raw_d
+        # `raw_d` is dict
+        if type(raw_d) is dict:
             return raw_d
-        except TypeError:
-            # `raw_d` is not dict, return a dict
-            return {}
+        # `raw_d` is not dict, return a dict
+        return {}
 
     # Last key, set value
     try:
@@ -194,14 +200,21 @@ def deep_set(d, keys, value):
             prev_d[prev_k2] = {prev_k: value}
             return raw_d
         except TypeError:
-            # `prev_d` is not dict, usually because `raw_d` is not dict
-            return {prev_k: value}
+            try:
+                # `prev_d` is not dict, usually because `raw_d` is not dict
+                return {prev_k: value}
+            except TypeError:
+                # `prev_k` is not hashable, cannot build a dict
+                if type(raw_d) is dict:
+                    return raw_d
+                return {}
 
 
 def deep_default(d, keys, value):
     """
     Set value into nested dict safely, imitating deep_get().
-    Can only set dict
+    Write operations assume dict only: a list met on the key path is treated
+    as a dict and replaced, so never write into a list.
 
     Note that always use:
         # This guarantee d is dict and deep_default() success
@@ -251,9 +264,15 @@ def deep_default(d, keys, value):
                 try:
                     prev_d[prev_k2] = {prev_k: d}
                 except TypeError:
-                    # `prev_d` is not dict, usually because `raw_d` is not dict
-                    prev_d = {prev_k: d}
-                    raw_d = prev_d
+                    try:
+                        # `prev_d` is not dict, usually because `raw_d` is not dict
+                        prev_d = {prev_k: d}
+                        raw_d = prev_d
+                    except TypeError:
+                        # `prev_k` is not hashable, cannot build a dict
+                        if type(raw_d) is dict:
+                            return raw_d
+                        return {}
 
             prev_k2 = prev_k
             prev_k = k
@@ -263,31 +282,37 @@ def deep_default(d, keys, value):
         pass
     # Input `keys` is empty list
     if first:
-        try:
-            # test if `raw_d` is dict
-            _ = None in raw_d
+        # `raw_d` is dict
+        if type(raw_d) is dict:
             return raw_d
-        except TypeError:
-            # `raw_d` is not dict, return a dict
-            return {}
+        # `raw_d` is not dict, return a dict
+        return {}
 
     # Last key, set value
     try:
         d.setdefault(prev_k, value)
         return raw_d
-    # Last value `d` is not dict
-    except AttributeError:
+    # Last value `d` is not dict, or `prev_k` is not hashable
+    except (AttributeError, TypeError):
         try:
             prev_d[prev_k2] = {prev_k: value}
             return raw_d
         except TypeError:
-            # `prev_d` is not dict, usually because `raw_d` is not dict
-            return {prev_k: value}
+            try:
+                # `prev_d` is not dict, usually because `raw_d` is not dict
+                return {prev_k: value}
+            except TypeError:
+                # `prev_k` is not hashable, cannot build a dict
+                if type(raw_d) is dict:
+                    return raw_d
+                return {}
 
 
 def deep_pop(d, keys, default=None):
     """
-    Pop value from nested dict and list
+    Pop value from nested dict
+    Write operations assume dict only: popping from a list returns default
+    without modifying the list.
 
     Args:
         d (dict | list):
@@ -300,7 +325,9 @@ def deep_pop(d, keys, default=None):
     try:
         for k in keys[:-1]:
             d = d[k]
-        # No `pop(k, default)` so it can pop list
+        # Write ops are dict only, do not pop from list
+        if type(d) is not dict:
+            return default
         return d.pop(keys[-1])
     # No such key
     except KeyError:
@@ -691,16 +718,27 @@ def deep_iter_diff(before, after):
         Any: Value in before, or None if not exists
         Any: Value in after, or None if not exists
     """
-    if before == after:
-        return
+    try:
+        if before == after:
+            return
+    except RecursionError:
+        # Circular reference or too deep to compare: fall through to diff
+        pass
     if type(before) is not dict or type(after) is not dict:
         yield [], before, after
         return
 
+    # Guard against circular references
+    visited = set()
     queue = deque([([], before, after)])
     while True:
         new_queue = deque()
         for path, d1, d2 in queue:
+            pair = (id(d1), id(d2))
+            if pair in visited:
+                # Circular reference: already compared, skip to avoid infinite loop
+                continue
+            visited.add(pair)
             keys1 = set(d1.keys())
             keys2 = set(d2.keys())
             for key in keys1.union(keys2):
@@ -717,7 +755,12 @@ def deep_iter_diff(before, after):
                     yield path + [key], None, val2
                     continue
                 # Compare dict first, which is pretty fast
-                if val1 != val2:
+                try:
+                    diff = val1 != val2
+                except RecursionError:
+                    # Too deep to compare, treat as different
+                    diff = True
+                if diff:
                     if type(val1) is dict and type(val2) is dict:
                         new_queue.append((path + [key], val1, val2))
                     else:
@@ -743,16 +786,27 @@ def deep_iter_patch(before, after):
         Any: Value in after,
             or None of event is OP_DEL
     """
-    if before == after:
-        return
+    try:
+        if before == after:
+            return
+    except RecursionError:
+        # Circular reference or too deep to compare: fall through to patch
+        pass
     if type(before) is not dict or type(after) is not dict:
         yield OP_SET, [], after
         return
 
+    # Guard against circular references
+    visited = set()
     queue = deque([([], before, after)])
     while True:
         new_queue = deque()
         for path, d1, d2 in queue:
+            pair = (id(d1), id(d2))
+            if pair in visited:
+                # Circular reference: already compared, skip to avoid infinite loop
+                continue
+            visited.add(pair)
             keys1 = set(d1.keys())
             keys2 = set(d2.keys())
             for key in keys1.union(keys2):
@@ -767,7 +821,12 @@ def deep_iter_patch(before, after):
                     yield OP_ADD, path + [key], val2
                     continue
                 # Compare dict first, which is pretty fast
-                if val1 != val2:
+                try:
+                    diff = val1 != val2
+                except RecursionError:
+                    # Too deep to compare, treat as different
+                    diff = True
+                if diff:
                     if type(val1) is dict and type(val2) is dict:
                         new_queue.append((path + [key], val1, val2))
                     else:
