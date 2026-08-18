@@ -23,21 +23,22 @@ parsing and dumping.
 
 import re
 from collections import deque
-from typing import Generic, Type, TypeVar
+from typing import Generic, List, Type, TypeVar, Union
 
 import msgspec
 import yaml
 from msgspec import NODEFAULT, Struct
 from msgspec.msgpack import encode as msgpack_encode
 from msgspec.structs import fields
-from msgspecerror import get_class_annotation_dict, load_msgpack_with_default
+from msgspecerror import ErrorInfo, get_class_annotation_dict, load_msgpack_with_default
 from msgspecerror.parse_type import is_struct_type, origin_args
 
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.ext.cache import cached_property
 from alasio.ext.cache.msgspec_meta import get_field_metadata
 from alasio.ext.file.yamlfile import yaml_dumps, yaml_loads
-from alasio.ext.path.atomic import atomic_read_text, atomic_write, atomic_read_bytes
+from alasio.ext.path.atomic import atomic_read_bytes, atomic_read_text, atomic_write
+from alasio.logger import logger
 
 T_model = TypeVar('T_model', bound=Struct)
 
@@ -186,7 +187,9 @@ class YamlConfig(Generic[T_model]):
         file (str): YAML file path
         model (type[T_model]): Subclass of msgspec.Struct
         data (T_model): Validated data, use ``self.data.attr`` to access fields
-        errors (list[ErrorInfo]): Errors of the last read or validate, empty if none
+        errors (list[ErrorInfo | Exception]): Errors or exceptions of the last read or
+            validate, empty if none. Exceptions are read failures such as
+            FileNotFoundError, UnicodeDecodeError and yaml.YAMLError
         help_map (dict): {path: help_text} mapping of the model, path is a tuple of keys,
             cached as cached_property
 
@@ -199,7 +202,7 @@ class YamlConfig(Generic[T_model]):
     def __init__(self, file, model: Type[T_model]):
         self.file = file
         self.model: Type[T_model] = model
-        self.errors = []
+        self.errors: "List[Union[ErrorInfo, Exception]]" = []
         # Model must be a msgspec struct
         if not isinstance(model, type) or not issubclass(model, Struct):
             raise TypeError(f'Model must be a subclass of msgspec.Struct, got {model!r}')
@@ -212,6 +215,8 @@ class YamlConfig(Generic[T_model]):
                 f'all fields need default values: {e}'
             ) from e
         self.data: T_model = self.read()
+        if self.errors:
+            self.write()
 
     @cached_property
     def help_map(self):
@@ -220,35 +225,52 @@ class YamlConfig(Generic[T_model]):
         """
         return build_help_map(self.model)
 
+    @staticmethod
+    def _log_errors(errors):
+        """
+        Log each error or exception as a warning
+
+        Args:
+            errors (list[ErrorInfo | Exception]): Errors to log
+        """
+        for error in errors:
+            logger.warning(f'Invalid deploy config value: {error}')
+
     def read(self) -> T_model:
         """
         Read yaml file and validate with model,
-        fields that fail validation fall back to defaults
+        fields that fail validation fall back to defaults.
+        Read failures are recorded in self.errors and also fall back to defaults
 
         Returns:
             T_model: self.data
         """
         try:
             text = atomic_read_bytes(self.file)
-        except (FileNotFoundError, UnicodeDecodeError):
+        except (FileNotFoundError, UnicodeDecodeError) as e:
             # File not found or not utf-8 encoded, use defaults
-            self.errors = []
+            self.errors = [e]
             self.data = self.model()
+            self._log_errors(self.errors)
             return self.data
         try:
             data = yaml_loads(text)
-        except yaml.YAMLError:
+        except yaml.YAMLError as e:
             # Invalid yaml, use defaults
-            self.errors = []
+            self.errors = [e]
             self.data = self.model()
+            self._log_errors(self.errors)
             return self.data
         if data is None:
             # Empty content or only comments, use defaults
             data = {}
-        obj, self.errors = load_msgpack_with_default(msgpack_encode(data), self.model)
+        obj, errors = load_msgpack_with_default(msgpack_encode(data), self.model)
         if obj is NODEFAULT:
             # Shouldn't happen, model is checked default constructible in __init__
             obj = self.model()
+        self.errors = errors
+        if errors:
+            self._log_errors(errors)
         self.data = obj
         return self.data
 
@@ -260,14 +282,18 @@ class YamlConfig(Generic[T_model]):
         Returns:
             bool: True if self.data is valid, False if errors were found
         """
-        obj, self.errors = load_msgpack_with_default(msgpack_encode(self.data), self.model)
+        obj, errors = load_msgpack_with_default(msgpack_encode(self.data), self.model)
         if obj is NODEFAULT:
             # Shouldn't happen, model is checked default constructible in __init__
             obj = self.model()
         self.data = obj
-        return not self.errors
+        self.errors = errors
+        if errors:
+            self._log_errors(errors)
+            return False
+        return True
 
-    def write(self, skip_same=False):
+    def write(self, skip_same=True):
         """
         Write self.data into yaml file, comments are inserted above the line
         of each key from ``Meta(extra={"help": ...})`` annotations, matched
@@ -292,5 +318,6 @@ class YamlConfig(Generic[T_model]):
             if text == old:
                 return False
 
+        logger.info(f'Write config {self.file}')
         atomic_write(self.file, text)
         return True

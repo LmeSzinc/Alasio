@@ -1,11 +1,11 @@
 import msgspec
 import pytest
+import yaml
 from msgspec import Meta, Struct
 from typing_extensions import Annotated
 
-from alasio.ext.file.yamlconfig import (
-    YamlConfig, build_help_map, insert_comments, insert_comments_iter, iter_yaml_rows
-)
+from alasio.ext.file.yamlconfig import YamlConfig, build_help_map, insert_comments, insert_comments_iter, iter_yaml_rows
+from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
 
@@ -349,7 +349,9 @@ class TestYamlConfigRead:
     def test_missing_file_returns_defaults(self, fs):
         config = YamlConfig('/config.yaml', Config)
         assert config.data == Config()
-        assert config.errors == []
+        # FileNotFoundError is recorded as an error
+        assert len(config.errors) == 1
+        assert isinstance(config.errors[0], FileNotFoundError)
 
     def test_read_values(self, fs):
         fs.create_file('/config.yaml', contents="""\
@@ -393,12 +395,18 @@ port: [unclosed
 """)
         config = YamlConfig('/config.yaml', Config)
         assert config.data == Config()
+        # yaml.YAMLError is recorded as an error
+        assert len(config.errors) == 1
+        assert isinstance(config.errors[0], yaml.YAMLError)
 
     def test_read_non_utf8(self, fs):
         # Invalid utf-8 bytes can't be expressed with multiline string
         fs.create_file('/config.yaml', contents=b"port: \xff\xfe\n")
         config = YamlConfig('/config.yaml', Config)
         assert config.data == Config()
+        # yaml.YAMLError (ReaderError) is recorded as an error
+        assert len(config.errors) == 1
+        assert isinstance(config.errors[0], yaml.YAMLError)
 
     def test_read_bom(self, fs):
         # BOM bytes can't be expressed with multiline string
@@ -442,6 +450,189 @@ desc: |-
         assert config.data.desc == "hello\nworld"
 
 
+class TestYamlConfigAutoFix:
+    """Init writes back fixed values when read found validation errors."""
+
+    def test_init_auto_fix_invalid_value(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: not-a-number
+name: custom
+""")
+        config = YamlConfig('/config.yaml', Config)
+        # Invalid field falls back to default, valid fields are preserved
+        assert config.data == Config(port=8080, name="custom")
+        # File is rewritten with the fixed values
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+port: 8080
+name: custom
+debug: false
+"""
+
+    def test_init_auto_fix_nested(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+inner:
+  port: not-a-number
+name: custom
+""")
+        YamlConfig('/config.yaml', OuterConfig)
+        # Second read has no errors, the file is now valid
+        config2 = YamlConfig('/config.yaml', OuterConfig)
+        assert config2.data == OuterConfig(inner=InnerConfig(port=8080), name="custom")
+        assert config2.errors == []
+
+    def test_init_auto_fix_round_trip(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: not-a-number
+""")
+        YamlConfig('/config.yaml', Config)
+        config2 = YamlConfig('/config.yaml', Config)
+        assert config2.data == Config()
+        assert config2.errors == []
+
+    def test_init_auto_fix_keeps_errors(self, fs):
+        # Errors of the read are still exposed after the auto fix
+        fs.create_file('/config.yaml', contents="""\
+port: not-a-number
+""")
+        config = YamlConfig('/config.yaml', Config)
+        assert config.errors
+
+    def test_init_no_write_on_valid(self, fs):
+        text = """\
+port: 9090
+name: custom
+"""
+        fs.create_file('/config.yaml', contents=text)
+        YamlConfig('/config.yaml', Config)
+        # Valid file is not rewritten
+        assert open('/config.yaml', encoding="utf-8").read() == text
+
+    def test_init_auto_fix_invalid_yaml(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: [unclosed
+""")
+        YamlConfig('/config.yaml', Config)
+        # Invalid yaml is replaced with default values
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+port: 8080
+name: server
+debug: false
+"""
+
+    def test_init_auto_fix_missing_file(self, fs):
+        YamlConfig('/config.yaml', Config)
+        # Missing file is created with default values
+        assert fs.exists('/config.yaml')
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+port: 8080
+name: server
+debug: false
+"""
+
+    def test_init_auto_fix_non_utf8(self, fs):
+        fs.create_file('/config.yaml', contents=b"port: \xff\xfe\n")
+        YamlConfig('/config.yaml', Config)
+        # Non-utf8 file is replaced with default values
+        text = open('/config.yaml', 'rb').read()
+        assert text == "port: 8080\nname: server\ndebug: false\n".encode('utf-8')
+
+
+class TestYamlConfigLogger:
+    """Logger outputs are captured with logger.mock_capture_writer."""
+
+    def test_read_invalid_value_logs_warning(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: not-a-number
+""")
+        with logger.mock_capture_writer() as capture:
+            YamlConfig('/config.yaml', Config)
+        assert capture.fd.any_contains("Invalid deploy config value")
+        assert capture.backend.any_contains("Invalid deploy config value")
+        assert any(log['l'] == 'WARNING' for log in capture.backend.logs)
+
+    def test_read_valid_no_warning(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: 9090
+""")
+        with logger.mock_capture_writer() as capture:
+            YamlConfig('/config.yaml', Config)
+        assert not capture.backend.any_contains("Invalid deploy config value")
+
+    def test_validate_invalid_logs_warning(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: 9090
+""")
+        config = YamlConfig('/config.yaml', Config)
+        config.data.port = "not-a-number"
+        with logger.mock_capture_writer() as capture:
+            assert config.validate() is False
+        assert capture.fd.any_contains("Invalid deploy config value")
+        assert any(log['l'] == 'WARNING' for log in capture.backend.logs)
+
+    def test_validate_valid_no_warning(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: 9090
+""")
+        config = YamlConfig('/config.yaml', Config)
+        with logger.mock_capture_writer() as capture:
+            assert config.validate() is True
+        assert not capture.backend.any_contains("Invalid deploy config value")
+
+    def test_write_logs_info(self, fs):
+        config = YamlConfig('/config.yaml', Config)
+        config.data.port = 9090
+        with logger.mock_capture_writer() as capture:
+            assert config.write() is True
+        assert capture.fd.any_contains("Write config")
+        assert capture.backend.any_contains("Write config")
+        assert any(log['l'] == 'INFO' for log in capture.backend.logs)
+
+    def test_write_skip_same_no_info(self, fs):
+        config = YamlConfig('/config.yaml', Config)
+        assert config.write(skip_same=False) is True
+        with logger.mock_capture_writer() as capture:
+            assert config.write(skip_same=True) is False
+        assert not capture.backend.any_contains("Write config")
+
+    def test_auto_fix_logs_warning_then_info(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: not-a-number
+""")
+        with logger.mock_capture_writer() as capture:
+            YamlConfig('/config.yaml', Config)
+        # warning from read(), info from the auto-fix write()
+        levels = [log['l'] for log in capture.backend.logs]
+        assert levels == ['WARNING', 'INFO']
+
+    def test_read_invalid_yaml_logs_warning_then_info(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+port: [unclosed
+""")
+        with logger.mock_capture_writer() as capture:
+            YamlConfig('/config.yaml', Config)
+        assert capture.fd.any_contains("Invalid deploy config value")
+        levels = [log['l'] for log in capture.backend.logs]
+        assert levels == ['WARNING', 'INFO']
+
+    def test_read_missing_file_logs_warning_then_info(self, fs):
+        with logger.mock_capture_writer() as capture:
+            YamlConfig('/config.yaml', Config)
+        assert capture.fd.any_contains("Invalid deploy config value")
+        levels = [log['l'] for log in capture.backend.logs]
+        assert levels == ['WARNING', 'INFO']
+
+    def test_read_non_utf8_logs_warning_then_info(self, fs):
+        fs.create_file('/config.yaml', contents=b"port: \xff\xfe\n")
+        with logger.mock_capture_writer() as capture:
+            YamlConfig('/config.yaml', Config)
+        assert capture.fd.any_contains("Invalid deploy config value")
+        levels = [log['l'] for log in capture.backend.logs]
+        assert levels == ['WARNING', 'INFO']
+
+
 class TestYamlConfigWrite:
     def test_write_comments(self, fs):
         config = YamlConfig('/config.yaml', CommentedConfig)
@@ -457,7 +648,7 @@ name: server
 
     def test_write_creates_file(self, fs):
         config = YamlConfig('/config.yaml', Config)
-        assert config.write() is True
+        assert config.write(skip_same=False) is True
         assert fs.exists('/config.yaml')
 
     def test_write_round_trip(self, fs):
@@ -529,7 +720,7 @@ inner:
 
     def test_write_skip_same(self, fs):
         config = YamlConfig('/config.yaml', Config)
-        assert config.write() is True
+        assert config.write(skip_same=False) is True
         assert config.write(skip_same=True) is False
 
     def test_write_skip_same_after_change(self, fs):
@@ -551,6 +742,7 @@ port: 9090
 # server name
 name: server
 """
+
 
 class TestYamlConfigValidate:
     def test_validate_valid(self, fs):
