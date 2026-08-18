@@ -16,7 +16,7 @@ from collections import deque
 
 import pytest
 
-from alasio.ext.deep import deep_default, deep_set, dict_update
+from alasio.ext.deep import deep_default, deep_set, deep_set_with_error, dict_update
 
 # Non-dict value types used to exercise the override correction of deep_set()
 NON_DICT_VALUES = [
@@ -327,3 +327,63 @@ class TestDeepSetOverrideNonDict:
         assert deep_set(d, ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7'], VALUE) == {
             'k1': {'k2': {'k3': {'k4': {'k5': {'k6': {'k7': VALUE}}}}}}
         }
+
+
+class TestDeepSetWithError:
+    """
+    deep_set_with_error() writes strictly like deep_pop() reads: the whole key
+    path must already exist as dicts. Missing keys raise KeyError, non-dict
+    levels raise TypeError, and nothing is auto-created or repaired.
+    """
+
+    def test_deep_set_with_error_basic(self):
+        d = {'a': {'b': 1}}
+        assert deep_set_with_error(d, 'a.b', 2) == {'a': {'b': 2}}
+        assert d == {'a': {'b': 2}}
+
+    def test_deep_set_with_error_missing_key_raises(self):
+        # Missing intermediate key is not created, raises KeyError
+        d = {}
+        with pytest.raises(KeyError):
+            deep_set_with_error(d, 'a.b', 1)
+        assert d == {}
+        # Missing last key raises KeyError
+        d = {'a': {}}
+        with pytest.raises(KeyError):
+            deep_set_with_error(d, 'a.b', 1)
+        assert d == {'a': {}}
+
+    def test_deep_set_with_error_returns_same_object(self):
+        d = {'a': {'b': 1}}
+        assert deep_set_with_error(d, 'a.b', 2) is d
+
+    @pytest.mark.parametrize('non_dict_value', NON_DICT_VALUES)
+    def test_deep_set_with_error_middle_non_dict_raises(self, non_dict_value):
+        # An existing non-dict intermediate level is an error, not repaired
+        d = {'a': non_dict_value}
+        with pytest.raises(TypeError):
+            deep_set_with_error(d, 'a.b', 2)
+        # data unchanged
+        assert d == {'a': non_dict_value}
+
+    def test_deep_set_with_error_last_non_dict_raises(self):
+        d = {'a': 1}
+        with pytest.raises(TypeError):
+            deep_set_with_error(d, 'a.b', 2)
+        assert d == {'a': 1}
+
+    def test_deep_set_with_error_empty_keys(self):
+        d = {'a': 1}
+        with pytest.raises(IndexError):
+            deep_set_with_error(d, [], 2)
+        assert d == {'a': 1}
+
+    def test_deep_set_with_error_non_iterable_keys_raises(self):
+        with pytest.raises(TypeError):
+            deep_set_with_error({'a': 1}, 123, 2)
+
+    def test_deep_set_with_error_tuple_deque_keys(self):
+        d = {'a': {'b': 1}}
+        assert deep_set_with_error(d, ('a', 'b'), 2) == {'a': {'b': 2}}
+        d = {'a': {'b': 1}}
+        assert deep_set_with_error(d, deque(['a', 'b']), 2) == {'a': {'b': 2}}

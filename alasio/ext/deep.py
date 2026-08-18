@@ -210,6 +210,71 @@ def deep_set(d, keys, value):
                 return {}
 
 
+def deep_set_with_error(d, keys, value):
+    """
+    Set value into nested dict strictly, raise on any error. Unlike deep_set(),
+    it does not create missing keys and does not repair non-dict intermediate
+    levels: the whole key path must already exist as dicts, otherwise an error
+    is raised. Similar to deep_pop() but writes instead of pops.
+
+    Note that always use:
+        # This guarantee d is dict and deep_set_with_error() success
+        d = deep_set_with_error(d, keys, value)
+    don't use:
+        deep_set_with_error(d, keys, value)
+
+    Args:
+        d (dict | list):
+        keys (str | list | tuple | deque)
+        value:
+
+    Returns:
+        dict:
+
+    Raises:
+        KeyError: If a key on the path does not exist
+        TypeError: If a non-dict is met on the key path, or `keys` is not
+            iterable
+        IndexError: If keys is empty
+    """
+    if type(keys) is str:
+        keys = keys.split('.')
+
+    raw_d = d
+    first = True
+    prev_k = None
+    try:
+        for k in keys:
+            if first:
+                prev_k = k
+                first = False
+                continue
+            d = d[prev_k]
+            prev_k = k
+        # keys is empty
+        if first:
+            raise IndexError('deep_set_with_error() keys is empty')
+        # Write ops assume dict only, do not set into list
+        if type(d) is not dict:
+            raise TypeError(
+                f'deep_set_with_error() expected dict at key {prev_k!r}, got {type(d).__name__}')
+        # The last key must already exist, like deep_pop()
+        if prev_k not in d:
+            raise KeyError(prev_k)
+        d[prev_k] = value
+        return raw_d
+    # No such key
+    except KeyError:
+        raise
+    # Input `keys` is not iterable or input `d` is not dict
+    # list indices must be integers or slices, not str
+    except TypeError:
+        raise
+    # Input `keys` out of index
+    except IndexError:
+        raise
+
+
 def deep_default(d, keys, value):
     """
     Set value into nested dict safely, imitating deep_get().
