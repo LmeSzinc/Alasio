@@ -1,8 +1,10 @@
 from alasio.config_dev.gen.gen_config_generated import GenConfigGenerated
 from alasio.config_dev.gen.gen_config_index import GenConfigIndex
 from alasio.config_dev.gen.gen_queue_index import GenQueueIndex
+from alasio.deploy.config.model import DeployModel
 from alasio.ext import env
 from alasio.ext.file.jsonfile import write_json_custom_indent
+from alasio.ext.file.yamlconfig import YamlConfig
 from alasio.ext.path import PathStr
 from alasio.git.stage.gitadd import GitAdd
 from alasio.logger import logger
@@ -102,6 +104,18 @@ class IndexGenerator(
         if not self.alasio:
             self.generate_group_export(gitadd=gitadd)
 
+    def _generate_deploy_template(self, gitadd=None):
+        """
+        Generate DeployModel to config/deploy.template.yaml
+        """
+        file = env.PROJECT_ROOT.joinpath('config/deploy.template.yaml')
+        config = YamlConfig(file, model=DeployModel)
+        op = config.write()
+        if op:
+            if gitadd:
+                gitadd.stage_add(file)
+
     def generate(self):
         with GitAdd(env.PROJECT_ROOT) as gitadd:
-            self._generate(gitadd)
+            self._generate(gitadd=gitadd)
+            self._generate_deploy_template(gitadd=gitadd)
