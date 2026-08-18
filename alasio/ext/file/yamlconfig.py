@@ -36,6 +36,7 @@ from msgspecerror.parse_type import is_struct_type, origin_args
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.ext.cache import cached_property
 from alasio.ext.cache.msgspec_meta import get_field_metadata
+from alasio.ext.deep import deep_iter_diff, deep_set_with_error
 from alasio.ext.file.yamlfile import yaml_dumps, yaml_loads
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_read_text, atomic_write
 from alasio.logger import logger
@@ -293,6 +294,50 @@ class YamlConfig(Generic[T_model]):
             return False
         return True
 
+    def set(self, key, value):
+        """
+        Set value at the key path of data with model validation.
+
+        The current data is converted to a builtin dict with
+        ``msgspec.to_builtins``, value is set at the key path with
+        ``deep_set_with_error``, then the dict is validated back into the
+        model with ``msgspec.convert``. On success self.data is replaced with
+        the validated model and True is returned, on failure the exception is
+        recorded in self.errors and logged, and self.data is left unchanged.
+
+        Args:
+            key (tuple[str]): Key path in the yaml structure, keys are encode
+                names of model fields, e.g. ('port',), ('inner', 'port')
+            value: Value to set at the key path, must be valid for the type
+                of the field at the path
+
+        Returns:
+            bool: True if the value was set, False if the key path doesn't
+                exist or validation failed
+        """
+        if not key:
+            error = ValueError(f'Key path must not be empty, got {key!r}')
+            self.errors = [error]
+            self._log_errors(self.errors)
+            return False
+        data = msgspec.to_builtins(self.data)
+        try:
+            deep_set_with_error(data, key, value)
+        except (KeyError, TypeError, IndexError):
+            error = KeyError(f'Key path {key!r} does not exist in data')
+            self.errors = [error]
+            self._log_errors(self.errors)
+            return False
+        try:
+            obj = msgspec.convert(data, self.model)
+        except Exception as e:
+            self.errors = [e]
+            self._log_errors(self.errors)
+            return False
+        self.data = obj
+        self.errors = []
+        return True
+
     def write(self, skip_same=True):
         """
         Write self.data into yaml file, comments are inserted above the line
@@ -321,3 +366,27 @@ class YamlConfig(Generic[T_model]):
         logger.info(f'Write config {self.file}')
         atomic_write(self.file, text)
         return True
+
+    def show(self):
+        """
+        Log all settings that are different from the default values, like::
+
+            Showing deploy config of xxx
+              Webapp.Lang = 'zh-CN'
+            (rest of the config is the same as default)
+
+        Key paths are joined with dots, e.g. ``Webapp.Lang``. When no setting
+        differs from the default, ``(config is the same as default)`` is
+        logged instead of the rest line.
+        """
+        logger.info(f'Showing deploy config of {self.file}')
+        default = msgspec.to_builtins(self.model())
+        data = msgspec.to_builtins(self.data)
+        count = 0
+        for path, _, after in deep_iter_diff(default, data):
+            logger.info(f'  {".".join(path)} = {after!r}')
+            count += 1
+        if count:
+            logger.info('(rest of the config is the same as default)')
+        else:
+            logger.info('(config is the same as default)')
