@@ -217,6 +217,78 @@ class TestStartStdinListener:
         assert supervisor._stdin_thread is None
 
 
+class TestStopStdinListenerWhenBlocked:
+    """The listener must exit even when stuck on a blocking readline."""
+
+    def test_unblocks_blocked_readline(self, replace_stdin):
+        # Pipe holds data without a newline, so readline() blocks forever
+        stream, write_fd = fake_stdin_from_pipe(b'partial data without newline')
+        replace_stdin(stream)
+        supervisor, _ = make_supervisor_with_pipe()
+
+        thread = supervisor.start_stdin_listener()
+        # Give the listener time to enter the blocking readline
+        time.sleep(0.2)
+        assert thread.is_alive()
+
+        supervisor.stop_stdin_listener()
+
+        assert not thread.is_alive()
+        assert supervisor._stdin_thread is None
+        os.close(write_fd)
+
+    def test_stop_while_pipe_partially_written(self, replace_stdin):
+        # Partial data without a newline used to block readline() forever;
+        # the listener must still exit promptly on stop
+        stream, write_fd = fake_stdin_from_pipe(b'command:st')
+        replace_stdin(stream)
+        supervisor, _ = make_supervisor_with_pipe()
+
+        thread = supervisor.start_stdin_listener()
+        time.sleep(0.2)
+        assert thread.is_alive()
+
+        supervisor.stop_stdin_listener()
+
+        assert not thread.is_alive()
+        assert supervisor._stdin_thread is None
+        os.close(write_fd)
+
+
+class TestRunStopsListener:
+    """Supervisor.run() must stop the stdin listener before returning."""
+
+    def test_stops_listener_on_exit(self, replace_stdin, monkeypatch):
+        import signal
+
+        stream, write_fd = fake_stdin_from_pipe()
+        replace_stdin(stream)
+        supervisor = Supervisor()
+        supervisor.backend_entry = staticmethod(lambda args: None)
+
+        # Listener running, as if a previous backend had started
+        thread = supervisor.start_stdin_listener()
+        assert thread.is_alive()
+
+        def fake_start_backend(args):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(supervisor, 'start_backend', fake_start_backend)
+
+        try:
+            supervisor.run([])
+        finally:
+            # run() installs custom signal handlers, restore the defaults
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            if sys.platform == 'win32':
+                signal.signal(signal.SIGBREAK, signal.SIG_DFL)
+
+        assert not thread.is_alive()
+        assert supervisor._stdin_thread is None
+        os.close(write_fd)
+
+
 class TestRecvLoopStartsListener:
     """Tests for recv_loop starting the stdin listener after startup."""
 
@@ -316,6 +388,49 @@ class TestStartBackendStopsListener:
         assert supervisor._stdin_thread is None
 
         os.close(write_fd)
+
+
+class TestHandleStdinLine:
+    """Tests for Supervisor._handle_stdin_line."""
+
+    def test_command_stop_forwards_and_stops(self):
+        supervisor, child_conn = make_supervisor_with_pipe()
+
+        assert supervisor._handle_stdin_line(b'command:stop\n') is True
+        assert supervisor.stop_requested is True
+        assert recv_with_timeout(child_conn) == b'command:stop'
+
+    def test_command_stop_crlf(self):
+        supervisor, child_conn = make_supervisor_with_pipe()
+
+        assert supervisor._handle_stdin_line(b'command:stop\r\n') is True
+        assert recv_with_timeout(child_conn) == b'command:stop'
+
+    def test_command_stop_no_parent_conn(self):
+        supervisor = Supervisor()
+
+        assert supervisor._handle_stdin_line(b'command:stop') is True
+        assert supervisor.stop_requested is True
+
+    def test_command_stop_broken_pipe_still_stops(self):
+        supervisor, child_conn = make_supervisor_with_pipe()
+        child_conn.close()
+
+        assert supervisor._handle_stdin_line(b'command:stop\n') is True
+        assert supervisor.stop_requested is True
+
+    def test_unknown_line_ignored(self):
+        supervisor, child_conn = make_supervisor_with_pipe()
+
+        assert supervisor._handle_stdin_line(b'garbage\n') is False
+        assert supervisor.stop_requested is False
+        assert not child_conn.poll(timeout=0.2)
+
+    def test_line_with_surrounding_spaces(self):
+        supervisor, _ = make_supervisor_with_pipe()
+
+        assert supervisor._handle_stdin_line(b'  command:stop  \n') is True
+        assert supervisor.stop_requested is True
 
 
 class TestHandleBackendMessage:

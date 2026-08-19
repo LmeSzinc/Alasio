@@ -227,10 +227,14 @@ class Supervisor:
         Recognized commands:
             command:stop    Gracefully stop the backend
 
-        The thread polls the stdin handle non-blocking and sleeps between
-        polls, and it must be stopped (see stop_stdin_listener) while a
-        backend process is spawning, otherwise multiprocessing spawn hangs on
-        Windows.
+        The thread never blocks on a read: it only reads bytes that are
+        already available in the pipe, so it always notices the stop event
+        within one poll cycle and can be joined by stop_stdin_listener. The
+        idle wait lives inside the platform read_available(): Windows sleeps
+        one poll cycle after an empty peek, POSIX lets select wait instead
+        of sleeping. The listener must be stopped (see stop_stdin_listener)
+        while a backend process is spawning, otherwise multiprocessing spawn
+        hangs on Windows.
 
         Returns:
             threading.Thread | None: The listener thread, or None if it was
@@ -244,49 +248,66 @@ class Supervisor:
                 if sys.platform == 'win32':
                     import ctypes
                     import msvcrt
-                    handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+                    fd = sys.stdin.fileno()
+                    handle = msvcrt.get_osfhandle(fd)
                     peek = ctypes.windll.kernel32.PeekNamedPipe
 
-                    def available():
-                        # Non-blocking check. On a broken pipe (EOF) peek fails
-                        # and returns ready so readline observes the EOF and
-                        # exits; a broken pipe also means the parent closed
-                        # stdin. Unlike WaitForMultipleObjects this never
+                    def read_available():
+                        # Non-blocking read of whatever is currently in the
+                        # pipe. PeekNamedPipe reports the exact byte count;
+                        # reading exactly that many bytes can never block
+                        # because the data is already there. On a broken pipe
+                        # (EOF) peek fails, so read the leftover and observe
+                        # the EOF. Unlike WaitForMultipleObjects this never
                         # reports a pipe as readable when it has no data.
+                        # When idle, sleep one poll cycle so the loop does
+                        # not busy-spin.
                         count = ctypes.c_ulong(0)
                         ok = peek(handle, None, 0, None, ctypes.byref(count), None)
                         if not ok:
-                            return True
-                        return count.value > 0
+                            count.value = 1
+                        if count.value > 0:
+                            try:
+                                return os.read(fd, count.value)
+                            except OSError:
+                                return b''
+                        time.sleep(0.05)
+                        return None
                 else:
                     import select
-                    handle = sys.stdin.fileno()
+                    fd = sys.stdin.fileno()
 
-                    def available():
-                        return bool(select.select([handle], [], [], 0)[0])
+                    def read_available():
+                        # select waits up to one poll cycle itself, so idle
+                        # waiting needs no separate sleep. A pipe read
+                        # returns whatever is available, so it never blocks
+                        # after select reported readable.
+                        if not select.select([fd], [], [], 0.05)[0]:
+                            return None
+                        try:
+                            return os.read(fd, 4096)
+                        except OSError:
+                            return b''
             except (AttributeError, OSError):
                 # No stdin available (e.g. launched without a stdin pipe)
                 return
+
+            line_buffer = b''
             while not self._stdin_stop.is_set():
-                if not available():
-                    time.sleep(0.02)
+                data = read_available()
+                if data is None:
                     continue
-                line = sys.stdin.buffer.readline()
-                if not line:
-                    # EOF: parent process closed stdin
+                if not data:
+                    # EOF: parent process closed stdin. Handle a last line
+                    # that was not terminated by a newline, then stop.
+                    if line_buffer and self._handle_stdin_line(line_buffer):
+                        return
                     return
-                msg = line.strip()
-                if msg == b'command:stop':
-                    self.stop_requested = True
-                    if self.parent_conn:
-                        try:
-                            self.parent_conn.send_bytes(msg)
-                        except (EOFError, OSError):
-                            # pipe broken, backend is gone, nothing to forward
-                            return
-                    # Stop requested, no more commands to handle
-                    return
-                # Unknown input is silently discarded
+                line_buffer += data
+                while b'\n' in line_buffer:
+                    line, _, line_buffer = line_buffer.partition(b'\n')
+                    if self._handle_stdin_line(line):
+                        return
 
         self._stdin_stop.clear()
         thread = threading.Thread(target=_stdin_loop, name='stdin_listener', daemon=True)
@@ -294,11 +315,42 @@ class Supervisor:
         self._stdin_thread = thread
         return thread
 
+    def _handle_stdin_line(self, line):
+        """
+        Handle one complete line read from stdin.
+
+        Args:
+            line (bytes): Line including the trailing newline unless it is
+                the last line of the stream
+
+        Returns:
+            bool: True if the listener should stop, False otherwise
+        """
+        line = line.strip()
+        if line == b'command:stop':
+            self.stop_requested = True
+            if self.parent_conn:
+                try:
+                    self.parent_conn.send_bytes(line)
+                except (EOFError, OSError):
+                    # pipe broken, backend is gone, nothing to forward
+                    pass
+            # Stop requested, no more commands to handle
+            return True
+        # Unknown input is silently discarded
+        return False
+
     def stop_stdin_listener(self):
         """
         Stop the stdin listener thread and wait for it to exit.
 
         Needed before spawning a backend process, see start_stdin_listener.
+        The listener never blocks on a read (see start_stdin_listener), so it
+        exits within one poll cycle and join always succeeds. This also
+        guarantees the daemon thread is gone before the interpreter shuts
+        down; a still-running listener would otherwise keep the stdin buffer
+        locked and Python aborts with
+        "Fatal Python error: could not acquire lock for <_io.BufferedReader>".
         """
         self._stdin_stop.set()
         if self._stdin_thread:
@@ -605,4 +657,9 @@ class Supervisor:
         finally:
             # Always clean up
             self.cleanup()
+            # The stdin listener is a daemon thread; if it is still running
+            # when the interpreter shuts down, Python aborts with
+            # "Fatal Python error: could not acquire lock ..." because the
+            # thread holds the stdin buffer lock. Stop it before returning.
+            self.stop_stdin_listener()
             mprint("Supervisor loop ended")
