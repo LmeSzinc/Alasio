@@ -15,8 +15,8 @@ let isQuitting = false;
 
 export function createWindow(): BrowserWindow {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: 960,
+    height: 660,
     frame: false,
     title: 'Alasio',
     webPreferences: {
