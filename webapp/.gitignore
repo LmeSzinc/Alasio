@@ -21,6 +21,15 @@ Thumbs.db
 !.env.example
 !.env.test
 
+# i18ngen (generated translation modules; entry files are tracked for bootstrap)
+renderer/src/i18ngen/*
+!renderer/src/i18ngen/constants.ts
+!renderer/src/i18ngen/index.ts
+main/i18ngen/*
+!main/i18ngen/constants.ts
+!main/i18ngen/index.ts
+!main/i18ngen/state.ts
+
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*

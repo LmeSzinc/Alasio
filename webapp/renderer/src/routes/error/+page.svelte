@@ -1,6 +1,6 @@
 <script lang="ts">
   import { useSharedState } from "$lib/useSharedState.svelte";
-  import * as t from "$lib/i18n/error";
+  import { t } from "$lib/i18n";
 
   const sharedState = useSharedState();
 </script>
@@ -14,7 +14,7 @@
         {sharedState.errorMessage || "Unknown error"}
       </p>
       <div class="text-sm">
-        <p>{t.CurrentPath()}: {sharedState.errorMessage}</p>
+        <p>{t.Error.CurrentPath()}: {sharedState.errorMessage}</p>
       </div>
     </div>
 

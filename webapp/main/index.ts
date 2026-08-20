@@ -1,10 +1,12 @@
 import { app, ipcMain } from 'electron';
 import * as path from 'path';
-import { loadConfig, saveFirstTimeConfig, AppConfig, ConfigError } from './config';
+import { loadConfig } from './config';
+import { appState } from './app-state';
 import { initSharedState, setRoute, setupSharedStateIPC, setMainWindow as setSharedStateWindow } from './shared-state';
 import { createWindow, setupWindowIPC } from './window';
 import { createTray, setMainWindow as setTrayWindow } from './tray';
 import { startBackend, setMainWindow as setBackendWindow } from './backend';
+import { IPC_BACKEND_START } from '../shared/ipc';
 import { registerAppProtocol } from './protocol';
 
 // Disable GPU and configure Electron
@@ -32,97 +34,75 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(async () => {
-    // Load configuration
-    const configResult = loadConfig();
-    
+    // Load configuration into the AppState singleton. On failure only
+    // appState.configError is set and the error page is shown below.
+    loadConfig();
+    // Register the nativeTheme listener and derive the initial display
+    // values (must happen after app ready).
+    appState.init();
+
     // Handle config errors
-    if ('type' in configResult) {
-      const error = configResult as ConfigError;
+    if (appState.configError) {
       initSharedState({
-        language: 'en-US',
         backendPort: 22267,
         route: 'error',
         isFirstTimeSetup: false,
       });
-      
+
       const window = createWindow();
       setSharedStateWindow(window);
       setTrayWindow(window);
       setBackendWindow(window);
-      
-      setRoute('error', error.message);
-      
+
+      setRoute('error', appState.configError.message);
+
       setupSharedStateIPC();
       setupWindowIPC();
-      
+
       const iconPath = path.join(__dirname, '../resources/icon.png');
-      createTray(iconPath, 'en-US');
+      createTray(iconPath, appState.displayLang);
       return;
     }
-    
-    const config = configResult as AppConfig;
-    
-    // Determine initial language
-    let initialLang = 'en-US';
-    const supportedLangs = ['zh-CN', 'en-US', 'ja-JP', 'zh-TW', 'es-ES'];
-    
-    if (config.isFirstTimeSetup) {
-      // First time: use system language
-      const systemLang = app.getLocale();
-      initialLang = supportedLangs.includes(systemLang) ? systemLang : 'en-US';
-    } else {
-      // Second time: use YAML config (or system language as fallback)
-      if (config.language && supportedLangs.includes(config.language)) {
-        initialLang = config.language;
-      } else {
-        const systemLang = app.getLocale();
-        initialLang = supportedLangs.includes(systemLang) ? systemLang : 'en-US';
-      }
-    }
-    
+
     // Initialize shared state
     initSharedState({
-      language: initialLang,
-      backendPort: config.backendPort,
-      route: config.isFirstTimeSetup ? 'setup' : 'loading',
-      isFirstTimeSetup: config.isFirstTimeSetup,
+      backendPort: appState.backendPort,
+      route: appState.isFirstTimeSetup ? 'setup' : 'loading',
+      isFirstTimeSetup: appState.isFirstTimeSetup,
     });
-    
+
     // Create window
     const window = createWindow();
     setSharedStateWindow(window);
     setTrayWindow(window);
     setBackendWindow(window);
-    
+
     // Setup IPC
     setupSharedStateIPC();
     setupWindowIPC();
-    
-    // Handle first-time config save
-    ipcMain.handle('config:save-first-time', async (_, language: string) => {
-      if (config.templatePath && config.deployPath) {
-        await saveFirstTimeConfig(config.templatePath, config.deployPath, language);
-        setRoute('loading');
-        
-        // Start backend after config is saved
-        try {
-          await startBackend(config.pythonExecutable, config.rootPath, config.backendHost, config.backendPort);
-          setRoute('app');
-        } catch (err) {
-          console.error('Failed to start backend:', err);
-          setRoute('error', 'Failed to start backend');
-        }
+
+    // Start the backend on first-time setup: the setup page has already
+    // saved the language/theme into the AppState (via setLanguage/
+    // setTheme IPC), and the backend persists them into deploy.yaml once
+    // it is ready (broadcastPrefs).
+    ipcMain.handle(IPC_BACKEND_START, async () => {
+      try {
+        await startBackend(appState.pythonExecutable, appState.rootPath, appState.backendHost, appState.backendPort);
+        setRoute('app');
+      } catch (err) {
+        console.error('Failed to start backend:', err);
+        setRoute('error', 'Failed to start backend');
       }
     });
-    
+
     // Create tray
     const iconPath = path.join(__dirname, '../resources/icon.png');
-    createTray(iconPath, initialLang);
-    
+    createTray(iconPath, appState.displayLang);
+
     // Start backend if not first time setup
-    if (!config.isFirstTimeSetup) {
+    if (!appState.isFirstTimeSetup) {
       try {
-        await startBackend(config.pythonExecutable, config.rootPath, config.backendHost, config.backendPort);
+        await startBackend(appState.pythonExecutable, appState.rootPath, appState.backendHost, appState.backendPort);
         setRoute('app');
       } catch (err) {
         console.error('Failed to start backend:', err);

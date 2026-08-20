@@ -3,8 +3,16 @@ import re
 import time
 
 import psutil
+import yaml
 
 from alasio.testing.managed_process import ManagedProcess
+
+# Absolute path of the real config/deploy.yaml. The stdin contract tests
+# exercise the full chain (stdin -> supervisor -> pipe -> backend ->
+# deploy.yaml) against the real config file and restore the original
+# values afterwards, so the file keeps its comments (the backend writes it
+# through YamlConfig, which preserves comments).
+DEPLOY_YAML = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'config', 'deploy.yaml'))
 
 
 def create_supervisor_process(backend_type: str) -> ManagedProcess:
@@ -194,3 +202,158 @@ class TestSupervisor:
 
             proc.wait_for_output("Restart limit exceeded", timeout=30)
             proc.wait_for_exit(timeout=5)
+
+
+class TestStdinPrefsCommands:
+    """
+    stdin 契约端到端：set_lang/set_theme 经 supervisor 转发到后端并
+    幂等持久化到 config/deploy.yaml
+    """
+
+    @staticmethod
+    def _read_webapp():
+        """
+        Read Webapp.Lang / Webapp.Theme from deploy.yaml
+
+        Returns:
+            tuple[str, str]: (lang, theme)
+        """
+        with open(DEPLOY_YAML, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+        webapp = data.get('Webapp', {}) or {}
+        return webapp.get('Lang', 'system'), webapp.get('Theme', 'system')
+
+    @staticmethod
+    def _wait_for_lang(expected, timeout=10):
+        """
+        Wait until Webapp.Lang equals expected
+
+        Args:
+            expected (str):
+            timeout (float): Seconds
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            lang, _ = TestStdinPrefsCommands._read_webapp()
+            if lang == expected:
+                return
+            time.sleep(0.05)
+        raise AssertionError(f'timeout waiting for Webapp.Lang == {expected}')
+
+    @staticmethod
+    def _restore_prefs(lang, theme):
+        """
+        Restore Webapp.Lang/Theme through a fresh prefs backend so the
+        yaml keeps its comments (YamlConfig write path)
+
+        Args:
+            lang (str):
+            theme (str):
+        """
+        with create_supervisor_process("prefs") as proc:
+            proc.wait_for_output("startup successful", timeout=10)
+            proc.process.stdin.write(f'command:set_lang:{lang}\n')
+            proc.process.stdin.flush()
+            TestStdinPrefsCommands._wait_for_lang(lang)
+            proc.process.stdin.write(f'command:set_theme:{theme}\n')
+            proc.process.stdin.flush()
+            proc.process.stdin.write('command:stop\n')
+            proc.process.stdin.flush()
+            proc.wait_for_exit(timeout=5)
+
+    def test_stdin_set_lang_persists_idempotent(self):
+        """
+        stdin set_lang 写入 deploy.yaml；重复写同值不写（mtime 不变）；
+        非法值不写；结束恢复原值
+        """
+        original_lang, original_theme = self._read_webapp()
+        try:
+            with create_supervisor_process("prefs") as proc:
+                proc.wait_for_output("startup successful", timeout=10)
+                proc.wait_for_output("Prefs backend started", timeout=5)
+
+                # 1. Set a value different from the current one
+                target = 'zh-CN' if original_lang != 'zh-CN' else 'en-US'
+                proc.process.stdin.write(f'command:set_lang:{target}\n')
+                proc.process.stdin.flush()
+                self._wait_for_lang(target)
+                mtime1 = os.stat(DEPLOY_YAML).st_mtime_ns
+
+                # 2. Same value again -> no write, mtime unchanged
+                time.sleep(0.1)
+                proc.process.stdin.write(f'command:set_lang:{target}\n')
+                proc.process.stdin.flush()
+                time.sleep(1.5)
+                assert os.stat(DEPLOY_YAML).st_mtime_ns == mtime1
+                assert self._read_webapp()[0] == target
+
+                # 3. Invalid value -> rejected by the backend, no write
+                time.sleep(0.1)
+                proc.process.stdin.write('command:set_lang:fr-FR\n')
+                proc.process.stdin.flush()
+                time.sleep(1.5)
+                assert os.stat(DEPLOY_YAML).st_mtime_ns == mtime1
+                assert self._read_webapp()[0] == target
+
+                # 4. Any command:* line is forwarded verbatim; the backend
+                #    logs and ignores unknown commands, no write happens
+                time.sleep(0.1)
+                proc.process.stdin.write('command:set_font:big\n')
+                proc.process.stdin.flush()
+                time.sleep(1.5)
+                assert os.stat(DEPLOY_YAML).st_mtime_ns == mtime1
+
+                # 5. Backend still alive, graceful stop works
+                assert proc.is_alive()
+                proc.process.stdin.write('command:stop\n')
+                proc.process.stdin.flush()
+                proc.wait_for_output('Received stop signal, shutting down gracefully', timeout=5)
+                proc.wait_for_exit(timeout=5)
+        finally:
+            if self._read_webapp()[0] != original_lang:
+                self._restore_prefs(original_lang, original_theme)
+
+    def test_stdin_set_theme_persists(self):
+        """
+        stdin set_theme 写入 deploy.yaml 并幂等；结束恢复原值
+        """
+        original_lang, original_theme = self._read_webapp()
+        try:
+            with create_supervisor_process("prefs") as proc:
+                proc.wait_for_output("startup successful", timeout=10)
+                proc.wait_for_output("Prefs backend started", timeout=5)
+
+                target = 'dark' if original_theme != 'dark' else 'light'
+                proc.process.stdin.write(f'command:set_theme:{target}\n')
+                proc.process.stdin.flush()
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    _, theme = self._read_webapp()
+                    if theme == target:
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError(f'timeout waiting for Webapp.Theme == {target}')
+                mtime1 = os.stat(DEPLOY_YAML).st_mtime_ns
+
+                # Idempotent: same value again -> no write
+                time.sleep(0.1)
+                proc.process.stdin.write(f'command:set_theme:{target}\n')
+                proc.process.stdin.flush()
+                time.sleep(1.5)
+                assert os.stat(DEPLOY_YAML).st_mtime_ns == mtime1
+
+                # Invalid value -> rejected
+                time.sleep(0.1)
+                proc.process.stdin.write('command:set_theme:blue\n')
+                proc.process.stdin.flush()
+                time.sleep(1.5)
+                assert os.stat(DEPLOY_YAML).st_mtime_ns == mtime1
+
+                proc.process.stdin.write('command:stop\n')
+                proc.process.stdin.flush()
+                proc.wait_for_output('Received stop signal, shutting down gracefully', timeout=5)
+                proc.wait_for_exit(timeout=5)
+        finally:
+            if self._read_webapp()[1] != original_theme:
+                self._restore_prefs(original_lang, original_theme)

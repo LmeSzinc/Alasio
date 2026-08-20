@@ -5,8 +5,13 @@
 // right of the page. The frontend can reserve space for them in its own
 // header (see `electronEnv.shouldAvoid`).
 //
-// UI-only flags: everything here can be tampered with by the user and it
-// only affects layout, which is exactly what we want for debugging.
+// There are two independent concepts:
+// - `isElectronSession`: the ?embedded=electron URL query injected by the
+//   webapp iframe. UI-only: it can be tampered with (e.g. by a remote
+//   visitor) and only affects header layout avoidance.
+// - `isElectron`: the authoritative embedded detection, driven by real
+//   `alasio:*` postMessage traffic from the host. Remote browser sessions
+//   never receive such messages and stay in per-client mode.
 //
 // NOTE: useLocalStorage is not reused here because its $effect runes cannot
 // be created at module top level (svelte 5 throws effect_orphan outside
@@ -38,7 +43,17 @@ function writeStored(key: string, value: unknown): void {
 }
 
 // The ?embedded=electron query injected by the webapp iframe.
+// Header-layout hint only; the authoritative embedded detection is the
+// message-driven `isElectron` below.
 export const isElectronSession = new URLSearchParams(location.search).get("embedded") === "electron";
+
+// Authoritative embedded detection: set to true by the first validated
+// `alasio:*` postMessage received from the parent window. The webapp host
+// always sends lang/theme downlinks shortly after the iframe loads, so an
+// embedded session flips this within the first frame. Remote browser
+// sessions have no parent container and never trigger this.
+// `let` is required: a `const` $state cannot be reassigned.
+export let isElectron = $state(false);
 
 // embedded: always mirrors the persisted value; an electron session forces
 // true on every load (overriding whatever was stored).
@@ -46,6 +61,17 @@ const embedded = $state(isElectronSession || readStored(EMBEDDED_KEY, false));
 if (isElectronSession) {
   writeStored(EMBEDDED_KEY, true);
 }
+
+// A real host presence is proven by `alasio:*` messages from the parent
+// window; only those count, so a spoofed URL query cannot enable the
+// host-sync behavior.
+window.addEventListener("message", (event: MessageEvent) => {
+  if (event.source !== window.parent) return;
+  const data = event.data;
+  if (data && typeof data === "object" && (data.type === "alasio:lang" || data.type === "alasio:theme")) {
+    isElectron = true;
+  }
+});
 
 // Avoidance mode: always mirrors localStorage (single source of truth).
 // An electron session resets it to the default once at startup through the
@@ -69,7 +95,7 @@ export const electronEnv = {
 
   /** Whether the header should reserve space for the electron window controls */
   get shouldAvoid() {
-    return avoidMode === "always" || (avoidMode === "auto" && embedded);
+    return avoidMode === "always" || (avoidMode === "auto" && (embedded || isElectron));
   },
 };
 

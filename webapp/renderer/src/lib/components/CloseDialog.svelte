@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import * as t from "$lib/i18n/close-dialog";
+  import { t } from "$lib/i18n";
 
   interface Props {
     show: boolean;
@@ -11,9 +11,9 @@
   let shutdownStage = $state<string>("");
 
   const stageMessages = $derived<Record<string, string>>({
-    waiting: t.WaitingBackend(),
-    forcing: t.ForcingBackend(),
-    killing: t.KillingBackend(),
+    waiting: t.CloseDialog.WaitingBackend(),
+    forcing: t.CloseDialog.ForcingBackend(),
+    killing: t.CloseDialog.KillingBackend(),
   });
 
   onMount(() => {
@@ -43,14 +43,14 @@
       class="bg-card text-card-foreground rounded-lg p-6 w-96 border border-border shadow-lg"
       onclick={(e) => e.stopPropagation()}
     >
-      <h2 class="text-2xl font-bold mb-4">{t.Title()}</h2>
-      <p class="text-muted-foreground mb-6">{t.Message()}</p>
+      <h2 class="text-2xl font-bold mb-4">{t.CloseDialog.Title()}</h2>
+      <p class="text-muted-foreground mb-6">{t.CloseDialog.Message()}</p>
 
       {#if isClosing}
         <div class="flex flex-col items-center gap-4 py-4">
           <div class="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-muted-foreground"></div>
           <p class="text-sm text-muted-foreground">
-            {stageMessages[shutdownStage] || t.Closing()}
+            {stageMessages[shutdownStage] || t.CloseDialog.Closing()}
           </p>
         </div>
       {:else}
@@ -59,13 +59,13 @@
             onclick={handleCancel}
             class="px-4 py-2 border border-border rounded hover:bg-accent hover:text-accent-foreground transition-colors"
           >
-            {t.Cancel()}
+            {t.CloseDialog.Cancel()}
           </button>
           <button
             onclick={handleConfirm}
             class="px-4 py-2 bg-destructive text-destructive-foreground rounded hover:bg-destructive/90 transition-colors"
           >
-            {t.Confirm()}
+            {t.CloseDialog.Confirm()}
           </button>
         </div>
       {/if}

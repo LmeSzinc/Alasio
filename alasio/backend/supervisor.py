@@ -225,7 +225,13 @@ class Supervisor:
         the pipe, unknown stdin input is silently discarded.
 
         Recognized commands:
-            command:stop    Gracefully stop the backend
+            command:stop        Gracefully stop the backend (also flags the
+                                supervisor itself to exit afterwards)
+            command:*           Any other command line is forwarded to the
+                                backend verbatim; the backend owns the
+                                semantics, so a backend update can change
+                                command handling without touching this
+                                process
 
         The thread never blocks on a read: it only reads bytes that are
         already available in the pipe, so it always notices the stop event
@@ -327,16 +333,28 @@ class Supervisor:
             bool: True if the listener should stop, False otherwise
         """
         line = line.strip()
-        if line == b'command:stop':
-            self.stop_requested = True
+        if line.startswith(b'command:'):
+            if line == b'command:stop':
+                self.stop_requested = True
+                if self.parent_conn:
+                    try:
+                        self.parent_conn.send_bytes(line)
+                    except (EOFError, OSError):
+                        # pipe broken, backend is gone, nothing to forward
+                        pass
+                # Stop requested, no more commands to handle
+                return True
+            # All other command lines are forwarded to the backend verbatim:
+            # the supervisor must not parse command semantics, the backend
+            # owns them (a backend update can change command handling
+            # without touching this process). The listener keeps running.
             if self.parent_conn:
                 try:
                     self.parent_conn.send_bytes(line)
                 except (EOFError, OSError):
                     # pipe broken, backend is gone, nothing to forward
                     pass
-            # Stop requested, no more commands to handle
-            return True
+            return False
         # Unknown input is silently discarded
         return False
 

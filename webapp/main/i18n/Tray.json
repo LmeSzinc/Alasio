@@ -1,0 +1,23 @@
+{
+  "Show": {
+    "en-US": "Show",
+    "zh-CN": "显示",
+    "ja-JP": "表示",
+    "zh-TW": "顯示",
+    "es-ES": "Mostrar"
+  },
+  "Hide": {
+    "en-US": "Hide",
+    "zh-CN": "隐藏",
+    "ja-JP": "非表示",
+    "zh-TW": "隱藏",
+    "es-ES": "Ocultar"
+  },
+  "Exit": {
+    "en-US": "Exit",
+    "zh-CN": "退出",
+    "ja-JP": "終了",
+    "zh-TW": "退出",
+    "es-ES": "Salir"
+  }
+}

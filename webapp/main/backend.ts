@@ -1,6 +1,7 @@
 import { ChildProcess, spawn } from 'child_process';
 import { BrowserWindow } from 'electron';
 import { IPC_BACKEND_LOG, IPC_BACKEND_READY } from '../shared/ipc';
+import { appState } from './app-state';
 import kill from 'tree-kill';
 
 export enum ShutdownStage {
@@ -22,6 +23,35 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export function setMainWindow(window: BrowserWindow) {
   mainWindow = window;
+}
+
+/**
+ * Write one command line to the backend stdin (e.g. the stdin contract
+ * commands command:set_lang:{lang} / command:set_theme:{theme}). The
+ * supervisor forwards recognized commands to the backend process.
+ *
+ * Returns:
+ *     bool: True if the command was written, False if the backend is not
+ *     running (never started, already exited or stdin unavailable)
+ */
+export function sendStdinCommand(command: string): boolean {
+  if (
+    !backendProcess ||
+    !backendProcess.stdin ||
+    !backendProcess.pid ||
+    backendProcess.exitCode !== null ||
+    backendProcess.signalCode !== null
+  ) {
+    return false;
+  }
+  try {
+    backendProcess.stdin.write(`${command}\n`);
+    return true;
+  } catch (err) {
+    // stdin is already closed, the process is exiting or already gone
+    console.error('Failed to write stdin command:', err);
+    return false;
+  }
 }
 
 export function startBackend(
@@ -86,6 +116,10 @@ export function startBackend(
         isReady = true;
         mainWindow?.webContents.send(IPC_BACKEND_READY);
         settle();
+        // Backend is up: push the current language/theme so the backend
+        // persists them into deploy.yaml (idempotent: no write when the
+        // value already matches).
+        appState.broadcastPrefs();
       }
     };
 

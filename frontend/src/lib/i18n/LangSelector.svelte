@@ -2,7 +2,8 @@
   import Button from "$lib/components/ui/button/button.svelte";
   import * as Popover from "$lib/components/ui/popover";
   import { i18nState, setLang, t } from "$lib/i18n";
-  import type { Lang } from "$lib/i18n/state.svelte";
+  import type { ConfigLang, Lang } from "$lib/i18n/state.svelte";
+  import { isElectron } from "$lib/use/useElectronEnv.svelte";
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
   import { SUPPORTED_LANGS } from "$src/i18ngen/constants";
@@ -12,7 +13,7 @@
     disabled?: boolean;
     class?: string;
     // Optional callback when value changed
-    handleEdit?: (value: Lang) => void;
+    handleEdit?: (value: ConfigLang) => void;
   };
   let { disabled = false, class: className, handleEdit }: Props = $props();
 
@@ -26,11 +27,20 @@
     "es-ES": "Español",
   };
 
+  // Options shown in the popover. In an embedded session the host is the
+  // source of truth, so a "follow system" option is offered; its value is
+  // the config semantic ('system'), while the display language always
+  // stays concrete.
+  const options = $derived<{ value: ConfigLang; name: string }[]>([
+    ...(isElectron ? [{ value: "system" as const, name: t.Language.FollowSystem() }] : []),
+    ...SUPPORTED_LANGS.map((lang) => ({ value: lang as Lang, name: languageNames[lang] })),
+  ]);
+
   let open = $state(false);
   $effect(() => {
     rpc.call("set_lang", { lang: i18nState.l });
   });
-  function selectLanguage(lang: Lang) {
+  function selectLanguage(lang: ConfigLang) {
     if (lang === i18nState.l) return;
     setLang(lang);
     open = false;
@@ -54,11 +64,11 @@
 
   <Popover.Content class="w-48 p-1" align="end">
     <div class="space-y-1">
-      {#each SUPPORTED_LANGS as lang}
-        {@const variant = i18nState.l === lang ? "default" : "ghost"}
-        <Button class="w-full justify-between font-normal" {variant} onclick={() => selectLanguage(lang)}>
-          {languageNames[lang]}
-          {#if i18nState.l === lang}
+      {#each options as opt (opt.value)}
+        {@const variant = i18nState.l === opt.value ? "default" : "ghost"}
+        <Button class="w-full justify-between font-normal" {variant} onclick={() => selectLanguage(opt.value)}>
+          {opt.name}
+          {#if i18nState.l === opt.value}
             <Check class="h-4 w-4" />
           {/if}
         </Button>

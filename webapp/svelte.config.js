@@ -19,6 +19,11 @@ const config = {
       routes: 'renderer/src/routes',
       appTemplate: 'renderer/src/app.html',
     },
+
+    // $src: absolute source root (used by generated i18n imports)
+    alias: {
+      $src: 'renderer/src',
+    },
   },
 };
 

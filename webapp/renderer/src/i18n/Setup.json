@@ -1,0 +1,51 @@
+{
+  "FollowSystem": {
+    "en-US": "Follow System",
+    "zh-CN": "跟随系统",
+    "ja-JP": "システムに従う",
+    "zh-TW": "跟隨系統",
+    "es-ES": "Seguir el sistema"
+  },
+  "Light": {
+    "en-US": "Light",
+    "zh-CN": "浅色",
+    "ja-JP": "ライト",
+    "zh-TW": "淺色",
+    "es-ES": "Claro"
+  },
+  "Dark": {
+    "en-US": "Dark",
+    "zh-CN": "深色",
+    "ja-JP": "ダーク",
+    "zh-TW": "深色",
+    "es-ES": "Oscuro"
+  },
+  "Welcome": {
+    "en-US": "Welcome",
+    "zh-CN": "欢迎使用",
+    "ja-JP": "ようこそ",
+    "zh-TW": "歡迎使用",
+    "es-ES": "Bienvenido"
+  },
+  "SelectLanguage": {
+    "en-US": "Select Language",
+    "zh-CN": "选择语言",
+    "ja-JP": "言語を選択",
+    "zh-TW": "選擇語言",
+    "es-ES": "Seleccionar idioma"
+  },
+  "SelectTheme": {
+    "en-US": "Select Theme",
+    "zh-CN": "选择主题",
+    "ja-JP": "テーマを選択",
+    "zh-TW": "選擇主題",
+    "es-ES": "Seleccionar tema"
+  },
+  "Start": {
+    "en-US": "Start",
+    "zh-CN": "开始使用",
+    "ja-JP": "スタート",
+    "zh-TW": "開始使用",
+    "es-ES": "Iniciar"
+  }
+}

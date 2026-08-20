@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { useSharedState } from '$lib/useSharedState.svelte';
-  import { i18nState } from '$lib/i18n/index.svelte';
+  import { i18nState } from '$lib/i18n/state.svelte';
   import TitleBar from '$lib/components/TitleBar.svelte';
   import '../app.css';
 
   const sharedState = useSharedState();
 
-  onMount(() => {
-    // Sync language with shared state
-    i18nState.l = sharedState.language;
+  // Keep the renderer i18n state in sync with the host's display language.
+  // The host (main process AppState) is the single source of truth.
+  $effect(() => {
+    i18nState.l = sharedState.displayLang;
   });
 </script>
 

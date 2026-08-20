@@ -432,6 +432,74 @@ class TestHandleStdinLine:
         assert supervisor._handle_stdin_line(b'  command:stop  \n') is True
         assert supervisor.stop_requested is True
 
+    def test_command_set_lang_forwards_without_stopping(self):
+        supervisor, child_conn = make_supervisor_with_pipe()
+
+        assert supervisor._handle_stdin_line(b'command:set_lang:zh-CN\n') is False
+        assert supervisor.stop_requested is False
+        assert recv_with_timeout(child_conn) == b'command:set_lang:zh-CN'
+
+    def test_command_set_lang_system_forwards(self):
+        supervisor, child_conn = make_supervisor_with_pipe()
+
+        assert supervisor._handle_stdin_line(b'command:set_lang:system\n') is False
+        assert supervisor.stop_requested is False
+        assert recv_with_timeout(child_conn) == b'command:set_lang:system'
+
+    def test_command_set_theme_forwards_without_stopping(self):
+        supervisor, child_conn = make_supervisor_with_pipe()
+
+        assert supervisor._handle_stdin_line(b'command:set_theme:dark\n') is False
+        assert supervisor.stop_requested is False
+        assert recv_with_timeout(child_conn) == b'command:set_theme:dark'
+
+    def test_command_set_lang_crlf(self):
+        supervisor, child_conn = make_supervisor_with_pipe()
+
+        assert supervisor._handle_stdin_line(b'command:set_lang:zh-TW\r\n') is False
+        assert recv_with_timeout(child_conn) == b'command:set_lang:zh-TW'
+
+    def test_command_set_lang_no_parent_conn(self):
+        supervisor = Supervisor()
+
+        # Without a backend the command is dropped, the listener keeps running
+        assert supervisor._handle_stdin_line(b'command:set_lang:zh-CN') is False
+        assert supervisor.stop_requested is False
+
+    def test_command_set_lang_broken_pipe_still_continues(self):
+        supervisor, child_conn = make_supervisor_with_pipe()
+        child_conn.close()
+
+        # Broken pipe must not raise; the listener keeps running
+        assert supervisor._handle_stdin_line(b'command:set_lang:zh-CN\n') is False
+        assert supervisor.stop_requested is False
+
+    def test_command_set_lang_unknown_value_still_forwards(self):
+        # The supervisor forwards verbatim without validating the value:
+        # validation belongs to the backend (which can be updated without
+        # touching the supervisor).
+        supervisor, child_conn = make_supervisor_with_pipe()
+
+        assert supervisor._handle_stdin_line(b'command:set_lang:fr-FR\n') is False
+        assert recv_with_timeout(child_conn) == b'command:set_lang:fr-FR'
+
+    def test_any_command_prefix_forwards(self):
+        # Any command:* line is forwarded verbatim, the backend owns the
+        # semantics; the listener keeps running
+        supervisor, child_conn = make_supervisor_with_pipe()
+
+        assert supervisor._handle_stdin_line(b'command:set_font:big\n') is False
+        assert supervisor.stop_requested is False
+        assert recv_with_timeout(child_conn) == b'command:set_font:big'
+
+    def test_command_prefix_broken_pipe_still_continues(self):
+        supervisor, child_conn = make_supervisor_with_pipe()
+        child_conn.close()
+
+        # Broken pipe must not raise; the listener keeps running
+        assert supervisor._handle_stdin_line(b'command:set_font:big\n') is False
+        assert supervisor.stop_requested is False
+
 
 class TestHandleBackendMessage:
     """Tests for Supervisor.handle_backend_message."""

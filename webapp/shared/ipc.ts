@@ -7,11 +7,12 @@ export const IPC_WINDOW_MINIMIZE = 'window:minimize';
 export const IPC_WINDOW_MAXIMIZE = 'window:maximize';
 export const IPC_WINDOW_HIDE = 'window:hide';
 export const IPC_SHARED_STATE_SET_LANGUAGE = 'shared-state:set-language';
+export const IPC_SHARED_STATE_SET_THEME = 'shared-state:set-theme';
 
 // Renderer -> Main, request/response (ipcRenderer.invoke / ipcMain.handle)
 export const IPC_WINDOW_CONFIRM_CLOSE = 'window:confirm-close';
 export const IPC_SHARED_STATE_GET = 'shared-state:get';
-export const IPC_CONFIG_SAVE_FIRST_TIME = 'config:save-first-time';
+export const IPC_BACKEND_START = 'backend:start';
 
 // Main -> Renderer, events (webContents.send / ipcRenderer.on)
 export const IPC_BACKEND_LOG = 'backend:log';

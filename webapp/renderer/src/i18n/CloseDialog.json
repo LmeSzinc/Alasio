@@ -1,0 +1,58 @@
+{
+  "WaitingBackend": {
+    "en-US": "Waiting for backend to close...",
+    "zh-CN": "正在等待后端关闭...",
+    "ja-JP": "バックエンドの終了を待っています...",
+    "zh-TW": "正在等待後端關閉...",
+    "es-ES": "Esperando que el backend se cierre..."
+  },
+  "ForcingBackend": {
+    "en-US": "Forcing backend shutdown...",
+    "zh-CN": "正在强制关闭后端...",
+    "ja-JP": "バックエンドを強制終了しています...",
+    "zh-TW": "正在強制關閉後端...",
+    "es-ES": "Forzando cierre del backend..."
+  },
+  "KillingBackend": {
+    "en-US": "Terminating backend process...",
+    "zh-CN": "正在终止后端进程...",
+    "ja-JP": "バックエンドプロセスを終了しています...",
+    "zh-TW": "正在終止後端進程...",
+    "es-ES": "Terminando proceso del backend..."
+  },
+  "Title": {
+    "en-US": "Confirm Close",
+    "zh-CN": "确认关闭",
+    "ja-JP": "閉じる確認",
+    "zh-TW": "確認關閉",
+    "es-ES": "Confirmar Cierre"
+  },
+  "Message": {
+    "en-US": "Are you sure you want to close Alasio?",
+    "zh-CN": "确定要关闭 Alasio 吗？",
+    "ja-JP": "Alasio を終了してもよろしいですか？",
+    "zh-TW": "確定要關閉 Alasio 嗎？",
+    "es-ES": "¿Estás seguro de que quieres cerrar Alasio?"
+  },
+  "Closing": {
+    "en-US": "Closing...",
+    "zh-CN": "正在关闭...",
+    "ja-JP": "終了中...",
+    "zh-TW": "正在關閉...",
+    "es-ES": "Cerrando..."
+  },
+  "Cancel": {
+    "en-US": "Cancel",
+    "zh-CN": "取消",
+    "ja-JP": "キャンセル",
+    "zh-TW": "取消",
+    "es-ES": "Cancelar"
+  },
+  "Confirm": {
+    "en-US": "Confirm",
+    "zh-CN": "确认",
+    "ja-JP": "確認",
+    "zh-TW": "確認",
+    "es-ES": "Confirmar"
+  }
+}

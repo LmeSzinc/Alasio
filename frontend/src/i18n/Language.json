@@ -1,4 +1,11 @@
 {
+  "FollowSystem": {
+    "en-US": "Follow System",
+    "zh-CN": "跟随系统",
+    "ja-JP": "システムに従う",
+    "zh-TW": "跟隨系統",
+    "es-ES": "Seguir el sistema"
+  },
   "SelectLanguage": {
     "en-US": "Select Language",
     "zh-CN": "选择语言",

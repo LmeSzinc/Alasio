@@ -34,7 +34,10 @@ export function useSharedState() {
   });
 
   return {
-    get language() { return state?.language || 'en-US'; },
+    get displayLang() { return state?.language || 'en-US'; },
+    get displayTheme() { return state?.theme || 'light'; },
+    get configLang() { return state?.configLang || 'system'; },
+    get configTheme() { return state?.configTheme || 'system'; },
     get backendPort() { return state?.backendPort || 22267; },
     get route() { return state?.route || 'loading'; },
     get isFirstTimeSetup() { return state?.isFirstTimeSetup || false; },

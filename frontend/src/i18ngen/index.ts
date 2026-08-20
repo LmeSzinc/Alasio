@@ -10,6 +10,7 @@ import * as Language from './Language';
 import * as Mod from './Mod';
 import * as Overview from './Overview';
 import * as Scheduler from './Scheduler';
+import * as Theme from './Theme';
 import * as WebsocketTest from './WebsocketTest';
 
 export const t = {
@@ -24,6 +25,7 @@ export const t = {
   Mod,
   Overview,
   Scheduler,
+  Theme,
   WebsocketTest,
 };
 export * from './constants';

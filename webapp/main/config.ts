@@ -1,29 +1,20 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
+import { appState, isConfigLang, isConfigTheme } from './app-state';
 
 interface DeployConfig {
   Python?: {
     PythonExecutable?: string;
   };
-  Webui?: {
-    Language?: string;
-  };
   Backend?: {
     Host?: string;
     Port?: number;
   };
-}
-
-export interface AppConfig {
-  pythonExecutable: string;
-  language: string;
-  backendHost: string;
-  backendPort: number;
-  rootPath: string;
-  isFirstTimeSetup: boolean;
-  templatePath?: string;
-  deployPath?: string;
+  Webapp?: {
+    Lang?: string;
+    Theme?: string;
+  };
 }
 
 export interface ConfigError {
@@ -67,7 +58,15 @@ function findConfigFile(startPath: string): {
   return { deployPath: null, templatePath: null, configDir: null };
 }
 
-export function loadConfig(): AppConfig | ConfigError {
+/**
+ * Load the deploy config into the AppState singleton.
+ *
+ * On success the startup config and the persistent Webapp.Lang/Theme
+ * values are written into appState and appState.configError is cleared.
+ * On failure only appState.configError is set; the caller routes to the
+ * error page.
+ */
+export function loadConfig(): void {
   // Start from the directory of the electron binary and walk upward to locate
   // the project root. process.cwd() must not be used: the app may be started
   // by a scheduled task with an unrelated working directory, which would make
@@ -77,11 +76,12 @@ export function loadConfig(): AppConfig | ConfigError {
   
   // No config files found
   if (!deployPath && !templatePath) {
-    return {
+    appState.configError = {
       type: 'config_not_found',
       message: 'Could not find deploy.yaml or deploy.template.yaml',
       currentPath: startPath,
     };
+    return;
   }
   
   // First time setup: only template exists
@@ -100,11 +100,12 @@ export function loadConfig(): AppConfig | ConfigError {
   // error.
   const pythonExecutableRaw = config.Python?.PythonExecutable;
   if (!pythonExecutableRaw) {
-    return {
+    appState.configError = {
       type: 'python_not_found',
       message: 'Python.PythonExecutable is not configured in deploy.yaml',
       currentPath: startPath,
     };
+    return;
   }
 
   // Resolve relative paths against the project root, never against the
@@ -115,54 +116,45 @@ export function loadConfig(): AppConfig | ConfigError {
   
   // Verify Python executable exists
   if (!fs.existsSync(pythonExecutable)) {
-    return {
+    appState.configError = {
       type: 'python_not_found',
       message: `Python executable not found: ${pythonExecutable}`,
       currentPath: startPath,
     };
+    return;
   }
   
   // Verify gui.py exists
   const guiPath = path.join(rootPath, 'gui.py');
   if (!fs.existsSync(guiPath)) {
-    return {
+    appState.configError = {
       type: 'guipy_not_found',
       message: `gui.py not found at: ${guiPath}`,
       currentPath: startPath,
     };
+    return;
   }
   
-  return {
-    pythonExecutable,
-    language: config.Webui?.Language || '',
-    // Command-line args given to gui.py take priority over the Backend
-    // section, so the webapp explicitly passes these on startup.
-    backendHost: config.Backend?.Host || '0.0.0.0',
-    backendPort: config.Backend?.Port || 22267,
-    rootPath,
-    isFirstTimeSetup,
-    templatePath: templatePath || undefined,
-    deployPath: deployPath || path.join(configDir!, 'deploy.yaml'),
-  };
-}
-
-export async function saveFirstTimeConfig(
-  templatePath: string,
-  deployPath: string,
-  language: string
-): Promise<void> {
-  const templateContent = fs.readFileSync(templatePath, 'utf-8');
-  const config = yaml.load(templateContent) as DeployConfig;
-  
-  // Update language
-  if (!config.Webui) config.Webui = {};
-  config.Webui.Language = language;
-  
-  // Write to deploy.yaml
-  const newContent = yaml.dump(config, {
-    indent: 2,
-    lineWidth: -1,
-  });
-  
-  fs.writeFileSync(deployPath, newContent, 'utf-8');
+  // Success: populate the AppState singleton.
+  // The webapp main process (AppState) is the single source of truth for
+  // language/theme; deploy.yaml (Webapp.Lang / Webapp.Theme) is only the
+  // persistence layer. Defaults stay 'system' when the fields are absent.
+  appState.pythonExecutable = pythonExecutable;
+  appState.rootPath = rootPath;
+  // Command-line args given to gui.py take priority over the Backend
+  // section, so the webapp explicitly passes these on startup.
+  appState.backendHost = config.Backend?.Host || '0.0.0.0';
+  appState.backendPort = config.Backend?.Port || 22267;
+  appState.isFirstTimeSetup = isFirstTimeSetup;
+  appState.templatePath = templatePath || undefined;
+  appState.deployPath = deployPath || path.join(configDir!, 'deploy.yaml');
+  const lang = config.Webapp?.Lang;
+  if (lang && isConfigLang(lang)) {
+    appState.configLang = lang;
+  }
+  const theme = config.Webapp?.Theme;
+  if (theme && isConfigTheme(theme)) {
+    appState.configTheme = theme;
+  }
+  appState.configError = undefined;
 }

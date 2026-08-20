@@ -37,4 +37,4 @@ class Const:
     # negative value to search a larger area
     ASSETS_SEARCH_OUTSET = 20
 
-    GUI_LANGUAGE = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP']
+    GUI_LANGUAGE = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'es-ES']

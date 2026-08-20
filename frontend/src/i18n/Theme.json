@@ -1,0 +1,30 @@
+{
+  "System": {
+    "en-US": "System",
+    "zh-CN": "跟随系统",
+    "ja-JP": "システム",
+    "zh-TW": "跟隨系統",
+    "es-ES": "Sistema"
+  },
+  "Light": {
+    "en-US": "Light",
+    "zh-CN": "浅色",
+    "ja-JP": "ライト",
+    "zh-TW": "淺色",
+    "es-ES": "Claro"
+  },
+  "Dark": {
+    "en-US": "Dark",
+    "zh-CN": "深色",
+    "ja-JP": "ダーク",
+    "zh-TW": "深色",
+    "es-ES": "Oscuro"
+  },
+  "SelectTheme": {
+    "en-US": "Select Theme",
+    "zh-CN": "选择主题",
+    "ja-JP": "テーマを選択",
+    "zh-TW": "選擇主題",
+    "es-ES": "Seleccionar tema"
+  }
+}

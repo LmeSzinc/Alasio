@@ -2,10 +2,11 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC_BACKEND_LOG,
   IPC_BACKEND_READY,
-  IPC_CONFIG_SAVE_FIRST_TIME,
+  IPC_BACKEND_START,
   IPC_CONFIRM_CLOSE,
   IPC_SHARED_STATE_GET,
   IPC_SHARED_STATE_SET_LANGUAGE,
+  IPC_SHARED_STATE_SET_THEME,
   IPC_SHARED_STATE_UPDATE,
   IPC_SHUTDOWN_STAGE,
   IPC_WINDOW_CONFIRM_CLOSE,
@@ -53,9 +54,10 @@ const api = {
     return () => ipcRenderer.removeListener(IPC_SHARED_STATE_UPDATE, handler);
   },
   setLanguage: (lang: string) => ipcRenderer.send(IPC_SHARED_STATE_SET_LANGUAGE, lang),
+  setTheme: (theme: string) => ipcRenderer.send(IPC_SHARED_STATE_SET_THEME, theme),
 
-  // First-time config
-  saveFirstTimeConfig: (language: string) => ipcRenderer.invoke(IPC_CONFIG_SAVE_FIRST_TIME, language),
+  // Backend lifecycle
+  startBackend: () => ipcRenderer.invoke(IPC_BACKEND_START),
 };
 
 // Single source of truth for the API surface exposed to the renderer.

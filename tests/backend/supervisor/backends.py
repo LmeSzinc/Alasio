@@ -50,6 +50,9 @@ class TestSupervisor(Supervisor):
         elif backend_type == "crash_after_success":
             # 启动成功后立即崩溃
             TestSupervisor._crash_after_success_backend()
+        elif backend_type == "prefs":
+            # 接收 stdin 转发来的 set_lang/set_theme 命令并持久化到 deploy.yaml
+            TestSupervisor._prefs_backend()
         else:
             print(f"[Backend] Unknown backend type: {backend_type}")
             sys.exit(1)
@@ -212,6 +215,46 @@ class TestSupervisor(Supervisor):
         time.sleep(0.5)
         print("[Backend] Crashing now")
         sys.exit(1)
+
+    @staticmethod
+    def _prefs_backend():
+        """
+        模拟真实后端：在 trio 环境中监听 pipe，处理 stdin 转发的
+        set_lang/set_theme 命令（持久化到 config/deploy.yaml）
+        """
+        import builtins
+        import os
+        import threading
+
+        import trio
+
+        from alasio.backend.lifespan import SHUTDOWN_EVENT, mpipe_recv_loop
+        from alasio.ext.env import set_project_root
+        from alasio.ext.path import PathStr
+
+        # Ensure the project root is resolved against the repository layout
+        set_project_root(PathStr.new(os.path.dirname(__file__)).uppath(3))
+
+        print("[Backend] Prefs backend started, waiting for commands...")
+
+        async def main():
+            trio_token = trio.lowlevel.current_trio_token()
+            thread = threading.Thread(
+                target=mpipe_recv_loop,
+                args=(builtins.__mpipe_conn__, trio_token),
+                name='mpipe_child_recv',
+                daemon=True,
+            )
+            thread.start()
+            await SHUTDOWN_EVENT.wait()
+            print("[Backend] Received stop signal, shutting down gracefully")
+
+        try:
+            trio.run(main)
+        except KeyboardInterrupt:
+            pass
+
+        print("[Backend] Prefs backend exiting")
 
 
 if __name__ == "__main__":
