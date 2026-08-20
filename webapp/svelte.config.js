@@ -15,14 +15,14 @@ const config = {
 
     // Keep the existing electron project layout under renderer/
     files: {
-      lib: 'renderer/src/lib',
-      routes: 'renderer/src/routes',
-      appTemplate: 'renderer/src/app.html',
+      lib: 'renderer/lib',
+      routes: 'renderer/routes',
+      appTemplate: 'renderer/app.html',
     },
 
     // $src: absolute source root (used by generated i18n imports)
     alias: {
-      $src: 'renderer/src',
+      $src: 'renderer',
     },
   },
 };

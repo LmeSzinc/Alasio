@@ -26,12 +26,12 @@ export interface I18nConfig {
 
 const LANGUAGES = ["en-US", "zh-CN", "ja-JP", "zh-TW", "es-ES"];
 
-/** Renderer (svelte mode) config: translations used by renderer/src */
+/** Renderer (svelte mode) config: translations used by renderer */
 export const rendererI18nConfig: I18nConfig = {
   cwd: process.cwd(),
-  srcPath: "renderer/src",
-  i18nPath: "renderer/src/i18n",
-  genPath: "renderer/src/i18ngen",
+  srcPath: "renderer",
+  i18nPath: "renderer/i18n",
+  genPath: "renderer/i18ngen",
   // Convention: Always use xx-YY format.
   // The first language is considered the default/fallback.
   languages: LANGUAGES,

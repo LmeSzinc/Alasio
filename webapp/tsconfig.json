@@ -17,14 +17,14 @@
     "verbatimModuleSyntax": false,
     "types": ["node", "vite/client"],
     "paths": {
-      "$lib": ["./renderer/src/lib"],
-      "$lib/*": ["./renderer/src/lib/*"],
-      "$src": ["./renderer/src"],
-      "$src/*": ["./renderer/src/*"],
-      "$routes": ["./renderer/src/routes"],
-      "$routes/*": ["./renderer/src/routes/*"]
+      "$lib": ["./renderer/lib"],
+      "$lib/*": ["./renderer/lib/*"],
+      "$src": ["./renderer"],
+      "$src/*": ["./renderer/*"],
+      "$routes": ["./renderer/routes"],
+      "$routes/*": ["./renderer/routes/*"]
     }
   },
-  "include": ["main/**/*", "preload/**/*", "renderer/src/**/*", "shared/**/*", "*.ts", "vite.config.mts"],
+  "include": ["main/**/*", "preload/**/*", "renderer/**/*", "shared/**/*", "*.ts", "vite.config.mts"],
   "exclude": ["node_modules", "dist"]
 }
