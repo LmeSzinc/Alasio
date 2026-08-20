@@ -52,8 +52,10 @@ export const isElectronSession = new URLSearchParams(location.search).get("embed
 // always sends lang/theme downlinks shortly after the iframe loads, so an
 // embedded session flips this within the first frame. Remote browser
 // sessions have no parent container and never trigger this.
-// `let` is required: a `const` $state cannot be reassigned.
-export let isElectron = $state(false);
+// Exported as an object reference (read via `.value`): svelte 5 forbids
+// exporting $state that is reassigned, so the mutable flag lives on a
+// property instead of the exported binding itself.
+export const isElectron = $state({ value: false });
 
 // embedded: always mirrors the persisted value; an electron session forces
 // true on every load (overriding whatever was stored).
@@ -69,7 +71,7 @@ window.addEventListener("message", (event: MessageEvent) => {
   if (event.source !== window.parent) return;
   const data = event.data;
   if (data && typeof data === "object" && (data.type === "alasio:lang" || data.type === "alasio:theme")) {
-    isElectron = true;
+    isElectron.value = true;
   }
 });
 
@@ -95,7 +97,7 @@ export const electronEnv = {
 
   /** Whether the header should reserve space for the electron window controls */
   get shouldAvoid() {
-    return avoidMode === "always" || (avoidMode === "auto" && (embedded || isElectron));
+    return avoidMode === "always" || (avoidMode === "auto" && (embedded || isElectron.value));
   },
 };
 

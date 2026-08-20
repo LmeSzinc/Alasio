@@ -25,7 +25,7 @@ export type DisplayTheme = "light" | "dark";
  * downlink. Remote browser sessions never report.
  */
 export function reportTheme(configTheme: ConfigTheme) {
-  if (browser && isElectron) {
+  if (browser && isElectron.value) {
     window.parent.postMessage({ type: "alasio:theme", theme: configTheme }, "*");
   }
 }

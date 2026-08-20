@@ -32,7 +32,7 @@
   // the config semantic ('system'), while the display language always
   // stays concrete.
   const options = $derived<{ value: ConfigLang; name: string }[]>([
-    ...(isElectron ? [{ value: "system" as const, name: t.Language.FollowSystem() }] : []),
+    ...(isElectron.value ? [{ value: "system" as const, name: t.Language.FollowSystem() }] : []),
     ...SUPPORTED_LANGS.map((lang) => ({ value: lang as Lang, name: languageNames[lang] })),
   ]);
 

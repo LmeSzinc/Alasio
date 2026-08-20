@@ -13,13 +13,6 @@
     "zh-TW": "配置檔案管理器",
     "es-ES": "Administrador de Config"
   },
-  "SchedulerGroup": {
-    "en-US": "Scheduler group #{n}",
-    "zh-CN": "调度器组 #{n}",
-    "ja-JP": "スケジューラグループ #{n}",
-    "zh-TW": "調度器組 #{n}",
-    "es-ES": "Grupo de programador #{n}"
-  },
   "RenameConfig": {
     "en-US": "Rename Config",
     "zh-CN": "重命名配置",
@@ -47,6 +40,13 @@
     "ja-JP": "設定を追加",
     "zh-TW": "新增配置",
     "es-ES": "Agregar Configuración"
+  },
+  "SchedulerGroup": {
+    "en-US": "Scheduler group #{n}",
+    "zh-CN": "调度器组 #{n}",
+    "ja-JP": "スケジューラグループ #{n}",
+    "zh-TW": "調度器組 #{n}",
+    "es-ES": "Grupo de programador #{n}"
   },
   "ConfigName": {
     "en-US": "Config Name",
@@ -90,20 +90,6 @@
     "zh-TW": "輸入新配置名稱",
     "es-ES": "Ingrese nuevo nombre de configuración"
   },
-  "DeleteConfirmation": {
-    "en-US": "Are you sure you want to delete this config?",
-    "zh-CN": "确定要删除此配置吗？",
-    "ja-JP": "この設定を削除してもよろしいですか？",
-    "zh-TW": "確定要刪除此配置嗎？",
-    "es-ES": "¿Está seguro de que desea eliminar esta configuración?"
-  },
-  "DeleteWarning": {
-    "en-US": "This action cannot be undone. The config file will be permanently deleted.",
-    "zh-CN": "此操作无法撤消。配置文件将被永久删除。",
-    "ja-JP": "この操作は元に戻せません。設定ファイルは完全に削除されます。",
-    "zh-TW": "此操作無法撤銷。配置檔案將被永久刪除。",
-    "es-ES": "Esta acción no se puede deshacer. El archivo de configuración se eliminará permanentemente."
-  },
   "CurrentName": {
     "en-US": "Current name",
     "zh-CN": "当前名称",
@@ -117,5 +103,19 @@
     "ja-JP": "新しい名前",
     "zh-TW": "新名稱",
     "es-ES": "Nuevo nombre"
+  },
+  "DeleteConfirmation": {
+    "en-US": "Are you sure you want to delete this config?",
+    "zh-CN": "确定要删除此配置吗？",
+    "ja-JP": "この設定を削除してもよろしいですか？",
+    "zh-TW": "確定要刪除此配置嗎？",
+    "es-ES": "¿Está seguro de que desea eliminar esta configuración?"
+  },
+  "DeleteWarning": {
+    "en-US": "This action cannot be undone. The config file will be permanently deleted.",
+    "zh-CN": "此操作无法撤消。配置文件将被永久删除。",
+    "ja-JP": "この操作は元に戻せません。設定ファイルは完全に削除されます。",
+    "zh-TW": "此操作無法撤銷。配置檔案將被永久刪除。",
+    "es-ES": "Esta acción no se puede deshacer. El archivo de configuración se eliminará permanentemente."
   }
 }

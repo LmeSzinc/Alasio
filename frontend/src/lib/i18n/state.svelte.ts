@@ -51,7 +51,7 @@ function applyLang(lang: Lang) {
  * parent container and never report.
  */
 function reportLang(configLang: ConfigLang) {
-  if (browser && isElectron) {
+  if (browser && isElectron.value) {
     window.parent.postMessage({ type: "alasio:lang", lang: configLang }, "*");
   }
 }
