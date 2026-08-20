@@ -275,8 +275,8 @@ def create_config(args=None):
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=str, default='')
-    parser.add_argument('--host', type=str, default='0.0.0.0')
-    parser.add_argument('--port', type=int, default=8000)
+    parser.add_argument('--host', type=str, default='')
+    parser.add_argument('--port', type=int, default=0)
     parsed_args, _ = parser.parse_known_args(args)
 
     # set project root, so we have the right path to save ./config
@@ -289,14 +289,30 @@ def create_config(args=None):
     logger.info(f'[PROJECT_ROOT] {env.PROJECT_ROOT}')
 
     apply_hypercorn_exclusivity_patch()
+    from alasio.deploy.config.model import DeployConfig
+    deploy = DeployConfig().config.data
+
+    # build host port
+    if parsed_args.host:
+        host = parsed_args.host
+    elif deploy.Backend.Host:
+        host = deploy.Backend.Host
+    else:
+        host = '0:0:0:0'
+    if parsed_args.port:
+        port = parsed_args.port
+    elif deploy.Backend.Port:
+        port = deploy.Backend.Port
+    else:
+        port = 8000
+
+    # build hypercorn config
     from hypercorn import Config
     config = Config()
-
-    # Bind address
-    config.bind = [f'{parsed_args.host}:{parsed_args.port}']
+    config.bind = [f'{host}:{port}']
 
     # To enable assess log
-    config.accesslog = '-'
+    # config.accesslog = '-'
 
     return config
 

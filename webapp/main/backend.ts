@@ -27,18 +27,24 @@ export function setMainWindow(window: BrowserWindow) {
 export function startBackend(
   pythonExecutable: string,
   rootPath: string,
-  webuiPort: number
+  backendHost: string,
+  backendPort: number
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     // gui.py forwards sys.argv to the backend supervisor, which passes them
     // down to the hypercorn config parser (--host/--port in create_config).
-    // Without --port the backend would listen on hypercorn's default 8000
-    // instead of the configured webuiPort.
-    const child = spawn(pythonExecutable, ['gui.py', '--port', String(webuiPort)], {
-      cwd: rootPath,
-      // stdin is piped so graceful shutdown can be requested through it
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    // --host/--port must be passed explicitly: command-line args take
+    // priority over the deploy.yaml Backend section, and without --port the
+    // backend would fall back to hypercorn's default 8000.
+    const child = spawn(
+      pythonExecutable,
+      ['gui.py', '--host', backendHost, '--port', String(backendPort)],
+      {
+        cwd: rootPath,
+        // stdin is piped so graceful shutdown can be requested through it
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }
+    );
     backendProcess = child;
 
     let isReady = false;

@@ -35,7 +35,7 @@ export function useSharedState() {
 
   return {
     get language() { return state?.language || 'en-US'; },
-    get webuiPort() { return state?.webuiPort || 22267; },
+    get backendPort() { return state?.backendPort || 22267; },
     get route() { return state?.route || 'loading'; },
     get isFirstTimeSetup() { return state?.isFirstTimeSetup || false; },
     get errorMessage() { return state?.errorMessage; },

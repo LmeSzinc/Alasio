@@ -8,14 +8,18 @@ interface DeployConfig {
   };
   Webui?: {
     Language?: string;
-    WebuiPort?: number;
+  };
+  Backend?: {
+    Host?: string;
+    Port?: number;
   };
 }
 
 export interface AppConfig {
   pythonExecutable: string;
   language: string;
-  webuiPort: number;
+  backendHost: string;
+  backendPort: number;
   rootPath: string;
   isFirstTimeSetup: boolean;
   templatePath?: string;
@@ -111,7 +115,10 @@ export function loadConfig(): AppConfig | ConfigError {
   return {
     pythonExecutable,
     language: config.Webui?.Language || '',
-    webuiPort: config.Webui?.WebuiPort || 22267,
+    // Command-line args given to gui.py take priority over the Backend
+    // section, so the webapp explicitly passes these on startup.
+    backendHost: config.Backend?.Host || '0.0.0.0',
+    backendPort: config.Backend?.Port || 22267,
     rootPath,
     isFirstTimeSetup,
     templatePath: templatePath || undefined,

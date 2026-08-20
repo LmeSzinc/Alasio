@@ -40,7 +40,7 @@ if (!gotTheLock) {
       const error = configResult as ConfigError;
       initSharedState({
         language: 'en-US',
-        webuiPort: 22267,
+        backendPort: 22267,
         route: 'error',
         isFirstTimeSetup: false,
       });
@@ -83,7 +83,7 @@ if (!gotTheLock) {
     // Initialize shared state
     initSharedState({
       language: initialLang,
-      webuiPort: config.webuiPort,
+      backendPort: config.backendPort,
       route: config.isFirstTimeSetup ? 'setup' : 'loading',
       isFirstTimeSetup: config.isFirstTimeSetup,
     });
@@ -106,7 +106,7 @@ if (!gotTheLock) {
         
         // Start backend after config is saved
         try {
-          await startBackend(config.pythonExecutable, config.rootPath, config.webuiPort);
+          await startBackend(config.pythonExecutable, config.rootPath, config.backendHost, config.backendPort);
           setRoute('app');
         } catch (err) {
           console.error('Failed to start backend:', err);
@@ -122,7 +122,7 @@ if (!gotTheLock) {
     // Start backend if not first time setup
     if (!config.isFirstTimeSetup) {
       try {
-        await startBackend(config.pythonExecutable, config.rootPath, config.webuiPort);
+        await startBackend(config.pythonExecutable, config.rootPath, config.backendHost, config.backendPort);
         setRoute('app');
       } catch (err) {
         console.error('Failed to start backend:', err);

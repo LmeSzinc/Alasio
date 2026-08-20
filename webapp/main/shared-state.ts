@@ -10,7 +10,7 @@ export type RouteType = 'setup' | 'loading' | 'app' | 'error';
 
 interface SharedState {
   language: string;
-  webuiPort: number;
+  backendPort: number;
   route: RouteType;
   isFirstTimeSetup: boolean;
   errorMessage?: string;
@@ -18,7 +18,7 @@ interface SharedState {
 
 const state: SharedState = {
   language: 'en-US',
-  webuiPort: 22267,
+  backendPort: 22267,
   route: 'loading',
   isFirstTimeSetup: false,
 };
@@ -31,12 +31,12 @@ export function setMainWindow(window: BrowserWindow) {
 
 export function initSharedState(config: {
   language: string;
-  webuiPort: number;
+  backendPort: number;
   route: RouteType;
   isFirstTimeSetup: boolean;
 }) {
   state.language = config.language;
-  state.webuiPort = config.webuiPort;
+  state.backendPort = config.backendPort;
   state.route = config.route;
   state.isFirstTimeSetup = config.isFirstTimeSetup;
 }

@@ -8,7 +8,7 @@
      the floating TitleBar overlay (drag strip + window controls) sits on top -->
 <div class="flex h-screen flex-col">
   <iframe
-    src="http://127.0.0.1:{sharedState.webuiPort}/?embedded=electron"
+    src="http://127.0.0.1:{sharedState.backendPort}/?embedded=electron"
     class="flex-1 w-full border-0"
     title="Alasio App"
   />
