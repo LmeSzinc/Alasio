@@ -32,15 +32,18 @@ export interface ConfigError {
   currentPath: string;
 }
 
-// Search for deploy.yaml or deploy.template.yaml
-function findConfigFile(startPath: string, maxLevels: number = 3): {
+// Search for deploy.yaml or deploy.template.yaml.
+// Walks upward from startPath until a directory containing
+// config/deploy.yaml or config/deploy.template.yaml is found (the project
+// root), or the filesystem root is reached.
+function findConfigFile(startPath: string): {
   deployPath: string | null;
   templatePath: string | null;
   configDir: string | null;
 } {
   let currentPath = startPath;
   
-  for (let i = 0; i < maxLevels; i++) {
+  for (;;) {
     const configDir = path.join(currentPath, 'config');
     const deployPath = path.join(configDir, 'deploy.yaml');
     const templatePath = path.join(configDir, 'deploy.template.yaml');
@@ -65,7 +68,11 @@ function findConfigFile(startPath: string, maxLevels: number = 3): {
 }
 
 export function loadConfig(): AppConfig | ConfigError {
-  const startPath = path.join(__dirname, '../..');
+  // Start from the directory of the electron binary and walk upward to locate
+  // the project root. process.cwd() must not be used: the app may be started
+  // by a scheduled task with an unrelated working directory, which would make
+  // the config file unfindable.
+  const startPath = path.dirname(process.execPath);
   const { deployPath, templatePath, configDir } = findConfigFile(startPath);
   
   // No config files found
@@ -87,11 +94,24 @@ export function loadConfig(): AppConfig | ConfigError {
   const configContent = fs.readFileSync(configFilePath, 'utf-8');
   const config = yaml.load(configContent) as DeployConfig;
   
-  // Get Python executable
-  let pythonExecutable = config.Python?.PythonExecutable || 'python';
-  if (!path.isAbsolute(pythonExecutable)) {
-    pythonExecutable = path.join(rootPath, pythonExecutable);
+  // Get Python executable.
+  // No default fallback (e.g. 'python' from PATH): mixing in the system
+  // python is not allowed, so a missing config or a missing file is a hard
+  // error.
+  const pythonExecutableRaw = config.Python?.PythonExecutable;
+  if (!pythonExecutableRaw) {
+    return {
+      type: 'python_not_found',
+      message: 'Python.PythonExecutable is not configured in deploy.yaml',
+      currentPath: startPath,
+    };
   }
+
+  // Resolve relative paths against the project root, never against the
+  // process working directory.
+  const pythonExecutable = path.isAbsolute(pythonExecutableRaw)
+    ? pythonExecutableRaw
+    : path.join(rootPath, pythonExecutableRaw);
   
   // Verify Python executable exists
   if (!fs.existsSync(pythonExecutable)) {

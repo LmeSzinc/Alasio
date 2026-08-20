@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC_BACKEND_LOG,
   IPC_BACKEND_READY,
@@ -12,7 +12,7 @@ import {
   IPC_WINDOW_HIDE,
   IPC_WINDOW_MAXIMIZE,
   IPC_WINDOW_MINIMIZE,
-} from '../shared/ipc';
+} from "../shared/ipc";
 
 const api = {
   // Window controls
@@ -55,12 +55,11 @@ const api = {
   setLanguage: (lang: string) => ipcRenderer.send(IPC_SHARED_STATE_SET_LANGUAGE, lang),
 
   // First-time config
-  saveFirstTimeConfig: (language: string) =>
-    ipcRenderer.invoke(IPC_CONFIG_SAVE_FIRST_TIME, language),
+  saveFirstTimeConfig: (language: string) => ipcRenderer.invoke(IPC_CONFIG_SAVE_FIRST_TIME, language),
 };
 
 // Single source of truth for the API surface exposed to the renderer.
 // The renderer imports this type instead of redeclaring the interface.
 export type ElectronAPI = typeof api;
 
-contextBridge.exposeInMainWorld('electronAPI', api);
+contextBridge.exposeInMainWorld("electronAPI", api);
