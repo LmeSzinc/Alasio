@@ -9,26 +9,38 @@
   // origin, and uplink messages are only accepted from it.
   const frontendOrigin = $derived(`http://127.0.0.1:${sharedState.backendPort}`);
 
+  // Whether the iframe has finished loading the backend page. Until the
+  // load event the iframe is still on its initial about:blank document,
+  // whose origin is inherited from the parent (app://bundle); posting
+  // with a strict targetOrigin then throws "target origin does not match
+  // the recipient window's origin" instead of delivering. Downlink
+  // messages are only sent after the backend page is actually loaded.
+  let iframeLoaded = false;
+
   // Send the current display values down to the embedded frontend.
-  // Runs on mount (once the iframe element exists) and whenever the
-  // display values change. Sending the same value again is harmless: the
-  // frontend's setLang no-ops on identical values.
-  $effect(() => {
+  // Sending the same value again is harmless: the frontend's setLang
+  // no-ops on identical values.
+  function sendDownlink() {
     const frame = iframe;
     if (!frame?.contentWindow) return;
     const origin = frontendOrigin;
     frame.contentWindow.postMessage({ type: "alasio:lang", lang: sharedState.displayLang }, origin);
     frame.contentWindow.postMessage({ type: "alasio:theme", theme: sharedState.displayTheme }, origin);
+  }
+
+  // Send whenever the display values change after the iframe finished
+  // loading (the load handler below sends the values on load).
+  $effect(() => {
+    if (!iframeLoaded) return;
+    sendDownlink();
   });
 
   // The frontend registers its message listeners when its scripts run, so
-  // a message posted before load could be lost. Re-send once the iframe
+  // a message posted before load could be lost. Send once the iframe
   // finished loading to guarantee the first frame converges.
   function handleLoad() {
-    const frame = iframe;
-    if (!frame?.contentWindow) return;
-    frame.contentWindow.postMessage({ type: "alasio:lang", lang: sharedState.displayLang }, frontendOrigin);
-    frame.contentWindow.postMessage({ type: "alasio:theme", theme: sharedState.displayTheme }, frontendOrigin);
+    iframeLoaded = true;
+    sendDownlink();
   }
 
   onMount(() => {
