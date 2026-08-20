@@ -1,17 +1,17 @@
 {
-  "Settings": {
-    "en-US": "Settings",
-    "zh-CN": "设置",
-    "ja-JP": "設定",
-    "zh-TW": "設定",
-    "es-ES": "Ajustes"
-  },
   "SystemTool": {
     "en-US": "System Tools",
     "zh-CN": "系统工具",
     "ja-JP": "システムツール",
     "zh-TW": "系統工具",
     "es-ES": "Herramientas del Sistema"
+  },
+  "Settings": {
+    "en-US": "Settings",
+    "zh-CN": "设置",
+    "ja-JP": "設定",
+    "zh-TW": "設定",
+    "es-ES": "Ajustes"
   },
   "AlasioTool": {
     "en-US": "Alasio Tools",
@@ -41,12 +41,26 @@
     "zh-TW": "重啟後端",
     "es-ES": "Reiniciar Backend"
   },
+  "RestartBackendHelp": {
+    "en-US": "Force restart the backend process",
+    "zh-CN": "强制重启后端进程",
+    "ja-JP": "バックエンドプロセスを強制再起動",
+    "zh-TW": "強制重啟後端程序",
+    "es-ES": "Reiniciar por fuerza el proceso del backend"
+  },
   "ReturnToLogin": {
     "en-US": "Return to Login",
     "zh-CN": "返回登录",
     "ja-JP": "ログインに戻る",
     "zh-TW": "返回登入",
     "es-ES": "Volver al Inicio de Sesión"
+  },
+  "ReturnToLoginHelp": {
+    "en-US": "Go back to the login page",
+    "zh-CN": "返回登录页面",
+    "ja-JP": "ログインページに戻る",
+    "zh-TW": "返回登入頁面",
+    "es-ES": "Volver a la página de inicio de sesión"
   },
   "AvoidAuto": {
     "en-US": "Auto avoid",
@@ -75,6 +89,13 @@
     "ja-JP": "ウィンドウボタン回避",
     "zh-TW": "視窗按鈕回避",
     "es-ES": "Evitar Controles de Ventana"
+  },
+  "WindowControlsAvoidHelp": {
+    "en-US": "Debugging only, affects the UI layout",
+    "zh-CN": "仅供调试，仅影响界面布局",
+    "ja-JP": "デバッグ専用、UIレイアウトのみに影響",
+    "zh-TW": "僅供除錯，僅影響介面版面",
+    "es-ES": "Solo depuración, afecta solo al diseño de la interfaz"
   },
   "SessionElectron": {
     "en-US": "Electron session",
