@@ -14,15 +14,6 @@ type LegacyRegisterProtocol = (
   handler: (request: any, callback: (result: { path?: string; error?: number }) => void) => void
 ) => void;
 
-// The electron d.ts version installed defines only one of the two APIs,
-// so cast through any to keep both electron 22 and modern versions compiling.
-const protocolHandle = (protocol as any).handle as HandleProtocol | undefined;
-const legacyRegister = (protocol as any).registerFileProtocol as
-  | LegacyRegisterProtocol
-  | undefined;
-// net.fetch is Electron 25+ only, same compatibility treatment
-const netFetch = (net as any).fetch as ((url: string) => Promise<Response>) | undefined;
-
 function resolveSafe(rendererDir: string, urlPath: string): string {
   const filePath = path.normalize(path.join(rendererDir, decodeURIComponent(urlPath)));
   if (!filePath.startsWith(rendererDir + path.sep)) {
@@ -59,6 +50,14 @@ export function registerAppProtocol(rendererDir: string) {
   ]);
 
   app.whenReady().then(() => {
+    // Electron 22 exposes the full protocol API (registerFileProtocol) only
+    // after ready, so the API references must be captured inside this
+    // callback, not at module top level.
+    const protocolHandle = (protocol as any).handle as HandleProtocol | undefined;
+    const legacyRegister = (protocol as any).registerFileProtocol as
+      | LegacyRegisterProtocol
+      | undefined;
+    const netFetch = (net as any).fetch as ((url: string) => Promise<Response>) | undefined;
     if (protocolHandle && netFetch) {
       protocolHandle('app', (request) => {
         const filePath = resolveFile(rendererDir, new URL(request.url).pathname);
