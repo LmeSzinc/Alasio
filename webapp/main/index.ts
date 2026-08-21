@@ -3,7 +3,7 @@ import * as path from 'path';
 import { loadConfig } from './config';
 import { appState } from './app-state';
 import { initSharedState, setRoute, setupSharedStateIPC, setMainWindow as setSharedStateWindow } from './shared-state';
-import { createWindow, setupWindowIPC } from './window';
+import { createWindow, setupWindowIPC, getMainWindow } from './window';
 import { createTray, setMainWindow as setTrayWindow } from './tray';
 import { startBackend, setMainWindow as setBackendWindow } from './backend';
 import { IPC_BACKEND_START } from '../shared/ipc';
@@ -25,7 +25,7 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    const win = require('./window').getMainWindow();
+    const win = getMainWindow();
     if (win) {
       if (win.isMinimized()) win.restore();
       if (!win.isVisible()) win.show();
