@@ -19,9 +19,9 @@
   const alasioNavItems = $derived([
     { path: "/dev/config", name: t.ConfigScan.ConfigManager() },
     { path: "/dev/mod", name: t.Mod.Title() },
+    { path: "/dev/setting", name: t.DevTool.AlasioSettings() },
   ]);
   const devNavItems = $derived([
-    { path: "/dev/tools", name: t.DevTool.SystemTool() },
     { path: "/dev/assets", name: t.AssetManager.AssetManager() },
     { path: "/dev/compat", name: "Browser Compatibility" },
   ]);

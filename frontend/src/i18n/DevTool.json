@@ -13,6 +13,13 @@
     "zh-TW": "設定",
     "es-ES": "Ajustes"
   },
+  "AlasioSettings": {
+    "en-US": "Alasio Settings",
+    "zh-CN": "Alasio 设置",
+    "ja-JP": "Alasio 設定",
+    "zh-TW": "Alasio 設定",
+    "es-ES": "Ajustes de Alasio"
+  },
   "AlasioTool": {
     "en-US": "Alasio Tools",
     "zh-CN": "Alasio 工具",
@@ -33,6 +40,41 @@
     "ja-JP": "DebugTool",
     "zh-TW": "DebugTool",
     "es-ES": "DebugTool"
+  },
+  "Display": {
+    "en-US": "Display",
+    "zh-CN": "显示",
+    "ja-JP": "ディスプレイ",
+    "zh-TW": "顯示",
+    "es-ES": "Pantalla"
+  },
+  "Language": {
+    "en-US": "Language",
+    "zh-CN": "语言",
+    "ja-JP": "言語",
+    "zh-TW": "語言",
+    "es-ES": "Idioma"
+  },
+  "Theme": {
+    "en-US": "Theme",
+    "zh-CN": "主题",
+    "ja-JP": "テーマ",
+    "zh-TW": "主題",
+    "es-ES": "Tema"
+  },
+  "DpiScaling": {
+    "en-US": "DPI Scaling",
+    "zh-CN": "DPI 缩放",
+    "ja-JP": "DPI スケーリング",
+    "zh-TW": "DPI 縮放",
+    "es-ES": "Escala DPI"
+  },
+  "DpiScalingHelp": {
+    "en-US": "Only available in the Electron app",
+    "zh-CN": "仅在 Electron 应用中可用",
+    "ja-JP": "Electron アプリでのみ利用可能",
+    "zh-TW": "僅在 Electron 應用程式中可用",
+    "es-ES": "Solo disponible en la aplicación Electron"
   },
   "RestartBackend": {
     "en-US": "Restart Backend",
