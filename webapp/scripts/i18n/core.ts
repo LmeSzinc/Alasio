@@ -70,6 +70,11 @@ export class I18nGenerator {
         ],
       },
     );
+    // fast-glob traverses the tree with parallel reads, so its result
+    // order varies between runs under filesystem activity (e.g. a running
+    // dev server). Sort by path so the generated module/key ordering is
+    // deterministic across runs and platforms.
+    files.sort();
 
     // Read all files in parallel, but apply the scan results in the order
     // files were returned by glob. Applying them in completion order would
