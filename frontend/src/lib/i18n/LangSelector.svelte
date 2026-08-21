@@ -3,7 +3,6 @@
   import * as Popover from "$lib/components/ui/popover";
   import { i18nState, setLang, t } from "$lib/i18n";
   import type { ConfigLang, Lang } from "$lib/i18n/state.svelte";
-  import { isElectron } from "$lib/use/useElectronEnv.svelte";
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
   import { SUPPORTED_LANGS } from "$src/i18ngen/constants";
@@ -27,12 +26,13 @@
     "es-ES": "Español",
   };
 
-  // Options shown in the popover. In an embedded session the host is the
-  // source of truth, so a "follow system" option is offered; its value is
-  // the config semantic ('system'), while the display language always
-  // stays concrete.
+  // Options shown in the popover. "Follow system" is always offered: in
+  // an embedded session the host derives the display language from its
+  // system locale; in a remote session it is derived locally from the
+  // browser languages. Its value is the config semantic ('system'), while
+  // the display language always stays concrete.
   const options = $derived<{ value: ConfigLang; name: string }[]>([
-    ...(isElectron.value ? [{ value: "system" as const, name: t.Language.FollowSystem() }] : []),
+    { value: "system" as const, name: t.Language.FollowSystem() },
     ...SUPPORTED_LANGS.map((lang) => ({ value: lang as Lang, name: languageNames[lang] })),
   ]);
 
@@ -41,7 +41,7 @@
     rpc.call("set_lang", { lang: i18nState.l });
   });
   function selectLanguage(lang: ConfigLang) {
-    if (lang === i18nState.l) return;
+    if (lang === i18nState.configLang) return;
     setLang(lang);
     open = false;
     handleEdit?.(lang);
@@ -65,10 +65,10 @@
   <Popover.Content class="w-48 p-1" align="end">
     <div class="space-y-1">
       {#each options as opt (opt.value)}
-        {@const variant = i18nState.l === opt.value ? "default" : "ghost"}
+        {@const variant = i18nState.configLang === opt.value ? "default" : "ghost"}
         <Button class="w-full justify-between font-normal" {variant} onclick={() => selectLanguage(opt.value)}>
           {opt.name}
-          {#if i18nState.l === opt.value}
+          {#if i18nState.configLang === opt.value}
             <Check class="h-4 w-4" />
           {/if}
         </Button>

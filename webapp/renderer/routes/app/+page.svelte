@@ -18,13 +18,18 @@
   let iframeLoaded = false;
 
   // Send the current display values down to the embedded frontend.
-  // Sending the same value again is harmless: the frontend's setLang
-  // no-ops on identical values.
+  // The lang message also carries the host config value so the frontend's
+  // configLang converges with the host (its own guess from cookie/browser
+  // may differ on first run). Sending the same value again is harmless:
+  // the frontend no-ops on identical values.
   function sendDownlink() {
     const frame = iframe;
     if (!frame?.contentWindow) return;
     const origin = frontendOrigin;
-    frame.contentWindow.postMessage({ type: "alasio:lang", lang: sharedState.displayLang }, origin);
+    frame.contentWindow.postMessage(
+      { type: "alasio:lang", lang: sharedState.displayLang, configLang: sharedState.configLang },
+      origin,
+    );
     frame.contentWindow.postMessage({ type: "alasio:theme", theme: sharedState.displayTheme }, origin);
   }
 
