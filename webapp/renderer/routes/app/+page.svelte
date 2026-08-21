@@ -15,7 +15,9 @@
   // with a strict targetOrigin then throws "target origin does not match
   // the recipient window's origin" instead of delivering. Downlink
   // messages are only sent after the backend page is actually loaded.
-  let iframeLoaded = false;
+  // Reactive ($state): the downlink effect below reads it, so flipping it
+  // on load reruns the effect and registers the display-value deps.
+  let iframeLoaded = $state(false);
 
   // Send the current display values down to the embedded frontend.
   // The lang message also carries the host config value so the frontend's
@@ -34,7 +36,12 @@
   }
 
   // Send whenever the display values change after the iframe finished
-  // loading (the load handler below sends the values on load).
+  // loading (the load handler below sends the values on load). Note the
+  // iframe load event can fire before the frontend registered its message
+  // listeners (the frontend starts through dynamic imports), so that first
+  // downlink may be lost; the frontend's "alasio:ready" handshake (sent
+  // once its listeners are registered) re-triggers this through the
+  // listener in onMount.
   $effect(() => {
     if (!iframeLoaded) return;
     sendDownlink();
@@ -63,6 +70,13 @@
         window.electronAPI.setLanguage(data.lang);
       } else if (data.type === "alasio:theme" && typeof data.theme === "string") {
         window.electronAPI.setTheme(data.theme);
+      } else if (data.type === "alasio:ready") {
+        // Handshake from the embedded frontend: it finished starting and
+        // registered its listeners. The load-event downlink may have been
+        // lost (the iframe load event can fire before the frontend's
+        // dynamic import chain finished), so re-send the current display
+        // values now.
+        sendDownlink();
       }
     };
     window.addEventListener("message", listener);
