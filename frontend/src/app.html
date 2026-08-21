@@ -5,6 +5,29 @@
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     %sveltekit.head%
+    <script>
+      // Embedded sessions: the host (webapp) passes its display theme in the
+      // iframe URL (?theme=dark|light). Apply it before the first paint so
+      // the embedded app opens already themed. This is needed because
+      // mode-watcher's FOUC script is not present in this SPA build
+      // (ssr/prerender disabled), and even when present it only knows
+      // localStorage/system preference, which can differ from the host
+      // config on first run. Persist the value to mode-watcher's storage key
+      // (its default modeStorageKey) so ModeWatcher's onMount initialization
+      // keeps the same mode. Remote sessions without the theme param are
+      // unaffected (per-client behavior preserved).
+      (() => {
+        try {
+          const theme = new URLSearchParams(window.location.search).get("theme");
+          if (theme === "light" || theme === "dark") {
+            const root = document.documentElement;
+            root.classList.toggle("dark", theme === "dark");
+            root.style.colorScheme = theme;
+            localStorage.setItem("mode-watcher-mode", theme);
+          }
+        } catch {}
+      })();
+    </script>
   </head>
   <body data-sveltekit-preload-data="hover">
     <div style="display: contents">%sveltekit.body%</div>

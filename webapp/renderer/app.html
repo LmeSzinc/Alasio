@@ -5,6 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Alasio</title>
     %sveltekit.head%
+    <script>
+      // Apply the host display theme before the first paint. Without this
+      // the document canvas is white until the CSS/JS bundle loads (the
+      // BrowserWindow backgroundColor only covers the pre-HTML window).
+      // The theme is read synchronously from the main process via the
+      // preload sendSync bridge (preload runs before page scripts); the
+      // root layout effect keeps it in sync afterwards.
+      (() => {
+        try {
+          const theme = window.electronAPI?.getSharedStateSync()?.theme;
+          if (theme === 'light' || theme === 'dark') {
+            document.documentElement.classList.toggle('dark', theme === 'dark');
+            document.documentElement.style.colorScheme = theme;
+          }
+        } catch {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app">%sveltekit.body%</div>

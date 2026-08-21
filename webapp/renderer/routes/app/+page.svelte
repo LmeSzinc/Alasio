@@ -4,6 +4,24 @@
 
   const sharedState = useSharedState();
   let iframe: HTMLIFrameElement | undefined = $state();
+  // The iframe's initial empty document is white until the frontend's
+  // first dark paint (its pre-paint script applies the theme passed in
+  // the URL). Keep it hidden until it is loaded (or the frontend signals
+  // ready) so no white flash shows between the loading page and the app;
+  // the parent background stays dark behind it.
+  let iframeVisible = $state(false);
+
+  // Initial iframe URL. The theme query is read by the frontend's
+  // pre-paint script in app.html, so the embedded app's very first paint
+  // already matches the host display theme (mode-watcher alone cannot
+  // know it: in this SPA build its FOUC script is absent from the served
+  // HTML, and its initial mode only comes from localStorage/system
+  // preference). Deliberately captured once, not reactive: rewriting the
+  // src would reload the iframe. Theme changes after load are propagated
+  // through the alasio:theme downlink instead.
+  let iframeSrc = $state(
+    `http://127.0.0.1:${sharedState.backendPort}/?embedded=electron&theme=${sharedState.displayTheme}`,
+  );
 
   // The embedded frontend origin. Downlink messages are only sent to this
   // origin, and uplink messages are only accepted from it.
@@ -52,6 +70,7 @@
   // finished loading to guarantee the first frame converges.
   function handleLoad() {
     iframeLoaded = true;
+    iframeVisible = true;
     sendDownlink();
   }
 
@@ -75,7 +94,10 @@
         // registered its listeners. The load-event downlink may have been
         // lost (the iframe load event can fire before the frontend's
         // dynamic import chain finished), so re-send the current display
-        // values now.
+        // values now. Also reveal the iframe: its first paint is already
+        // themed (pre-paint script), so hiding it any longer is
+        // unnecessary.
+        iframeVisible = true;
         sendDownlink();
       }
     };
@@ -90,8 +112,9 @@
   <iframe
     bind:this={iframe}
     onload={handleLoad}
-    src="http://127.0.0.1:{sharedState.backendPort}/?embedded=electron"
-    class="flex-1 w-full border-0"
+    src={iframeSrc}
+    class="flex-1 w-full border-0 opacity-0 transition-opacity duration-150"
+    class:opacity-100={iframeVisible}
     title="Alasio App"
   ></iframe>
 </div>
