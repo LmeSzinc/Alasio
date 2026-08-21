@@ -3,6 +3,9 @@ productName: Alasio
 directories:
   output: release
   buildResources: resources
+# Use the electron binary already installed in node_modules,
+# so electron-builder never re-downloads electron on every package
+electronDist: node_modules/electron/dist
 files:
   - dist/**/*
   - package.json
