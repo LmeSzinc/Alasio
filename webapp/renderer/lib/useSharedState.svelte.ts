@@ -9,6 +9,24 @@ const ROUTE_TO_PATH: Record<string, string> = {
   error: '/error',
 };
 
+// Initial shared state, read synchronously once (module scope, via the
+// preload sendSync bridge) so the very first paint already renders with
+// the host's display theme instead of flashing the light fallback before
+// the async getSharedState round trip resolves. Only a starting point:
+// live updates come from onSharedStateUpdate.
+let initialSharedState: any;
+
+function getInitialSharedState(): any {
+  if (initialSharedState === undefined) {
+    try {
+      initialSharedState = window.electronAPI.getSharedStateSync();
+    } catch {
+      initialSharedState = null;
+    }
+  }
+  return initialSharedState;
+}
+
 function navigateTo(route: string) {
   const path = ROUTE_TO_PATH[route];
   if (path && page.route.id !== path) {
@@ -17,7 +35,7 @@ function navigateTo(route: string) {
 }
 
 export function useSharedState() {
-  let state = $state<any>(null);
+  let state = $state<any>(getInitialSharedState());
 
   onMount(() => {
     window.electronAPI.getSharedState().then((s: any) => {

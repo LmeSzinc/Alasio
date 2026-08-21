@@ -1,5 +1,6 @@
 import { BrowserWindow, app, ipcMain } from 'electron';
 import * as path from 'path';
+import { appState } from './app-state';
 import {
   IPC_CONFIRM_CLOSE,
   IPC_SHUTDOWN_STAGE,
@@ -19,6 +20,11 @@ export function createWindow(): BrowserWindow {
     height: 660,
     frame: false,
     title: 'Alasio',
+    // Match the native window background to the display theme (values are
+    // the renderer's --background tokens) so no white flash appears while
+    // the renderer is still loading. The renderer paints its own themed
+    // background as soon as it is up.
+    backgroundColor: appState.displayTheme === 'dark' ? '#18181b' : '#f3f3f3',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

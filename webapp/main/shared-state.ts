@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import {
   IPC_SHARED_STATE_GET,
+  IPC_SHARED_STATE_GET_SYNC,
   IPC_SHARED_STATE_SET_LANGUAGE,
   IPC_SHARED_STATE_SET_THEME,
   IPC_SHARED_STATE_UPDATE,
@@ -92,6 +93,13 @@ function notifyRenderer() {
 
 export function setupSharedStateIPC() {
   ipcMain.handle(IPC_SHARED_STATE_GET, () => state);
+
+  // Synchronous variant: used once by the renderer at startup so the first
+  // paint already shows the host's display theme before the async invoke
+  // round trip resolves.
+  ipcMain.on(IPC_SHARED_STATE_GET_SYNC, (event) => {
+    event.returnValue = state;
+  });
 
   ipcMain.on(IPC_SHARED_STATE_SET_LANGUAGE, (_, lang: string) => {
     setLanguage(lang);

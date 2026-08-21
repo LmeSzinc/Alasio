@@ -14,6 +14,12 @@ export const IPC_WINDOW_CONFIRM_CLOSE = 'window:confirm-close';
 export const IPC_SHARED_STATE_GET = 'shared-state:get';
 export const IPC_BACKEND_START = 'backend:start';
 
+// Renderer -> Main, synchronous request/response (ipcRenderer.sendSync /
+// ipcMain.on + event.returnValue). Read once at renderer startup so the
+// first paint already renders with the host's display theme (no light
+// flash before the async IPC round trip resolves).
+export const IPC_SHARED_STATE_GET_SYNC = 'shared-state:get-sync';
+
 // Main -> Renderer, events (webContents.send / ipcRenderer.on)
 export const IPC_BACKEND_LOG = 'backend:log';
 export const IPC_BACKEND_READY = 'backend:ready';

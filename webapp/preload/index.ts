@@ -5,6 +5,7 @@ import {
   IPC_BACKEND_START,
   IPC_CONFIRM_CLOSE,
   IPC_SHARED_STATE_GET,
+  IPC_SHARED_STATE_GET_SYNC,
   IPC_SHARED_STATE_SET_LANGUAGE,
   IPC_SHARED_STATE_SET_THEME,
   IPC_SHARED_STATE_UPDATE,
@@ -48,6 +49,9 @@ const api = {
 
   // Shared state
   getSharedState: () => ipcRenderer.invoke(IPC_SHARED_STATE_GET),
+  // Synchronous variant: read once at renderer startup so the first paint
+  // already renders with the host's display theme.
+  getSharedStateSync: () => ipcRenderer.sendSync(IPC_SHARED_STATE_GET_SYNC),
   onSharedStateUpdate: (callback: (state: any) => void) => {
     const handler = (_: any, state: any) => callback(state);
     ipcRenderer.on(IPC_SHARED_STATE_UPDATE, handler);
