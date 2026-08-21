@@ -71,7 +71,23 @@ export class I18nGenerator {
       },
     );
 
-    await Promise.all(files.map((file) => this.scanFile(file, false)));
+    // Read all files in parallel, but apply the scan results in the order
+    // files were returned by glob. Applying them in completion order would
+    // make the cache insertion order — and therefore the generated
+    // module/key ordering — nondeterministic across runs.
+    const contents = await Promise.all(
+      files.map(async (file) => {
+        try {
+          return await fs.readFile(file, "utf-8");
+        } catch {
+          return null;
+        }
+      }),
+    );
+    for (const [index, file] of files.entries()) {
+      const content = contents[index];
+      if (content !== null) this.applyScannedContent(file, content, false);
+    }
     await this.reconcileAll();
 
     console.log(`[i18n] Initialization complete in ${Date.now() - start}ms`);
@@ -183,33 +199,7 @@ export class I18nGenerator {
   private async scanFile(filePath: string, returnAffected = true): Promise<Set<string> | null> {
     try {
       const content = await fs.readFile(filePath, "utf-8");
-      const modules: Record<string, Set<string>> = {};
-
-      let match;
-      while ((match = CALL_REGEX.exec(content)) !== null) {
-        const [_, mod, key] = match;
-        if (!modules[mod]) modules[mod] = new Set();
-        modules[mod].add(key);
-      }
-
-      // Diff against cache
-      const old = this.fileCache.get(filePath) || {};
-      let changed = false;
-      const affected = new Set<string>();
-      const checkChange = (m: string) => {
-        changed = true;
-        affected.add(m);
-      };
-
-      // Check new/modified
-      for (const mod in modules) {
-        const newK = modules[mod];
-        const oldK = old[mod];
-        if (!oldK || !this.areSetsEqual(newK, oldK)) checkChange(mod);
-      }
-      for (const mod in old) if (!modules[mod]) checkChange(mod);
-      if (changed) this.fileCache.set(filePath, modules);
-      return returnAffected ? affected : null;
+      return this.applyScannedContent(filePath, content, returnAffected);
     } catch (e) {
       // Read failure: the file may be temporarily renamed (e.g. by
       // svelte-drop-dev-page during a concurrent build, or an editor's
@@ -218,6 +208,46 @@ export class I18nGenerator {
       // translations based on a file we could not read.
       return null;
     }
+  }
+
+  /**
+   * Applies the i18n usage of one file's content to the cache.
+   *
+   * The cache insertion order decides the generated module/key ordering
+   * (first occurrence in source wins), so when scanning multiple files
+   * this must be called in the order files were returned by glob — never
+   * in the completion order of parallel reads.
+   *
+   * Returns a set of affected module names if usage changed.
+   */
+  private applyScannedContent(filePath: string, content: string, returnAffected = true): Set<string> | null {
+    const modules: Record<string, Set<string>> = {};
+
+    let match;
+    while ((match = CALL_REGEX.exec(content)) !== null) {
+      const [_, mod, key] = match;
+      if (!modules[mod]) modules[mod] = new Set();
+      modules[mod].add(key);
+    }
+
+    // Diff against cache
+    const old = this.fileCache.get(filePath) || {};
+    let changed = false;
+    const affected = new Set<string>();
+    const checkChange = (m: string) => {
+      changed = true;
+      affected.add(m);
+    };
+
+    // Check new/modified
+    for (const mod in modules) {
+      const newK = modules[mod];
+      const oldK = old[mod];
+      if (!oldK || !this.areSetsEqual(newK, oldK)) checkChange(mod);
+    }
+    for (const mod in old) if (!modules[mod]) checkChange(mod);
+    if (changed) this.fileCache.set(filePath, modules);
+    return returnAffected ? affected : null;
   }
 
   /**
@@ -281,8 +311,9 @@ export class I18nGenerator {
       }
     });
 
-    // Serialize and compare with current file content to decide whether to write
-    const encoded = JSON.stringify(newData, null, 2).trimEnd();
+    // Serialize with a trailing newline to match prettier formatting, then
+    // compare with current file content to decide whether to write
+    const encoded = JSON.stringify(newData, null, 2).trimEnd() + "\n";
     if (encoded !== (currentContent || "")) {
       await fs.outputFile(jsonPath, encoded);
     }
