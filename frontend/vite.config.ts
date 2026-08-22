@@ -25,4 +25,10 @@ export default defineConfig({
   esbuild: {
     legalComments: "none",
   },
+  build: {
+    // The webui is served by the python backend and embedded in the
+    // electron 22 shell (Chromium 108) via iframe; do not follow vite 8's
+    // default baseline-widely-available (2026-01) target
+    target: "chrome108",
+  },
 });
