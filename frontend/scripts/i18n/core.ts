@@ -1,8 +1,8 @@
 import fs from "fs-extra";
 import path from "path";
 import glob from "fast-glob";
-import { DROPPED_SUFFIX } from "../svelte-drop-dev-page/files";
-import { type I18nConfig, resolvePath } from "./config";
+import { DROPPED_SUFFIX } from "../svelte-drop-dev-page/files.ts";
+import { type I18nConfig, resolvePath } from "./config.ts";
 
 // Matches usage like: t.Home.Hello(
 // Capture Group 1: Module Name (e.g., Home)

@@ -1,6 +1,6 @@
 import { type Plugin } from "vite";
-import { i18nConfig, resolvePath } from "./config";
-import { I18nGenerator } from "./core";
+import { i18nConfig, resolvePath } from "./config.ts";
+import { I18nGenerator } from "./core.ts";
 
 // Singleton instance to maintain cache state during dev server runtime
 export const generator = new I18nGenerator(i18nConfig);

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { type Plugin } from "vite";
-import { dropMarkedRoutes, restoreDroppedRoutes } from "./files";
+import { dropMarkedRoutes, restoreDroppedRoutes } from "./files.ts";
 
 /**
  * Default marker comment.

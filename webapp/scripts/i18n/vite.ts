@@ -1,6 +1,6 @@
 import { type Plugin } from "vite";
-import { I18nGenerator } from "./core";
-import { type I18nConfig, resolvePath } from "./config";
+import { I18nGenerator } from "./core.ts";
+import { type I18nConfig, resolvePath } from "./config.ts";
 
 // Process-level flag: the second (client) build pass re-bundles the vite
 // config, which recreates this module and its plugin instance, so an

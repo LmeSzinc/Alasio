@@ -1,8 +1,8 @@
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
-import { i18nPlugin } from "./scripts/i18n/vite";
-import { svelteDropDevPage } from "./scripts/svelte-drop-dev-page/vite";
+import { i18nPlugin } from "./scripts/i18n/vite.ts";
+import { svelteDropDevPage } from "./scripts/svelte-drop-dev-page/vite.ts";
 
 export default defineConfig({
   // i18nPlugin must come first: its config hook scans source files before
