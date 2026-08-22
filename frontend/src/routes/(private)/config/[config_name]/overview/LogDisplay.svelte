@@ -48,7 +48,7 @@
       {/each}
     {:else}
       <div class="flex w-full items-start justify-center">
-        <span class="text-muted-foreground italic text-sm">{t.Overview.LogEmpty()}</span>
+        <span class="text-muted-foreground text-sm italic">{t.Overview.LogEmpty()}</span>
       </div>
     {/if}
   </div>

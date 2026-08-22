@@ -4,5 +4,14 @@ pnpm-lock.yaml
 yarn.lock
 bun.lock
 bun.lockb
+
+# Generated
+.svelte-kit
+build
+node_modules
+
+# shadcn components
 /src/lib/components/ui
+
+# Docs
 *.md

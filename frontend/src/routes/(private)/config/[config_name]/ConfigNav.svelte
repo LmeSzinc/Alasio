@@ -61,8 +61,7 @@
       // cannot tell whether the indicator is on the opened nav.
       if (openedNavItem && openedNavItem.cards.length > 0) {
         const indicatorInNav =
-          ui.nav_name === ui.opened_nav &&
-          openedNavItem.cards.some((card) => card.key === ui.card_indicate);
+          ui.nav_name === ui.opened_nav && openedNavItem.cards.some((card) => card.key === ui.card_indicate);
 
         // Only auto-select if the indicator is not on the opened nav
         if (!indicatorInNav) {
@@ -85,10 +84,7 @@
     const item = itemElements[navKey];
     if (!item || !viewport) return;
 
-    const itemTop =
-      item.getBoundingClientRect().top -
-      viewport.getBoundingClientRect().top +
-      viewport.scrollTop;
+    const itemTop = item.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
     const itemHeight = item.offsetHeight;
     const viewportHeight = viewport.clientHeight;
 

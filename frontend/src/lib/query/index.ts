@@ -1,4 +1,2 @@
 import { withQuery } from "./withQuery.svelte";
-export {
-    withQuery,
-}
+export { withQuery };

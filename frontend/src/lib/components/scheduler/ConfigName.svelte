@@ -35,15 +35,15 @@
   <!-- Probe text-lg -->
   <span
     bind:this={probeLgRef}
-    class="invisible absolute top-0 left-0 whitespace-nowrap text-lg font-semibold"
-    aria-hidden="true"
-  >{text}</span>
+    class="invisible absolute top-0 left-0 text-lg font-semibold whitespace-nowrap"
+    aria-hidden="true">{text}</span
+  >
   <!-- Probe text-base -->
   <span
     bind:this={probeBaseRef}
-    class="invisible absolute top-0 left-0 whitespace-nowrap text-base font-semibold"
-    aria-hidden="true"
-  >{text}</span>
+    class="invisible absolute top-0 left-0 text-base font-semibold whitespace-nowrap"
+    aria-hidden="true">{text}</span
+  >
   <!-- Display -->
   <span
     class={cn(
@@ -51,6 +51,6 @@
       mode === "lg" && "truncate text-lg",
       mode === "base" && "truncate text-base",
       mode === "sm-clamp" && "line-clamp-2 text-sm wrap-break-word",
-    )}
-  >{text}</span>
+    )}>{text}</span
+  >
 </div>

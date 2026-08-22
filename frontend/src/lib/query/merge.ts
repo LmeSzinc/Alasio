@@ -2,11 +2,8 @@
  * A type-level check to see if a type is a plain object.
  * It excludes arrays and functions, which are technically `object`s.
  */
-type IsPlainObject<T> = T extends Record<string, any>
-  ? T extends any[] | ((...args: any[]) => any)
-    ? false
-    : true
-  : false;
+type IsPlainObject<T> =
+  T extends Record<string, any> ? (T extends any[] | ((...args: any[]) => any) ? false : true) : false;
 
 /**
  * [Type-level] Merges two object types, T and U, deeply.
@@ -44,9 +41,9 @@ type DeepMergeAll<T extends readonly any[]> = T extends [infer First, ...infer R
  * @returns `true` if the item is a plain object, otherwise `false`.
  */
 function isObject(item: any): item is Record<string, any> {
-	// `item !== null` is slightly faster than `item && ...`
-	// as it avoids a truthiness conversion.
-	return item !== null && typeof item === 'object' && !Array.isArray(item);
+  // `item !== null` is slightly faster than `item && ...`
+  // as it avoids a truthiness conversion.
+  return item !== null && typeof item === "object" && !Array.isArray(item);
 }
 
 /**
@@ -56,24 +53,24 @@ function isObject(item: any): item is Record<string, any> {
  * @param source The source object.
  */
 function mergeInto(target: Record<string, any>, source: Record<string, any>): void {
-	// Iterate over the keys of the source object using for...in for good performance.
-	for (const key in source) {
-		// Using Object.prototype.hasOwnProperty.call is the safest way to check for own properties.
-		if (Object.prototype.hasOwnProperty.call(source, key)) {
-			const sourceValue = source[key];
-			const targetValue = target[key];
+  // Iterate over the keys of the source object using for...in for good performance.
+  for (const key in source) {
+    // Using Object.prototype.hasOwnProperty.call is the safest way to check for own properties.
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      const sourceValue = source[key];
+      const targetValue = target[key];
 
-			// The core recursive condition: recurse only if both the target and source
-			// values for the same key are objects.
-			if (isObject(targetValue) && isObject(sourceValue)) {
-				// Recurse directly on the target's sub-object to achieve in-place mutation.
-				mergeInto(targetValue, sourceValue);
-			} else {
-				// Otherwise, the source value directly overwrites the target value.
-				target[key] = sourceValue;
-			}
-		}
-	}
+      // The core recursive condition: recurse only if both the target and source
+      // values for the same key are objects.
+      if (isObject(targetValue) && isObject(sourceValue)) {
+        // Recurse directly on the target's sub-object to achieve in-place mutation.
+        mergeInto(targetValue, sourceValue);
+      } else {
+        // Otherwise, the source value directly overwrites the target value.
+        target[key] = sourceValue;
+      }
+    }
+  }
 }
 
 /**
@@ -87,18 +84,17 @@ function mergeInto(target: Record<string, any>, source: Record<string, any>): vo
  * @param sources One or more source objects to merge.
  * @returns A new object with a precisely inferred type representing the merged sources.
  */
-export function deepMerge<T extends readonly any[]>(
-	...sources: T
-  ): DeepMergeAll<[...T]> { // The return type is now the result of our type-level magic
-	const result: Record<string, any> = {};
-  
-	for (const source of sources) {
-	  if (isObject(source)) {
-		mergeInto(result, source);
-	  }
-	}
-  
-	// We cast to `any` because the runtime logic correctly produces the complex type,
-	// but TypeScript can't verify this on its own without our explicit return type assertion.
-	return result as any;
+export function deepMerge<T extends readonly any[]>(...sources: T): DeepMergeAll<[...T]> {
+  // The return type is now the result of our type-level magic
+  const result: Record<string, any> = {};
+
+  for (const source of sources) {
+    if (isObject(source)) {
+      mergeInto(result, source);
+    }
   }
+
+  // We cast to `any` because the runtime logic correctly produces the complex type,
+  // but TypeScript can't verify this on its own without our explicit return type assertion.
+  return result as any;
+}

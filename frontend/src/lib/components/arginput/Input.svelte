@@ -169,7 +169,7 @@
       class={cn(
         "bg-card dark:bg-card peer truncate border-0 p-1 px-2 shadow-none",
         isDatetime ? "pr-12 focus-visible:pr-12" : "focus-visible:pr-6",
-        isDesc ? "py-0 text-muted-foreground" : "",
+        isDesc ? "text-muted-foreground py-0" : "",
         "focus-visible:shadow-none",
         "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-5",
         errorMessage && "ring-destructive ring-2 ring-offset-5",
@@ -200,7 +200,11 @@
           "w-0 group-focus-within:w-4",
         )}
       >
-        <Reset {onReset} onmousedown={() => (_pendingReset = true)} class="opacity-0 transition-opacity duration-200 group-focus-within:opacity-100" />
+        <Reset
+          {onReset}
+          onmousedown={() => (_pendingReset = true)}
+          class="opacity-0 transition-opacity duration-200 group-focus-within:opacity-100"
+        />
       </div>
     </div>
   </div>

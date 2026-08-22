@@ -67,4 +67,3 @@ export const t = new Proxy(realT, proxyHandler) as typeof Generated.t;
 
 // Export state management
 export { i18nState, setLang } from "./state.svelte";
-

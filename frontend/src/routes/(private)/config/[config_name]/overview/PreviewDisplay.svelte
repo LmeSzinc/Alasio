@@ -20,14 +20,7 @@
     onPreviewStop: () => void;
     onModeChange: (mode: PreviewMode) => void;
   };
-  let {
-    class: className,
-    config_name: _config_name,
-    data,
-    previewMode,
-    workerState,
-    onModeChange,
-  }: Props = $props();
+  let { class: className, config_name: _config_name, data, previewMode, workerState, onModeChange }: Props = $props();
 
   // Derive whether preview is active (not disabled)
   const isPreviewActive = $derived(previewMode !== "disable");

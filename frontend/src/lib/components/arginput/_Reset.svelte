@@ -14,6 +14,13 @@
   } = $props();
 </script>
 
-<Button variant="ghost" size="icon" class={cn("h-6 w-6", className)} onclick={onReset} onmousedown={onmousedown} aria-label="Reset value">
+<Button
+  variant="ghost"
+  size="icon"
+  class={cn("h-6 w-6", className)}
+  onclick={onReset}
+  {onmousedown}
+  aria-label="Reset value"
+>
   <RotateCcw class="text-muted-foreground size-3 opacity-50" />
 </Button>

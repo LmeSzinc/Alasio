@@ -42,9 +42,7 @@
     </DialogHeader>
 
     <div class="space-y-4">
-      <p class="text-muted-foreground text-sm">
-        All instances will be force-killed and restarted.
-      </p>
+      <p class="text-muted-foreground text-sm">All instances will be force-killed and restarted.</p>
 
       {#if rpc.errorMsg}
         <Help variant="error">{rpc.errorMsg}</Help>

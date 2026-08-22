@@ -36,7 +36,7 @@ function syncDisplayFromConfig() {
 
 // === Initialization ===
 if (browser) {
-  const match = document.cookie.match(new RegExp('(^| )alasio_lang=([^;]+)'));
+  const match = document.cookie.match(new RegExp("(^| )alasio_lang=([^;]+)"));
   const saved = match ? match[2] : null;
 
   if (saved && (saved === "system" || (SUPPORTED_LANGS as readonly string[]).includes(saved))) {

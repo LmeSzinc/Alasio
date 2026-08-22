@@ -13,8 +13,14 @@
   // Build a reusable arg template
   function info(group: string, dashboard: string, color: string, name: string): any {
     return {
-      group, arg: "_info", task: "Dashboard", dt: "dashboard-value",
-      dashboard, dashboard_color: color, name, value: "",
+      group,
+      arg: "_info",
+      task: "Dashboard",
+      dt: "dashboard-value",
+      dashboard,
+      dashboard_color: color,
+      name,
+      value: "",
     };
   }
   function arg(group: string, argName: string, dt: string, value: any, extra: any = {}): any {
@@ -136,16 +142,16 @@
 <div class="container mx-auto flex flex-col gap-8 overflow-auto p-6 pb-20">
   <h1 class="text-3xl font-bold">Dashboard Group Types</h1>
   <p class="text-muted-foreground">
-    Each group with <code class="bg-muted rounded px-1">_info.dashboard</code> is rendered as a
-    single compact arg row. Compare with normal (non-dashboard) groups below.
+    Each group with <code class="bg-muted rounded px-1">_info.dashboard</code> is rendered as a single compact arg row. Compare
+    with normal (non-dashboard) groups below.
   </p>
 
   <!-- Dashboard-only card -->
   <section class="space-y-3">
     <h2 class="text-xl font-semibold">All Dashboard Types</h2>
     <p class="text-muted-foreground text-sm">
-      Amount, Total, Remain, DynamicTotal, Progress, and Planner types &mdash;
-      each rendered as a single arg row with PrettyValue on the right and time below.
+      Amount, Total, Remain, DynamicTotal, Progress, and Planner types &mdash; each rendered as a single arg row with
+      PrettyValue on the right and time below.
     </p>
     <ArgCard
       bind:cardData={dashboardCard}
@@ -160,8 +166,8 @@
   <section class="space-y-3">
     <h2 class="text-xl font-semibold">Non-Dashboard (normal args)</h2>
     <p class="text-muted-foreground text-sm">
-      Groups without <code class="bg-muted rounded px-1">_info.dashboard</code> &mdash;
-      each arg renders individually as separate rows.
+      Groups without <code class="bg-muted rounded px-1">_info.dashboard</code> &mdash; each arg renders individually as separate
+      rows.
     </p>
     <ArgCard
       bind:cardData={normalCard}
@@ -176,8 +182,7 @@
   <section class="space-y-3">
     <h2 class="text-xl font-semibold">Mixed: Dashboard + Normal Groups</h2>
     <p class="text-muted-foreground text-sm">
-      Dashboard and normal groups interleaved in the same card, as they would appear
-      in the real config overview.
+      Dashboard and normal groups interleaved in the same card, as they would appear in the real config overview.
     </p>
     <ArgCard
       bind:cardData={mixedCard}
