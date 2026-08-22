@@ -29,12 +29,16 @@ export function useLocalStorage<T = string>(key: string, defaultValue: T) {
       }
     };
 
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   });
 
   return {
-    get value() { return value; },
-    set value(v: T) { value = v; },
+    get value() {
+      return value;
+    },
+    set value(v: T) {
+      value = v;
+    },
   };
 }

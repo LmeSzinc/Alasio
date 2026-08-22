@@ -1,6 +1,6 @@
-import { BrowserWindow, app, ipcMain } from 'electron';
-import * as path from 'path';
-import { appState } from './app-state';
+import { BrowserWindow, app, ipcMain } from "electron";
+import * as path from "path";
+import { appState } from "./app-state";
 import {
   IPC_CONFIRM_CLOSE,
   IPC_SHUTDOWN_STAGE,
@@ -8,8 +8,8 @@ import {
   IPC_WINDOW_HIDE,
   IPC_WINDOW_MAXIMIZE,
   IPC_WINDOW_MINIMIZE,
-} from '../shared/ipc';
-import { shutdownBackend, ShutdownStage } from './backend';
+} from "../shared/ipc";
+import { shutdownBackend, ShutdownStage } from "./backend";
 
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
@@ -19,14 +19,14 @@ export function createWindow(): BrowserWindow {
     width: 960,
     height: 660,
     frame: false,
-    title: 'Alasio',
+    title: "Alasio",
     // Match the native window background to the display theme (values are
     // the renderer's --background tokens) so no white flash appears while
     // the renderer is still loading. The renderer paints its own themed
     // background as soon as it is up.
-    backgroundColor: appState.displayTheme === 'dark' ? '#18181b' : '#f3f3f3',
+    backgroundColor: appState.displayTheme === "dark" ? "#18181b" : "#f3f3f3",
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
+      preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -40,11 +40,11 @@ export function createWindow(): BrowserWindow {
     // app:// is registered by main/index.ts; the custom scheme is required
     // because SvelteKit's client-side router uses history.pushState, which
     // fails on the file:// protocol. The root path maps to index.html.
-    mainWindow.loadURL('app://bundle/');
+    mainWindow.loadURL("app://bundle/");
   }
 
   // Prevent default close behavior
-  mainWindow.on('close', (e) => {
+  mainWindow.on("close", (e) => {
     if (!isQuitting) {
       e.preventDefault();
       mainWindow?.webContents.send(IPC_CONFIRM_CLOSE);
@@ -77,11 +77,11 @@ export function setupWindowIPC() {
 
   ipcMain.handle(IPC_WINDOW_CONFIRM_CLOSE, async () => {
     isQuitting = true;
-    
+
     return new Promise<void>((resolve) => {
       shutdownBackend((stage) => {
         mainWindow?.webContents.send(IPC_SHUTDOWN_STAGE, stage);
-        
+
         if (stage === ShutdownStage.Done) {
           // Resolve first so the IPC reply is sent to the renderer
           // before destroying the window (otherwise "reply was never sent" error)

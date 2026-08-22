@@ -45,13 +45,13 @@
   }
 </script>
 
-<div class="flex h-screen items-center justify-center bg-background text-foreground">
-  <div class="w-[600px] rounded-xl bg-card border border-border p-12 shadow-lg">
-    <h1 class="text-5xl font-bold mb-4">Alasio</h1>
-    <p class="text-xl text-muted-foreground mb-12">{t.Setup.Welcome()}</p>
+<div class="bg-background text-foreground flex h-screen items-center justify-center">
+  <div class="bg-card border-border w-[600px] rounded-xl border p-12 shadow-lg">
+    <h1 class="mb-4 text-5xl font-bold">Alasio</h1>
+    <p class="text-muted-foreground mb-12 text-xl">{t.Setup.Welcome()}</p>
 
     <div class="mb-8">
-      <label class="text-lg mb-4 block">
+      <label class="mb-4 block text-lg">
         {t.Setup.SelectLanguage()}
       </label>
 
@@ -59,7 +59,7 @@
         {#each languages as lang}
           <button
             onclick={() => selectLang(lang.code)}
-            class="p-4 rounded-lg border-2 transition-all
+            class="rounded-lg border-2 p-4 transition-all
               {selectedLang === lang.code ? 'border-primary bg-primary/20' : 'border-border bg-muted hover:bg-accent'}"
           >
             <span class="text-lg">{lang.name}</span>
@@ -69,7 +69,7 @@
     </div>
 
     <div class="mb-8">
-      <label class="text-lg mb-4 block">
+      <label class="mb-4 block text-lg">
         {t.Setup.SelectTheme()}
       </label>
 
@@ -77,8 +77,10 @@
         {#each themes as theme}
           <button
             onclick={() => selectTheme(theme.code)}
-            class="p-4 rounded-lg border-2 transition-all
-              {selectedTheme === theme.code ? 'border-primary bg-primary/20' : 'border-border bg-muted hover:bg-accent'}"
+            class="rounded-lg border-2 p-4 transition-all
+              {selectedTheme === theme.code
+              ? 'border-primary bg-primary/20'
+              : 'border-border bg-muted hover:bg-accent'}"
           >
             <span class="text-lg">{theme.name}</span>
           </button>
@@ -88,7 +90,7 @@
 
     <button
       onclick={handleStart}
-      class="w-full py-4 bg-primary hover:bg-primary/90 text-primary-foreground text-xl font-semibold rounded-lg transition-colors"
+      class="bg-primary hover:bg-primary/90 text-primary-foreground w-full rounded-lg py-4 text-xl font-semibold transition-colors"
     >
       {t.Setup.Start()}
     </button>

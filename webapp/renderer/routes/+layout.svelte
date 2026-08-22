@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { page } from '$app/state';
-  import { useSharedState } from '$lib/useSharedState.svelte';
-  import { i18nState } from '$lib/i18n/state.svelte';
-  import TitleBar from '$lib/components/TitleBar.svelte';
-  import '../app.css';
+  import { page } from "$app/state";
+  import { useSharedState } from "$lib/useSharedState.svelte";
+  import { i18nState } from "$lib/i18n/state.svelte";
+  import TitleBar from "$lib/components/TitleBar.svelte";
+  import "../app.css";
 
   const sharedState = useSharedState();
 
@@ -21,13 +21,13 @@
   // theme itself via mode-watcher. The host (main process AppState) is the
   // single source of truth.
   $effect(() => {
-    const dark = sharedState.displayTheme === 'dark';
-    document.documentElement.classList.toggle('dark', dark);
-    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    const dark = sharedState.displayTheme === "dark";
+    document.documentElement.classList.toggle("dark", dark);
+    document.documentElement.style.colorScheme = dark ? "dark" : "light";
   });
 </script>
 
 <!-- The embedded web app (/app) provides its own header, so the title bar
      becomes a floating overlay (drag strip + window controls) there. -->
-<TitleBar floating={page.route.id === '/app'} />
+<TitleBar floating={page.route.id === "/app"} />
 <slot />

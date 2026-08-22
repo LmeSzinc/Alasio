@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -15,8 +15,8 @@
       (() => {
         try {
           const theme = window.electronAPI?.getSharedStateSync()?.theme;
-          if (theme === 'light' || theme === 'dark') {
-            document.documentElement.classList.toggle('dark', theme === 'dark');
+          if (theme === "light" || theme === "dark") {
+            document.documentElement.classList.toggle("dark", theme === "dark");
             document.documentElement.style.colorScheme = theme;
           }
         } catch {}

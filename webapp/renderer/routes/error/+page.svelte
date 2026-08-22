@@ -5,12 +5,12 @@
   const sharedState = useSharedState();
 </script>
 
-<div class="flex h-screen items-center justify-center bg-background text-foreground">
-  <div class="w-[600px] rounded-xl bg-card backdrop-blur-lg p-12 shadow-lg">
-    <h1 class="text-4xl font-bold mb-6 text-destructive">Error</h1>
+<div class="bg-background text-foreground flex h-screen items-center justify-center">
+  <div class="bg-card w-[600px] rounded-xl p-12 shadow-lg backdrop-blur-lg">
+    <h1 class="text-destructive mb-6 text-4xl font-bold">Error</h1>
 
     <div class="mb-6">
-      <p class="text-xl mb-4">
+      <p class="mb-4 text-xl">
         {sharedState.errorMessage || "Unknown error"}
       </p>
       <div class="text-sm">
@@ -20,7 +20,7 @@
 
     <button
       onclick={() => location.reload()}
-      class="w-full py-3 bg-primary hover:bg-primary/30 text-destructive-foreground font-semibold rounded-lg transition-colors"
+      class="bg-primary hover:bg-primary/30 text-destructive-foreground w-full rounded-lg py-3 font-semibold transition-colors"
     >
       Retry
     </button>

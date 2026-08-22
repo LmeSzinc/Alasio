@@ -106,20 +106,20 @@ export class I18nGenerator {
     const indexPath = resolvePath(this.config, this.config.genPath, "index.ts");
 
     // Generate constants
-    const langVars = this.config.languages.map((l) => `export const ${toVar(l)} = '${l}';`);
+    const langVars = this.config.languages.map((l) => `export const ${toVar(l)} = "${l}";`);
     const constContent = [
       ...langVars,
-      `export const SUPPORTED_LANGS = [${this.config.languages.map((l) => `'${l}'`).join(", ")}] as const;`,
-      `export const DEFAULT_LANG = '${this.config.languages[0]}';`,
+      `export const SUPPORTED_LANGS = [${this.config.languages.map((l) => `"${l}"`).join(", ")}] as const;`,
+      `export const DEFAULT_LANG = "${this.config.languages[0]}";`,
       "",
     ].join("\n");
     await fs.outputFile(constPath, constContent);
 
     // Generate empty t object
     const indexContent = [
-      `export * from './constants';`,
+      `export * from "./constants";`,
       // Node mode generated modules import './state', so it must exist too
-      ...(this.config.mode === "node" ? [`export { setLang, getLang } from './state';`] : []),
+      ...(this.config.mode === "node" ? [`export { setLang, getLang } from "./state";`] : []),
       `export const t = {};`, // Proxy in runtime will handle this empty object
       "",
     ].join("\n");
@@ -127,10 +127,7 @@ export class I18nGenerator {
 
     // Node mode: generate the plain language state module
     if (this.config.mode === "node") {
-      await fs.outputFile(
-        resolvePath(this.config, this.config.genPath, "state.ts"),
-        this.stateModuleContent(),
-      );
+      await fs.outputFile(resolvePath(this.config, this.config.genPath, "state.ts"), this.stateModuleContent());
     }
   }
 
@@ -141,7 +138,7 @@ export class I18nGenerator {
   private stateModuleContent() {
     return [
       `// Auto-generated language state (node mode)`,
-      `import { DEFAULT_LANG } from './constants';`,
+      `import { DEFAULT_LANG } from "./constants";`,
       ``,
       `let currentLang: string = DEFAULT_LANG;`,
       ``,
@@ -341,8 +338,8 @@ export class I18nGenerator {
     const langRef = this.config.mode === "node" ? "getLang()" : "i18nState.l";
     const lines = [
       `// Auto-generated module: ${mod}`,
-      `import { ${this.config.mode === "node" ? "getLang" : "i18nState"} } from '${this.config.stateModule}';`,
-      `import { ${langVars.join(", ")} } from './constants';`,
+      `import { ${this.config.mode === "node" ? "getLang" : "i18nState"} } from "${this.config.stateModule}";`,
+      `import { ${langVars.join(", ")} } from "./constants";`,
       "",
     ];
 
@@ -390,7 +387,7 @@ export class I18nGenerator {
     // constants.ts
     const constLines = [
       `// Language Constants`,
-      ...this.config.languages.map((l) => `export const ${toVar(l)} = '${l}';`),
+      ...this.config.languages.map((l) => `export const ${toVar(l)} = "${l}";`),
       ``,
       `export const SUPPORTED_LANGS = [${langVars.join(", ")}] as const;`,
       `export const DEFAULT_LANG = ${toVar(this.config.languages[0])};`,
@@ -401,23 +398,20 @@ export class I18nGenerator {
     // index.ts
     const lines = [
       `// Aggregation Entry`,
-      ...modules.map((m) => `import * as ${m} from './${m}';`),
+      ...modules.map((m) => `import * as ${m} from "./${m}";`),
       ``,
       `export const t = {`,
       ...modules.map((m) => `  ${m},`),
       `};`,
-      `export * from './constants';`,
-      ...(this.config.mode === "node" ? [`export { setLang, getLang } from './state';`] : []),
+      `export * from "./constants";`,
+      ...(this.config.mode === "node" ? [`export { setLang, getLang } from "./state";`] : []),
       "",
     ];
     await fs.outputFile(resolvePath(this.config, this.config.genPath, "index.ts"), lines.join("\n"));
 
     // Node mode: (re)generate the language state module
     if (this.config.mode === "node") {
-      await fs.outputFile(
-        resolvePath(this.config, this.config.genPath, "state.ts"),
-        this.stateModuleContent(),
-      );
+      await fs.outputFile(resolvePath(this.config, this.config.genPath, "state.ts"), this.stateModuleContent());
     }
   }
 

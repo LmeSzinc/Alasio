@@ -1,17 +1,17 @@
-import { app, nativeTheme } from 'electron';
-import { sendStdinCommand } from './backend';
-import { DEFAULT_LANG, SUPPORTED_LANGS } from './i18ngen';
-import type { ConfigError } from './config';
+import { app, nativeTheme } from "electron";
+import { sendStdinCommand } from "./backend";
+import { DEFAULT_LANG, SUPPORTED_LANGS } from "./i18ngen";
+import type { ConfigError } from "./config";
 
 // Host-level language values: 'system' or one of the supported languages.
 // The webapp main process is the single source of truth; the backend only
 // persists the value into deploy.yaml (Webapp.Lang) through the stdin
 // contract.
-export const CONFIG_LANGS = [...SUPPORTED_LANGS, 'system'] as const;
+export const CONFIG_LANGS = [...SUPPORTED_LANGS, "system"] as const;
 export type ConfigLang = (typeof CONFIG_LANGS)[number];
 
 // Host-level theme values: 'system', 'light' or 'dark'
-export const CONFIG_THEMES = ['system', 'light', 'dark'] as const;
+export const CONFIG_THEMES = ["system", "light", "dark"] as const;
 export type ConfigTheme = (typeof CONFIG_THEMES)[number];
 
 export function isConfigLang(value: string): value is ConfigLang {
@@ -31,16 +31,16 @@ function matchSystemLanguage(): string {
   if ((SUPPORTED_LANGS as readonly string[]).includes(locale)) {
     return locale;
   }
-  const base = locale.split('-')[0];
-  const match = (SUPPORTED_LANGS as readonly string[]).find((l) => l.split('-')[0] === base);
+  const base = locale.split("-")[0];
+  const match = (SUPPORTED_LANGS as readonly string[]).find((l) => l.split("-")[0] === base);
   return match || DEFAULT_LANG;
 }
 
 class AppState {
   // === Startup config (set by config.ts loadConfig) ===
-  pythonExecutable = '';
-  rootPath = '';
-  backendHost = '0.0.0.0';
+  pythonExecutable = "";
+  rootPath = "";
+  backendHost = "0.0.0.0";
   backendPort = 22267;
   isFirstTimeSetup = false;
   templatePath?: string;
@@ -50,11 +50,11 @@ class AppState {
   // === Runtime state ===
   // Persistent values (single source of truth, persisted by the backend
   // into deploy.yaml through the stdin contract)
-  configLang: ConfigLang = 'system';
-  configTheme: ConfigTheme = 'system';
+  configLang: ConfigLang = "system";
+  configTheme: ConfigTheme = "system";
   // Derived display values (always concrete)
   displayLang: string = DEFAULT_LANG;
-  displayTheme: 'light' | 'dark' = 'light';
+  displayTheme: "light" | "dark" = "light";
 
   private listeners = new Set<() => void>();
 
@@ -64,8 +64,8 @@ class AppState {
    * before app ready.
    */
   init(): void {
-    nativeTheme.on('updated', () => {
-      if (this.configTheme === 'system') {
+    nativeTheme.on("updated", () => {
+      if (this.configTheme === "system") {
         this.deriveDisplay();
         this.notify();
       }
@@ -125,13 +125,9 @@ class AppState {
   }
 
   private deriveDisplay(): void {
-    this.displayLang = this.configLang === 'system' ? matchSystemLanguage() : this.configLang;
+    this.displayLang = this.configLang === "system" ? matchSystemLanguage() : this.configLang;
     this.displayTheme =
-      this.configTheme === 'system'
-        ? nativeTheme.shouldUseDarkColors
-          ? 'dark'
-          : 'light'
-        : this.configTheme;
+      this.configTheme === "system" ? (nativeTheme.shouldUseDarkColors ? "dark" : "light") : this.configTheme;
   }
 
   private notify(): void {

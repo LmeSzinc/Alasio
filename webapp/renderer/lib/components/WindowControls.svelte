@@ -26,21 +26,21 @@
 <div class="flex" style="-webkit-app-region: no-drag">
   <button
     onclick={handleHide}
-    class="flex h-12 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
+    class="hover:bg-accent hover:text-accent-foreground flex h-12 w-12 items-center justify-center transition-colors"
     title="Hide to tray"
   >
     <Minimize2 size={16} />
   </button>
   <button
     onclick={handleMinimize}
-    class="flex h-12 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
+    class="hover:bg-accent hover:text-accent-foreground flex h-12 w-12 items-center justify-center transition-colors"
     title="Minimize"
   >
     <Minus size={16} />
   </button>
   <button
     onclick={handleMaximize}
-    class="flex h-12 w-12 items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
+    class="hover:bg-accent hover:text-accent-foreground flex h-12 w-12 items-center justify-center transition-colors"
     title="Maximize"
   >
     {#if isMaximized}
@@ -51,7 +51,7 @@
   </button>
   <button
     onclick={handleClose}
-    class="flex h-12 w-12 items-center justify-center hover:bg-destructive hover:text-destructive-foreground transition-colors"
+    class="hover:bg-destructive hover:text-destructive-foreground flex h-12 w-12 items-center justify-center transition-colors"
     title="Close"
   >
     <X size={16} />

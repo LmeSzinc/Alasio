@@ -106,18 +106,18 @@ export class I18nGenerator {
     const indexPath = resolvePath(this.config.genPath, "index.ts");
 
     // Generate constants
-    const langVars = this.config.languages.map((l) => `export const ${toVar(l)} = '${l}';`);
+    const langVars = this.config.languages.map((l) => `export const ${toVar(l)} = "${l}";`);
     const constContent = [
       ...langVars,
-      `export const SUPPORTED_LANGS = [${this.config.languages.map((l) => `'${l}'`).join(", ")}] as const;`,
-      `export const DEFAULT_LANG = '${this.config.languages[0]}';`,
+      `export const SUPPORTED_LANGS = [${this.config.languages.map((l) => `"${l}"`).join(", ")}] as const;`,
+      `export const DEFAULT_LANG = "${this.config.languages[0]}";`,
       "",
     ].join("\n");
     await fs.outputFile(constPath, constContent);
 
     // Generate empty t object
     const indexContent = [
-      `export * from './constants';`,
+      `export * from "./constants";`,
       `export const t = {};`, // Proxy in runtime will handle this empty object
       "",
     ].join("\n");
@@ -307,8 +307,8 @@ export class I18nGenerator {
     const langVars = this.config.languages.map(toVar);
     const lines = [
       `// Auto-generated module: ${mod}`,
-      `import { i18nState } from '$lib/i18n/state.svelte';`,
-      `import { ${langVars.join(", ")} } from './constants';`,
+      `import { i18nState } from "$lib/i18n/state.svelte";`,
+      `import { ${langVars.join(", ")} } from "./constants";`,
       "",
     ];
 
@@ -356,7 +356,7 @@ export class I18nGenerator {
     // constants.ts
     const constLines = [
       `// Language Constants`,
-      ...this.config.languages.map((l) => `export const ${toVar(l)} = '${l}';`),
+      ...this.config.languages.map((l) => `export const ${toVar(l)} = "${l}";`),
       ``,
       `export const SUPPORTED_LANGS = [${langVars.join(", ")}] as const;`,
       `export const DEFAULT_LANG = ${toVar(this.config.languages[0])};`,
@@ -367,12 +367,12 @@ export class I18nGenerator {
     // index.ts
     const lines = [
       `// Aggregation Entry`,
-      ...modules.map((m) => `import * as ${m} from './${m}';`),
+      ...modules.map((m) => `import * as ${m} from "./${m}";`),
       ``,
       `export const t = {`,
       ...modules.map((m) => `  ${m},`),
       `};`,
-      `export * from './constants';`,
+      `export * from "./constants";`,
       "",
     ];
 

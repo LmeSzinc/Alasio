@@ -38,32 +38,32 @@
 </script>
 
 {#if show}
-  <div class="fixed inset-0 backdrop-blur-sm flex items-center justify-center z-50" onclick={handleCancel}>
+  <div class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm" onclick={handleCancel}>
     <div
-      class="bg-card text-card-foreground rounded-lg p-6 w-96 border border-border shadow-lg"
+      class="bg-card text-card-foreground border-border w-96 rounded-lg border p-6 shadow-lg"
       onclick={(e) => e.stopPropagation()}
     >
-      <h2 class="text-2xl font-bold mb-4">{t.CloseDialog.Title()}</h2>
+      <h2 class="mb-4 text-2xl font-bold">{t.CloseDialog.Title()}</h2>
       <p class="text-muted-foreground mb-6">{t.CloseDialog.Message()}</p>
 
       {#if isClosing}
         <div class="flex flex-col items-center gap-4 py-4">
-          <div class="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-muted-foreground"></div>
-          <p class="text-sm text-muted-foreground">
+          <div class="border-border border-t-muted-foreground h-8 w-8 animate-spin rounded-full border-4"></div>
+          <p class="text-muted-foreground text-sm">
             {stageMessages[shutdownStage] || t.CloseDialog.Closing()}
           </p>
         </div>
       {:else}
-        <div class="flex gap-3 justify-end">
+        <div class="flex justify-end gap-3">
           <button
             onclick={handleCancel}
-            class="px-4 py-2 border border-border rounded hover:bg-accent hover:text-accent-foreground transition-colors"
+            class="border-border hover:bg-accent hover:text-accent-foreground rounded border px-4 py-2 transition-colors"
           >
             {t.CloseDialog.Cancel()}
           </button>
           <button
             onclick={handleConfirm}
-            class="px-4 py-2 bg-destructive text-destructive-foreground rounded hover:bg-destructive/90 transition-colors"
+            class="bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded px-4 py-2 transition-colors"
           >
             {t.CloseDialog.Confirm()}
           </button>

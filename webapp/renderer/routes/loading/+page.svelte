@@ -18,16 +18,16 @@
   });
 </script>
 
-<div class="flex h-screen flex-col items-center justify-center bg-background text-foreground">
-  <h1 class="text-6xl font-bold mb-8">Alasio</h1>
-  <div class="text-xl mb-12 text-muted-foreground">Starting backend...</div>
+<div class="bg-background text-foreground flex h-screen flex-col items-center justify-center">
+  <h1 class="mb-8 text-6xl font-bold">Alasio</h1>
+  <div class="text-muted-foreground mb-12 text-xl">Starting backend...</div>
 
   <div
     bind:this={logContainer}
-    class="w-[80%] max-w-4xl h-64 bg-muted rounded-lg p-4 overflow-y-auto font-mono text-sm border border-border"
+    class="bg-muted border-border h-64 w-[80%] max-w-4xl overflow-y-auto rounded-lg border p-4 font-mono text-sm"
   >
     {#each logs as log}
-      <div class="whitespace-pre-wrap text-muted-foreground">{log}</div>
+      <div class="text-muted-foreground whitespace-pre-wrap">{log}</div>
     {/each}
   </div>
 </div>

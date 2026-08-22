@@ -1,17 +1,14 @@
-import { app, protocol, net } from 'electron';
-import * as path from 'path';
-import * as fs from 'fs';
-import { pathToFileURL } from 'url';
+import { app, protocol, net } from "electron";
+import * as path from "path";
+import * as fs from "fs";
+import { pathToFileURL } from "url";
 
 // Electron 25+ only: protocol.handle() with a fetch-style handler.
-type HandleProtocol = (
-  scheme: string,
-  handler: (request: Request) => Promise<Response> | Response
-) => void;
+type HandleProtocol = (scheme: string, handler: (request: Request) => Promise<Response> | Response) => void;
 // Electron <= 24: registerFileProtocol() with a callback.
 type LegacyRegisterProtocol = (
   scheme: string,
-  handler: (request: any, callback: (result: { path?: string; error?: number }) => void) => void
+  handler: (request: any, callback: (result: { path?: string; error?: number }) => void) => void,
 ) => void;
 
 function resolveSafe(rendererDir: string, urlPath: string): string {
@@ -27,7 +24,7 @@ function resolveFile(rendererDir: string, urlPath: string): string {
   const filePath = resolveSafe(rendererDir, urlPath);
   try {
     if (fs.statSync(filePath).isDirectory()) {
-      return path.join(filePath, 'index.html');
+      return path.join(filePath, "index.html");
     }
   } catch (e) {
     // File not found: let the request fail with the original path
@@ -46,7 +43,7 @@ export function registerAppProtocol(rendererDir: string) {
   // standard + secure make app:// URLs parse like http(s), so
   // history.pushState works for the SvelteKit client-side router.
   protocol.registerSchemesAsPrivileged([
-    { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+    { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
   ]);
 
   app.whenReady().then(() => {
@@ -54,17 +51,15 @@ export function registerAppProtocol(rendererDir: string) {
     // after ready, so the API references must be captured inside this
     // callback, not at module top level.
     const protocolHandle = (protocol as any).handle as HandleProtocol | undefined;
-    const legacyRegister = (protocol as any).registerFileProtocol as
-      | LegacyRegisterProtocol
-      | undefined;
+    const legacyRegister = (protocol as any).registerFileProtocol as LegacyRegisterProtocol | undefined;
     const netFetch = (net as any).fetch as ((url: string) => Promise<Response>) | undefined;
     if (protocolHandle && netFetch) {
-      protocolHandle('app', (request) => {
+      protocolHandle("app", (request) => {
         const filePath = resolveFile(rendererDir, new URL(request.url).pathname);
         return netFetch(pathToFileURL(filePath).toString());
       });
     } else if (legacyRegister) {
-      legacyRegister('app', (request, callback) => {
+      legacyRegister("app", (request, callback) => {
         const filePath = resolveFile(rendererDir, new URL(request.url).pathname);
         callback({ path: filePath });
       });

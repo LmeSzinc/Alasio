@@ -1,5 +1,5 @@
 // Auto-generated language state (node mode)
-import { DEFAULT_LANG } from './constants';
+import { DEFAULT_LANG } from "./constants";
 
 let currentLang: string = DEFAULT_LANG;
 

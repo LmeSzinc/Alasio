@@ -113,7 +113,7 @@
     bind:this={iframe}
     onload={handleLoad}
     src={iframeSrc}
-    class="flex-1 w-full border-0 opacity-0 transition-opacity duration-150"
+    class="w-full flex-1 border-0 opacity-0 transition-opacity duration-150"
     class:opacity-100={iframeVisible}
     title="Alasio App"
   ></iframe>

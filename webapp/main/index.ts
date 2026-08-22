@@ -1,30 +1,30 @@
-import { app, ipcMain } from 'electron';
-import * as path from 'path';
-import { loadConfig } from './config';
-import { appState } from './app-state';
-import { initSharedState, setRoute, setupSharedStateIPC, setMainWindow as setSharedStateWindow } from './shared-state';
-import { createWindow, setupWindowIPC, getMainWindow } from './window';
-import { createTray, setMainWindow as setTrayWindow } from './tray';
-import { startBackend, setMainWindow as setBackendWindow } from './backend';
-import { IPC_BACKEND_START } from '../shared/ipc';
-import { registerAppProtocol } from './protocol';
+import { app, ipcMain } from "electron";
+import * as path from "path";
+import { loadConfig } from "./config";
+import { appState } from "./app-state";
+import { initSharedState, setRoute, setupSharedStateIPC, setMainWindow as setSharedStateWindow } from "./shared-state";
+import { createWindow, setupWindowIPC, getMainWindow } from "./window";
+import { createTray, setMainWindow as setTrayWindow } from "./tray";
+import { startBackend, setMainWindow as setBackendWindow } from "./backend";
+import { IPC_BACKEND_START } from "../shared/ipc";
+import { registerAppProtocol } from "./protocol";
 
 // Disable GPU and configure Electron
 app.disableHardwareAcceleration();
-app.commandLine.appendSwitch('no-sandbox');
-app.commandLine.appendSwitch('disable-http-cache');
-app.commandLine.appendSwitch('no-proxy-server');
+app.commandLine.appendSwitch("no-sandbox");
+app.commandLine.appendSwitch("disable-http-cache");
+app.commandLine.appendSwitch("no-proxy-server");
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
 
 // Register the app:// protocol serving the built renderer (must be before app ready)
-registerAppProtocol(path.join(__dirname, '../renderer'));
+registerAppProtocol(path.join(__dirname, "../renderer"));
 
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on("second-instance", () => {
     const win = getMainWindow();
     if (win) {
       if (win.isMinimized()) win.restore();
@@ -45,7 +45,7 @@ if (!gotTheLock) {
     if (appState.configError) {
       initSharedState({
         backendPort: 22267,
-        route: 'error',
+        route: "error",
         isFirstTimeSetup: false,
       });
 
@@ -54,12 +54,12 @@ if (!gotTheLock) {
       setTrayWindow(window);
       setBackendWindow(window);
 
-      setRoute('error', appState.configError.message);
+      setRoute("error", appState.configError.message);
 
       setupSharedStateIPC();
       setupWindowIPC();
 
-      const iconPath = path.join(__dirname, '../resources/icon.png');
+      const iconPath = path.join(__dirname, "../resources/icon.png");
       createTray(iconPath, appState.displayLang);
       return;
     }
@@ -67,7 +67,7 @@ if (!gotTheLock) {
     // Initialize shared state
     initSharedState({
       backendPort: appState.backendPort,
-      route: appState.isFirstTimeSetup ? 'setup' : 'loading',
+      route: appState.isFirstTimeSetup ? "setup" : "loading",
       isFirstTimeSetup: appState.isFirstTimeSetup,
     });
 
@@ -88,31 +88,31 @@ if (!gotTheLock) {
     ipcMain.handle(IPC_BACKEND_START, async () => {
       try {
         await startBackend(appState.pythonExecutable, appState.rootPath, appState.backendHost, appState.backendPort);
-        setRoute('app');
+        setRoute("app");
       } catch (err) {
-        console.error('Failed to start backend:', err);
-        setRoute('error', 'Failed to start backend');
+        console.error("Failed to start backend:", err);
+        setRoute("error", "Failed to start backend");
       }
     });
 
     // Create tray
-    const iconPath = path.join(__dirname, '../resources/icon.png');
+    const iconPath = path.join(__dirname, "../resources/icon.png");
     createTray(iconPath, appState.displayLang);
 
     // Start backend if not first time setup
     if (!appState.isFirstTimeSetup) {
       try {
         await startBackend(appState.pythonExecutable, appState.rootPath, appState.backendHost, appState.backendPort);
-        setRoute('app');
+        setRoute("app");
       } catch (err) {
-        console.error('Failed to start backend:', err);
-        setRoute('error', 'Failed to start backend');
+        console.error("Failed to start backend:", err);
+        setRoute("error", "Failed to start backend");
       }
     }
   });
 
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
       app.quit();
     }
   });

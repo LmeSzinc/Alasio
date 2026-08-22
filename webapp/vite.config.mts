@@ -1,13 +1,13 @@
-import { defineConfig } from 'vite';
-import { sveltekit } from '@sveltejs/kit/vite';
-import tailwindcss from '@tailwindcss/vite';
-import electron from 'vite-plugin-electron';
-import { resolve } from 'path';
-import { fileURLToPath } from 'url';
-import { i18nPlugin } from './scripts/i18n/vite.ts';
-import { mainI18nConfig, rendererI18nConfig } from './scripts/i18n/config.ts';
+import { defineConfig } from "vite";
+import { sveltekit } from "@sveltejs/kit/vite";
+import tailwindcss from "@tailwindcss/vite";
+import electron from "vite-plugin-electron";
+import { resolve } from "path";
+import { fileURLToPath } from "url";
+import { i18nPlugin } from "./scripts/i18n/vite.ts";
+import { mainI18nConfig, rendererI18nConfig } from "./scripts/i18n/config.ts";
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   // i18nPlugin (renderer instance) is listed first so its config hook
@@ -18,7 +18,7 @@ export default defineConfig({
     tailwindcss(),
     electron([
       {
-        entry: resolve(__dirname, 'main/index.ts'),
+        entry: resolve(__dirname, "main/index.ts"),
         vite: {
           // The main process runs as plain node (no HMR): the node-mode
           // i18n plugin rescans main sources on every buildStart, so
@@ -27,19 +27,19 @@ export default defineConfig({
           build: {
             // electron 22 bundles Node 16.17; do not follow vite 8's
             // default baseline-widely-available (2026-01) target
-            target: 'node16',
-            outDir: 'dist/main',
+            target: "node16",
+            outDir: "dist/main",
           },
         },
       },
       {
-        entry: resolve(__dirname, 'preload/index.ts'),
+        entry: resolve(__dirname, "preload/index.ts"),
         vite: {
           build: {
             // electron 22 bundles Node 16.17; do not follow vite 8's
             // default baseline-widely-available (2026-01) target
-            target: 'node16',
-            outDir: 'dist/preload',
+            target: "node16",
+            outDir: "dist/preload",
           },
         },
       },
@@ -51,6 +51,6 @@ export default defineConfig({
   build: {
     // electron 22 bundles Chromium 108; do not follow vite 8's default
     // baseline-widely-available (2026-01) target
-    target: 'chrome108',
+    target: "chrome108",
   },
 });

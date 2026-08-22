@@ -1,20 +1,20 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow } from "electron";
 import {
   IPC_SHARED_STATE_GET,
   IPC_SHARED_STATE_GET_SYNC,
   IPC_SHARED_STATE_SET_LANGUAGE,
   IPC_SHARED_STATE_SET_THEME,
   IPC_SHARED_STATE_UPDATE,
-} from '../shared/ipc';
-import { appState } from './app-state';
-import { updateTrayMenu } from './tray';
+} from "../shared/ipc";
+import { appState } from "./app-state";
+import { updateTrayMenu } from "./tray";
 
-export type RouteType = 'setup' | 'loading' | 'app' | 'error';
+export type RouteType = "setup" | "loading" | "app" | "error";
 
 interface SharedState {
   // Display values (derived, always concrete): what the UI actually shows
   language: string;
-  theme: 'light' | 'dark';
+  theme: "light" | "dark";
   // Config values (persistent, may be 'system')
   configLang: string;
   configTheme: string;
@@ -25,12 +25,12 @@ interface SharedState {
 }
 
 const state: SharedState = {
-  language: 'en-US',
-  theme: 'light',
-  configLang: 'system',
-  configTheme: 'system',
+  language: "en-US",
+  theme: "light",
+  configLang: "system",
+  configTheme: "system",
   backendPort: 22267,
-  route: 'loading',
+  route: "loading",
   isFirstTimeSetup: false,
 };
 
@@ -40,11 +40,7 @@ export function setMainWindow(window: BrowserWindow) {
   mainWindow = window;
 }
 
-export function initSharedState(config: {
-  backendPort: number;
-  route: RouteType;
-  isFirstTimeSetup: boolean;
-}) {
+export function initSharedState(config: { backendPort: number; route: RouteType; isFirstTimeSetup: boolean }) {
   syncState();
   state.backendPort = config.backendPort;
   state.route = config.route;
