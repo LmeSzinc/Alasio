@@ -428,6 +428,188 @@ class TestRecvLoopStartsListener:
         supervisor.stop_stdin_listener()
         assert supervisor._stdin_thread is None
 
+    def test_first_message_starts_listener_before_timeout(self, replace_stdin):
+        """
+        The first backend message (command:started) must end the startup
+        window immediately: the stdin listener starts long before
+        startup_timeout would elapse, so a command:stop written right
+        after the backend came up is never left unread.
+        """
+        stream, write_fd = fake_stdin_from_pipe()
+        replace_stdin(stream)
+        supervisor, child_conn = make_supervisor_with_pipe()
+        # startup window far longer than the test run: only the backend's
+        # startup message can end it in time
+        supervisor.startup_timeout = 30
+
+        result = {}
+
+        def run_recv_loop():
+            result['ok'] = supervisor.recv_loop()
+
+        thread = threading.Thread(target=run_recv_loop, daemon=True)
+        thread.start()
+
+        # the backend announces pipe readiness
+        child_conn.send_bytes(b'command:started')
+
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            if supervisor._stdin_thread is not None and supervisor._stdin_thread.is_alive():
+                break
+            time.sleep(0.05)
+        assert supervisor._stdin_thread is not None
+        assert supervisor._stdin_thread.is_alive()
+
+        # close the child end of the pipe, recv_loop hits EOF and returns
+        child_conn.close()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        assert result['ok'] is True
+
+        os.close(write_fd)
+        supervisor.stop_stdin_listener()
+        assert supervisor._stdin_thread is None
+
+    def test_spawned_message_starts_listener_without_ending_window(self, replace_stdin):
+        """
+        command:spawned must start the stdin listener immediately but must
+        NOT end the startup window: a backend crash after the spawn
+        announcement (e.g. a bind conflict during startup) still counts as
+        a startup failure, so recv_loop returns False on EOF.
+        """
+        stream, write_fd = fake_stdin_from_pipe()
+        replace_stdin(stream)
+        supervisor, child_conn = make_supervisor_with_pipe()
+        # startup window far longer than the test run: only a real
+        # startup confirmation message can end it
+        supervisor.startup_timeout = 30
+
+        result = {}
+
+        def run_recv_loop():
+            result['ok'] = supervisor.recv_loop()
+
+        thread = threading.Thread(target=run_recv_loop, daemon=True)
+        thread.start()
+
+        # the backend child announces its spawn completion
+        child_conn.send_bytes(b'command:spawned')
+
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            if supervisor._stdin_thread is not None and supervisor._stdin_thread.is_alive():
+                break
+            time.sleep(0.05)
+        assert supervisor._stdin_thread is not None
+        assert supervisor._stdin_thread.is_alive()
+
+        # backend crashes before any startup confirmation: the window is
+        # still open, so this is a startup failure (no restart loop)
+        child_conn.close()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        assert result['ok'] is False
+
+        os.close(write_fd)
+        supervisor.stop_stdin_listener()
+        assert supervisor._stdin_thread is None
+
+    def test_spawned_then_confirmation_ends_window(self, replace_stdin):
+        """
+        After command:spawned started the listener, a real startup
+        confirmation message (e.g. command:started after the listeners
+        bound) must still end the startup window: a later crash is then a
+        normal crash, not a startup failure.
+        """
+        stream, write_fd = fake_stdin_from_pipe()
+        replace_stdin(stream)
+        supervisor, child_conn = make_supervisor_with_pipe()
+        supervisor.startup_timeout = 30
+
+        result = {}
+
+        def run_recv_loop():
+            result['ok'] = supervisor.recv_loop()
+
+        thread = threading.Thread(target=run_recv_loop, daemon=True)
+        thread.start()
+
+        # spawn announcement, then the real startup confirmation
+        child_conn.send_bytes(b'command:spawned')
+        child_conn.send_bytes(b'command:started')
+
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            if supervisor._stdin_thread is not None and supervisor._stdin_thread.is_alive():
+                break
+            time.sleep(0.05)
+        assert supervisor._stdin_thread is not None
+        assert supervisor._stdin_thread.is_alive()
+
+        # backend exits after the window was confirmed: a normal exit, so
+        # recv_loop reports startup success (run() would restart it)
+        child_conn.close()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        assert result['ok'] is True
+
+        os.close(write_fd)
+        supervisor.stop_stdin_listener()
+        assert supervisor._stdin_thread is None
+
+    def test_parent_exit_inside_startup_window_raises(self, replace_stdin):
+        """
+        stdin EOF while recv_loop is still inside the startup window (the
+        backend sent command:spawned, so the listener is already running,
+        but no startup confirmation arrived yet) must raise
+        ParentProcessExited immediately: the EOF must not wait out the
+        startup window to be acted on.
+        """
+        stream, write_fd = fake_stdin_from_pipe()
+        replace_stdin(stream)
+        supervisor, child_conn = make_supervisor_with_pipe()
+        # startup window far longer than the test run: only the stdin EOF
+        # check can end the wait in time
+        supervisor.startup_timeout = 30
+
+        result = {}
+
+        def run_recv_loop():
+            try:
+                supervisor.recv_loop()
+            except ParentProcessExited as e:
+                result['raised'] = type(e).__name__
+            else:
+                result['raised'] = None
+
+        thread = threading.Thread(target=run_recv_loop, daemon=True)
+        thread.start()
+
+        # the backend child announces its spawn completion: the listener
+        # starts inside the startup window
+        child_conn.send_bytes(b'command:spawned')
+
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            if supervisor._stdin_thread is not None and supervisor._stdin_thread.is_alive():
+                break
+            time.sleep(0.05)
+        assert supervisor._stdin_thread is not None
+        assert supervisor._stdin_thread.is_alive()
+
+        # parent (Electron) dies while the backend is still starting:
+        # close the stdin write end; the backend pipe stays open
+        os.close(write_fd)
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        assert result['raised'] == 'ParentProcessExited'
+        assert supervisor._stdin_eof.is_set()
+
+        child_conn.close()
+        supervisor.stop_stdin_listener()
+        assert supervisor._stdin_thread is None
+
     def test_recv_loop_raises_on_parent_exit(self, replace_stdin):
         stream, write_fd = fake_stdin_from_pipe()
         replace_stdin(stream)
@@ -688,6 +870,44 @@ class TestHandleBackendMessage:
 
         assert capture.any_contains("Unknown command from backend: b'unknown'")
         assert supervisor.sigint_count == 0
+        assert supervisor.restart_requested is False
+
+    def test_command_started_ignored_silently(self, monkeypatch):
+        """
+        command:started (backend pipe readiness announcement) must not be
+        treated as an unknown command, must not stop or restart anything
+        """
+        from alasio.logger.writer import CaptureStream
+
+        capture = CaptureStream()
+        monkeypatch.setattr(sys, 'stdout', capture)
+        supervisor = Supervisor()
+
+        supervisor.handle_backend_message(b'command:started')
+
+        assert not capture.any_contains('Unknown command')
+        assert supervisor.sigint_count == 0
+        assert supervisor.stop_requested is False
+        assert supervisor.restart_requested is False
+
+    def test_command_spawned_ignored_silently(self, monkeypatch):
+        """
+        command:spawned arriving after the startup window ended (recv_loop
+        main loop) must not be treated as an unknown command or change
+        any state: the stdin listener was already started when the window
+        closed
+        """
+        from alasio.logger.writer import CaptureStream
+
+        capture = CaptureStream()
+        monkeypatch.setattr(sys, 'stdout', capture)
+        supervisor = Supervisor()
+
+        supervisor.handle_backend_message(b'command:spawned')
+
+        assert not capture.any_contains('Unknown command')
+        assert supervisor.sigint_count == 0
+        assert supervisor.stop_requested is False
         assert supervisor.restart_requested is False
 
 

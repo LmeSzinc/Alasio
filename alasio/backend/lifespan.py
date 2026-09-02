@@ -193,6 +193,26 @@ async def lifespan_stop():
     SHUTDOWN_EVENT.set()
 
 
+def announce_started():
+    """
+    Announce pipe readiness to the supervisor once the listeners are bound.
+
+    recv_loop treats the first backend message as the startup confirmation
+    and only then starts the stdin listener (the listener must stay stopped
+    while a backend spawns, see the Windows constraint in supervisor.py).
+    Without this message the confirmation falls back to the startup_timeout
+    (5s), during which a command:stop written to stdin (e.g. closing the
+    webapp right after it opened) would sit unread until the timeout ends,
+    longer than the Electron close flow waits before force-killing the tree.
+
+    Called by the hypercorn bind patch in app.py right after the sockets
+    are bound, before any request can arrive. A bind failure (port already
+    in use) raises before this runs, so it stays a startup failure and the
+    supervisor does not restart-loop on it.
+    """
+    mpipe_backend.send(b'command:started')
+
+
 def get_shutdown_trigger():
     """
     Get shutdown_trigger function, or None if no daemon by supervisor.

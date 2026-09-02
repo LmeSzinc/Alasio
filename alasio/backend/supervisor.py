@@ -451,12 +451,32 @@ class Supervisor:
         try:
             # First recv with timeout to detect startup failures
             # If backend crashes within timeout, we'll get EOFError
-            # If backed emits any message, backend is running successfully
-            # If timeout reached, backend is running successfully
+            # If backend emits a confirmation message, startup succeeded
+            # If timeout reached, startup is considered successful
             for _ in loop_until_timeout(timeout=self.startup_timeout):
+                if self._stdin_eof.is_set():
+                    # The parent process (Electron) closed the stdin
+                    # command channel while the backend was still
+                    # starting: nobody is left to manage this supervisor.
+                    # Checked here because command:spawned can already
+                    # have started the listener inside this window, so the
+                    # EOF must not wait out the window to be acted on.
+                    raise ParentProcessExited
                 wake = self.parent_conn.poll(timeout=0.2)
                 if wake:
                     msg = self.parent_conn.recv_bytes()
+                    if msg == b'command:spawned':
+                        # Backend child finished spawning (sent from
+                        # entry.backend_process_entry right after boot):
+                        # the child is past its stdio initialization, so
+                        # the stdin listener can safely start. This is NOT
+                        # a startup confirmation: the backend has not
+                        # finished starting, the window keeps running, and
+                        # a crash later in the window (e.g. a bind
+                        # conflict) still counts as a startup failure.
+                        mprint("Backend spawned, starting stdin listener")
+                        self.start_stdin_listener()
+                        continue
                     mprint(f"Backend emits message, startup successful")
                     self.handle_backend_message(msg)
                     break
@@ -465,10 +485,14 @@ class Supervisor:
 
             startup_success = True
 
-            # The stdin listener can only be started once the backend has
-            # finished starting up: on Windows, touching the inherited stdin
-            # pipe handle while the child process initializes its stdio makes
-            # multiprocessing spawn hang.
+            # The stdin listener can only be started once the child is past
+            # its stdio initialization: on Windows, touching the inherited
+            # stdin pipe handle while the child process initializes its
+            # stdio makes multiprocessing spawn hang. entry.py announces
+            # command:spawned as soon as the child is past that point, which
+            # starts the listener inside the startup window above; this call
+            # is the fallback for backends that never announce (already
+            # running listener is a no-op).
             self.start_stdin_listener()
 
             # wait infinitely
@@ -515,6 +539,21 @@ class Supervisor:
         elif msg == b'command:stop':
             mprint("Backend requested stop")
             self.handle_sigint(signal.SIGINT, None)
+        elif msg == b'command:started':
+            # The backend announced that its pipe channel is live (sent by
+            # app.py's bind patch once the listeners are up). Any first
+            # backend message ends recv_loop's startup window, which is
+            # what starts the stdin listener; there is nothing further to
+            # act on here.
+            pass
+        elif msg == b'command:spawned':
+            # Backend child spawn completion announcement (sent from
+            # entry.backend_process_entry). Normally received inside
+            # recv_loop's startup window, which starts the stdin listener
+            # and keeps the window running; this branch only covers the
+            # message arriving after the window already ended, where the
+            # listener is up already and there is nothing to do.
+            pass
         elif msg.startswith(b'token_ack:'):
             # Backend confirmed a rotated token; wake the rotation thread
             self.token_manager.handle_token_ack(msg)

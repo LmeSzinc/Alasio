@@ -65,6 +65,21 @@ def backend_process_entry(conn, args, backend_entry_fn, tokens=()):
     import builtins
     builtins.__mpipe_conn__ = conn
 
+    # Tell the supervisor the spawn handshake is done. Running this target
+    # means the child is already past Py_Initialize (its stdio was
+    # initialized during boot), so the supervisor may start its stdin
+    # listener now -- the listener only has to stay stopped while the
+    # child initializes stdio (Windows constraint, see supervisor.py).
+    # This is NOT a startup confirmation: the backend has not finished
+    # starting, so recv_loop keeps its startup window running (a crash
+    # later in the window, e.g. a bind conflict, must still count as a
+    # startup failure instead of a restart loop).
+    try:
+        conn.send_bytes(b'command:spawned')
+    except (EOFError, OSError):
+        # supervisor already gone, nothing to notify
+        pass
+
     # ignore SIGINT on windows because signal is send to the entire process group
     # Supervisor should receive SIGINT and backend should ignore, then supervisor tell backend to stop
     if sys.platform == "win32":

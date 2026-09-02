@@ -11,7 +11,7 @@ from starlette.routing import Route, WebSocketRoute
 
 from alasio.backend.auth import auth
 from alasio.backend.dev.assets import ImageStaticFiles, SPANoCacheStaticFiles
-from alasio.backend.lifespan import get_shutdown_trigger
+from alasio.backend.lifespan import announce_started, get_shutdown_trigger
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.mod import HISTORY_CACHE
@@ -283,6 +283,40 @@ def apply_hypercorn_exclusivity_patch():
     Config._create_sockets = patched_create_sockets
 
 
+def apply_started_announce_patch():
+    """
+    Patch Config.create_sockets to announce pipe readiness after binding.
+
+    The backend announces b'command:started' over the supervisor pipe once
+    the listeners are bound (see lifespan.announce_started): the
+    supervisor's recv_loop ends its startup window on the first backend
+    message, and the stdin listener (command:stop channel) only starts
+    after that confirmation. Without the announce the confirmation would
+    wait out the whole startup_timeout (5s), so a close right after the
+    webapp opened would sit unread in the stdin pipe until Electron
+    force-kills the tree.
+
+    The wrapper must run only after the sockets bound successfully: a bind
+    failure (port in use) raises inside create_sockets, no announce is
+    sent, and the supervisor still treats the crash as a startup failure
+    instead of restart-looping. create_sockets (public) is wrapped rather
+    than _create_sockets because SSL mode binds several socket lists in
+    one create_sockets call.
+    """
+    from hypercorn import Config
+
+    original_create_sockets = Config.create_sockets
+
+    def patched_create_sockets(self):
+        sockets = original_create_sockets(self)
+        # listeners are bound and about to serve: tell the supervisor
+        # (no-op when running without a supervisor pipe)
+        announce_started()
+        return sockets
+
+    Config.create_sockets = patched_create_sockets
+
+
 def create_config(args=None):
     """
     Args:
@@ -303,6 +337,7 @@ def create_config(args=None):
         env.set_project_root(os.getcwd())
     logger.info(f'[PROJECT_ROOT] {env.PROJECT_ROOT}')
     apply_hypercorn_exclusivity_patch()
+    apply_started_announce_patch()
     deploy = DeployConfig().config.data
 
     # build host port

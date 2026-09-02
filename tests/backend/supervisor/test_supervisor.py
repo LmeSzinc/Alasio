@@ -103,7 +103,10 @@ class TestSupervisor:
 
     def test_startup_timeout_confirmation(self):
         """
-        不发启动消息的后端（真实后端行为），靠 startup_timeout 超时确认
+        不发启动消息的后端（确认消息缺失的兜底路径），靠 startup_timeout 超时确认
+
+        真实后端会在 bind 成功后发送 command:started，因此正常情况不再
+        需要等满 startup_timeout；silent 后端保留该超时路径的覆盖。
         """
         with create_supervisor_process("silent") as proc:
             proc.wait_for_output("Backend running for 5.0s, startup successful", timeout=15)

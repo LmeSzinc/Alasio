@@ -92,8 +92,9 @@ class TestSupervisor(Supervisor):
         """
         正常启动但不发送启动确认的后端
 
-        真实后端启动时不会主动向 pipe 发送消息，supervisor 只能靠
-        startup_timeout 超时来确认启动成功；这个后端模拟该行为。
+        真实后端现在会在监听端口绑定成功后发送 command:started 确认启动；
+        这个后端模拟的是确认消息缺失时的兜底路径：supervisor 只能靠
+        startup_timeout 超时来确认启动成功。
         """
         import builtins
         print("[Backend] Silent backend started, waiting indefinitely...")

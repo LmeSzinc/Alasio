@@ -1,3 +1,4 @@
+import builtins
 import multiprocessing
 import threading
 
@@ -5,6 +6,37 @@ import trio
 
 from alasio.backend import lifespan
 from alasio.backend.lifespan import mpipe_recv_loop
+
+
+class TestAnnounceStarted:
+    """
+    Tests for announce_started: the pipe readiness announcement that ends
+    the supervisor's startup window early (see the bind patch in app.py).
+    """
+
+    def test_sends_command_started_on_pipe(self, monkeypatch):
+        """
+        announce_started must send b'command:started' over the supervisor
+        pipe
+        """
+        parent_conn, child_conn = multiprocessing.Pipe()
+        monkeypatch.setattr(builtins, '__mpipe_conn__', child_conn, raising=False)
+        try:
+            lifespan.announce_started()
+
+            assert parent_conn.poll(timeout=1)
+            assert parent_conn.recv_bytes() == b'command:started'
+        finally:
+            parent_conn.close()
+            child_conn.close()
+
+    def test_no_pipe_is_noop(self, monkeypatch):
+        """
+        announce_started without a supervisor pipe (e.g. standalone runs
+        or tests that call config.create_sockets directly) must not raise
+        """
+        monkeypatch.delattr(builtins, '__mpipe_conn__', raising=False)
+        lifespan.announce_started()
 
 
 class TestMpipeRecvLoop:

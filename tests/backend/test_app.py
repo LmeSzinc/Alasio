@@ -35,6 +35,8 @@ class TestCreateConfig:
         """SSL configured: hypercorn must be given keyfile/certfile."""
         monkeypatch.setattr(
             'alasio.backend.app.apply_hypercorn_exclusivity_patch', lambda: None)
+        monkeypatch.setattr(
+            'alasio.backend.app.apply_started_announce_patch', lambda: None)
         monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
         monkeypatch.setattr(
             'alasio.backend.app.DeployConfig',
@@ -52,6 +54,8 @@ class TestCreateConfig:
         """No SSL configured: hypercorn stays plaintext."""
         monkeypatch.setattr(
             'alasio.backend.app.apply_hypercorn_exclusivity_patch', lambda: None)
+        monkeypatch.setattr(
+            'alasio.backend.app.apply_started_announce_patch', lambda: None)
         monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
         monkeypatch.setattr(
             'alasio.backend.app.DeployConfig',
@@ -63,3 +67,34 @@ class TestCreateConfig:
         assert config.keyfile is None
         assert config.certfile is None
         assert not config.ssl_enabled
+
+
+class TestBindAnnounce:
+    """
+    After a successful bind the backend must announce command:started to
+    the supervisor pipe, so recv_loop's startup window (and with it the
+    stdin listener) starts without waiting out startup_timeout.
+    """
+
+    def test_create_sockets_announces_started(self, monkeypatch):
+        import builtins
+        import multiprocessing
+
+        parent_conn, child_conn = multiprocessing.Pipe()
+        monkeypatch.setattr(builtins, '__mpipe_conn__', child_conn, raising=False)
+        monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
+        monkeypatch.setattr(
+            'alasio.backend.app.DeployConfig',
+            lambda: FakeDeployConfig(ssl=False),
+        )
+
+        config = create_config(['--host', '127.0.0.1', '--port', '0'])
+        sockets = config.create_sockets()
+        try:
+            assert parent_conn.poll(timeout=1)
+            assert parent_conn.recv_bytes() == b'command:started'
+        finally:
+            for sock in sockets.secure_sockets + sockets.insecure_sockets:
+                sock.close()
+            parent_conn.close()
+            child_conn.close()
