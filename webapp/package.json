@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && tsx scripts/csp-inline-hash/fix.ts && tsx scripts/pack-asar.ts",
-    "package": "vite build && electron-builder && tsx scripts/electron-cleanup.ts",
+    "package": "vite build && tsx scripts/csp-inline-hash/fix.ts && electron-builder && tsx scripts/electron-cleanup.ts",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
