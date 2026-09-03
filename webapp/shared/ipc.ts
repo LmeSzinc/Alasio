@@ -14,6 +14,10 @@ export const IPC_SHARED_STATE_SET_DPI_SCALING = "shared-state:set-dpi-scaling";
 export const IPC_WINDOW_CONFIRM_CLOSE = "window:confirm-close";
 export const IPC_SHARED_STATE_GET = "shared-state:get";
 export const IPC_BACKEND_START = "backend:start";
+// Subscribe to the startup log stream: the invoke reply replays the full
+// buffered startup log (chronological), lines recorded after the
+// subscription arrive through the IPC_BACKEND_LOG push channel.
+export const IPC_BACKEND_LOG_SUBSCRIBE = "backend:log-subscribe";
 
 // Renderer -> Main, synchronous request/response (ipcRenderer.sendSync /
 // ipcMain.on + event.returnValue). Read once at renderer startup so the

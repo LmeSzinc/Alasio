@@ -1,18 +1,19 @@
 import * as path from "path";
 import { app, ipcMain } from "electron";
-import { IPC_BACKEND_START } from "../shared/ipc";
+import { IPC_BACKEND_LOG_SUBSCRIBE, IPC_BACKEND_START } from "../shared/ipc";
 import { appState } from "./app-state";
 import {
   registerTokenInjection,
-  setBackendSuccessCallback,
+  setBackendStatusCallback,
   setMainWindow as setBackendWindow,
   startBackend,
+  subscribeBackendLogs,
 } from "./backend";
 import { loadConfig } from "./config";
 import { registerAppProtocol } from "./protocol";
 import {
   initSharedState,
-  setBackendSuccess,
+  setBackendStatus,
   setRoute,
   setMainWindow as setSharedStateWindow,
   setupSharedStateIPC,
@@ -27,12 +28,13 @@ app.commandLine.appendSwitch("disable-http-cache");
 app.commandLine.appendSwitch("no-proxy-server");
 
 // Wire backend startup status into shared state so the loading/setup
-// pages can show the failure hint. Injected here (instead of backend.ts
-// importing shared-state) to keep the module graph acyclic: shared-state
-// registers an appState.onChange listener at module scope, and a direct
-// import would create the cycle shared-state -> app-state -> backend ->
-// shared-state. By this point every module has finished loading.
-setBackendSuccessCallback(setBackendSuccess);
+// pages can show the running/failure states. Injected here (instead of
+// backend.ts importing shared-state) to keep the module graph acyclic:
+// shared-state registers an appState.onChange listener at module scope,
+// and a direct import would create the cycle shared-state -> app-state ->
+// backend -> shared-state. By this point every module has finished
+// loading.
+setBackendStatusCallback(setBackendStatus);
 
 // Load the deploy config synchronously before app ready: the dpi scaling
 // preference must be applied as a Chromium command-line switch
@@ -122,6 +124,11 @@ if (!gotTheLock) {
     setupSharedStateIPC();
     setupWindowIPC();
 
+    // Startup log subscription: the invoke reply replays the buffered
+    // startup log (chronological snapshot); lines recorded after the
+    // subscription are pushed through IPC_BACKEND_LOG by backend.ts.
+    ipcMain.handle(IPC_BACKEND_LOG_SUBSCRIBE, () => subscribeBackendLogs());
+
     // Start the backend on first-time setup: the setup page has already
     // saved the language/theme into the AppState (via setLanguage/
     // setTheme IPC), and the backend persists them into deploy.yaml once
@@ -132,7 +139,7 @@ if (!gotTheLock) {
         setRoute("app");
       } catch (err) {
         // The failure was already published to the renderer through shared
-        // state (setBackendSuccess in startBackend), so the current page
+        // state (setBackendStatus in startBackend), so the current page
         // (loading/setup) stays put and shows the failure hint with a retry
         // action instead of navigating to the error route.
         console.error("Failed to start backend:", err);
@@ -150,7 +157,7 @@ if (!gotTheLock) {
         setRoute("app");
       } catch (err) {
         // Stay on the loading page: the failure is published through shared
-        // state (setBackendSuccess in startBackend), and the loading page
+        // state (setBackendStatus in startBackend), and the loading page
         // shows the failure hint with a retry button.
         console.error("Failed to start backend:", err);
       }

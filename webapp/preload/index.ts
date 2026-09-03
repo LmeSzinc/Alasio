@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC_BACKEND_LOG,
+  IPC_BACKEND_LOG_SUBSCRIBE,
   IPC_BACKEND_READY,
   IPC_BACKEND_START,
   IPC_CONFIRM_CLOSE,
@@ -64,6 +65,10 @@ const api = {
 
   // Backend lifecycle
   startBackend: () => ipcRenderer.invoke(IPC_BACKEND_START),
+  // Subscribe to the startup log stream: resolves with the full buffered
+  // snapshot (chronological order, oldest first); lines recorded after
+  // the subscription arrive through onBackendLog pushes.
+  subscribeBackendLogs: () => ipcRenderer.invoke(IPC_BACKEND_LOG_SUBSCRIBE) as Promise<string[]>,
 };
 
 // Single source of truth for the API surface exposed to the renderer.

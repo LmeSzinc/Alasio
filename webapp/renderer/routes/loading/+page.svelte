@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import StartupCard from "$lib/components/StartupCard.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -8,7 +9,14 @@
   import { getDevOverride, useSharedState } from "$lib/useSharedState.svelte";
 
   const sharedState = useSharedState();
-  const failed = $derived(!sharedState.backendSuccess);
+  // Startup status comes from shared state: the main process publishes
+  // "starting" at the beginning of every launch attempt, "success" once
+  // the backend is up, "failed" when an attempt settled with an error.
+  // The failure hint is exclusive to "failed": while an attempt is
+  // running (or before the first one) the footer shows the spinner state.
+  const backendStatus = $derived(sharedState.backendStatus);
+  const failed = $derived(backendStatus === "failed");
+  const starting = $derived(backendStatus === "starting");
 
   // Dev preview mock logs, in chronological order (oldest first). The page
   // stores lines newest-first for the column-reverse layout, so the mock
@@ -126,18 +134,30 @@
     const override = getDevOverride();
     if (override?.route === "loading" && override.backendSuccess !== undefined) return;
 
+    // Subscribe AFTER registering the live listener: the subscribe reply
+    // replays the whole main-process buffer (chronological snapshot, see
+    // startup-log.ts) so no pre-mount line is lost - the main process
+    // does not push before the subscription, and pushes share the IPC
+    // ordering with the reply, so the snapshot is complete up to the
+    // subscribe moment. The snapshot replaces the whole view (reversed
+    // to newest-first); a push racing the reply is also still in the
+    // buffer, so the replacement stays consistent.
     const unsubscribe = window.electronAPI.onBackendLog((log: string) => {
       logs.unshift(log);
+    });
+    void window.electronAPI.subscribeBackendLogs().then((snapshot: string[]) => {
+      logs = snapshot.reverse();
     });
 
     return unsubscribe;
   });
 
-  // Retry wipes the previous attempt's log (the shared-state failure flag
-  // is cleared by the main process at the start of the new attempt, which
-  // hides the failure hint), then the log accumulates from scratch again.
-  // In dev preview the retry is simulated locally: the mock log is
-  // re-filled without touching the real backend.
+  // Retry wipes the previous attempt's log, then the log accumulates
+  // from scratch again (the main process empties its buffer and flips
+  // the status back to "starting" at the beginning of the new attempt,
+  // which hides the failure hint and shows the spinner state). In dev
+  // preview the retry is simulated locally: the mock log is re-filled
+  // without touching the real backend.
   async function retry() {
     logs = [];
     retrying = true;
@@ -172,9 +192,10 @@
         {/each}
       </div>
     </ScrollArea>
-    <!-- Placeholder below the log: blank while starting (or after a
-         successful start, when the page has already navigated away);
-         on startup failure it shows the hint and a retry button. -->
+    <!-- Status bar below the log: spinner + "Starting backend..." while
+         an attempt is running; the failure hint and a retry button when
+         an attempt failed; nothing after a successful start (the page
+         has already navigated away by then). -->
     <div class="mt-2 flex h-8 w-full shrink-0 items-center justify-end gap-4">
       {#if failed}
         <div class="flex items-center gap-2">
@@ -184,6 +205,11 @@
         <Button onclick={retry} disabled={retrying} class="h-8 w-16 font-semibold">
           {t.Error.Retry()}
         </Button>
+      {:else if starting}
+        <div class="flex items-center gap-2">
+          <LoaderCircle class="text-muted-foreground size-4 animate-spin" />
+          <p class="text-muted-foreground ml-0">{t.Loading.StartingBackend()}</p>
+        </div>
       {/if}
     </div>
   </div>

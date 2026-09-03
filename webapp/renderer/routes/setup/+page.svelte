@@ -9,7 +9,10 @@
   import { useSharedState } from "$lib/useSharedState.svelte";
 
   const sharedState = useSharedState();
-  const failed = $derived(!sharedState.backendSuccess);
+  // Failure hint only after an attempt actually failed: "failed" is
+  // published by the main process when the attempt settles with an error
+  // (nothing is shown while idle or while an attempt is running).
+  const failed = $derived(sharedState.backendStatus === "failed");
   // Initial selection mirrors the persistent config values (may be 'system');
   // the UI display language/theme follows the derived values in shared state.
   let selectedLang = $state(sharedState.configLang);

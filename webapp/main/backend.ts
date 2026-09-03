@@ -5,14 +5,15 @@ import { IPC_BACKEND_LOG, IPC_BACKEND_READY } from "../shared/ipc";
 import { acceptAnnouncement, parseAnnouncement } from "./announcement";
 import { appState } from "./app-state";
 import { LineSplitter } from "./line-splitter";
+import { StartupLogBuffer } from "./startup-log";
 
 // Backend startup status callback, wired by main/index.ts to shared state
-// (setBackendSuccess). Injected instead of imported to break a circular
+// (setBackendStatus). Injected instead of imported to break a circular
 // import chain (shared-state -> app-state -> backend -> shared-state):
 // rolldown would otherwise emit shared-state before app-state, crashing
 // shared-state's module-body appState.onChange() registration on an
 // undefined appState.
-let onBackendSuccess: ((success: boolean) => void) | null = null;
+let onBackendStatus: ((status: "starting" | "success" | "failed") => void) | null = null;
 
 /**
  * Wire the backend startup status callback. Called once by main/index.ts
@@ -20,11 +21,12 @@ let onBackendSuccess: ((success: boolean) => void) | null = null;
  * startBackend() call.
  *
  * Args:
- *     callback (function): Receives true when a launch attempt succeeds,
- *         false at the start of an attempt (or when one fails)
+ *     callback (function): Receives "starting" at the beginning of every
+ *         launch attempt, "success" when an attempt settles without
+ *         error, "failed" when one settles with an error
  */
-export function setBackendSuccessCallback(callback: (success: boolean) => void) {
-  onBackendSuccess = callback;
+export function setBackendStatusCallback(callback: (status: "starting" | "success" | "failed") => void) {
+  onBackendStatus = callback;
 }
 
 export enum ShutdownStage {
@@ -54,10 +56,54 @@ let mainWindow: BrowserWindow | null = null;
 let authToken: string | null = null;
 let backendReady = false;
 
+// Startup log buffer (main side of the loading page log channel): the
+// backend starts streaming stdout/stderr right after spawn, while the
+// loading page only registers its listener after the renderer mounted.
+// Lines produced before the subscription are buffered here (bounded,
+// chronological) and replayed in full when the page subscribes, because
+// webContents.send does not queue for unregistered listeners (see
+// startup-log.ts and doc/2026-09-03_electron-window-flicker-and-loading-page.md
+// §4.2).
+const startupLog = new StartupLogBuffer();
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function setMainWindow(window: BrowserWindow) {
   mainWindow = window;
+}
+
+/**
+ * Record one startup stdout/stderr line. Before the backend is ready the
+ * line is buffered (bounded, chronological) and additionally pushed to
+ * the window once a renderer subscribed (subscribeBackendLogs); after
+ * ready no line is recorded anymore, matching the previous "stop
+ * forwarding after ready" behavior so the buffer stops growing.
+ *
+ * Args:
+ *     line (str): One complete log line, without trailing newline
+ */
+function recordStartupLog(line: string) {
+  if (backendReady) return;
+  startupLog.record(line);
+  if (startupLog.isSubscribed) {
+    mainWindow?.webContents.send(IPC_BACKEND_LOG, line);
+  }
+}
+
+/**
+ * Subscribe to the startup log stream. Marks the channel as subscribed
+ * (from this point recordStartupLog pushes every new line through
+ * IPC_BACKEND_LOG in addition to buffering it) and returns the current
+ * buffer so the caller can replay everything produced before the
+ * subscription. Registered as the IPC_BACKEND_LOG_SUBSCRIBE invoke
+ * handler by main/index.ts.
+ *
+ * Returns:
+ *     list[str]: Buffered lines in chronological order (oldest first);
+ *         the renderer reverses the snapshot for its newest-first view
+ */
+export function subscribeBackendLogs(): string[] {
+  return startupLog.subscribe();
 }
 
 /**
@@ -124,11 +170,14 @@ export function startBackend(
   backendPort: number,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Every launch attempt starts with a clean status: not yet successful.
-    // The renderer derives its failure hint from shared state, so a retry
-    // clears the previous failure immediately (before the new process
-    // spawns).
-    onBackendSuccess?.(false);
+    // Every launch attempt starts with a clean status and a clean log:
+    // back to "starting" and an empty buffer, so a retry neither shows
+    // the previous failure hint nor mixes the previous attempt's lines
+    // into the new one. The renderer derives its failure hint from
+    // shared state, so the retry UI switches to the running state before
+    // the new process spawns.
+    onBackendStatus?.("starting");
+    startupLog.clear();
 
     // gui.py forwards sys.argv to the backend supervisor, which passes them
     // down to the hypercorn config parser (--host/--port in create_config).
@@ -168,13 +217,18 @@ export function startBackend(
         // (spawn error, missing gui.py...) can happen before the renderer
         // mounted, and shared state is read synchronously at renderer
         // start, so the failure hint is never lost to an event race.
-        onBackendSuccess?.(false);
+        // The log buffer is deliberately NOT cleared: the error tail must
+        // stay replayable (it is dropped by the next attempt's clear).
+        onBackendStatus?.("failed");
         reject(error);
       } else {
         // Startup succeeded: publish it (the renderer navigates to the
         // app page right after, but the shared state stays correct even
-        // if the navigation races with the renderer's read).
-        onBackendSuccess?.(true);
+        // if the navigation races with the renderer's read) and drop the
+        // buffer - the loading page is about to leave, successful logs no
+        // longer need to be replayed and must not stay in memory.
+        onBackendStatus?.("success");
+        startupLog.clear();
         resolve();
       }
     };
@@ -217,10 +271,9 @@ export function startBackend(
         // non-announcement lines go to the loading page log (before ready).
         // LineSplitter already stripped the trailing newline; the renderer
         // displays each message as its own block-level line, so no "\n"
-        // needs to be re-appended.
-        if (!backendReady) {
-          mainWindow?.webContents.send(IPC_BACKEND_LOG, line);
-        }
+        // needs to be re-appended. recordStartupLog buffers the line and
+        // pushes it once the loading page subscribed (no-op after ready).
+        recordStartupLog(line);
         return;
       }
       const next = acceptAnnouncement(authToken, announcement.old, announcement.next);
@@ -235,16 +288,17 @@ export function startBackend(
 
     // stderr: hypercorn prints "Running on http://..." here (supervisor
     // logs also land here before ready). Line-split like stdout so every
-    // message is forwarded as a whole line; ready detection runs on the
-    // complete line ("Running on http" split across chunks can no longer
-    // be missed or matched on a partial line).
+    // message is buffered/pushed as a whole line; ready detection runs on
+    // the complete line ("Running on http" split across chunks can no
+    // longer be missed or matched on a partial line).
     const stderrLines = new LineSplitter((line) => {
-      if (!backendReady) {
-        mainWindow?.webContents.send(IPC_BACKEND_LOG, line);
-        if (line.includes("Running on http")) {
-          backendReady = true;
-          maybeOpenApp();
-        }
+      // recordStartupLog is a no-op once the backend is ready; the ready
+      // detection below must observe the "Running on http" line BEFORE
+      // that flag flips, so the recording happens first.
+      recordStartupLog(line);
+      if (!backendReady && line.includes("Running on http")) {
+        backendReady = true;
+        maybeOpenApp();
       }
     });
     child.stderr?.on("data", (data: Buffer) => {

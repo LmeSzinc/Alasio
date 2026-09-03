@@ -45,6 +45,29 @@ export function createWindow(): BrowserWindow {
   // comment above). Route switches themselves are emitted by the main
   // process (setRoute -> shared-state:update), so no renderer round-trip
   // is needed to time the reveal.
+  //
+  // DO NOT remove this gate as an "optimization" (eager show). Root cause
+  // of the first-launch flicker it prevents (2026-09-03): on Windows, a
+  // window that never composited a frame has no surface content, so DWM
+  // shows whatever is behind it (the desktop) inside the window area.
+  // This app disables hardware acceleration
+  // (app.disableHardwareAcceleration in main/index.ts), so composition
+  // runs on the software path whose cold start is slow (no shader/disk
+  // cache), and the first frame arrives late. Showing the window during
+  // that window toggles between "no frame (desktop shows through)" and
+  // "first frame committed (themed background)" at vsync rate, which
+  // reads as high-frequency flicker on the very first launch. Later
+  // launches are warm and deliver the first frame within tens of
+  // milliseconds, hiding the race and making the flicker look like an
+  // occasional glitch that is safe to "fix" away.
+  //
+  // Note on the Electron 22 semantics: ready-to-show fires on the FIRST
+  // NON-EMPTY LAYOUT of the main frame (WebContents::OnFirstNonEmptyLayout
+  // in shell/browser/api/electron_api_web_contents.cc), NOT on the first
+  // OS-composited frame. It is therefore the earliest safe moment to
+  // show: whatever route (loading/setup/app/error) the first layout lands
+  // on is already complete, and showing any earlier would re-open the
+  // desktop-through race above.
   if (!isDev) {
     mainWindow.once("ready-to-show", () => {
       mainWindow?.show();

@@ -112,11 +112,12 @@ export function useSharedState() {
     get isFirstTimeSetup() {
       return state?.isFirstTimeSetup || false;
     },
-    get backendSuccess() {
-      // Dev loading preview: the URL backendSuccess flag decides the value.
+    get backendStatus(): "starting" | "success" | "failed" {
+      // Dev loading preview: the URL backendSuccess flag decides the value
+      // (true -> "success", false -> "failed").
       const backendSuccess = getDevOverride()?.backendSuccess;
-      if (backendSuccess !== undefined) return backendSuccess;
-      return state?.backendSuccess ?? false;
+      if (backendSuccess !== undefined) return backendSuccess ? "success" : "failed";
+      return state?.backendStatus ?? "starting";
     },
     get errorKey() {
       return getDevOverride()?.errorKey ?? state?.errorKey;
