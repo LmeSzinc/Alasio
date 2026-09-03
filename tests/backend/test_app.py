@@ -76,7 +76,7 @@ class TestBindAnnounce:
     stdin listener) starts without waiting out startup_timeout.
     """
 
-    def test_create_sockets_announces_started(self, monkeypatch):
+    def test_create_sockets_announces_started(self, monkeypatch, free_port):
         import builtins
         import multiprocessing
 
@@ -88,7 +88,7 @@ class TestBindAnnounce:
             lambda: FakeDeployConfig(ssl=False),
         )
 
-        config = create_config(['--host', '127.0.0.1', '--port', '0'])
+        config = create_config(['--host', '127.0.0.1', '--port', str(free_port)])
         sockets = config.create_sockets()
         try:
             assert parent_conn.poll(timeout=1)
