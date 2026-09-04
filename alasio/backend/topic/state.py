@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 from msgspec import Struct
 
 from alasio.backend.lifespan import lifespan_restart
@@ -11,10 +9,6 @@ from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
 from alasio.config.table.scan import validate_config_name
-
-# dict to speedup message backwards from worker to connection
-# key: config_name, value: set of conn_id
-DICT_CONFIG_TO_CONN: "dict[str, set[str]]" = defaultdict(set)
 
 
 class NavState(Struct):
@@ -66,13 +60,6 @@ class ConnState(BaseTopic):
         state.lang = lang
         await self.nav_state.mutate()
 
-    async def op_unsub(self):
-        await super().op_unsub()
-        # maintain DICT_CONFIG_TO_CONN
-        for connections in DICT_CONFIG_TO_CONN.values():
-            if self.conn_id in connections:
-                connections.remove(self.conn_id)
-
     @rpc(require_electron=True)
     async def restart(self):
         """
@@ -109,12 +96,6 @@ class ConnState(BaseTopic):
             config = data[name]
         except KeyError:
             raise RpcValueError(f'No such config: "{name}"')
-
-        # maintain DICT_CONFIG_TO_CONN
-        if state.config_name:
-            DICT_CONFIG_TO_CONN[state.config_name].remove(self.conn_id)
-        if name:
-            DICT_CONFIG_TO_CONN[name].add(self.conn_id)
 
         # set
         # note that mod_name is calculated in backend to ensure consistency of mod_name and config_name

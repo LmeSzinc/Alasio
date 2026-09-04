@@ -1,94 +1,129 @@
-from typing import Any
-
 import trio
 
-from alasio.backend.reactive.base_msgbus import on_msgbus_config_event
 from alasio.backend.reactive.event import ResponseEvent
-from alasio.backend.reactive.rx_trio import async_reactive_nocache
+from alasio.backend.reactive.source import ViewportEventSource
+from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.model import ConfigSetEvent
-from alasio.ext.deep import deep_iter, deep_set
+from alasio.ext.deep import deep_iter
 
 
-class Dashboard(BaseTopic):
-    FULL_EVENT_ONLY = True
-    # dict that convert config path to topic data path
-    # key: (task, group, arg), value: card_name
-    dict_config_to_topic = {}
+class DashboardSource(ViewportEventSource):
+    """
+    Viewport source of the Dashboard topic: key (mod_name, config_name,
+    lang), view fixed to 'dashboard'. The full view (values + i18n) is
+    built on subscribe (MOD_LOADER.get_gui_config); the mapping
+    (task, group, arg) -> card_name is this source's private business.
+    """
+    TOPIC = 'Dashboard'
 
-    @async_reactive_nocache
-    async def data(self):
+    def __init__(self, config_name, mod_name, lang):
+        super().__init__(config_name)
+        self.mod_name = mod_name
+        self.lang = lang
+        # Build the structure mapping (nav JSON cache, no config values).
+        # Raises KeyError when the config / mod / dashboard nav has been
+        # deleted: get() converts that into None (no source).
+        self.dict_config_to_topic = self._build_mapping()
+
+    @classmethod
+    def get(cls, mod_name, config_name, lang):
         """
+        [Trio] Get or create the dashboard source of (mod_name,
+        config_name, lang).
+
         Returns:
-            dict[str, dict[str, dict[str, Any]]]:
-                key: {card_name}.{group_name}.{arg_name}
-                    first card is shown by default
-                    rest of the cards only show if expanded
-                {group_name}._info.dashboard is the dashboard type
+            DashboardSource | None: None when the source cannot be built
+                (config / mod deleted).
         """
-        state = ConnState(self.conn_id, self.server)
-        mod_name = await state.mod_name
-        config_name = await state.config_name
-        if not mod_name or not config_name:
-            return {}
+        return super().get(config_name, cls, mod_name, lang)
 
-        lang: str = await state.lang
-        # call
-        data: "dict[str, dict[str, Any]]" = await trio.to_thread.run_sync(
+    async def _build_full(self):
+        """
+        [Trio] Build the full dashboard view (values + i18n) in a thread.
+        Runs in the single-flight path of subscribe.
+        """
+        return await trio.to_thread.run_sync(
             MOD_LOADER.get_gui_config,
-            mod_name, config_name, 'dashboard', lang
+            self.mod_name, self.config_name, 'dashboard', self.lang
         )
 
-        # convert config path to topic data path
+    def _build_mapping(self):
+        """
+        Build the mapping from the GUI structure only (nav JSON cache), no
+        config values. Replicates the mapping logic of the old
+        Dashboard.data().
+
+        Raises:
+            KeyError: When the config / mod / dashboard nav no longer exists.
+        """
+        configs = ConfigScanSource().data
+        try:
+            info = configs[self.config_name]
+        except KeyError:
+            raise KeyError(f'No such config: "{self.config_name}"') from None
+        if info.mod != self.mod_name:
+            # the config was re-bound to another mod (external edit):
+            # treat it as nonexistent under this key
+            raise KeyError(f'Config "{self.config_name}" is not under mod "{self.mod_name}"') from None
+        try:
+            mod = MOD_LOADER.dict_mod[info.mod]
+        except KeyError:
+            raise KeyError(f'No such mod: "{info.mod}"') from None
+        try:
+            nav_ref = mod.config_index_data()['dashboard']
+        except KeyError:
+            raise KeyError('No such nav: "dashboard"') from None
+        tree = mod.nav_config_json(nav_ref.file)
+
         dict_config_to_topic = {}
-        for keys, info in deep_iter(data, depth=3):
+        for keys, arg_data in deep_iter(tree, depth=3):
             card_name, group_name, arg_name = keys
             if group_name == '_info':
                 continue
             try:
-                task = info['task']
-                group = info['group']
-                arg = info['arg']
+                task = arg_data['task']
+                group = arg_data['group']
+                arg = arg_data['arg']
             except KeyError:
                 # this shouldn't happen
                 continue
             dict_config_to_topic[(task, group, arg)] = card_name
-        self.dict_config_to_topic = dict_config_to_topic
+        return dict_config_to_topic
 
-        return data
-
-    @on_msgbus_config_event('ConfigArg')
-    async def on_config_event(self, event: "ConfigSetEvent | list[ConfigSetEvent] | dict | list[dict]"):
+    def _convert(self, event):
         """
-        Handle config event from msgbus
+        [锁内] One event -> a set response of the view key, or None when the
+        arg is not displayed by the dashboard (dropped).
         """
-        if isinstance(event, list):
-            events = event
-        else:
-            events = [event]
+        # we may receive dict from worker, because it's decoded from bytes
+        if type(event) is dict:
+            event = ConfigSetEvent(**event)
 
-        resps = []
-        data = await self.data
-        for e in events:
-            # we may receive dict from worker, because it's decoded from bytes
-            if type(e) is dict:
-                e = ConfigSetEvent(**e)
+        card_name = self.dict_config_to_topic.get((event.task, event.group, event.arg))
+        if card_name is None:
+            # not displaying this key
+            return None
+        topic_key = (card_name, event.group, event.arg, 'value')
+        return ResponseEvent(t=self.TOPIC, o='set', k=topic_key, v=event.value)
 
-            card_name = self.dict_config_to_topic.get((e.task, e.group, e.arg))
-            if card_name is None:
-                # not displaying this key
-                continue
 
-            topic_key = (card_name, e.group, e.arg, 'value')
-            # set to topic data
-            deep_set(data, keys=topic_key, value=e.value)
-            # collect response
-            resps.append(ResponseEvent(t=self.topic_name(), o='set', k=topic_key, v=e.value))
-
-        if resps:
-            if len(resps) == 1:
-                await self.server.send(resps[0])
-            else:
-                await self.server.send(resps)
+class Dashboard(BaseTopic):
+    async def get_source(self):
+        """
+        Resolve the dashboard source of the current (mod, config, lang);
+        the full view is built by source.subscribe() on registration.
+        """
+        state = ConnState(self.conn_id, self.server)
+        mod_name = await state.mod_name
+        config_name = await state.config_name
+        lang = await state.lang
+        if not mod_name or not config_name or not lang:
+            return None
+        source = DashboardSource.get(mod_name, config_name, lang)
+        if source is None:
+            # config / mod deleted: silent
+            return None
+        return source

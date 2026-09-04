@@ -275,6 +275,27 @@ class async_reactive_nocache(async_reactive):
     async def get_value(self, obj) -> T:
         return await self.compute(obj)
 
+    async def broadcast(self, obj, old=_NOT_FOUND, new=_NOT_FOUND):
+        """
+        No-cache side-effect carrier: nothing to invalidate and nothing to
+        compare (the cache is never written, so old is always _NOT_FOUND) -
+        just re-run the side effect, then notify observers as the base
+        class does (normally none for a side-effect carrier).
+
+        The base-class implementation computes inside the descriptor lock.
+        That lock is shared by every instance of the descriptor -- all topic
+        instances share BaseTopic._resubscribe, so one slow round (a full
+        view build inside subscribe) would serialize the broadcasts of
+        every connection and block their mutate() calls. Serialization of
+        the side effect is the caller's per-instance job
+        (BaseTopic._resubscribe busy/dirty merging); concurrent instances
+        are independent and need no mutual exclusion.
+        """
+        new = await self.compute(obj)
+        async with self.lock:
+            observer_items = list(self.observers.items())
+        await self._broadcast_observer(obj, observer_items, _NOT_FOUND, new)
+
     async def mutate(self, obj, new=_NOT_FOUND):
         """
         Mutate without setting cache

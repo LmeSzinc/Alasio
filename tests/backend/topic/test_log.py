@@ -6,7 +6,8 @@ with a lock-free inbox/cache design:
 - events go to the inbox (live stream) first, then to the cache (history)
 - the same ResponseEvent object lives in both, dedup uses identity
 - the doorbell (run_sync_soon) only rings when the inbox turns non-empty
-- subscribe sends a full snapshot, live batches go through send_lossy
+- subscribe returns the encoded full snapshot bytes (no internal send),
+  live batches go through send_lossy
 """
 
 import time
@@ -16,7 +17,8 @@ import msgspec
 import pytest
 import trio
 
-from alasio.backend.topic.log import LogCache
+from alasio.backend.reactive.event import ResponseEvent
+from alasio.backend.topic.log import LOG_ENCODER, LogCache
 from alasio.backend.worker.event import ConfigEvent
 from alasio.logger import logger
 
@@ -46,6 +48,19 @@ def make_event(n):
         ConfigEvent:
     """
     return ConfigEvent(t='Log', v={'t': float(n), 'l': 'INFO', 'm': f'message {n}', 'e': None})
+
+
+def decode_full(data):
+    """
+    Decode the full snapshot bytes returned by LogCache.subscribe
+
+    Args:
+        data (bytes):
+
+    Returns:
+        ResponseEvent:
+    """
+    return msgspec.json.Decoder(ResponseEvent).decode(data)
 
 
 def send_events_from_thread(cache, events, delay=0.001, batch_size=1):
@@ -87,7 +102,7 @@ class TestLogCacheOnEvent:
         """Events go to both the inbox and the cache when a subscriber exists"""
         cache = await LogCache.get_instance('test_config')
         topic = MockTopic()
-        cache.subscribe(topic)
+        await cache.subscribe(topic)
         cache.on_event(make_event(1))
         # the message is pending in the inbox, not yet consumed
         assert len(cache._inbox) == 1
@@ -102,7 +117,7 @@ class TestLogCacheOnEvent:
         """_sync_to_trio encodes the whole batch once and sends via send_lossy"""
         cache = await LogCache.get_instance('test_config')
         topic = MockTopic()
-        cache.subscribe(topic)
+        await cache.subscribe(topic)
         cache.on_event(make_event(1))
         cache.on_event(make_event(2))
         await trio.testing.wait_all_tasks_blocked()
@@ -118,7 +133,7 @@ class TestLogCacheOnEvent:
         """without a trio_token (direct construction) the live stream degrades with a warning"""
         cache = LogCache('test_config')
         topic = MockTopic()
-        cache.subscribe(topic)
+        await cache.subscribe(topic)
         with logger.mock_capture_writer() as capture:
             cache.on_event(make_event(1))
             assert capture.fd.any_contains('trio_token not initialized')
@@ -132,32 +147,33 @@ class TestLogCacheOnEvent:
         """_sync_to_trio with an empty inbox does nothing"""
         cache = await LogCache.get_instance('test_config')
         topic = MockTopic()
-        cache.subscribe(topic)
+        await cache.subscribe(topic)
         cache._sync_to_trio()
         assert topic.server.send_lossy.call_count == 0
 
 
 class TestLogCacheSubscribe:
     @pytest.mark.trio
-    async def test_subscribe_sends_full_snapshot(self):
-        """Subscribing sends a full snapshot of the cached history"""
+    async def test_subscribe_returns_full_snapshot(self):
+        """Subscribing returns an encoded full snapshot of the cached history"""
         cache = await LogCache.get_instance('test_config')
         for n in range(5):
             cache.on_event(make_event(n))
         topic = MockTopic()
-        cache.subscribe(topic)
-        assert topic.server.send_nowait.call_count == 1
-        event = topic.server.send_nowait.call_args[0][0]
+        data = await cache.subscribe(topic)
+        assert isinstance(data, bytes)
+        event = decode_full(data)
         assert event.o == 'full'
         assert [v['m'] for v in event.v] == [f'message {n}' for n in range(5)]
+        # subscribe does not send internally
+        assert topic.server.send_nowait.call_count == 0
 
     @pytest.mark.trio
-    async def test_subscribe_empty_cache_sends_empty_full(self):
-        """Subscribing on an empty cache still sends an empty full event (clears UI on config switch)"""
+    async def test_subscribe_empty_cache_returns_empty_full(self):
+        """Subscribing on an empty cache still returns an empty full event (clears UI on config switch)"""
         cache = await LogCache.get_instance('test_config')
         topic = MockTopic()
-        cache.subscribe(topic)
-        event = topic.server.send_nowait.call_args[0][0]
+        event = decode_full(await cache.subscribe(topic))
         assert event.o == 'full'
         assert event.v == []
 
@@ -172,20 +188,27 @@ class TestLogCacheSubscribe:
         for n in range(5):
             cache.on_event(make_event(n))
         topic1 = MockTopic()
-        cache.subscribe(topic1)
+        await cache.subscribe(topic1)
         # events 5..7 go to both cache and inbox, still pending (no await in between)
         for n in range(5, 8):
             cache.on_event(make_event(n))
         # a second subscriber joins before trio consumes the inbox
         topic2 = MockTopic()
-        cache.subscribe(topic2)
-        snapshot = topic2.server.send_nowait.call_args[0][0]
+        snapshot = decode_full(await cache.subscribe(topic2))
         # overlapping 5..7 are cut from the snapshot
         assert [v['m'] for v in snapshot.v] == [f'message {n}' for n in range(5)]
         # the pending 5..7 arrive as live batches to both subscribers
         await trio.testing.wait_all_tasks_blocked()
         assert topic1.server.send_lossy.call_count > 0
         assert topic2.server.send_lossy.call_count > 0
+
+    @pytest.mark.trio
+    async def test_subscribe_registers_subscriber(self):
+        """Subscribing registers the topic in the subscriber set"""
+        cache = await LogCache.get_instance('test_config')
+        topic = MockTopic()
+        await cache.subscribe(topic)
+        assert topic in cache._subscribers
 
 
 class TestLogCacheUnsubscribe:
@@ -194,7 +217,7 @@ class TestLogCacheUnsubscribe:
         """Unsubscribing removes the topic from the subscriber set"""
         cache = await LogCache.get_instance('test_config')
         topic = MockTopic()
-        cache.subscribe(topic)
+        await cache.subscribe(topic)
         assert topic in cache._subscribers
         cache.unsubscribe(topic)
         assert topic not in cache._subscribers
@@ -210,7 +233,7 @@ class TestLogCacheUnsubscribe:
         """Unsubscribing the last subscriber clears the pending inbox"""
         cache = await LogCache.get_instance('test_config')
         topic = MockTopic()
-        cache.subscribe(topic)
+        await cache.subscribe(topic)
         cache.on_event(make_event(1))
         assert len(cache._inbox) == 1
         cache.unsubscribe(topic)
@@ -224,7 +247,7 @@ class TestLogCacheBatching:
         """High-frequency events from a worker thread are batched into few send_lossy calls"""
         cache = await LogCache.get_instance('test_config')
         topic = MockTopic()
-        cache.subscribe(topic)
+        await cache.subscribe(topic)
         topic.server.send_lossy.reset_mock()
 
         num_events = 1000
@@ -240,7 +263,7 @@ class TestLogCacheBatching:
         """The doorbell only rings when the inbox transitions from empty to non-empty"""
         cache = await LogCache.get_instance('test_config')
         topic = MockTopic()
-        cache.subscribe(topic)
+        await cache.subscribe(topic)
         run_sync_soon_count = [0]
         original_token = cache.trio_token
 
@@ -277,8 +300,8 @@ class TestLogCacheMultipleSubscribers:
         cache = await LogCache.get_instance('test_config')
         topic1 = MockTopic()
         topic2 = MockTopic()
-        cache.subscribe(topic1)
-        cache.subscribe(topic2)
+        await cache.subscribe(topic1)
+        await cache.subscribe(topic2)
         topic1.server.send_lossy.reset_mock()
         topic2.server.send_lossy.reset_mock()
 
@@ -292,12 +315,12 @@ class TestLogCacheMultipleSubscribers:
         """Subscribers joining/leaving mid-stream don't interfere with others"""
         cache = await LogCache.get_instance('test_config')
         topic1 = MockTopic()
-        cache.subscribe(topic1)
+        await cache.subscribe(topic1)
         topic1.server.send_lossy.reset_mock()
 
         # subscriber 2 joins mid-stream
         topic2 = MockTopic()
-        cache.subscribe(topic2)
+        await cache.subscribe(topic2)
         topic2.server.send_lossy.reset_mock()
 
         cache.on_event(make_event(1))
@@ -337,10 +360,9 @@ class TestLogCacheLifecycle:
         for n in range(5):
             cache.on_event(make_event(n))
 
-        # 1. subscribe, snapshot of history is sent
+        # 1. subscribe, snapshot of history is returned
         topic = MockTopic()
-        cache.subscribe(topic)
-        snapshot = topic.server.send_nowait.call_args[0][0]
+        snapshot = decode_full(await cache.subscribe(topic))
         assert snapshot.o == 'full'
         assert len(snapshot.v) == 5
         topic.server.send_lossy.reset_mock()
@@ -363,7 +385,7 @@ class TestLogCacheLifecycle:
         """Switching configs re-subscribes to a fresh cache with an empty snapshot"""
         cache1 = await LogCache.get_instance('config1')
         topic = MockTopic()
-        cache1.subscribe(topic)
+        await cache1.subscribe(topic)
         for n in range(3):
             cache1.on_event(make_event(n))
         await trio.testing.wait_all_tasks_blocked()
@@ -371,8 +393,7 @@ class TestLogCacheLifecycle:
         # switch to config2
         cache1.unsubscribe(topic)
         cache2 = await LogCache.get_instance('config2')
-        cache2.subscribe(topic)
-        snapshot = topic.server.send_nowait.call_args[0][0]
+        snapshot = decode_full(await cache2.subscribe(topic))
         assert snapshot.o == 'full'
         assert snapshot.v == []
 
@@ -381,3 +402,12 @@ class TestLogCacheLifecycle:
         cache2.on_event(make_event(100))
         await trio.testing.wait_all_tasks_blocked()
         assert topic.server.send_lossy.call_count > 0
+
+
+class TestLogCacheEncoder:
+    def test_log_encoder_encodes_batch(self):
+        """LOG_ENCODER encodes a batch of ResponseEvents into a JSON array"""
+        events = [ResponseEvent(t='Log', v={'t': 1.0}), ResponseEvent(t='Log', v={'t': 2.0})]
+        data = LOG_ENCODER.encode(events)
+        decoded = msgspec.json.decode(data)
+        assert [entry['t'] for entry in decoded] == ['Log', 'Log']

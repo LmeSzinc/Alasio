@@ -1,9 +1,8 @@
 import trio
 
-from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
 from alasio.backend.reactive.base_rpc import rpc
-from alasio.backend.reactive.event import ResponseEvent, RpcValueError
-from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
+from alasio.backend.reactive.event import RpcValueError
+from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER, WorkerSource
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
@@ -28,23 +27,12 @@ async def get_mod(config: str):
 
 
 class Worker(BaseTopic):
-    async def getdata(self):
+    async def get_source(self):
         """
-        Returns:
-            dict[str, WORKER_STATE]: key: config name, value: worker state
+        Worker states flow entirely through events
+        (WorkerManager.on_worker_state -> WorkerSource): no reinit needed.
         """
-        return await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.get_state_info)
-
-    @on_msgbus_global_event('Worker')
-    async def on_worker_state(self, value):
-        # Broadcast worker state to websocket connection
-        config, state = value
-        if state == 'idle':
-            # remove worker state
-            event = ResponseEvent(t='Worker', o='del', k=(config,))
-        else:
-            event = ResponseEvent(t='Worker', o='set', k=(config,), v=state)
-        await self.server.send(event)
+        return WorkerSource()
 
     @rpc
     async def start(self, config: str):

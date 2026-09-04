@@ -7,7 +7,6 @@ from trio._core import TrioToken
 from typing_extensions import Self
 
 from alasio.backend.reactive.event import ResponseEvent
-from alasio.backend.reactive.rx_trio import async_reactive_nocache
 from alasio.backend.topic.state import ConnState
 from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
@@ -135,11 +134,15 @@ class LogCache(metaclass=SingletonNamed):
                 # 如果订阅者处理太慢，send_nowait 会抛出 WouldBlock (或丢弃，取决于 channel 类型)
                 topic.server.send_lossy(event)
 
-    def subscribe(self, topic: BaseTopic):
+    async def subscribe(self, topic: BaseTopic) -> bytes:
         """
         [Trio 主线程]
         核心订阅逻辑：将 Log 流转发给指定的 WS topic。
-        包含：无锁去重、快照发送、实时流转发。
+        包含：无锁去重、快照生成。
+        不再内部发送 full —— 返回编码好的 full bytes，发送权在调用方
+        （topic 侧统一发送路径，顺带获得 WouldBlock 补救）。
+        返回后调用方必须不经 await 立即 send_nowait：full 必然先于任何
+        后续 add 入队（subscribe 内部无 await，同步区间内增量无法插队）。
         """
         # --- 原子操作区间 (Atomic Block) 开始 ---
         # 在 Trio 中，只要没有 await，以下代码是不可中断的。
@@ -190,22 +193,11 @@ class LogCache(metaclass=SingletonNamed):
 
         # --- 原子操作区间 结束 ---
 
-        # 4. 发送快照
+        # 4. 生成快照
         # 合并全部行到一个 full 事件
-        # 如果 snapshot 为空，仍然发送，这样可以在切换 config 的时候清除已有内容
+        # 如果 snapshot 为空，仍然返回空 full，这样可以在切换 config 的时候清除已有内容
         event = ResponseEvent(t=topic.topic_name(), o='full', v=[e.v for e in snapshot])
-        try:
-            # 使用 send_nowait 确保这一步不会挂起 (yield)。
-            # 如果使用 await send()，Trio 可能会在等待期间切换去执行 _sync_to_trio，
-            # 导致 target_ws_channel 在收到 "full" 之前先收到了 "add"。
-            # 只要 target_ws_channel 的 buffer 足够 (例如 > 1)，这里就不会报错。
-            topic.server.send_nowait(event)
-        except trio.WouldBlock:
-            # 极其罕见：连接刚建立 channel 就满了？
-            pass
-
-        # 5. 保持订阅状态
-        # 接下来会持续推送，直到调用 unsubscribe
+        return LOG_ENCODER.encode(event)
 
     def unsubscribe(self, topic: BaseTopic):
         try:
@@ -233,37 +225,13 @@ class LogData(msgspec.Struct, omit_defaults=True):
 
 
 class Log(BaseTopic):
-    cache: "LogCache | None" = None
-
-    @async_reactive_nocache
-    async def data(self):
-        # reactive dependency changed, unsubscribe last cache
-        if self.cache is not None:
-            self.cache.unsubscribe(self)
-
+    async def get_source(self):
+        """
+        LogCache keeps its own lock-free implementation; it only aligns its
+        interface (subscribe returns the encoded full snapshot).
+        """
         state = ConnState(self.conn_id, self.server)
         config_name = await state.config_name
         if not config_name:
-            # empty logs if config_name is empty
-            # event = ResponseEvent(t=self.topic_name(), o='full', v=[])
-            # await self.server.send(event)
-            return
-
-        cache = await LogCache.get_instance(config_name)
-        self.cache = cache
-        cache.subscribe(self)
-
-    async def op_sub(self):
-        """
-        LogCache.subscribe already send, no need to send here
-        """
-        await self.data
-
-    async def op_unsub(self):
-        # topic unsubscribed, unsubscribe cache too
-        if self.cache is not None:
-            self.cache.unsubscribe(self)
-
-    async def reactive_callback(self, name, old, new):
-        # also no reactive callback
-        pass
+            return None
+        return await LogCache.get_instance(config_name)

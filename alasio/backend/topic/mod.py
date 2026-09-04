@@ -1,11 +1,10 @@
-import trio
 from msgspec import Struct
 from msgspec.structs import asdict
 
+from alasio.backend.reactive.source import GlobalEventSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.deploy.history.decode_history import decode_history
-from alasio.ext.cache.resource import ResourceCacheTTL
 from alasio.ext.path.atomic import atomic_read_bytes
 from alasio.logger import logger
 
@@ -15,41 +14,53 @@ class ModOption(Struct):
     label: str
 
 
-class ModList(BaseTopic):
-    # one-time-usage
-    async def getdata(self):
+class ModListSource(GlobalEventSource):
+    """
+    One-shot global cache source of ModList.
+    """
+    TOPIC = 'ModList'
+    TTL = 8
+    IDLE_TTL = 8
+
+    def on_init(self):
         """
         Returns:
             list[ModOption]: List of mod names
+
+        Note: MOD_LOADER.dict_mod is a cached_property whose first build
+        loads files / imports mods: on_init always runs in a thread
+        (on_init_async), so the first subscription never blocks the event
+        loop.
         """
         dic_mod = MOD_LOADER.dict_mod
         return [ModOption(value=name, label=name) for name in dic_mod if name]
 
 
-class HistoryCache(ResourceCacheTTL):
-    def load_resource(self, file):
-        """
-        Load the packed release history of a mod
-
-        Args:
-            file (str): Path to .pack/history.pack
-
-        Returns:
-            list[HistoryObj]: Decoded history objects
-        """
-        return decode_history(atomic_read_bytes(file))
+class ModList(BaseTopic):
+    async def get_source(self):
+        source = ModListSource()
+        await source.reinit()
+        return source
 
 
-HISTORY_CACHE = HistoryCache()
+class ModHistorySource(GlobalEventSource):
+    """
+    One-shot global cache source of ModHistory.
 
+    There is exactly one cache layer -- the source data itself (TTL 8s +
+    idle GC). The old file-level HISTORY_CACHE (ResourceCacheTTL) was
+    removed: it duplicated the source cache, and the source already holds
+    the decoded history for its whole lifetime.
+    """
+    TOPIC = 'ModHistory'
+    TTL = 8
+    IDLE_TTL = 8
 
-class ModHistory(BaseTopic):
-    # one-time-usage
-    @classmethod
-    def load_history(cls):
+    def on_init(self):
         """
         Traverse all mods and decode their packed release history.
-        This is a synchronous function, call it in a thread to avoid blocking the event loop.
+        Runs in a thread (on_init_async): file reads must not block the
+        event loop.
 
         Returns:
             dict[str, dict[str, Union[list[dict], str]]]:
@@ -65,7 +76,7 @@ class ModHistory(BaseTopic):
                 continue
             file = mod.root.joinpath('.pack/history.pack')
             try:
-                history = HISTORY_CACHE.get(file)
+                history = decode_history(atomic_read_bytes(file))
             except Exception as e:
                 logger.warning(f'Failed to load mod history "{file}": {e}')
                 out[name] = {'data': [], 'error': f'{e.__class__.__name__}: {e}'}
@@ -74,13 +85,9 @@ class ModHistory(BaseTopic):
             out[name] = {'data': [asdict(obj) for obj in history]}
         return out
 
-    async def getdata(self):
-        """
-        Returns:
-            dict[str, dict[str, Union[list[dict], str]]]:
-                key: mod name
-                value: {"data": list[dict], "error": str}
-                    "data" is the release history of the mod, empty on error
-                    "error" is the error message, only present on error
-        """
-        return await trio.to_thread.run_sync(self.load_history)
+
+class ModHistory(BaseTopic):
+    async def get_source(self):
+        source = ModHistorySource()
+        await source.reinit()
+        return source

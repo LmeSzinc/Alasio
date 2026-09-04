@@ -1,12 +1,12 @@
 from typing import TYPE_CHECKING
 
+import trio
 from msgspec import DecodeError, ValidationError
 
 from alasio.backend.mpipe.token_backend import token_table
 from alasio.backend.reactive.base_topic import BaseTopic as BaseMixin
 from alasio.backend.reactive.event import AccessDenied, ElectronOnlyError, ResponseEvent, RpcValueError
-from alasio.backend.reactive.rx_trio import AsyncReactiveCallback, async_reactive
-from alasio.ext.deep import deep_iter_patch
+from alasio.backend.reactive.rx_trio import AsyncReactiveCallback, async_reactive_nocache
 from alasio.ext.singleton import SingletonNamed
 from alasio.logger import logger
 
@@ -32,6 +32,12 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         """
         self.conn_id = conn_id
         self.server = server
+        # Current subscribed source instance; None when not subscribed.
+        # Resubscription state (Trio thread only; plain flags, no lock):
+        self._src = None
+        self._busy = False   # a resubscribe round (incl. the catch-up loop) is running
+        self._dirty = False  # a trigger arrived while busy -> catch up with the newest state
+        self._closed = False  # op_unsub executed -> the running round must abort
 
     def __str__(self):
         return f'{self.topic_name()}({self.conn_id})>'
@@ -46,37 +52,95 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         if not token_table.verify(self.server.auth_token):
             raise ElectronOnlyError('Electron token required')
 
-    @async_reactive
-    async def data(self):
+    @async_reactive_nocache
+    async def _resubscribe(self):
         """
-        Subclasses should implement how to get data.
+        Side-effect carrier of the source-model subscription: unsubscribe
+        the old source, resolve the new subscription (get_source), register
+        the new source and send the full event.
 
-        Examples:
-            @reactive
-            async def data(self):
-                # Do simple data filtering
-                return Shared().data.get('lang', 'cn')
-                # Put the real data fetching on thread to avoid blocking event loop
-                return await run_sync(ConfigScanSource.scan)
-        """
-        raise AccessDenied('Topic did not implement "data" method')
+        Latest-wins merging (see doc/2026-09-03_topic-source-subscribe-v2.md):
 
-    async def getdata(self):
+        - at most ONE round runs per topic instance (entry gate `_busy`);
+        - triggers arriving while a round runs (rapid navigation changes,
+          dependency broadcasts) only set `_dirty` and return: they never
+          start a second round, so the expensive full builds of the
+          intermediate states are skipped;
+        - when the running round finishes it drops its own result if
+          `_dirty` is set (it is stale by then) and catches up with one
+          more round reading the newest state; the loop ends when a round
+          completes without new triggers (the last state is sent);
+        - `op_unsub` sets `_closed`: the running round aborts at its next
+          checkpoint, unregisters itself and never re-registers.
+
+        The old `_gen` generation counter was removed: this instance only
+        runs one round at a time, so no round can ever be "outdated" by a
+        concurrent one. Serialization of full builds across connections
+        sharing one source instance is the source's own job
+        (ViewportEventSource single-flight).
         """
-        A wrapper function to get data.
-        So you can do some pre-process and post-process
-        """
-        return await self.data
+        if self._busy:
+            # a round is running: merge this trigger into it
+            self._dirty = True
+            return
+        self._busy = True
+        try:
+            while not self._closed:
+                self._dirty = False
+                old = self._src
+                if old is not None:
+                    old.unsubscribe(self)
+                    self._src = None
+                source = await self.get_source()
+                if self._closed:
+                    # unsubscribed while resolving: abort without registering
+                    break
+                if self._dirty:
+                    # a newer trigger arrived while resolving: skip this
+                    # round (no build) and catch up with the newest state
+                    continue
+                if source is None:
+                    # no source right now: silent; the next dependency
+                    # change re-runs this flow
+                    break
+                self._src = source
+                snapshot = await source.subscribe(self)
+                if self._closed:
+                    # op_unsub ran while the build was in flight: undo the
+                    # registration and abort
+                    source.unsubscribe(self)
+                    self._src = None
+                    break
+                if self._dirty:
+                    # stale result: drop it (the next round unregisters)
+                    # and catch up with the newest state
+                    continue
+                if snapshot is not None:
+                    # Ordering contract: right after registration, without
+                    # any await, send the full event so it precedes every
+                    # later increment.
+                    try:
+                        self.server.send_nowait(snapshot)
+                    except trio.WouldBlock:
+                        # rare fallback; increments may sneak in during the
+                        # await, which is an acceptable window (slow
+                        # connection, dropped by heartbeat)
+                        await self.server.send(snapshot)
+                if self._dirty:
+                    # a trigger arrived while sending: catch up once more
+                    continue
+                break
+        finally:
+            self._busy = False
 
     async def op_sub(self):
         """
         Subscribe to this topic, once subscribe the data will flow
 
         When receiving a "sub" event from client, the data flows
-        --> Topic.subscribe()
-        --> Topic.getdata()
-        --> Topic.data
-            data is returned and observer chain is built
+        --> Topic.get_source()
+            the topic is bound to its source, the source snapshot is sent
+            (subscribe() returns the encoded snapshot, sent immediately)
 
         Changes may come from:
         - backend background task that updates data
@@ -84,45 +148,50 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         - another topic changes the dependency ot current topic
         - another client changes the data of current topic
 
-        When receiving a dependency change, the data flows:
+        When a reactive dependency (ConnState) changes, the data flows:
         --> DataSource.data.mutate(self, data)
-        --> @async_reactive
+        --> @async_reactive_nocache
             changes will broadcast to callback function
-            --> reactive_callback
-            --> sender.send()
-            and also broadcast to each observer
-            --> Observer1.data
-            --> Observer2.data
+            --> _resubscribe (unsubscribe the old source, resolve get_source
+                again, bind the new source, send a new full)
         """
-        data = await self.getdata()
+        await self._resubscribe
 
-        # prepare event
-        topic = self.topic_name()
-        event = ResponseEvent(t=topic, o='full', v=data)
-
-        # send event
-        if data:
-            await self.server.send(event)
-
-    async def reactive_callback(self, name, old, new):
+    async def get_source(self):
         """
-        Callback function to send diff when `self.data` is re-computed
+        Resolve the source this topic should bind to.
+
+        Returns:
+            BaseSource | None:
+                - the source instance to register; the initial full event
+                  comes from source.subscribe() (cache sources snapshot
+                  their data, viewport sources build their view);
+                - None: no source right now, subscribe silently.
+
+        Data preparation: topics that need fresh full data (ConfigScan /
+        TaskQueue / one-shot sources / DevAssets) must `await
+        source.reinit()` before returning. Sources without a full data
+        source have an empty reinit, calling it costs nothing.
+
+        May await ConnState etc. reactive dependencies; they form the
+        observation chain that re-runs _resubscribe on changes, so a
+        dependency change automatically re-binds the topic to the source
+        resolved by the new conditions.
         """
-        if name != 'data':
-            return
-        topic = self.topic_name()
-        if self.FULL_EVENT_ONLY:
-            event = ResponseEvent(t=topic, o='full', v=new)
-            await self.server.send(event)
-        else:
-            for op, keys, value in deep_iter_patch(old, new):
-                event = ResponseEvent(t=topic, o=op, k=keys, v=value)
-                await self.server.send(event)
+        return None
 
     async def op_unsub(self):
         """
         Release current data topic
         """
+        # Abort any running _resubscribe round: it checks `_closed` at its
+        # next checkpoint, unregisters itself and never re-registers after
+        # the connection is gone (no leak into resident sources).
+        self._closed = True
+        src = self._src
+        if src is not None:
+            src.unsubscribe(self)
+            self._src = None
         cls = self.__class__
         cls.singleton_remove(self.conn_id)
 

@@ -227,9 +227,14 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
 class Preview(BaseTopic):
     cache: "PreviewTask | None" = None
 
-    async def getdata(self):
-        # no full data
-        return {}
+    async def get_source(self):
+        """
+        Preview is not migrated to the source model: it has no snapshot and
+        its subscription is driven by the preview_start / preview_stop RPCs
+        (PreviewTask). Return None = no source, subscribe silently; the
+        scaffold never sends a full event for it.
+        """
+        return None
 
     @rpc
     async def preview_start(self, name: str, speed: PREVIEW_SPEED):

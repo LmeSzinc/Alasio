@@ -4,10 +4,11 @@ import trio
 from msgspec import Struct
 
 from alasio.assets.manager import AssetsManager
-from alasio.assets.model.folder import AssetFolder
+from alasio.assets.model.folder import AssetFolder, FolderResponse
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
-from alasio.backend.reactive.rx_trio import async_reactive, async_reactive_nocache, async_reactive_source
+from alasio.backend.reactive.rx_trio import async_reactive_source
+from alasio.backend.reactive.source import KeyedEventSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 
@@ -15,6 +16,35 @@ from alasio.config.entry.loader import MOD_LOADER
 class ManagerState(Struct):
     mod_name: str = ''
     path: str = ''
+
+
+class DevAssetsSource(KeyedEventSource):
+    """
+    Keyed cache source of the DevAssets topic: key (mod_name, path).
+    data is the FolderResponse of the folder scan, kept as the original
+    struct (no dict conversion). Every reinit rescans the disk (TTL=None:
+    the data only changes through RPC operations, and each operation pays
+    the same rescan as the old per-subscribe full scan).
+    """
+    TOPIC = 'DevAssetsManager'
+    # Every reinit rescans (no freshness window)
+    TTL = None
+    # The data tree is big: idle instances are collected after 8s
+    IDLE_TTL = 8
+
+    def __init__(self, mod_name, path):
+        super().__init__()
+        self.mod_name = mod_name
+        self.path = path
+
+    def on_init(self) -> FolderResponse:
+        """
+        Full folder scan (in a thread through on_init_async).
+
+        Returns:
+            FolderResponse:
+        """
+        return AssetsManager.get_folder_manager(self.mod_name, self.path).getdata()
 
 
 class DevAssetsManager(BaseTopic):
@@ -33,12 +63,17 @@ class DevAssetsManager(BaseTopic):
 
         return state
 
-    @async_reactive
-    async def asset_folder(self) -> Optional[AssetFolder]:
-        state: ManagerState = await self.assets_state
-        if not state.mod_name:
-            return None
+    async def _get_folder(self) -> "Optional[AssetFolder]":
+        """
+        Get the folder manager of the current viewport selection.
 
+        Returns:
+            AssetFolder | None: None when the selection is empty or the
+                path is invalid.
+        """
+        state: ManagerState = await self.assets_state
+        if not state.mod_name or not state.path:
+            return None
         try:
             folder = AssetsManager.get_folder_manager(state.mod_name, state.path)
         except ValueError:
@@ -46,14 +81,13 @@ class DevAssetsManager(BaseTopic):
             return None
         return folder
 
-    @async_reactive_nocache
-    async def data(self):
-        folder = await self.asset_folder
-        if folder is None:
-            return {}
-
-        data = await trio.to_thread.run_sync(folder.getdata)
-        return data
+    async def _refresh(self):
+        """
+        Rescan the current viewport folder and broadcast a full event to
+        every subscriber of the folder (including the operator itself).
+        """
+        state: ManagerState = await self.assets_state
+        await DevAssetsSource.get(state.mod_name, state.path).reinit()
 
     @rpc
     async def set_mod(self, mod_name: str):
@@ -74,7 +108,7 @@ class DevAssetsManager(BaseTopic):
     @rpc
     async def set_path(self, path: str):
         """
-        Set mod_name
+        Set path
         """
         state: ManagerState = await self.assets_state
         state.path = path
@@ -92,7 +126,7 @@ class DevAssetsManager(BaseTopic):
         """
         Add a resource from a base64 encoded string.
         """
-        folder: "AssetFolder | None" = await self.asset_folder
+        folder: "AssetFolder | None" = await self._get_folder()
         if folder is None:
             raise RpcValueError('Folder not initialized')
 
@@ -100,14 +134,14 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_add_base64, source, data)
         except ValueError as e:
             raise RpcValueError(str(e))
-        await self.data.mutate()
+        await self._refresh()
 
     @rpc
     async def resource_del(self, names: List[str]):
         """
         Delete resources without tracking their usage.
         """
-        folder: "AssetFolder | None" = await self.asset_folder
+        folder: "AssetFolder | None" = await self._get_folder()
         if folder is None:
             raise RpcValueError('Folder not initialized')
 
@@ -115,11 +149,11 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_del_force, names)
         except ValueError as e:
             raise RpcValueError(str(e))
-        await self.data.mutate()
+        await self._refresh()
 
     @rpc
     async def resource_track(self, names: List[str]):
-        folder: "AssetFolder | None" = await self.asset_folder
+        folder: "AssetFolder | None" = await self._get_folder()
         if folder is None:
             raise RpcValueError('Folder not initialized')
 
@@ -127,11 +161,11 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_track, names)
         except ValueError as e:
             raise RpcValueError(str(e))
-        await self.data.mutate()
+        await self._refresh()
 
     @rpc
     async def resource_untrack(self, names: List[str]):
-        folder: "AssetFolder | None" = await self.asset_folder
+        folder: "AssetFolder | None" = await self._get_folder()
         if folder is None:
             raise RpcValueError('Folder not initialized')
 
@@ -139,14 +173,14 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_untrack_force, names)
         except ValueError as e:
             raise RpcValueError(str(e))
-        await self.data.mutate()
+        await self._refresh()
 
     @rpc
     async def resource_to_asset(self, names: List[str]):
         """
         Convert a resource file to a new asset.
         """
-        folder: "AssetFolder | None" = await self.asset_folder
+        folder: "AssetFolder | None" = await self._get_folder()
         if folder is None:
             raise RpcValueError('Folder not initialized')
 
@@ -154,15 +188,14 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_to_asset, names)
         except ValueError as e:
             raise RpcValueError(str(e))
-
-        await self.data.mutate()
+        await self._refresh()
 
     @rpc
     async def asset_add(self, name: str):
         """
         Create a new empty asset.
         """
-        folder: "AssetFolder | None" = await self.asset_folder
+        folder: "AssetFolder | None" = await self._get_folder()
         if folder is None:
             raise RpcValueError('Folder not initialized')
 
@@ -170,15 +203,14 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.asset_add, name)
         except ValueError as e:
             raise RpcValueError(str(e))
-
-        await self.data.mutate()
+        await self._refresh()
 
     @rpc
     async def asset_del(self, names: List[str]):
         """
         Delete an asset and its associated template files.
         """
-        folder: "AssetFolder | None" = await self.asset_folder
+        folder: "AssetFolder | None" = await self._get_folder()
         if folder is None:
             raise RpcValueError('Folder not initialized')
 
@@ -186,12 +218,11 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.asset_del, names)
         except ValueError as e:
             raise RpcValueError(str(e))
-
-        await self.data.mutate()
+        await self._refresh()
 
     @rpc
     async def resource_rename(self, old_name: str, new_name: str):
-        folder: "AssetFolder | None" = await self.asset_folder
+        folder: "AssetFolder | None" = await self._get_folder()
         if folder is None:
             raise RpcValueError('Folder not initialized')
 
@@ -199,11 +230,11 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.resource_rename, old_name, new_name)
         except ValueError as e:
             raise RpcValueError(str(e))
-        await self.data.mutate()
+        await self._refresh()
 
     @rpc
     async def asset_rename(self, old_name: str, new_name: str):
-        folder: "AssetFolder | None" = await self.asset_folder
+        folder: "AssetFolder | None" = await self._get_folder()
         if folder is None:
             raise RpcValueError('Folder not initialized')
 
@@ -211,5 +242,18 @@ class DevAssetsManager(BaseTopic):
             await trio.to_thread.run_sync(folder.asset_rename, old_name, new_name)
         except ValueError as e:
             raise RpcValueError(str(e))
+        await self._refresh()
 
-        await self.data.mutate()
+    async def get_source(self):
+        """
+        Data preparation: rescan the viewport folder (also covers external
+        disk changes); the snapshot is returned by source.subscribe().
+        """
+        state: ManagerState = await self.assets_state
+        if not state.mod_name or not state.path:
+            return None
+        source = DevAssetsSource.get(state.mod_name, state.path)
+        if source is None:
+            return None
+        await source.reinit()
+        return source

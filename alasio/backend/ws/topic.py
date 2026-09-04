@@ -1,9 +1,6 @@
 from typing import Type
 
 from alasio.backend.locale.accept_language import negotiate_accept_language
-from alasio.backend.reactive.base_topic import (
-    MSGBUS_CONFIG_HANDLERS, MSGBUS_CONFIG_RECV, MSGBUS_GLOBAL_HANDLERS, MSGBUS_GLOBAL_RECV
-)
 from alasio.backend.topic.config import ConfigArg, ConfigNav
 from alasio.backend.topic.dashboard import Dashboard
 from alasio.backend.topic.log import Log
@@ -11,13 +8,11 @@ from alasio.backend.topic.mod import ModHistory, ModList
 from alasio.backend.topic.preview import Preview
 from alasio.backend.topic.que import TaskQueue, TaskQueueI18n
 from alasio.backend.topic.scan import ConfigScan
-from alasio.backend.topic.state import DICT_CONFIG_TO_CONN, ConnState
+from alasio.backend.topic.state import ConnState
 from alasio.backend.topic.worker import Worker
-from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_server import WebsocketTopicServer
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
-from alasio.logger import logger
 
 
 def create_topic_dict(topic_classes: "list[Type[BaseTopic]]") -> "dict[str, Type[BaseTopic]]":
@@ -104,83 +99,6 @@ class WebsocketServer(WebsocketTopicServer):
             # empty available languages, there's nothing we can do
             # return default anyway
             return default
-
-    @classmethod
-    async def handle_global_event(cls, topic: str, value):
-        """
-        Broadcast global events to all connections that subscribed this config
-        """
-        try:
-            handlers = MSGBUS_GLOBAL_HANDLERS[topic]
-        except KeyError:
-            # nobody listening given topic
-            return
-
-        for handler in handlers:
-            topic_cls, func = handler
-            # make a copy so we can safely iterate in async
-            topic_instances = list(topic_cls.singleton_instances().values())
-            for topic_obj in topic_instances:
-                # broadcast
-                await func(topic_obj, value)
-
-    @classmethod
-    async def handle_config_event(cls, event: ConfigEvent):
-        """
-        Broadcast config events to all connections that subscribed this config
-        """
-        connections = DICT_CONFIG_TO_CONN[event.c]
-        if not connections:
-            # nobody subscribing given config
-            return
-
-        try:
-            handlers = MSGBUS_CONFIG_HANDLERS[event.t]
-        except KeyError:
-            # nobody listening given topic
-            return
-
-        # make a copy so we can safely iterate in async
-        connections = list(connections)
-        for handler in handlers:
-            topic_cls, func = handler
-            # access with cls.singleton_instances()[conn_id] to make sure we don't create new instances
-            topic_instances = topic_cls.singleton_instances()
-            # Do we need asynchronous concurrency here?
-            for conn_id in connections:
-                topic_obj = topic_instances.get(conn_id, None)
-                if topic_obj is None:
-                    # race condition that topic just unsubscribed
-                    # or DICT_CONFIG_TO_CONN is inconsistent with topic_cls(conn_id)
-                    continue
-                # broadcast
-                await func(topic_obj, event.v)
-
-    @classmethod
-    async def task_msgbus_global(cls):
-        """
-        Coroutine task that handles global events on msgbus
-        """
-        while 1:
-            # receive then do, msg order matters
-            event = await MSGBUS_GLOBAL_RECV.receive()
-            try:
-                await cls.handle_global_event(*event)
-            except Exception as e:
-                logger.exception(e)
-
-    @classmethod
-    async def task_msgbus_config(cls):
-        """
-        Coroutine task that handles config events on msgbus
-        """
-        while 1:
-            # receive then do, msg order matters
-            event = await MSGBUS_CONFIG_RECV.receive()
-            try:
-                await cls.handle_config_event(event)
-            except Exception as e:
-                logger.exception(e)
 
 
 class PreviewServer(WebsocketTopicServer):

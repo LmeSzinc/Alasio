@@ -11,7 +11,7 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import AccessDenied, RpcValueError
-from alasio.backend.reactive.rx_trio import async_reactive_source
+from alasio.backend.reactive.source import EventSource
 from alasio.backend.ws.ws_server import WebsocketTopicServer
 from alasio.backend.ws.ws_topic import BaseTopic
 
@@ -98,9 +98,23 @@ class FakeWebSocket:
         self._inbox_send.close()
 
 
+class FakeTopicSource(EventSource):
+    """
+    A minimal cache source for the topic helpers: the full event topic name
+    is set per instance, the snapshot value is the data dict. The scaffold
+    sends the subscribe snapshot directly (no topic-side data() anymore).
+    """
+
+    def __init__(self, topic_name, data):
+        self.TOPIC = topic_name
+        super().__init__()
+        self.data = data
+
+
 class SampleTopic(BaseTopic):
     """
-    A test topic with mutable data, and RPC methods covering every response path
+    A test topic bound to a static cache source, with RPC methods covering
+    every response path
     """
     NAME = 'sample'
 
@@ -108,13 +122,12 @@ class SampleTopic(BaseTopic):
         super().__init__(conn_id, server)
         if initial is _MISSING:
             initial = {'a': 1, 'b': 2}
-        self._raw = initial
+        self.source = FakeTopicSource(self.topic_name(), initial)
         # Record of RPC calls, as (func_name, *args)
         self.calls = []
 
-    @async_reactive_source
-    async def data(self):
-        return self._raw
+    async def get_source(self):
+        return self.source
 
     @rpc
     async def echo(self, x: int, y: str = 'hi'):
@@ -139,32 +152,31 @@ class SampleTopic(BaseTopic):
 
 class FullOnlyTopic(BaseTopic):
     """
-    A test topic that pushes full events only
+    A test topic bound to a static cache source
     """
     NAME = 'full_only'
-    FULL_EVENT_ONLY = True
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
-        self._raw = {'a': 1, 'b': 2}
+        self.source = FakeTopicSource(self.topic_name(), {'a': 1, 'b': 2})
 
-    @async_reactive_source
-    async def data(self):
-        return self._raw
+    async def get_source(self):
+        return self.source
 
 
 class EmptyTopic(BaseTopic):
     """
-    A test topic whose data is falsy, so op_sub sends nothing
+    A test topic whose source data is falsy: subscribing registers but
+    sends nothing (empty data sends no full)
     """
     NAME = 'empty'
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
+        self.source = FakeTopicSource(self.topic_name(), {})
 
-    @async_reactive_source
-    async def data(self):
-        return {}
+    async def get_source(self):
+        return self.source
 
 
 class ErrorTopic(BaseTopic):
@@ -175,10 +187,10 @@ class ErrorTopic(BaseTopic):
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
+        self.source = FakeTopicSource(self.topic_name(), {'x': 1})
 
-    @async_reactive_source
-    async def data(self):
-        return {'x': 1}
+    async def get_source(self):
+        return self.source
 
     async def op_unsub(self):
         raise RuntimeError('unsub failed')
@@ -193,11 +205,10 @@ class MismatchTopic(BaseTopic):
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
-        self._raw = {'x': 1}
+        self.source = FakeTopicSource(self.topic_name(), {'x': 1})
 
-    @async_reactive_source
-    async def data(self):
-        return self._raw
+    async def get_source(self):
+        return self.source
 
     @rpc
     async def echo(self):

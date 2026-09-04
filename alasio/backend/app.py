@@ -13,8 +13,8 @@ from alasio.backend.auth import auth
 from alasio.backend.dev.assets import ImageStaticFiles, SPANoCacheStaticFiles
 from alasio.backend.lifespan import announce_started, get_shutdown_trigger
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
+from alasio.backend.reactive.source import BaseSource
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
-from alasio.backend.topic.mod import HISTORY_CACHE
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws import renew as ws_renew
 from alasio.backend.ws.context import GLOBAL_CONTEXT, GlobalContext
@@ -114,7 +114,9 @@ def sync_task_gc(wait=8):
     logger.check_rotate()
     SQLITE_POOL.gc(wait)
     MOD_JSON_CACHE.gc(wait)
-    HISTORY_CACHE.gc(wait)
+    # idle sources (one-shot / viewport / DevAssets sources): remove
+    # instances that have been idle (no subscriber) for IDLE_TTL seconds
+    BaseSource.gc_idle()
     # renewal codes: expiry scan, the main cleanup hook
     renewal_manager.gc()
 
@@ -155,9 +157,6 @@ async def lifespan(app):
         nursery.start_soon(task_listen_shutdown)
         # start gc task
         nursery.start_soon(task_gc)
-        # start message bus task
-        nursery.start_soon(WebsocketServer.task_msgbus_global)
-        nursery.start_soon(WebsocketServer.task_msgbus_config)
         # warmups
         nursery.start_soon(ConfigScanSource.create_default_config)
 
@@ -391,4 +390,5 @@ def run(args=None):
     """
     Backend entry point
     """
+    logger.info('Backend entry point')
     trio.run(functools.partial(serve_app, args=args))

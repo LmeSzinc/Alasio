@@ -16,10 +16,9 @@ from alasio.backend.auth.auth import JWT_MANAGER
 from alasio.backend.mpipe.token_backend import token_table
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RequestEvent
-from alasio.backend.reactive.rx_trio import async_reactive_source
 from alasio.backend.ws.ws_server import WebsocketTopicServer
 from alasio.backend.ws.ws_topic import BaseTopic
-from tests.backend.ws.helpers import ServerHarness
+from tests.backend.ws.helpers import FakeTopicSource, ServerHarness
 
 SECRET = b'test-secret'
 PASSWORD = 'test-password'
@@ -49,11 +48,10 @@ class RestrictedTopic(BaseTopic):
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
-        self._raw = {'x': 1}
+        self.source = FakeTopicSource(self.topic_name(), {'x': 1})
 
-    @async_reactive_source
-    async def data(self):
-        return self._raw
+    async def get_source(self):
+        return self.source
 
     @rpc
     async def secret_op(self):
@@ -66,11 +64,10 @@ class MixedTopic(BaseTopic):
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
-        self._raw = {'m': 1}
+        self.source = FakeTopicSource(self.topic_name(), {'m': 1})
 
-    @async_reactive_source
-    async def data(self):
-        return self._raw
+    async def get_source(self):
+        return self.source
 
     @rpc
     async def public_op(self):

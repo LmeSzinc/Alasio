@@ -1,14 +1,13 @@
+import time
 from typing import List, Optional, TypedDict
 
 import trio
 from msgspec import NODEFAULT
 
-from alasio.backend.reactive.base_msgbus import on_msgbus_global_event
-from alasio.backend.reactive.event_cache import ConfigEventCache
-from alasio.backend.reactive.rx_trio import async_reactive_nocache
+from alasio.backend.reactive.event import ResponseEvent
+from alasio.backend.reactive.source import ConfigEventSource, KeyedEventSource
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.topic.state import ConnState
-from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.model import TaskItem
@@ -21,31 +20,90 @@ class TaskQueueData(TypedDict):
     waiting: List[TaskItem]
 
 
-class TaskQueueSource(ConfigEventCache):
+class TaskQueueSource(ConfigEventSource):
+    """
+    Task queue cache source, resident (event stream).
+
+    Event protocol: ConfigEvent(t='TaskQueue') with v a dict of any subset
+    of {running, pending, waiting} -- merged key by key. Increments carry
+    the whole data as a set-at-root response.
+    """
     TOPIC = 'TaskQueue'
+    # Freshness window of fetch_init (running trust overrides it)
+    TTL = 5
     data: TaskQueueData
 
-    def on_init(self) -> TaskQueueData:
+    def __init__(self, config_name):
+        super().__init__(config_name)
+        # debounce flag of the config_event linkage (see config_event.py):
+        # consecutive scheduler changes merge into one forced reinit
+        self._reinit_pending = False
+
+    def on_init(self, running) -> TaskQueueData:
+        """
+        Build the task table from the ConfigScan cache and the mod schedule.
+        Runs in a worker thread (on_init_async).
+
+        Args:
+            running (str | None): Preserved running state, read under the
+                lock by fetch_init (never read self.data in the thread).
+
+        Returns:
+            TaskQueueData:
+        """
         # access cache directly, no rescan
         configs = ConfigScanSource().data
         try:
             info = configs[self.config_name]
         except KeyError:
-            return {'running': None, 'pending': [], 'waiting': []}
+            return {'running': running, 'pending': [], 'waiting': []}
         try:
             mod = MOD_LOADER.dict_mod[info.mod]
         except KeyError:
-            return {'running': None, 'pending': [], 'waiting': []}
+            return {'running': running, 'pending': [], 'waiting': []}
 
         pending_task, waiting_task = mod.get_task_schedule(self.config_name)
-        # Preserve current running state from worker, so reinit() won't clear it
-        running = deep_get(self.data, keys='running', default=None)
         return {'running': running, 'pending': pending_task, 'waiting': waiting_task}
 
-    def _apply_event_update(self, event: ConfigEvent):
-        # simple merge
-        # scheduler updates 'running'
-        # config updates 'pending', 'waiting'
+    async def fetch_init(self, force=False):
+        """
+        Read the task table when needed:
+        1. running trust: the worker is alive and its events already cover
+           every change (data is up to date), skip the read;
+        2. TTL 5s freshness;
+        3. read the task table in a thread (pending / waiting), the running
+           state is preserved from data -- read under the lock first, to
+           keep it safe against concurrent recv-thread apply.
+
+        Args:
+            force (bool): Ignore the running trust and the TTL window.
+
+        Returns:
+            TaskQueueData | None: The new data, or None when fresh.
+        """
+        if not force:
+            with self._lock:
+                if self._running:
+                    return None
+                if time.monotonic() - self._lastrun < self.TTL:
+                    return None
+        # preserve the current running state from the worker: read under the
+        # lock, never from the worker thread
+        with self._lock:
+            running = deep_get(self.data, keys='running', default=None)
+        new = await trio.to_thread.run_sync(self.on_init, running)
+        with self._lock:
+            self._lastrun = time.monotonic()
+        return new
+
+    def _apply(self, event):
+        """
+        [锁内] Simple merge: each present key of {running, pending, waiting}
+        replaces the corresponding key of data.
+
+        Returns:
+            bool: If data changed
+        """
         value = event.v
         modified = False
         for key in ['running', 'pending', 'waiting']:
@@ -57,98 +115,98 @@ class TaskQueueSource(ConfigEventCache):
             if before != after:
                 self.data[key] = after
                 modified = True
-        # modify to send full event
-        event.v = self.data
         return modified
+
+    def _make_response(self, event):
+        """
+        [锁内] Incremental response = the whole data as a root set.
+        Frozen by shallow copy: pending / waiting are only ever replaced
+        wholesale (never mutated in place), the copy protects the queued
+        payload from later in-place key replacement of data.
+        """
+        return ResponseEvent(t=self.TOPIC, o='set', v=dict(self.data))
+
+    def _snapshot(self):
+        """
+        [锁内] Full-event payload, shallow-copied for the same reason as
+        _make_response.
+        """
+        return dict(self.data)
+
+    def _reinit_mark(self):
+        """
+        [任意线程] Mark a forced-reinit request (config_event linkage).
+
+        Returns:
+            bool: True when a reinit should be scheduled; False when one is
+                already pending / running (the request is merged into it).
+        """
+        with self._lock:
+            if self._reinit_pending:
+                return False
+            self._reinit_pending = True
+            return True
+
+    def _reinit_clear(self):
+        """
+        [Trio] Clear the pending flag after a forced reinit finished.
+        """
+        with self._lock:
+            self._reinit_pending = False
 
 
 class TaskQueue(BaseTopic):
-    cache: "TaskQueueSource | None" = None
-
-    @async_reactive_nocache
-    async def data(self):
-        # reactive dependency changed, unsubscribe last cache
-        if self.cache is not None:
-            self.cache.unsubscribe(self)
-
+    async def get_source(self):
+        """
+        Data preparation: reinit (running trust / TTL no-op when fresh; the
+        first subscription of a config without worker events fills the task
+        table through on_init).
+        """
         state = ConnState(self.conn_id, self.server)
         config_name = await state.config_name
         if not config_name:
-            # empty logs if config_name is empty
-            # event = ResponseEvent(t=self.topic_name(), o='full', v={})
-            # await self.server.send(event)
-            return
-
-        cache = TaskQueueSource(config_name)
-        self.cache = cache
-        await cache.subscribe(self)
-
-    async def op_sub(self):
-        """
-        LogCache.subscribe already send, no need to send here
-        """
-        await self.data
-
-    async def op_unsub(self):
-        # topic unsubscribed, unsubscribe cache too
-        if self.cache is not None:
-            self.cache.unsubscribe(self)
-
-    async def reactive_callback(self, name, old, new):
-        # also no reactive callback
-        pass
-
-    @on_msgbus_global_event('ConfigArg')
-    async def on_config_event(self, event: ConfigEvent):
-        """
-        Re-init TaskQueueSource if scheduler config changed, so frontend can receive new task queue
-        """
-        resps = event.v
-        if not isinstance(resps, list):
-            resps = [resps]
-
-        should_reinit = False
-        for resp in resps:
-            # handle dict from worker
-            if type(resp) is dict:
-                try:
-                    group = resp['group']
-                    arg = resp['arg']
-                except KeyError:
-                    continue
-            else:
-                group = resp.group
-                arg = resp.arg
-
-            if group == 'Scheduler' and (arg == 'Enable' or arg == 'NextRun'):
-                should_reinit = True
-                break
-
-        if should_reinit:
-            cache = TaskQueueSource(event.c)
-            if cache.subscribers:
-                await cache.reinit()
+            return None
+        source = TaskQueueSource(config_name)
+        await source.reinit()
+        return source
 
 
-class TaskQueueI18n(BaseTopic):
-    @async_reactive_nocache
-    async def data(self):
+class TaskQueueI18nSource(KeyedEventSource):
+    """
+    One-shot keyed cache source of TaskQueueI18n: key (mod_name, lang).
+    """
+    TOPIC = 'TaskQueueI18n'
+    TTL = 8
+    IDLE_TTL = 8
+
+    def __init__(self, mod_name, lang):
+        super().__init__()
+        self.mod_name = mod_name
+        self.lang = lang
+
+    def on_init(self):
         """
         Returns:
             dict[str, str]:
                 key: {task_name}
                 value: i18n translation
         """
-        state = ConnState(self.conn_id, self.server)
-        mod_name = await state.mod_name
-        lang = await state.lang
-        if not lang or not mod_name:
-            return {}
-
-        data = await trio.to_thread.run_sync(MOD_LOADER.get_queue_i18n, mod_name)
+        data = MOD_LOADER.get_queue_i18n(self.mod_name)
         # {task_name}.{lang}=i18n -> {task_name}=i18n
         i18n_dict = {}
         for task, i18n in deep_iter_depth1(data):
-            value = i18n.get(lang, task)
+            value = i18n.get(self.lang, task)
             i18n_dict[task] = value
         return i18n_dict
+
+
+class TaskQueueI18n(BaseTopic):
+    async def get_source(self):
+        state = ConnState(self.conn_id, self.server)
+        mod_name = await state.mod_name
+        lang = await state.lang
+        if not mod_name or not lang:
+            return None
+        source = TaskQueueI18nSource.get(mod_name, lang)
+        await source.reinit()
+        return source

@@ -4,15 +4,21 @@ import trio
 
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
-from alasio.backend.reactive.event_cache import GlobalEventCache
+from alasio.backend.reactive.source import GlobalEventSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.table.scan import ConfigInfo, DndRequest, ScanTable
 from alasio.logger import logger
 
 
-class ConfigScanSource(GlobalEventCache):
+class ConfigScanSource(GlobalEventSource):
+    """
+    Config scan cache source, resident (its data is read lock-free by other
+    modules and sources, a rebuilt instance would read empty).
+    """
     TOPIC = 'ConfigScan'
+    # Refresh window of fetch_init
+    TTL = 5
     data: "dict[str, ConfigInfo]"
 
     def on_init(self):
@@ -81,21 +87,22 @@ class ConfigScanSource(GlobalEventCache):
         """
         self = cls()
         # ensure having data in self.data, no need to be the latest
-        await self.fetch_init()
+        await self.reinit()
         created = await trio.to_thread.run_sync(self._create_default_config)
         if created:
             # rescan configs if created any
-            await self.reinit()
+            await self.reinit(force=True)
 
 
 class ConfigScan(BaseTopic):
-    async def op_sub(self):
-        cache = ConfigScanSource()
-        await cache.subscribe(self)
-
-    async def op_unsub(self):
-        cache = ConfigScanSource()
-        cache.unsubscribe(self)
+    async def get_source(self):
+        """
+        Data preparation: refresh the scan cache (no-op when fresh), the
+        snapshot is returned by source.subscribe().
+        """
+        source = ConfigScanSource()
+        await source.reinit()
+        return source
 
     @rpc
     async def config_add(self, name: str, mod: str):
@@ -111,7 +118,7 @@ class ConfigScan(BaseTopic):
         await trio.to_thread.run_sync(scan_table.config_add, name, mod)
 
         # Force rescan to update the data and notify observers
-        await ConfigScanSource().reinit()
+        await ConfigScanSource().reinit(force=True)
 
     @rpc
     async def config_copy(self, old_name: str, new_name: str):
@@ -127,7 +134,7 @@ class ConfigScan(BaseTopic):
         await trio.to_thread.run_sync(scan_table.config_copy, old_name, new_name)
 
         # Force rescan to update the data and notify observers
-        await ConfigScanSource().reinit()
+        await ConfigScanSource().reinit(force=True)
 
     @rpc
     async def config_rename(self, old_name: str, new_name: str):
@@ -143,7 +150,7 @@ class ConfigScan(BaseTopic):
         await trio.to_thread.run_sync(scan_table.config_rename, old_name, new_name)
 
         # Force rescan to update the data and notify observers
-        await ConfigScanSource().reinit()
+        await ConfigScanSource().reinit(force=True)
 
     @rpc
     async def config_del(self, name: str):
@@ -158,7 +165,7 @@ class ConfigScan(BaseTopic):
         await trio.to_thread.run_sync(scan_table.config_del, name)
 
         # Force rescan to update the data and notify observers
-        await ConfigScanSource().reinit()
+        await ConfigScanSource().reinit(force=True)
 
     @rpc
     async def config_dnd(self, configs: List[DndRequest]):
@@ -175,4 +182,4 @@ class ConfigScan(BaseTopic):
         await trio.to_thread.run_sync(scan_table.config_dnd, configs)
 
         # Force rescan to update the data and notify observers
-        await ConfigScanSource().reinit()
+        await ConfigScanSource().reinit(force=True)
