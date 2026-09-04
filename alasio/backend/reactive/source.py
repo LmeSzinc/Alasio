@@ -141,9 +141,11 @@ class BaseSource:
         """
         with self._lock:
             self._subscribers.discard(sub)
-            empty = not self._subscribers
-        if empty:
-            self._last_unsub = time.monotonic()
+            if not self._subscribers:
+                # Record atomically with the discard: gc_idle (worker
+                # thread) reads both under the lock and must never see
+                # an empty set with a stale timestamp.
+                self._last_unsub = time.monotonic()
 
     # ---------------- sub-class hooks ----------------
 
