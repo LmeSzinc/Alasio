@@ -1,7 +1,7 @@
 """
 Tests for the BaseSource common machinery
 (alasio/backend/reactive/source.py): subscription, doorbell batching,
-retry delivery, concurrent producers and idle GC.
+delivery through the subscriber contract, concurrent producers and idle GC.
 
 Driven through minimal EventSource subclasses.
 """
@@ -17,22 +17,17 @@ import trio
 
 from alasio.backend.reactive.event import ResponseEvent
 from alasio.backend.reactive.source import BaseSource, EventSource, KeyedEventSource
-from alasio.logger import logger
 
 
 class MockServer:
     """
-    Mock ws server surface used by BaseSource._deliver
+    Mock ws server surface used by the mock subscriber
     """
 
-    def __init__(self, fail_send_nowait=0):
+    def __init__(self):
         self.sent = []
-        self.fail_send_nowait = fail_send_nowait
 
     def send_nowait(self, data):
-        if self.fail_send_nowait > 0:
-            self.fail_send_nowait -= 1
-            raise trio.WouldBlock()
         self.sent.append(data)
 
     async def send(self, data):
@@ -44,14 +39,15 @@ class MockServer:
 
 class MockTopic:
     """
-    Mock subscriber: server records send_nowait / send / send_lossy calls.
-    fail_send_nowait programs WouldBlock on the first N send_nowait calls.
+    Mock subscriber: deliver() records the payloads the source broadcasts
+    (the BaseTopic.deliver contract). The mock always accepts: backpressure
+    handling is a topic concern, tested at the ws layer.
     """
 
-    def __init__(self, topic_name='T', fail_send_nowait=0):
+    def __init__(self, topic_name='T'):
         self.topic_name_value = topic_name
         self.conn_id = f'conn_{id(self)}'
-        self.server = MockServer(fail_send_nowait)
+        self.server = MockServer()
 
     def topic_name(self):
         return self.topic_name_value
@@ -60,13 +56,11 @@ class MockTopic:
     def sent(self):
         return self.server.sent
 
-    @property
-    def fail_send_nowait(self):
-        return self.server.fail_send_nowait
-
-    @fail_send_nowait.setter
-    def fail_send_nowait(self, value):
-        self.server.fail_send_nowait = value
+    def deliver(self, payload):
+        """
+        [Trio 线程] Source increments land here (BaseTopic.deliver contract)
+        """
+        self.server.sent.append(payload)
 
 
 DECODER = msgspec.json.Decoder(ResponseEvent)
@@ -206,18 +200,6 @@ class TestUnsubscribe:
         source.unsubscribe(topic)
         assert source._last_unsub == 123.
 
-    @pytest.mark.trio
-    async def test_unsubscribe_clears_retry_queue(self):
-        """unsubscribe drops the subscriber's retry queue"""
-        source = FakeSource()
-        topic = MockTopic(fail_send_nowait=1)
-        await source.subscribe(topic)
-        source.on_event(('x', 1))
-        await trio.testing.wait_all_tasks_blocked()
-        assert topic in source._retry
-        source.unsubscribe(topic)
-        assert topic not in source._retry
-
 
 class TestDoorbellBatching:
     @pytest.mark.trio
@@ -267,70 +249,23 @@ class TestDoorbellBatching:
         source._sync_to_trio()
 
 
-class TestRetryDelivery:
+class TestDeliverContract:
     @pytest.mark.trio
-    async def test_would_block_queues_in_retry(self):
-        """a WouldBlock send is queued in the per-subscriber retry queue"""
+    async def test_deliver_called_per_subscriber(self):
+        """each subscriber receives the encoded payload through deliver()"""
         source = FakeSource()
-        topic = MockTopic(fail_send_nowait=1)
-        await source.subscribe(topic)
+        t1 = MockTopic()
+        t2 = MockTopic()
+        await source.subscribe(t1)
+        await source.subscribe(t2)
         source.on_event(('x', 1))
         await trio.testing.wait_all_tasks_blocked()
-        assert topic.sent == []
-        assert len(source._retry[topic]) == 1
-
-    @pytest.mark.trio
-    async def test_retry_flushed_before_new_payload(self):
-        """the next event flushes the retry queue first, then sends the new payload"""
-        source = FakeSource()
-        topic = MockTopic(fail_send_nowait=1)
-        await source.subscribe(topic)
-        source.on_event(('x', 1))
-        await trio.testing.wait_all_tasks_blocked()
-        # next event: the retried payload goes out, then the new one
-        source.on_event(('x', 2))
-        await trio.testing.wait_all_tasks_blocked()
-        assert len(topic.sent) == 2
-        assert decode(topic.sent[0]).v == 1
-        assert decode(topic.sent[1]).v == 2
-        assert not source._retry[topic]
-
-    @pytest.mark.trio
-    async def test_retry_full_drops_oldest_and_logs(self):
-        """a full retry queue drops its oldest payload with an error log"""
-        source = FakeSource()
-        source.RETRY_MAXLEN = 2
-        topic = MockTopic(fail_send_nowait=100)
-        await source.subscribe(topic)
-        # one burst per payload: each drained batch is a single encoded message
-        source.on_event(('x', 1))
-        await trio.testing.wait_all_tasks_blocked()
-        source.on_event(('x', 2))
-        await trio.testing.wait_all_tasks_blocked()
-        assert len(source._retry[topic]) == 2
-        with logger.mock_capture_writer() as capture:
-            source.on_event(('x', 3))
-            await trio.testing.wait_all_tasks_blocked()
-            assert capture.fd.any_contains('retry buffer full')
-        # oldest (x=1) dropped, newest retained in FIFO order
-        assert len(source._retry[topic]) == 2
-        assert [decode(p).v for p in source._retry[topic]] == [2, 3]
-
-    @pytest.mark.trio
-    async def test_slow_subscriber_does_not_block_fast_one(self):
-        """per-ws retry isolation: a slow subscriber never blocks a fast one"""
-        source = FakeSource()
-        slow = MockTopic(fail_send_nowait=100)
-        fast = MockTopic()
-        await source.subscribe(slow)
-        await source.subscribe(fast)
-        for n in range(1, 4):
-            source.on_event(('x', n))
-        await trio.testing.wait_all_tasks_blocked()
-        # the fast subscriber received everything, the slow one nothing yet
-        assert len(fast.sent) == 1
-        assert [e.v for e in decode(fast.sent[0])] == [1, 2, 3]
-        assert slow.sent == []
+        # one delivery per subscriber (no arrays: single-event batch)
+        assert len(t1.sent) == 1
+        assert decode(t1.sent[0]).o == 'set'
+        assert decode(t1.sent[0]).v == 1
+        assert len(t2.sent) == 1
+        assert decode(t2.sent[0]).v == 1
 
 
 class TestConcurrentProducers:

@@ -44,14 +44,17 @@ class BaseSource:
     - ViewportEventSource: view source without cached data (subscribe
       builds the full view single-flight and returns the encoded payload),
       events are filtered / converted and forwarded.
+
+    Subscriber contract: every subscriber (a ws BaseTopic) must implement
+    deliver(payload) -- the sync entry the source broadcasts increments
+    through. Delivery backpressure is the subscriber's own business (the
+    topic queues what its connection cannot take and sends it with await
+    send, see BaseTopic.deliver); the source itself never blocks.
     """
 
     # Inbox is the cross-thread entry buffer (payload objects).
     # When it overflows, the oldest payload is dropped.
     INBOX_MAXLEN = 1024
-    # Per-subscriber retry queue (encoded payloads) for slow connections.
-    # When it overflows, the oldest payload is dropped and an error is logged.
-    RETRY_MAXLEN = 128
     # Idle GC: None = resident (never collected); a number = the instance is
     # removed when it has no subscriber for that many seconds.
     IDLE_TTL = None
@@ -66,16 +69,14 @@ class BaseSource:
             _GC_CLASSES.discard(cls)
 
     def __init__(self):
-        # One lock covers data (cache sources), the inbox and the subscriber
-        # set. The subscriber set and the retry queues are only touched from
-        # the Trio thread; the lock just keeps them atomic with the snapshot.
+        # One lock covers data (cache sources) and the inbox. The
+        # subscriber set is only touched from the Trio thread; the lock
+        # just keeps it atomic with the snapshot.
         self._lock = threading.Lock()
         self._subscribers: "set[BaseTopic]" = set()
         # Cross-thread entry buffer written by on_event (any thread) and
         # reinit (Trio), drained by _sync_to_trio in one batch.
         self._inbox: "deque[ResponseEvent]" = deque(maxlen=self.INBOX_MAXLEN)
-        # Per-subscriber backpressure buffer of encoded payloads
-        self._retry: "dict[BaseTopic, deque[bytes]]" = {}
         # Set on the first subscribe (Trio thread); _ring relies on it.
         self._trio_token: "Optional[TrioToken]" = None
         # Timestamp of the moment the last subscriber left, for idle GC.
@@ -100,7 +101,6 @@ class BaseSource:
             if self._trio_token is None:
                 self._trio_token = trio.lowlevel.current_trio_token()
             self._subscribers.add(sub)
-            self._retry.setdefault(sub, deque())
             data = self._snapshot()
             if not data:
                 return None
@@ -117,9 +117,6 @@ class BaseSource:
         """
         with self._lock:
             self._subscribers.discard(sub)
-            # Retried messages die with the subscription: the connection is
-            # gone or no longer interested.
-            self._retry.pop(sub, None)
             empty = not self._subscribers
         if empty:
             self._last_unsub = time.monotonic()
@@ -187,7 +184,13 @@ class BaseSource:
                 # Several doorbells may be scheduled while the first one is
                 # running; empty runs are safe no-ops.
                 return
-            batch = [self._inbox.popleft() for _ in range(len(self._inbox))]
+            # Copy the batch under the lock, then clear: every append path
+            # (on_event / reinit) holds the same lock, so no producer can
+            # interleave between the copy and the clear -- the batch is
+            # exactly the queued events and nothing is left for a
+            # duplicate delivery.
+            batch = list(self._inbox)
+            self._inbox.clear()
         # Encode outside the lock: payloads are frozen inside the lock
         # (see the freeze rules of EventSource), so encoding is safe.
         if len(batch) == 1:
@@ -195,53 +198,15 @@ class BaseSource:
         else:
             # Merge the batch into one array message, encoded once.
             payload = ENCODER.encode(batch)
-        self._deliver(payload)
-
-    def _deliver(self, payload):
-        """
-        [Trio 线程] Deliver one encoded payload to all subscribers.
-
-        - Send through send_nowait (send_buffer, priority channel);
-        - on WouldBlock (slow connection) the payload is queued in the
-          per-subscriber retry queue and sent on the next event;
-        - retry queues are FIFO: retried messages are flushed first, then
-          the new payload, so ordering is strictly preserved;
-        - the retry queue is bounded: when it is full the oldest payload is
-          dropped and an error is logged.
-        """
+        # Deliver to every subscriber. The backpressure strategy is the
+        # subscriber's own business: each topic buffers what its
+        # connection cannot take yet (per-subscription outbox,
+        # BaseTopic.deliver) and sends it with await send when the send
+        # buffer frees a slot. The source never blocks: send_nowait
+        # fails fast and the topic takes over, so a slow connection never
+        # delays the delivery to fast ones.
         for sub in self._subscribers:
-            retry = self._retry[sub]
-            # 1. flush retried payloads first (stop at the first WouldBlock)
-            while retry:
-                try:
-                    sub.server.send_nowait(retry[0])
-                except trio.WouldBlock:
-                    break
-                retry.popleft()
-            if retry:
-                # still blocked: the new payload goes after the retried ones
-                # (the buffer is bounded in every append path)
-                self._retry_append(retry, payload)
-                continue
-            # 2. send the new payload
-            try:
-                sub.server.send_nowait(payload)
-            except trio.WouldBlock:
-                self._retry_append(retry, payload)
-
-    def _retry_append(self, retry, payload):
-        """
-        Queue one payload into a subscriber retry buffer.
-
-        The buffer is bounded (RETRY_MAXLEN): on overflow the oldest payload
-        is dropped and an error is logged. Every append path goes through
-        here, so a permanently stuck subscriber can never grow memory
-        without bound.
-        """
-        if len(retry) >= self.RETRY_MAXLEN:
-            retry.popleft()
-            logger.error(f'{self} retry buffer full, drop oldest message')
-        retry.append(payload)
+            sub.deliver(payload)
 
     # ---------------- idle GC ----------------
 
@@ -653,7 +618,6 @@ class ViewportEventSource(BaseSource):
             if self._trio_token is None:
                 self._trio_token = trio.lowlevel.current_trio_token()
             self._subscribers.add(sub)
-            self._retry.setdefault(sub, deque())
         return payload
 
     async def _get_payload(self):
