@@ -44,15 +44,15 @@ class FakeSource(EventSource):
         self.data[key] = value
         return True
 
-    def _make_response(self, event):
+    def _convert(self, event):
         key, value = event
         return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(key,), v=value)
 
 
 class NoWriterSource(EventSource):
     """
-    A source without sub-thread writers: data is only replaced wholesale by
-    reinit, so the snapshot may reference data directly.
+    A source without an event stream: data is only refreshed by reinit.
+    Full events are encoded under the lock, no freeze contract applies.
     """
     TOPIC_NAME = 'NoWriter'
     TTL = None
@@ -114,13 +114,13 @@ class TestOnEvent:
         assert topic.sent == []
 
 
-class TestMakeResponseFreeze:
+class TestConvertFreeze:
     @pytest.mark.trio
     async def test_incremental_response_not_affected_by_later_apply(self):
         """
         Payload freeze: an incremental response queued by a worker thread
-        carries its own frozen value; a later in-place apply of data does
-        not change the queued payload.
+        references the applied event payload; a later in-place apply of
+        data does not change the queued response.
         """
         source = FakeSource()
         topic = MockTopic()
@@ -212,6 +212,27 @@ class TestReinit:
         event = decode(topic.sent[0])
         assert event.o == 'full'
         assert event.v == {'x': 1, 'y': 1}
+
+    @pytest.mark.trio
+    async def test_reinit_full_queued_behind_earlier_increments(self):
+        """
+        A full event is queued behind increments applied before the
+        reinit (same run_sync_soon FIFO, every queueing inside the
+        lock): the client never receives the full before an older event.
+        """
+        source = FakeSource()
+        topic = MockTopic()
+        await source.subscribe(topic)
+        topic.sent.clear()
+        # an increment is applied and its doorbell queued, then a reinit
+        # runs before the trio thread drains the inbox
+        source.on_event(('x', 5))
+        await source.reinit(force=True)
+        await trio.testing.wait_all_tasks_blocked()
+        events = [decode(p) for p in topic.sent]
+        assert events[0].o == 'set'
+        assert events[0].k == ('x',)
+        assert events[1].o == 'full'
 
     @pytest.mark.trio
     async def test_reinit_no_change_no_broadcast(self):

@@ -38,7 +38,7 @@ class WorkerSource(GlobalEventSource):
             self.data[config] = state
         return True
 
-    def _make_response(self, event):
+    def _convert(self, event):
         config, state = event
         if state == 'idle':
             return ResponseEvent(t=self.TOPIC_NAME, o='del', k=(config,))

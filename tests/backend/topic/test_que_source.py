@@ -1,7 +1,7 @@
 """
 Tests for TaskQueueSource (alasio/backend/topic/que.py): key merge apply,
-whole-data set responses with shallow-copy freeze, running preservation and
-the running-trust / TTL fetch semantics.
+keyed patch increments (referencing the event payload), running
+preservation and the running-trust / TTL fetch semantics.
 """
 
 import pytest
@@ -78,14 +78,13 @@ class TestMergeApply:
 
 class TestDelivery:
     @pytest.mark.trio
-    async def test_increment_is_whole_data_set(self):
+    async def test_increment_is_keyed_patch(self):
         """
-        increments deliver o='set' at the root with the whole data
-        (the full 3-key shape appears once the task table has been read;
-        events alone only carry their own subset keys)
+        increments deliver keyed set patches of the changed keys: the
+        client merges the patch into the task table instead of replacing
+        the whole data at the root.
         """
         source = TaskQueueSource('alas')
-        source.data = full_data(running='A')
         topic = MockTopic(topic_name='TaskQueue')
         await source.subscribe(topic)
         source.on_event(make_event(running='B'))
@@ -93,26 +92,47 @@ class TestDelivery:
         event = decode(topic.sent[0])
         assert event.t == 'TaskQueue'
         assert event.o == 'set'
-        assert event.k == ()
-        assert event.v == full_data(running='B')
+        assert event.k == ('running',)
+        assert event.v == 'B'
 
     @pytest.mark.trio
-    async def test_response_frozen_against_later_apply(self):
+    async def test_multi_key_event_forwards_one_patch_per_key(self):
         """
-        Payload freeze: a queued whole-data response is a shallow copy; a
-        later in-place key replacement of data does not change it.
+        a {pending, waiting} event forwards one keyed set per changed key
+        (the responses are queued inside one critical section and arrive
+        as one batch).
+        """
+        source = TaskQueueSource('alas')
+        topic = MockTopic(topic_name='TaskQueue')
+        await source.subscribe(topic)
+        source.on_event(make_event(pending=['P'], waiting=['W']))
+        await trio.testing.wait_all_tasks_blocked()
+        events = decode(topic.sent[0])
+        if not isinstance(events, list):
+            events = [events]
+        assert [(e.o, e.k, e.v) for e in events] == [
+            ('set', ('pending',), ['P']),
+            ('set', ('waiting',), ['W']),
+        ]
+
+    @pytest.mark.trio
+    async def test_patch_values_frozen_by_reference(self):
+        """
+        Each keyed patch references the applied event payload; a later
+        replacement of the key in data does not change the queued patch
+        (the payload object becomes an orphan).
         """
         source = TaskQueueSource('alas')
         topic = MockTopic(topic_name='TaskQueue')
         await source.subscribe(topic)
         # two changes queued before the trio thread drains them
-        source.on_event(make_event(running='A'))
-        source.on_event(make_event(running='B'))
+        source.on_event(make_event(pending=[1]))
+        source.on_event(make_event(pending=[2]))
         await trio.testing.wait_all_tasks_blocked()
         events = decode(topic.sent[0])
         if not isinstance(events, list):
             events = [events]
-        assert [e.v['running'] for e in events] == ['A', 'B']
+        assert [e.v for e in events] == [[1], [2]]
 
     @pytest.mark.trio
     async def test_subscribe_snapshot(self):

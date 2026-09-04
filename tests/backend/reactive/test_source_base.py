@@ -103,7 +103,7 @@ class FakeSource(EventSource):
         self.data[key] = value
         return True
 
-    def _make_response(self, event):
+    def _convert(self, event):
         key = event[0]
         return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(key,), v=self.data[key])
 

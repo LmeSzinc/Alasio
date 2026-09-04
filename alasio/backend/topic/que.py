@@ -25,8 +25,9 @@ class TaskQueueSource(ConfigEventSource):
     Task queue cache source, resident (event stream).
 
     Event protocol: ConfigEvent(t='TaskQueue') with v a dict of any subset
-    of {running, pending, waiting} -- merged key by key. Increments carry
-    the whole data as a set-at-root response.
+    of {running, pending, waiting} -- merged key by key. Increments are
+    keyed set patches of the changed keys (the client merges them into the
+    task table); full events carry the whole data at the root.
     """
     TOPIC_NAME = 'TaskQueue'
     # Freshness window of fetch_init (running trust overrides it)
@@ -117,21 +118,28 @@ class TaskQueueSource(ConfigEventSource):
                 modified = True
         return modified
 
-    def _make_response(self, event):
+    def _convert(self, event):
         """
-        [锁内] Incremental response = the whole data as a root set.
-        Frozen by shallow copy: pending / waiting are only ever replaced
-        wholesale (never mutated in place), the copy protects the queued
-        payload from later in-place key replacement of data.
-        """
-        return ResponseEvent(t=self.TOPIC_NAME, o='set', v=dict(self.data))
+        [锁内] Keyed set patches of the event's changed keys, referencing
+        the applied values.
 
-    def _snapshot(self):
+        The worker event v is a dict of any subset of {running, pending,
+        waiting}; each key is forwarded as a separate keyed set so the
+        client merges the patch instead of replacing the whole task table.
+        Values reference the event payload: they are bound into data by
+        replacement and never mutated in place afterwards, so encoding
+        later (outside the lock) is safe. A redundant key (value equal to
+        the current one, untouched by _apply) is harmless: the client
+        merge is idempotent.
+
+        Returns:
+            ResponseEvent | list[ResponseEvent]:
         """
-        [锁内] Full-event payload, shallow-copied for the same reason as
-        _make_response.
-        """
-        return dict(self.data)
+        value = event.v
+        return [
+            ResponseEvent(t=self.TOPIC_NAME, o='set', k=(key,), v=after)
+            for key, after in value.items()
+        ]
 
     def _reinit_mark(self):
         """

@@ -77,6 +77,11 @@ class BaseSource:
     # Idle GC: None = resident (never collected); a number = the instance is
     # removed when it has no subscriber for that many seconds.
     IDLE_TTL = None
+    # Full data of cache sources (EventSource initializes it per instance).
+    # The default subscribe() encodes it under the lock; a source without
+    # data (None) registers without a full event. ViewportEventSource
+    # overrides subscribe() entirely and has no data.
+    data = None
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -115,10 +120,12 @@ class BaseSource:
         """
         [Trio] Register a subscriber and return the encoded full snapshot.
 
-        - Cache sources: register first, then snapshot the current data
-          under the lock and encode the full event.
+        - Cache sources: register first, then encode the current data
+          under the lock (the payload may reference data, frozen while
+          the lock is held).
         - Empty data returns None (no full event, matching the previous
           EventCache behavior).
+        - Sources without data (self.data is None) register silently.
 
         Ordering contract: after subscribe() returns, the caller must send
         the returned bytes with send_nowait() without any await in between,
@@ -128,11 +135,11 @@ class BaseSource:
             if self._trio_token is None:
                 self._trio_token = trio.lowlevel.current_trio_token()
             self._subscribers.add(sub)
-            data = self._snapshot()
+            data = self.data
             if not data:
                 return None
-            # Encode under the lock: the snapshot may reference data, and
-            # data cannot be modified while the lock is held.
+            # Encode under the lock: the payload references data, and data
+            # cannot be modified while the lock is held.
             return ENCODER.encode(ResponseEvent(t=self.TOPIC_NAME, o='full', v=data))
 
     def unsubscribe(self, sub):
@@ -151,13 +158,6 @@ class BaseSource:
                 self._last_unsub = time.monotonic()
 
     # ---------------- sub-class hooks ----------------
-
-    def _snapshot(self):
-        """
-        [锁内] Snapshot hook of subscribe(). Default: no data.
-        Cache sources return the data to be sent as the full event.
-        """
-        return None
 
     async def reinit(self, force=False):
         """
@@ -234,6 +234,17 @@ class BaseSource:
         # buffer frees a slot. The source never blocks: send_nowait
         # fails fast and the topic takes over, so a slow connection never
         # delays the delivery to fast ones.
+        self._deliver_all(payload)
+
+    def _deliver_all(self, payload):
+        """
+        [Trio 线程] Deliver one encoded payload to every current
+        subscriber. No lock: the subscriber set is only touched from the
+        Trio thread, so it cannot change while this runs. Also the
+        run_sync_soon target of reinit full deliveries: the FIFO order of
+        the callback queue keeps a full event behind the increments
+        queued before it.
+        """
         for sub in self._subscribers:
             sub.deliver(payload)
 
@@ -298,18 +309,21 @@ class EventSource(BaseSource):
     Sub-class hooks:
     - on_init() / on_init_async(): read the full data;
     - _apply(event): apply an event under the lock, return whether data
-      changed;
-    - _make_response(event): build the incremental response under the lock;
-    - _snapshot(): take the full-event value under the lock (default: the
-      data itself; sources whose data is mutated in place by event threads
-      must shallow-copy, see the freeze rules below).
+      changed (default False: no event stream);
+    - _convert(event): [锁内] build the incremental response(s) of an
+      event _apply accepted. Default raises: unreachable without an event
+      stream, a missing override with one is a class bug.
 
-    Payload freeze rules: the values referenced by incremental responses
-    and reinit full events may only be sub-objects with "replace wholesale"
-    semantics. Sources with sub-thread writers must shallow-copy
-    (e.g. dict(self.data)); sources whose data is only replaced wholesale by
-    the Trio thread (ConfigScan / DevAssets / one-shot sources) may
-    reference the data directly.
+    Freeze contract: full events reference data and are encoded INSIDE the
+    critical section (subscribe / reinit) -- data may be mutated in place
+    by event threads as soon as the lock is released, so a full payload
+    never outlives the lock unencoded. Incremental responses are queued as
+    objects and encoded later, outside the lock (batch, _sync_to_trio);
+    their values must therefore never be mutated after the response is
+    built. Referencing the event payload itself is safe: worker events are
+    decoded objects bound into data by replacement -- an apply must
+    replace a bound container wholesale, never mutate it in place
+    afterwards.
     """
 
     # Freshness window of fetch_init: None = read every time.
@@ -347,19 +361,23 @@ class EventSource(BaseSource):
         """
         return False
 
-    def _make_response(self, event):
+    def _convert(self, event):
         """
-        [锁内] Build the incremental response and freeze its payload.
+        [锁内] Event -> incremental response(s). Called by on_event only
+        after _apply accepted the event (data changed).
+
+        Returns:
+            ResponseEvent | list[ResponseEvent]: A single response, or a
+                list for multi-key events. May reference the event payload
+                (bound by replacement, never mutated afterwards): it is
+                encoded later, outside the lock.
+
+        Raises:
+            NotImplementedError: A source that accepts events (overrides
+                _apply) must convert them. Unreachable for sources without
+                an event stream (_apply rejects every event beforehand).
         """
         raise NotImplementedError
-
-    def _snapshot(self):
-        """
-        [锁内] Full-event payload. Default: reference data directly.
-        Sources with sub-thread writers that mutate data in place must
-        shallow-copy (see the freeze rules above).
-        """
-        return self.data
 
     # ---------------- data refresh ----------------
 
@@ -391,7 +409,12 @@ class EventSource(BaseSource):
         - fetch_lock (double-checked with the freshness window of
           fetch_init) serializes concurrent refreshes;
         - identical data (old == new) does not broadcast;
-        - without subscribers only the data is refreshed (no broadcast).
+        - without subscribers only the data is refreshed (no broadcast);
+        - the full event is encoded and its delivery queued under the
+          lock (it references data, which event threads may mutate as
+          soon as the lock is released; the run_sync_soon queueing
+          shares the FIFO of the inbox doorbells, so the full event is
+          ordered against increments by the lock itself).
 
         Args:
             force (bool): Ignore the freshness window. RPC handlers that
@@ -408,10 +431,26 @@ class EventSource(BaseSource):
                 self.data = new
                 if not self._subscribers:
                     return
-                # Freeze the payload before queueing: it is encoded later,
-                # outside the lock, by _sync_to_trio.
-                payload = ResponseEvent(t=self.TOPIC_NAME, o='full', v=self._snapshot())
-                self._push(payload)
+                # Encode under the lock: the payload references data, and
+                # data may be mutated in place as soon as the lock is
+                # released. bytes are frozen.
+                payload = ENCODER.encode(
+                    ResponseEvent(t=self.TOPIC_NAME, o='full', v=self.data)
+                )
+                # Queue the delivery under the lock, exactly like the
+                # doorbells of _ring: the run_sync_soon queue is the
+                # delivery order, and the lock serializes every queueing
+                # against the worker-thread on_event. A full event is
+                # therefore always queued before any increment whose event
+                # applied after its data snapshot -- never after (queueing
+                # outside the lock would race the doorbells and could let
+                # the full event trail a newer increment). Subscribers
+                # that leave in between are skipped (delivery reads the
+                # current set).
+                try:
+                    self._trio_token.run_sync_soon(self._deliver_all, payload)
+                except trio.RunFinishedError:
+                    pass
 
     # ---------------- event stream ----------------
 
@@ -421,7 +460,9 @@ class EventSource(BaseSource):
 
         - No actual change: nothing is broadcast;
         - no subscriber: the event is only applied (data stays fresh),
-          nothing is scheduled.
+          nothing is scheduled;
+        - _convert returns a single response or a list (multi-key
+          events); everything is pushed inside one critical section.
         """
         with self._lock:
             if not self._apply(event):
@@ -431,8 +472,14 @@ class EventSource(BaseSource):
             self._running = True
             if not self._subscribers:
                 return
-            payload = self._make_response(event)
-            self._push(payload)
+            payload = self._convert(event)
+            if type(payload) is list:
+                # multi-key events: several responses pushed inside the
+                # same critical section (the doorbell rings at most once)
+                for p in payload:
+                    self._push(p)
+            else:
+                self._push(payload)
 
 
 class GlobalEventSource(EventSource, metaclass=Singleton):
@@ -731,8 +778,12 @@ class ViewportEventSource(BaseSource):
         """
         [锁内] One event -> a response, or None when the event is not
         displayed by this view (dropped). Subclass hook.
+
+        Default: no forwarding (every event dropped) -- a view source
+        without increments (static / one-shot view) is legal; override to
+        filter / convert the events of the view.
         """
-        raise NotImplementedError
+        return None
 
     def on_event(self, event):
         """
