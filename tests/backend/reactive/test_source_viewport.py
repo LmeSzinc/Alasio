@@ -371,6 +371,31 @@ class TestSingleFlight:
         assert topic2 in a._subscribers
 
     @pytest.mark.trio
+    async def test_late_subscriber_after_failure_rebuilds(self):
+        """
+        A subscriber arriving after a failed build (failure sentinel still
+        published, its waiters not yet awake) rebuilds instead of reusing
+        the failure as an empty-view result: the sentinel is never a
+        reusable payload.
+        """
+        a = FakeViewport.get('config_a', 'nav1')
+        topic = MockTopic()
+        await a.subscribe(topic)
+        assert a.builds == 1
+        # simulate the failure window: the build failed and published the
+        # sentinel, its waiter has not taken it yet
+        a._build_payload = ViewportEventSource._FAILED
+        topic2 = MockTopic()
+        payload = await a.subscribe(topic2)
+        # the late subscriber rebuilt and received a real full event
+        assert a.builds == 2
+        assert payload is not None
+        assert decode(payload).v == FakeViewport.VIEW
+        assert topic2 in a._subscribers
+        # the sentinel is gone once the state is reused
+        assert a._build_payload is ViewportEventSource._NO_PAYLOAD
+
+    @pytest.mark.trio
     async def test_non_overlapping_subscribers_rebuild(self):
         """
         Sequential (non-overlapping) subscribers each rebuild: the full
@@ -393,6 +418,18 @@ class TestSingleFlight:
 
 
 class TestIdleGc:
+    @pytest.mark.trio
+    async def test_fresh_instance_protected_from_gc(self):
+        """
+        A freshly created instance (no subscriber yet) is protected for
+        IDLE_TTL: the get_source -> subscribe window must never be
+        collected out from under an incoming subscription.
+        """
+        a = FakeViewport.get('config_a', 'nav1')
+        # no subscriber, but the instance is brand new: kept
+        FakeViewport.gc_idle()
+        assert ViewportEventSource._by_config['config_a'][(FakeViewport, 'nav1')] is a
+
     @pytest.mark.trio
     async def test_idle_instance_removed_by_gc(self):
         """an idle viewport instance is removed from the registry after IDLE_TTL"""

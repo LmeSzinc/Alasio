@@ -192,13 +192,17 @@ class TestUnsubscribe:
     @pytest.mark.trio
     async def test_unsubscribe_records_idle_time(self, monkeypatch):
         """the last subscriber leaving records the idle timestamp"""
+        monkeypatch.setattr(time, 'monotonic', lambda: 100.)
         source = FakeSource()
         topic = MockTopic()
         await source.subscribe(topic)
-        assert source._last_unsub == 0.
-        monkeypatch.setattr(time, 'monotonic', lambda: 123.)
+        # a fresh instance records its creation time: idle GC keeps it
+        # for IDLE_TTL even without subscribers (get_source -> subscribe
+        # window)
+        assert source._last_unsub == 100.
+        monkeypatch.setattr(time, 'monotonic', lambda: 200.)
         source.unsubscribe(topic)
-        assert source._last_unsub == 123.
+        assert source._last_unsub == 200.
 
 
 class TestDoorbellBatching:

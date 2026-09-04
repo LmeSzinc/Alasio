@@ -103,8 +103,11 @@ class BaseSource:
         self._inbox: "deque[ResponseEvent]" = deque(maxlen=self.INBOX_MAXLEN)
         # Set on the first subscribe (Trio thread); _ring relies on it.
         self._trio_token: "Optional[TrioToken]" = None
-        # Timestamp of the moment the last subscriber left, for idle GC.
-        self._last_unsub = 0.
+        # Timestamp of the moment the last subscriber left (or the
+        # instance was created): idle GC only removes an instance that
+        # has been subscriber-free for IDLE_TTL, so a fresh instance is
+        # protected while get_source() -> subscribe() is still in flight.
+        self._last_unsub = time.monotonic()
 
     # ---------------- subscribe / unsubscribe ----------------
 
@@ -545,6 +548,10 @@ class ViewportEventSource(BaseSource):
     _reg_lock = threading.Lock()
     # Sentinel: no reusable build payload
     _NO_PAYLOAD = object()
+    # Sentinel: the build failed. Waiters translate it to None (registered,
+    # no full); subscribers arriving after the failure must rebuild, never
+    # reuse it as an empty-view result.
+    _FAILED = object()
 
     def __init__(self, config_name):
         super().__init__()
@@ -648,7 +655,9 @@ class ViewportEventSource(BaseSource):
         the waiters of that build and expires when the last one took it:
         a later subscriber always rebuilds, so the full view is never
         stale by more than one build window. On build failure the waiters
-        receive None (registered, no full) and the builder re-raises.
+        receive None (registered, no full) and the builder re-raises;
+        subscribers arriving after the failure rebuild (the failure
+        sentinel is never reused as a result).
         """
         if self._building:
             # a concurrent build is running: wait and reuse its payload
@@ -656,18 +665,25 @@ class ViewportEventSource(BaseSource):
             try:
                 event = self._build_event
                 await event.wait()
+                payload = self._build_payload
+                if payload is self._FAILED:
+                    # the build failed: register without a full (same
+                    # semantics as the failing builder's own path)
+                    return None
                 # the builder published bytes | None before setting the
                 # event: never the sentinel here
-                return self._build_payload
+                return payload
             finally:
                 self._build_waiters -= 1
                 if self._build_waiters == 0:
                     # last waiter took the payload: expire it
                     self._build_payload = self._NO_PAYLOAD
         payload = self._build_payload
-        if payload is not self._NO_PAYLOAD:
+        if payload is not self._NO_PAYLOAD and payload is not self._FAILED:
             # a build just finished and its last waiter is not awake yet:
-            # reuse it (fresh within one scheduling window)
+            # reuse it (fresh within one scheduling window); a failed
+            # build leaves the failure sentinel, which is never reused --
+            # later subscribers rebuild
             return payload
         # no build running: build ourselves and publish to the waiters
         self._building = True
@@ -682,11 +698,19 @@ class ViewportEventSource(BaseSource):
             if self._build_waiters:
                 self._build_payload = payload
                 event.set()
+            else:
+                # no waiter to take it: leave no stale result behind
+                # (a leftover failure sentinel must not survive a
+                # successful rebuild)
+                self._build_payload = self._NO_PAYLOAD
             return payload
         except BaseException:
-            # wake the waiters even on failure: they must not hang forever
+            # wake the waiters even on failure: they must not hang forever.
+            # Publish the failure sentinel (not None): waiters translate it
+            # to None, and subscribers arriving after the failure rebuild
+            # instead of reusing it as an empty-view result.
             if self._build_waiters:
-                self._build_payload = None
+                self._build_payload = self._FAILED
                 event.set()
             raise
         finally:
