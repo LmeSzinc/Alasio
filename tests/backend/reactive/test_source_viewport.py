@@ -19,7 +19,7 @@ class FakeViewport(ViewportEventSource):
     A viewport source with a fixed mapping and a fixed full view:
     (task, group, arg) -> (card, group, arg) with keys 'T1.a.b' style.
     """
-    TOPIC = 'FakeView'
+    TOPIC_NAME = 'FakeView'
     VIEW = {'card1': {'value': 1}}
 
     def __init__(self, config_name, view_name):
@@ -50,7 +50,7 @@ class FakeViewport(ViewportEventSource):
         key = self.dict_config_to_topic.get((task, group, arg))
         if key is None:
             return None
-        return ResponseEvent(t=self.TOPIC, o='set', k=(*key, 'value'), v=value)
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(*key, 'value'), v=value)
 
 
 class OtherViewport(FakeViewport):
@@ -58,7 +58,7 @@ class OtherViewport(FakeViewport):
     A second viewport subclass to verify registry sharing between sibling
     classes (dispatch covers both).
     """
-    TOPIC = 'OtherView'
+    TOPIC_NAME = 'OtherView'
 
 
 @pytest.fixture(autouse=True)
@@ -93,7 +93,7 @@ class TestRegistry:
         """a KeyError while constructing the source makes get return None"""
 
         class BrokenViewport(ViewportEventSource):
-            TOPIC = 'Broken'
+            TOPIC_NAME = 'Broken'
 
             def __init__(self, config_name, view_name):
                 raise KeyError('config deleted')

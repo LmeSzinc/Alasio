@@ -24,7 +24,7 @@ class FakeSource(EventSource):
       replaced in place);
     - TTL = 5 for fetch freshness tests.
     """
-    TOPIC = 'Fake'
+    TOPIC_NAME = 'Fake'
     TTL = 5
 
     def __init__(self):
@@ -46,7 +46,7 @@ class FakeSource(EventSource):
 
     def _make_response(self, event):
         key, value = event
-        return ResponseEvent(t=self.TOPIC, o='set', k=(key,), v=value)
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(key,), v=value)
 
 
 class NoWriterSource(EventSource):
@@ -54,7 +54,7 @@ class NoWriterSource(EventSource):
     A source without sub-thread writers: data is only replaced wholesale by
     reinit, so the snapshot may reference data directly.
     """
-    TOPIC = 'NoWriter'
+    TOPIC_NAME = 'NoWriter'
     TTL = None
 
     def on_init(self):
@@ -254,7 +254,7 @@ class TestGlobalConfigSingleton:
     def test_global_singleton(self):
         """GlobalEventSource subclasses share one global instance"""
         class GlobalFake(GlobalEventSource):
-            TOPIC = 'GlobalFake'
+            TOPIC_NAME = 'GlobalFake'
 
         try:
             a = GlobalFake()
@@ -266,7 +266,7 @@ class TestGlobalConfigSingleton:
     def test_config_named_singleton(self):
         """ConfigEventSource instances are keyed by config name"""
         class ConfigFake(ConfigEventSource):
-            TOPIC = 'ConfigFake'
+            TOPIC_NAME = 'ConfigFake'
 
         try:
             a = ConfigFake('config_a')
@@ -294,7 +294,7 @@ class TestOneShotIdleGc:
         """one-shot sources are removed after IDLE_TTL without subscribers"""
 
         class OneShotFake(GlobalEventSource):
-            TOPIC = 'OneShotFake'
+            TOPIC_NAME = 'OneShotFake'
             IDLE_TTL = 8
 
         try:

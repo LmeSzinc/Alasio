@@ -18,7 +18,7 @@ class ModListSource(GlobalEventSource):
     """
     One-shot global cache source of ModList.
     """
-    TOPIC = 'ModList'
+    TOPIC_NAME = 'ModList'
     TTL = 8
     IDLE_TTL = 8
 
@@ -37,6 +37,8 @@ class ModListSource(GlobalEventSource):
 
 
 class ModList(BaseTopic):
+    TOPIC_NAME = 'ModList'
+
     async def get_source(self):
         source = ModListSource()
         await source.reinit()
@@ -52,7 +54,7 @@ class ModHistorySource(GlobalEventSource):
     removed: it duplicated the source cache, and the source already holds
     the decoded history for its whole lifetime.
     """
-    TOPIC = 'ModHistory'
+    TOPIC_NAME = 'ModHistory'
     TTL = 8
     IDLE_TTL = 8
 
@@ -87,6 +89,8 @@ class ModHistorySource(GlobalEventSource):
 
 
 class ModHistory(BaseTopic):
+    TOPIC_NAME = 'ModHistory'
+
     async def get_source(self):
         source = ModHistorySource()
         await source.reinit()

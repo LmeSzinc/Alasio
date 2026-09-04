@@ -16,7 +16,7 @@ class ConfigScanSource(GlobalEventSource):
     Config scan cache source, resident (its data is read lock-free by other
     modules and sources, a rebuilt instance would read empty).
     """
-    TOPIC = 'ConfigScan'
+    TOPIC_NAME = 'ConfigScan'
     # Refresh window of fetch_init
     TTL = 5
     data: "dict[str, ConfigInfo]"
@@ -95,6 +95,8 @@ class ConfigScanSource(GlobalEventSource):
 
 
 class ConfigScan(BaseTopic):
+    TOPIC_NAME = 'ConfigScan'
+
     async def get_source(self):
         """
         Data preparation: refresh the scan cache (no-op when fresh), the

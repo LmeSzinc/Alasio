@@ -24,7 +24,7 @@ class WorkerSource(GlobalEventSource):
     WorkerManager.on_worker_state -> WorkerSource().on_event, so the data is
     always up to date, also without subscribers.
     """
-    TOPIC = 'Worker'
+    TOPIC_NAME = 'Worker'
 
     def _apply(self, event):
         config, state = event
@@ -41,8 +41,8 @@ class WorkerSource(GlobalEventSource):
     def _make_response(self, event):
         config, state = event
         if state == 'idle':
-            return ResponseEvent(t=self.TOPIC, o='del', k=(config,))
-        return ResponseEvent(t=self.TOPIC, o='set', k=(config,), v=state)
+            return ResponseEvent(t=self.TOPIC_NAME, o='del', k=(config,))
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(config,), v=state)
 
 
 class BackendWorkerManager(WorkerManager):

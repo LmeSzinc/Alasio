@@ -89,7 +89,7 @@ class FakeSource(EventSource):
     {'x': 0}, on_event({'x': n}) replaces the x value, `_apply` returns
     whether the value changed.
     """
-    TOPIC = 'Fake'
+    TOPIC_NAME = 'Fake'
 
     def __init__(self):
         super().__init__()
@@ -105,7 +105,7 @@ class FakeSource(EventSource):
 
     def _make_response(self, event):
         key = event[0]
-        return ResponseEvent(t=self.TOPIC, o='set', k=(key,), v=self.data[key])
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(key,), v=self.data[key])
 
 
 class KeyedFakeSource(KeyedEventSource):
@@ -113,7 +113,7 @@ class KeyedFakeSource(KeyedEventSource):
     A keyed source to verify per-class registries and idle GC of keyed
     instances.
     """
-    TOPIC = 'KeyedFake'
+    TOPIC_NAME = 'KeyedFake'
     IDLE_TTL = 8
 
     def __init__(self, name):
@@ -366,7 +366,7 @@ class TestGcIdle:
     def test_keyed_source_get_isolation(self):
         """each keyed subclass owns its own registry table"""
         class OtherKeyedSource(KeyedEventSource):
-            TOPIC = 'Other'
+            TOPIC_NAME = 'Other'
             IDLE_TTL = 8
 
             def __init__(self, name):

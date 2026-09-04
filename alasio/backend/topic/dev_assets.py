@@ -26,7 +26,7 @@ class DevAssetsSource(KeyedEventSource):
     the data only changes through RPC operations, and each operation pays
     the same rescan as the old per-subscribe full scan).
     """
-    TOPIC = 'DevAssetsManager'
+    TOPIC_NAME = 'DevAssetsManager'
     # Every reinit rescans (no freshness window)
     TTL = None
     # The data tree is big: idle instances are collected after 8s
@@ -48,6 +48,8 @@ class DevAssetsSource(KeyedEventSource):
 
 
 class DevAssetsManager(BaseTopic):
+    TOPIC_NAME = 'DevAssetsManager'
+
     @async_reactive_source
     async def assets_state(self):
         state = ManagerState()

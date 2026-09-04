@@ -58,7 +58,7 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         self._nursery = None
 
     def __str__(self):
-        return f'{self.topic_name()}({self.conn_id})>'
+        return f'{self.TOPIC_NAME}({self.conn_id})>'
 
     def _check_electron(self):
         """
@@ -366,7 +366,7 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
             method = self.rpc_methods[func]
         except KeyError:
             msg = f'RPC method not found "{func}"'
-            event = ResponseEvent(t=self.topic_name(), v=msg, i=rpc_id)
+            event = ResponseEvent(t=self.TOPIC_NAME, v=msg, i=rpc_id)
             await self.server.send(event)
             return
 
@@ -382,20 +382,20 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         except (ValidationError, DecodeError, UnicodeDecodeError, AccessDenied, RpcValueError) as e:
             # input errors
             msg = f'{e.__class__.__name__}: {e}'
-            event = ResponseEvent(t=self.topic_name(), v=msg, i=rpc_id)
+            event = ResponseEvent(t=self.TOPIC_NAME, v=msg, i=rpc_id)
             await self.server.send(event)
             return
         except Exception as e:
             # unexpected internal errors
             logger.exception(e)
             msg = f'{e.__class__.__name__}: {e}'
-            event = ResponseEvent(t=self.topic_name(), v=msg, i=rpc_id)
+            event = ResponseEvent(t=self.TOPIC_NAME, v=msg, i=rpc_id)
             await self.server.send(event)
             return
 
         # success
         # RPC success has no return value sent, omitting "v" means success, having "v" means error
         # The real RPC response will go through existing topic subscription
-        event = ResponseEvent(t=self.topic_name(), i=rpc_id)
+        event = ResponseEvent(t=self.TOPIC_NAME, i=rpc_id)
         await self.server.send(event)
         return

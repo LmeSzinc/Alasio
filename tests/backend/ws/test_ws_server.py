@@ -531,7 +531,7 @@ class TestSendError:
 
 
 class TestTopicNameMismatch:
-    """subscriptions are keyed by the requested topic name, not topic_name()"""
+    """subscriptions are keyed by the requested topic name, not by TOPIC_NAME"""
 
     class MismatchServer(WebsocketTopicServer):
         ALL_TOPIC_CLASS = {'mismatch': MismatchTopic}
@@ -544,7 +544,7 @@ class TestTopicNameMismatch:
         async with trio.open_nursery() as nursery:
             nursery.start_soon(harness.run_serve)
             await harness.wait_connected()
-            # sub by the registered key, events still carry the topic_name()
+            # sub by the registered key, events still carry the TOPIC_NAME
             harness.fake_ws.send_message(b'{"t":"mismatch"}')
             await trio.testing.wait_all_tasks_blocked()
             assert 'mismatch' in harness.server.subscribed

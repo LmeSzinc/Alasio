@@ -41,7 +41,7 @@ class SharedViewportSource(ViewportEventSource):
     mapping and the full view are fixed per view. `builds` counts full view
     builds (single-flight probe).
     """
-    TOPIC = 'shared_view'
+    TOPIC_NAME = 'shared_view'
 
     def __init__(self, config_name, view_name):
         super().__init__(config_name)
@@ -67,7 +67,7 @@ class SharedViewportSource(ViewportEventSource):
         key = self.dict_config_to_topic.get((task, group, arg))
         if key is None:
             return None
-        return ResponseEvent(t=self.TOPIC, o='set', k=(*key, 'value'), v=value)
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(*key, 'value'), v=value)
 
 
 class SharedViewTopic(BaseTopic):
@@ -75,7 +75,7 @@ class SharedViewTopic(BaseTopic):
     A topic bound to the viewport source of (config, view); the view comes
     from the server (per-connection navigation state, like ConnState).
     """
-    NAME = 'shared_view'
+    TOPIC_NAME = 'shared_view'
 
     async def get_source(self):
         return SharedViewportSource.get(CONFIG, self.server.view_name)
@@ -85,7 +85,7 @@ class TwoConnServer(HarnessWebsocketServer):
     """Server with the shared-view topic registered, no default topics."""
     view_name = 'nav1'
     ALL_TOPIC_CLASS = {
-        SharedViewTopic.topic_name(): SharedViewTopic,
+        SharedViewTopic.TOPIC_NAME: SharedViewTopic,
     }
     DEFAULT_TOPIC_CLASS = {}
 

@@ -28,7 +28,7 @@ class TaskQueueSource(ConfigEventSource):
     of {running, pending, waiting} -- merged key by key. Increments carry
     the whole data as a set-at-root response.
     """
-    TOPIC = 'TaskQueue'
+    TOPIC_NAME = 'TaskQueue'
     # Freshness window of fetch_init (running trust overrides it)
     TTL = 5
     data: TaskQueueData
@@ -124,7 +124,7 @@ class TaskQueueSource(ConfigEventSource):
         wholesale (never mutated in place), the copy protects the queued
         payload from later in-place key replacement of data.
         """
-        return ResponseEvent(t=self.TOPIC, o='set', v=dict(self.data))
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', v=dict(self.data))
 
     def _snapshot(self):
         """
@@ -156,6 +156,8 @@ class TaskQueueSource(ConfigEventSource):
 
 
 class TaskQueue(BaseTopic):
+    TOPIC_NAME = 'TaskQueue'
+
     async def get_source(self):
         """
         Data preparation: reinit (running trust / TTL no-op when fresh; the
@@ -175,7 +177,7 @@ class TaskQueueI18nSource(KeyedEventSource):
     """
     One-shot keyed cache source of TaskQueueI18n: key (mod_name, lang).
     """
-    TOPIC = 'TaskQueueI18n'
+    TOPIC_NAME = 'TaskQueueI18n'
     TTL = 8
     IDLE_TTL = 8
 
@@ -201,6 +203,8 @@ class TaskQueueI18nSource(KeyedEventSource):
 
 
 class TaskQueueI18n(BaseTopic):
+    TOPIC_NAME = 'TaskQueueI18n'
+
     async def get_source(self):
         state = ConnState(self.conn_id, self.server)
         mod_name = await state.mod_name

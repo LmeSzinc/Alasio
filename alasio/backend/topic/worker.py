@@ -27,6 +27,8 @@ async def get_mod(config: str):
 
 
 class Worker(BaseTopic):
+    TOPIC_NAME = 'Worker'
+
     async def get_source(self):
         """
         Worker states flow entirely through events

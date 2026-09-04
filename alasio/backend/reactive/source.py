@@ -22,6 +22,19 @@ ENCODER = Encoder()
 # __init_subclass__; only classes with a numeric IDLE_TTL are listed.
 _GC_CLASSES: "set[type]" = set()
 
+# Framework layers of the source hierarchy (known, fixed set): never
+# instantiated on their own, they leave TOPIC_NAME to the concrete
+# business sources below them. The class-level TOPIC_NAME check in
+# __init_subclass__ exempts this list by name; add any new framework
+# layer here (a missing entry surfaces as a class-definition warning).
+_FRAMEWORK_LAYERS = frozenset((
+    'EventSource',
+    'GlobalEventSource',
+    'ConfigEventSource',
+    'KeyedEventSource',
+    'ViewportEventSource',
+))
+
 
 class BaseSource:
     """
@@ -52,6 +65,12 @@ class BaseSource:
     send, see BaseTopic.deliver); the source itself never blocks.
     """
 
+    # Topic name this source feeds: tagged into every full / incremental
+    # event (ResponseEvent.t). Every concrete source class must set it;
+    # the check runs at class definition time (see __init_subclass__), so
+    # a missing TOPIC_NAME is reported on import instead of on the first
+    # subscribe.
+    TOPIC_NAME = ''
     # Inbox is the cross-thread entry buffer (payload objects).
     # When it overflows, the oldest payload is dropped.
     INBOX_MAXLEN = 1024
@@ -67,6 +86,11 @@ class BaseSource:
             _GC_CLASSES.add(cls)
         else:
             _GC_CLASSES.discard(cls)
+        # TOPIC_NAME must be set on every concrete source class (checked
+        # at class definition time); the framework layers of this module
+        # are exempt by name (see _FRAMEWORK_LAYERS above).
+        if cls.__name__ not in _FRAMEWORK_LAYERS and not cls.TOPIC_NAME:
+            logger.warning(f'{cls.__name__}.TOPIC_NAME is not set')
 
     def __init__(self):
         # One lock covers data (cache sources) and the inbox. The
@@ -106,7 +130,7 @@ class BaseSource:
                 return None
             # Encode under the lock: the snapshot may reference data, and
             # data cannot be modified while the lock is held.
-            return ENCODER.encode(ResponseEvent(t=self.TOPIC, o='full', v=data))
+            return ENCODER.encode(ResponseEvent(t=self.TOPIC_NAME, o='full', v=data))
 
     def unsubscribe(self, sub):
         """
@@ -283,7 +307,6 @@ class EventSource(BaseSource):
     reference the data directly.
     """
 
-    TOPIC = ''
     # Freshness window of fetch_init: None = read every time.
     TTL = None
 
@@ -296,8 +319,6 @@ class EventSource(BaseSource):
         # True when an event producer is alive: its data is trusted over the
         # full-data source (fetch_init running trust of TaskQueueSource).
         self._running = False
-        if not self.TOPIC:
-            logger.warning(f'{self.__class__.__name__}.TOPIC is not set')
 
     # ---------------- sub-class hooks ----------------
 
@@ -384,7 +405,7 @@ class EventSource(BaseSource):
                     return
                 # Freeze the payload before queueing: it is encoded later,
                 # outside the lock, by _sync_to_trio.
-                payload = ResponseEvent(t=self.TOPIC, o='full', v=self._snapshot())
+                payload = ResponseEvent(t=self.TOPIC_NAME, o='full', v=self._snapshot())
                 self._push(payload)
 
     # ---------------- event stream ----------------
@@ -512,8 +533,6 @@ class ViewportEventSource(BaseSource):
     IDLE_TTL seconds without subscribers (fast navigation round trips
     reuse the instance).
     """
-
-    TOPIC = ''
     IDLE_TTL = 8
     # Shared registry of the base class: config_name -> {key: instance}.
     # One table for every subclass (ConfigArgSource / DashboardSource), so
@@ -531,11 +550,9 @@ class ViewportEventSource(BaseSource):
         # Single-flight full build (Trio thread only): plain flags + one
         # event, no lock needed.
         self._building = False
-        self._build_event = None          # completion signal of the running build
+        self._build_event = None  # completion signal of the running build
         self._build_payload = self._NO_PAYLOAD  # bytes | None | sentinel
         self._build_waiters = 0
-        if not self.TOPIC:
-            logger.warning(f'{self.__class__.__name__}.TOPIC is not set')
 
     # ---------------- instance management and routing ----------------
 
@@ -653,11 +670,11 @@ class ViewportEventSource(BaseSource):
         # no build running: build ourselves and publish to the waiters
         self._building = True
         event = trio.Event()
-        self._build_event = event   # fresh event per build: stale signals never wake new waiters
+        self._build_event = event  # fresh event per build: stale signals never wake new waiters
         try:
             view = await self._build_full()
             payload = (
-                ENCODER.encode(ResponseEvent(t=self.TOPIC, o='full', v=view))
+                ENCODER.encode(ResponseEvent(t=self.TOPIC_NAME, o='full', v=view))
                 if view else None
             )
             if self._build_waiters:

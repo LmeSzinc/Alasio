@@ -24,6 +24,8 @@ class NavState(Struct):
 
 
 class ConnState(BaseTopic):
+    TOPIC_NAME = 'ConnState'
+
     @async_reactive_source
     async def nav_state(self):
         return NavState()

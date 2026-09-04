@@ -98,15 +98,10 @@ class FakeWebSocket:
         self._inbox_send.close()
 
 
-class FakeTopicSource(EventSource):
-    """
-    A minimal cache source for the topic helpers: the full event topic name
-    is set per instance, the snapshot value is the data dict. The scaffold
-    sends the subscribe snapshot directly (no topic-side data() anymore).
-    """
+class SampleSource(EventSource):
+    TOPIC_NAME = 'sample'
 
-    def __init__(self, topic_name, data):
-        self.TOPIC = topic_name
+    def __init__(self, data):
         super().__init__()
         self.data = data
 
@@ -116,13 +111,13 @@ class SampleTopic(BaseTopic):
     A test topic bound to a static cache source, with RPC methods covering
     every response path
     """
-    NAME = 'sample'
+    TOPIC_NAME = 'sample'
 
     def __init__(self, conn_id, server, initial=_MISSING):
         super().__init__(conn_id, server)
         if initial is _MISSING:
             initial = {'a': 1, 'b': 2}
-        self.source = FakeTopicSource(self.topic_name(), initial)
+        self.source = SampleSource(initial)
         # Record of RPC calls, as (func_name, *args)
         self.calls = []
 
@@ -150,18 +145,34 @@ class SampleTopic(BaseTopic):
         raise ValueError('boom')
 
 
+class FullOnlySource(EventSource):
+    TOPIC_NAME = 'full_only'
+
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
+
+
 class FullOnlyTopic(BaseTopic):
     """
     A test topic bound to a static cache source
     """
-    NAME = 'full_only'
+    TOPIC_NAME = 'full_only'
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
-        self.source = FakeTopicSource(self.topic_name(), {'a': 1, 'b': 2})
+        self.source = FullOnlySource({'a': 1, 'b': 2})
 
     async def get_source(self):
         return self.source
+
+
+class EmptySource(EventSource):
+    TOPIC_NAME = 'empty'
+
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
 
 
 class EmptyTopic(BaseTopic):
@@ -169,25 +180,33 @@ class EmptyTopic(BaseTopic):
     A test topic whose source data is falsy: subscribing registers but
     sends nothing (empty data sends no full)
     """
-    NAME = 'empty'
+    TOPIC_NAME = 'empty'
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
-        self.source = FakeTopicSource(self.topic_name(), {})
+        self.source = EmptySource({})
 
     async def get_source(self):
         return self.source
+
+
+class ErrorSource(EventSource):
+    TOPIC_NAME = 'error_topic'
+
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
 
 
 class ErrorTopic(BaseTopic):
     """
     A test topic whose op_unsub raises, cleanup should survive it
     """
-    NAME = 'error_topic'
+    TOPIC_NAME = 'error_topic'
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
-        self.source = FakeTopicSource(self.topic_name(), {'x': 1})
+        self.source = ErrorSource({'x': 1})
 
     async def get_source(self):
         return self.source
@@ -196,16 +215,24 @@ class ErrorTopic(BaseTopic):
         raise RuntimeError('unsub failed')
 
 
+class MismatchSource(EventSource):
+    TOPIC_NAME = 'mismatch_actual'
+
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
+
+
 class MismatchTopic(BaseTopic):
     """
     A test topic whose NAME differs from its registered key, so the server
     must key subscriptions by the requested name
     """
-    NAME = 'mismatch_actual'
+    TOPIC_NAME = 'mismatch_actual'
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
-        self.source = FakeTopicSource(self.topic_name(), {'x': 1})
+        self.source = MismatchSource({'x': 1})
 
     async def get_source(self):
         return self.source
@@ -220,13 +247,13 @@ class HarnessWebsocketServer(WebsocketTopicServer):
     A WebsocketTopicServer with the test topics registered
     """
     ALL_TOPIC_CLASS = {
-        SampleTopic.topic_name(): SampleTopic,
-        FullOnlyTopic.topic_name(): FullOnlyTopic,
-        EmptyTopic.topic_name(): EmptyTopic,
-        ErrorTopic.topic_name(): ErrorTopic,
+        SampleTopic.TOPIC_NAME: SampleTopic,
+        FullOnlyTopic.TOPIC_NAME: FullOnlyTopic,
+        EmptyTopic.TOPIC_NAME: EmptyTopic,
+        ErrorTopic.TOPIC_NAME: ErrorTopic,
     }
     DEFAULT_TOPIC_CLASS = {
-        SampleTopic.topic_name(): SampleTopic,
+        SampleTopic.TOPIC_NAME: SampleTopic,
     }
 
 

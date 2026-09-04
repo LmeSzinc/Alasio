@@ -1,22 +1,26 @@
 from alasio.backend.reactive.base_rpc import RPCMethod
+from alasio.logger import logger
+
+# Framework classes of the topic hierarchy (known, fixed set): never
+# instantiated on their own, they leave TOPIC_NAME to the concrete
+# business topics below them. The class-level TOPIC_NAME check in
+# __init_subclass__ exempts this list by name; add any new framework
+# class here (a missing entry surfaces as a class-definition warning).
+_FRAMEWORK_TOPICS = frozenset(('BaseTopic',))
 
 
 class BaseTopic:
-    # subclasses should override `topic` and topic name should be unique
-    # If topic name is empty, class name will be used
+    # Topic name of this topic class: the "t" field of its events and the
+    # key clients subscribe with. Every concrete topic class must set it
+    # (checked at class definition time, see __init_subclass__), so no
+    # runtime name resolution is needed -- callers read TOPIC_NAME
+    # directly.
     # The following names are preserved:
     # - "error", the builtin topic to give response to invalid input
-    NAME = ''
+    TOPIC_NAME = ''
     # A collection of RPC methods
     # Note that this is auto generated and should be static, don't modify it at runtime
     rpc_methods: "dict[str, RPCMethod]" = {}
-
-    @classmethod
-    def topic_name(cls):
-        if cls.NAME:
-            return cls.NAME
-        else:
-            return cls.__name__
 
     def __init_subclass__(cls, **kwargs):
         """
@@ -45,3 +49,9 @@ class BaseTopic:
                         continue
                     cls.rpc_methods[name] = member._rpc_method_instance
                     continue
+
+        # TOPIC_NAME must be set on every concrete topic class (checked at
+        # class definition time); framework classes are exempt by name
+        # (see _FRAMEWORK_TOPICS above).
+        if cls.__name__ not in _FRAMEWORK_TOPICS and not cls.TOPIC_NAME:
+            logger.warning(f'{cls.__name__}.TOPIC_NAME is not set')

@@ -196,7 +196,7 @@ class LogCache(metaclass=SingletonNamed):
         # 4. 生成快照
         # 合并全部行到一个 full 事件
         # 如果 snapshot 为空，仍然返回空 full，这样可以在切换 config 的时候清除已有内容
-        event = ResponseEvent(t=topic.topic_name(), o='full', v=[e.v for e in snapshot])
+        event = ResponseEvent(t=topic.TOPIC_NAME, o='full', v=[e.v for e in snapshot])
         return LOG_ENCODER.encode(event)
 
     def unsubscribe(self, topic: BaseTopic):
@@ -225,6 +225,8 @@ class LogData(msgspec.Struct, omit_defaults=True):
 
 
 class Log(BaseTopic):
+    TOPIC_NAME = 'Log'
+
     async def get_source(self):
         """
         LogCache keeps its own lock-free implementation; it only aligns its

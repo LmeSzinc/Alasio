@@ -225,6 +225,7 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
 
 
 class Preview(BaseTopic):
+    TOPIC_NAME = 'Preview'
     cache: "PreviewTask | None" = None
 
     async def get_source(self):

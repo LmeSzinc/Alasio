@@ -37,7 +37,7 @@ class FakeSource(EventSource):
     """
     A minimal cache source: data = {'x': value}
     """
-    TOPIC = 'fake_src'
+    TOPIC_NAME = 'fake_src'
 
     def __init__(self, value=0):
         super().__init__()
@@ -52,7 +52,7 @@ class FakeSource(EventSource):
 
     def _make_response(self, event):
         key, value = event
-        return ResponseEvent(t=self.TOPIC, o='set', k=(key,), v=value)
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(key,), v=value)
 
 
 class FakeViewportSource(ViewportEventSource):
@@ -61,9 +61,11 @@ class FakeViewportSource(ViewportEventSource):
     view is built on subscribe (single-flight) and returned as the encoded
     payload, mirroring ConfigArgSource / DashboardSource.
     """
+    # Bound to ViewportTopic below: the full-event topic name must match
+    # the NAME of the topic it serves.
+    TOPIC_NAME = 'viewport_topic'
 
-    def __init__(self, config_name, view, topic_name):
-        self.TOPIC = topic_name  # instance attribute: topic == source name
+    def __init__(self, config_name, view):
         super().__init__(config_name)
         self.view = view
         self.builds = 0  # number of full view builds (single-flight probe)
@@ -81,7 +83,7 @@ class FakeViewportSource(ViewportEventSource):
         key = self.dict_config_to_topic.get((task, group, arg))
         if key is None:
             return None
-        return ResponseEvent(t=self.TOPIC, o='set', k=(*key, 'value'), v=value)
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(*key, 'value'), v=value)
 
 
 class Server:
@@ -104,7 +106,7 @@ class CacheSourceTopic(BaseTopic):
     """
     A source topic whose data comes from a cache source snapshot
     """
-    NAME = 'cache_src_topic'
+    TOPIC_NAME = 'cache_src_topic'
 
     def __init__(self, conn_id, server, source):
         super().__init__(conn_id, server)
@@ -121,13 +123,13 @@ class ViewportTopic(BaseTopic):
     A source topic bound to a viewport source whose full view is built on
     subscribe (source.subscribe returns the encoded full payload).
     """
-    NAME = 'viewport_topic'
+    TOPIC_NAME = 'viewport_topic'
 
     def __init__(self, conn_id, server, view=None):
         super().__init__(conn_id, server)
         if view is None:
             view = {'view': 1}
-        self.source = FakeViewportSource('config_a', view, self.topic_name())
+        self.source = FakeViewportSource('config_a', view)
 
     async def get_source(self):
         return self.source
@@ -138,7 +140,7 @@ class ReactiveTopic(BaseTopic):
     A topic whose source selection depends on a mutable raw value:
     switching configs re-runs _resubscribe through the reactive chain.
     """
-    NAME = 'reactive_src_topic'
+    TOPIC_NAME = 'reactive_src_topic'
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
@@ -164,7 +166,7 @@ class GatedTopic(ReactiveTopic):
     A topic whose first get_source round blocks on a gate, to interleave
     a second trigger into the running round deterministically.
     """
-    NAME = 'gated_topic'
+    TOPIC_NAME = 'gated_topic'
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)

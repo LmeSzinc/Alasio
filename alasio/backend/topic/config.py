@@ -21,7 +21,7 @@ class ConfigNavSource(KeyedEventSource):
     """
     One-shot keyed cache source of ConfigNav: key (mod_name, lang).
     """
-    TOPIC = 'ConfigNav'
+    TOPIC_NAME = 'ConfigNav'
     TTL = 8
     IDLE_TTL = 8
 
@@ -41,6 +41,8 @@ class ConfigNavSource(KeyedEventSource):
 
 
 class ConfigNav(BaseTopic):
+    TOPIC_NAME = 'ConfigNav'
+
     async def get_source(self):
         state = ConnState(self.conn_id, self.server)
         mod_name = await state.mod_name
@@ -60,7 +62,7 @@ class ConfigArgSource(ViewportEventSource):
     (task, group, arg) -> (card_name, group_name, arg_name) is built from
     the GUI structure only and is this source's private business.
     """
-    TOPIC = 'ConfigArg'
+    TOPIC_NAME = 'ConfigArg'
 
     def __init__(self, config_name, mod_name, nav_name, lang):
         super().__init__(config_name)
@@ -154,10 +156,12 @@ class ConfigArgSource(ViewportEventSource):
             # not displaying this key
             return None
         topic_key = (*key, 'value')
-        return ResponseEvent(t=self.TOPIC, o='set', k=topic_key, v=event.value)
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', k=topic_key, v=event.value)
 
 
 class ConfigArg(BaseTopic):
+    TOPIC_NAME = 'ConfigArg'
+
     async def get_source(self):
         """
         Resolve the viewport source of the current (mod, config, nav,
@@ -217,7 +221,7 @@ class ConfigArg(BaseTopic):
                 # not displaying this key
                 return
             key = (*key, 'value')
-            resp_event = ResponseEvent(t=self.topic_name(), o='set', k=key, v=resp.value)
+            resp_event = ResponseEvent(t=self.TOPIC_NAME, o='set', k=key, v=resp.value)
             await self.server.send(resp_event)
             # re-raise error, so server will treat as RPC call failed
             if resp.error is not None:

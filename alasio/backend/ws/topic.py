@@ -19,7 +19,7 @@ def create_topic_dict(topic_classes: "list[Type[BaseTopic]]") -> "dict[str, Type
     """
     Convert a list of topic classes to a dict of them
     """
-    return {topic.topic_name(): topic for topic in topic_classes}
+    return {topic.TOPIC_NAME: topic for topic in topic_classes}
 
 
 class WebsocketServer(WebsocketTopicServer):
@@ -57,7 +57,7 @@ class WebsocketServer(WebsocketTopicServer):
     async def init(self):
         await super().init()
         # set language
-        topic: "ConnState | None" = self.subscribed.get(ConnState.topic_name(), None)
+        topic: "ConnState | None" = self.subscribed.get(ConnState.TOPIC_NAME, None)
         if topic is not None:
             lang = self._negotiate_lang()
             state = await topic.nav_state

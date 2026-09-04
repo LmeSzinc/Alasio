@@ -27,14 +27,11 @@ class MockTopic:
     """
     Mock BaseTopic for testing LogCache
     """
+    TOPIC_NAME = 'Log'
 
-    def __init__(self, topic_name='Log'):
-        self.topic_name_value = topic_name
+    def __init__(self):
         self.server = MagicMock()
         self.conn_id = f'conn_{id(self)}'
-
-    def topic_name(self):
-        return self.topic_name_value
 
 
 def make_event(n):

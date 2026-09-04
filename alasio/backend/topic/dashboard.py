@@ -17,7 +17,7 @@ class DashboardSource(ViewportEventSource):
     built on subscribe (MOD_LOADER.get_gui_config); the mapping
     (task, group, arg) -> card_name is this source's private business.
     """
-    TOPIC = 'Dashboard'
+    TOPIC_NAME = 'Dashboard'
 
     def __init__(self, config_name, mod_name, lang):
         super().__init__(config_name)
@@ -107,10 +107,12 @@ class DashboardSource(ViewportEventSource):
             # not displaying this key
             return None
         topic_key = (card_name, event.group, event.arg, 'value')
-        return ResponseEvent(t=self.TOPIC, o='set', k=topic_key, v=event.value)
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', k=topic_key, v=event.value)
 
 
 class Dashboard(BaseTopic):
+    TOPIC_NAME = 'Dashboard'
+
     async def get_source(self):
         """
         Resolve the dashboard source of the current (mod, config, lang);

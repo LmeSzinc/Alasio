@@ -51,7 +51,7 @@ class FakeSource(EventSource):
     """
     A minimal cache source: data = {'x': value}
     """
-    TOPIC = 'fake_outbox_src'
+    TOPIC_NAME = 'fake_outbox_src'
 
     def __init__(self, value=0):
         super().__init__()
@@ -66,7 +66,7 @@ class FakeSource(EventSource):
 
     def _make_response(self, event):
         key, value = event
-        return ResponseEvent(t=self.TOPIC, o='set', k=(key,), v=value)
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(key,), v=value)
 
 
 class ChannelServer:
@@ -124,7 +124,7 @@ class CacheSourceTopic(BaseTopic):
     """
     A source topic whose data comes from a cache source snapshot
     """
-    NAME = 'outbox_cache_topic'
+    TOPIC_NAME = 'outbox_cache_topic'
 
     def __init__(self, conn_id, server, source):
         super().__init__(conn_id, server)
@@ -139,7 +139,7 @@ class ReactiveTopic(BaseTopic):
     A topic whose source selection depends on a mutable raw value:
     switching configs re-runs _resubscribe through the reactive chain.
     """
-    NAME = 'outbox_reactive_topic'
+    TOPIC_NAME = 'outbox_reactive_topic'
 
     def __init__(self, conn_id, server):
         super().__init__(conn_id, server)
