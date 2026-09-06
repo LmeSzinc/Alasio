@@ -198,7 +198,7 @@ class AlasioScheduler:
         backend = BackendBridge()
         if backend.inited:
             running = task if task else None
-            event = ConfigEvent(t='TaskQueue', v={'running': running})
+            event = ConfigEvent(t='TaskRunning', v=running)
             backend.send(event)
 
     def _on_task_switch(self, task):

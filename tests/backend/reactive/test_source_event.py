@@ -199,6 +199,101 @@ class TestFetchInit:
         assert source.fetch_count == 1
 
 
+class TestMarkDirty:
+    """
+    Dirty semantics of fetch_init (mark_dirty): a dirty mark bypasses the
+    TTL window, the successful read consumes the marks that existed when
+    it started, marks set while the read runs survive it and a failing
+    read keeps the mark.
+    """
+
+    @pytest.mark.trio
+    async def test_mark_dirty_bypasses_ttl_and_is_consumed(self):
+        """a dirty mark makes the next fetch re-read inside the TTL window"""
+        source = FakeSource()
+        assert await source.fetch_init() == {'x': 1, 'y': 1}
+        source.mark_dirty()
+        # fresh TTL would skip the read, dirty bypasses it
+        assert await source.fetch_init() == {'x': 2, 'y': 2}
+        assert source.fetch_count == 2
+        # the successful read consumed the mark
+        assert source._dirty == 0
+        # fresh again: no read
+        assert await source.fetch_init() is None
+        assert source.fetch_count == 2
+
+    @pytest.mark.trio
+    async def test_marks_accumulate_consumed_together(self):
+        """marks accumulate; one successful read consumes all of them"""
+        source = FakeSource()
+        source.mark_dirty()
+        source.mark_dirty()
+        assert source._dirty == 2
+        await source.fetch_init()
+        assert source._dirty == 0
+
+    @pytest.mark.trio
+    async def test_mark_during_read_survives(self):
+        """
+        a mark set while the read runs survives it (the result may
+        predate the change): the read cannot tell its own mark from the
+        new one, so the counter is kept and the next read happens.
+        """
+        source = FakeSource()
+        reads = []
+        marked_during_read = [False]
+
+        async def gated_on_init():
+            if not marked_during_read[0]:
+                # a save lands while the read is in flight
+                marked_during_read[0] = True
+                source.mark_dirty()
+            reads.append(1)
+            return {'x': len(reads), 'y': len(reads)}
+
+        source.on_init_async = gated_on_init
+        source.mark_dirty()  # the mark that starts the read
+        new = await source.fetch_init()
+        assert new == {'x': 1, 'y': 1}
+        # neither mark was consumed (dirty_before != dirty after)
+        assert source._dirty == 2
+        # dirty bypasses the TTL window: another read consumes the marks
+        new = await source.fetch_init()
+        assert new == {'x': 2, 'y': 2}
+        assert source._dirty == 0
+
+    @pytest.mark.trio
+    async def test_failed_read_keeps_dirty(self):
+        """a failing read keeps the mark: the next read retries"""
+        source = FakeSource()
+        calls = [0]
+
+        async def failing_on_init():
+            calls[0] += 1
+            if calls[0] == 1:
+                raise RuntimeError('disk boom')
+            return {'x': 1, 'y': 1}
+
+        source.on_init_async = failing_on_init
+        source.mark_dirty()
+        with pytest.raises(RuntimeError):
+            await source.fetch_init()
+        # the failed read did not consume the mark
+        assert source._dirty == 1
+        # the retried read succeeds and consumes it
+        new = await source.fetch_init()
+        assert new == {'x': 1, 'y': 1}
+        assert source._dirty == 0
+
+    @pytest.mark.trio
+    async def test_ttl_none_unaffected_by_dirty(self):
+        """TTL=None sources always read: a dirty mark changes nothing"""
+        source = NoWriterSource()
+        source.mark_dirty()
+        assert await source.fetch_init() == {'a': 1}
+        assert source._dirty == 0
+
+
 class TestReinit:
     @pytest.mark.trio
     async def test_reinit_broadcasts_full_to_subscribers(self):

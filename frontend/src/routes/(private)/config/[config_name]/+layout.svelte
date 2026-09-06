@@ -2,7 +2,7 @@
   import { onDestroy, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import type { ConfigTopicLike, WORKER_STATE } from "$lib/components/aside/types";
-  import { Scheduler, type TaskQueueData, type TaskQueueI18n } from "$lib/components/scheduler";
+  import { Scheduler, type TaskQueueData, type TaskQueueI18n, type TaskRunningData } from "$lib/components/scheduler";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { NavContext } from "$lib/slotcontext.svelte";
   import { useTopic } from "$lib/ws";
@@ -90,6 +90,7 @@
 
   const taskQueueClient = useTopic<TaskQueueData>("TaskQueue");
   const taskQueueI18nClient = useTopic<TaskQueueI18n>("TaskQueueI18n");
+  const taskRunningClient = useTopic<TaskRunningData>("TaskRunning");
 
   // translate task name
   function getTaskName(task: string | null | undefined) {
@@ -102,7 +103,7 @@
     }
     return i18n[task] || task;
   }
-  const taskRunning = $derived(getTaskName(taskQueueClient.data?.running));
+  const taskRunning = $derived(getTaskName(taskRunningClient.data));
   const taskNext = $derived(
     [...(taskQueueClient.data?.pending || []), ...(taskQueueClient.data?.waiting || [])].map((task) => {
       return {

@@ -1,14 +1,20 @@
 """
-Tests for TaskQueueSource (alasio/backend/topic/que.py): key merge apply,
-keyed patch increments (referencing the event payload), running
-preservation and the running-trust / TTL fetch semantics.
+Tests for TaskQueueSource (alasio/backend/topic/que.py): two-key merge
+apply (pending / waiting), keyed patch increments (referencing the event
+payload), the framework fetch semantics (TTL / dirty, no running trust),
+the config-event linkage (subscriber force refresh / dirty mark, no
+debounce) and the scheduler-settings hit detection.
 """
+
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import trio
 
 from alasio.backend.topic.que import TaskQueueSource
 from alasio.backend.worker.event import ConfigEvent
+from alasio.backend.ws.context import GLOBAL_CONTEXT
+from alasio.config.entry.model import ConfigSetEvent
 from tests.backend.reactive.test_source_base import MockTopic, decode
 
 
@@ -17,7 +23,7 @@ def make_event(**kwargs):
     A TaskQueue ConfigEvent carrying the given data subset
 
     Args:
-        **kwargs: any subset of running / pending / waiting
+        **kwargs: any subset of pending / waiting
 
     Returns:
         ConfigEvent:
@@ -25,20 +31,52 @@ def make_event(**kwargs):
     return ConfigEvent(t='TaskQueue', c='alas', v=kwargs)
 
 
-def full_data(running=None, pending=None, waiting=None):
+def full_data(pending=None, waiting=None):
     """
-    The canonical 3-key task queue data shape (what on_init produces)
+    The canonical 2-key task queue data shape (what on_init produces)
 
     Args:
-        running (str | None):
         pending (list | None):
         waiting (list | None):
 
     Returns:
         dict:
     """
-    return {'running': running, 'pending': [] if pending is None else pending,
+    return {'pending': [] if pending is None else pending,
             'waiting': [] if waiting is None else waiting}
+
+
+def scheduler_event(value=True):
+    """
+    A Scheduler.Enable ConfigSetEvent
+
+    Args:
+        value (bool):
+
+    Returns:
+        ConfigSetEvent:
+    """
+    return ConfigSetEvent(task='Scheduler', group='Scheduler', arg='Enable', value=value)
+
+
+def next_run_event():
+    """
+    A Scheduler.NextRun ConfigSetEvent
+
+    Returns:
+        ConfigSetEvent:
+    """
+    return ConfigSetEvent(task='Scheduler', group='Scheduler', arg='NextRun', value='2026-09-03T00:00:00Z')
+
+
+def other_event():
+    """
+    An unrelated ConfigSetEvent
+
+    Returns:
+        ConfigSetEvent:
+    """
+    return ConfigSetEvent(task='General', group='General', arg='Foo', value=1)
 
 
 @pytest.fixture(autouse=True)
@@ -52,27 +90,34 @@ class TestMergeApply:
     def test_merge_subset_updates_only_present_keys(self):
         """an event with a key subset merges: present keys replaced, others kept"""
         source = TaskQueueSource('alas')
-        source.data = full_data(running='A', pending=[1], waiting=[2])
-        assert source._apply(make_event(running='B')) is True
-        assert source.data == full_data(running='B', pending=[1], waiting=[2])
+        source.data = full_data(pending=[1], waiting=[2])
         assert source._apply(make_event(pending=[3])) is True
-        assert source.data == full_data(running='B', pending=[3], waiting=[2])
+        assert source.data == full_data(pending=[3], waiting=[2])
         assert source._apply(make_event(waiting=[])) is True
-        assert source.data == full_data(running='B', pending=[3], waiting=[])
+        assert source.data == full_data(pending=[3], waiting=[])
 
     def test_merge_no_change_returns_false(self):
         """an event whose values equal the current data does not modify"""
         source = TaskQueueSource('alas')
-        source.data = full_data(running='A', pending=[1], waiting=[2])
-        assert source._apply(make_event(running='A')) is False
+        source.data = full_data(pending=[1], waiting=[2])
+        assert source._apply(make_event(pending=[1])) is False
         assert source._apply(make_event()) is False
 
     def test_merge_ignores_unknown_keys(self):
-        """unknown keys in the payload are ignored"""
+        """
+        unknown keys in the payload are ignored. running is gone from the
+        event protocol (it moved to TaskRunning): a stale event carrying
+        it must not resurrect the key in data.
+        """
         source = TaskQueueSource('alas')
         source.data = full_data()
-        event = ConfigEvent(t='TaskQueue', c='alas', v={'running': 'A', 'unknown': 1})
+        event = ConfigEvent(
+            t='TaskQueue', c='alas',
+            v={'running': 'A', 'unknown': 1, 'pending': ['P']},
+        )
         assert source._apply(event) is True
+        assert source.data == full_data(pending=['P'])
+        assert 'running' not in source.data
         assert 'unknown' not in source.data
 
 
@@ -87,13 +132,13 @@ class TestDelivery:
         source = TaskQueueSource('alas')
         topic = MockTopic(topic_name='TaskQueue')
         await source.subscribe(topic)
-        source.on_event(make_event(running='B'))
+        source.on_event(make_event(pending=['B']))
         await trio.testing.wait_all_tasks_blocked()
         event = decode(topic.sent[0])
         assert event.t == 'TaskQueue'
         assert event.o == 'set'
-        assert event.k == ('running',)
-        assert event.v == 'B'
+        assert event.k == ('pending',)
+        assert event.v == ['B']
 
     @pytest.mark.trio
     async def test_multi_key_event_forwards_one_patch_per_key(self):
@@ -136,70 +181,69 @@ class TestDelivery:
 
     @pytest.mark.trio
     async def test_subscribe_snapshot(self):
-        """the subscribe snapshot is the whole current data"""
+        """the subscribe snapshot is the whole current data (two keys)"""
         source = TaskQueueSource('alas')
-        source.data = full_data(running='A')
+        source.data = full_data(pending=['P'], waiting=['W'])
         topic = MockTopic(topic_name='TaskQueue')
         event = decode(await source.subscribe(topic))
         assert event.o == 'full'
-        assert event.v == full_data(running='A')
+        assert event.v == full_data(pending=['P'], waiting=['W'])
 
 
-class TestRunningPreserve:
+class TestReinitTaskTable:
     @pytest.mark.trio
-    async def test_reinit_preserves_running_from_data(self):
+    async def test_reinit_rebuilds_the_two_key_table(self):
         """
-        reinit preserves the running state: fetch reads it under the lock
-        and the new data carries it (the task table rebuild never clears a
-        running worker).
+        reinit rebuilds only the task table (pending / waiting): running
+        left the topic (it moved to TaskRunning), so on_init takes no
+        argument and the rebuild never touches a running state.
         """
         source = TaskQueueSource('alas')
-        source.on_event(make_event(running='MyTask'))
-        # the running trust only applies to live event producers: clear it so
-        # the fetch path (which preserves the running value) is exercised
-        source._running = False
-        source._lastrun = 0.
+        # seed data through the event stream
+        source.on_event(make_event(pending=['P1'], waiting=['W1']))
+        assert source.data == full_data(pending=['P1'], waiting=['W1'])
+        calls = []
 
-        def fake_on_init(running):
-            assert running == 'MyTask'
-            return full_data(running=running)
+        def fake_on_init():
+            calls.append(1)
+            return {'pending': ['P2'], 'waiting': ['W2']}
 
         source.on_init = fake_on_init
-        source._lastrun = 0.
-        new = await source.fetch_init()
-        assert new == full_data(running='MyTask')
+        await source.reinit(force=True)
+        assert calls == [1]
+        assert source.data == full_data(pending=['P2'], waiting=['W2'])
 
 
 class TestFetchInit:
     @pytest.mark.trio
-    async def test_running_trust_skips_read(self):
+    async def test_stale_reads_task_table(self):
         """
-        running trust: once the worker events are alive (_running), fetch
-        skips the task table read entirely.
+        a stale cache reads the task table; on_init is called without
+        arguments (fetch_init is the framework version: TTL + dirty, no
+        running trust, no running preservation).
         """
         source = TaskQueueSource('alas')
         calls = []
 
-        def fake_on_init(running):
-            calls.append(running)
-            return full_data(running=running)
+        def fake_on_init():
+            calls.append(1)
+            return {'pending': ['task'], 'waiting': []}
 
         source.on_init = fake_on_init
-        # simulate a received worker event
-        source.on_event(make_event(running='A'))
         source._lastrun = 0.
-        assert await source.fetch_init() is None
-        assert calls == []
+        new = await source.fetch_init()
+        assert calls == [1]
+        assert new == full_data(pending=['task'])
 
     @pytest.mark.trio
     async def test_ttl_fresh_skips_read(self):
-        """without running trust, a fresh TTL skips the read"""
+        """a fresh TTL skips the read"""
         source = TaskQueueSource('alas')
         calls = []
 
-        def fake_on_init(running):
-            calls.append(running)
-            return full_data(running=running)
+        def fake_on_init():
+            calls.append(1)
+            return full_data()
 
         source.on_init = fake_on_init
         source._lastrun = 999999999999.  # far future: fresh
@@ -207,46 +251,204 @@ class TestFetchInit:
         assert calls == []
 
     @pytest.mark.trio
-    async def test_stale_reads_task_table(self):
-        """a stale cache reads the task table"""
-        source = TaskQueueSource('alas')
-        calls = []
-
-        def fake_on_init(running):
-            calls.append(running)
-            return full_data(running=running, pending=['task'])
-
-        source.on_init = fake_on_init
-        source._lastrun = 0.
-        new = await source.fetch_init()
-        assert calls == [None]
-        assert new == full_data(pending=['task'])
-
-    @pytest.mark.trio
     async def test_force_skips_freshness(self):
         """force=True always reads"""
         source = TaskQueueSource('alas')
         calls = []
 
-        def fake_on_init(running):
-            calls.append(running)
-            return full_data(running=running)
+        def fake_on_init():
+            calls.append(1)
+            return full_data()
 
         source.on_init = fake_on_init
         source._lastrun = 999999999999.
         new = await source.fetch_init(force=True)
-        assert len(calls) == 1
-        assert new['running'] is None
+        assert calls == [1]
+        assert new == full_data()
 
 
-class TestReinitPending:
+class TestNeedReinit:
+    """TaskQueueSource._need_reinit: scheduler-settings hit detection."""
+
+    @pytest.mark.parametrize('responses', [
+        scheduler_event(),
+        [scheduler_event()],
+        next_run_event(),
+        [next_run_event(), other_event()],
+        {'task': 'Scheduler', 'group': 'Scheduler', 'arg': 'Enable', 'value': True},
+        [{'task': 'Scheduler', 'group': 'Scheduler', 'arg': 'NextRun', 'value': ''}],
+        [other_event(), scheduler_event()],
+    ])
+    def test_hit(self, responses):
+        """Scheduler.Enable / NextRun payloads hit (struct and dict, single and list)"""
+        assert TaskQueueSource._need_reinit(responses) is True
+
+    @pytest.mark.parametrize('responses', [
+        other_event(),
+        [other_event()],
+        [],
+        {'task': 'Scheduler', 'group': 'Scheduler', 'arg': 'Other', 'value': 1},
+        {'task': 'Scheduler', 'group': 'Other', 'arg': 'Enable', 'value': True},
+        {'task': 'Scheduler', 'group': 'Scheduler', 'arg': 'enable', 'value': True},
+        {},
+        None,
+    ])
+    def test_miss(self, responses):
+        """everything else misses"""
+        assert TaskQueueSource._need_reinit(responses) is False
+
+    @pytest.mark.parametrize('responses', [
+        # the historical check only inspects group / arg, not task
+        {'task': 'General', 'group': 'Scheduler', 'arg': 'Enable', 'value': True},
+        {'group': 'Scheduler', 'arg': 'Enable', 'value': True},
+    ])
+    def test_hit_ignores_task_field(self, responses):
+        """hits are decided on (group, arg) only, replicating the old check"""
+        assert TaskQueueSource._need_reinit(responses) is True
+
+
+class TestOnConfigEventLinkage:
+    """
+    TaskQueueSource.on_config_event: scheduler-settings hits trigger a
+    forced refresh (subscribers) or mark the data dirty (no subscriber);
+    misses do nothing; consecutive hits are not debounced (duplicates are
+    absorbed by the reinit machinery itself).
+    """
+
+    @pytest.fixture
+    async def trio_context(self):
+        """
+        Provide a live nursery + trio token through GLOBAL_CONTEXT
+        """
+        async with trio.open_nursery() as nursery:
+            with patch.object(GLOBAL_CONTEXT, 'global_nursery', nursery), \
+                    patch.object(GLOBAL_CONTEXT, 'trio_token', trio.lowlevel.current_trio_token()):
+                yield nursery
+
     @pytest.mark.trio
-    async def test_reinit_mark_debounce(self):
-        """_reinit_mark merges consecutive requests"""
+    async def test_subscriber_triggers_forced_reinit(self, trio_context):
+        """a hit with subscribers queues exactly one forced reinit"""
         source = TaskQueueSource('alas')
-        assert source._reinit_mark() is True
-        # second request while pending: merged
-        assert source._reinit_mark() is False
-        source._reinit_clear()
-        assert source._reinit_mark() is True
-        source._reinit_clear()
+        topic = MockTopic(topic_name='TaskQueue')
+        await source.subscribe(topic)
+        done = trio.Event()
+        calls = []
+
+        async def fake_reinit(self, force=False):
+            calls.append(force)
+            done.set()
+
+        with patch.object(TaskQueueSource, 'reinit', fake_reinit):
+            source.on_config_event(scheduler_event())
+            with trio.fail_after(2):
+                await done.wait()
+            await trio.testing.wait_all_tasks_blocked()
+        assert calls == [True]
+
+    @pytest.mark.trio
+    async def test_no_subscriber_marks_dirty(self, trio_context):
+        """
+        a hit without subscribers only marks the data dirty: nothing to
+        broadcast, the refresh happens on the next fetch (subscribe /
+        reinit bypass the TTL while dirty).
+        """
+        source = TaskQueueSource('alas')
+        with patch.object(TaskQueueSource, 'reinit', AsyncMock()) as reinit:
+            source.on_config_event(scheduler_event())
+            await trio.testing.wait_all_tasks_blocked()
+            await trio.sleep(0.01)
+            reinit.assert_not_called()
+        assert source._dirty == 1
+
+    @pytest.mark.trio
+    async def test_unrelated_event_no_action(self, trio_context):
+        """an unrelated config change never refreshes nor marks dirty"""
+        source = TaskQueueSource('alas')
+        topic = MockTopic(topic_name='TaskQueue')
+        await source.subscribe(topic)
+        with patch.object(TaskQueueSource, 'reinit', AsyncMock()) as reinit:
+            source.on_config_event(other_event())
+            await trio.testing.wait_all_tasks_blocked()
+            await trio.sleep(0.01)
+            reinit.assert_not_called()
+        assert source._dirty == 0
+
+    @pytest.mark.trio
+    async def test_consecutive_hits_both_trigger(self, trio_context):
+        """
+        no debounce: a hit arriving while a refresh is still running
+        triggers a second refresh. Duplicates are absorbed downstream
+        (_fetch_lock serialization + identical reads not broadcasting),
+        never by dropping the hit.
+        """
+        source = TaskQueueSource('alas')
+        topic = MockTopic(topic_name='TaskQueue')
+        await source.subscribe(topic)
+        started = trio.Event()
+        release = trio.Event()
+        calls = []
+
+        async def fake_reinit(self, force=False):
+            calls.append(force)
+            started.set()
+            await release.wait()
+
+        with patch.object(TaskQueueSource, 'reinit', fake_reinit):
+            source.on_config_event(scheduler_event())
+            with trio.fail_after(2):
+                await started.wait()
+            # second hit while the first refresh is still running
+            source.on_config_event(next_run_event())
+            release.set()
+            await trio.testing.wait_all_tasks_blocked()
+            await trio.sleep(0.05)
+        # both hits ran their refresh (no debounce window)
+        assert calls == [True, True]
+
+    @pytest.mark.trio
+    async def test_dirty_consumed_by_next_fetch(self):
+        """
+        the dirty mark of a no-subscriber save is consumed by the next
+        fetch: reinit re-reads (bypassing the TTL) and broadcasts nothing
+        (no subscribers); a second reinit inside the TTL skips the read.
+        """
+        source = TaskQueueSource('alas')
+        calls = []
+
+        def fake_on_init():
+            calls.append(1)
+            return {'pending': ['p'], 'waiting': []}
+
+        source.on_init = fake_on_init
+        source.on_config_event(scheduler_event())  # no subscriber: dirty
+        assert source._dirty == 1
+        await source.reinit()
+        assert source._dirty == 0
+        assert calls == [1]
+        assert source.data == full_data(pending=['p'])
+        # the mark was consumed: a fresh reinit skips the read
+        await source.reinit()
+        assert calls == [1]
+
+    @pytest.mark.trio
+    async def test_linkage_from_thread(self, trio_context):
+        """
+        on_config_event works from a worker thread: the refresh runs on
+        the Trio thread, the calling thread never blocks.
+        """
+        source = TaskQueueSource('alas')
+        topic = MockTopic(topic_name='TaskQueue')
+        await source.subscribe(topic)
+        done = trio.Event()
+        calls = []
+
+        async def fake_reinit(self, force=False):
+            calls.append(force)
+            done.set()
+
+        with patch.object(TaskQueueSource, 'reinit', fake_reinit):
+            # call from a plain thread, like the worker recv thread
+            await trio.to_thread.run_sync(source.on_config_event, scheduler_event())
+            with trio.fail_after(2):
+                await done.wait()
+        assert calls == [True]

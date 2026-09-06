@@ -4,10 +4,11 @@ export type TaskItem = {
 };
 
 export type TaskQueueData = {
-  running: string | null;
   pending: TaskItem[];
   waiting: TaskItem[];
 };
+
+export type TaskRunningData = string | null; // null = no task running
 
 export type TaskQueueI18n = {
   [task_name: string]: string;

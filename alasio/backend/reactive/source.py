@@ -338,6 +338,11 @@ class EventSource(BaseSource):
         # True when an event producer is alive: its data is trusted over the
         # full-data source (fetch_init running trust of TaskQueueSource).
         self._running = False
+        # Untrusted disk changes (mark_dirty) not yet consumed by a read:
+        # >0 = stale, the next fetch_init bypasses the TTL window. Counting
+        # (not bool) lets a read tell "its own mark" from "a mark set while
+        # it was reading" (see fetch_init).
+        self._dirty = 0
 
     # ---------------- sub-class hooks ----------------
 
@@ -381,9 +386,29 @@ class EventSource(BaseSource):
 
     # ---------------- data refresh ----------------
 
+    def mark_dirty(self):
+        """
+        [任意线程] Mark the data stale: an external change (e.g. a config
+        save outside the event stream) may have made the current data
+        outdated. The next fetch_init bypasses trust / TTL and re-reads.
+
+        Sources without a full-data source never call it. The mark is
+        consumed by a successful read (fetch_init); a read that fails
+        keeps it, so the next read retries.
+        """
+        with self._lock:
+            self._dirty += 1
+
     async def fetch_init(self, force=False):
         """
         [Trio] Read the latest full data.
+
+        - force: ignore the freshness window;
+        - dirty (mark_dirty): ignore the freshness window, the disk may
+          have changed outside the event stream;
+        - the read consumes the dirty marks that existed when it started;
+          marks set while the read runs survive it (the result may
+          predate them), so they trigger another read.
 
         Args:
             force (bool): Ignore the freshness window.
@@ -392,13 +417,18 @@ class EventSource(BaseSource):
             Any | None: The new data, or None when the current data is
                 still fresh (reinit skips the broadcast).
         """
-        if not force and self.TTL is not None:
-            with self._lock:
-                if time.monotonic() - self._lastrun < self.TTL:
-                    return None
+        with self._lock:
+            if not force and not self._dirty:
+                if self.TTL is not None:
+                    if time.monotonic() - self._lastrun < self.TTL:
+                        return None
+            dirty_before = self._dirty
         new = await self.on_init_async()
         with self._lock:
             self._lastrun = time.monotonic()
+            if self._dirty == dirty_before:
+                # consumed the marks that existed when the read started
+                self._dirty = 0
         return new
 
     async def reinit(self, force=False):

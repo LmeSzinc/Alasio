@@ -1,5 +1,4 @@
-import time
-from typing import List, Optional, TypedDict
+from typing import List, TypedDict
 
 import trio
 from msgspec import NODEFAULT
@@ -8,14 +7,15 @@ from alasio.backend.reactive.event import ResponseEvent
 from alasio.backend.reactive.source import ConfigEventSource, KeyedEventSource
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.topic.state import ConnState
+from alasio.backend.ws.context import GLOBAL_CONTEXT
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.model import TaskItem
-from alasio.ext.deep import deep_get, deep_iter_depth1
+from alasio.ext.deep import deep_iter_depth1
+from alasio.logger import logger
 
 
 class TaskQueueData(TypedDict):
-    running: Optional[str]
     pending: List[TaskItem]
     waiting: List[TaskItem]
 
@@ -25,81 +25,44 @@ class TaskQueueSource(ConfigEventSource):
     Task queue cache source, resident (event stream).
 
     Event protocol: ConfigEvent(t='TaskQueue') with v a dict of any subset
-    of {running, pending, waiting} -- merged key by key. Increments are
-    keyed set patches of the changed keys (the client merges them into the
-    task table); full events carry the whole data at the root.
+    of {pending, waiting} -- merged key by key. Increments are keyed set
+    patches of the changed keys (the client merges them into the task
+    table); full events carry the whole data at the root.
     """
     TOPIC_NAME = 'TaskQueue'
-    # Freshness window of fetch_init (running trust overrides it)
     TTL = 5
     data: TaskQueueData
 
     def __init__(self, config_name):
         super().__init__(config_name)
-        # debounce flag of the config_event linkage (see config_event.py):
-        # consecutive scheduler changes merge into one forced reinit
-        self._reinit_pending = False
 
-    def on_init(self, running) -> TaskQueueData:
+    def on_init(self):
         """
-        Build the task table from the ConfigScan cache and the mod schedule.
-        Runs in a worker thread (on_init_async).
-
-        Args:
-            running (str | None): Preserved running state, read under the
-                lock by fetch_init (never read self.data in the thread).
+        [线程] Build the task table from the ConfigScan cache and the mod
+        schedule. Runs in a worker thread (on_init_async). Never touches
+        self.data (cross-thread).
 
         Returns:
-            TaskQueueData:
+            dict: {'pending': list, 'waiting': list} -- empty lists when
+                the config / mod is gone.
         """
         # access cache directly, no rescan
         configs = ConfigScanSource().data
         try:
             info = configs[self.config_name]
         except KeyError:
-            return {'running': running, 'pending': [], 'waiting': []}
+            return {'pending': [], 'waiting': []}
         try:
             mod = MOD_LOADER.dict_mod[info.mod]
         except KeyError:
-            return {'running': running, 'pending': [], 'waiting': []}
+            return {'pending': [], 'waiting': []}
 
         pending_task, waiting_task = mod.get_task_schedule(self.config_name)
-        return {'running': running, 'pending': pending_task, 'waiting': waiting_task}
-
-    async def fetch_init(self, force=False):
-        """
-        Read the task table when needed:
-        1. running trust: the worker is alive and its events already cover
-           every change (data is up to date), skip the read;
-        2. TTL 5s freshness;
-        3. read the task table in a thread (pending / waiting), the running
-           state is preserved from data -- read under the lock first, to
-           keep it safe against concurrent recv-thread apply.
-
-        Args:
-            force (bool): Ignore the running trust and the TTL window.
-
-        Returns:
-            TaskQueueData | None: The new data, or None when fresh.
-        """
-        if not force:
-            with self._lock:
-                if self._running:
-                    return None
-                if time.monotonic() - self._lastrun < self.TTL:
-                    return None
-        # preserve the current running state from the worker: read under the
-        # lock, never from the worker thread
-        with self._lock:
-            running = deep_get(self.data, keys='running', default=None)
-        new = await trio.to_thread.run_sync(self.on_init, running)
-        with self._lock:
-            self._lastrun = time.monotonic()
-        return new
+        return {'pending': pending_task, 'waiting': waiting_task}
 
     def _apply(self, event):
         """
-        [锁内] Simple merge: each present key of {running, pending, waiting}
+        [锁内] Simple merge: each present key of {pending, waiting}
         replaces the corresponding key of data.
 
         Returns:
@@ -107,7 +70,7 @@ class TaskQueueSource(ConfigEventSource):
         """
         value = event.v
         modified = False
-        for key in ['running', 'pending', 'waiting']:
+        for key in ['pending', 'waiting']:
             if key not in value:
                 continue
             before = self.data.get(key, NODEFAULT)
@@ -123,10 +86,10 @@ class TaskQueueSource(ConfigEventSource):
         [锁内] Keyed set patches of the event's changed keys, referencing
         the applied values.
 
-        The worker event v is a dict of any subset of {running, pending,
-        waiting}; each key is forwarded as a separate keyed set so the
-        client merges the patch instead of replacing the whole task table.
-        Values reference the event payload: they are bound into data by
+        The worker event v is a dict of any subset of {pending, waiting};
+        each key is forwarded as a separate keyed set so the client merges
+        the patch instead of replacing the whole task table. Values
+        reference the event payload: they are bound into data by
         replacement and never mutated in place afterwards, so encoding
         later (outside the lock) is safe. A redundant key (value equal to
         the current one, untouched by _apply) is harmless: the client
@@ -141,26 +104,85 @@ class TaskQueueSource(ConfigEventSource):
             for key, after in value.items()
         ]
 
-    def _reinit_mark(self):
+    # ---------------- config-event linkage ----------------
+
+    @staticmethod
+    def _need_reinit(responses):
         """
-        [任意线程] Mark a forced-reinit request (config_event linkage).
+        Does the config-save payload touch Scheduler.Enable / NextRun?
+        Handles ConfigSetEvent and dict payloads, single or list.
+
+        Args:
+            responses (ConfigSetEvent | list[ConfigSetEvent] | dict |
+                list[dict]):
 
         Returns:
-            bool: True when a reinit should be scheduled; False when one is
-                already pending / running (the request is merged into it).
+            bool:
         """
-        with self._lock:
-            if self._reinit_pending:
-                return False
-            self._reinit_pending = True
-            return True
+        if not isinstance(responses, list):
+            responses = [responses]
+        for resp in responses:
+            if resp is None:
+                continue
+            # worker payloads are dicts (decoded from bytes)
+            if type(resp) is dict:
+                try:
+                    group = resp['group']
+                    arg = resp['arg']
+                except KeyError:
+                    continue
+            else:
+                group = resp.group
+                arg = resp.arg
+            if group == 'Scheduler' and (arg == 'Enable' or arg == 'NextRun'):
+                return True
+        return False
 
-    def _reinit_clear(self):
+    def on_config_event(self, event):
         """
-        [Trio] Clear the pending flag after a forced reinit finished.
+        [任意线程] Config-save linkage: recompute the task table when the
+        scheduler settings (Scheduler.Enable / NextRun) changed.
+
+        - subscribers present: force a refresh (queued on the Trio thread;
+          concurrent hits serialize on _fetch_lock and identical reads do
+          not broadcast -- no debounce needed);
+        - no subscriber: mark the data dirty. The refresh happens on the
+          next subscribe (fetch_init bypasses TTL while dirty); nothing is
+          broadcast anyway without subscribers, and the data is kept as a
+          fallback (never cleared: a failed read still has the old table).
         """
+        if not self._need_reinit(event):
+            return
+        # snapshot under the lock, branch outside: mark_dirty takes the
+        # lock itself (threading.Lock is not reentrant)
         with self._lock:
-            self._reinit_pending = False
+            has_subscribers = bool(self._subscribers)
+        if has_subscribers:
+            # queue a forced refresh on the Trio thread
+            try:
+                GLOBAL_CONTEXT.trio_token.run_sync_soon(self._spawn_refresh)
+            except trio.RunFinishedError:
+                pass
+        else:
+            self.mark_dirty()
+
+    def _spawn_refresh(self):
+        """
+        [Trio 线程, run_sync_soon callback] Launch the linkage coroutine.
+        """
+        try:
+            GLOBAL_CONTEXT.global_nursery.start_soon(self._refresh)
+        except RuntimeError:
+            pass  # nursery already ended (shutdown race)
+
+    async def _refresh(self):
+        """
+        [Trio task] Forced refresh; errors must not crash the nursery.
+        """
+        try:
+            await self.reinit(force=True)
+        except Exception:
+            logger.exception(f'{self} config-event refresh failed')
 
 
 class TaskQueue(BaseTopic):
@@ -168,8 +190,8 @@ class TaskQueue(BaseTopic):
 
     async def get_source(self):
         """
-        Data preparation: reinit (running trust / TTL no-op when fresh; the
-        first subscription of a config without worker events fills the task
+        Data preparation: reinit (TTL / dirty no-op when fresh; the first
+        subscription of a config without worker events fills the task
         table through on_init).
         """
         state = ConnState(self.conn_id, self.server)
@@ -179,6 +201,61 @@ class TaskQueue(BaseTopic):
         source = TaskQueueSource(config_name)
         await source.reinit()
         return source
+
+
+class TaskRunningSource(ConfigEventSource):
+    """
+    Current running task of a config, resident (event stream only).
+
+    Event protocol: ConfigEvent(t='TaskRunning') with
+    v = task_name | None -- sent by the worker scheduler on every task
+    switch. data is the task name itself (None = no task running). There
+    is no full-data source: every change flows through events, so reinit
+    is never called (the get_source of the topic does not call it).
+    """
+    TOPIC_NAME = 'TaskRunning'
+
+    def __init__(self, config_name):
+        super().__init__(config_name)
+        # no running task until the first scheduler event
+        self.data = None
+
+    def _apply(self, event):
+        """
+        [锁内] Replace the running task.
+
+        Args:
+            event: ConfigEvent with v = task name | None
+
+        Returns:
+            bool: If data changed
+        """
+        value = event.v
+        if self.data == value:
+            return False
+        self.data = value
+        return True
+
+    def _convert(self, event):
+        """
+        [锁内] Event -> root set of the running task.
+        """
+        return ResponseEvent(t=self.TOPIC_NAME, o='set', v=self.data)
+
+
+class TaskRunning(BaseTopic):
+    TOPIC_NAME = 'TaskRunning'
+
+    async def get_source(self):
+        """
+        Pure event-stream source: no reinit (there is no full-data read;
+        the full is the in-memory data snapshot of subscribe).
+        """
+        state = ConnState(self.conn_id, self.server)
+        config_name = await state.config_name
+        if not config_name:
+            return None
+        return TaskRunningSource(config_name)
 
 
 class TaskQueueI18nSource(KeyedEventSource):

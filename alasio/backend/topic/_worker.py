@@ -5,7 +5,7 @@ from alasio.backend.reactive.source import GlobalEventSource
 from alasio.backend.topic import config_event
 from alasio.backend.topic.log import LogCache
 from alasio.backend.topic.preview import PreviewTask
-from alasio.backend.topic.que import TaskQueueSource
+from alasio.backend.topic.que import TaskQueueSource, TaskRunningSource
 from alasio.backend.worker.event import ConfigEvent
 from alasio.backend.worker.manager import WORKER_STATE, WorkerManager
 from alasio.backend.ws.context import GLOBAL_CONTEXT
@@ -82,6 +82,9 @@ class BackendWorkerManager(WorkerManager):
                 pass
         elif topic == 'TaskQueue':
             cache = TaskQueueSource(event.c)
+            cache.on_event(event)
+        elif topic == 'TaskRunning':
+            cache = TaskRunningSource(event.c)
             cache.on_event(event)
         elif topic == 'Worker':
             self.on_worker_state(config=event.c, state=event.v)
