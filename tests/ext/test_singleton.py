@@ -386,6 +386,42 @@ class TestSingletonOptionalNamed:
         assert named_a1 is not named_a2
         assert named_b1 is not named_b2
 
+    def test_singleton_remove_unnamed(self):
+        """Verify that singleton_remove(None) removes the unnamed instance."""
+        instance1 = OptionalNamedService()
+
+        assert OptionalNamedService.singleton_remove(None) is True
+
+        instance2 = OptionalNamedService()
+        assert instance1 is not instance2
+
+    def test_singleton_remove_named(self):
+        """Verify that singleton_remove removes a named instance."""
+        instance_a1 = OptionalNamedService("A")
+        instance_b1 = OptionalNamedService("B")
+
+        # Test removal of an existing key
+        assert OptionalNamedService.singleton_remove("A") is True
+
+        # Test removal of a non-existent key
+        assert OptionalNamedService.singleton_remove("C") is False
+
+        # Get instance 'A' again, it should be a new object
+        instance_a2 = OptionalNamedService("A")
+        assert instance_a1 is not instance_a2
+
+        # Instance 'B' should not have been affected
+        assert OptionalNamedService("B") is instance_b1
+
+    def test_singleton_instances_includes_unnamed(self):
+        """Verify that the unnamed instance is cached under the None key."""
+        unnamed = OptionalNamedService()
+        named = OptionalNamedService("A")
+
+        instances = OptionalNamedService.singleton_instances()
+        assert instances[None] is unnamed
+        assert instances["A"] is named
+
     def test_thread_safety_for_unnamed_is_deterministic(self):
         """A deterministic test for thread-safety when creating the unnamed instance."""
         init_call_count = 0

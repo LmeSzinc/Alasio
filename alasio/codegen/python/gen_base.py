@@ -2,6 +2,8 @@ from alasio.codegen.python.libscan import EnvLibraryScanner, ModuleType
 from alasio.codegen.python.obj_class import *
 from alasio.codegen.python.obj_closure import *
 from alasio.codegen.python.obj_import import *
+from alasio.ext import env
+from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import atomic_read_text, atomic_write
 
 
@@ -17,9 +19,12 @@ class CodeGenBase(AutoBlankLineMixin, ClosureObject):
         super().__init__(self)
         self._import_registry: "dict[str, Import]" = {}
 
-    @property
+    @cached_property
     def scanner(self) -> EnvLibraryScanner:
-        return EnvLibraryScanner()
+        # The scanner is a named singleton per project root, cached per generator instance.
+        # env.PROJECT_ROOT falls back to an empty string when unset,
+        # which realpath() resolves to the current working directory.
+        return EnvLibraryScanner(env.PROJECT_ROOT)
 
     def _add_item(self, item: CodeObject):
         if isinstance(self.context, ClosureObject):

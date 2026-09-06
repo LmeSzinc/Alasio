@@ -6,7 +6,7 @@ import warnings
 
 from alasio.backport.strenum import StrEnum
 from alasio.ext.cache import cached_property
-from alasio.ext.singleton import SingletonOptionalNamed
+from alasio.ext.singleton import SingletonNamed
 
 
 # Module type classification Enum
@@ -20,16 +20,24 @@ class ModuleType(StrEnum):
 # ==========================================
 # 2. Environment Library Scanner and Classifier
 # ==========================================
-class EnvLibraryScanner(metaclass=SingletonOptionalNamed):
-    def __init__(self, project_root=None):
+class EnvLibraryScanner(metaclass=SingletonNamed):
+    """
+    Named-singleton scanner of the current python environment's importable libraries.
+
+    Each project root gets its own scanner instance and its own scan cache,
+    since module classification depends on the project root.
+    """
+
+    def __init__(self, project_root):
         """
         Initialize the library scanner
 
         Args:
-            project_root (str): Project root directory. Defaults to None.
+            project_root (str): Project root directory, used to classify
+                project-local modules. Must be provided explicitly.
         """
         # Determine project root directory (absolute path)
-        self.project_root = os.path.realpath(project_root or os.getcwd())
+        self.project_root = os.path.realpath(project_root)
 
         # Pre-fetch standard library physical paths
         self.stdlib_paths = {

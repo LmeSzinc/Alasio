@@ -3,13 +3,17 @@ import os
 
 from alasio.codegen.python.libscan import EnvLibraryScanner, ModuleType
 
+# Alasio repo root, used as the scanner's classification root.
+# Current file is tests/codegen/python/test_libscan.py
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+
 
 class TestEnvLibraryScanner:
     def test_scanned_metadata(self):
         """
         Test that scanned_metadata is not empty and contains core modules
         """
-        scanner = EnvLibraryScanner()
+        scanner = EnvLibraryScanner(PROJECT_ROOT)
         meta = scanner._scanned_metadata
 
         # Verify it's not empty
@@ -24,7 +28,7 @@ class TestEnvLibraryScanner:
         """
         Test that all_importable contains common top-level modules
         """
-        scanner = EnvLibraryScanner()
+        scanner = EnvLibraryScanner(PROJECT_ROOT)
         all_modules = scanner.all_importable
 
         # Verify presence of core modules
@@ -36,7 +40,7 @@ class TestEnvLibraryScanner:
         """
         Test that low-level C libraries are correctly scanned as standard library
         """
-        scanner = EnvLibraryScanner()
+        scanner = EnvLibraryScanner(PROJECT_ROOT)
         stdlib = scanner.standard_library
 
         # Specifically check _lzma as requested by user
@@ -52,7 +56,7 @@ class TestEnvLibraryScanner:
         """
         Test that known third-party libraries are correctly classified
         """
-        scanner = EnvLibraryScanner()
+        scanner = EnvLibraryScanner(PROJECT_ROOT)
         third_party = scanner.third_party
 
         # Verify project dependencies are classified as third-party
@@ -69,7 +73,7 @@ class TestEnvLibraryScanner:
         """
         Test that standard_library and third_party sets have no intersection
         """
-        scanner = EnvLibraryScanner()
+        scanner = EnvLibraryScanner(PROJECT_ROOT)
         stdlib = scanner.standard_library
         third_party = scanner.third_party
 
@@ -80,12 +84,7 @@ class TestEnvLibraryScanner:
         """
         Test that the local project itself is correctly classified
         """
-        # Determine project root. Current file is tests/codegen/python/test_libscan.py
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        # Alasio/
-        project_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..'))
-
-        scanner = EnvLibraryScanner(project_root=project_root)
+        scanner = EnvLibraryScanner(PROJECT_ROOT)
         meta = scanner._scanned_metadata
 
         # 'alasio' should be classified as LOCAL_PROJECT
