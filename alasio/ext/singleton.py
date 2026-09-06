@@ -87,18 +87,19 @@ class SingletonNamed(type):
 
     def __call__(cls: Type[T], name, *args, **kwargs) -> T:
         # return cached instance directly
-        try:
-            return cls.__instances[name]
-        except KeyError:
-            pass
+        instance = cls.__instances.get(name)
+        if instance is not None:
+            return instance
 
         # create new instance
         with cls.__lock:
             # another thread may have created while we are waiting
-            try:
-                return cls.__instances[name]
-            except KeyError:
-                pass
+            # it is rare case so check if key is in first
+            if name in cls.__instances:
+                try:
+                    return cls.__instances[name]
+                except KeyError:
+                    pass
 
             # create
             instance = super().__call__(name, *args, **kwargs)
