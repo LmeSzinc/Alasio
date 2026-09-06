@@ -1,10 +1,11 @@
 """
-Tests for the viewport subclass mapping algorithms: ConfigArgSource
-(topic/config.py) and DashboardSource (topic/dashboard.py). Each mapping is
-built from the GUI structure only (nav JSON cache), never from config
-values; the two algorithms are independent by design. Source keys carry the
-full context: (mod, config, nav, lang) for ConfigArg, (mod, config, lang)
-for Dashboard.
+Tests for the shared GUI view source GuiConfigSource
+(topic/_gui_config.py) and its two concrete view sources:
+ConfigArgSource (topic/config.py) and DashboardSource (topic/dashboard.py).
+The mapping is built from the GUI structure only (nav JSON cache), never
+from config values; the nav name is the only difference between the two
+views. Source keys carry the full context: (mod, config, nav, lang) for
+ConfigArg, (mod, config, lang) for Dashboard.
 """
 
 from types import SimpleNamespace
@@ -12,7 +13,6 @@ from types import SimpleNamespace
 import pytest
 
 from alasio.backend.reactive.event import ResponseEvent
-from alasio.backend.reactive.source import ViewportEventSource
 from alasio.backend.topic.config import ConfigArgSource
 from alasio.backend.topic.dashboard import DashboardSource
 from alasio.backend.topic.scan import ConfigScanSource
@@ -99,7 +99,8 @@ def structure_env(monkeypatch):
     )
     monkeypatch.setattr(MOD_LOADER, 'dict_mod', {MOD_NAME: mod})
     yield
-    ViewportEventSource._by_config.clear()
+    ConfigArgSource.singleton_clear()
+    DashboardSource.singleton_clear()
 
 
 def arg_source():
@@ -185,13 +186,13 @@ class TestConfigArgSourceConvert:
 
 
 class TestDashboardSourceBuildMapping:
-    def test_mapping_value_is_card_name(self):
-        """dashboard mapping values are card names"""
+    def test_mapping_value_is_card_location(self):
+        """dashboard mapping values are (card, group, arg) display locations"""
         source = dash_source()
         assert source.dict_config_to_topic == {
-            ('Dashboard', 'Oil', 'Time'): 'card-Dashboard-Oil',
-            ('Dashboard', 'Oil', 'Value'): 'card-Dashboard-Oil',
-            ('Dashboard', 'Ship', 'Name'): 'card-Dashboard-Ship',
+            ('Dashboard', 'Oil', 'Time'): ('card-Dashboard-Oil', 'Oil', 'Time'),
+            ('Dashboard', 'Oil', 'Value'): ('card-Dashboard-Oil', 'Oil', 'Value'),
+            ('Dashboard', 'Ship', 'Name'): ('card-Dashboard-Ship', 'Ship', 'Name'),
         }
 
     def test_info_skipped(self):
@@ -219,12 +220,16 @@ class TestDashboardSourceConvert:
 
     def test_independent_mappings(self):
         """
-        ConfigArgSource and DashboardSource map the same event independently
-        (no shared algorithm): different key shapes on purpose.
+        ConfigArgSource and DashboardSource map the same event through the
+        shared GuiConfigSource algorithm; they stay distinct instances and
+        own separate per-class registries (dispatch covers both classes
+        through the application-level route list).
         """
         arg_source_inst = arg_source()
         dash_source_inst = dash_source()
         assert arg_source_inst is not dash_source_inst
-        # same shared registry table: dispatch covers both classes
-        assert ViewportEventSource._by_config[CONFIG][(ConfigArgSource, MOD_NAME, 'general', LANG)] is arg_source_inst
-        assert ViewportEventSource._by_config[CONFIG][(DashboardSource, MOD_NAME, LANG)] is dash_source_inst
+        # separate registries: each class owns its own keyed table
+        assert (MOD_NAME, CONFIG, 'general', LANG) in ConfigArgSource.singleton_instances()
+        assert (MOD_NAME, CONFIG, LANG) in DashboardSource.singleton_instances()
+        assert arg_source_inst.nav_name == 'general'
+        assert dash_source_inst.nav_name == 'dashboard'

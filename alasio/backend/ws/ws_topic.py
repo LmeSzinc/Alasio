@@ -222,7 +222,7 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         runs one round at a time, so no round can ever be "outdated" by a
         concurrent one. Serialization of full builds across connections
         sharing one source instance is the source's own job
-        (ViewportEventSource single-flight).
+        (NoCachePush single-flight).
         """
         if self._busy:
             # a round is running: merge this trigger into it

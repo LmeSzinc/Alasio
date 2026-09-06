@@ -1,6 +1,7 @@
 """
-Tests for ViewportEventSource (alasio/backend/reactive/source.py):
-the shared keyed registry, config-level dispatch, view filtering and the
+Tests for NoCachePush (alasio/backend/reactive/source.py): the
+no-cache forwarding model composed with the KeyedSource registry, the
+application-level config dispatch pattern, view filtering and the
 single-flight full build shared by concurrent subscribers.
 """
 
@@ -10,20 +11,28 @@ import pytest
 import trio
 
 from alasio.backend.reactive.event import ResponseEvent
-from alasio.backend.reactive.source import ViewportEventSource
+from alasio.backend.reactive.source import BaseSource, KeyedSource, NoCachePush
 from tests.backend.reactive.test_source_base import MockTopic, decode
 
+# Sibling view source classes of the test suite that take part in the
+# config-level dispatch (mirrors GuiConfigSource._CONFIG_GUI_CLASSES).
+# FakeViewport registers itself below (a class never receives its own
+# __init_subclass__ call); sibling subclasses register through it.
+_VIEW_CLASSES = []
 
-class FakeViewport(ViewportEventSource):
+
+class FakeViewport(KeyedSource, NoCachePush):
     """
-    A viewport source with a fixed mapping and a fixed full view:
-    (task, group, arg) -> (card, group, arg) with keys 'T1.a.b' style.
+    A no-cache view source with a fixed mapping and a fixed full view:
+    key = (config_name, view_name); (task, group, arg) -> (card, group,
+    arg) with keys 'T1.a.b' style.
     """
     TOPIC_NAME = 'FakeView'
     VIEW = {'card1': {'value': 1}}
 
     def __init__(self, config_name, view_name):
-        super().__init__(config_name)
+        super().__init__()
+        self.config_name = config_name
         self.view_name = view_name
         self.builds = 0
         self.dict_config_to_topic = {
@@ -32,9 +41,22 @@ class FakeViewport(ViewportEventSource):
             ('T2', 'g1', 'a1'): ('card2', 'g1', 'a1'),
         }
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls.TOPIC_NAME:
+            _VIEW_CLASSES.append(cls)
+
     @classmethod
-    def get(cls, config_name, view_name):
-        return super().get(config_name, cls, view_name)
+    def dispatch(cls, config_name, event):
+        """
+        [任意线程] Application-level config dispatch used by the tests:
+        route one config event to every view source of the config across
+        the sibling classes (the real one lives in GuiConfigSource).
+        """
+        for src_cls in _VIEW_CLASSES:
+            for _, source in src_cls.singleton_items():
+                if source.config_name == config_name:
+                    source.on_event(event)
 
     async def _build_full(self):
         self.builds += 1
@@ -53,19 +75,23 @@ class FakeViewport(ViewportEventSource):
         return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(*key, 'value'), v=value)
 
 
+_VIEW_CLASSES.append(FakeViewport)
+
+
 class OtherViewport(FakeViewport):
     """
-    A second viewport subclass to verify registry sharing between sibling
-    classes (dispatch covers both).
+    A second view subclass with its own registry (per-class keyed
+    registry) to verify sibling isolation and dispatch coverage.
     """
     TOPIC_NAME = 'OtherView'
 
 
 @pytest.fixture(autouse=True)
 def cleanup_viewports():
-    """Clean the shared viewport registry after each test"""
+    """Clean the per-class keyed registries after each test"""
     yield
-    ViewportEventSource._by_config.clear()
+    for src_cls in _VIEW_CLASSES:
+        src_cls.singleton_clear()
 
 
 class TestRegistry:
@@ -92,30 +118,23 @@ class TestRegistry:
     async def test_get_returns_none_on_build_error(self):
         """a KeyError while constructing the source makes get return None"""
 
-        class BrokenViewport(ViewportEventSource):
+        class BrokenViewport(KeyedSource, NoCachePush):
             TOPIC_NAME = 'Broken'
 
             def __init__(self, config_name, view_name):
                 raise KeyError('config deleted')
 
-            @classmethod
-            def get(cls, config_name, view_name):
-                return super().get(config_name, cls, view_name)
-
-        try:
-            assert BrokenViewport.get('config_x', 'nav1') is None
-        finally:
-            BrokenViewport._by_config.clear()
+        assert BrokenViewport.get('config_x', 'nav1') is None
+        assert BrokenViewport.singleton_instances() == {}
+        BrokenViewport.singleton_clear()
 
     @pytest.mark.trio
-    async def test_registry_shared_across_subclasses(self):
-        """sibling subclasses share the registry of the base class"""
+    async def test_registry_isolated_per_subclass(self):
+        """sibling subclasses own separate registries (no class in key)"""
         a = FakeViewport.get('config_a', 'nav1')
         b = OtherViewport.get('config_a', 'nav2')
-        # both live in the same registry table; keys carry the class so
-        # sibling subclasses never collide
-        assert ViewportEventSource._by_config['config_a'][(FakeViewport, 'nav1')] is a
-        assert ViewportEventSource._by_config['config_a'][(OtherViewport, 'nav2')] is b
+        assert FakeViewport.singleton_instances() == {('config_a', 'nav1'): a}
+        assert OtherViewport.singleton_instances() == {('config_a', 'nav2'): b}
 
     @pytest.mark.trio
     async def test_sibling_keys_never_collide(self):
@@ -142,7 +161,7 @@ class TestDispatch:
         assert topic_b.sent == []
 
     @pytest.mark.trio
-    async def test_dispatch_covers_all_viewport_subclasses(self):
+    async def test_dispatch_covers_all_view_subclasses(self):
         """one dispatch call covers ConfigArg-like and Dashboard-like sources"""
         a = FakeViewport.get('config_a', 'nav1')
         b = OtherViewport.get('config_a', 'dashboard')
@@ -151,7 +170,7 @@ class TestDispatch:
         await a.subscribe(topic_a)
         await b.subscribe(topic_b)
 
-        ViewportEventSource.dispatch('config_a', {'task': 'T1', 'group': 'g1', 'arg': 'a1', 'value': 5})
+        FakeViewport.dispatch('config_a', {'task': 'T1', 'group': 'g1', 'arg': 'a1', 'value': 5})
         await trio.testing.wait_all_tasks_blocked()
         assert len(topic_a.sent) == 1
         assert len(topic_b.sent) == 1
@@ -251,7 +270,7 @@ class TestOnEventFilter:
 class TestSubscribe:
     @pytest.mark.trio
     async def test_subscribe_builds_and_returns_full_payload(self):
-        """viewport subscribe builds the full view and returns encoded bytes"""
+        """subscribe builds the full view and returns encoded bytes"""
         a = FakeViewport.get('config_a', 'nav1')
         topic = MockTopic()
         payload = await a.subscribe(topic)
@@ -384,7 +403,7 @@ class TestSingleFlight:
         assert a.builds == 1
         # simulate the failure window: the build failed and published the
         # sentinel, its waiter has not taken it yet
-        a._build_payload = ViewportEventSource._FAILED
+        a._build_payload = NoCachePush._FAILED
         topic2 = MockTopic()
         payload = await a.subscribe(topic2)
         # the late subscriber rebuilt and received a real full event
@@ -393,7 +412,7 @@ class TestSingleFlight:
         assert decode(payload).v == FakeViewport.VIEW
         assert topic2 in a._subscribers
         # the sentinel is gone once the state is reused
-        assert a._build_payload is ViewportEventSource._NO_PAYLOAD
+        assert a._build_payload is NoCachePush._NO_PAYLOAD
 
     @pytest.mark.trio
     async def test_non_overlapping_subscribers_rebuild(self):
@@ -412,55 +431,60 @@ class TestSingleFlight:
         await a.subscribe(topic2)
         assert a.builds == 2
         # without overlapping waiters nothing is ever cached
-        assert a._build_payload is ViewportEventSource._NO_PAYLOAD
+        assert a._build_payload is NoCachePush._NO_PAYLOAD
         a.unsubscribe(topic1)
         a.unsubscribe(topic2)
 
 
-class TestIdleGc:
+class TestLifecycle:
     @pytest.mark.trio
-    async def test_fresh_instance_protected_from_gc(self):
+    async def test_never_in_gc_loop(self):
         """
-        A freshly created instance (no subscriber yet) is protected for
-        IDLE_TTL: the get_source -> subscribe window must never be
-        collected out from under an incoming subscription.
+        NoCachePush classes never enter the data-expiry gc: there is no
+        data to expire, instances remove themselves on the last
+        unsubscribe.
+        """
+        from alasio.backend.reactive.source import _GC_CLASSES
+
+        assert FakeViewport not in _GC_CLASSES
+        a = FakeViewport.get('config_a', 'nav1')
+        BaseSource.gc_idle()
+        assert FakeViewport.singleton_instances() == {('config_a', 'nav1'): a}
+
+    @pytest.mark.trio
+    async def test_last_unsubscribe_removes_instance(self):
+        """
+        The instance removes itself from the registry when its last
+        subscriber leaves: nothing is cached, the next get() rebuilds it.
         """
         a = FakeViewport.get('config_a', 'nav1')
-        # no subscriber, but the instance is brand new: kept
-        FakeViewport.gc_idle()
-        assert ViewportEventSource._by_config['config_a'][(FakeViewport, 'nav1')] is a
+        topic1 = MockTopic()
+        topic2 = MockTopic()
+        await a.subscribe(topic1)
+        await a.subscribe(topic2)
+        assert FakeViewport.singleton_instances() == {('config_a', 'nav1'): a}
+        # one subscriber leaving keeps the instance
+        a.unsubscribe(topic1)
+        assert FakeViewport.singleton_instances() == {('config_a', 'nav1'): a}
+        # the last one leaving removes it
+        a.unsubscribe(topic2)
+        assert FakeViewport.singleton_instances() == {}
+        # next get() rebuilds a fresh instance
+        b = FakeViewport.get('config_a', 'nav1')
+        assert b is not a
+        assert b.builds == 0
 
     @pytest.mark.trio
-    async def test_idle_instance_removed_by_gc(self):
-        """an idle viewport instance is removed from the registry after IDLE_TTL"""
+    async def test_subscribe_reconciles_removed_instance(self):
+        """
+        A subscribe arriving on an instance that was already removed
+        (last-unsubscribe of a concurrent flow) re-registers it when the
+        registry slot is vacant.
+        """
         a = FakeViewport.get('config_a', 'nav1')
+        # simulate: removed while the subscribe flow was in flight
+        FakeViewport.singleton_remove_if(('config_a', 'nav1'), a)
+        assert FakeViewport.singleton_instances() == {}
         topic = MockTopic()
         await a.subscribe(topic)
-        a.unsubscribe(topic)
-        # idle longer than IDLE_TTL (8)
-        a._last_unsub = a._last_unsub - 20
-        FakeViewport.gc_idle()
-        assert ViewportEventSource._by_config == {}
-
-    @pytest.mark.trio
-    async def test_recent_idle_instance_kept(self):
-        """an instance idle within the TTL is kept (fast navigation round trip)"""
-        a = FakeViewport.get('config_a', 'nav1')
-        topic = MockTopic()
-        await a.subscribe(topic)
-        a.unsubscribe(topic)
-        # still inside the idle window: kept
-        FakeViewport.gc_idle()
-        assert ViewportEventSource._by_config['config_a'][(FakeViewport, 'nav1')] is a
-        # and get() reuses it
-        assert FakeViewport.get('config_a', 'nav1') is a
-
-    @pytest.mark.trio
-    async def test_subscribed_instance_never_collected(self):
-        """an instance with subscribers is never collected"""
-        a = FakeViewport.get('config_a', 'nav1')
-        topic = MockTopic()
-        await a.subscribe(topic)
-        a._last_unsub = 0.
-        FakeViewport.gc_idle()
-        assert ViewportEventSource._by_config['config_a'][(FakeViewport, 'nav1')] is a
+        assert FakeViewport.singleton_instances() == {('config_a', 'nav1'): a}

@@ -4,21 +4,29 @@ import trio
 
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
-from alasio.backend.reactive.source import GlobalEventSource
+from alasio.backend.reactive.source import DiskCache, GlobalSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.table.scan import ConfigInfo, DndRequest, ScanTable
 from alasio.logger import logger
 
 
-class ConfigScanSource(GlobalEventSource):
+class ConfigScanSource(GlobalSource, DiskCache):
     """
-    Config scan cache source, resident (its data is read lock-free by other
-    modules and sources, a rebuilt instance would read empty).
+    Config scan disk-cache source, resident (GC=False).
+
+    Its data is read lock-free by other modules and sources (a rebuilt
+    instance would read empty), so it never enters the data-expiry gc:
+    the GC switch is the only difference from a regular DiskCache -- the
+    TTL stays as the fetch freshness window (how long reinit may skip a
+    re-read of the disk).
     """
     TOPIC_NAME = 'ConfigScan'
-    # Refresh window of fetch_init
-    TTL = 5
+    # Refresh window of fetch_init; GC=False keeps the instance resident.
+    TTL = 8
+    # Process-wide shared cache: readers assume a stable populated
+    # instance, never recycle it.
+    GC = False
     data: "dict[str, ConfigInfo]"
 
     def on_init(self):

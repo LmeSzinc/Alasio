@@ -11,7 +11,7 @@ import trio
 
 from alasio.backend.reactive.event import ResponseEvent
 from alasio.backend.reactive.rx_trio import async_reactive, async_reactive_source
-from alasio.backend.reactive.source import EventSource, ViewportEventSource
+from alasio.backend.reactive.source import EventSource, NoCachePush
 from alasio.backend.ws.ws_topic import BaseTopic
 
 DECODER = msgspec.json.Decoder(ResponseEvent)
@@ -55,18 +55,20 @@ class FakeSource(EventSource):
         return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(key,), v=value)
 
 
-class FakeViewportSource(ViewportEventSource):
+class FakeViewportSource(NoCachePush):
     """
-    A viewport source with a fixed mapping and a fixed full view. The full
-    view is built on subscribe (single-flight) and returned as the encoded
-    payload, mirroring ConfigArgSource / DashboardSource.
+    A no-cache view source with a fixed mapping and a fixed full view.
+    The full view is built on subscribe (single-flight) and returned as
+    the encoded payload, mirroring GuiConfigSource subclasses. Each test
+    builds its own instance (registry-free NoCachePush).
     """
     # Bound to ViewportTopic below: the full-event topic name must match
     # the NAME of the topic it serves.
     TOPIC_NAME = 'viewport_topic'
 
     def __init__(self, config_name, view):
-        super().__init__(config_name)
+        super().__init__()
+        self.config_name = config_name
         self.view = view
         self.builds = 0  # number of full view builds (single-flight probe)
         self.dict_config_to_topic = {('t1', 'g1', 'a1'): ('card1', 'g1', 'a1')}
@@ -183,11 +185,10 @@ class GatedTopic(ReactiveTopic):
 
 @pytest.fixture(autouse=True)
 def cleanup():
-    """Clear local topic singletons and viewport registry after each test"""
+    """Clear local topic singletons after each test"""
     yield
     for cls in (CacheSourceTopic, ViewportTopic, ReactiveTopic, GatedTopic):
         cls.singleton_clear()
-    ViewportEventSource._by_config.clear()
 
 
 class TestResubscribe:

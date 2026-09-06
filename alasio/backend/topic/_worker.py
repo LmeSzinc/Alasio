@@ -1,7 +1,7 @@
 import trio
 
 from alasio.backend.reactive.event import ResponseEvent
-from alasio.backend.reactive.source import GlobalEventSource
+from alasio.backend.reactive.source import GlobalSource, ResidentCache
 from alasio.backend.topic import config_event
 from alasio.backend.topic.log import LogCache
 from alasio.backend.topic.preview import PreviewTask
@@ -14,9 +14,10 @@ from alasio.ext import env
 from alasio.logger import logger
 
 
-class WorkerSource(GlobalEventSource):
+class WorkerSource(GlobalSource, ResidentCache):
     """
-    Worker states of every config: data = dict[config, WORKER_STATE].
+    Worker states of every config: data = dict[config, WORKER_STATE],
+    resident (runtime-produced state kept for later front-end visits).
 
     Event protocol: on_event((config, state)); 'idle' deletes the config
     (absent workers default to idle), any other state is set. There is no

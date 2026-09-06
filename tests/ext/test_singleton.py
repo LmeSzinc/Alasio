@@ -3,7 +3,7 @@ from typing import List
 
 import pytest
 
-from alasio.ext.singleton import Singleton, SingletonNamed, SingletonOptionalNamed
+from alasio.ext.singleton import Singleton, SingletonKeyed, SingletonNamed, SingletonOptionalNamed
 
 # ==============================================================================
 # Test Fixtures and Helper Classes
@@ -459,3 +459,156 @@ class TestSingletonOptionalNamed:
         assert init_call_count == 1, "The __init__ method was called more than once for the unnamed instance."
         assert len(instances_from_threads) == 2, "Both threads should have returned an instance."
         assert instances_from_threads[0] is instances_from_threads[1], "Threads received different instances."
+
+
+# ==============================================================================
+# Tests for the `SingletonKeyed` metaclass and the registry APIs
+# ==============================================================================
+
+
+class KeyedService(metaclass=SingletonKeyed):
+    """A standard class using the SingletonKeyed metaclass: the whole
+    positional argument tuple is the key, the constructor receives the
+    arguments unpacked."""
+
+    def __init__(self, mod_name, lang):
+        self.mod_name = mod_name
+        self.lang = lang
+
+
+class SubKeyedService(KeyedService):
+    """A subclass to test that it has its own separate keyed cache."""
+    pass
+
+
+class TestSingletonKeyed:
+    """Tests for the composite-key Singleton pattern."""
+
+    def test_same_key_is_singleton(self):
+        a1 = KeyedService('alas', 'zh-CN')
+        a2 = KeyedService('alas', 'zh-CN')
+        assert a1 is a2
+
+    def test_different_key_is_different_instance(self):
+        a = KeyedService('alas', 'zh-CN')
+        b = KeyedService('alas', 'en-US')
+        c = KeyedService('other', 'zh-CN')
+        assert a is not b
+        assert a is not c
+
+    def test_constructor_receives_unpacked_arguments(self):
+        a = KeyedService('alas', 'zh-CN')
+        assert a.mod_name == 'alas'
+        assert a.lang == 'zh-CN'
+
+    def test_singleton_key_stored_on_instance(self):
+        a = KeyedService('alas', 'zh-CN')
+        assert a._singleton_key == ('alas', 'zh-CN')
+
+    def test_subclasses_have_separate_caches(self):
+        a = KeyedService('alas', 'zh-CN')
+        b = SubKeyedService('alas', 'zh-CN')
+        assert a is not b
+        assert KeyedService.singleton_instances() is not SubKeyedService.singleton_instances()
+
+    def test_key_can_be_any_hashable(self):
+        s1 = KeyedService('m', 'zh-CN')
+        assert s1 is not None
+
+    def test_clear_all(self):
+        KeyedService.singleton_clear()
+        assert KeyedService.singleton_instances() == {}
+
+    def test_thread_safety_deterministic(self):
+        """concurrent creation of the same key runs __init__ exactly once"""
+        init_call_count = 0
+        instances_from_threads = []
+
+        thread1_inside_init = threading.Event()
+        main_thread_can_unblock_thread1 = threading.Event()
+
+        class SlowKeyedService(metaclass=SingletonKeyed):
+            def __init__(self, mod, lang):
+                nonlocal init_call_count
+                init_call_count += 1
+                self.mod = mod
+                thread1_inside_init.set()
+                main_thread_can_unblock_thread1.wait()
+
+        def thread_target(results_list: List):
+            instance = SlowKeyedService('alas', 'zh-CN')
+            results_list.append(instance)
+
+        t1 = threading.Thread(target=thread_target, args=(instances_from_threads,))
+        t1.start()
+
+        assert thread1_inside_init.wait(timeout=1), "Thread 1 did not enter __init__ in time."
+
+        t2 = threading.Thread(target=thread_target, args=(instances_from_threads,))
+        t2.start()
+
+        main_thread_can_unblock_thread1.set()
+        t1.join(timeout=1)
+        t2.join(timeout=1)
+
+        SlowKeyedService.singleton_clear()  # Cleanup
+
+        assert init_call_count == 1, "The __init__ method was called more than once for the same key."
+        assert len(instances_from_threads) == 2
+        assert instances_from_threads[0] is instances_from_threads[1]
+
+
+class TestRegistryApis:
+    """Tests for the identity-checked removal / reinsert / snapshot APIs."""
+
+    def test_singleton_remove_if_identity(self):
+        try:
+            a = KeyedService('alas', 'zh-CN')
+            # remove the current instance: True
+            assert KeyedService.singleton_remove_if(('alas', 'zh-CN'), a) is True
+            assert KeyedService.singleton_instances() == {}
+            # a stale remover (instance already gone) returns False
+            assert KeyedService.singleton_remove_if(('alas', 'zh-CN'), a) is False
+            # a newer instance is never removed by the stale identity
+            b = KeyedService('alas', 'zh-CN')
+            assert KeyedService.singleton_remove_if(('alas', 'zh-CN'), a) is False
+            assert KeyedService.singleton_instances()[('alas', 'zh-CN')] is b
+        finally:
+            KeyedService.singleton_clear()
+
+    def test_singleton_reinsert_vacant_only(self):
+        try:
+            a = KeyedService('alas', 'zh-CN')
+            KeyedService.singleton_remove_if(('alas', 'zh-CN'), a)
+            # vacant slot: restored
+            assert KeyedService.singleton_reinsert(('alas', 'zh-CN'), a) is True
+            assert KeyedService.singleton_instances()[('alas', 'zh-CN')] is a
+            # occupied slot: no-op, newer instance kept
+            b = KeyedService('alas', 'en-US')
+            assert KeyedService.singleton_reinsert(('alas', 'en-US'), b) is False
+        finally:
+            KeyedService.singleton_clear()
+
+    def test_singleton_items_snapshot(self):
+        try:
+            a = KeyedService('alas', 'zh-CN')
+            b = KeyedService('alas', 'en-US')
+            items = dict(KeyedService.singleton_items())
+            assert items == {('alas', 'zh-CN'): a, ('alas', 'en-US'): b}
+        finally:
+            KeyedService.singleton_clear()
+
+    def test_global_remove_if_and_reinsert(self):
+        try:
+            class GlobalService(metaclass=Singleton):
+                def __init__(self, value=0):
+                    self.value = value
+
+            g = GlobalService()
+            assert GlobalService.singleton_remove_if(g) is True
+            assert GlobalService.singleton_instance() is None
+            assert GlobalService.singleton_reinsert(g) is True
+            assert GlobalService.singleton_instance() is g
+            assert GlobalService.singleton_reinsert(g) is False  # occupied
+        finally:
+            GlobalService.singleton_clear()

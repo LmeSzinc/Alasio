@@ -4,7 +4,7 @@ import trio
 from msgspec import NODEFAULT
 
 from alasio.backend.reactive.event import ResponseEvent
-from alasio.backend.reactive.source import ConfigEventSource, KeyedEventSource
+from alasio.backend.reactive.source import ConfigSource, DiskCache, DiskCachePush, KeyedSource, ResidentCache
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.context import GLOBAL_CONTEXT
@@ -20,14 +20,21 @@ class TaskQueueData(TypedDict):
     waiting: List[TaskItem]
 
 
-class TaskQueueSource(ConfigEventSource):
+class TaskQueueSource(ConfigSource, DiskCachePush):
     """
-    Task queue cache source, resident (event stream).
+    Task queue cache source: disk cache + event push (config-keyed).
 
-    Event protocol: ConfigEvent(t='TaskQueue') with v a dict of any subset
+    Data = {pending, waiting} loaded from the disk schedule table
+    (reinit) and kept up to date by worker TaskQueue events. Event
+    protocol: ConfigEvent(t='TaskQueue') with v a dict of any subset
     of {pending, waiting} -- merged key by key. Increments are keyed set
     patches of the changed keys (the client merges them into the task
     table); full events carry the whole data at the root.
+
+    Lifecycle: DiskCachePush -- worker events / config-event refreshes
+    refresh the data TTL; the data-expiry GC recycles the instance only
+    when the TTL expired AND no subscriber is attached (the push channel
+    is bound to the instance).
     """
     TOPIC_NAME = 'TaskQueue'
     TTL = 5
@@ -203,7 +210,7 @@ class TaskQueue(BaseTopic):
         return source
 
 
-class TaskRunningSource(ConfigEventSource):
+class TaskRunningSource(ConfigSource, ResidentCache):
     """
     Current running task of a config, resident (event stream only).
 
@@ -212,6 +219,8 @@ class TaskRunningSource(ConfigEventSource):
     switch. data is the task name itself (None = no task running). There
     is no full-data source: every change flows through events, so reinit
     is never called (the get_source of the topic does not call it).
+    Runtime-produced state is kept resident: a later front-end visit
+    finds the current task without events having to be replayed.
     """
     TOPIC_NAME = 'TaskRunning'
 
@@ -258,13 +267,16 @@ class TaskRunning(BaseTopic):
         return TaskRunningSource(config_name)
 
 
-class TaskQueueI18nSource(KeyedEventSource):
+class TaskQueueI18nSource(KeyedSource, DiskCache):
     """
-    One-shot keyed cache source of TaskQueueI18n: key (mod_name, lang).
+    One-shot disk-cache source of TaskQueueI18n: key (mod_name, lang).
+
+    Static i18n content read from disk; no push after the full snapshot.
+    Recycled by the data-expiry GC when the data TTL expired, regardless
+    of subscribers (DiskCache semantics).
     """
     TOPIC_NAME = 'TaskQueueI18n'
     TTL = 8
-    IDLE_TTL = 8
 
     def __init__(self, mod_name, lang):
         super().__init__()

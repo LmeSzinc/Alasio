@@ -4,11 +4,11 @@ import trio
 from msgspec import Struct
 
 from alasio.assets.manager import AssetsManager
-from alasio.assets.model.folder import AssetFolder, FolderResponse
+from alasio.assets.model.folder import AssetFolder
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.reactive.rx_trio import async_reactive_source
-from alasio.backend.reactive.source import KeyedEventSource
+from alasio.backend.reactive.source import KeyedSource, NoCachePush
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 
@@ -18,33 +18,37 @@ class ManagerState(Struct):
     path: str = ''
 
 
-class DevAssetsSource(KeyedEventSource):
+class DevAssetsSource(KeyedSource, NoCachePush):
     """
-    Keyed cache source of the DevAssets topic: key (mod_name, path).
-    data is the FolderResponse of the folder scan, kept as the original
-    struct (no dict conversion). Every reinit rescans the disk (TTL=None:
-    the data only changes through RPC operations, and each operation pays
-    the same rescan as the old per-subscribe full scan).
+    No-cache view source of the DevAssets topic: key (mod_name, path).
+
+    The folder tree is scanned from disk on every build (subscribe / RPC
+    refresh) and is NOT cached between subscriptions: there is no value in
+    keeping a stale tree, every operation rescans anyway. The instance is
+    removed when its last subscriber leaves (NoCachePush); a refresh after
+    a resource operation only rescans while subscribers are attached
+    (reinit is a no-op without them).
     """
     TOPIC_NAME = 'DevAssetsManager'
-    # Every reinit rescans (no freshness window)
-    TTL = None
-    # The data tree is big: idle instances are collected after 8s
-    IDLE_TTL = 8
 
     def __init__(self, mod_name, path):
         super().__init__()
         self.mod_name = mod_name
         self.path = path
 
-    def on_init(self) -> FolderResponse:
+    async def _build_full(self):
         """
-        Full folder scan (in a thread through on_init_async).
+        [Trio] Full folder scan (in a thread). Runs in the single-flight
+        path of subscribe / in reinit.
 
         Returns:
             FolderResponse:
         """
-        return AssetsManager.get_folder_manager(self.mod_name, self.path).getdata()
+        def scan():
+            folder = AssetsManager.get_folder_manager(self.mod_name, self.path)
+            return folder.getdata()
+
+        return await trio.to_thread.run_sync(scan)
 
 
 class DevAssetsManager(BaseTopic):
@@ -85,11 +89,16 @@ class DevAssetsManager(BaseTopic):
 
     async def _refresh(self):
         """
-        Rescan the current viewport folder and broadcast a full event to
-        every subscriber of the folder (including the operator itself).
+        Refresh the current viewport folder: rebuild and broadcast a full
+        event to every subscriber of the folder (including the operator
+        itself). No-op without subscribers (reinit of NoCachePush) -- a
+        rescan nobody receives would be wasted IO.
         """
         state: ManagerState = await self.assets_state
-        await DevAssetsSource.get(state.mod_name, state.path).reinit()
+        source = DevAssetsSource.get(state.mod_name, state.path)
+        if source is None:
+            return None
+        await source.reinit()
 
     @rpc
     async def set_mod(self, mod_name: str):
@@ -248,8 +257,9 @@ class DevAssetsManager(BaseTopic):
 
     async def get_source(self):
         """
-        Data preparation: rescan the viewport folder (also covers external
-        disk changes); the snapshot is returned by source.subscribe().
+        Resolve the view source of the current (mod, path); the full
+        folder scan is done by source.subscribe() on registration (the
+        source holds no cached data between subscriptions).
         """
         state: ManagerState = await self.assets_state
         if not state.mod_name or not state.path:
@@ -257,5 +267,4 @@ class DevAssetsManager(BaseTopic):
         source = DevAssetsSource.get(state.mod_name, state.path)
         if source is None:
             return None
-        await source.reinit()
         return source

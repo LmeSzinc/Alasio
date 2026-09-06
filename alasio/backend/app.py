@@ -114,8 +114,9 @@ def sync_task_gc(wait=8):
     logger.check_rotate()
     SQLITE_POOL.gc(wait)
     MOD_JSON_CACHE.gc(wait)
-    # idle sources (one-shot / viewport / DevAssets sources): remove
-    # instances that have been idle (no subscriber) for IDLE_TTL seconds
+    # data-expiry gc of topic sources: instances whose data TTL expired
+    # (membership is static, GC=True classes only; NoCachePush removes
+    # itself on the last unsubscribe and never appears here)
     BaseSource.gc_idle()
     # renewal codes: expiry scan, the main cleanup hook
     renewal_manager.gc()

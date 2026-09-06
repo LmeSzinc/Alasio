@@ -9,8 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from alasio.backend.reactive.source import ViewportEventSource
 from alasio.backend.topic import config_event
+from alasio.backend.topic._gui_config import GuiConfigSource
 from alasio.backend.topic.que import TaskQueueSource
 from alasio.config.entry.model import ConfigSetEvent
 
@@ -36,7 +36,7 @@ class TestOnConfigEventDispatch:
     def test_dispatch_called_once_with_payload(self):
         """on_config_event dispatches exactly once with (config_name, event)"""
         event = other_event()
-        with patch.object(ViewportEventSource, 'dispatch', MagicMock()) as dispatch, \
+        with patch.object(GuiConfigSource, 'dispatch_config', MagicMock()) as dispatch, \
                 patch.object(TaskQueueSource, 'on_config_event', MagicMock()) as linkage:
             config_event.on_config_event('alas', event)
         dispatch.assert_called_once_with('alas', event)

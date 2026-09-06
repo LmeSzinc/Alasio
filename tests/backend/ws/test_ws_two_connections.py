@@ -19,7 +19,7 @@ import pytest
 import trio
 
 from alasio.backend.reactive.event import ResponseEvent
-from alasio.backend.reactive.source import ViewportEventSource
+from alasio.backend.reactive.source import KeyedSource, NoCachePush
 from alasio.backend.ws.ws_topic import BaseTopic
 from tests.backend.ws.helpers import HarnessWebsocketServer, ServerHarness
 
@@ -35,23 +35,32 @@ MAPPING = {
 VIEW = {'card1': {'value': 1}}
 
 
-class SharedViewportSource(ViewportEventSource):
+class SharedViewportSource(KeyedSource, NoCachePush):
     """
-    A viewport source keyed by (config, view) like ConfigArgSource: the
-    mapping and the full view are fixed per view. `builds` counts full view
-    builds (single-flight probe).
+    A no-cache view source keyed by (config, view) like GuiConfigSource
+    subclasses: the mapping and the full view are fixed per view.
+    `builds` counts full view builds (single-flight probe). The registry
+    (KeyedSource) is what makes two connections share one instance.
     """
     TOPIC_NAME = 'shared_view'
 
     def __init__(self, config_name, view_name):
-        super().__init__(config_name)
+        super().__init__()
+        self.config_name = config_name
         self.view_name = view_name
         self.builds = 0
         self.dict_config_to_topic = MAPPING[view_name]
 
     @classmethod
-    def get(cls, config_name, view_name):
-        return super().get(config_name, cls, view_name)
+    def dispatch(cls, config_name, event):
+        """
+        [任意线程] Application-level config dispatch used by the tests:
+        route one config event to every source of the config (the real
+        one lives in GuiConfigSource).
+        """
+        for _, source in cls.singleton_items():
+            if source.config_name == config_name:
+                source.on_event(event)
 
     async def _build_full(self):
         self.builds += 1
@@ -92,10 +101,10 @@ class TwoConnServer(HarnessWebsocketServer):
 
 @pytest.fixture(autouse=True)
 def cleanup_two_conn():
-    """Clean topic singletons and the viewport registry after each test"""
+    """Clean topic singletons and the view source registry after each test"""
     yield
     SharedViewTopic.singleton_clear()
-    ViewportEventSource._by_config.clear()
+    SharedViewportSource.singleton_clear()
 
 
 @pytest.fixture

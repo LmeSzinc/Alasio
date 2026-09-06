@@ -16,7 +16,7 @@ import pytest
 import trio
 
 from alasio.backend.reactive.event import ResponseEvent
-from alasio.backend.reactive.source import BaseSource, EventSource, KeyedEventSource
+from alasio.backend.reactive.source import _GC_CLASSES, BaseSource, DiskCache, EventSource, KeyedSource
 
 
 class MockServer:
@@ -108,13 +108,13 @@ class FakeSource(EventSource):
         return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(key,), v=self.data[key])
 
 
-class KeyedFakeSource(KeyedEventSource):
+class KeyedFakeSource(KeyedSource, DiskCache):
     """
-    A keyed source to verify per-class registries and idle GC of keyed
-    instances.
+    A keyed disk-cache source to verify per-class registries and the
+    data-expiry GC of keyed instances (GC=True, TTL=8).
     """
     TOPIC_NAME = 'KeyedFake'
-    IDLE_TTL = 8
+    TTL = 8
 
     def __init__(self, name):
         super().__init__()
@@ -126,7 +126,7 @@ class KeyedFakeSource(KeyedEventSource):
 def cleanup_sources():
     """Clean up keyed registries and singleton caches after each test"""
     yield
-    KeyedFakeSource._registry.clear()
+    KeyedFakeSource.singleton_clear()
 
 
 class TestSubscribe:
@@ -190,19 +190,139 @@ class TestUnsubscribe:
         assert topic.sent == []
 
     @pytest.mark.trio
-    async def test_unsubscribe_records_idle_time(self, monkeypatch):
-        """the last subscriber leaving records the idle timestamp"""
+    async def test_creation_time_guards_fresh_instance(self, monkeypatch):
+        """a fresh source is never recycled before its TTL (creation base)"""
         monkeypatch.setattr(time, 'monotonic', lambda: 100.)
         source = FakeSource()
+        # EventSource records the creation moment as _lastrun: the data-
+        # expiry GC freshness base of a brand-new instance
+        assert source._lastrun == 100.
+        # never loaded: the first reinit must read (TTL window not applied)
+        assert source._loaded is False
+        await source.reinit()
+        assert source._loaded is True
+
+
+class TestGcIdle:
+    def test_gc_membership_is_static(self):
+        """only GC=True classes with a numeric TTL enter the gc list"""
+        assert KeyedFakeSource in _GC_CLASSES
+        assert FakeSource not in _GC_CLASSES
+        # plain EventSource instances (no GC) are never collected
+
+    @pytest.mark.trio
+    async def test_no_gc_class_not_collected(self):
+        """sources without GC=True are never collected"""
+        source = FakeSource()
+        await source.subscribe(MockTopic())
+        source.unsubscribe(*list(source._subscribers))
+        BaseSource.gc_idle()
+
+    def test_keyed_source_gc_removes_expired_instance(self, monkeypatch):
+        """an expired keyed disk-cache instance is removed from its registry"""
+        instance = KeyedFakeSource.get('a')
+        assert ('a',) in KeyedFakeSource.singleton_instances()
+        monkeypatch.setattr(time, 'monotonic', lambda: 100.)
+        instance._lastrun = 80.  # data 20s old > TTL 8
+        KeyedFakeSource.gc_idle()
+        assert KeyedFakeSource.singleton_instances() == {}
+
+    def test_keyed_source_gc_keeps_fresh_instance(self, monkeypatch):
+        """instances inside the TTL window are kept"""
+        instance = KeyedFakeSource.get('a')
+        monkeypatch.setattr(time, 'monotonic', lambda: 100.)
+        instance._lastrun = 95.  # data 5s old < TTL 8
+        KeyedFakeSource.gc_idle()
+        assert KeyedFakeSource.singleton_instances() != {}
+
+    def test_keyed_source_gc_never_loaded_uses_creation_base(self, monkeypatch):
+        """a never-loaded instance is protected from its creation moment"""
+        instance = KeyedFakeSource.get('a')
+        monkeypatch.setattr(time, 'monotonic', lambda: 100.)
+        # _lastrun starts at the creation moment: fresh within TTL
+        instance._lastrun = 95.
+        KeyedFakeSource.gc_idle()
+        assert KeyedFakeSource.singleton_instances() != {}
+        # older than TTL from creation -> collected
+        instance._lastrun = 80.
+        KeyedFakeSource.gc_idle()
+        assert KeyedFakeSource.singleton_instances() == {}
+
+    def test_disk_cache_recycles_subscribed_expired_instance(self, monkeypatch):
+        """DiskCache recycles on TTL expiry regardless of subscribers"""
+        instance = KeyedFakeSource.get('a')
+        monkeypatch.setattr(time, 'monotonic', lambda: 100.)
+        instance._lastrun = 80.
+        topic = MagicMock()
+        instance._subscribers.add(topic)
+        KeyedFakeSource.gc_idle()
+        assert KeyedFakeSource.singleton_instances() == {}
+
+    def test_keyed_source_get_isolation(self):
+        """each keyed subclass owns its own registry table"""
+        class OtherKeyedSource(KeyedSource, DiskCache):
+            TOPIC_NAME = 'Other'
+            TTL = 8
+
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+        try:
+            a = KeyedFakeSource.get('a')
+            b = OtherKeyedSource.get('b')
+            assert KeyedFakeSource.singleton_instances() is not OtherKeyedSource.singleton_instances()
+            assert KeyedFakeSource.singleton_instances() == {('a',): a}
+            assert OtherKeyedSource.singleton_instances() == {('b',): b}
+        finally:
+            OtherKeyedSource.singleton_clear()
+
+    def test_keyed_source_get_same_key_same_instance(self):
+        """get with the same key returns the same instance"""
+        a1 = KeyedFakeSource.get('a')
+        a2 = KeyedFakeSource.get('a')
+        b = KeyedFakeSource.get('b')
+        assert a1 is a2
+        assert a1 is not b
+
+    def test_keyed_source_get_none_on_keyerror(self):
+        """get returns None when the constructor raises KeyError"""
+        class BrokenKeyedSource(KeyedSource, DiskCache):
+            TOPIC_NAME = 'Broken'
+            TTL = 8
+
+            def __init__(self, name):
+                super().__init__()
+                raise KeyError('gone')
+
+        assert BrokenKeyedSource.get('a') is None
+        assert BrokenKeyedSource.singleton_instances() == {}
+
+    @pytest.mark.trio
+    async def test_subscribe_reconciles_removed_instance(self):
+        """
+        subscribe on an instance a concurrent GC removed re-registers it
+        (the registry slot is vacant and a live subscriber is arriving)
+        """
+        source = KeyedFakeSource.get('a')
+        KeyedFakeSource.singleton_remove_if(('a',), source)  # simulated GC
+        assert KeyedFakeSource.singleton_instances() == {}
         topic = MockTopic()
         await source.subscribe(topic)
-        # a fresh instance records its creation time: idle GC keeps it
-        # for IDLE_TTL even without subscribers (get_source -> subscribe
-        # window)
-        assert source._last_unsub == 100.
-        monkeypatch.setattr(time, 'monotonic', lambda: 200.)
-        source.unsubscribe(topic)
-        assert source._last_unsub == 200.
+        assert KeyedFakeSource.singleton_instances() == {('a',): source}
+
+    @pytest.mark.trio
+    async def test_subscribe_reconcile_keeps_newer_instance(self):
+        """
+        subscribe on a removed instance does NOT displace a newer instance
+        that already took the slot
+        """
+        old = KeyedFakeSource.get('a')
+        KeyedFakeSource.singleton_remove_if(('a',), old)
+        new = KeyedFakeSource.get('a')
+        topic = MockTopic()
+        await old.subscribe(topic)  # stale flow completes on the old one
+        assert KeyedFakeSource.singleton_instances() == {('a',): new}
 
 
 class TestDoorbellBatching:
@@ -331,65 +451,3 @@ class TestConcurrentProducers:
         finally:
             stop.set()
             thread.join(timeout=2)
-
-
-class TestGcIdle:
-    @pytest.mark.trio
-    async def test_idle_ttl_none_not_collected(self):
-        """sources with IDLE_TTL=None are never collected"""
-        source = FakeSource()
-        await source.subscribe(MockTopic())
-        source.unsubscribe(*list(source._subscribers))
-        BaseSource.gc_idle()
-        # FakeSource is not registered in the gc class list at all
-
-    def test_keyed_source_gc_removes_idle_instance(self, monkeypatch):
-        """an idle keyed instance is removed from its registry after IDLE_TTL"""
-        instance = KeyedFakeSource.get('a')
-        assert KeyedFakeSource._registry == {('a',): instance}
-        # simulate: idle for longer than IDLE_TTL
-        monkeypatch.setattr(time, 'monotonic', lambda: 100.)
-        instance._last_unsub = 80.  # idle for 20s > 8s
-        KeyedFakeSource.gc_idle()
-        assert KeyedFakeSource._registry == {}
-
-    def test_keyed_source_gc_keeps_active_instance(self, monkeypatch):
-        """instances with subscribers or inside the idle window are kept"""
-        instance = KeyedFakeSource.get('a')
-        monkeypatch.setattr(time, 'monotonic', lambda: 100.)
-        instance._last_unsub = 95.  # idle for 5s < 8s
-        KeyedFakeSource.gc_idle()
-        assert KeyedFakeSource._registry != {}
-        # subscriber present: never collected even when idle is long
-        topic = MagicMock()
-        instance._subscribers.add(topic)
-        instance._last_unsub = 1.
-        KeyedFakeSource.gc_idle()
-        assert KeyedFakeSource._registry != {}
-
-    def test_keyed_source_get_isolation(self):
-        """each keyed subclass owns its own registry table"""
-        class OtherKeyedSource(KeyedEventSource):
-            TOPIC_NAME = 'Other'
-            IDLE_TTL = 8
-
-            def __init__(self, name):
-                super().__init__()
-                self.name = name
-
-        try:
-            a = KeyedFakeSource.get('a')
-            b = OtherKeyedSource.get('b')
-            assert KeyedFakeSource._registry is not OtherKeyedSource._registry
-            assert KeyedFakeSource._registry == {('a',): a}
-            assert OtherKeyedSource._registry == {('b',): b}
-        finally:
-            OtherKeyedSource._registry.clear()
-
-    def test_keyed_source_get_same_key_same_instance(self):
-        """get with the same key returns the same instance"""
-        a1 = KeyedFakeSource.get('a')
-        a2 = KeyedFakeSource.get('a')
-        b = KeyedFakeSource.get('b')
-        assert a1 is a2
-        assert a1 is not b

@@ -1,4 +1,4 @@
-from alasio.backend.reactive.source import ViewportEventSource
+from alasio.backend.topic._gui_config import GuiConfigSource
 from alasio.backend.topic.que import TaskQueueSource
 
 
@@ -10,8 +10,9 @@ def on_config_event(config_name, event):
     linkage.
 
     One call covers every potential consumer of the config:
-    - the viewport sources of every nav (ConfigArg) and the Dashboard
-      source of the config;
+    - the GUI view sources of the config (every nav of ConfigArg + the
+      Dashboard source), routed through the application-level
+      GuiConfigSource.dispatch_config;
     - the TaskQueue linkage (TaskQueueSource.on_config_event decides
       whether the scheduler settings changed and refreshes / marks dirty).
 
@@ -19,9 +20,10 @@ def on_config_event(config_name, event):
         config_name (str):
         event (ConfigSetEvent | list[ConfigSetEvent] | dict | list[dict]):
     """
-    # 1. viewport dispatch: registry snapshot under the registry lock, each
-    #    source filters by its own view (inbox + doorbell under its lock)
-    ViewportEventSource.dispatch(config_name, event)
+    # 1. GUI view sources: registry snapshot per source class under its
+    #    lock, each source filters the event by its own mapping (inbox +
+    #    doorbell under its lock)
+    GuiConfigSource.dispatch_config(config_name, event)
     # 2. TaskQueue linkage: the source decides whether the scheduler
     #    settings changed; subscribers present -> force refresh on the
     #    Trio thread, no subscriber -> mark dirty

@@ -246,7 +246,9 @@ class TestFetchInit:
             return full_data()
 
         source.on_init = fake_on_init
-        source._lastrun = 999999999999.  # far future: fresh
+        # loaded data far in the future: fresh, the read is skipped
+        source._lastrun = 999999999999.
+        source._loaded = True
         assert await source.fetch_init() is None
         assert calls == []
 

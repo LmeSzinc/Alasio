@@ -1,7 +1,7 @@
 from msgspec import Struct
 from msgspec.structs import asdict
 
-from alasio.backend.reactive.source import GlobalEventSource
+from alasio.backend.reactive.source import DiskCache, GlobalSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.deploy.history.decode_history import decode_history
@@ -14,13 +14,13 @@ class ModOption(Struct):
     label: str
 
 
-class ModListSource(GlobalEventSource):
+class ModListSource(GlobalSource, DiskCache):
     """
-    One-shot global cache source of ModList.
+    One-shot disk-cache source of ModList: static mod list read from
+    MOD_LOADER, recycled by the data-expiry GC when the TTL expired.
     """
     TOPIC_NAME = 'ModList'
     TTL = 8
-    IDLE_TTL = 8
 
     def on_init(self):
         """
@@ -45,18 +45,17 @@ class ModList(BaseTopic):
         return source
 
 
-class ModHistorySource(GlobalEventSource):
+class ModHistorySource(GlobalSource, DiskCache):
     """
-    One-shot global cache source of ModHistory.
+    One-shot disk-cache source of ModHistory.
 
     There is exactly one cache layer -- the source data itself (TTL 8s +
-    idle GC). The old file-level HISTORY_CACHE (ResourceCacheTTL) was
-    removed: it duplicated the source cache, and the source already holds
-    the decoded history for its whole lifetime.
+    data-expiry GC). The old file-level HISTORY_CACHE (ResourceCacheTTL)
+    was removed: it duplicated the source cache, and the source already
+    holds the decoded history for its whole lifetime.
     """
     TOPIC_NAME = 'ModHistory'
     TTL = 8
-    IDLE_TTL = 8
 
     def on_init(self):
         """

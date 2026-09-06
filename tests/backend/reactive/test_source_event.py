@@ -11,7 +11,7 @@ import pytest
 import trio
 
 from alasio.backend.reactive.event import ResponseEvent
-from alasio.backend.reactive.source import BaseSource, ConfigEventSource, EventSource, GlobalEventSource
+from alasio.backend.reactive.source import BaseSource, ConfigSource, DiskCache, EventSource, GlobalSource, ResidentCache
 from tests.backend.reactive.test_source_base import MockTopic, decode
 
 
@@ -368,8 +368,8 @@ class TestReinit:
 
 class TestGlobalConfigSingleton:
     def test_global_singleton(self):
-        """GlobalEventSource subclasses share one global instance"""
-        class GlobalFake(GlobalEventSource):
+        """GlobalSource subclasses share one global instance"""
+        class GlobalFake(GlobalSource, ResidentCache):
             TOPIC_NAME = 'GlobalFake'
 
         try:
@@ -380,8 +380,8 @@ class TestGlobalConfigSingleton:
             GlobalFake.singleton_clear()
 
     def test_config_named_singleton(self):
-        """ConfigEventSource instances are keyed by config name"""
-        class ConfigFake(ConfigEventSource):
+        """ConfigSource instances are keyed by config name"""
+        class ConfigFake(ConfigSource, ResidentCache):
             TOPIC_NAME = 'ConfigFake'
 
         try:
@@ -395,10 +395,10 @@ class TestGlobalConfigSingleton:
             ConfigFake.singleton_clear()
 
 
-class TestOneShotIdleGc:
+class TestOneShotGc:
     @pytest.mark.trio
     async def test_resident_source_not_collected(self):
-        """resident sources (IDLE_TTL=None) are never idle-collected"""
+        """resident sources (ResidentCache) are never data-expiry collected"""
         source = FakeSource()
         topic = MockTopic()
         await source.subscribe(topic)
@@ -406,20 +406,36 @@ class TestOneShotIdleGc:
         BaseSource.gc_idle()
         assert source._subscribers == set()
 
-    def test_one_shot_collected_after_idle(self, monkeypatch):
-        """one-shot sources are removed after IDLE_TTL without subscribers"""
+    def test_disk_cache_collected_after_ttl(self, monkeypatch):
+        """disk-cache global sources are removed after the data TTL expired"""
 
-        class OneShotFake(GlobalEventSource):
+        class OneShotFake(GlobalSource, DiskCache):
             TOPIC_NAME = 'OneShotFake'
-            IDLE_TTL = 8
+            TTL = 8
 
         try:
             instance = OneShotFake()
-            topic = MockTopic()
-            # simulate it was subscribed and then left 20s ago
-            instance._last_unsub = time.monotonic() - 20
-            # instance must be re-registered on next use: singleton cleared
+            # simulate data refreshed 20s ago (> TTL 8)
+            instance._lastrun = time.monotonic() - 20
             OneShotFake.gc_idle()
+            # instance must be re-registered on next use: singleton cleared
             assert OneShotFake.singleton_instance() is None
         finally:
             OneShotFake.singleton_clear()
+
+    def test_disk_cache_fresh_instance_kept(self, monkeypatch):
+        """a fresh global disk-cache instance is kept (creation base)"""
+
+        class FreshFake(GlobalSource, DiskCache):
+            TOPIC_NAME = 'FreshFake'
+            TTL = 8
+
+        try:
+            instance = FreshFake()
+            # never loaded: _lastrun is the creation moment (fresh)
+            monkeypatch.setattr(time, 'monotonic', lambda: 100.)
+            instance._lastrun = 95.
+            FreshFake.gc_idle()
+            assert FreshFake.singleton_instance() is instance
+        finally:
+            FreshFake.singleton_clear()

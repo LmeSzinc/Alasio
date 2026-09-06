@@ -154,11 +154,11 @@ class TestInstance:
         assert a is not c
 
     @pytest.mark.trio
-    async def test_resident_not_idle_collected(self):
+    async def test_resident_not_gc_collected(self):
         """
-        TaskRunningSource is resident (IDLE_TTL=None): the in-memory
-        running task survives subscriber round trips (page refresh /
-        navigation), so it is never idle-collected.
+        TaskRunningSource is resident (ResidentCache, GC=False): the
+        in-memory running task survives subscriber round trips (page
+        refresh / navigation), so it is never data-expiry collected.
         """
         source = TaskRunningSource('alas')
         topic = MockTopic(topic_name='TaskRunning')

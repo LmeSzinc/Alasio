@@ -7,7 +7,7 @@ import trio
 from msgspec.json import Encoder
 
 from alasio.backend.reactive.event import ResponseEvent
-from alasio.ext.singleton import Singleton, SingletonNamed
+from alasio.ext.singleton import Singleton, SingletonKeyed, SingletonNamed
 from alasio.logger import logger
 
 if TYPE_CHECKING:
@@ -17,9 +17,11 @@ if TYPE_CHECKING:
 
 ENCODER = Encoder()
 
-# Classes whose instances may be garbage-collected when idle
+# Classes whose instances may be garbage-collected when data expires
 # (see BaseSource.gc_idle). Collected on class definition via
-# __init_subclass__; only classes with a numeric IDLE_TTL are listed.
+# __init_subclass__: a class joins the list only when it declares GC=True
+# with a numeric TTL -- the GC switch is static, decided once at class
+# creation, never at runtime.
 _GC_CLASSES: "set[type]" = set()
 
 # Framework layers of the source hierarchy (known, fixed set): never
@@ -27,12 +29,18 @@ _GC_CLASSES: "set[type]" = set()
 # business sources below them. The class-level TOPIC_NAME check in
 # __init_subclass__ exempts this list by name; add any new framework
 # layer here (a missing entry surfaces as a class-definition warning).
+# GuiConfigSource (topic/_gui_config.py) is the application-level shared
+# base of the config view sources and is exempt the same way.
 _FRAMEWORK_LAYERS = frozenset((
     'EventSource',
-    'GlobalEventSource',
-    'ConfigEventSource',
-    'KeyedEventSource',
-    'ViewportEventSource',
+    'ResidentCache',
+    'DiskCache',
+    'DiskCachePush',
+    'GlobalSource',
+    'ConfigSource',
+    'KeyedSource',
+    'NoCachePush',
+    'GuiConfigSource',
 ))
 
 
@@ -51,12 +59,16 @@ class BaseSource:
     Iron rule: never await inside a lock. All critical sections are
     synchronous in-memory operations.
 
-    Subclasses implement the three methods (or their hooks). Two families:
-    - EventSource: cache source with full data (subscribe returns the
-      encoded snapshot), events apply into data and broadcast increments;
-    - ViewportEventSource: view source without cached data (subscribe
-      builds the full view single-flight and returns the encoded payload),
-      events are filtered / converted and forwarded.
+    A source is built by composing two orthogonal dimensions:
+    - dimension A (registry shape, see GlobalSource / ConfigSource /
+      KeyedSource): where the instances live, how they are fetched,
+      enumerated and removed;
+    - dimension B (cache / push model, see EventSource and its semantic
+      subclasses ResidentCache / DiskCache / DiskCachePush, plus
+      NoCachePush): where the data comes from, how long it is cached,
+      what subscribing means.
+    Concrete topics combine them through inheritance, e.g.
+    class TaskQueueSource(ConfigSource, DiskCachePush).
 
     Subscriber contract: every subscriber (a ws BaseTopic) must implement
     deliver(payload) -- the sync entry the source broadcasts increments
@@ -74,20 +86,44 @@ class BaseSource:
     # Inbox is the cross-thread entry buffer (payload objects).
     # When it overflows, the oldest payload is dropped.
     INBOX_MAXLEN = 1024
-    # Idle GC: None = resident (never collected); a number = the instance is
-    # removed when it has no subscriber for that many seconds.
-    IDLE_TTL = None
+    # GC switch: whether instances of this class take part in the data-
+    # expiry garbage collection. It is a STATIC class declaration:
+    # __init_subclass__ collects GC-enabled classes into _GC_CLASSES once
+    # at class definition time and the gc loop never evaluates the flag
+    # again at runtime.
+    # - GC=True classes are recycled by BaseSource.gc_idle() when their
+    #   data TTL expired (the recycle rule of the dimension-B model
+    #   applies, see DiskCache / DiskCachePush);
+    # - GC=False classes never enter the gc loop: resident sources
+    #   (ResidentCache), view sources that remove themselves on the last
+    #   unsubscribe (NoCachePush) and process-wide caches whose readers
+    #   rely on a stable instance (e.g. ConfigScanSource with GC=False).
+    GC = False
+    # Recycle of a GC-enabled source additionally requires an empty
+    # subscriber set. DiskCachePush sets it: the subscriber channel is
+    # bound to the instance, recycling a subscribed instance would cut
+    # the push. DiskCache leaves it False: its full never expires, so
+    # recycling a subscribed instance is harmless (see the class docs).
+    GC_NEEDS_NO_SUBSCRIBER = False
+    # Data freshness window of EventSource (seconds | None):
+    # - fetch_init re-reads the full data when the window expired;
+    # - the idle GC removes the instance when the window expired
+    #   (only for GC=True classes);
+    # - None = resident (never recycled) or read on every fetch.
+    TTL = None
     # Full data of cache sources (EventSource initializes it per instance).
     # The default subscribe() encodes it under the lock; a source without
-    # data (None) registers without a full event. ViewportEventSource
-    # overrides subscribe() entirely and has no data.
+    # data (None) registers without a full event. NoCachePush overrides
+    # subscribe() entirely and has no data.
     data = None
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        # Collect idle-gc candidate classes. Instances are enumerated through
-        # the singleton metaclass or the keyed registry of the class.
-        if cls.IDLE_TTL is not None:
+        # Static GC membership, decided once at class definition time:
+        # only classes that opt in (GC=True) with a numeric TTL are
+        # collected. There is deliberately no runtime flag check in the
+        # gc loop -- ConfigScan-like classes just declare GC=False.
+        if cls.GC and cls.TTL is not None:
             _GC_CLASSES.add(cls)
         else:
             _GC_CLASSES.discard(cls)
@@ -108,11 +144,6 @@ class BaseSource:
         self._inbox: "deque[ResponseEvent]" = deque(maxlen=self.INBOX_MAXLEN)
         # Set on the first subscribe (Trio thread); _ring relies on it.
         self._trio_token: "Optional[TrioToken]" = None
-        # Timestamp of the moment the last subscriber left (or the
-        # instance was created): idle GC only removes an instance that
-        # has been subscriber-free for IDLE_TTL, so a fresh instance is
-        # protected while get_source() -> subscribe() is still in flight.
-        self._last_unsub = time.monotonic()
 
     # ---------------- subscribe / unsubscribe ----------------
 
@@ -126,6 +157,11 @@ class BaseSource:
         - Empty data returns None (no full event, matching the previous
           EventCache behavior).
         - Sources without data (self.data is None) register silently.
+        - After registration the instance reconciles with its registry
+          (dimension A hook): when a concurrent GC removed it while the
+          get_source() -> subscribe() flow was in flight, it re-registers
+          itself -- a live subscriber means the instance is wanted again
+          (see _reconcile).
 
         Ordering contract: after subscribe() returns, the caller must send
         the returned bytes with send_nowait() without any await in between,
@@ -137,25 +173,34 @@ class BaseSource:
             self._subscribers.add(sub)
             data = self.data
             if not data:
-                return None
-            # Encode under the lock: the payload references data, and data
-            # cannot be modified while the lock is held.
-            return ENCODER.encode(ResponseEvent(t=self.TOPIC_NAME, o='full', v=data))
+                payload = None
+            else:
+                # Encode under the lock: the payload references data, and
+                # data cannot be modified while the lock is held.
+                payload = ENCODER.encode(ResponseEvent(t=self.TOPIC_NAME, o='full', v=data))
+        self._reconcile()
+        return payload
 
     def unsubscribe(self, sub):
         """
         [Trio] Unsubscribe. Idempotent.
-
-        When the last subscriber leaves, the idle timestamp is recorded
-        (for idle GC, see gc_idle()).
         """
         with self._lock:
             self._subscribers.discard(sub)
-            if not self._subscribers:
-                # Record atomically with the discard: gc_idle (worker
-                # thread) reads both under the lock and must never see
-                # an empty set with a stale timestamp.
-                self._last_unsub = time.monotonic()
+
+    def _reconcile(self):
+        """
+        [Trio，锁外] Registry reconciliation after registration.
+
+        Dimension A hook (default: no registry): a concurrent GC may have
+        removed this instance while get_source() -> subscribe() was in
+        flight. With a live subscriber the instance is wanted again:
+        re-register it when its registry slot is vacant; when a newer
+        instance already occupies the slot, stay unregistered (the
+        subscription keeps working through this instance, full already
+        sent; the next dependency change rebinds to the newer instance).
+        """
+        pass
 
     # ---------------- sub-class hooks ----------------
 
@@ -163,7 +208,7 @@ class BaseSource:
         """
         [Trio] Refresh the full data and broadcast a full event.
         Default empty implementation: sources without a full data source
-        (Log / Worker / viewport sources) never call it.
+        (Log / Worker / NoCachePush sources) never call it.
         """
         pass
 
@@ -253,14 +298,18 @@ class BaseSource:
     @classmethod
     def gc_idle(cls):
         """
-        [任意线程] Idle garbage collection over all collectable source
-        classes. Mounted in sync_task_gc (app.py, one round every 8s).
+        [任意线程] Data-expiry garbage collection over all collectable
+        source classes. Mounted in sync_task_gc (app.py, one round every
+        8s). Membership is static: only classes that declared GC=True with
+        a numeric TTL at class definition time are in _GC_CLASSES.
 
-        An instance is removed when it has no subscriber and has been idle
-        for IDLE_TTL seconds. Thread safety: instance enumeration goes
-        through a registry / singleton snapshot (never mutate the dict while
-        iterating), subscriber count and the idle timestamp are read under
-        the instance lock.
+        An instance is removed when its data TTL expired (the recycle
+        rule of its dimension-B model applies: DiskCache ignores
+        subscribers, DiskCachePush additionally requires an empty
+        subscriber set). Thread safety: instance enumeration goes
+        through a registry / singleton snapshot (never mutate the dict
+        while iterating), the freshness timestamp (and subscriber set of
+        the keep-on-subscriber models) are read under the instance lock.
         """
         for src_cls in list(_GC_CLASSES):
             try:
@@ -275,36 +324,48 @@ class BaseSource:
         now = time.monotonic()
         for inst in src_cls._iter_idle_instances():
             if type(inst) is not src_cls:
-                # intermediate class in the collection (e.g. the viewport
-                # base class): instances are collected under their own class
+                # intermediate class in the collection: instances are
+                # collected under their own concrete class
                 continue
             with inst._lock:
-                if inst._subscribers:
+                if inst._subscribers and inst.GC_NEEDS_NO_SUBSCRIBER:
+                    # keep-on-subscriber model (DiskCachePush): a live
+                    # subscriber channel is bound to this instance, never
+                    # recycle it
                     continue
-                if now - inst._last_unsub < src_cls.IDLE_TTL:
+                # Freshness base: data activity since the last fetch /
+                # event; _lastrun starts at the creation moment, so a
+                # brand-new instance is protected for TTL from its birth
+                # (see EventSource.__init__).
+                if now - inst._lastrun < src_cls.TTL:
                     continue
             inst._remove()
 
     @classmethod
     def _iter_idle_instances(cls):
         """
-        Snapshot the live instances of this class for idle GC.
-        Only implemented by classes with a numeric IDLE_TTL.
+        Snapshot the live instances of this class for the data-expiry GC.
+        Only implemented by classes with GC=True and a numeric TTL.
         """
         return []
 
     def _remove(self):
         """
         Unregister this instance from its singleton / registry.
-        Called by idle GC.
+        Called by the data-expiry GC (dimension-A models) or by
+        NoCachePush when its last subscriber leaves.
         """
         pass
 
 
 class EventSource(BaseSource):
     """
-    Cache source: a full data dict kept fresh by either an event stream
-    (on_event) or a full-data source (fetch_init / reinit).
+    Cache-source implementation layer (dimension B of the source model):
+    a full data dict kept fresh by either an event stream (on_event) or a
+    full-data source (fetch_init / reinit). The semantic subclasses
+    ResidentCache / DiskCache / DiskCachePush are the business models a
+    concrete topic picks; EventSource itself is the shared implementation
+    and never instantiated on its own.
 
     Sub-class hooks:
     - on_init() / on_init_async(): read the full data;
@@ -326,15 +387,23 @@ class EventSource(BaseSource):
     afterwards.
     """
 
-    # Freshness window of fetch_init: None = read every time.
-    TTL = None
-
     def __init__(self):
         super().__init__()
         self._fetch_lock = trio.Lock()
         self.data: Any = {}
-        # Timestamp of the last data refresh (event or full read)
-        self._lastrun = 0.
+        # Timestamp of the last data refresh (event or full read),
+        # initialized to the creation moment: a brand-new instance is
+        # protected for TTL from its birth (the data-expiry GC recycles on
+        # now - _lastrun >= TTL). _lastrun starts at the creation time and
+        # moves forward on every data activity (fetch_init success /
+        # on_event applied).
+        self._lastrun = time.monotonic()
+        # False until data has been loaded at least once (fetch_init
+        # success or an applied event): the TTL freshness check of
+        # fetch_init only applies to loaded data -- a never-loaded instance
+        # must always read on its first reinit, even when the freshness
+        # window has not expired since creation.
+        self._loaded = False
         # True when an event producer is alive: its data is trusted over the
         # full-data source (fetch_init running trust of TaskQueueSource).
         self._running = False
@@ -355,8 +424,8 @@ class EventSource(BaseSource):
     async def on_init_async(self):
         """
         Default implementation: run on_init() in a worker thread.
-        One-shot sources and DevAssets must keep their reads in a thread
-        (file / import IO must not block the event loop).
+        Disk sources must keep their reads in a thread (file / import IO
+        must not block the event loop).
         """
         return await trio.to_thread.run_sync(self.on_init)
 
@@ -419,13 +488,17 @@ class EventSource(BaseSource):
         """
         with self._lock:
             if not force and not self._dirty:
-                if self.TTL is not None:
+                if self.TTL is not None and self._loaded:
+                    # Freshness window of loaded data only: a never-loaded
+                    # instance (created but not fetched / evented yet) must
+                    # always read on its first reinit.
                     if time.monotonic() - self._lastrun < self.TTL:
                         return None
             dirty_before = self._dirty
         new = await self.on_init_async()
         with self._lock:
             self._lastrun = time.monotonic()
+            self._loaded = True
             if self._dirty == dirty_before:
                 # consumed the marks that existed when the read started
                 self._dirty = 0
@@ -499,6 +572,7 @@ class EventSource(BaseSource):
                 return
             # the event stream is alive and its data is up to date
             self._lastrun = time.monotonic()
+            self._loaded = True
             self._running = True
             if not self._subscribers:
                 return
@@ -512,8 +586,79 @@ class EventSource(BaseSource):
                 self._push(payload)
 
 
-class GlobalEventSource(EventSource, metaclass=Singleton):
-    """Global singleton cache source (e.g. ConfigScanSource)."""
+class ResidentCache(EventSource):
+    """
+    Resident cache model (dimension B): runtime-produced data kept in
+    memory forever.
+
+    - business: log / preview / worker state / current running task are
+      produced at runtime and events are the ONLY data source (no disk
+      fallback -- losing an event loses the data forever). They must stay
+      resident so a later front-end visit finds something to display;
+      subscribing returns the in-memory data;
+    - GC = False, TTL = None: never recycled by the data-expiry gc;
+      memory is bounded by the inner structure of each source;
+    - subscribe = in-memory snapshot + later incremental pushes.
+    """
+
+
+class DiskCache(EventSource):
+    """
+    Disk cache model (dimension B): content read from disk and cached so
+    concurrent connections do not re-read the disk.
+
+    - business: static content, NO push after subscription (no event
+      stream, no RPC refresh): the full a subscriber received never
+      expires. Content changes only come from subscription-condition
+      changes (mod / lang / navigation) that rebuild the data through
+      get_source -> reinit;
+    - TTL (seconds, subclass sets): both the fetch freshness window and
+      the recycle window of the data-expiry GC;
+    - GC = True: recycle when the data TTL expired REGARDLESS of
+      subscribers -- recycling a subscribed instance is harmless because
+      there is no push channel after the full was sent (see the design
+      doc, "DiskCache 订阅中回收安全"); a subclass may declare GC=False
+      to stay resident, e.g. ConfigScanSource whose data is read
+      lock-free by other modules (a rebuilt instance would read empty)
+      and whose TTL only throttles re-reads;
+    - subscribe = one full snapshot, then no communication.
+    """
+    GC = True
+
+
+class DiskCachePush(EventSource):
+    """
+    Disk cache + event push model (dimension B): caches topic data that
+    can be rebuilt from disk AND pushes event-stream increments.
+
+    - business: typical TaskQueue -- data = {pending, waiting} loaded from
+      the disk schedule table, later changes flow in through worker
+      TaskQueue events; a config-event linkage forces reinit refreshes
+      and a successful refresh counts as data activity;
+    - TTL (seconds, subclass sets): worker events / successful refreshes
+      refresh _lastrun (keep-alive);
+    - GC = True with GC_NEEDS_NO_SUBSCRIBER = True: recycle only when the
+      TTL expired AND no subscriber is attached. A live subscriber keeps
+      the instance: the push channel is bound to the instance and worker
+      event gaps (a long running task) can exceed the TTL by far --
+      recycling a subscribed instance would permanently cut the push (the
+      next event would land on a fresh instance nobody is subscribed to);
+    - subscribe = full + incremental pushes; events still arrive without
+      subscribers and keep the instance alive / warm the cache for the
+      next subscription.
+    """
+    GC = True
+    GC_NEEDS_NO_SUBSCRIBER = True
+
+
+class GlobalSource(BaseSource, metaclass=Singleton):
+    """
+    Registry shape (dimension A): globally unique instance.
+
+    Instance management only -- no cache / push implementation. Pick a
+    dimension-B model and inherit it, e.g.
+    class WorkerSource(GlobalSource, ResidentCache).
+    """
 
     @classmethod
     def _iter_idle_instances(cls):
@@ -521,11 +666,21 @@ class GlobalEventSource(EventSource, metaclass=Singleton):
         return (inst,) if inst is not None else ()
 
     def _remove(self):
-        type(self).singleton_clear()
+        type(self).singleton_remove_if(self)
+
+    def _reconcile(self):
+        # a concurrent data-expiry GC may have cleared the singleton
+        # while get_source() -> subscribe() was in flight
+        type(self).singleton_reinsert(self)
 
 
-class ConfigEventSource(EventSource, metaclass=SingletonNamed):
-    """Config-keyed named-singleton cache source (e.g. TaskQueueSource)."""
+class ConfigSource(BaseSource, metaclass=SingletonNamed):
+    """
+    Registry shape (dimension A): instances keyed by config_name (the
+    first constructor argument). Instance management only -- pick a
+    dimension-B model and inherit it, e.g.
+    class TaskQueueSource(ConfigSource, DiskCachePush).
+    """
 
     def __init__(self, config_name):
         self.config_name = config_name
@@ -533,96 +688,89 @@ class ConfigEventSource(EventSource, metaclass=SingletonNamed):
 
     @classmethod
     def _iter_idle_instances(cls):
-        return list(cls.singleton_instances().values())
+        return [inst for _, inst in cls.singleton_items()]
 
     def _remove(self):
-        type(self).singleton_remove(self.config_name)
+        type(self).singleton_remove_if(self.config_name, self)
+
+    def _reconcile(self):
+        type(self).singleton_reinsert(self.config_name, self)
 
 
-class KeyedEventSource(EventSource):
+class KeyedSource(BaseSource, metaclass=SingletonKeyed):
     """
-    Keyed cache source: registry of composite-key -> instance.
-
-    Each subclass owns its own registry table (created on class definition,
-    see __init_subclass__), so subclasses with different key semantics never
-    see each other's instances. Idle GC enumerates through the registry.
+    Registry shape (dimension A): instances keyed by the whole
+    constructor argument tuple (metaclass SingletonKeyed). Subclasses
+    keep natural constructor signatures such as
+    __init__(self, mod_name, lang); each subclass owns its own registry
+    (per-class metaclass storage). Instance management only -- pick a
+    dimension-B model and inherit it, e.g.
+    class ConfigNavSource(KeyedSource, DiskCache).
     """
-    # registry of the base class; replaced by a fresh per-subclass table
-    _registry: "dict[tuple, KeyedEventSource]" = {}
-    _reg_lock = threading.Lock()
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        # each subclass gets its own table (key semantics differ per class)
-        cls._registry = {}
-        cls._reg_lock = threading.Lock()
+    # The composite key of this instance. Assigned by the SingletonKeyed
+    # metaclass when the instance is created (never set in __init__);
+    # declared here so type checkers resolve the attribute.
+    _singleton_key: tuple
 
     @classmethod
     def get(cls, *key):
         """
         [Trio] Get or create the instance of the composite key.
 
+        The key is the whole positional argument tuple: cls(*key) calls
+        the natural constructor signature. Registry lookup / creation and
+        the _singleton_key bookkeeping happen in the SingletonKeyed
+        metaclass.
+
         Returns:
-            KeyedEventSource | None: None when the construction raised
-                KeyError (e.g. the referenced mod is gone).
+            KeyedSource | None: None when the construction raised
+                KeyError (e.g. the referenced structure is gone).
         """
-        with cls._reg_lock:
-            try:
-                return cls._registry[key]
-            except KeyError:
-                pass
-            try:
-                instance = cls(*key)
-            except KeyError:
-                return None
-            instance._reg_key = key
-            cls._registry[key] = instance
-            return instance
+        try:
+            return cls(*key)
+        except KeyError:
+            return None
 
     @classmethod
     def _iter_idle_instances(cls):
-        with cls._reg_lock:
-            return list(cls._registry.values())
+        return [inst for _, inst in cls.singleton_items()]
 
     def _remove(self):
-        with self._reg_lock:
-            try:
-                if self._registry.get(self._reg_key) is self:
-                    del self._registry[self._reg_key]
-            except KeyError:
-                pass
+        type(self).singleton_remove_if(self._singleton_key, self)
+
+    def _reconcile(self):
+        type(self).singleton_reinsert(self._singleton_key, self)
 
 
-class ViewportEventSource(BaseSource):
+class NoCachePush(BaseSource):
     """
-    View source: no data cached in memory, full view built on subscribe.
+    No-cache forwarding model (dimension B): nothing is cached in memory,
+    the full view is built on subscribe and events are forwarded after
+    that. Registry shape comes from dimension A (composed through
+    inheritance) -- this class itself is registry-free and carries no
+    config semantics: the event content protocol is NOT part of the
+    model (_convert receives any external event, application layers such
+    as GuiConfigSource decide what to accept).
 
-    - subscribe() builds the full view (subclass hook _build_full, runs in
-      a thread) and returns the encoded full payload. Concurrent
-      subscribers of the same instance -- same key, i.e. same
-      (mod, config, view, lang) -- share ONE build single-flight: while a
-      build runs, later subscribers wait and reuse its payload (same key
-      -> same view; the stale window equals the private-build window).
-      The payload expires when the last waiter took it, so later
-      subscribers always rebuild (freshness is never cached);
+    - subscribe() builds the full view (subclass hook _build_full, runs
+      in a thread) and returns the encoded full payload. Concurrent
+      subscribers of the same instance -- same key -- share ONE build
+      single-flight: while a build runs, later subscribers wait and reuse
+      its payload (same key -> same view; the stale window equals the
+      private-build window). The payload expires when the last waiter
+      took it, so later subscribers always rebuild (freshness is never
+      cached);
     - on_event() forwards events filtered / converted by the subclass
       (_convert), unrelated ones are dropped;
-    - the mapping between events and the view is subclass business: the
-      base class only provides the registry, the subscribe / unsubscribe /
-      on_event machinery and idle GC.
+    - reinit() rebuilds the full view and broadcasts it to the current
+      subscribers (RPC-driven full refresh, e.g. DevAssets); without
+      subscribers it is a no-op (nothing cached, nothing to refresh).
 
-    Lifecycle: instances are created by get() and removed by idle GC after
-    IDLE_TTL seconds without subscribers (fast navigation round trips
-    reuse the instance).
+    Lifecycle: GC = False -- nothing to expire, never in the data-expiry
+    gc loop. The instance removes itself from its registry when the LAST
+    subscriber leaves (unsubscribe): nothing is cached, so a departed
+    viewer leaves no value behind; the next get() rebuilds it.
     """
-    IDLE_TTL = 8
-    # Shared registry of the base class: config_name -> {key: instance}.
-    # One table for every subclass (ConfigArgSource / DashboardSource), so
-    # a single dispatch(config_name, event) call covers all viewport
-    # sources of a config. Keys start with the source class to keep
-    # sibling subclasses apart (their key shapes differ).
-    _by_config: "dict[str, dict[tuple, ViewportEventSource]]" = {}
-    _reg_lock = threading.Lock()
     # Sentinel: no reusable build payload
     _NO_PAYLOAD = object()
     # Sentinel: the build failed. Waiters translate it to None (registered,
@@ -630,77 +778,14 @@ class ViewportEventSource(BaseSource):
     # reuse it as an empty-view result.
     _FAILED = object()
 
-    def __init__(self, config_name):
+    def __init__(self):
         super().__init__()
-        self.config_name = config_name
         # Single-flight full build (Trio thread only): plain flags + one
         # event, no lock needed.
         self._building = False
         self._build_event = None  # completion signal of the running build
         self._build_payload = self._NO_PAYLOAD  # bytes | None | sentinel
         self._build_waiters = 0
-
-    # ---------------- instance management and routing ----------------
-
-    @classmethod
-    def get(cls, config_name, *key):
-        """
-        [Trio] Get or create the instance of (config_name, key).
-
-        key[0] is the source class (registry isolation between sibling
-        subclasses), the rest is passed to the constructor. The mapping /
-        structure build happens in the constructor and may raise KeyError
-        (config / mod / view deleted): get() converts that into None.
-
-        Returns:
-            ViewportEventSource | None:
-        """
-        with cls._reg_lock:
-            sources = cls._by_config.get(config_name, None)
-            if sources is not None:
-                source = sources.get(key, None)
-                if source is not None:
-                    return source
-            try:
-                source = cls(config_name, *key[1:])
-            except KeyError:
-                # structure read failed (config / mod / view just deleted)
-                return None
-            if sources is None:
-                sources = {}
-                cls._by_config[config_name] = sources
-            source._reg_key = key
-            sources[key] = source
-            return source
-
-    @classmethod
-    def dispatch(cls, config_name, event):
-        """
-        [任意线程] Event entry of a config-granularity event (worker recv /
-        RPC broadcast): route it to every viewport source of the config,
-        each source filters by its own view.
-        """
-        with cls._reg_lock:
-            sources = list(cls._by_config.get(config_name, {}).values())
-        for source in sources:
-            source.on_event(event)
-
-    def _remove(self):
-        """
-        [Trio] Unregister this instance (called by idle GC; the next
-        subscription recreates it).
-        """
-        with self._reg_lock:
-            sources = self._by_config.get(self.config_name, None)
-            if sources is not None and sources.get(self._reg_key) is self:
-                del sources[self._reg_key]
-                if not sources:
-                    del self._by_config[self.config_name]
-
-    @classmethod
-    def _iter_idle_instances(cls):
-        with cls._reg_lock:
-            return [source for sources in cls._by_config.values() for source in sources.values()]
 
     # ---------------- subscribe: single-flight full build ----------------
 
@@ -714,14 +799,32 @@ class ViewportEventSource(BaseSource):
         dropped, same as the private-build window of the previous design).
         A falsy view returns None: the subscriber is registered but no
         full is sent (empty-view semantics, same as empty data of cache
-        sources).
+        sources). After registration the instance reconciles with its
+        registry (dimension A hook, see BaseSource._reconcile): when a
+        concurrent GC removed it while the get_source() -> subscribe()
+        flow was in flight, it re-registers itself.
         """
         payload = await self._get_payload()
         with self._lock:
             if self._trio_token is None:
                 self._trio_token = trio.lowlevel.current_trio_token()
             self._subscribers.add(sub)
+        self._reconcile()
         return payload
+
+    def unsubscribe(self, sub):
+        """
+        [Trio] Unsubscribe. Idempotent.
+
+        When the last subscriber leaves, the instance is removed from its
+        registry: nothing is cached, the next subscription rebuilds it
+        (dimension A _remove, identity-checked).
+        """
+        with self._lock:
+            self._subscribers.discard(sub)
+            empty = not self._subscribers
+        if empty:
+            self._remove()
 
     async def _get_payload(self):
         """
@@ -801,6 +904,33 @@ class ViewportEventSource(BaseSource):
         registered, no full is sent).
         """
         raise NotImplementedError
+
+    # ---------------- RPC-driven full refresh ----------------
+
+    async def reinit(self, force=False):
+        """
+        [Trio] Rebuild the full view and broadcast it to every current
+        subscriber. No-op without subscribers (nothing cached, nothing to
+        refresh). Used by sources refreshed through RPC (e.g. DevAssets
+        after a resource operation).
+
+        The payload is queued under the lock through the run_sync_soon
+        queue (same FIFO as the inbox doorbells), so a full event is
+        ordered against the forwarding increments by the lock itself.
+        """
+        with self._lock:
+            if not self._subscribers:
+                return
+        view = await self._build_full()
+        if not view:
+            # empty view: nothing to broadcast
+            return
+        payload = ENCODER.encode(ResponseEvent(t=self.TOPIC_NAME, o='full', v=view))
+        with self._lock:
+            try:
+                self._trio_token.run_sync_soon(self._deliver_all, payload)
+            except trio.RunFinishedError:
+                pass
 
     # ---------------- on_event forwarding ----------------
 
