@@ -23,8 +23,13 @@ class GuiConfigSource(NoCachePush):
     Both views are built from the same blocks:
     - the full view is MOD_LOADER.get_gui_config(mod, config, nav, lang),
       differing only in the nav name;
-    - the event -> keyed-set mapping is built from the nav structure JSON:
-      (task, group, arg) rows -> (card, group, arg) location;
+    - the event -> keyed-set mapping is projected from that SAME view
+      (every displayed arg row carries its (task, group, arg) reference),
+      so the mapping is always consistent with the full. Both are built
+      together on the first subscribe (_build_full, in a thread); the
+      mapping is empty ({}) before that -- empty mapping drops every
+      event, which is safe because events only reach registered
+      subscribers and registration happens after the build.
     - both consume ConfigSetEvent (or its dict form, as decoded from
       worker bytes) and convert it into a keyed 'set' patch of the
       displayed value.
@@ -33,7 +38,11 @@ class GuiConfigSource(NoCachePush):
     nav name: ConfigArgSource(mod, config, nav, lang) for any nav, or
     DashboardSource(mod, config, lang) with nav fixed to 'dashboard'.
     The registry (KeyedSource.get) converts a KeyError of the constructor
-    (config / mod / nav deleted) into None.
+    (config / mod deleted or the config re-bound to another mod) into
+    None. A deleted / unknown nav is NOT validated in the constructor:
+    get_gui_config checks the nav itself and returns {} for an unknown
+    one, which yields an empty view + empty mapping at subscribe time
+    (silent no-data, same visible result as "no source").
     """
 
     def __init__(self, mod_name, config_name, nav_name, lang):
@@ -42,21 +51,26 @@ class GuiConfigSource(NoCachePush):
         self.config_name = config_name
         self.nav_name = nav_name
         self.lang = lang
-        # Build the structure mapping (nav JSON cache, no config values).
-        # Raises KeyError when the config / mod / nav has been deleted:
+        # In-memory existence check only, no IO (see the class docstring):
+        # config deleted / re-bound or mod deleted => KeyError, and
         # KeyedSource.get() converts that into None (no source).
-        self.dict_config_to_topic = self._build_mapping()
+        self._validate_config()
+        # Event -> keyed-set mapping. Projected from the full view on the
+        # first subscribe (_build_full); empty until then (an empty
+        # mapping drops every event -- safe, see the class docstring).
+        self.dict_config_to_topic = {}
 
-    def _build_mapping(self):
+    def _validate_config(self):
         """
-        Build the mapping from the GUI structure only (nav JSON cache), no
-        config values. Rows of the nav tree at depth 3 are keyed by their
-        (task, group, arg) reference and mapped to their (card, group,
-        arg) display location; '_info' pseudo groups and rows without
-        task / group / arg references are skipped.
+        In-memory existence check of the view: the config must be present
+        in the current scan data and bound to this mod; the mod itself
+        must exist. Deliberately does NOT touch the disk / nav structure:
+        a missing nav surfaces as an empty view at subscribe time (the
+        built-in nav check of get_gui_config returns {}).
 
         Raises:
-            KeyError: When the config / mod / nav no longer exists.
+            KeyError: When the config or mod no longer exists, or the
+                config was re-bound to another mod.
         """
         configs = ConfigScanSource().data
         try:
@@ -68,17 +82,19 @@ class GuiConfigSource(NoCachePush):
             # treat it as nonexistent under this key
             raise KeyError(f'Config "{self.config_name}" is not under mod "{self.mod_name}"') from None
         try:
-            mod = MOD_LOADER.dict_mod[info.mod]
+            MOD_LOADER.dict_mod[info.mod]
         except KeyError:
             raise KeyError(f'No such mod: "{info.mod}"') from None
-        try:
-            nav_ref = mod.config_index_data()[self.nav_name]
-        except KeyError:
-            raise KeyError(f'No such nav: "{self.nav_name}"') from None
-        tree = mod.nav_config_json(nav_ref.file)
 
-        dict_config_to_topic = {}
-        for keys, arg_data in deep_iter(tree, depth=3):
+    def build(self):
+        view = MOD_LOADER.get_gui_config(
+            self.mod_name, self.config_name, self.nav_name, self.lang
+        )
+        # project (task, group, arg) -> (card, group, arg) location
+        # from the view rows; '_info' pseudo rows never carry
+        # references and are skipped defensively
+        mapping = {}
+        for keys, arg_data in deep_iter(view, depth=3):
             card_name, group_name, arg_name = keys
             if group_name == '_info':
                 continue
@@ -87,22 +103,39 @@ class GuiConfigSource(NoCachePush):
                 group = arg_data['group']
                 arg = arg_data['arg']
             except KeyError:
-                # this shouldn't happen
+                # this shouldn't happen (see above)
                 continue
-            dict_config_to_topic[(task, group, arg)] = (card_name, group_name, arg_name)
-        return dict_config_to_topic
+            mapping[(task, group, arg)] = (card_name, group_name, arg_name)
+        return view, mapping
 
     async def _build_full(self):
         """
-        [Trio] Build the full view (values + i18n) in a thread. Runs in the
-        single-flight path of subscribe: concurrent subscribers of the same
-        key share one build. An empty view returns None (registered, no
-        full sent).
+        [Trio] Build the full view AND the event mapping in one thread
+        round trip (file reads must not block the event loop). The
+        mapping is projected from the same view the full is built from,
+        so it is always consistent with the full -- no separate structure
+        read, no loader filter rules to replicate (every view row carries
+        its (task, group, arg) reference; rows without a resolvable
+        reference never enter the view).
+
+        The mapping is assigned before any subscriber is registered
+        (subscribe registers after _get_payload completes), so the event
+        forwarding readers (_convert, any thread) always see the finished
+        mapping -- the write needs no lock. Single-flight serializes the
+        side effect to exactly once per instance: concurrent subscribers
+        of the same key wait for the running build and reuse its payload,
+        they never re-run the builder.
+
+        An empty view (unknown nav / mod: get_gui_config returns {})
+        yields an empty mapping; the falsy view makes subscribe register
+        without a full event (empty-view semantics).
+
+        Returns:
+            dict: The full view data (falsy = empty view).
         """
-        return await trio.to_thread.run_sync(
-            MOD_LOADER.get_gui_config,
-            self.mod_name, self.config_name, self.nav_name, self.lang
-        )
+        view, mapping = await trio.to_thread.run_sync(self.build)
+        self.dict_config_to_topic = mapping
+        return view
 
     def _convert(self, event):
         """

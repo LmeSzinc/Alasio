@@ -20,7 +20,6 @@ class ModListSource(GlobalSource, DiskCache):
     MOD_LOADER, recycled by the data-expiry GC when the TTL expired.
     """
     TOPIC_NAME = 'ModList'
-    TTL = 8
 
     def on_init(self):
         """
@@ -49,13 +48,12 @@ class ModHistorySource(GlobalSource, DiskCache):
     """
     One-shot disk-cache source of ModHistory.
 
-    There is exactly one cache layer -- the source data itself (TTL 8s +
-    data-expiry GC). The old file-level HISTORY_CACHE (ResourceCacheTTL)
-    was removed: it duplicated the source cache, and the source already
-    holds the decoded history for its whole lifetime.
+    There is exactly one cache layer -- the source data itself (model-
+    default TTL 8s + data-expiry GC). The old file-level HISTORY_CACHE
+    (ResourceCacheTTL) was removed: it duplicated the source cache, and
+    the source already holds the decoded history for its whole lifetime.
     """
     TOPIC_NAME = 'ModHistory'
-    TTL = 8
 
     def on_init(self):
         """

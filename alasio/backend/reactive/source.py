@@ -105,11 +105,15 @@ class BaseSource:
     # the push. DiskCache leaves it False: its full never expires, so
     # recycling a subscribed instance is harmless (see the class docs).
     GC_NEEDS_NO_SUBSCRIBER = False
-    # Data freshness window of EventSource (seconds | None):
+    # Data freshness window of the cache models (seconds | None):
     # - fetch_init re-reads the full data when the window expired;
     # - the idle GC removes the instance when the window expired
     #   (only for GC=True classes);
-    # - None = resident (never recycled) or read on every fetch.
+    # - None = no window (resident, or read on every fetch);
+    # - the cache models set their own default: DiskCache / DiskCachePush
+    #   default to 8s (most topics inherit it without declaring TTL); a
+    #   subclass overrides the value or sets TTL=None explicitly to
+    #   disable the window.
     TTL = None
     # Full data of cache sources (EventSource initializes it per instance).
     # The default subscribe() encodes it under the lock; a source without
@@ -121,9 +125,11 @@ class BaseSource:
         super().__init_subclass__(**kwargs)
         # Static GC membership, decided once at class definition time:
         # only classes that opt in (GC=True) with a numeric TTL are
-        # collected. There is deliberately no runtime flag check in the
-        # gc loop -- ConfigScan-like classes just declare GC=False.
-        if cls.GC and cls.TTL is not None:
+        # collected; the framework layers of this module are exempt by
+        # name (see _FRAMEWORK_LAYERS -- they never hold instances).
+        # There is deliberately no runtime flag check in the gc loop --
+        # ConfigScan-like classes just declare GC=False.
+        if cls.GC and cls.TTL is not None and cls.__name__ not in _FRAMEWORK_LAYERS:
             _GC_CLASSES.add(cls)
         else:
             _GC_CLASSES.discard(cls)
@@ -339,7 +345,21 @@ class BaseSource:
                 # (see EventSource.__init__).
                 if now - inst._lastrun < src_cls.TTL:
                     continue
-            inst._remove()
+                # Removal INSIDE the instance lock (lock order: instance
+                # lock -> registry lock): the expiry decision and the
+                # registry removal are one critical section, atomic
+                # against subscriber attach (subscribe registers under
+                # the same instance lock and only reconciles with the
+                # registry after releasing it). Without this, a
+                # subscriber could attach between the decision and the
+                # removal and end up stranded on a removed instance:
+                # later events would go to a fresh instance and never
+                # reach it (see the design doc, 11.5). Deadlock safety:
+                # no code path takes a registry lock while holding an
+                # instance lock in the reverse direction (registry
+                # holders never touch instance locks), so instance ->
+                # registry nesting is acyclic.
+                inst._remove()
 
     @classmethod
     def _iter_idle_instances(cls):
@@ -612,8 +632,11 @@ class DiskCache(EventSource):
       expires. Content changes only come from subscription-condition
       changes (mod / lang / navigation) that rebuild the data through
       get_source -> reinit;
-    - TTL (seconds, subclass sets): both the fetch freshness window and
-      the recycle window of the data-expiry GC;
+    - TTL (seconds, default 8 of the model, subclass may override):
+      both the fetch freshness window and the recycle window of the
+      data-expiry GC; a subclass sets TTL=None to disable both
+      (never collected -- with GC=True and TTL=None the class stays out
+      of _GC_CLASSES);
     - GC = True: recycle when the data TTL expired REGARDLESS of
       subscribers -- recycling a subscribed instance is harmless because
       there is no push channel after the full was sent (see the design
@@ -624,6 +647,9 @@ class DiskCache(EventSource):
     - subscribe = one full snapshot, then no communication.
     """
     GC = True
+    # Default data freshness / recycle window of the cache model: most
+    # DiskCache topics inherit it without declaring TTL.
+    TTL = 8
 
 
 class DiskCachePush(EventSource):
@@ -635,8 +661,9 @@ class DiskCachePush(EventSource):
       the disk schedule table, later changes flow in through worker
       TaskQueue events; a config-event linkage forces reinit refreshes
       and a successful refresh counts as data activity;
-    - TTL (seconds, subclass sets): worker events / successful refreshes
-      refresh _lastrun (keep-alive);
+    - TTL (seconds, default 8 of the model, subclass may override):
+      worker events / successful refreshes refresh _lastrun
+      (keep-alive);
     - GC = True with GC_NEEDS_NO_SUBSCRIBER = True: recycle only when the
       TTL expired AND no subscriber is attached. A live subscriber keeps
       the instance: the push channel is bound to the instance and worker
@@ -649,6 +676,10 @@ class DiskCachePush(EventSource):
     """
     GC = True
     GC_NEEDS_NO_SUBSCRIBER = True
+    # Default data freshness / recycle window of the cache model: most
+    # DiskCachePush topics inherit it without declaring TTL (TaskQueue
+    # overrides with 5s).
+    TTL = 8
 
 
 class GlobalSource(BaseSource, metaclass=Singleton):

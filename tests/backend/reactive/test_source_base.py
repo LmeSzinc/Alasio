@@ -227,6 +227,28 @@ class TestGcIdle:
         KeyedFakeSource.gc_idle()
         assert KeyedFakeSource.singleton_instances() == {}
 
+    def test_gc_removal_holds_instance_lock(self, monkeypatch):
+        """
+        The expiry decision and the registry removal share one critical
+        section (removal runs inside the instance lock): a subscriber can
+        no longer attach between them and end up stranded on a removed
+        instance (see design doc 11.5).
+        """
+        instance = KeyedFakeSource.get('a')
+        monkeypatch.setattr(time, 'monotonic', lambda: 100.)
+        instance._lastrun = 80.  # data 20s old > TTL 8
+        lock_held = []
+        original_remove = instance._remove
+
+        def removing():
+            lock_held.append(instance._lock.locked())
+            original_remove()
+
+        instance._remove = removing
+        KeyedFakeSource.gc_idle()
+        assert lock_held == [True]
+        assert KeyedFakeSource.singleton_instances() == {}
+
     def test_keyed_source_gc_keeps_fresh_instance(self, monkeypatch):
         """instances inside the TTL window are kept"""
         instance = KeyedFakeSource.get('a')

@@ -2,7 +2,7 @@ import trio
 
 from alasio.backend.reactive.event import ResponseEvent
 from alasio.backend.reactive.source import GlobalSource, ResidentCache
-from alasio.backend.topic import config_event
+from alasio.backend.topic import _config_event
 from alasio.backend.topic.log import LogCache
 from alasio.backend.topic.preview import PreviewTask
 from alasio.backend.topic.que import TaskQueueSource, TaskRunningSource
@@ -92,7 +92,7 @@ class BackendWorkerManager(WorkerManager):
         elif topic == 'ConfigArg':
             # unified entry of config-save events (viewport dispatch +
             # TaskQueue linkage), replaces the old msgbus broadcast
-            config_event.on_config_event(event.c, event.v)
+            _config_event.on_config_event(event.c, event.v)
         else:
             logger.warning(f'Unknown topic event: {topic}')
 

@@ -1,6 +1,6 @@
 """
 Tests for the unified ConfigArg event entry
-(alasio/backend/topic/config_event.py): viewport dispatch and the one-line
+(alasio/backend/topic/_config_event.py): viewport dispatch and the one-line
 forwarding to the TaskQueue linkage (the source itself decides whether the
 scheduler settings changed, see test_que_source.py TestOnConfigEventLinkage).
 """
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from alasio.backend.topic import config_event
+from alasio.backend.topic import _config_event
 from alasio.backend.topic._gui_config import GuiConfigSource
 from alasio.backend.topic.que import TaskQueueSource
 from alasio.config.entry.model import ConfigSetEvent
@@ -38,7 +38,7 @@ class TestOnConfigEventDispatch:
         event = other_event()
         with patch.object(GuiConfigSource, 'dispatch_config', MagicMock()) as dispatch, \
                 patch.object(TaskQueueSource, 'on_config_event', MagicMock()) as linkage:
-            config_event.on_config_event('alas', event)
+            _config_event.on_config_event('alas', event)
         dispatch.assert_called_once_with('alas', event)
 
     def test_task_queue_linkage_forwarded(self):
@@ -48,5 +48,5 @@ class TestOnConfigEventDispatch:
         """
         event = other_event()
         with patch.object(TaskQueueSource, 'on_config_event', MagicMock()) as linkage:
-            config_event.on_config_event('alas', event)
+            _config_event.on_config_event('alas', event)
         linkage.assert_called_once_with(event)

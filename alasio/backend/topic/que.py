@@ -276,7 +276,6 @@ class TaskQueueI18nSource(KeyedSource, DiskCache):
     of subscribers (DiskCache semantics).
     """
     TOPIC_NAME = 'TaskQueueI18n'
-    TTL = 8
 
     def __init__(self, mod_name, lang):
         super().__init__()

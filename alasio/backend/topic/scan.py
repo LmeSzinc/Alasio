@@ -22,10 +22,9 @@ class ConfigScanSource(GlobalSource, DiskCache):
     re-read of the disk).
     """
     TOPIC_NAME = 'ConfigScan'
-    # Refresh window of fetch_init; GC=False keeps the instance resident.
-    TTL = 8
-    # Process-wide shared cache: readers assume a stable populated
-    # instance, never recycle it.
+    # GC=False keeps the instance resident: readers assume a stable
+    # populated instance, never recycle it. TTL (model default 8s) stays
+    # as the fetch freshness window.
     GC = False
     data: "dict[str, ConfigInfo]"
 

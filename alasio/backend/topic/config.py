@@ -8,7 +8,7 @@ from msgspecerror import ErrorInfo
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import ResponseEvent
 from alasio.backend.reactive.source import DiskCache, KeyedSource
-from alasio.backend.topic import config_event
+from alasio.backend.topic import _config_event
 from alasio.backend.topic._gui_config import GuiConfigSource
 from alasio.backend.topic.state import ConnState, NavState
 from alasio.backend.ws.ws_topic import BaseTopic
@@ -27,7 +27,6 @@ class ConfigNavSource(KeyedSource, DiskCache):
     (DiskCache semantics).
     """
     TOPIC_NAME = 'ConfigNav'
-    TTL = 8
 
     def __init__(self, mod_name, lang):
         super().__init__()
@@ -119,7 +118,7 @@ class ConfigArg(BaseTopic):
         if success:
             # unified event entry: viewport sources of every nav + Dashboard
             # + TaskQueue linkage (sync, thread safe)
-            config_event.on_config_event(config_name, responses)
+            _config_event.on_config_event(config_name, responses)
         else:
             # there always be one rollback_event; convert it directly into a
             # set response for this connection (values are not re-read from
@@ -169,7 +168,7 @@ class ConfigArg(BaseTopic):
             return
 
         # unified event entry
-        config_event.on_config_event(config_name, [resp])
+        _config_event.on_config_event(config_name, [resp])
 
     @rpc
     async def group_reset(self, card: str):
@@ -214,4 +213,4 @@ class ConfigArg(BaseTopic):
             return
 
         # unified event entry
-        config_event.on_config_event(config_name, resp)
+        _config_event.on_config_event(config_name, resp)
