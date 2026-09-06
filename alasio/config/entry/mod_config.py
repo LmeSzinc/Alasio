@@ -28,6 +28,42 @@ def get_field_default_with_error(model, arg):
     return default
 
 
+def get_config_current_value(task, group, model, arg, old):
+    """
+    Get the current effective user setting of arg from stored config.
+
+    Args:
+        task (str):
+        group (str):
+        model (type): Group model, arg must exist in model
+        arg (str):
+        old (bytes | None): Stored msgpack data of the group, None if the group was never stored
+
+    Returns:
+        Any: Current user setting of arg.
+            Note that stored data is still validated against model after read:
+            fields that failed to parse are substituted with model defaults,
+            and a warning is logged for each inconsistent field.
+            If the arg is not in user setting (group never stored, or stored data
+            failed to load), fallback to the model default of arg.
+
+    Raises:
+        DataInconsistent: model has no default for arg, and arg is not in user setting
+    """
+    if old is not None:
+        obj, errors = load_msgpack_with_default(old, model)
+        for error in errors:
+            logger.warning(f'Config data inconsistent at {task}.{group}: {error}')
+        if obj is not NODEFAULT:
+            try:
+                return getattr(obj, arg)
+            except AttributeError:
+                # this shouldn't happen, as validation errors only point to fields existing in model
+                pass
+    # no user setting (or failed to load), fallback to model default
+    return get_field_default_with_error(model, arg)
+
+
 class ModConfig(ModBase):
     """
     Config read/write
@@ -104,6 +140,9 @@ class ModConfig(ModBase):
                     - event.error is None
                 If failed, returns False and a list of rollback_event.
                     - event.error is parsed error message
+                    - for events that failed validation, event.value is the current user setting
+                      (or model default if the user never set it), so the caller can restore
+                      the UI to the actual state
 
         Raises:
             DataInconsistent:
@@ -139,6 +178,10 @@ class ModConfig(ModBase):
 
         # validate - process all events, collect all errors
         success: "list[ConfigSetEvent]" = []
+        # convert errors are collected first, so that user settings of all failed
+        # groups can be queried in a single read after the validation loop
+        # key: (task, group), value: (arg, error)
+        dict_convert_error = {}
         for key, value in dict_value.items():
             try:
                 model = dict_model[key]
@@ -157,8 +200,7 @@ class ModConfig(ModBase):
                 except IndexError:
                     # can't parse
                     raise DataInconsistent(f'Failed to parse error.loc from "{e}"') from None
-                default = get_field_default_with_error(model, arg)
-                rollback.append(ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=error))
+                dict_convert_error[key] = (arg, error)
                 has_error = True
                 continue
             # validate all args in this group
@@ -189,6 +231,22 @@ class ModConfig(ModBase):
 
         # if any event failed to validate, entire batch is atomic: nothing is written
         if has_error:
+            # rollback event should restore to the current user setting, not the model default.
+            # query user settings of all failed groups in one read, after collecting all errors.
+            # note that it's a plain read without exclusive lock (nothing is written on failure),
+            # but the stored data is still validated against the model after the read
+            if dict_convert_error:
+                table = AlasioConfigTable(config_name)
+                # key: (task, group), value: stored msgpack data
+                dict_row = {}
+                query_events = [e for e in events if (e.task, e.group) in dict_convert_error]
+                for row in table.read_rows(query_events):
+                    dict_row[(row.task, row.group)] = row.value
+                for key, (arg, error) in dict_convert_error.items():
+                    task, group = key
+                    model = dict_model[key]
+                    value = get_config_current_value(task, group, model, arg, dict_row.get(key))
+                    rollback.append(ConfigSetEvent(task=task, group=group, arg=arg, value=value, error=error))
             # include other groups' valid events in rollback (no error)
             rollback.extend(success)
             return False, rollback
@@ -286,6 +344,9 @@ class ModConfig(ModBase):
                     - event.error is None
                 If failed, returns False and a list of rollback_event.
                     - event.error is parsed error message
+                    - for events that failed validation, event.value is the current user setting
+                      (or model default if the user never set it), so the caller can restore
+                      the UI to the actual state
                 note that there might be multiple success_event if post_edit has side effect changes
                 but there always be one rollback_event
 
@@ -322,8 +383,16 @@ class ModConfig(ModBase):
                 arg = error.loc[0]
             except IndexError:
                 raise DataInconsistent(f'Failed to parse error.loc from "{e}"') from None
-            default = get_field_default_with_error(model, arg)
-            rollback = ConfigSetEvent(task=task, group=group, arg=arg, value=default, error=error)
+            # rollback event should restore to the current user setting, not the model default.
+            # query user setting with a plain read without exclusive lock (nothing is written on failure),
+            # but the stored data is still validated against the model after the read
+            table = AlasioConfigTable(config_name)
+            old = None
+            for row in table.read_rows([event]):
+                old = row.value
+                break
+            value = get_config_current_value(task, group, model, arg, old)
+            rollback = ConfigSetEvent(task=task, group=group, arg=arg, value=value, error=error)
             return False, [rollback]
 
         # get validated value

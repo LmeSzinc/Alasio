@@ -137,6 +137,39 @@ class TestConfigSet(ModConfigTestBase):
         assert responses[0].error is not None
         assert responses[0].value is False
 
+    def test_config_set_invalid_value_rollback_to_current_setting(self, example_mod):
+        """Rollback of a failed set should return the current user setting, not model default"""
+        # 1. User stores a non-default value
+        success, _ = example_mod.config_set(self.TEST_CONFIG_NAME, ConfigSetEvent(
+            task='Main', group='Scheduler', arg='Enable', value=True))
+        assert success is True
+
+        # 2. Failed set should roll back to the current user setting (True),
+        # not the model default (False)
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, ConfigSetEvent(
+            task='Main', group='Scheduler', arg='Enable', value='not_a_bool'))
+        assert success is False
+        assert len(responses) == 1
+        assert responses[0].arg == 'Enable'
+        assert responses[0].error is not None
+        assert responses[0].value is True
+
+        # 3. An arg the user never set still falls back to its model default
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, ConfigSetEvent(
+            task='Main', group='Scheduler', arg='NextRun', value='not_a_datetime'))
+        assert success is False
+        assert len(responses) == 1
+        assert responses[0].arg == 'NextRun'
+        assert responses[0].error is not None
+        assert responses[0].value == d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+
+        # 4. The user setting in db is unchanged
+        table = AlasioConfigTable(self.TEST_CONFIG_NAME)
+        row = table.select_one(task='Main', group='Scheduler')
+        data = decode(row.value)
+        assert data['Enable'] is True
+        assert 'NextRun' not in data
+
     def test_config_set_nonexistent_group(self, example_mod):
         """Test setting config for non-existent group returns validation error"""
         event = ConfigSetEvent(
@@ -362,6 +395,41 @@ class TestConfigBatchSet(ModConfigTestBase):
         assert responses[0].error is not None
         assert responses[0].value is False
 
+    def test_config_batch_set_invalid_value_rollback_to_current_setting(self, example_mod):
+        """Failed batch events should roll back to current user settings, not model defaults"""
+        # 1. User settings exist in db
+        success, _ = example_mod.config_batch_set(self.TEST_CONFIG_NAME, [
+            ConfigSetEvent(task='Main', group='Scheduler', arg='Enable', value=True),
+            ConfigSetEvent(task='Main', group='Scheduler', arg='ServerUpdate', value='06:00'),
+        ])
+        assert success is True
+
+        # 2. Batch set with invalid events in two groups
+        success, responses = example_mod.config_batch_set(self.TEST_CONFIG_NAME, [
+            ConfigSetEvent(task='Main', group='Scheduler', arg='Enable', value='not_a_bool'),
+            ConfigSetEvent(task='Alas', group='Game', arg='PackageName', value='invalid_package'),
+        ])
+        assert success is False
+        assert len(responses) == 2
+        enable_events = [r for r in responses if r.arg == 'Enable']
+        package_events = [r for r in responses if r.arg == 'PackageName']
+        assert len(enable_events) == 1
+        assert len(package_events) == 1
+        # Failed events roll back to the current user setting:
+        # - Enable: stored value True, not model default False
+        # - PackageName: never stored, falls back to model default 'auto'
+        assert enable_events[0].error is not None
+        assert enable_events[0].value is True
+        assert package_events[0].error is not None
+        assert package_events[0].value == 'auto'
+
+        # 3. Nothing is written to db (batch is atomic)
+        table = AlasioConfigTable(self.TEST_CONFIG_NAME)
+        row = table.select_one(task='Main', group='Scheduler')
+        data = decode(row.value)
+        assert data['Enable'] is True
+        assert data['ServerUpdate'] == '06:00'
+
     def test_config_batch_set_invalid_value_and_nonexistent_arg(self, example_mod):
         """Test batch_set with both invalid value and nonexistent arg in same group.
         convert() validates the entire dict at once, so only the first error is returned."""
@@ -393,7 +461,15 @@ class TestConfigBatchSet(ModConfigTestBase):
         assert server_events[0].error is None
 
     def test_config_batch_set_invalid_value_in_other_task(self, example_mod):
-        """Test batch_set with invalid value in one task and valid in another task"""
+        """Test batch_set with invalid value in one task and valid in another task.
+        One invalid event fails the whole batch: the valid event is also returned
+        in rollback (error=None) and nothing is written to db."""
+        # 1. Store a user setting first, to verify it is untouched by the failed batch
+        success, _ = example_mod.config_batch_set(self.TEST_CONFIG_NAME, [
+            ConfigSetEvent(task='Main', group='Scheduler', arg='Enable', value=True),
+        ])
+        assert success is True
+
         events = [
             ConfigSetEvent(task='Main', group='Scheduler', arg='ServerUpdate', value='06:00'),
             ConfigSetEvent(task='Alas', group='Game', arg='PackageName', value='invalid_package'),
@@ -401,13 +477,24 @@ class TestConfigBatchSet(ModConfigTestBase):
 
         success, responses = example_mod.config_batch_set(self.TEST_CONFIG_NAME, events)
         assert success is False
+        # both events are returned: the failed one with error, the valid one without error
         assert len(responses) == 2
         errors = [r.error for r in responses]
         assert any(e is not None for e in errors)
         server_events = [r for r in responses if r.arg == 'ServerUpdate']
         assert len(server_events) == 1
+        # valid event of the failed batch is returned as rollback with its validated input value,
+        # not read from db (ServerUpdate was never stored, its model default is '00:00')
         assert server_events[0].value == '06:00'
         assert server_events[0].error is None
+
+        # 2. Nothing is written to db (batch is atomic): ServerUpdate not stored,
+        # stored Enable=True untouched
+        table = AlasioConfigTable(self.TEST_CONFIG_NAME)
+        row = table.select_one(task='Main', group='Scheduler')
+        data = decode(row.value)
+        assert 'ServerUpdate' not in data
+        assert data['Enable'] is True
 
     def test_config_batch_set_preserves_unchanged_fields(self, example_mod, task_index_data):
         """
@@ -620,6 +707,23 @@ class TestConfigCorruptedData(ModConfigTestBase):
         # Verify reset to default
         config = example_mod.config_read(self.TEST_CONFIG_NAME, ref)
         assert config['Main']['Scheduler']['Enable'] is False
+
+    def test_config_set_invalid_value_with_corrupted_data(self, example_mod):
+        """Reading corrupted user data for rollback should not crash and fall back to default"""
+        # 1. Manually insert corrupted data
+        table = AlasioConfigTable(self.TEST_CONFIG_NAME)
+        corrupted_row = ConfigRow(
+            task='Main', group='Scheduler', value=b'not_msgpack_data')
+        table.upsert_row(corrupted_row, conflicts=('task', 'group'), updates='value')
+
+        # 2. Failed set: stored data fails to load, rollback value should fall back
+        # to model default without raising
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, ConfigSetEvent(
+            task='Main', group='Scheduler', arg='Enable', value='not_a_bool'))
+        assert success is False
+        assert len(responses) == 1
+        assert responses[0].error is not None
+        assert responses[0].value is False
 
 
 class TestConfigOmitDefaults(ModConfigTestBase):
