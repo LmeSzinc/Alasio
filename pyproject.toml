@@ -31,8 +31,6 @@ dependencies = [
     # 14.1.0 is the minimum version to have exceptiongroup support
     # see alasio/ext/backport/__init__.py patch_rich_traceback_extract()
     "rich>=14.1.0,<=15.0.0",
-    # 0.4.6 is the latest version, colorama is unchanged since 2022
-    "colorama>=0.4.6",
 ]
 
 [project.optional-dependencies]
