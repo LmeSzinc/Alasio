@@ -541,7 +541,8 @@ class Supervisor:
             self.handle_sigint(signal.SIGINT, None)
         elif msg == b'command:started':
             # The backend announced that its pipe channel is live (sent by
-            # app.py's bind patch once the listeners are up). Any first
+            # app.py's BackendConfig.create_sockets once the listeners are
+            # up). Any first
             # backend message ends recv_loop's startup window, which is
             # what starts the stdin listener; there is nothing further to
             # act on here.

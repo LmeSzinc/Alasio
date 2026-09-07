@@ -205,10 +205,10 @@ def announce_started():
     webapp right after it opened) would sit unread until the timeout ends,
     longer than the Electron close flow waits before force-killing the tree.
 
-    Called by the hypercorn bind patch in app.py right after the sockets
-    are bound, before any request can arrive. A bind failure (port already
-    in use) raises before this runs, so it stays a startup failure and the
-    supervisor does not restart-loop on it.
+    Called by BackendConfig.create_sockets in app.py right after the
+    sockets are bound, before any request can arrive. A bind failure (port
+    already in use) raises before this runs, so it stays a startup failure
+    and the supervisor does not restart-loop on it.
     """
     mpipe_backend.send(b'command:started')
 

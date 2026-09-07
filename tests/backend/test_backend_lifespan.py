@@ -11,7 +11,8 @@ from alasio.backend.lifespan import mpipe_recv_loop
 class TestAnnounceStarted:
     """
     Tests for announce_started: the pipe readiness announcement that ends
-    the supervisor's startup window early (see the bind patch in app.py).
+    the supervisor's startup window early (see BackendConfig.create_sockets
+    in app.py).
     """
 
     def test_sends_command_started_on_pipe(self, monkeypatch):

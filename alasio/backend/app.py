@@ -6,6 +6,7 @@ import platform
 import socket
 
 import trio
+from hypercorn import Config
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
 
@@ -283,9 +284,9 @@ def apply_hypercorn_exclusivity_patch():
     Config._create_sockets = patched_create_sockets
 
 
-def apply_started_announce_patch():
+class BackendConfig(Config):
     """
-    Patch Config.create_sockets to announce pipe readiness after binding.
+    Hypercorn Config subclass that announces pipe readiness after binding.
 
     The backend announces b'command:started' over the supervisor pipe once
     the listeners are bound (see lifespan.announce_started): the
@@ -296,25 +297,33 @@ def apply_started_announce_patch():
     webapp opened would sit unread in the stdin pipe until Electron
     force-kills the tree.
 
-    The wrapper must run only after the sockets bound successfully: a bind
-    failure (port in use) raises inside create_sockets, no announce is
-    sent, and the supervisor still treats the crash as a startup failure
-    instead of restart-looping. create_sockets (public) is wrapped rather
-    than _create_sockets because SSL mode binds several socket lists in
-    one create_sockets call.
+    The announce lives in create_sockets() rather than the starlette
+    lifespan because hypercorn (trio) runs the lifespan startup before it
+    binds the sockets: announcing there would end the supervisor's startup
+    window while the port is still unbound, and a bind failure (port in
+    use) would then crash after the window ended -- the supervisor would
+    restart-loop instead of treating it as a startup failure. create_sockets
+    (public) is overridden rather than _create_sockets because SSL mode
+    binds several socket lists in one create_sockets call, so the announce
+    fires exactly once, after every list bound successfully.
     """
-    from hypercorn import Config
 
-    original_create_sockets = Config.create_sockets
+    def create_sockets(self):
+        """
+        Bind the listeners, then announce pipe readiness to the supervisor.
 
-    def patched_create_sockets(self):
-        sockets = original_create_sockets(self)
+        A bind failure (port already in use) raises inside the super call
+        before the announce, so it stays a startup failure and the
+        supervisor does not restart-loop on it.
+
+        Returns:
+            Sockets: hypercorn Sockets dataclass of the bound listeners
+        """
+        sockets = super().create_sockets()
         # listeners are bound and about to serve: tell the supervisor
         # (no-op when running without a supervisor pipe)
         announce_started()
         return sockets
-
-    Config.create_sockets = patched_create_sockets
 
 
 def create_config(args=None):
@@ -342,7 +351,6 @@ def create_config(args=None):
     DeployConfig().config.show()
 
     apply_hypercorn_exclusivity_patch()
-    apply_started_announce_patch()
     deploy = DeployConfig().config.data
 
     # build host port
@@ -360,8 +368,7 @@ def create_config(args=None):
         port = 8000
 
     # build hypercorn config
-    from hypercorn import Config
-    config = Config()
+    config = BackendConfig()
     config.bind = [f'{host}:{port}']
     logger.attr('Bind', config.bind)
 
