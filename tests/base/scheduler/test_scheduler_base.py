@@ -500,22 +500,22 @@ class TestAlasioSchedulerSendSchedulerRunning:
     """Tests for _send_scheduler_running()."""
 
     def test_send_running_task_when_backend_inited(self, scheduler):
-        """When backend is initialized, sends TaskQueue event with running task."""
+        """When backend is initialized, sends TaskRunning event with running task."""
         backend = _patch_backend(inited=True)
         scheduler._send_scheduler_running("Main")
         backend.send.assert_called_once()
         event = backend.send.call_args[0][0]
-        assert event.t == "TaskQueue"
-        assert event.v == {"running": "Main"}
+        assert event.t == "TaskRunning"
+        assert event.v == "Main"
 
     def test_send_none_when_task_is_none(self, scheduler):
-        """Sends TaskQueue event with running=None when no task is active."""
+        """Sends TaskRunning event with running=None when no task is active."""
         backend = _patch_backend(inited=True)
         scheduler._send_scheduler_running(None)
         backend.send.assert_called_once()
         event = backend.send.call_args[0][0]
-        assert event.t == "TaskQueue"
-        assert event.v == {"running": None}
+        assert event.t == "TaskRunning"
+        assert event.v is None
 
     def test_skips_when_backend_not_inited(self, scheduler):
         """Does not send events when backend is not initialized."""
