@@ -43,6 +43,22 @@ class MultiLineConfig(Struct):
     desc: str = "line1\nline2"
 
 
+class SecretPasswordConfig(Struct):
+    """Model with a password field used in secret tests."""
+
+    password: str = "password"
+    name: str = "server"
+
+
+class SecretPasswordYamlConfig(YamlConfig):
+    """YamlConfig subclass that hides password values in show(), like YamlConfigWithPassword."""
+
+    def _secrete_value(self, path):
+        if 'password' in path:
+            return '********'
+        return super()._secrete_value(path)
+
+
 class TestYamlConfigInit:
     def test_model_not_struct(self):
         with pytest.raises(TypeError, match="msgspec.Struct"):
@@ -709,3 +725,72 @@ port: 9090
         assert capture.backend.any_contains('Showing deploy config of /config.yaml')
         assert capture.backend.any_contains('  port = 9090')
         assert capture.backend.any_contains('(rest of the config is the same as default)')
+
+
+class TestYamlConfigSecreteValue:
+    """_secrete_value() overrides the value shown by show() for secret fields."""
+
+    def test_secrete_value_default_returns_nodesecret(self, fs):
+        # Default returns NODEFAULT, so show() displays the current value
+        config = YamlConfig('/config.yaml', SecretPasswordConfig)
+        assert config._secrete_value(('password',)) is msgspec.NODEFAULT
+        assert config._secrete_value(('name',)) is msgspec.NODEFAULT
+
+    def test_show_hides_password_value(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+password: hunter2
+""")
+        config = SecretPasswordYamlConfig('/config.yaml', SecretPasswordConfig)
+        with logger.mock_capture_writer() as capture:
+            config.show()
+        # Override value is displayed instead of the real one
+        assert capture.fd.any_contains("  password = '********'")
+        assert capture.backend.any_contains("  password = '********'")
+        assert capture.fd.any_contains('(rest of the config is the same as default)')
+        # The real password value never appears in the log
+        assert not capture.fd.any_contains('hunter2')
+
+    def test_show_hides_password_keeps_other_differences(self, fs):
+        fs.create_file('/config.yaml', contents="""\
+password: hunter2
+name: custom
+""")
+        config = SecretPasswordYamlConfig('/config.yaml', SecretPasswordConfig)
+        with logger.mock_capture_writer() as capture:
+            config.show()
+        assert capture.fd.any_contains("  password = '********'")
+        assert capture.fd.any_contains("  name = 'custom'")
+        assert not capture.fd.any_contains('hunter2')
+
+    def test_show_hides_nested_password(self, fs):
+        class SecretInner(Struct):
+            password: str = "password"
+            port: int = 8080
+
+        class SecretOuter(Struct):
+            inner: SecretInner = msgspec.field(default_factory=SecretInner)
+            name: str = "server"
+
+        fs.create_file('/config.yaml', contents="""\
+inner:
+  password: hunter2
+  port: 9090
+""")
+        config = SecretPasswordYamlConfig('/config.yaml', SecretOuter)
+        with logger.mock_capture_writer() as capture:
+            config.show()
+        # Path passed to _secrete_value is the full key path ('inner', 'password')
+        assert capture.fd.any_contains("  inner.password = '********'")
+        assert capture.fd.any_contains('  inner.port = 9090')
+        assert not capture.fd.any_contains('hunter2')
+
+    def test_show_default_password_not_logged(self, fs):
+        # Unchanged password is not a difference, show() logs nothing about it
+        fs.create_file('/config.yaml', contents="""\
+name: custom
+""")
+        config = SecretPasswordYamlConfig('/config.yaml', SecretPasswordConfig)
+        with logger.mock_capture_writer() as capture:
+            config.show()
+        assert capture.fd.any_contains("  name = 'custom'")
+        assert not capture.fd.any_contains('  password =')

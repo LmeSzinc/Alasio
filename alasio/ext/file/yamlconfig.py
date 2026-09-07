@@ -367,6 +367,17 @@ class YamlConfig(Generic[T_model]):
         atomic_write(self.file, text)
         return True
 
+    def _secrete_value(self, path):
+        """
+        Args:
+            path (tuple[str]):
+
+        Returns:
+            Any: Any value to override value displayed in show()
+                NODEFAULT to display current value
+        """
+        return msgspec.NODEFAULT
+
     def show(self):
         """
         Log all settings that are different from the default values, like::
@@ -384,6 +395,9 @@ class YamlConfig(Generic[T_model]):
         data = msgspec.to_builtins(self.data)
         count = 0
         for path, _, after in deep_iter_diff(default, data):
+            secret = self._secrete_value(path)
+            if secret is not msgspec.NODEFAULT:
+                after = secret
             logger.info(f'  {".".join(path)} = {after!r}')
             count += 1
         if count:

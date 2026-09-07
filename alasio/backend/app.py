@@ -323,6 +323,8 @@ def create_config(args=None):
         args (list[str] | None): Commandline args from supervisor level
             Use this `args` input instead of `sys.args`, as backend is a sub-process
     """
+    logger.hr('Start', level=0)
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=str, default='')
     parser.add_argument('--host', type=str, default='')
@@ -335,7 +337,10 @@ def create_config(args=None):
         os.chdir(parsed_args.root)
     else:
         env.set_project_root(os.getcwd())
-    logger.info(f'[PROJECT_ROOT] {env.PROJECT_ROOT}')
+    logger.attr('PROJECT_ROOT', env.PROJECT_ROOT)
+    logger.attr('ELECTRON', bool(env.ELECTRON))
+    DeployConfig().config.show()
+
     apply_hypercorn_exclusivity_patch()
     apply_started_announce_patch()
     deploy = DeployConfig().config.data
@@ -358,6 +363,7 @@ def create_config(args=None):
     from hypercorn import Config
     config = Config()
     config.bind = [f'{host}:{port}']
+    logger.attr('Bind', config.bind)
 
     # SSL wiring: when both key and cert are configured the deployment
     # auto-enters public mode (DeploymentGateMiddleware mode detection)
@@ -368,6 +374,9 @@ def create_config(args=None):
     if deploy.Backend.WebuiSSLKey and deploy.Backend.WebuiSSLCert:
         config.keyfile = deploy.Backend.WebuiSSLKey
         config.certfile = deploy.Backend.WebuiSSLCert
+        logger.attr('SSL', True)
+    else:
+        logger.attr('SSL', False)
 
     # To enable assess log
     # config.accesslog = '-'
@@ -391,5 +400,4 @@ def run(args=None):
     """
     Backend entry point
     """
-    logger.info('Backend entry point')
     trio.run(functools.partial(serve_app, args=args))

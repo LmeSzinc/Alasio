@@ -19,7 +19,7 @@ from typing import Optional
 
 from msgspec import Meta, Struct, field
 from typing_extensions import Annotated
-
+from alasio.ext.file.yamlconfig import YamlConfig
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.singleton import Singleton
@@ -239,12 +239,18 @@ class DeployModel(Struct):
     Webapp: WebappConfig = field(default_factory=WebappConfig)
 
 
+class YamlConfigWithPassword(YamlConfig):
+    def _secrete_value(self, path):
+        if 'Password' in path:
+            return '********'
+        return super()._secrete_value(path)
+
+
 class DeployConfig(metaclass=Singleton):
     @cached_property
     def config(self):
-        from alasio.ext.file.yamlconfig import YamlConfig
         file = env.PROJECT_ROOT.joinpath('config/deploy.yaml')
-        config = YamlConfig(file, model=DeployModel)
+        config = YamlConfigWithPassword(file, model=DeployModel)
         if config.errors:
             config.write()
         return config
