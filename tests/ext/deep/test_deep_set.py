@@ -4,6 +4,7 @@ Tests for the write functions in ``alasio.ext.deep``:
 - ``deep_set``: set a value into a nested dict, creating missing levels
 - ``deep_default``: set a value only when the key does not exist
 - ``dict_update``: safely update a dict
+- ``dict_copy``: safely shallow-copy a dict
 
 ``deep_set``/``deep_default`` correct non-dict intermediate levels on the fly
 (e.g. an int at an intermediate key is replaced by a dict), so callers should
@@ -16,7 +17,7 @@ from collections import deque
 
 import pytest
 
-from alasio.ext.deep import deep_default, deep_set, deep_set_with_error, dict_update
+from alasio.ext.deep import deep_default, deep_set, deep_set_with_error, dict_copy, dict_update
 
 # Non-dict value types used to exercise the override correction of deep_set()
 NON_DICT_VALUES = [
@@ -222,6 +223,40 @@ class TestDictUpdate:
         d = {'a': 1}
         ret = dict_update(d, {'b': 2})
         assert ret is d
+
+
+class TestDictCopy:
+    def test_dict_copy_basic(self):
+        d = {'a': 1, 'b': {'c': 2}}
+        ret = dict_copy(d)
+        # Same content, but a new top-level dict
+        assert ret == d
+        assert ret is not d
+
+    def test_dict_copy_shallow(self):
+        # Nested dict is shared with the source: shallow copy
+        d = {'a': {'b': 1}}
+        ret = dict_copy(d)
+        assert ret['a'] is d['a']
+        # Mutating the copy does not affect the source
+        ret['x'] = 2
+        assert d == {'a': {'b': 1}}
+
+    def test_dict_copy_empty(self):
+        d = {}
+        ret = dict_copy(d)
+        assert ret == {}
+        assert ret is not d
+
+    def test_dict_copy_non_dict(self):
+        # `d` is not a dict -> {}
+        # list and set also implement copy(), but they are not dicts
+        assert dict_copy(None) == {}
+        assert dict_copy(1) == {}
+        assert dict_copy('text') == {}
+        assert dict_copy([1, 2]) == {}
+        assert dict_copy({1, 2}) == {}
+        assert dict_copy(object()) == {}
 
 
 class TestDeepSetOverrideNonDict:

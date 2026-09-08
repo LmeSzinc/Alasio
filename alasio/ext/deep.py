@@ -443,6 +443,24 @@ def dict_update(d, new):
         return d
 
 
+def dict_copy(d):
+    """
+    Safely do dict.copy(), return {} if `d` is not a dict
+    Shallow copy only: nested dicts and lists are shared with the source
+
+    Args:
+        d (dict): Dict to copy
+
+    Returns:
+        dict: Shallow copy of `d`, or {} if `d` is not a dict
+    """
+    # Use exact type check, do not call copy() on dict subclasses or other
+    # objects that happen to implement a copy() method (list, set, ...)
+    if type(d) is not dict:
+        return {}
+    return d.copy()
+
+
 def deep_iter_depth1(data):
     """
     Equivalent to data.items() but suppress error if data is not a dict
