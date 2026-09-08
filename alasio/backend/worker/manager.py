@@ -17,7 +17,9 @@ from alasio.logger import logger
 # running: worker process running
 # scheduler-stopping: requesting to stop scheduler loop, worker will stop after current task
 # scheduler-waiting: worker waiting for next task, no task running currently
-# killing: requesting to kill a worker, worker will stop and do GC asap
+# killing: requesting to kill a worker, worker will stop and do GC asap.
+#   worker_kill() waits KILL_WAIT_TIMEOUT for the worker to stop by itself,
+#   then escalates to force-killing
 # force-killing: requesting to kill worker process immediately
 # disconnected: backend just lost connection worker,
 #   worker process will be clean up and worker status will turn into idle or error very soon
@@ -35,6 +37,10 @@ WORKER_STATE_ALLOWS = ['running', 'scheduler-waiting']
 WORKER_RUNNING_STATE = ['running', 'scheduler-stopping', 'scheduler-waiting']
 # Worker is considered stopped if state in the followings
 WORKER_STOPPED_STATE = ['idle', 'error']
+
+# Seconds to wait for a worker to stop by itself in worker_kill(),
+# before the kill is escalated to worker_force_kill()
+KILL_WAIT_TIMEOUT = 1.0
 
 
 class WorkerState(msgspec.Struct):
@@ -466,7 +472,10 @@ class WorkerManager(metaclass=Singleton):
 
     def worker_kill(self, config: str) -> "tuple[bool, str]":
         """
-        Send "killing" to worker
+        Send "killing" to worker, wait for the worker to stop by itself
+
+        The call blocks until the worker stops. If the worker does not stop
+        within KILL_WAIT_TIMEOUT seconds, escalate to worker_force_kill().
 
         Returns:
             whether success, reason
@@ -488,6 +497,19 @@ class WorkerManager(metaclass=Singleton):
         # send command without lock
         command = CommandEvent(c='killing')
         state.send_command(command)
+
+        # Wait for worker to stop by itself
+        if state.wait_stopped(timeout=KILL_WAIT_TIMEOUT):
+            return True, 'Success'
+
+        # Worker did not stop by itself, escalate to force kill
+        self.on_worker_info(config, f'[WorkerManager] Worker did not stop by itself within '
+                                     f'{KILL_WAIT_TIMEOUT}s, force killing: {config}')
+        success, msg = self.worker_force_kill(config)
+        if not success:
+            # Worker may have just stopped by itself, or is being stopped by another request,
+            # the worker is no longer running, so the kill is considered successful
+            self.on_worker_info(config, f'[WorkerManager] Worker already stopped, force kill skipped: {msg}')
 
         return True, 'Success'
 

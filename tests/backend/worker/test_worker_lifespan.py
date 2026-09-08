@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from alasio.backend.worker.manager import WorkerManager
+from alasio.backend.worker.manager import WorkerManager, WorkerState
 from alasio.testing.timeout import AssertTimeout
 from tests.backend.worker.const import *
 
@@ -268,17 +268,38 @@ class TestWorkerStop:
 
         state = manager.state['test_kill']
         state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+        process = state.process
 
-        # Kill worker
+        # Kill worker. worker_kill waits for the worker to stop by itself,
+        # escalating to force kill if the worker fails to stop in time,
+        # so the worker should already be stopped when it returns
         success, msg = manager.worker_kill('test_kill')
         assert success, f"Failed to kill worker: {msg}"
-        assert state.state == 'killing'
+        assert state.state == 'idle'
+        assert state.process is None
+        assert not process.is_alive()
 
-        # 等待清理
-        for _ in AssertTimeout(WORKER_STOP_TIMEOUT):
-            with _:
-                assert state.state in ['idle', 'error']
-                assert not state.process or not state.process.is_alive()
+    def test_worker_kill_escalates_to_force_kill(self, manager, monkeypatch):
+        """测试 worker_kill 在 worker 未自行停止时升级为 force kill"""
+        # Shorten the escalation wait to keep the test fast
+        monkeypatch.setattr('alasio.backend.worker.manager.KILL_WAIT_TIMEOUT', 0.1)
+        # Worker never receives the kill command, simulating an unresponsive worker
+        monkeypatch.setattr(WorkerState, 'send_command', lambda self, command: False)
+
+        success, _ = manager.worker_start('WorkerTestInfinite', 'test_kill_force')
+        assert success
+
+        state = manager.state['test_kill_force']
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+        process = state.process
+
+        # Worker is still running after the escalation wait, so worker_kill
+        # should escalate to force kill and stop the worker
+        success, msg = manager.worker_kill('test_kill_force')
+        assert success, f"Failed to kill worker: {msg}"
+        assert state.state == 'idle'
+        assert state.process is None
+        assert not process.is_alive()
 
     def test_worker_force_kill(self, manager):
         """测试 force killing a worker"""
