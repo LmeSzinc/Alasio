@@ -36,9 +36,11 @@ class ConfigNavSource(KeyedSource, DiskCache):
     def on_init(self):
         """
         Returns:
-            dict[str, dict[str, str]]:
+            dict[str, dict[str, dict]]:
                 key: {nav_name}.{card_name}
-                value: translation
+                value:
+                    {"i18n": name} for normal cards
+                    {"i18n": name, "scheduler": True} for cards with scheduler
         """
         return MOD_LOADER.get_gui_nav(self.mod_name, self.lang)
 

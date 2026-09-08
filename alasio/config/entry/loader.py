@@ -124,9 +124,11 @@ class ModLoader:
             lang (str):
 
         Returns:
-            dict[str, dict[str, str]]:
+            dict[str, dict[str, dict]]:
                 key: {nav_name}.{card_name}
-                value: translation
+                value:
+                    {"i18n": name} for normal cards
+                    {"i18n": name, "scheduler": True} for cards with scheduler
 
         Raises:
             KeyError:
@@ -139,24 +141,23 @@ class ModLoader:
 
         data = mod.nav_index_data()
         out = defaultdict(dict)
-        for nav_name, card_name, i18n_data in deep_iter_depth2(data):
-            try:
-                out[nav_name][card_name] = i18n_data[lang]
-                continue
-            except KeyError:
-                pass
-            # there shouldn't be KeyError, because data is validated
-            # no such language, try "en-US"
-            try:
-                out[nav_name][card_name] = i18n_data['en-US']
-                continue
-            except KeyError:
-                pass
-            # no "en-US", use keypath
-            if card_name == '_info':
-                out[nav_name][card_name] = nav_name
-            else:
-                out[nav_name][card_name] = card_name
+        for nav_name, card_name, meta in deep_iter_depth2(data):
+            # Copy the whole meta, so scheduler and future attributes pass
+            # through unchanged, only the i18n gets flattened.
+            row = dict_copy(meta)
+            # no such language, try "en-US", then use keypath
+            name = deep_get(row, ['i18n', lang])
+            if name is None:
+                name = deep_get(row, ['i18n', 'en-US'])
+                # still no luck, use key as name
+                if name is None:
+                    if card_name == '_info':
+                        name = nav_name
+                    else:
+                        name = card_name
+            # flatten i18n: keep the name of the requested language only
+            row['i18n'] = name
+            out[nav_name][card_name] = row
         return out
 
     def get_gui_config(self, mod_name, config_name, nav_name, lang):

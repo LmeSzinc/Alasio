@@ -36,9 +36,11 @@ class ModBase:
     def nav_index_data(self):
         """
         Returns:
-            dict[str, dict[str, dict[str, str]]]:
-                key: {nav_name}.{card_name}.{lang}
-                value: i18n translation
+            dict[str, dict[str, dict[str, Any]]]:
+                key: {nav_name}.{card_name}
+                value:
+                    {"i18n": {lang: name}} for normal cards
+                    {"scheduler": True, "i18n": {lang: name}} for cards with scheduler
         """
         file = self.path_config.joinpath('_index/nav.index.json')
         decoder = DECODER_CACHE.MODEL_DICT_DEPTH3_ANY

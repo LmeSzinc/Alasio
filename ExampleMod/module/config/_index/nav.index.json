@@ -1,152 +1,229 @@
 {
   "alas": {
     "_info": {
-      "zh-CN": "alas",
-      "en-US": "alas"
+      "i18n": {
+        "zh-CN": "alas",
+        "en-US": "alas"
+      }
     },
     "card-Alas-Game": {
-      "zh-CN": "Game",
-      "en-US": "Game"
+      "i18n": {
+        "zh-CN": "Game",
+        "en-US": "Game"
+      }
     },
     "card-Alas-Emulator": {
-      "zh-CN": "模拟器设置",
-      "en-US": "Emulator Settings"
+      "i18n": {
+        "zh-CN": "模拟器设置",
+        "en-US": "Emulator Settings"
+      }
     },
     "card-Alas-EmulatorInfo": {
-      "zh-CN": "模拟器设置",
-      "en-US": "Emulator Settings"
+      "i18n": {
+        "zh-CN": "模拟器设置",
+        "en-US": "Emulator Settings"
+      }
     },
     "card-Alas-Error": {
-      "zh-CN": "调试设置",
-      "en-US": "Debug Settings"
+      "i18n": {
+        "zh-CN": "调试设置",
+        "en-US": "Debug Settings"
+      }
     },
     "card-Alas-Optimization": {
-      "zh-CN": "优化设置",
-      "en-US": "Optimization Settings"
+      "i18n": {
+        "zh-CN": "优化设置",
+        "en-US": "Optimization Settings"
+      }
     },
     "card-RestartDeviceDisplay-RestartDevice": {
-      "zh-CN": "RestartDevice",
-      "en-US": "RestartDevice"
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "RestartDevice",
+        "en-US": "RestartDevice"
+      }
     },
     "card-RestartGameDisplay-RestartGame": {
-      "zh-CN": "RestartGame",
-      "en-US": "RestartGame"
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "RestartGame",
+        "en-US": "RestartGame"
+      }
     }
   },
   "general": {
     "_info": {
-      "zh-CN": "general",
-      "en-US": "general"
+      "i18n": {
+        "zh-CN": "general",
+        "en-US": "general"
+      }
     },
     "card-General-Retirement": {
-      "zh-CN": "Retirement",
-      "en-US": "Retirement"
+      "i18n": {
+        "zh-CN": "Retirement",
+        "en-US": "Retirement"
+      }
     },
     "card-General-OneClickRetire": {
-      "zh-CN": "OneClickRetire",
-      "en-US": "OneClickRetire"
+      "i18n": {
+        "zh-CN": "OneClickRetire",
+        "en-US": "OneClickRetire"
+      }
     },
     "card-General-Enhance": {
-      "zh-CN": "Enhance",
-      "en-US": "Enhance"
+      "i18n": {
+        "zh-CN": "Enhance",
+        "en-US": "Enhance"
+      }
     },
     "card-General-OldRetire": {
-      "zh-CN": "OldRetire",
-      "en-US": "OldRetire"
+      "i18n": {
+        "zh-CN": "OldRetire",
+        "en-US": "OldRetire"
+      }
     },
     "card-General-DropRecord": {
-      "zh-CN": "DropRecord",
-      "en-US": "DropRecord"
+      "i18n": {
+        "zh-CN": "DropRecord",
+        "en-US": "DropRecord"
+      }
     }
   },
   "main": {
     "_info": {
-      "zh-CN": "main",
-      "en-US": "main"
+      "i18n": {
+        "zh-CN": "main",
+        "en-US": "main"
+      }
     },
     "card-Main-Main": {
-      "zh-CN": "主线图",
-      "en-US": "Main"
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "主线图",
+        "en-US": "Main"
+      }
     },
     "card-Main-Campaign": {
-      "zh-CN": "Campaign",
-      "en-US": "Campaign"
+      "i18n": {
+        "zh-CN": "Campaign",
+        "en-US": "Campaign"
+      }
     },
     "card-Main-StopCondition": {
-      "zh-CN": "StopCondition",
-      "en-US": "StopCondition"
+      "i18n": {
+        "zh-CN": "StopCondition",
+        "en-US": "StopCondition"
+      }
     },
     "card-Main-Fleet": {
-      "zh-CN": "Fleet",
-      "en-US": "Fleet"
+      "i18n": {
+        "zh-CN": "Fleet",
+        "en-US": "Fleet"
+      }
     },
     "card-Main-Emotion": {
-      "zh-CN": "Emotion",
-      "en-US": "Emotion"
+      "i18n": {
+        "zh-CN": "Emotion",
+        "en-US": "Emotion"
+      }
     },
     "card-Main-Submarine": {
-      "zh-CN": "Submarine",
-      "en-US": "Submarine"
+      "i18n": {
+        "zh-CN": "Submarine",
+        "en-US": "Submarine"
+      }
     },
     "card-Main-HpControl": {
-      "zh-CN": "HpControl",
-      "en-US": "HpControl"
+      "i18n": {
+        "zh-CN": "HpControl",
+        "en-US": "HpControl"
+      }
     },
     "card-Main-EnemyPriority": {
-      "zh-CN": "EnemyPriority",
-      "en-US": "EnemyPriority"
+      "i18n": {
+        "zh-CN": "EnemyPriority",
+        "en-US": "EnemyPriority"
+      }
     },
     "card-Main-Hard": {
-      "zh-CN": "Campaign",
-      "en-US": "Campaign"
+      "i18n": {
+        "zh-CN": "Campaign",
+        "en-US": "Campaign"
+      }
     }
   },
   "opsi": {
     "_info": {
-      "zh-CN": "opsi",
-      "en-US": "opsi"
+      "i18n": {
+        "zh-CN": "opsi",
+        "en-US": "opsi"
+      }
     },
     "card-OpsiExplore-OpsiExplore": {
-      "zh-CN": "OpsiExplore",
-      "en-US": "OpsiExplore"
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "OpsiExplore",
+        "en-US": "OpsiExplore"
+      }
     },
     "card-OpsiDaily-OpsiDaily": {
-      "zh-CN": "OpsiDaily",
-      "en-US": "OpsiDaily"
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "OpsiDaily",
+        "en-US": "OpsiDaily"
+      }
     },
     "card-OpsiGeneral-OpsiGeneral": {
-      "zh-CN": "大世界通用设置",
-      "en-US": "OpsiGeneral"
+      "i18n": {
+        "zh-CN": "大世界通用设置",
+        "en-US": "OpsiGeneral"
+      }
     },
     "card-OpsiAshAssist-OpsiAshAssist": {
-      "zh-CN": "META支援",
-      "en-US": "Opsi AshAssist"
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "META支援",
+        "en-US": "Opsi AshAssist"
+      }
     }
   },
   "gems": {
     "_info": {
-      "zh-CN": "gems",
-      "en-US": "gems"
+      "i18n": {
+        "zh-CN": "gems",
+        "en-US": "gems"
+      }
     },
     "card-GemsFarming-GemsFarming": {
-      "zh-CN": "GemsFarming",
-      "en-US": "GemsFarming"
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "GemsFarming",
+        "en-US": "GemsFarming"
+      }
     },
     "card-GemsFarming-StopCondition": {
-      "zh-CN": "GemsStopCondition",
-      "en-US": "GemsStopCondition"
+      "i18n": {
+        "zh-CN": "GemsStopCondition",
+        "en-US": "GemsStopCondition"
+      }
     },
     "card-GemsFarming-Fleet1": {
-      "zh-CN": "Fleet",
-      "en-US": "Fleet"
+      "i18n": {
+        "zh-CN": "Fleet",
+        "en-US": "Fleet"
+      }
     },
     "card-GemsFarming-EquipmentCode": {
-      "zh-CN": "EquipmentCode",
-      "en-US": "EquipmentCode"
+      "i18n": {
+        "zh-CN": "EquipmentCode",
+        "en-US": "EquipmentCode"
+      }
     },
     "card-GemsFarming-Emotion1": {
-      "zh-CN": "GemsEmotionRecord",
-      "en-US": "GemsEmotionRecord"
+      "i18n": {
+        "zh-CN": "GemsEmotionRecord",
+        "en-US": "GemsEmotionRecord"
+      }
     }
   }
 }

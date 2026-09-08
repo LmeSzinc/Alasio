@@ -20,10 +20,14 @@
   let { onCardClick, onOverviewClick, onDeviceClick, viewport, class: className }: $props = $props();
 
   // --- WebSocket & RPC Setup ---
-  const topicClient = useTopic<Record<string, Record<string, string>>>("ConfigNav");
+  // ConfigNav topic data: {nav_name: {card_name: {i18n, scheduler?}}}
+  // "scheduler" marks cards that display a scheduler group, i.e. tasks
+  // that can be enabled in the scheduler
+  const topicClient = useTopic<Record<string, Record<string, ConfigNavCard>>>("ConfigNav");
 
   // --- Data Types ---
-  type CardItem = { key: string; name: string };
+  type ConfigNavCard = { i18n: string; scheduler?: boolean };
+  type CardItem = { key: string; name: string; scheduler: boolean };
   type NavItem = { key: string; name: string; cards: CardItem[] };
 
   // Derived state to transform raw topic data into a structured array for the UI.
@@ -32,13 +36,17 @@
 
     if (!navData) return [] as NavItem[];
 
-    return Object.entries(navData).map(([navKey, navData]) => {
+    return Object.entries(navData).map(([navKey, navEntry]) => {
       return {
         key: navKey,
-        name: navData._info || navKey,
-        cards: Object.entries(navData)
+        name: navEntry._info?.i18n || navKey,
+        cards: Object.entries(navEntry)
           .filter(([cardKey]) => cardKey !== "_info")
-          .map(([cardKey, cardName]) => ({ key: cardKey, name: cardName })),
+          .map(([cardKey, card]) => ({
+            key: cardKey,
+            name: card.i18n,
+            scheduler: card.scheduler === true,
+          })),
       };
     });
   });
@@ -121,7 +129,7 @@
     const navData = topicClient.data;
     if (ui.isOverview) return t.Overview.OverviewTitle();
     if (ui.isDevice) return t.Device.DeviceTitle();
-    return navData?.[ui.nav_name]?._info || ui.nav_name;
+    return navData?.[ui.nav_name]?._info?.i18n || ui.nav_name;
   });
   HeaderContext.use(header);
 </script>
@@ -164,6 +172,7 @@
                   <NavButton
                     name={card.name}
                     {active}
+                    scheduler={card.scheduler}
                     onclick={() => handleCardClick(nav.key, card.key)}
                     ondblclick={() => ui.triggerFlash(card.key)}
                   />

@@ -125,12 +125,15 @@ class GenNavIndex(CrossNavGenerator):
         data of nav.index.json
 
         Returns:
-            dict[str, dict[str, dict[str, str]]]:
-                key: {nav_name}.{card_name}.{lang}
-                value: i18n translation
+            dict[str, dict[str, dict[str, Any]]]:
+                key: {nav_name}.{card_name}
+                value:
+                    {"scheduler": True, "i18n": {lang: name}} for cards with scheduler
+                    {"i18n": {lang: name}} for cards without scheduler
 
-            {nav_name}._info.{lang} is manual maintained
-            {nav_name}.{card_name}.{lang} is auto generated from card.info
+            {nav_name}._info is manual maintained, its value is {"i18n": {lang: name}}
+            {nav_name}.{card_name} is auto generated from card.info,
+            "scheduler" is True when the card displays a "Scheduler" group
         """
         old = read_msgspec(self.nav_index_file)
         out = {}
@@ -144,7 +147,7 @@ class GenNavIndex(CrossNavGenerator):
                     break
             if config.tasks_data and not empty:
                 for lang in self.entry.gui_language:
-                    key = [nav_name, '_info', lang]
+                    key = [nav_name, '_info', 'i18n', lang]
                     value = deep_get(old, key, default='')
                     if not value:
                         value = nav_name
@@ -166,6 +169,11 @@ class GenNavIndex(CrossNavGenerator):
                 except KeyError:
                     raise DefinitionError(
                         f'Card "{nav_name}.{card_name}._info" reference a non-exist group: "{group_name}"')
-                deep_set(out, [nav_name, card_name], name)
+                row = {}
+                # a card has scheduler when it displays a group named "Scheduler"
+                if any(group == 'Scheduler' for group in data):
+                    row['scheduler'] = True
+                row['i18n'] = name
+                deep_set(out, [nav_name, card_name], row)
 
         return out
