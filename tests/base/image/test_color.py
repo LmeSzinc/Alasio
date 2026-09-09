@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from alasio.base.image.color import (
-    color_similarity_2d, extract_letters, extract_white_letters, rgb2luma, rgb565_to_rgb888
+    color_mask, color_similarity_2d, extract_letters, extract_white_letters, rgb2luma, rgb565_to_rgb888
 )
 
 
@@ -226,6 +226,47 @@ class TestColorSimilarity2d:
             reference = self.reference(block, color)
             assert np.array_equal(result, reference), \
                 f"color={color} block {index}"
+
+
+class TestColorMask:
+    """color_mask must match color_similarity_2d followed by cv2.inRange"""
+
+    @staticmethod
+    def reference(image, color, threshold):
+        """
+        Unoptimized reference algorithm, copied from the comments in color.py
+
+        Args:
+            image (np.ndarray): 2D BGR image
+            color (tuple): (r, g, b)
+            threshold (int):
+
+        Returns:
+            np.ndarray: uint8
+        """
+        similarity = color_similarity_2d(image, color)
+        return cv2.inRange(similarity, 255 - threshold, 255)
+
+    @pytest.mark.parametrize("color", [
+        (128, 100, 200),
+        (0, 0, 0),
+        (255, 255, 255),
+        (10, 245, 3),
+    ])
+    @pytest.mark.parametrize("threshold", [1, 30, 255])
+    def test_matches_reference(self, rgb888_image, color, threshold):
+        # Large image path (per-channel, >= 30000 pixels)
+        result = color_mask(rgb888_image, color, threshold)
+        reference = self.reference(rgb888_image, color, threshold)
+        assert np.array_equal(result, reference), \
+            f"color={color} threshold={threshold}"
+        # Small image path (< 30000 pixels): every 125x125 block together
+        # covers the full color space
+        for index, block in enumerate(color_blocks(rgb888_image)):
+            result = color_mask(block, color, threshold)
+            reference = self.reference(block, color, threshold)
+            assert np.array_equal(result, reference), \
+                f"color={color} threshold={threshold} block {index}"
 
 
 class TestExtractLetters:
