@@ -61,7 +61,7 @@ class PerformanceTest:
 
         # Format positional arguments
         for arg in args:
-            if hasattr(arg, '__module__') and hasattr(arg, 'shape') and 'numpy' in str(type(arg)):
+            if hasattr(arg, 'shape') and 'numpy' in str(type(arg)):
                 # Handle numpy arrays without importing numpy
                 parts.append(f"array{getattr(arg, 'shape', '(?)')}")
             else:
@@ -69,7 +69,7 @@ class PerformanceTest:
 
         # Format keyword arguments
         for key, value in kwargs.items():
-            if hasattr(value, '__module__') and hasattr(value, 'shape') and 'numpy' in str(type(value)):
+            if hasattr(value, 'shape') and 'numpy' in str(type(value)):
                 parts.append(f"{key}=array{getattr(value, 'shape', '(?)')}")
             else:
                 parts.append(f"{key}={value}")
@@ -102,7 +102,9 @@ class PerformanceTest:
             str: Formatted output string
         """
         # Check if it's a numpy array without importing numpy
-        if hasattr(output, '__module__') and hasattr(output, 'shape') and 'numpy' in str(type(output)):
+        # note that numpy.ndarray has no __module__ attribute in some versions,
+        # so detection relies on shape and the type string only
+        if hasattr(output, 'shape') and 'numpy' in str(type(output)):
             shape = getattr(output, 'shape', 'unknown')
             dtype = getattr(output, 'dtype', 'unknown')
 
