@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import type { CardData } from "$lib/components/arg/utils.svelte";
   import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "$lib/components/ui/accordion";
   import { t } from "$lib/i18n";
   import { HeaderContext } from "$lib/slotcontext.svelte";
@@ -25,14 +26,44 @@
   // that can be enabled in the scheduler
   const topicClient = useTopic<Record<string, Record<string, ConfigNavCard>>>("ConfigNav");
 
+  // ConfigArg topic data of the displayed nav: {card_name: {group_name: {arg_name: ArgData}}}
+  // Same data as the arg page, so the enable state of a task can be read from it
+  const argClient = useTopic<Record<string, CardData>>("ConfigArg");
+
   // --- Data Types ---
   type ConfigNavCard = { i18n: string; scheduler?: boolean };
-  type CardItem = { key: string; name: string; scheduler: boolean };
+  type CardItem = { key: string; name: string; scheduler: boolean | undefined };
   type NavItem = { key: string; name: string; cards: CardItem[] };
+
+  /**
+   * Scheduler state of a card, drawn as a dot on its NavButton:
+   * true when the task is enabled, false when disabled, undefined when the
+   * card is not a task or the state is not known.
+   *
+   * @param isTask Whether the card displays a scheduler group (ConfigNav topic)
+   * @param cardData Card data of the ConfigArg topic; the topic only holds the
+   *     data of the displayed nav, so cards of another nav have no data
+   */
+  function getSchedulerState(isTask: boolean, cardData: CardData | undefined): boolean | undefined {
+    // Not a task, nothing can be enabled in the scheduler
+    if (!isTask) {
+      return undefined;
+    }
+    // Scheduler.Enable is the enable state of the task, dt="enable" stores a
+    // boolean, dt="static" stores the literal "enabled" for a task that can
+    // never be disabled
+    const enable = cardData?.Scheduler?.Enable;
+    if (enable?.dt === "static") {
+      return true;
+    }
+    const value: unknown = enable?.value;
+    return typeof value === "boolean" ? value : undefined;
+  }
 
   // Derived state to transform raw topic data into a structured array for the UI.
   const navItems = $derived.by(() => {
     const navData = topicClient.data;
+    const argData = argClient.data;
 
     if (!navData) return [] as NavItem[];
 
@@ -45,7 +76,7 @@
           .map(([cardKey, card]) => ({
             key: cardKey,
             name: card.i18n,
-            scheduler: card.scheduler === true,
+            scheduler: getSchedulerState(card.scheduler === true, argData?.[cardKey]),
           })),
       };
     });
