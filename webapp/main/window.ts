@@ -10,6 +10,7 @@ import {
 } from "../shared/ipc";
 import { appState } from "./app-state";
 import { ShutdownStage, shutdownBackend } from "./backend";
+import { type StartupWindowMode, getStartupWindowMode } from "./startup-args";
 
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
@@ -21,14 +22,18 @@ export function createWindow(): BrowserWindow {
   // app/error) the first paint lands on is already complete. In dev mode
   // the window shows immediately — the developer drives navigation
   // manually through the dev route switcher and expects the window right
-  // away.
+  // away. An explicit --window mode overrides the dev shortcut as well: it
+  // is a deliberate choice, and the only way to exercise the startup modes
+  // against the dev server.
   const isDev = !!process.env.VITE_DEV_SERVER_URL;
+  const windowMode = getStartupWindowMode();
+  const showImmediately = isDev && windowMode === "default";
   mainWindow = new BrowserWindow({
     width: 960,
     height: 660,
     frame: false,
     title: "Alasio",
-    show: isDev,
+    show: showImmediately,
     // Match the native window background to the display theme (values are
     // the renderer's --background tokens) so no white flash appears while
     // the renderer is still loading. The renderer paints its own themed
@@ -68,9 +73,9 @@ export function createWindow(): BrowserWindow {
   // show: whatever route (loading/setup/app/error) the first layout lands
   // on is already complete, and showing any earlier would re-open the
   // desktop-through race above.
-  if (!isDev) {
+  if (!showImmediately) {
     mainWindow.once("ready-to-show", () => {
-      mainWindow?.show();
+      showWindow(windowMode);
     });
   }
 
@@ -111,6 +116,43 @@ export function createWindow(): BrowserWindow {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   return mainWindow;
+}
+
+/**
+ * Reveal the created window in the requested startup mode.
+ *
+ * The window is brought into its startup state *before* it can be seen,
+ * never after: `--window=minimize` must not show the window first and
+ * minimize it afterwards, and the same holds for `--window=maximize`.
+ * Measured on windows with electron 22.3.27, sampling a hidden window
+ * every 5ms:
+ *
+ * - `minimize()` shows the window already minimized (the very first
+ *   sample reads visible + minimized, no intermediate normal state). A
+ *   `show()` afterwards would undo it — it emits `restore` and leaves the
+ *   window un-minimized — so it is not called here.
+ * - `maximize()` shows the window already maximized (same argument). The
+ *   `show()` afterwards keeps the maximized state and adds the focus,
+ *   matching what the default mode does.
+ * - `tray` never shows the window at all: it stays hidden until the user
+ *   picks "Show" in the tray menu, or launches the client a second time
+ *   (the second-instance handler in main/index.ts reveals the window).
+ *
+ * @param mode Startup mode requested through the command line
+ */
+function showWindow(mode: StartupWindowMode) {
+  const target = mainWindow;
+  if (!target || mode === "tray") {
+    return;
+  }
+  if (mode === "minimize") {
+    target.minimize();
+    return;
+  }
+  if (mode === "maximize") {
+    target.maximize();
+  }
+  target.show();
 }
 
 export function getMainWindow(): BrowserWindow | null {
