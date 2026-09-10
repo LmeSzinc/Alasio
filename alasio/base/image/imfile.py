@@ -66,15 +66,13 @@ def image_shape(image):
 
 def image_copy(src):
     """
-    Equivalent to image.copy() but a little bit faster
+    Equivalent to image.copy()
 
-    Time cost to copy a 1280*720*3 image:
-        image.copy()      0.743ms
-        image_copy(image) 0.639ms
+    Time cost to copy a 1280*720*3 image (numpy 1.24.4, opencv 4.13.0):
+        src.copy()                                  0.57ms
+        np.empty_like + cv2.copyTo(src, None, dst)  0.65ms
     """
-    dst = np.empty_like(src)
-    cv2.copyTo(src, None, dst)
-    return dst
+    return src.copy()
 
 
 def crop(image, area, copy=True):
