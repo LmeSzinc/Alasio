@@ -8,8 +8,15 @@ alasio/backend/worker/bridge.py) so test code never gets mixed into runtime
 code. Tests patch WorkerManager.WORKER_ENTRY to worker_test_entry, which
 dispatches to the worker functions by mod name.
 """
+import time
+
 from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
+from alasio.logger import logger
+
+# Long enough that "the worker is still alive" is only explicable by a worker
+# that survived its backend (the test that uses it waits 5s, not 60s)
+WORKER_TEST_SLEEP_SECONDS = 60.0
 
 
 def worker_test_infinite():
@@ -57,6 +64,33 @@ def worker_test_scheduler():
         else:
             backend.test_wait.wait(timeout=0.05)
             continue
+
+
+def worker_test_sleep():
+    # A worker that sleeps in short chunks: an injected KeyboardInterrupt is
+    # delivered between two chunks, so it stops without being killed
+    # Logging is muted to keep the test from writing into the real log directory
+    logger.mute(all=True)
+    # Report "sleeping" through the worker state: the backend side of the test
+    # waits for it, so the mute is in effect and the sleep is really running
+    # before the backend is killed
+    BackendBridge().send_worker_state('scheduler-waiting')
+    try:
+        deadline = time.monotonic() + WORKER_TEST_SLEEP_SECONDS
+        while time.monotonic() < deadline:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        # the injected stop of BackendBridge, exit quietly
+        return
+
+
+def worker_test_sleep_long():
+    # A worker that blocks in one long sleep: an injected KeyboardInterrupt is
+    # only delivered when that sleep returns, so only being terminated directly
+    # can stop it
+    logger.mute(all=True)
+    BackendBridge().send_worker_state('scheduler-waiting')
+    time.sleep(WORKER_TEST_SLEEP_SECONDS)
 
 
 def worker_test_send_events():
@@ -117,5 +151,7 @@ WORKER_TEST_MODS = {
     'WorkerTestRun3': worker_test_run3,
     'WorkerTestError': worker_test_error,
     'WorkerTestScheduler': worker_test_scheduler,
+    'WorkerTestSleep': worker_test_sleep,
+    'WorkerTestSleepLong': worker_test_sleep_long,
     'WorkerTestSendEvents': worker_test_send_events,
 }

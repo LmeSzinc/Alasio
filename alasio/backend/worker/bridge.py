@@ -11,7 +11,8 @@
 import importlib
 import os
 import sys
-from threading import Event, Lock, Thread, get_ident
+import time
+from threading import Event, Lock, Thread, get_ident, main_thread
 from typing import Literal
 
 from msgspec.msgpack import Decoder, Encoder
@@ -23,6 +24,29 @@ from alasio.ext.cache import cached_property
 from alasio.ext.path.calc import to_python_import
 from alasio.ext.singleton import Singleton
 from alasio.logger import logger
+
+# Exit code of a worker that terminated itself because its backend is gone, so
+# a postmortem can tell it apart from a scheduler crash and a graceful stop.
+BACKEND_LOST_EXIT_CODE = 3
+
+# Seconds to wait for an injected KeyboardInterrupt to unwind the scheduler
+# before the worker process is terminated directly. A scheduler blocked in a
+# native call (one long time.sleep, a socket read, an adb round trip) never sees
+# the exception, it survives this wait and gets terminated.
+BACKEND_LOST_KILL_WAIT_TIMEOUT = 0.5
+
+
+def _exit_process(code):
+    """
+    Terminate this process immediately
+
+    A function instead of a bare os._exit() call so tests can intercept it: a
+    real exit inside a test process would kill the test runner.
+
+    Args:
+        code (int): Process exit code
+    """
+    os._exit(code)
 
 
 def mod_entry(mod_name, config_name, child_conn, project_root='', mod_root='', path_main=''):
@@ -117,6 +141,10 @@ class BackendBridge(metaclass=Singleton):
         self.test_wait = Event()
 
         # send thread
+        # running: the bridge is alive and its backend is still there.
+        # Cleared by close() (before the pipe is closed) and by
+        # _handle_backend_lost() on pipe EOF, both of which turn send() into a
+        # no-op and make the pipe loops stop.
         self.running = True
         # 初始为空，稍后存放 (bytes, threading.Lock)
         self._task_slot: "tuple[bytes, Lock] | None" = None
@@ -181,8 +209,10 @@ class BackendBridge(metaclass=Singleton):
              即使实例属性在下一毫秒被新任务覆盖，Worker 手中的锁依然能正确通知对应的旧任务调用者。
         """
         conn = self.conn
-        if not conn:
-            # allow worker running without backend
+        if not conn or not self.running:
+            # allow worker running without backend, and drop events once the
+            # backend is gone: blocking the caller on a send worker that never
+            # runs again is worse than losing the event
             return Lock()
 
         data = self._encoder.encode(event)
@@ -216,6 +246,71 @@ class BackendBridge(metaclass=Singleton):
             # 下一个调用者进来后，会在步骤 2 被阻塞，直到 Worker 完成本次任务。
             self._mutex.release()
 
+    def _handle_backend_lost(self):
+        """
+        Stop the worker when the backend pipe reaches EOF
+
+        Called by the recv loop: the backend crashed, was force killed or was
+        shut down, nobody will ever consume worker events again, and a worker
+        left behind keeps driving the device with nobody watching it.
+
+        Two steps, the first one that works wins:
+
+        1. inject a KeyboardInterrupt into the scheduler thread, the same thing
+           the "killing" command does: a scheduler running python code unwinds
+           and the process exits by itself. The injection is only delivered when
+           that thread reaches a python bytecode boundary, so it cannot stop a
+           scheduler blocked in a native call.
+        2. if the scheduler thread is still running after
+           BACKEND_LOST_KILL_WAIT_TIMEOUT, terminate the process directly.
+           Skipping the scheduler cleanup is deliberate: it only holds task
+           state, device connections and log buffers, which the interpreter and
+           the OS reclaim when the process exits.
+        """
+        if not self.running:
+            # close() closed the pipe (it clears `running` before touching the
+            # pipe): that EOF is ours, the worker is shutting itself down and
+            # must not be stopped here
+            return
+
+        self.running = False
+        # logged before the stop, the log file is flushed per line
+        logger.warning(f'[BackendBridge] Backend disconnected, stopping worker: "{self.config_name}"')
+        _async_raise(self.main_tid)
+
+        # step 2: the injected exception is useless when the scheduler thread
+        # never gets back to python code (it stays pending until the blocking
+        # call returns)
+        deadline = time.monotonic() + BACKEND_LOST_KILL_WAIT_TIMEOUT
+        while time.monotonic() < deadline:
+            if not main_thread().is_alive():
+                # the injection worked, the process is exiting by itself
+                return
+            time.sleep(0.05)
+
+        logger.warning(f'[BackendBridge] Scheduler did not stop in {BACKEND_LOST_KILL_WAIT_TIMEOUT}s, '
+                       f'terminating: "{self.config_name}"')
+        _exit_process(BACKEND_LOST_EXIT_CODE)
+
+    def _release_pending_task(self):
+        """
+        Release the task lock of a task slot that will never be sent
+
+        The send loop can stop while a task slot is still pending (the sender
+        was woken by a task published in the race window of a shutdown), its
+        caller is blocked on that lock and would never be woken up otherwise.
+        """
+        try:
+            _, task_lock = self._task_slot
+        except (TypeError, ValueError):
+            # no task pending, nothing to release
+            return
+        try:
+            task_lock.release()
+        except RuntimeError:
+            # already released by the send loop
+            pass
+
     def _send_loop(self):
         """
         后台 Worker 线程逻辑
@@ -231,6 +326,9 @@ class BackendBridge(metaclass=Singleton):
             wait_for_work()
 
             if not self.running:
+                # stopping: a task may have been published right before, its
+                # caller is waiting on the task lock and must be released
+                self._release_pending_task()
                 break
 
             try:
@@ -254,12 +352,17 @@ class BackendBridge(metaclass=Singleton):
                 logger.error(f'[BackendBridge] Failed to send command: pipe connection not initialized')
                 return False
             except (EOFError, OSError):
-                self.running = False
-                # if pipe is already closed, failed silently,
-                # and don't try to log back into the pipe to avoid deadlock
+                # pipe broken, the backend is gone: drop this event, the recv
+                # loop owns the backend-lost handling (this loop must never
+                # clear `running`, a cleared flag here would make a lost backend
+                # look like close() to the recv loop). Keep looping: a caller
+                # that is already waiting on a task lock is released by the
+                # finally below, and the next wake-up stops this loop, because
+                # the recv loop clears `running`
+                # don't try to log back into the pipe to avoid deadlock
                 # from alasio.logger import logger
                 # logger.error(f'[BackendBridge] Failed to send command: pipe broken')
-                return False
+                pass
             except Exception as e:
                 logger.error(f'[BackendBridge] Failed to send command: {e}')
             finally:
@@ -313,11 +416,12 @@ class BackendBridge(metaclass=Singleton):
             try:
                 data = conn.recv_bytes()
             except (EOFError, OSError):
-                self.running = False
-                # handle error silently
-                # and don't try to log back into the pipe to avoid deadlock
+                # the backend is gone for good: stop the worker instead of
+                # leaving it running as an orphan
+                # don't try to log back into the pipe to avoid deadlock
                 # from alasio.logger import logger
                 # logger.error(f'[BackendBridge] Failed to recv command: pipe broken')
+                self._handle_backend_lost()
                 return False
             except Exception as e:
                 logger.error(f'[BackendBridge] Failed to recv command: {e}')
@@ -340,7 +444,9 @@ class BackendBridge(metaclass=Singleton):
         if not self.inited:
             return
 
-        # Set closing flag to stop threads from logging errors
+        # Set closing flag to stop threads from logging errors. It must be
+        # cleared before the pipe is closed: the pipe loops use `running` to
+        # tell an EOF caused by this close from an EOF caused by a dead backend.
         self.running = False
 
         # Close and NULLIFY connection to unblock recv_bytes() call
