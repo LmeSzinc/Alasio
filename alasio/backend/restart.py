@@ -487,7 +487,7 @@ async def run_graceful_restart(manager=None, hooks=None):
         GRACEFUL_RESTART.scope = scope
         try:
             try:
-                manager.restart_begin()
+                waiting = manager.restart_begin()
             except Exception as e:
                 # already restarting (the rpc re-entry guard makes this
                 # unreachable) or nothing to begin: release the rpc flag
@@ -496,8 +496,12 @@ async def run_graceful_restart(manager=None, hooks=None):
                 return
 
             push_restart_phase('stopping')
-            logger.info('[Restart] Graceful restart requested, waiting up to '
-                        f'{GRACEFUL_STOP_TIMEOUT:.0f}s for the workers to stop')
+            # the returned list is the whole waiting set of this restart (the
+            # final resume list is the return value of restart_wait later)
+            logger.info(
+                f'[Restart] Graceful restart requested, '
+                f'waiting up to {GRACEFUL_STOP_TIMEOUT:.0f}s for the workers to stop, '
+                f'waiting for: {waiting}')
 
             # 1) block for every worker to stop; the wait lives in the manager
             #    (thread-safe, no trio), the timeout escalation happens inside
@@ -528,7 +532,7 @@ async def run_graceful_restart(manager=None, hooks=None):
             #    The success path does NOT release the gate: it stays until the
             #    process exits, so no worker is started (and lost) in between
             push_restart_phase('shutting-down')
-            logger.info(f'[Restart] All workers stopped, restarting backend, resume_list={resume_list}')
+            logger.info(f'[Restart] All workers stopped, restarting backend, resume list: {resume_list}')
             await lifespan_restart()
         except trio.Cancelled:
             # the cancel path (cancel_graceful_restart) owns the cleanup

@@ -61,12 +61,22 @@ def mod_entry(mod_name, config_name, child_conn, project_root='', mod_root='', p
         mod_root:
         path_main:
     """
+    # Test mods are defined in tests/backend/worker/worker_mods.py to keep
+    # test code out of runtime, import lazily on demand.
+    # A test worker is silenced BEFORE the bridge starts: the bridge recv
+    # thread logs the command handling, and the parent can send a command as
+    # soon as the worker reported "running" (the end of init), so a mute after
+    # init would race with the first log line and leave a log file behind.
+    is_test_mod = mod_name.startswith('WorkerTest')
+    if is_test_mod:
+        from tests.backend.worker.worker_mods import WORKER_TEST_MODS, mute_test_worker_logging
+
+        # a test worker must not open a log file in the real log directory
+        mute_test_worker_logging()
+
     BackendBridge().init(mod_name, config_name, child_conn)
 
-    # Test mods are defined in tests/backend/worker/worker_mods.py to keep
-    # test code out of runtime, import lazily on demand
-    if mod_name.startswith('WorkerTest'):
-        from tests.backend.worker.worker_mods import WORKER_TEST_MODS
+    if is_test_mod:
         try:
             worker = WORKER_TEST_MODS[mod_name]
         except KeyError:

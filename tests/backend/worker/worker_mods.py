@@ -19,6 +19,23 @@ from alasio.logger import logger
 WORKER_TEST_SLEEP_SECONDS = 60.0
 
 
+def mute_test_worker_logging():
+    """
+    Keep a test worker process from opening a log file in the log directory
+
+    Called by bridge.mod_entry for every "WorkerTest*" mod BEFORE the bridge
+    starts: the worker process would otherwise open log/{date}_{config}.txt in
+    the project log directory, one leftover file per test worker (many per
+    full run).
+
+    The call runs before BackendBridge.init() on purpose: the bridge recv
+    thread logs the command handling, and the parent can send a command as
+    soon as the worker reported "running" (the end of init), so a mute after
+    init races with the first log line (verified: the file was still created).
+    """
+    logger.mute(fd=True)
+
+
 def worker_test_infinite():
     # A worker that runs infinitely
     backend = BackendBridge()

@@ -111,12 +111,34 @@ class TestRestartBegin:
         b = add_state(manager, 'cfg_b', 'scheduler-waiting')
         c = add_state(manager, 'cfg_c', 'starting')
 
-        manager.restart_begin()
+        waiting = manager.restart_begin()
 
         for worker in (a, b, c):
             assert worker.pending_restart is True
             # the graceful stop was requested
             assert worker.state == 'scheduler-stopping'
+        # the return value is the waiting set of the restart (for the caller's log)
+        assert waiting == ['cfg_a', 'cfg_b', 'cfg_c']
+
+    def test_returns_the_waiting_set(self, manager, no_send):
+        """
+        The returned list covers every worker the wait will wait for: the ones
+        this begin stopped plus the ones already stopping from an earlier
+        request. Stopped / parked entries are not part of the wait.
+        """
+        add_state(manager, 'cfg_run', 'running')
+        add_state(manager, 'cfg_stop', 'scheduler-stopping')
+        add_state(manager, 'cfg_kill', 'killing')
+        add_state(manager, 'cfg_err', 'error')
+        add_state(manager, 'cfg_parked', 'restarting', pending_restart=True)
+
+        waiting = manager.restart_begin()
+
+        assert waiting == ['cfg_kill', 'cfg_run', 'cfg_stop']
+
+    def test_returns_empty_without_workers(self, manager, no_send):
+        """No worker to wait for: the list is empty"""
+        assert manager.restart_begin() == []
 
     def test_non_running_states_are_not_marked(self, manager, no_send):
         # a worker the user already asked to stop: the old intent wins

@@ -67,7 +67,11 @@ class SpawnSafeManager(WorkerManager):
         return self._spawn_safe(super().worker_resume, *args, **kwargs)
 
     def _spawn_safe(self, func, *args, **kwargs):
+        # the fake filesystem is lifted for the spawn (multiprocessing needs the
+        # real os.*): re-mute the log file target, or a log line inside this
+        # window would open a real log file under the fake PROJECT_ROOT
         LogWriter().close_fd()
+        LogWriter().mute(fd=True)
         self._fs.deactivate()
         try:
             return func(*args, **kwargs)
@@ -91,20 +95,6 @@ def fake_fs():
     yield fake
     LogWriter().close_fd()
     fake.deactivate()
-
-
-@pytest.fixture(autouse=True)
-def mute_log_file():
-    """
-    Never write into the real log directory
-
-    The fake filesystem is lifted around process spawns, a log write in that
-    window would open the real file under a PROJECT_ROOT pointing into the fake
-    root (i.e. on the real disk).
-    """
-    LogWriter().mute(fd=True)
-    yield
-    LogWriter().mute_clear()
 
 
 @pytest.fixture
@@ -370,7 +360,14 @@ class TestRunGracefulRestart:
         credentials = []
         monkeypatch.setattr(restart, 'announce_resume_token', credentials.append)
 
-        await run_graceful_restart(manager)
+        with logger.mock_capture_writer() as capture:
+            await run_graceful_restart(manager)
+            # the log names every config the wait covers
+            assert capture.fd.any_contains(
+                "waiting up to 600s for the workers to stop, waiting for: ['cfg_a', 'cfg_b']")
+            # and the final resume list handed to the backend restart
+            assert capture.fd.any_contains(
+                "restarting backend, resume list: ['cfg_a', 'cfg_b']")
 
         assert calls == ['restart']
         # both workers stopped for the restart
@@ -445,7 +442,9 @@ class TestRunGracefulRestart:
         monkeypatch.setattr(restart, 'announce_resume_token', credentials.append)
 
         started = time.monotonic()
-        await run_graceful_restart(manager)
+        with logger.mock_capture_writer() as capture:
+            await run_graceful_restart(manager)
+            assert capture.fd.any_contains('waiting for: []')
         # no worker: no wait, no file, no credential, just the restart
         assert time.monotonic() - started < 2
         assert calls == ['restart']

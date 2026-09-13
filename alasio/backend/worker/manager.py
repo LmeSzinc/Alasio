@@ -691,7 +691,7 @@ class WorkerManager(metaclass=Singleton):
 
     # ---------------- graceful restart orchestration ----------------
 
-    def restart_begin(self) -> None:
+    def restart_begin(self) -> "List[str]":
         """
         Begin a graceful backend restart
 
@@ -701,6 +701,13 @@ class WorkerManager(metaclass=Singleton):
         auto-resume ("resuming") into "restarting" so this restart collects
         them too. The stop requests are sent outside the lock. The call
         returns immediately, the wait belongs to restart_wait().
+
+        Returns:
+            List[str]: Sorted configs the wait will cover -- every worker that
+                is not stopped yet, including the ones already stopping from
+                an earlier request. Meant for the caller's log ("waiting for
+                these configs"); the final resume list is the return value of
+                restart_wait()
 
         Raises:
             RuntimeError: When a graceful restart is already in progress
@@ -727,12 +734,15 @@ class WorkerManager(metaclass=Singleton):
             for state in list(self.state.values()):
                 if state.state == 'resuming':
                     self._set_state(state, 'restarting')
+            waiting = self._restart_pending_configs_locked()
 
         # send the graceful stop requests outside the lock (worker_scheduler_stop
         # takes the lock itself); a "starting" worker gets the command queued
         # in the pipe and exits from its earliest checkpoint
         for state in running:
             self.worker_scheduler_stop(state.config)
+
+        return waiting
 
     def restart_wait(self, timeout=None) -> "List[str]":
         """
@@ -809,6 +819,17 @@ class WorkerManager(metaclass=Singleton):
         """
         Configs still waiting to stop for the graceful restart
 
+        Returns:
+            List[str]: Sorted config names, see
+                _restart_pending_configs_locked()
+        """
+        with self._lock:
+            return self._restart_pending_configs_locked()
+
+    def _restart_pending_configs_locked(self) -> "List[str]":
+        """
+        Configs the graceful restart wait covers (lock required)
+
         A worker counts as stopped when its entry is gone (idle) or its state
         is idle / error / restarting; "disconnected" is transient (the
         disconnect handler is finishing its cleanup) and keeps the wait going.
@@ -816,11 +837,10 @@ class WorkerManager(metaclass=Singleton):
         Returns:
             List[str]: Sorted config names
         """
-        with self._lock:
-            return sorted(
-                config for config, state in self.state.items()
-                if state.state not in ['idle', 'error', 'restarting']
-            )
+        return sorted(
+            config for config, state in self.state.items()
+            if state.state not in ['idle', 'error', 'restarting']
+        )
 
     def _restart_resume_list(self) -> "List[str]":
         """
