@@ -25,6 +25,31 @@ def clear_init_event(parent_conn, timeout=0.1):
         assert init_event.v == 'running'
 
 
+def recv_with_timeout(parent_conn, timeout=5.0):
+    """
+    Receive one message, waiting at most timeout seconds
+
+    Replaces the "give the background thread some time" sleeps: the wait ends
+    as soon as the message arrives, and a lost message fails the test instead
+    of hanging it.
+
+    Args:
+        parent_conn: Parent end of the pipe connection
+        timeout (float): Seconds to wait at most
+
+    Returns:
+        bytes: The received payload
+
+    Raises:
+        AssertionError: If nothing arrived in time
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if parent_conn.poll(timeout=0.01):
+            return parent_conn.recv_bytes()
+    raise AssertionError(f'No message received within {timeout}s')
+
+
 @pytest.fixture
 def bridge_instance():
     """Create a BackendBridge instance with mocked pipe connection"""
@@ -309,12 +334,10 @@ def test_send_without_acquire(bridge_instance):
     for event in events:
         bridge.send(event)  # Don't call acquire on returned lock
 
-    # Give some time for background thread to process
-    time.sleep(0.2)
-
-    # Receive all events and verify
+    # Receive all events and verify: wait for each message itself instead of
+    # sleeping a fixed time
     for expected_event in events:
-        received_data = parent_conn.recv_bytes()
+        received_data = recv_with_timeout(parent_conn)
         received_event = decode(received_data, type=ConfigEvent)
         assert received_event.t == expected_event.t
         assert received_event.v == expected_event.v

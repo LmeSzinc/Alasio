@@ -160,11 +160,15 @@ class TestLoginLayer:
             await harness.wait_connected()
             # public topic subscribable
             harness.send_sub('mixed')
-            await trio.sleep(0.1)
+            # wait for the subscription to take effect instead of sleeping
+            await harness.wait_for(lambda: 'mixed' in harness.server.subscribed,
+                                   description='the mixed topic subscription')
             assert harness.fake_ws.application_state == WebSocketState.CONNECTED
             # restricted rpc refused with ElectronOnlyError + rpc_id
             harness.send_rpc('mixed', 'private_op', rpc_id='r1')
-            await trio.sleep(0.1)
+            await harness.wait_for(
+                lambda: any(e.get('i') == 'r1' for e in event_dicts(harness.fake_ws)),
+                description='the rpc error reply')
             errors = [e for e in event_dicts(harness.fake_ws) if e.get('i') == 'r1']
             assert len(errors) == 1
             assert 'ElectronOnlyError' in errors[0]['v']
@@ -197,8 +201,10 @@ class TestRestrictedTopic:
             nursery.start_soon(harness.run_serve)
             await harness.wait_connected()
             harness.send_sub('restricted')
-            await trio.sleep(0.1)
             # error message sent
+            await harness.wait_for(
+                lambda: any(e.get('t') == 'error' for e in event_dicts(harness.fake_ws)),
+                description='the restricted topic error')
             errors = [e for e in event_dicts(harness.fake_ws) if e.get('t') == 'error']
             assert len(errors) == 1
             assert 'Topic requires electron' in errors[0]['v']
@@ -293,7 +299,9 @@ class TestRenewal:
             nursery.start_soon(harness.run_serve)
             await harness.wait_connected()
             harness.send(RequestEvent(t='', o='auth', v=code))
-            await trio.sleep(0.1)
+            await harness.wait_for(
+                lambda: any(e.get('t') == 'error' for e in event_dicts(harness.fake_ws)),
+                description='the expired renewal code error')
             errors = [e for e in event_dicts(harness.fake_ws) if e.get('t') == 'error']
             assert len(errors) == 1
             assert 'Invalid or expired renewal code' in errors[0]['v']
@@ -316,7 +324,8 @@ class TestRenewal:
             nursery.start_soon(harness.run_serve)
             await harness.wait_connected()
             harness.send_sub('restricted')
-            await trio.sleep(0.1)
+            await harness.wait_for(lambda: 'restricted' in harness.server.subscribed,
+                                   description='the restricted topic subscription')
             assert 'restricted' in harness.server.subscribed
             # rotate: tok2 enters, tok1 still in the window
             token_table.handle_token('tok2')

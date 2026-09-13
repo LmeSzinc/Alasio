@@ -286,6 +286,27 @@ class ServerHarness:
                     continue
                 return
 
+    async def wait_for(self, predicate, timeout=2.0, interval=0.01, description='condition'):
+        """
+        Wait until the predicate holds (event driven, no fixed sleep)
+
+        The server runs in another task of the same nursery, so "send a message
+        and sleep long enough" is a race: this returns as soon as the server
+        produced the expected state and fails loudly when it never does.
+
+        Args:
+            predicate (callable): Returns True once the expected state is there
+            timeout (float): Seconds to wait at most
+            interval (float): Poll interval
+            description (str): What is being waited for, used in the error
+        """
+        deadline = trio.current_time() + timeout
+        while trio.current_time() < deadline:
+            if predicate():
+                return
+            await trio.sleep(interval)
+        raise AssertionError(f'Timeout waiting for {description}')
+
     async def stop(self):
         """
         Stop the server gracefully: closing the inbox makes task_recv exit,

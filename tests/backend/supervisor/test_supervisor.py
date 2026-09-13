@@ -83,7 +83,7 @@ class TestSupervisor:
         # Case 1: interrupt before the startup confirmation. The silent
         # backend never confirms startup through the pipe, so an interrupt
         # sent right after "Backend running on PID:" lands while recv_loop
-        # is still in the startup window (far before the 5s timeout). The
+        # is still in the startup window (far before the startup timeout). The
         # interrupt aborts the startup wait, so the timeout log can never
         # be emitted; asserting its absence after exit verifies the
         # interrupt really was processed inside the startup window.
@@ -92,7 +92,9 @@ class TestSupervisor:
             proc.send_interrupt()
             proc.wait_for_exit(timeout=15)
             assert proc.has_output("initiating graceful shutdown")
-            assert not proc.has_output("Backend running for 5.0s, startup successful")
+            # prefix only: the line carries the configured timeout, asserting
+            # the prefix cannot turn vacuous if the test window changes
+            assert not proc.has_output("Backend running for")
 
         # Case 2: interrupt after the startup confirmation
         with create_supervisor_process("normal") as proc:
@@ -118,38 +120,80 @@ class TestSupervisor:
         """
         后端在启动早期/启动确认后 发送restart或者 stop都能正确处理
 
-        restart_2s/stop_2s send the request ~0.5s after boot (inside the
-        startup window), so recv_loop confirms startup through the request
-        message itself; restart_8s/stop_8s confirm startup first (b'ok')
-        and send the request later. Both orders must be handled.
+        Each case is driven by the test: the fake backend announces the step it
+        waits for, the test checks the state it wants to see and only then
+        releases the next step through the supervisor stdin channel. Nothing
+        depends on a sleep, and the "early" / "late" ordering is decided by the
+        test's own observations.
         """
         # Case 1: Restart requested early, during the startup window
-        with create_supervisor_process("restart_2s") as proc:
+        with create_supervisor_process("restart_early") as proc:
+            proc.wait_for_output("waiting for step:restart", timeout=10)
+            # The backend is up and the request is still withheld by the test:
+            # nothing was sent back yet, so the startup window is still open
+            assert not proc.has_output("Backend emits message, startup successful")
+            assert not proc.has_output("Backend requested restart")
+            proc.send_command("command:step:restart")
             proc.wait_for_output("Backend requested restart", timeout=10)
+            # The request was the first scenario message, so it confirmed the
+            # startup itself and was handled as a request: the timeout path was
+            # not taken and nothing was seen as an unknown message
+            assert proc.has_output("Backend emits message, startup successful")
+            assert not proc.has_output("Backend running for")
+            assert not proc.has_output("Unknown command from backend")
             # Drop the first launch's "started" line, then the line can
             # only come from the restarted backend
             proc.output_buffer.clear()
-            proc.wait_for_output("Restart 2s backend started", timeout=10)
+            proc.wait_for_output("Restart early backend started", timeout=10)
 
         # Case 2: Restart after the startup confirmation
-        with create_supervisor_process("restart_8s") as proc:
+        with create_supervisor_process("restart_late") as proc:
             proc.wait_for_output("startup successful", timeout=10)
-            proc.wait_for_output("Backend requested restart", timeout=15)
+            proc.wait_for_output("waiting for step:restart", timeout=10)
+            # The startup is already confirmed and the request is still
+            # withheld: the test releases it *after* the confirmation
+            assert proc.has_output("Unknown command from backend: b'ok'")
+            assert not proc.has_output("Backend requested restart")
+            proc.send_command("command:step:restart")
+            proc.wait_for_output("Backend requested restart", timeout=10)
+            # The confirmation was read before the request, and the startup was
+            # never decided by the timeout
+            output = proc.get_output()
+            assert output.index("Unknown command from backend") < output.index("Backend requested restart")
+            assert not proc.has_output("Backend running for")
             # Drop the first launch's "started" line, then the line can
             # only come from the restarted backend
             proc.output_buffer.clear()
-            proc.wait_for_output("Restart 8s backend started", timeout=10)
+            proc.wait_for_output("Restart late backend started", timeout=10)
 
         # Case 3: Stop requested early, during the startup window
-        with create_supervisor_process("stop_2s") as proc:
+        with create_supervisor_process("stop_early") as proc:
+            proc.wait_for_output("waiting for step:stop", timeout=10)
+            # Same as case 1: nothing was sent yet
+            assert not proc.has_output("Backend emits message, startup successful")
+            assert not proc.has_output("Backend requested stop")
+            proc.send_command("command:step:stop")
             proc.wait_for_output("Backend requested stop", timeout=10)
+            # The stop request is the first scenario message: it confirms the
+            # startup and is handled as a request
+            assert proc.has_output("Backend emits message, startup successful")
+            assert not proc.has_output("Backend running for")
+            assert not proc.has_output("Unknown command from backend")
             proc.wait_for_output("initiating graceful shutdown", timeout=5)
             proc.wait_for_exit(timeout=5)
 
         # Case 4: Stop after the startup confirmation
-        with create_supervisor_process("stop_8s") as proc:
+        with create_supervisor_process("stop_late") as proc:
             proc.wait_for_output("startup successful", timeout=10)
-            proc.wait_for_output("Backend requested stop", timeout=15)
+            proc.wait_for_output("waiting for step:stop", timeout=10)
+            # Same as case 2: confirmation first, stop request released after
+            assert proc.has_output("Unknown command from backend: b'ok'")
+            assert not proc.has_output("Backend requested stop")
+            proc.send_command("command:step:stop")
+            proc.wait_for_output("Backend requested stop", timeout=10)
+            output = proc.get_output()
+            assert output.index("Unknown command from backend") < output.index("Backend requested stop")
+            assert not proc.has_output("Backend running for")
             proc.wait_for_output("initiating graceful shutdown", timeout=5)
             proc.wait_for_exit(timeout=5)
 
@@ -235,12 +279,22 @@ class TestSupervisor:
 
     def test_close_pipe_restart(self):
         """在正常启动之后，直接关闭pipe，supervisor能够重新拉起后端"""
-        # Use late_exit backend which closes pipe (exits) after 8s
+        # Use late_exit backend which confirms startup and waits for the test
         with create_supervisor_process("late_exit") as proc:
             proc.wait_for_output("startup successful", timeout=10)
+            proc.wait_for_output("waiting for step:exit", timeout=10)
+            # The backend is alive and past its startup confirmation: the exit
+            # released below is a crash after a successful startup, not a
+            # boot failure
+            assert proc.is_alive()
+            proc.send_command("command:step:exit")
 
             # Wait for it to exit/close pipe
             proc.wait_for_output("Backend closed pipe connection", timeout=15)
+            # Assert the exact variant: a startup-window death
+            # ("...during startup") must not have happened
+            assert proc.has_output("Backend emits message, startup successful")
+            assert not proc.has_output("closed pipe connection during startup")
 
             # Should restart
             proc.wait_for_output("Restarting in", timeout=5)
@@ -256,7 +310,20 @@ class TestSupervisor:
             # Max restarts is 3.
             # We expect to see "Restart limit exceeded"
 
-            proc.wait_for_output("Restart limit exceeded", timeout=30)
+            # Max restarts is 3: the first 3 crashes are each followed by a
+            # restart, the 4th one hits the limit. One crash per round, and
+            # every round is released only after the supervisor confirmed the
+            # startup, so each crash counts as a crash of a started backend
+            for round_index in range(1, 5):
+                proc.wait_for_output("Backend emits message, startup successful",
+                                     timeout=15, count=round_index)
+                proc.wait_for_output("waiting for step:crash", timeout=15, count=round_index)
+                proc.send_command("command:step:crash")
+
+            proc.wait_for_output("Restart limit exceeded", timeout=15)
+            # No crash was ever seen as a startup failure
+            assert not proc.has_output("closed pipe connection during startup")
+            assert not proc.has_output("Backend failed to start properly")
             proc.wait_for_exit(timeout=5)
 
 

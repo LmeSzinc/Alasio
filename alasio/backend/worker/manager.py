@@ -275,8 +275,17 @@ class WorkerManager(metaclass=Singleton):
     def on_config_event(self, event: ConfigEvent):
         """
         Callback when received config event from worker
+
+        The base manager has no event consumer (the app layer overrides this to
+        feed the topic layer), so the event is only logged for debugging. It
+        must not be printed: the callback runs on the manager's recv thread, so
+        a print lands outside pytest's capture window and dumps raw events into
+        the test output.
+
+        Args:
+            event (ConfigEvent): Event received from the worker
         """
-        print(event)
+        logger.debug(f'[WorkerManager] Unhandled config event: {event}')
 
     def on_worker_info(self, config: str, msg: str):
         """
@@ -317,8 +326,16 @@ class WorkerManager(metaclass=Singleton):
     def on_worker_state(self, config: str, state: WORKER_STATE):
         """
         Callback when worker state changed
+
+        Like on_config_event: the base manager only logs (the app layer
+        overrides this to broadcast the Worker topic), and it must not print
+        from the recv thread.
+
+        Args:
+            config (str): Config name
+            state (WORKER_STATE): New worker state
         """
-        print(f'Worker state "{config}": {state}')
+        logger.debug(f'[WorkerManager] Worker state "{config}": {state}')
 
     def _set_state(self, worker: WorkerState, state: WORKER_STATE):
         """
@@ -961,21 +978,3 @@ class WorkerManager(metaclass=Singleton):
             # maybe new worker started while we are killing existing workers
 
         logger.info('[WorkerManager] All closed')
-
-
-if __name__ == '__main__':
-    self = WorkerManager()
-    self.worker_start('WorkerTestScheduler', 'alas')
-
-    for _ in range(1):
-        print(self.state)
-        time.sleep(1)
-        continue
-    # self.worker_kill('alas')
-    # self.close()
-    # self.state['alas'].conn.close()
-
-    for _ in range(10):
-        print(self.state)
-        time.sleep(1)
-        continue

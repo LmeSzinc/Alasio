@@ -160,30 +160,56 @@ class ManagedProcess:
             text: str,
             timeout: float = 10.0,
             case_sensitive: bool = True,
-            interval: float = 0.01
+            interval: float = 0.01,
+            count: int = 1
     ) -> bool:
         """
-        等待特定文本出现在输出中
+        等待特定文本在输出中出现至少 count 次
 
         Args:
             text: 要等待的文本
             timeout: 超时时间（秒）
             case_sensitive: 是否区分大小写
             interval: 检查间隔（秒）
+            count: 需要出现的次数（用于按轮次同步，如反复重启的用例）
 
         Returns:
             True如果文本出现，False如果超时
 
         Raises:
-            AssertionError: 如果超时且文本未出现
+            AssertionError: 如果超时且文本未出现足够次数
         """
         for _ in AssertTimeout(timeout, interval=interval):
             with _:
-                # print(self.output_buffer)
-                assert self.has_output(text, case_sensitive), \
-                    f"Timeout waiting for '{text}' in output"
+                output = self.get_output()
+                if not case_sensitive:
+                    output = output.lower()
+                    text = text.lower()
+                assert output.count(text) >= count, \
+                    f"Timeout waiting for '{text}' x{count} in output"
 
         return True
+
+    def send_command(self, command: str):
+        """
+        向子进程 stdin 写一行命令（supervisor 的命令通道）
+
+        The supervisor handles command:stop itself and forwards every other
+        command:* line to the backend process verbatim, so a test can drive a
+        fake backend step by step (e.g. command:step:restart) at the moment it
+        has observed the state it wants to check.
+
+        Args:
+            command: Command line, the trailing newline is added if missing
+
+        Raises:
+            RuntimeError: If the process has no stdin pipe
+        """
+        if self.process is None or self.process.stdin is None:
+            raise RuntimeError('Process stdin is not available')
+        line = command if command.endswith('\n') else command + '\n'
+        self.process.stdin.write(line)
+        self.process.stdin.flush()
 
     def wait_for_exit(self, timeout: float = 10.0) -> int:
         """

@@ -219,8 +219,11 @@ class TestMpipeRecvLoop:
             thread = threading.Thread(
                 target=mpipe_recv_loop, args=(child_conn, token), daemon=True)
             thread.start()
-            await trio.sleep(0.1)
+            # The message stays buffered in the pipe until the recv loop reads
+            # it, so no wait for the thread is needed here
             parent_conn.send_bytes(b'command:set_lang:zh-CN')
+            # Unknown command: give the loop a window to (not) act, then assert
+            # that nothing happened
             await trio.sleep(0.1)
             assert not event.is_set()
             assert thread.is_alive()
@@ -275,7 +278,6 @@ class TestMpipeRecvLoopCancelRestart:
             thread = threading.Thread(
                 target=mpipe_recv_loop, args=(child_conn, token), daemon=True)
             thread.start()
-            await trio.sleep(0.1)
             if send_bytes is not None:
                 parent_conn.send_bytes(send_bytes)
             if close_parent:

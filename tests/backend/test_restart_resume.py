@@ -553,12 +553,12 @@ class TestRunGracefulRestart:
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(run_graceful_restart, manager)
-            await trio.sleep(0.5)
-            assert manager.state['cfg_inf'].state == 'scheduler-stopping'
+            await wait_until(lambda: manager.state['cfg_inf'].state == 'scheduler-stopping',
+                             description='the worker to enter scheduler-stopping')
             # nothing written while the wait is running
             assert restart.iter_resume_files() == []
             cancel_graceful_restart('test cancel')
-            await trio.sleep(0.3)
+            # no sleep needed: the nursery exit waits for the orchestration task
 
         assert calls == []
         assert credentials == []
@@ -764,17 +764,41 @@ class TestResumeAfterRestart:
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(resume_after_restart, manager)
-            await trio.sleep(0.2)
-            # first worker started, the rest is still queued (0.5s interval)
-            assert manager.state['cfg_a'].state in ('starting', 'running')
+            await wait_until(
+                lambda: manager.state.get('cfg_a') is not None
+                and manager.state['cfg_a'].state in ('starting', 'running'),
+                description='the first queued worker to start')
+            # the rest is still queued (the 0.5s start interval has not elapsed)
             assert manager.state['cfg_b'].state == 'resuming'
             cancel_graceful_restart('test cancel')
-            await trio.sleep(0.3)
+            # no sleep needed: the nursery exit waits for the resume task
 
         # the queue stopped: no further worker was started and the queued
         # entries were dropped by the cancel
         assert 'cfg_b' not in manager.state
         assert 'cfg_c' not in manager.state
+
+
+async def wait_until(predicate, timeout=5.0, interval=0.01, description='condition'):
+    """
+    Wait until the predicate holds (event driven, no fixed sleep)
+
+    The orchestration runs as a trio task, so a fixed sleep both wastes time
+    and races: this returns as soon as the state appears and fails loudly when
+    it never does.
+
+    Args:
+        predicate (callable): Returns True once the expected state is there
+        timeout (float): Seconds to wait at most
+        interval (float): Poll interval
+        description (str): What is being waited for, used in the error
+    """
+    deadline = trio.current_time() + timeout
+    while trio.current_time() < deadline:
+        if predicate():
+            return
+        await trio.sleep(interval)
+    raise AssertionError(f'Timeout waiting for {description}')
 
 
 async def _fake_get_mod(config):

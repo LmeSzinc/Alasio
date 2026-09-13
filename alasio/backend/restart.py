@@ -599,7 +599,7 @@ def cancel_graceful_restart(reason: str = ''):
 # Resume (new backend)
 # =============================================================================
 
-async def _wait_configs_ready(configs, timeout=RESUME_CONFIG_WAIT):
+async def _wait_configs_ready(configs, timeout=None):
     """
     Wait until the config scan exposes the recorded configs
 
@@ -611,11 +611,15 @@ async def _wait_configs_ready(configs, timeout=RESUME_CONFIG_WAIT):
 
     Args:
         configs (list[str]): Config names to wait for
-        timeout (float): Seconds to wait at most
+        timeout (float): Seconds to wait at most. Defaults to
+            RESUME_CONFIG_WAIT, read when the call runs (a default argument
+            would bind the constant at import time and defeat monkeypatching)
 
     Returns:
         list[str]: Configs visible in the scan, input order
     """
+    if timeout is None:
+        timeout = RESUME_CONFIG_WAIT
     deadline = trio.current_time() + timeout
     while True:
         source = ConfigScanSource()

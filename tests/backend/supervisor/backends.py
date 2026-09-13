@@ -17,6 +17,50 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 
+# -----------------------------------------------------------------------------
+# Step protocol
+#
+# A test can walk a fake backend through its scenario instead of letting it act
+# on a fixed timeline. The test writes a line to the supervisor stdin
+# (ManagedProcess.send_command), the supervisor forwards every command:* line
+# to the backend process verbatim (it only handles command:stop itself), and the
+# backend resolves it in wait_for_step below.
+#
+# A step command looks like `command:step:<name>`. Every fake backend prints
+# "waiting for step:<name>" before it blocks, so the test waits for that line
+# (an event) and only then releases the step: the ordering is decided by the
+# test's own observations, never by a sleep.
+# -----------------------------------------------------------------------------
+STEP_PREFIX = 'command:step:'
+
+
+def wait_for_step(conn, step, timeout=60.0):
+    """
+    等待测试发来的 step 命令（由 supervisor 从 stdin 转发过来）
+
+    Args:
+        conn (multiprocessing.Connection): Pipe to the supervisor
+        step (str): Step name, e.g. "restart"
+        timeout (float): Seconds to wait before giving up
+
+    Raises:
+        RuntimeError: The step did not arrive (the test gave up on this
+            process or forgot to release the step)
+    """
+    expected = f'{STEP_PREFIX}{step}'.encode()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not conn.poll(timeout=0.05):
+            continue
+        msg = conn.recv_bytes()
+        if msg == expected:
+            return
+        # Other traffic (a stop forwarded by the supervisor) is not part of
+        # the scenario: report it and keep waiting
+        print(f"[Backend] Ignoring {msg!r} while waiting for step:{step}")
+    raise RuntimeError(f'[Backend] Timed out waiting for step:{step}')
+
+
 class TestSupervisor(Supervisor):
     """测试用的Supervisor子类，根据命令行参数启动不同的后端"""
 
@@ -51,18 +95,18 @@ class TestSupervisor(Supervisor):
         elif backend_type == "slow_shutdown":
             # 收到stop信号后，延迟退出的后端
             TestSupervisor._slow_shutdown_backend()
-        elif backend_type == "restart_2s":
+        elif backend_type == "restart_early":
             # 启动窗口内发送restart请求
-            TestSupervisor._restart_2s_backend()
-        elif backend_type == "restart_8s":
+            TestSupervisor._restart_early_backend()
+        elif backend_type == "restart_late":
             # 启动确认后发送restart请求
-            TestSupervisor._restart_8s_backend()
-        elif backend_type == "stop_2s":
+            TestSupervisor._restart_late_backend()
+        elif backend_type == "stop_early":
             # 启动窗口内发送stop请求
-            TestSupervisor._stop_2s_backend()
-        elif backend_type == "stop_8s":
+            TestSupervisor._stop_early_backend()
+        elif backend_type == "stop_late":
             # 启动确认后发送stop请求
-            TestSupervisor._stop_8s_backend()
+            TestSupervisor._stop_late_backend()
         elif backend_type == "crash_after_success":
             # 启动成功后立即崩溃
             TestSupervisor._crash_after_success_backend()
@@ -72,6 +116,20 @@ class TestSupervisor(Supervisor):
         else:
             print(f"[Backend] Unknown backend type: {backend_type}")
             sys.exit(1)
+
+    @staticmethod
+    def _announce_spawned():
+        """
+        Announce spawn completion like the real backend does
+
+        entry.backend_process_entry sends command:spawned right after boot, and
+        the supervisor uses it to start the stdin listener while the startup
+        window is still open (it is explicitly *not* a startup confirmation).
+        Without it a fake backend could not be driven by stdin before its
+        startup window ends.
+        """
+        import builtins
+        builtins.__mpipe_conn__.send_bytes(b'command:spawned')
 
     @staticmethod
     def _notify_startup_success():
@@ -125,10 +183,9 @@ class TestSupervisor(Supervisor):
         print("[Backend] Normal backend started, waiting indefinitely...")
 
         conn = builtins.__mpipe_conn__
-        # Simulate a realistic startup delay before confirming startup.
-        # The delay keeps a window where an interrupt arrives before the
-        # startup confirmation (test_graceful_exit_timings case 1).
-        time.sleep(0.5)
+        # Confirm startup as the first message: the supervisor's startup window
+        # ends on the first backend message, so no delay is needed to give an
+        # interrupt a window to land in (the window is open until the message)
         TestSupervisor._notify_startup_success()
 
         try:
@@ -157,9 +214,8 @@ class TestSupervisor(Supervisor):
 
     @staticmethod
     def _early_exit_backend():
-        """启动后2秒内退出的后端（小于startup_timeout）"""
-        print("[Backend] Early exit backend started, will exit in 2 seconds...")
-        time.sleep(2)
+        """启动后立刻退出的后端（启动窗口内关闭 pipe：启动失败路径）"""
+        print("[Backend] Early exit backend started, exiting now...")
         print("[Backend] Early exit backend exiting")
         sys.exit(0)
 
@@ -168,12 +224,13 @@ class TestSupervisor(Supervisor):
         """
         启动成功确认后延迟退出的后端（关闭 pipe 触发 supervisor 重启）
         """
-        print("[Backend] Late exit backend started, will exit in 1.5 seconds...")
-
+        import builtins
+        print("[Backend] Late exit backend started")
+        conn = builtins.__mpipe_conn__
+        TestSupervisor._announce_spawned()
         TestSupervisor._notify_startup_success()
-        # Give the supervisor time to finish the startup handshake, then
-        # exit and close the pipe so it observes the unexpected exit.
-        time.sleep(1.5)
+        print("[Backend] Late exit backend waiting for step:exit")
+        wait_for_step(conn, 'exit')
         print("[Backend] Late exit backend exiting")
         sys.exit(0)
 
@@ -199,47 +256,60 @@ class TestSupervisor(Supervisor):
             pass
 
     @staticmethod
-    def _restart_2s_backend():
+    def _restart_early_backend():
         """
-        启动后很快发送restart请求（在 startup_timeout 窗口内到达）
+        启动窗口内发送 restart 请求（由测试用 command:step:restart 放行）
+
+        The request is the first scenario message of this backend (only the spawn
+        announcement comes before it), so it arrives while recv_loop is in the
+        startup window and the request itself confirms the startup. The test
+        observes the "waiting for step" line and the still-empty state before it
+        releases the step.
         """
         import builtins
-        print("[Backend] Restart 2s backend started...")
+        print("[Backend] Restart early backend started")
         conn = builtins.__mpipe_conn__
-        # No startup confirmation: the restart request arrives while
-        # recv_loop is still in the startup window, and the message itself
-        # confirms startup success
-        time.sleep(0.5)
+        TestSupervisor._announce_spawned()
+        print("[Backend] Restart early backend waiting for step:restart")
+        wait_for_step(conn, 'restart')
         print("[Backend] Sending restart request")
         conn.send_bytes(b'command:restart')
         print("[Backend] Exiting after restart request")
         sys.exit(0)
 
     @staticmethod
-    def _restart_8s_backend():
-        """启动确认后稍后发送restart请求"""
+    def _restart_late_backend():
+        """
+        启动确认后发送 restart 请求（由测试用 command:step:restart 放行）
+
+        The test waits for the supervisor to confirm the startup (from the
+        backend's own message), checks that the request is still withheld and
+        only then releases it: "after the confirmation" is decided by the test
+        sequence instead of by a delay or by the pipe order.
+        """
         import builtins
-        print("[Backend] Restart 8s backend started...")
+        print("[Backend] Restart late backend started")
         conn = builtins.__mpipe_conn__
+        TestSupervisor._announce_spawned()
         TestSupervisor._notify_startup_success()
-        time.sleep(1.5)
+        print("[Backend] Restart late backend waiting for step:restart")
+        wait_for_step(conn, 'restart')
         print("[Backend] Sending restart request")
         conn.send_bytes(b'command:restart')
         print("[Backend] Exiting after restart request")
         sys.exit(0)
 
     @staticmethod
-    def _stop_2s_backend():
+    def _stop_early_backend():
         """
-        启动后很快发送stop请求（在 startup_timeout 窗口内到达）
+        启动窗口内发送 stop 请求（由测试用 command:step:stop 放行）
         """
         import builtins
-        print("[Backend] Stop 2s backend started...")
+        print("[Backend] Stop early backend started")
         conn = builtins.__mpipe_conn__
-        # No startup confirmation: the stop request arrives while recv_loop
-        # is still in the startup window, and the message itself confirms
-        # startup success
-        time.sleep(0.5)
+        TestSupervisor._announce_spawned()
+        print("[Backend] Stop early backend waiting for step:stop")
+        wait_for_step(conn, 'stop')
         print("[Backend] Sending stop request")
         conn.send_bytes(b'command:stop')
         # Wait for supervisor to send command:stop back
@@ -255,13 +325,17 @@ class TestSupervisor(Supervisor):
         sys.exit(0)
 
     @staticmethod
-    def _stop_8s_backend():
-        """启动确认后稍后发送stop请求"""
+    def _stop_late_backend():
+        """
+        启动确认后发送 stop 请求（由测试用 command:step:stop 放行）
+        """
         import builtins
-        print("[Backend] Stop 8s backend started...")
+        print("[Backend] Stop late backend started")
         conn = builtins.__mpipe_conn__
+        TestSupervisor._announce_spawned()
         TestSupervisor._notify_startup_success()
-        time.sleep(1.5)
+        print("[Backend] Stop late backend waiting for step:stop")
+        wait_for_step(conn, 'stop')
         print("[Backend] Sending stop request")
         conn.send_bytes(b'command:stop')
         # Wait for supervisor to send command:stop back
@@ -278,14 +352,17 @@ class TestSupervisor(Supervisor):
 
     @staticmethod
     def _crash_after_success_backend():
-        """启动后发送消息标记启动成功，然后立即退出"""
+        """启动确认后崩溃（每次崩溃由测试用 command:step:crash 放行）"""
         import builtins
         import sys
-        import time
         conn = builtins.__mpipe_conn__
-        # Send a message to trigger startup success
+        TestSupervisor._announce_spawned()
+        # Send a message to trigger startup success, then wait for the test step:
+        # the crash only happens after the supervisor confirmed the startup, so
+        # it counts against the restart limit as a crash of a started backend
         conn.send_bytes(b'ok')
-        time.sleep(0.5)
+        print("[Backend] Crash after success backend waiting for step:crash")
+        wait_for_step(conn, 'crash')
         print("[Backend] Crashing now")
         sys.exit(1)
 
@@ -336,6 +413,9 @@ class TestSupervisor(Supervisor):
 
 
 if __name__ == "__main__":
+    # Production defaults. The fake backends below are event driven (they act
+    # on pipe events and on the supervisor's own messages instead of sleeping),
+    # so the realistic timings cost the tests almost nothing.
     supervisor = TestSupervisor(
         restart_delay=1,
         max_restart_attempts=3,

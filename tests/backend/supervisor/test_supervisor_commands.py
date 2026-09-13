@@ -9,6 +9,27 @@ import pytest
 from alasio.backend.supervisor import ParentProcessExited, Supervisor
 
 
+def wait_stdin_listener(supervisor, timeout=2.0):
+    """
+    Wait until the stdin listener thread of the supervisor is alive
+
+    The listener starts only after the startup timeout (inside recv_loop), so
+    polling the predicate with a short interval replaces a fixed sleep and is
+    both faster and more robust on a slow machine. The caller still asserts on
+    the thread, so a listener that never starts fails loudly.
+
+    Args:
+        supervisor (Supervisor): Supervisor under test
+        timeout (float): Seconds to wait at most
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        thread = supervisor._stdin_thread
+        if thread is not None and thread.is_alive():
+            return
+        time.sleep(0.01)
+
+
 @pytest.fixture
 def replace_stdin():
     """Replace sys.stdin for the duration of a test."""
@@ -414,7 +435,7 @@ class TestRecvLoopStartsListener:
         thread.start()
 
         # after startup timeout, the stdin listener should be running
-        time.sleep(0.8)
+        wait_stdin_listener(supervisor)
         assert supervisor._stdin_thread is not None
         assert supervisor._stdin_thread.is_alive()
 
@@ -630,7 +651,7 @@ class TestRecvLoopStartsListener:
         thread.start()
 
         # after startup timeout, the stdin listener should be running
-        time.sleep(0.8)
+        wait_stdin_listener(supervisor)
         assert supervisor._stdin_thread is not None
         assert supervisor._stdin_thread.is_alive()
 
