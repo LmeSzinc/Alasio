@@ -377,45 +377,14 @@ def push_restart_phase(phase: str):
 # Resume actions (carried by the resume file, run before the resume)
 # =============================================================================
 
-def _action_clear_pycache():
-    """
-    Remove the __pycache__ folders of the running code (library + mods)
-
-    An in-app update that replaces python files must not leave stale bytecode
-    behind. Best effort: a locked or missing folder is skipped, the resume must
-    not be blocked by a cleanup.
-    """
-    roots = [env.ALIASIO_ROOT]
-    try:
-        # local import: loader binds PROJECT_ROOT at import time, it must be
-        # imported after set_project_root() ran (backend startup)
-        from alasio.config.entry.loader import MOD_LOADER
-        roots.extend(mod.root for mod in MOD_LOADER.dict_mod.values())
-    except Exception as e:
-        logger.warning(f'[Restart] Cannot resolve the mod roots for the pycache cleanup: {e}')
-    removed = 0
-    for root in roots:
-        try:
-            # materialize the walk before deleting anything
-            entries = list(PathStr.new(root).iter_entry(recursive=True))
-        except (FileNotFoundError, NotADirectoryError, OSError):
-            continue
-        for entry in entries:
-            try:
-                if entry.name == '__pycache__' and entry.is_dir(follow_symlinks=False):
-                    if PathStr.new(entry.path).atomic_rmtree():
-                        removed += 1
-            except OSError:
-                continue
-    logger.info(f'[Restart] Action clear_pycache: removed {removed} folders')
-
-
-# Action tag -> runner. No shell: an action is a built-in cleanup the new
-# backend runs before the auto-resume (the in-app update flow injects tags
-# through write_resume(..., actions=[...]))
-RESUME_ACTIONS = {
-    'clear_pycache': _action_clear_pycache,
-}
+# Action tag -> runner. No shell: an action is a cleanup the new backend runs
+# before the auto-resume (the in-app update flow injects tags through
+# write_resume(..., actions=[...]) and registers their runners here).
+# No builtin action is registered: replacing the .py files of an updated
+# package needs no bytecode cleanup, the interpreter drops a stale .pyc on its
+# own (the .pyc header records the source mtime and size, a changed source is
+# recompiled).
+RESUME_ACTIONS = {}
 
 
 def run_resume_actions(actions):

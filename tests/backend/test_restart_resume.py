@@ -195,12 +195,12 @@ class TestResumeFileIO:
         assert not file.isfile()
 
     def test_write_with_actions_and_owner(self, project_root):
-        write_resume([], owner='update', actions=['clear_pycache'])
+        write_resume([], owner='update', actions=['test_action'])
         files = restart.iter_resume_files()
         assert len(files) == 1
         record = read_record(files[0])
         assert record.configs == []
-        assert record.actions == ['clear_pycache']
+        assert record.actions == ['test_action']
         assert record.owner == 'update'
 
     def test_write_removes_leftover_files(self, project_root):
@@ -459,14 +459,14 @@ class TestRunGracefulRestart:
         monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
         monkeypatch.setattr(restart, 'announce_resume_token', lambda credential: None)
 
-        hooks = restart.RestartHooks(actions=['clear_pycache'])
+        hooks = restart.RestartHooks(actions=['test_action'])
         await run_graceful_restart(manager, hooks)
 
         files = restart.iter_resume_files()
         assert len(files) == 1
         record = read_record(files[0])
         assert record.configs == []
-        assert record.actions == ['clear_pycache']
+        assert record.actions == ['test_action']
 
     @pytest.mark.trio
     async def test_hooks_order_and_actions(self, project_root, manager, monkeypatch):
@@ -484,12 +484,12 @@ class TestRunGracefulRestart:
         monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
         monkeypatch.setattr(restart, 'announce_resume_token', lambda credential: None)
 
-        hooks = restart.RestartHooks(on_all_stopped=on_all_stopped, actions=['clear_pycache'])
+        hooks = restart.RestartHooks(on_all_stopped=on_all_stopped, actions=['test_action'])
         await run_graceful_restart(manager, hooks)
 
         assert order == ['hook', 'restart']
         record = read_record(restart.iter_resume_files()[0])
-        assert record.actions == ['clear_pycache']
+        assert record.actions == ['test_action']
         assert record.configs == ['cfg_a']
 
     @pytest.mark.trio
@@ -719,7 +719,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_actions_run_before_resume(self, project_root, manager, monkeypatch):
-        credential = write_resume(['cfg_a'], actions=['clear_pycache'])
+        credential = write_resume(['cfg_a'], actions=['test_action'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
         fake = FakeScan({'cfg_a': 1})
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
@@ -727,7 +727,7 @@ class TestResumeAfterRestart:
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
 
         order = []
-        monkeypatch.setitem(restart.RESUME_ACTIONS, 'clear_pycache', lambda: order.append('action'))
+        monkeypatch.setitem(restart.RESUME_ACTIONS, 'test_action', lambda: order.append('action'))
         original = manager.worker_resume
 
         def spy(mod, config, *args, **kwargs):
