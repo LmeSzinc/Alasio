@@ -17,6 +17,8 @@
     "force-killing",
     "disconnected",
     "error",
+    "restarting",
+    "resuming",
   ];
 
   // Input state for selected config

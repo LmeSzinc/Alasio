@@ -1,5 +1,6 @@
 <script lang="ts">
   import Power from "@lucide/svelte/icons/power";
+  import Zap from "@lucide/svelte/icons/zap";
   import LayoutHorizontalLike from "$lib/components/arg/LayoutHorizontalLike.svelte";
   import type { ArgData } from "$lib/components/arg/utils.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -9,7 +10,8 @@
 
   // Connect to backend topic
   const topicClient = useTopic("ConnState");
-  const restartRpc = topicClient.rpc();
+  const gracefulRpc = topicClient.rpc();
+  const forceRpc = topicClient.rpc();
 
   // Display this tool as an arg row
   // $derived so name/help follow the current display language
@@ -28,13 +30,20 @@
 <div class="flex flex-col gap-y-1.5">
   <LayoutHorizontalLike {data}>
     {#snippet InputSnippet()}
-      <Button onclick={restartRpc.open} variant="destructive" class="w-full">
-        <Power class="mr-2 h-4 w-4" />
-        {t.DevTool.RestartBackend()}
-      </Button>
+      <div class="flex gap-2">
+        <Button onclick={gracefulRpc.open} variant="destructive" class="flex-1" title={t.DevTool.RestartBackendHelp()}>
+          <Power class="mr-2 h-4 w-4" />
+          {t.DevTool.RestartBackend()}
+        </Button>
+        <Button onclick={forceRpc.open} variant="outline" class="flex-1" title={t.DevTool.ForceRestartBackendHelp()}>
+          <Zap class="mr-2 h-4 w-4" />
+          {t.DevTool.ForceRestartBackend()}
+        </Button>
+      </div>
     {/snippet}
   </LayoutHorizontalLike>
 </div>
 
-<!-- Dialog -->
-<RestartDialog rpc={restartRpc} />
+<!-- Dialogs -->
+<RestartDialog rpc={gracefulRpc} kind="graceful" />
+<RestartDialog rpc={forceRpc} kind="force" />

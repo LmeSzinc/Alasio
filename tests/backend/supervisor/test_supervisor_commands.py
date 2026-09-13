@@ -910,6 +910,147 @@ class TestHandleBackendMessage:
         assert supervisor.stop_requested is False
         assert supervisor.restart_requested is False
 
+    def test_command_resume_stores_credential(self, monkeypatch):
+        """
+        command:resume:<credential> stores the credential without being
+        treated as an unknown command
+        """
+        from alasio.logger.writer import CaptureStream
+
+        capture = CaptureStream()
+        monkeypatch.setattr(sys, 'stdout', capture)
+        supervisor = Supervisor()
+
+        supervisor.handle_backend_message(b'command:resume:token123-checksum456')
+
+        assert not capture.any_contains('Unknown command')
+        assert supervisor.resume_token == 'token123-checksum456'
+
+    def test_command_resume_malformed_payload_ignored(self, monkeypatch):
+        """
+        A non-utf8 credential payload is dropped with a warning: a broken
+        backend message must never kill the supervision loop
+        """
+        from alasio.logger.writer import CaptureStream
+
+        capture = CaptureStream()
+        monkeypatch.setattr(sys, 'stdout', capture)
+        supervisor = Supervisor()
+
+        supervisor.handle_backend_message(b'command:resume:\xff\xfe')
+
+        assert supervisor.resume_token == ''
+        assert capture.any_contains('Ignoring malformed resume credential')
+
+
+class TestResumeCredential:
+    """
+    Tests for the one-shot resume credential (command:resume announcement
+    and its injection into the next spawned backend as
+    ALASIO_RESUME_TOKEN).
+    """
+
+    @staticmethod
+    def _record_spawn_env(monkeypatch):
+        """
+        Patch multiprocessing.Process.start to record the environment state
+        at spawn time without actually spawning a child.
+
+        Returns:
+            dict: observed values; 'present' records whether the variable
+                existed at spawn time, 'token' its value (None otherwise),
+                'count' the number of recorded spawns
+        """
+        import multiprocessing.process as mp_process
+
+        observed = {'count': 0, 'present': False, 'token': None}
+
+        def recording_start(self):
+            observed['count'] += 1
+            observed['present'] = 'ALASIO_RESUME_TOKEN' in os.environ
+            observed['token'] = os.environ.get('ALASIO_RESUME_TOKEN')
+
+        monkeypatch.setattr(mp_process.BaseProcess, 'start', recording_start)
+        return observed
+
+    def test_inherited_value_untouched_without_announcement(self, monkeypatch):
+        """
+        Without a command:resume announcement an inherited environment
+        value (e.g. passed down by an update relaunch) must not be modified
+        """
+        monkeypatch.setenv('ALASIO_RESUME_TOKEN', 'inherited-value')
+        supervisor, _ = make_supervisor_with_pipe()
+        observed = self._record_spawn_env(monkeypatch)
+
+        supervisor.start_backend([])
+
+        assert observed['present'] is True
+        assert observed['token'] == 'inherited-value'
+
+    def test_announced_credential_injected_on_next_spawn(self, monkeypatch):
+        """The announced credential is injected before the next spawn"""
+        monkeypatch.delenv('ALASIO_RESUME_TOKEN', raising=False)
+        supervisor, _ = make_supervisor_with_pipe()
+        supervisor.handle_backend_message(b'command:resume:token123-checksum456')
+        observed = self._record_spawn_env(monkeypatch)
+
+        supervisor.start_backend([])
+
+        assert observed['token'] == 'token123-checksum456'
+
+    def test_latest_announcement_wins(self, monkeypatch):
+        """Two announcements keep the latest credential"""
+        monkeypatch.delenv('ALASIO_RESUME_TOKEN', raising=False)
+        supervisor, _ = make_supervisor_with_pipe()
+        supervisor.handle_backend_message(b'command:resume:first-checksum')
+        supervisor.handle_backend_message(b'command:resume:second-checksum')
+        observed = self._record_spawn_env(monkeypatch)
+
+        supervisor.start_backend([])
+
+        assert observed['token'] == 'second-checksum'
+
+    def test_startup_completion_clears_credential(self, monkeypatch):
+        """
+        After command:started the credential must be gone from the stored
+        copy and the environment, so a later spawn never inherits it
+        """
+        monkeypatch.delenv('ALASIO_RESUME_TOKEN', raising=False)
+        supervisor, _ = make_supervisor_with_pipe()
+        supervisor.handle_backend_message(b'command:resume:token123-checksum456')
+        observed = self._record_spawn_env(monkeypatch)
+
+        supervisor.start_backend([])
+        assert observed['token'] == 'token123-checksum456'
+
+        supervisor.handle_backend_message(b'command:started')
+        assert supervisor.resume_token == ''
+        assert 'ALASIO_RESUME_TOKEN' not in os.environ
+
+        supervisor.start_backend([])
+        assert observed['count'] == 2
+        assert observed['present'] is False
+        assert observed['token'] is None
+
+    def test_startup_crash_before_completion_keeps_credential(self, monkeypatch):
+        """
+        While the backend has not announced startup completion, the
+        credential stays: a startup crash may re-spawn and consume it again
+        """
+        monkeypatch.delenv('ALASIO_RESUME_TOKEN', raising=False)
+        supervisor, _ = make_supervisor_with_pipe()
+        supervisor.handle_backend_message(b'command:resume:token123-checksum456')
+        observed = self._record_spawn_env(monkeypatch)
+
+        supervisor.start_backend([])
+        assert observed['token'] == 'token123-checksum456'
+
+        # first spawn crashed before command:started: the next spawn still
+        # carries the credential
+        supervisor.start_backend([])
+        assert supervisor.resume_token == 'token123-checksum456'
+        assert observed['token'] == 'token123-checksum456'
+
 
 class TestGracefulShutdown:
     """Tests for Supervisor.graceful_shutdown."""

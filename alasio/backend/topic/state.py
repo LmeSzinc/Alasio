@@ -2,10 +2,12 @@ from msgspec import Struct
 
 from alasio.backend.lifespan import lifespan_restart
 from alasio.backend.locale.accept_language import negotiate_accept_language
+from alasio.backend.mpipe.mpipe_backend import mpipe_backend
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.reactive.rx_trio import async_reactive, async_reactive_source
 from alasio.backend.topic.scan import ConfigScanSource
+from alasio.backend.ws.context import GLOBAL_CONTEXT
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
 from alasio.config.table.scan import validate_config_name
@@ -62,11 +64,45 @@ class ConnState(BaseTopic):
         state.lang = lang
         await self.nav_state.mutate()
 
-    @rpc(require_electron=True)
+    @rpc
     async def restart(self):
         """
-        Restart the entire backend
+        Gracefully restart the entire backend
+
+        Every running worker is asked to stop gracefully (scheduler-stopping:
+        the current task finishes first, a 10-minute wait escalates to a kill),
+        then the backend restarts and resumes the workers stopped by this
+        request. Returns as soon as the restart is accepted: the progress flows
+        through the Restart and Worker topics.
         """
+        # local import: topic.log imports ConnState from this module, a module
+        # level import of restart (-> topic._worker -> topic.log) would be
+        # circular
+        from alasio.backend.restart import GRACEFUL_RESTART, run_graceful_restart
+
+        if not mpipe_backend:
+            raise PermissionError('Cannot restart backend running without supervisor')
+        if GRACEFUL_RESTART.running:
+            raise RpcValueError('Restart already in progress')
+        # set the flag synchronously (no await in between): two concurrent
+        # clicks cannot start two orchestrations
+        GRACEFUL_RESTART.running = True
+        GLOBAL_CONTEXT.global_nursery.start_soon(run_graceful_restart)
+
+    @rpc
+    async def force_restart(self):
+        """
+        Restart the entire backend immediately
+
+        Unlike restart(), the workers are not waited for: every running worker
+        is ended right away and nothing is resumed after the backend restarted.
+        """
+        # local import (see restart above)
+        from alasio.backend.restart import cancel_graceful_restart
+
+        # a graceful restart in progress (or a resume queue of the previous
+        # one) is cancelled first: no worker of it may be resumed
+        cancel_graceful_restart('force restart')
         await lifespan_restart()
 
     @rpc

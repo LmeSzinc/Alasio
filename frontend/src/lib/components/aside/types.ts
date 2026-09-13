@@ -10,6 +10,14 @@ export type ConfigLike = {
 // Topic data from "ConfigScan"
 export type ConfigTopicLike = Record<string, ConfigLike>;
 
+// Topic data from "Restart": the phase of a graceful backend restart.
+// Absent (no restart in progress) = the object is empty / undefined.
+// 'done' is transient: it is pushed right before the topic is cleared.
+export type RestartTopicLike = {
+  phase?: "stopping" | "shutting-down" | "resuming" | "done";
+  update?: number;
+};
+
 // idle: not running
 // starting: requesting to start a worker, starting worker process
 // running: worker process running
@@ -22,6 +30,10 @@ export type ConfigTopicLike = Record<string, ConfigLike>;
 // error: worker stopped with error
 //   Note that scheduler will loop forever, so there is no "stopped" state
 //   If user request "scheduler_stopping" or "killing", state will later be "idle"
+// restarting: worker stopped because of a graceful backend restart, the backend
+//   will auto-resume it after the restart; manual start is rejected
+// resuming: queued for auto-resume after the backend restart (no process yet)
+//   a stop on it cancels the auto-resume
 export type WORKER_STATE =
   | "idle"
   | "starting"
@@ -31,4 +43,6 @@ export type WORKER_STATE =
   | "scheduler-stopping"
   | "scheduler-waiting"
   | "killing"
-  | "force-killing";
+  | "force-killing"
+  | "restarting"
+  | "resuming";

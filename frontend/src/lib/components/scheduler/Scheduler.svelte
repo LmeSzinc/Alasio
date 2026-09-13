@@ -2,10 +2,11 @@
   import CircleDotDashed from "@lucide/svelte/icons/circle-dot-dashed";
   import ConfigState from "$lib/components/aside/ConfigState.svelte";
   import { useWorkerState } from "$lib/components/aside/state.svelte";
-  import type { WORKER_STATE } from "$lib/components/aside/types";
+  import type { RestartTopicLike, WORKER_STATE } from "$lib/components/aside/types";
   import { t } from "$lib/i18n";
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
+  import ActionCancelResume from "./ActionCancelResume.svelte";
   import ActionKill from "./ActionKill.svelte";
   import ActionSchedulerContinue from "./ActionSchedulerContinue.svelte";
   import ActionSchedulerStop from "./ActionSchedulerStop.svelte";
@@ -33,6 +34,11 @@
 
   const displayState = useWorkerState(() => workerState);
   const isRunning = $derived(taskRunning && displayState.value !== "idle");
+
+  // Restart topic: a non-empty phase means a graceful backend restart is in
+  // progress ('done' is pushed right before the topic is cleared)
+  const restartClient = useTopic<RestartTopicLike>("Restart");
+  const isBackendRestarting = $derived(!!restartClient.data?.phase && restartClient.data?.phase !== "done");
 
   // Show 3 tasks, or 2 if a task is running
   let nextTasksToShow = $derived.by(() => {
@@ -76,6 +82,7 @@
   const schedulerStopRpc = workerClient.rpc();
   const schedulerContinueRpc = workerClient.rpc();
   const killRpc = workerClient.rpc();
+  const killKeepResumeRpc = workerClient.rpc();
   function handleStart(e: Event) {
     e.stopPropagation();
     startRpc.call("start", { config: config_name });
@@ -90,6 +97,17 @@
   }
   function handleKill(e: Event) {
     e.stopPropagation();
+    // during a graceful restart wait the default kill also cancels the resume
+    killRpc.call("kill", { config: config_name });
+  }
+  function handleKillKeepResume(e: Event) {
+    e.stopPropagation();
+    // force stop now, the worker is still resumed after the backend restart
+    killKeepResumeRpc.call("kill", { config: config_name, restart_resume: true });
+  }
+  function handleCancelResume(e: Event) {
+    e.stopPropagation();
+    // "restarting" / "resuming" entry: stop = cancel the auto-resume
     killRpc.call("kill", { config: config_name });
   }
 </script>
@@ -123,6 +141,8 @@
       {:else if workerState === "scheduler-waiting"}{t.Scheduler.SchedulerWaiting()}
       {:else if workerState === "killing"}{t.Scheduler.Killing()}
       {:else if workerState === "force-killing"}{t.Scheduler.ForceKilling()}
+      {:else if workerState === "restarting"}{t.Scheduler.Restarting()}
+      {:else if workerState === "resuming"}{t.Scheduler.Resuming()}
       {:else}{workerState}{/if}
     </span>
   </div>
@@ -174,13 +194,29 @@
       <ActionKill onclick={handleKill} title={t.Scheduler.Kill()} class="flex-1" />
       <ActionSchedulerStop onclick={handleSchedulerStop} title={t.Scheduler.SchedulerStop()} />
     {:else if displayState.value === "scheduler-stopping"}
-      <!-- scheduler-stopping: kill (flex-1) + scheduler continue (right) -->
-      <ActionKill disabled={isStoppingDebouncing} onclick={handleKill} title={t.Scheduler.Kill()} class="flex-1" />
-      <ActionSchedulerContinue
-        disabled={isStoppingDebouncing}
-        onclick={handleSchedulerContinue}
-        title={t.Scheduler.SchedulerContinue()}
-      />
+      {#if isBackendRestarting}
+        <!-- backend graceful restart: force-stop (resume kept) or stop (cancel resume) -->
+        <ActionKill onclick={handleKillKeepResume} title={t.Scheduler.KillKeepResume()} class="flex-1" />
+        <ActionKill onclick={handleKill} title={t.Scheduler.KillNoResume()} class="flex-1" />
+      {:else}
+        <!-- scheduler-stopping: kill (flex-1) + scheduler continue (right) -->
+        <ActionKill disabled={isStoppingDebouncing} onclick={handleKill} title={t.Scheduler.Kill()} class="flex-1" />
+        <ActionSchedulerContinue
+          disabled={isStoppingDebouncing}
+          onclick={handleSchedulerContinue}
+          title={t.Scheduler.SchedulerContinue()}
+        />
+      {/if}
+    {:else if displayState.value === "restarting"}
+      <!-- restarting: the backend will resume it, start is disabled, the round
+           button cancels the auto-resume -->
+      <ActionStart disabled title={t.Scheduler.Start()} class="flex-1" />
+      <ActionCancelResume onclick={handleCancelResume} title={t.Scheduler.CancelResume()} />
+    {:else if displayState.value === "resuming"}
+      <!-- queued for auto-resume: start is refused (it starts by itself soon),
+           a stop cancels the resume -->
+      <ActionStart disabled title={t.Scheduler.Start()} class="flex-1" />
+      <ActionCancelResume onclick={handleCancelResume} title={t.Scheduler.CancelResume()} />
     {:else if displayState.value === "killing" || displayState.value === "force-killing" || displayState.value === "disconnected"}
       <!-- killing: kill (flex-1) + scheduler stop (right) -->
       <ActionKill disabled title={t.Scheduler.Kill()} class="flex-1" />

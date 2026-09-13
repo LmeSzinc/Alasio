@@ -234,3 +234,67 @@ class TestMpipeRecvLoop:
         assert received == ['zh-CN']
         parent_conn.close()
         child_conn.close()
+
+
+class TestMpipeRecvLoopCancelRestart:
+    """
+    Tests that a shutdown request (stdin stop / supervisor EOF) cancels a
+    graceful restart and a running auto-resume queue: the backend is going
+    down, nothing may restart it or resume workers afterwards.
+    """
+
+    @staticmethod
+    def _make(monkeypatch):
+        event = trio.Event()
+        monkeypatch.setattr(lifespan, 'SHUTDOWN_EVENT', event)
+        parent_conn, child_conn = multiprocessing.Pipe()
+        return parent_conn, event, child_conn
+
+    def _run_with_cancel_spy(self, monkeypatch, send_bytes=None, close_parent=False):
+        """
+        Run mpipe_recv_loop with cancel_graceful_restart spied
+
+        Args:
+            monkeypatch: pytest monkeypatch fixture
+            send_bytes (bytes): Message to write before the shutdown, optional
+            close_parent (bool): Close the parent end to simulate the
+                supervisor pipe EOF instead of a message
+
+        Returns:
+            list: Cancel reasons recorded by the spy
+        """
+        from alasio.backend import restart as restart_mod
+
+        calls = []
+        monkeypatch.setattr(restart_mod, 'cancel_graceful_restart',
+                            lambda reason='': calls.append(reason))
+        parent_conn, event, child_conn = self._make(monkeypatch)
+
+        async def main():
+            token = trio.lowlevel.current_trio_token()
+            thread = threading.Thread(
+                target=mpipe_recv_loop, args=(child_conn, token), daemon=True)
+            thread.start()
+            await trio.sleep(0.1)
+            if send_bytes is not None:
+                parent_conn.send_bytes(send_bytes)
+            if close_parent:
+                parent_conn.close()
+            with trio.fail_after(5):
+                await event.wait()
+            thread.join(timeout=2)
+            assert not thread.is_alive()
+
+        trio.run(main)
+        if not close_parent:
+            parent_conn.close()
+        child_conn.close()
+        return calls
+
+    def test_command_stop_cancels_restart(self, monkeypatch):
+        calls = self._run_with_cancel_spy(monkeypatch, send_bytes=b'command:stop')
+        assert calls == ['backend stop']
+
+    def test_pipe_eof_cancels_restart(self, monkeypatch):
+        calls = self._run_with_cancel_spy(monkeypatch, close_parent=True)
+        assert calls == ['backend stop']

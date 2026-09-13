@@ -77,18 +77,95 @@
     "es-ES": "Solo disponible en la aplicación Electron. Se aplica al reiniciar la aplicación"
   },
   "RestartBackend": {
-    "en-US": "Restart Backend",
-    "zh-CN": "重启后端",
-    "ja-JP": "バックエンドを再起動",
-    "zh-TW": "重啟後端",
-    "es-ES": "Reiniciar Backend"
+    "en-US": "Gracefully Restart Backend",
+    "zh-CN": "优雅重启",
+    "ja-JP": "優雅に再起動",
+    "zh-TW": "優雅重啟",
+    "es-ES": "Reiniciar elegantemente"
   },
   "RestartBackendHelp": {
-    "en-US": "Force restart the backend process",
-    "zh-CN": "强制重启后端进程",
-    "ja-JP": "バックエンドプロセスを強制再起動",
-    "zh-TW": "強制重啟後端程序",
-    "es-ES": "Reiniciar por fuerza el proceso del backend"
+    "en-US": "Running configs stop after the current task and resume automatically after the restart (up to 10 minutes). Force restart kills them immediately without resuming.",
+    "zh-CN": "正在运行的配置会在当前任务结束后停止，并在重启后自动恢复（最长等待 10 分钟）。强制重启会立即结束它们且不再恢复。",
+    "ja-JP": "実行中の設定は現在のタスク終了後に停止し、再起動後に自動的に再開されます（最大 10 分）。強制再起動は即座に終了し、再開しません。",
+    "zh-TW": "正在運行的設定會在當前任務結束後停止，並在重啟後自動恢復（最長等待 10 分鐘）。強制重啟會立即結束它們且不再恢復。",
+    "es-ES": "Las configuraciones en ejecución se detienen al terminar la tarea actual y se reanudan automáticamente tras el reinicio (hasta 10 minutos). El reinicio forzado las termina de inmediato sin reanudarlas."
+  },
+  "ForceRestartBackendHelp": {
+    "en-US": "All workers are force-killed immediately, nothing is resumed after the restart.",
+    "zh-CN": "立即强杀所有 worker，重启后不会自动恢复。",
+    "ja-JP": "すべての worker を即座に強制終了し、再起動後も再開しません。",
+    "zh-TW": "立即強殺所有 worker，重啟後不會自動恢復。",
+    "es-ES": "Todos los workers se terminan de inmediato, nada se reanuda tras el reinicio."
+  },
+  "ForceRestartBackend": {
+    "en-US": "Force Restart",
+    "zh-CN": "强制重启",
+    "ja-JP": "強制再起動",
+    "zh-TW": "強制重啟",
+    "es-ES": "Reinicio forzado"
+  },
+  "RestartPhaseStopping": {
+    "en-US": "Waiting for the running configs to stop…",
+    "zh-CN": "正在等待运行中的配置优雅停止…",
+    "ja-JP": "実行中の設定が停止するのを待っています…",
+    "zh-TW": "正在等待運行中的設定優雅停止…",
+    "es-ES": "Esperando a que las configuraciones en ejecución se detengan…"
+  },
+  "RestartPhaseShuttingDown": {
+    "en-US": "All configs stopped, restarting the backend…",
+    "zh-CN": "所有配置已停止，正在重启后端…",
+    "ja-JP": "すべての設定が停止しました。バックエンドを再起動しています…",
+    "zh-TW": "所有設定已停止，正在重啟後端…",
+    "es-ES": "Todas las configuraciones se detuvieron, reiniciando el backend…"
+  },
+  "RestartPhaseResuming": {
+    "en-US": "Restoring the configs…",
+    "zh-CN": "正在恢复配置…",
+    "ja-JP": "設定を復元しています…",
+    "zh-TW": "正在恢復設定…",
+    "es-ES": "Restaurando las configuraciones…"
+  },
+  "RestartBackendConfirmTitle": {
+    "en-US": "Gracefully restart the backend?",
+    "zh-CN": "确认优雅重启后端？",
+    "ja-JP": "バックエンドを優雅に再起動しますか？",
+    "zh-TW": "確認優雅重啟後端？",
+    "es-ES": "¿Reiniciar el backend elegantemente?"
+  },
+  "ForceRestartBackendConfirmTitle": {
+    "en-US": "Force restart the backend?",
+    "zh-CN": "确认强制重启后端？",
+    "ja-JP": "バックエンドを強制再起動しますか？",
+    "zh-TW": "確認強制重啟後端？",
+    "es-ES": "¿Forzar el reinicio del backend?"
+  },
+  "RestartProgress": {
+    "en-US": "{stopped}/{total} configs stopped",
+    "zh-CN": "{stopped}/{total} 个配置已停止",
+    "ja-JP": "{stopped}/{total} 件の設定が停止しました",
+    "zh-TW": "{stopped}/{total} 個設定已停止",
+    "es-ES": "{stopped}/{total} configuraciones detenidas"
+  },
+  "RestartBackendConfirmHelp": {
+    "en-US": "Running configs stop after the current task and resume automatically after the restart. The graceful wait can take up to 10 minutes.",
+    "zh-CN": "正在运行的配置会在当前任务结束后停止，并在重启后自动恢复。优雅等待最长 10 分钟。",
+    "ja-JP": "実行中の設定は現在のタスク終了後に停止し、再起動後に自動的に再開されます。優雅な待機は最大 10 分です。",
+    "zh-TW": "正在運行的設定會在當前任務結束後停止，並在重啟後自動恢復。優雅等待最長 10 分鐘。",
+    "es-ES": "Las configuraciones en ejecución se detienen al terminar la tarea actual y se reanudan automáticamente tras el reinicio. La espera puede durar hasta 10 minutos."
+  },
+  "ForceRestartBackendConfirmHelp": {
+    "en-US": "All instances are force-killed immediately and are NOT resumed after the restart.",
+    "zh-CN": "所有实例会被立即强杀，且重启后不会自动恢复。",
+    "ja-JP": "すべてのインスタンスは即座に強制終了され、再起動後も再開されません。",
+    "zh-TW": "所有實例會被立即強殺，且重啟後不會自動恢復。",
+    "es-ES": "Todas las instancias se terminan de inmediato y NO se reanudan tras el reinicio."
+  },
+  "Cancel": {
+    "en-US": "Cancel",
+    "zh-CN": "取消",
+    "ja-JP": "キャンセル",
+    "zh-TW": "取消",
+    "es-ES": "Cancelar"
   },
   "ReturnToLogin": {
     "en-US": "Return to Login",

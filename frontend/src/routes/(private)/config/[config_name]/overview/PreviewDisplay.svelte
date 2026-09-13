@@ -132,7 +132,8 @@
       <EyeOff class="h-5 w-5" />
       {t.Overview.PreviewDisabled()}
     </div>
-  {:else if workerState === "idle"}
+  {:else if workerState === "idle" || workerState === "restarting" || workerState === "resuming"}
+    <!-- stopped for a graceful backend restart / queued for resume: not running -->
     <div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm italic">
       <PlayOff class="h-5 w-5" />
       {t.Overview.PreviewNotRunning()}

@@ -14,7 +14,9 @@ from alasio.config.table.scan import validate_config_name
 from alasio.ext.singleton import SingletonNamed
 
 PREVIEW_AVAILABLE = ['running', 'scheduler-stopping']
-PREVIEW_IDLE = ['idle', 'error', 'scheduler-waiting']
+# restarting / resuming are stopped states (no process): the preview task must
+# stop like on idle, and the cached last screenshot is sent once
+PREVIEW_IDLE = ['idle', 'error', 'scheduler-waiting', 'restarting', 'resuming']
 PREVIEW_SPEED = Literal['normal', 'realtime']
 
 

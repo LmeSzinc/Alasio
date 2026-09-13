@@ -62,6 +62,20 @@
     "zh-TW": "強殺中",
     "es-ES": "Forzando cierre"
   },
+  "Restarting": {
+    "en-US": "Restarting",
+    "zh-CN": "重启中",
+    "ja-JP": "再起動中",
+    "zh-TW": "重啟中",
+    "es-ES": "Reiniciando"
+  },
+  "Resuming": {
+    "en-US": "Queued for resume",
+    "zh-CN": "等待恢复",
+    "ja-JP": "再開待ち",
+    "zh-TW": "等待恢復",
+    "es-ES": "En espera de reanudación"
+  },
   "NoTask": {
     "en-US": "No Task",
     "zh-CN": "无任务",
@@ -90,11 +104,32 @@
     "zh-TW": "在下一個任務檢查點優雅停止",
     "es-ES": "Detener elegantemente en el próximo punto de control"
   },
+  "KillKeepResume": {
+    "en-US": "Force stop, keep resume",
+    "zh-CN": "急停（重启后仍恢复）",
+    "ja-JP": "強制停止（再開維持）",
+    "zh-TW": "急停（重啟後仍恢復）",
+    "es-ES": "Forzar parada, mantener reanudación"
+  },
+  "KillNoResume": {
+    "en-US": "Stop, no resume",
+    "zh-CN": "停止（不再恢复）",
+    "ja-JP": "停止（再開しない）",
+    "zh-TW": "停止（不再恢復）",
+    "es-ES": "Parar sin reanudar"
+  },
   "SchedulerContinue": {
     "en-US": "Continue running",
     "zh-CN": "继续运行",
     "ja-JP": "実行を継続",
     "zh-TW": "繼續運行",
     "es-ES": "Continuar ejecución"
+  },
+  "CancelResume": {
+    "en-US": "Cancel resume",
+    "zh-CN": "取消恢复",
+    "ja-JP": "再開を取消",
+    "zh-TW": "取消恢復",
+    "es-ES": "Cancelar reanudación"
   }
 }

@@ -5,6 +5,8 @@
   import CirclePlay from "@lucide/svelte/icons/circle-play";
   import Ghost from "@lucide/svelte/icons/ghost";
   import Hourglass from "@lucide/svelte/icons/hourglass";
+  import Loader from "@lucide/svelte/icons/loader";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import X from "@lucide/svelte/icons/x";
   import { cn } from "$lib/utils";
   import type { WORKER_STATE } from "./types";
@@ -21,7 +23,10 @@
 
   const strokeWidth = $derived(mode.current === "dark" ? "3" : "2");
   const spin = $derived(
-    workerState === "running" || workerState === "scheduler-waiting" || workerState === "scheduler-stopping"
+    workerState === "running" ||
+      workerState === "scheduler-waiting" ||
+      workerState === "scheduler-stopping" ||
+      workerState === "restarting"
       ? "animate-spin"
       : "",
   );
@@ -54,6 +59,12 @@
   {:else if workerState === "killing" || workerState === "force-killing"}
     <!-- Killing: X with muted color -->
     <Ghost class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Killing" />
+  {:else if workerState === "restarting"}
+    <!-- Restarting: stopped for a graceful backend restart, auto-resume later -->
+    <RefreshCw class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Restarting" />
+  {:else if workerState === "resuming"}
+    <!-- Resuming: queued for auto-resume after the backend restart -->
+    <Loader class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Resuming" />
   {:else if workerState === "disconnected"}
     <!-- Disconnected: circle with muted color -->
     <Ghost class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Disconnected" />

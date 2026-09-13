@@ -56,6 +56,18 @@ class BackendWorkerManager(WorkerManager):
             project_root=project_root, mod_root=mod_root, path_main=path_main
         )
 
+    def worker_resume(self, mod: Mod, config: str) -> "tuple[bool, str]":
+        """
+        Start a worker queued by mark_resume(), like worker_start()
+        """
+        project_root = env.PROJECT_ROOT
+        mod_root = mod.root
+        path_main = mod.entry.path_main
+        return super().worker_resume(
+            mod=mod.name, config=config,
+            project_root=project_root, mod_root=mod_root, path_main=path_main
+        )
+
     def on_worker_state(self, config: str, state: WORKER_STATE):
         # 1. Worker state source: locked forwarding, safe from any thread
         #    (worker recv thread / trio RPC thread / to_thread).

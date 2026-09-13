@@ -48,14 +48,21 @@ class Worker(BaseTopic):
             raise RpcValueError(msg)
 
     @rpc
-    async def scheduler_stop(self, config: str):
+    async def scheduler_stop(self, config: str, restart_resume: bool = False):
         """
         Request to stop scheduler loop
+
+        Args:
+            config (str): Config name
+            restart_resume (bool): Only meaningful for a worker already parked
+                by a graceful restart: True keeps the pending resume, False
+                (default) cancels it
         """
         # Validate config/mod existence
         await get_mod(config)
 
-        success, msg = await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.worker_scheduler_stop, config)
+        success, msg = await trio.to_thread.run_sync(
+            BACKEND_WORKER_MANAGER.worker_scheduler_stop, config, restart_resume)
         if not success:
             raise RpcValueError(msg)
 
@@ -72,25 +79,37 @@ class Worker(BaseTopic):
             raise RpcValueError(msg)
 
     @rpc
-    async def kill(self, config: str):
+    async def kill(self, config: str, restart_resume: bool = False):
         """
         Request to kill worker
+
+        Args:
+            config (str): Config name
+            restart_resume (bool): During a graceful restart wait, True stops
+                the worker but keeps the pending resume (it still resumes after
+                the backend restart), False (default) stops it for good
         """
         # Validate config/mod existence
         await get_mod(config)
 
-        success, msg = await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.worker_kill, config)
+        success, msg = await trio.to_thread.run_sync(
+            BACKEND_WORKER_MANAGER.worker_kill, config, restart_resume)
         if not success:
             raise RpcValueError(msg)
 
     @rpc
-    async def force_kill(self, config: str):
+    async def force_kill(self, config: str, restart_resume: bool = False):
         """
         Request to force kill worker
+
+        Args:
+            config (str): Config name
+            restart_resume (bool): See kill()
         """
         # Validate config/mod existence
         await get_mod(config)
 
-        success, msg = await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.worker_force_kill, config)
+        success, msg = await trio.to_thread.run_sync(
+            BACKEND_WORKER_MANAGER.worker_force_kill, config, restart_resume)
         if not success:
             raise RpcValueError(msg)

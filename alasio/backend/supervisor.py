@@ -104,6 +104,14 @@ class Supervisor:
         # after the backend is gone instead of restarting it
         self.stop_requested = False
 
+        # One-shot resume credential (token-checksum) announced by the backend
+        # through command:resume:<credential>. The next start_backend()
+        # injects it into the backend child as ALASIO_RESUME_TOKEN; it is
+        # cleared once the new backend announced startup completion
+        # (command:started), so the credential only serves the spawn chain it
+        # was meant for and can never leak into a later independent start.
+        self.resume_token = ''
+
         # stdin listener thread state. The thread must be fully stopped while
         # a backend process is spawning: on Windows, any thread holding the
         # inherited stdin pipe handle (read or wait, even non-blocking) makes
@@ -212,6 +220,11 @@ class Supervisor:
         # electron mode.
         if self.is_electron:
             os.environ['ELECTRON'] = '1'
+        # Inject the announced resume credential the same way: only write when
+        # the backend announced one, so an inherited value (e.g. passed down
+        # by an update relaunch) is never modified without an announcement.
+        if self.resume_token:
+            os.environ['ALASIO_RESUME_TOKEN'] = self.resume_token
         try:
             self.process.start()
         finally:
@@ -544,9 +557,12 @@ class Supervisor:
             # app.py's BackendConfig.create_sockets once the listeners are
             # up). Any first
             # backend message ends recv_loop's startup window, which is
-            # what starts the stdin listener; there is nothing further to
-            # act on here.
-            pass
+            # what starts the stdin listener.
+            # The announced resume credential has now served its spawn chain:
+            # drop the stored copy and the environment residue, so a later
+            # independent spawn can never inherit a stale credential.
+            self.resume_token = ''
+            os.environ.pop('ALASIO_RESUME_TOKEN', None)
         elif msg == b'command:spawned':
             # Backend child spawn completion announcement (sent from
             # entry.backend_process_entry). Normally received inside
@@ -555,6 +571,16 @@ class Supervisor:
             # message arriving after the window already ended, where the
             # listener is up already and there is nothing to do.
             pass
+        elif msg.startswith(b'command:resume:'):
+            # One-shot resume credential announcement (graceful restart or
+            # crash takeover): the next start_backend() injects it into the
+            # backend child through ALASIO_RESUME_TOKEN. Latest announcement
+            # wins; a malformed payload is ignored instead of killing the
+            # supervision loop.
+            try:
+                self.resume_token = msg[len(b'command:resume:'):].decode()
+            except UnicodeDecodeError as e:
+                mprint(f"WARNING: Ignoring malformed resume credential: {e}")
         elif msg.startswith(b'token_ack:'):
             # Backend confirmed a rotated token; wake the rotation thread
             self.token_manager.handle_token_ack(msg)
