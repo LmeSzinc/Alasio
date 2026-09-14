@@ -127,6 +127,17 @@ export class WebsocketManager {
       this.#reconnectAttempts = 0;
       clearTimeout(this.#reconnectTimeout);
 
+      // Drop the topic data of the previous connection: a reconnect may land
+      // on a NEW backend session (a graceful restart / crash recovery rebuilds
+      // the backend process), whose state has nothing to do with the cached
+      // one. The server only pushes a full snapshot for topics that HAVE data,
+      // so a stale value would never be corrected (e.g. a restart phase stuck
+      // at 'shutting-down', workers stuck at 'restarting'). The data is kept
+      // for as long as the connection is down (status quo instead of a
+      // flashing page) and only dropped here, right before the
+      // re-subscriptions below refill every topic from the new session.
+      this.#clearAll();
+
       // Immediately mark all default topics as "ready".
       for (const topic of this.#options.defaultSubscriptions) {
         this.topicReady[topic] = true;
@@ -181,8 +192,10 @@ export class WebsocketManager {
       }
 
       // For all other cases (e.g., normal closure, network issues), attempt to reconnect.
-      // Note that for better user experience, we don't clear topic data on reconnect,
-      // so page can keep status quo on random disconnection instead of flashing.
+      // Note that we don't clear topic data when the connection drops, so the
+      // page keeps its state during a random disconnection instead of flashing;
+      // the data is dropped on the next successful open (see onopen), so a
+      // reconnect never leaves the previous session's data behind.
       this.#clearTopicReady();
       this.#scheduleReconnect();
     };

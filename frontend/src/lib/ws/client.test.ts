@@ -763,6 +763,32 @@ describe("TestReconnect", () => {
     expect(client.topicReady).toEqual({});
   });
 
+  it("drops the previous session's topic data when the reconnect opens", () => {
+    // A reconnect may land on a NEW backend session (a graceful restart or a
+    // crash recovery rebuilds the backend process): its topics only push a
+    // full snapshot when they HAVE data, so the stale value of the old
+    // session would otherwise stay forever (e.g. a restart phase stuck at
+    // 'shutting-down', workers stuck at 'restarting').
+    const client = new WebsocketManager();
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+    client.sub("Restart");
+    FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "Restart", o: "full", v: { phase: "shutting-down" } }));
+    expect(client.topics.Restart).toEqual({ phase: "shutting-down" });
+
+    const ws = dropAndReconnect(1000);
+    // kept while the connection is down: the page shows its state instead of
+    // flashing empty for the whole outage
+    expect(client.topics.Restart).toEqual({ phase: "shutting-down" });
+
+    ws.serverOpen();
+    // dropped once the connection is back, then refilled by the new session
+    expect(client.topics.Restart).toBeUndefined();
+    expect(lastSent(ws)).toEqual({ t: "Restart" });
+    ws.serverMessage(JSON.stringify({ t: "Restart", o: "full", v: { phase: "resuming" } }));
+    expect(client.topics.Restart).toEqual({ phase: "resuming" });
+  });
+
   it("redirects to login and clears data on close code 4001", () => {
     const client = new WebsocketManager();
     client.connect();
