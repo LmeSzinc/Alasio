@@ -25,10 +25,18 @@ class FakeDeployData:
         self.Backend = FakeBackend(ssl)
         # create_config reads `DeployConfig().config.data`
         self.data = self
+        # create_config reformats the config after reading it
+        self.write_calls = 0
 
     def show(self):
         # create_config logs the deploy config through `.config.show()`
         pass
+
+    def write(self, skip_same=True):
+        # create_config rewrites the config so read errors / comments are
+        # normalized (YamlConfig.write); the fake only records the call
+        self.write_calls += 1
+        return False
 
 
 class FakeDeployConfig:
@@ -69,6 +77,19 @@ class TestCreateConfig:
         assert config.keyfile is None
         assert config.certfile is None
         assert not config.ssl_enabled
+
+    def test_reformats_deploy_yaml_after_read(self, monkeypatch):
+        """The loaded config is written back, so the file is normalized
+        (comments / read errors) before the backend serves"""
+        monkeypatch.setattr(
+            'alasio.backend.app.apply_hypercorn_exclusivity_patch', lambda: None)
+        monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
+        fake = FakeDeployConfig(ssl=False)
+        monkeypatch.setattr('alasio.backend.app.DeployConfig', lambda: fake)
+
+        create_config([])
+
+        assert fake.config.write_calls == 1
 
 
 class TestBindAnnounce:

@@ -354,6 +354,7 @@ def create_config(args=None):
     logger.attr('PROJECT_ROOT', env.PROJECT_ROOT)
     logger.attr('ELECTRON', bool(env.ELECTRON))
     DeployConfig().config.show()
+    DeployConfig().config.write()
 
     apply_hypercorn_exclusivity_patch()
     deploy = DeployConfig().config.data
