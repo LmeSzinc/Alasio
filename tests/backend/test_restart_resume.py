@@ -610,6 +610,25 @@ class TestResumeAfterRestart:
         assert RestartSource().data == {}
 
     @pytest.mark.trio
+    async def test_cleanup_runs_after_the_read(self, manager, monkeypatch):
+        """The stale file cleanup is ordered after the read, in the same task"""
+        order = []
+
+        def fake_read():
+            order.append('read')
+            return None
+
+        def fake_cleanup():
+            order.append('cleanup')
+
+        monkeypatch.setattr(GRACEFUL_RESTART, 'read_resume', fake_read)
+        monkeypatch.setattr(GRACEFUL_RESTART, 'resume_cleanup', fake_cleanup)
+
+        await resume_after_restart(manager)
+
+        assert order == ['read', 'cleanup']
+
+    @pytest.mark.trio
     async def test_no_credential_starts_nothing(self, project_root, manager, monkeypatch):
         credential = GRACEFUL_RESTART.write_resume(['cfg_a'])
         file = GRACEFUL_RESTART.resume_file_of(credential.partition('-')[0])

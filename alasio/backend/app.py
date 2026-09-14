@@ -15,7 +15,7 @@ from alasio.backend.dev.assets import ImageStaticFiles, SPANoCacheStaticFiles
 from alasio.backend.lifespan import announce_started, get_shutdown_trigger
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
 from alasio.backend.reactive.source import BaseSource
-from alasio.backend.restart import GRACEFUL_RESTART, resume_after_restart
+from alasio.backend.restart import resume_after_restart
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws import renew as ws_renew
@@ -152,11 +152,6 @@ async def lifespan(app):
     """
     restore_context_cls()
     logger.info('Lifespan start')
-    # stale resume files of a session killed before its restart transaction
-    # finished: nothing stale can be consumed (a read requires the one-shot
-    # credential), this only keeps the disk clean. Tolerant, never blocks the
-    # startup.
-    await trio.to_thread.run_sync(GRACEFUL_RESTART.resume_cleanup)
     async with trio.open_nursery() as nursery:
         # inject global context
         GLOBAL_CONTEXT.global_nursery = nursery
@@ -168,7 +163,8 @@ async def lifespan(app):
         # warmups
         nursery.start_soon(ConfigScanSource.create_default_config)
         # auto-resume of the workers recorded before a graceful restart: a
-        # no-op without the one-shot credential (normal cold start)
+        # no-op without the one-shot credential (normal cold start). The stale
+        # resume file cleanup is part of this task: it must run after the read
         nursery.start_soon(resume_after_restart)
 
         # actual backend runs here

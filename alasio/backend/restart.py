@@ -693,7 +693,9 @@ async def resume_after_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
 
     Every call into the blocking layer (the resume file read, the actions, the
     manager queue, the worker starts, the topic pushes) goes through the trio
-    thread pool.
+    thread pool. The stale resume file cleanup is part of this task and runs
+    after the read (never as an independent task: it must not race the file
+    this backend consumes).
 
     Args:
         manager (WorkerManager): Manager to drive, defaults to
@@ -704,7 +706,19 @@ async def resume_after_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
     with trio.CancelScope() as scope:
         GRACEFUL_RESTART.resume_scope = scope
         try:
-            record = await trio.to_thread.run_sync(GRACEFUL_RESTART.read_resume)
+            # 1) consume the file of THIS session first: read_resume deletes it,
+            #    so the stale file cleanup below can never race it
+            record = None
+            try:
+                record = await trio.to_thread.run_sync(GRACEFUL_RESTART.read_resume)
+            except Exception as e:
+                # an unexpected failure of the read must not skip the housekeeping
+                logger.error(f'[Restart] Resume file read failed: {e}')
+                logger.exception(e)
+            # 2) then the leftovers of sessions killed before their transaction
+            #    finished. Same task, strict order: the two must never run as
+            #    independent tasks (the cleanup would race the file just read)
+            await trio.to_thread.run_sync(GRACEFUL_RESTART.resume_cleanup)
             if record is None:
                 return
             logger.info(f'[Restart] Resume intent accepted: {len(record.configs)} configs, '
