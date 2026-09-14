@@ -97,7 +97,10 @@ class WorkerState(msgspec.Struct):
             conn._send_bytes(data)
             return True
         except AttributeError:
-            # this shouldn't happen
+            # no pipe attached: the worker was cleaned up in between (the state
+            # checks passed before the disconnect handler cleared state.conn).
+            # A worker in its spawn window always has its pipe registered
+            # (see _mark_starting_locked), so a stop request is never dropped
             logger.warning(f'[WorkerManager] Failed to send command config="{self.config}", command={command}: '
                            f'pipe connection not initialized')
             return False
@@ -412,24 +415,44 @@ class WorkerManager(metaclass=Singleton):
             # mark immediately
             state.mod = mod
             state.pending_restart = False
-            self._set_state(state, 'starting')
+            child_conn = self._mark_starting_locked(state)
 
         self.on_worker_info(config, f'[WorkerManager] Starting worker: {config}')
-        return self._worker_start_process(state, mod, config, project_root, mod_root, path_main)
+        return self._worker_start_process(state, mod, config, child_conn, project_root, mod_root, path_main)
 
-    def _worker_start_process(self, state: WorkerState, mod: str, config: str,
+    def _mark_starting_locked(self, state: WorkerState) -> Connection:
+        """
+        Mark the worker as "starting" with its pipe already open (lock required)
+
+        The pipe is opened before the state becomes visible, so a "starting"
+        worker always has one: a command sent while the process spawns is written
+        into the pipe and buffered by the OS until the worker reads its end.
+        Setting the state first would leave the spawn window without a pipe -- a
+        stop request landing in it would be dropped and the worker would keep
+        running while the manager believes it is stopping (a graceful restart
+        would then only end through the timeout escalation).
+
+        Returns:
+            Connection: The child end of the pipe, to be handed to the spawned
+                process (the parent end is registered as state.conn)
+        """
+        parent_conn, child_conn = self._ctx.Pipe()
+        state.conn = parent_conn
+        self._set_state(state, 'starting')
+        return child_conn
+
+    def _worker_start_process(self, state: WorkerState, mod: str, config: str, child_conn,
                               project_root='', mod_root='', path_main='') -> "tuple[bool, str]":
         """
         Spawn the worker process and its recv thread (lock released)
 
-        The caller must have marked the worker as "starting" under the lock;
-        worker_start() and worker_resume() share this tail.
+        The caller must have marked the worker as "starting" under the lock and
+        opened its pipe (_mark_starting_locked): worker_start() and
+        worker_resume() share this tail.
 
         Returns:
             whether success, reason
         """
-        # start process without lock
-        parent_conn, child_conn = self._ctx.Pipe()
         if project_root and mod_root and path_main:
             # if project_root, mod_root, path_main all provided, consider as real mod
             args = (mod, config, child_conn, project_root, mod_root, path_main)
@@ -448,7 +471,6 @@ class WorkerManager(metaclass=Singleton):
 
         with self._lock:
             state.process = process
-            state.conn = parent_conn
             # status will become "running" when worker process initialize BackendBridge
 
             # start recv thread
@@ -930,10 +952,10 @@ class WorkerManager(metaclass=Singleton):
                 return False, f'Backend is gracefully restarting, cannot resume now: "{config}"'
             # mark immediately
             state.mod = mod
-            self._set_state(state, 'starting')
+            child_conn = self._mark_starting_locked(state)
 
         self.on_worker_info(config, f'[WorkerManager] Resuming worker: {config}')
-        return self._worker_start_process(state, mod, config, project_root, mod_root, path_main)
+        return self._worker_start_process(state, mod, config, child_conn, project_root, mod_root, path_main)
 
     def close(self):
         """
