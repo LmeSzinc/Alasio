@@ -15,7 +15,7 @@ from alasio.backend.dev.assets import ImageStaticFiles, SPANoCacheStaticFiles
 from alasio.backend.lifespan import announce_started, get_shutdown_trigger
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
 from alasio.backend.reactive.source import BaseSource
-from alasio.backend.restart import resume_after_restart, resume_cleanup
+from alasio.backend.restart import GRACEFUL_RESTART, resume_after_restart
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws import renew as ws_renew
@@ -156,7 +156,7 @@ async def lifespan(app):
     # finished: nothing stale can be consumed (a read requires the one-shot
     # credential), this only keeps the disk clean. Tolerant, never blocks the
     # startup.
-    resume_cleanup()
+    GRACEFUL_RESTART.resume_cleanup()
     async with trio.open_nursery() as nursery:
         # inject global context
         GLOBAL_CONTEXT.global_nursery = nursery

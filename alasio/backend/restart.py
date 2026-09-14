@@ -8,10 +8,13 @@ backend consumes the file -- only with the one-shot credential handed over
 through the supervisor -- and starts the recorded workers again.
 
 File protocol (see doc/2026-09-13_graceful-backend-restart.md):
-- path: <PROJECT_ROOT>/log/resume/resume-{token}.json, token = random hex; the
-  whole log/resume/ folder belongs to this feature;
+- path: <PROJECT_ROOT>/log/resume/resume-{token}.json, token = random hex;
 - content: the payload itself, {"ts", "owner", "configs", "actions"}; written
   once, after the workers stopped (never during the wait);
+- the folder may hold the files of other backends as well: a transaction only
+  ever touches the file named by its own token (write / read-and-delete /
+  defensive cancel), it never deletes or rewrites a foreign file; leftovers
+  of dead sessions are removed by resume_cleanup() (age based) only;
 - credential: f'{token}-{checksum}' with checksum = HMAC-SHA256(token, payload);
   the checksum is NOT stored in the file, so a file whose credential was never
   announced is never consumed (the read requires the token from the
@@ -40,6 +43,7 @@ from alasio.backend.topic.restart import RestartSource
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws.context import GLOBAL_CONTEXT
 from alasio.ext import env
+from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_remove, atomic_write
 from alasio.logger import logger
@@ -112,6 +116,10 @@ class GracefulRestart:
     """
     Runtime state of the restart orchestration (module singleton)
 
+    One instance is one backend process: besides the runtime state it owns the
+    resume file IO (path, credential, write / read / cleanup) of its own
+    transaction.
+
     Attributes:
         manager (WorkerManager): Worker manager driving the orchestration,
             injectable for tests (defaults to BACKEND_WORKER_MANAGER)
@@ -123,7 +131,7 @@ class GracefulRestart:
             cancel_graceful_restart()
         resume_scope (trio.CancelScope): Resume task scope of the new backend
         resume_file (PathStr): Resume file written by this transaction (for
-            the defensive cancel cleanup)
+            the defensive cancel cleanup), None when nothing was written yet
         resume_owner (str): Owner of the written resume file
     """
 
@@ -134,6 +142,10 @@ class GracefulRestart:
         self.resume_scope = None
         self.resume_file: "Optional[PathStr]" = None
         self.resume_owner = ''
+        # resume_folder is a cached_property: drop the cache on a re-init
+        # (reset(), a caller repointing PROJECT_ROOT) so the current
+        # PROJECT_ROOT is read again
+        cached_property.pop(self, 'resume_folder')
 
     def reset(self):
         """
@@ -141,217 +153,213 @@ class GracefulRestart:
         """
         self.__init__()
 
+    # =========================================================================
+    # Resume file: path, credential, read / write / cleanup
+    # =========================================================================
+
+    @cached_property
+    def resume_folder(self) -> PathStr:
+        """
+        Folder holding the resume files (shared by every backend of a project)
+
+        Cached: PROJECT_ROOT is bound once per process at the backend startup.
+
+        Returns:
+            PathStr: <PROJECT_ROOT>/log/resume
+        """
+        return env.PROJECT_ROOT.joinpath('log/resume')
+
+    def resume_file_of(self, token: str) -> PathStr:
+        """
+        Path of the resume file of one token
+
+        The `resume_file` attribute holds the file THIS transaction wrote;
+        this method resolves where the file of any token lives (token is the
+        isolation, the file name carries it).
+
+        Args:
+            token (str): One-shot random token
+
+        Returns:
+            PathStr: <PROJECT_ROOT>/log/resume/resume-{token}.json
+        """
+        return self.resume_folder.joinpath(f'{RESUME_FILE_PREFIX}{token}{RESUME_FILE_SUFFIX}')
+
+    def resume_checksum(self, token: str, payload: bytes) -> str:
+        """
+        HMAC-SHA256 of the payload under the token (the credential's judge)
+
+        Args:
+            token (str): One-shot random token
+            payload (bytes): Exact bytes written to / read from the resume file
+
+        Returns:
+            str: Hex digest
+        """
+        return hmac.new(token.encode(), payload, hashlib.sha256).hexdigest()
+
+    def iter_resume_files(self) -> "List[PathStr]":
+        """
+        Existing resume files (empty when the folder or the file list is missing)
+
+        Returns:
+            List[PathStr]: Full paths of the resume-*.json files
+        """
+        folder = self.resume_folder
+        try:
+            entries = list(folder.iter_entry())
+        except (FileNotFoundError, NotADirectoryError, OSError):
+            return []
+        files = []
+        for entry in entries:
+            try:
+                name = entry.name
+                if not (name.startswith(RESUME_FILE_PREFIX) and name.endswith(RESUME_FILE_SUFFIX)):
+                    continue
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+            except OSError:
+                continue
+            files.append(folder.joinpath(name))
+        return files
+
+    def write_resume(self, resume_list, owner=OWNER_RESTART, actions=None) -> str:
+        """
+        Write the resume intent and mint its one-shot credential
+
+        Called once per restart transaction, after restart_wait() returned (never
+        during the wait): the content is the final resume list, there is no
+        intermediate write and no rewrite. Only the file of this transaction is
+        written: other resume files in the folder (another backend, a session that
+        died before its transaction finished) are left untouched -- they can never
+        be consumed without their own credential, and the stale ones are removed
+        by resume_cleanup().
+
+        Args:
+            resume_list (list[str]): Configs to auto-resume after the restart
+            owner (str): Transaction owner, OWNER_RESTART ('restart') or 'update'
+            actions (list[str]): Optional action tags the new backend runs before
+                the resume
+
+        Returns:
+            str: Credential string f'{token}-{checksum}' to announce to the
+                supervisor
+        """
+        token = secrets.token_hex(16)
+        record = ResumeRecord(
+            ts=time.time(),
+            owner=owner,
+            configs=list(resume_list),
+            actions=list(actions) if actions else [],
+        )
+        payload = msgspec.json.encode(record)
+        checksum = self.resume_checksum(token, payload)
+        file = self.resume_file_of(token)
+        atomic_write(file, payload)
+        self.resume_file = file
+        self.resume_owner = owner
+        logger.info(f'[Restart] Resume file written: {file} '
+                    f'(owner={owner}, {len(record.configs)} configs, {len(record.actions)} actions)')
+        return f'{token}-{checksum}'
+
+    def read_resume(self) -> "Optional[ResumeRecord]":
+        """
+        Consume the resume file of this backend (new backend startup)
+
+        The credential comes from the supervisor (ALASIO_RESUME_TOKEN). Without a
+        credential nothing is read, so a file left behind by a killed session can
+        never be consumed. With a credential the file named by its token is read
+        and deleted immediately -- a file never survives a read, whatever the
+        verification result -- then the payload is verified against the checksum.
+
+        Returns:
+            ResumeRecord | None: The verified record, or None (no credential, no
+                file, checksum mismatch, malformed payload)
+        """
+        credential = os.environ.get(RESUME_TOKEN_ENV, '')
+        if not credential:
+            # logger.info('[Restart] Resume file not read: no env credential')
+            return None
+        token, sep, checksum = credential.partition('-')
+        if not (sep and token and checksum):
+            logger.warning('[Restart] Resume file not read: malformed credential')
+            return None
+        file = self.resume_file_of(token)
+        try:
+            payload = atomic_read_bytes(file)
+        except FileNotFoundError:
+            logger.info(f'[Restart] Resume file not found: {file}')
+            return None
+        except OSError as e:
+            logger.warning(f'[Restart] Resume file not readable: {file}: {e}')
+            return None
+        # read once: the file never survives a read, valid or not
+        atomic_remove(file)
+        actual = self.resume_checksum(token, payload)
+        if not hmac.compare_digest(actual, checksum):
+            logger.warning('[Restart] Resume file dropped: checksum mismatch (tampered or corrupted)')
+            return None
+        try:
+            record = msgspec.json.decode(payload, type=ResumeRecord)
+        except msgspec.ValidationError as e:
+            logger.warning(f'[Restart] Resume file dropped: invalid payload: {e}')
+            return None
+        return record
+
+    def resume_cleanup(self):
+        """
+        Remove stale resume files (lifespan startup, best effort)
+
+        Deletes resume files older than RESUME_CLEANUP_AGE. Nothing stale can be
+        consumed anyway (a read requires the one-shot credential); this only keeps
+        the disk clean when a process was killed before its transaction finished
+        (the normal path is deleted by the read itself). Never raises: a cleanup
+        problem must not block the backend startup.
+        """
+        try:
+            files = self.iter_resume_files()
+        except Exception as e:
+            logger.warning(f'[Restart] Resume cleanup failed: {e}')
+            return
+        now = time.time()
+        removed = 0
+        kept = 0
+        for file in files:
+            try:
+                st = file.stat()
+            except (FileNotFoundError, OSError):
+                continue
+            if now - st.st_mtime > RESUME_CLEANUP_AGE:
+                try:
+                    if atomic_remove(file):
+                        removed += 1
+                except OSError as e:
+                    logger.warning(f'[Restart] Failed to remove stale resume file {file}: {e}')
+                continue
+            kept += 1
+        if removed or kept:
+            logger.info(f'[Restart] Resume cleanup: removed {removed} stale files, kept {kept}')
+
+    def announce_resume_token(self, credential: str):
+        """
+        Announce the resume credential to the supervisor
+
+        Sends b'command:resume:<credential>'; the supervisor stores it and injects
+        it into the next spawned backend (ALASIO_RESUME_TOKEN). Without a supervisor
+        the message is silently dropped (send default), so a file written without a
+        supervisor is never consumed: the credential cannot be handed over.
+
+        Args:
+            credential (str): Credential string returned by write_resume()
+        """
+        # write the file first, announce after: the invariant is "no credential
+        # announced => the file is never read", so a crash in between leaves an
+        # unconsumable file (cleaned up by the next transaction / the age cleanup)
+        mpipe_backend.send(b'command:resume:' + credential.encode())
+        logger.info('[Restart] Resume credential announced to the supervisor')
+
 
 GRACEFUL_RESTART = GracefulRestart()
-
-
-# =============================================================================
-# Resume file: path, credential, read / write / cleanup
-# =============================================================================
-
-def resume_folder() -> PathStr:
-    """
-    Folder holding the resume files (owned by this feature)
-
-    Returns:
-        PathStr: <PROJECT_ROOT>/log/resume
-    """
-    return env.PROJECT_ROOT.joinpath('log/resume')
-
-
-def resume_file(token: str) -> PathStr:
-    """
-    Path of the resume file of one token
-
-    Args:
-        token (str): One-shot random token
-
-    Returns:
-        PathStr: <PROJECT_ROOT>/log/resume/resume-{token}.json
-    """
-    return resume_folder().joinpath(f'{RESUME_FILE_PREFIX}{token}{RESUME_FILE_SUFFIX}')
-
-
-def resume_checksum(token: str, payload: bytes) -> str:
-    """
-    HMAC-SHA256 of the payload under the token (the credential's judge)
-
-    Args:
-        token (str): One-shot random token
-        payload (bytes): Exact bytes written to / read from the resume file
-
-    Returns:
-        str: Hex digest
-    """
-    return hmac.new(token.encode(), payload, hashlib.sha256).hexdigest()
-
-
-def iter_resume_files() -> "List[PathStr]":
-    """
-    Existing resume files (empty when the folder or the file list is missing)
-
-    Returns:
-        List[PathStr]: Full paths of the resume-*.json files
-    """
-    folder = resume_folder()
-    try:
-        entries = list(folder.iter_entry())
-    except (FileNotFoundError, NotADirectoryError, OSError):
-        return []
-    files = []
-    for entry in entries:
-        try:
-            name = entry.name
-            if not (name.startswith(RESUME_FILE_PREFIX) and name.endswith(RESUME_FILE_SUFFIX)):
-                continue
-            if not entry.is_file(follow_symlinks=False):
-                continue
-        except OSError:
-            continue
-        files.append(folder.joinpath(name))
-    return files
-
-
-def write_resume(resume_list, owner=OWNER_RESTART, actions=None) -> str:
-    """
-    Write the resume intent and mint its one-shot credential
-
-    Called once per restart transaction, after restart_wait() returned (never
-    during the wait): the content is the final resume list, there is no
-    intermediate write and no rewrite.
-
-    Args:
-        resume_list (list[str]): Configs to auto-resume after the restart
-        owner (str): Transaction owner, OWNER_RESTART ('restart') or 'update'
-        actions (list[str]): Optional action tags the new backend runs before
-            the resume
-
-    Returns:
-        str: Credential string f'{token}-{checksum}' to announce to the
-            supervisor
-    """
-    token = secrets.token_hex(16)
-    record = ResumeRecord(
-        ts=time.time(),
-        owner=owner,
-        configs=list(resume_list),
-        actions=list(actions) if actions else [],
-    )
-    payload = msgspec.json.encode(record)
-    checksum = resume_checksum(token, payload)
-    # leftover files of previous transactions: one backend process runs at a
-    # time (one transaction), so any other resume file is stale
-    for file in iter_resume_files():
-        try:
-            atomic_remove(file)
-        except OSError as e:
-            logger.warning(f'[Restart] Failed to remove the leftover resume file {file}: {e}')
-    file = resume_file(token)
-    atomic_write(file, payload)
-    GRACEFUL_RESTART.resume_file = file
-    GRACEFUL_RESTART.resume_owner = owner
-    logger.info(f'[Restart] Resume file written: {file} '
-                f'(owner={owner}, {len(record.configs)} configs, {len(record.actions)} actions)')
-    return f'{token}-{checksum}'
-
-
-def read_resume() -> "Optional[ResumeRecord]":
-    """
-    Consume the resume file of this backend (new backend startup)
-
-    The credential comes from the supervisor (ALASIO_RESUME_TOKEN). Without a
-    credential nothing is read, so a file left behind by a killed session can
-    never be consumed. With a credential the file named by its token is read
-    and deleted immediately -- a file never survives a read, whatever the
-    verification result -- then the payload is verified against the checksum.
-
-    Returns:
-        ResumeRecord | None: The verified record, or None (no credential, no
-            file, checksum mismatch, malformed payload)
-    """
-    credential = os.environ.get(RESUME_TOKEN_ENV, '')
-    if not credential:
-        logger.info('[Restart] Resume file not read: no env credential')
-        return None
-    token, sep, checksum = credential.partition('-')
-    if not (sep and token and checksum):
-        logger.warning('[Restart] Resume file not read: malformed credential')
-        return None
-    file = resume_file(token)
-    try:
-        payload = atomic_read_bytes(file)
-    except FileNotFoundError:
-        logger.info(f'[Restart] Resume file not found: {file}')
-        return None
-    except OSError as e:
-        logger.warning(f'[Restart] Resume file not readable: {file}: {e}')
-        return None
-    # read once: the file never survives a read, valid or not
-    atomic_remove(file)
-    actual = resume_checksum(token, payload)
-    if not hmac.compare_digest(actual, checksum):
-        logger.warning('[Restart] Resume file dropped: checksum mismatch (tampered or corrupted)')
-        return None
-    try:
-        record = msgspec.json.decode(payload, type=ResumeRecord)
-    except msgspec.ValidationError as e:
-        logger.warning(f'[Restart] Resume file dropped: invalid payload: {e}')
-        return None
-    return record
-
-
-def resume_cleanup():
-    """
-    Remove stale resume files (lifespan startup, best effort)
-
-    Deletes resume files older than RESUME_CLEANUP_AGE. Nothing stale can be
-    consumed anyway (a read requires the one-shot credential); this only keeps
-    the disk clean when a process was killed before its transaction finished
-    (the normal path is deleted by the read itself). Never raises: a cleanup
-    problem must not block the backend startup.
-    """
-    try:
-        files = iter_resume_files()
-    except Exception as e:
-        logger.warning(f'[Restart] Resume cleanup failed: {e}')
-        return
-    now = time.time()
-    removed = 0
-    kept = 0
-    for file in files:
-        try:
-            st = file.stat()
-        except (FileNotFoundError, OSError):
-            continue
-        if now - st.st_mtime > RESUME_CLEANUP_AGE:
-            try:
-                if atomic_remove(file):
-                    removed += 1
-            except OSError as e:
-                logger.warning(f'[Restart] Failed to remove stale resume file {file}: {e}')
-            continue
-        kept += 1
-    if removed or kept:
-        logger.info(f'[Restart] Resume cleanup: removed {removed} stale files, kept {kept}')
-
-
-def announce_resume_token(credential: str):
-    """
-    Announce the resume credential to the supervisor
-
-    Sends b'command:resume:<credential>'; the supervisor stores it and injects
-    it into the next spawned backend (ALASIO_RESUME_TOKEN). Without a supervisor
-    the message is silently dropped (send default), so a file written without a
-    supervisor is never consumed: the credential cannot be handed over.
-
-    Args:
-        credential (str): Credential string returned by write_resume()
-    """
-    # write the file first, announce after: the invariant is "no credential
-    # announced => the file is never read", so a crash in between leaves an
-    # unconsumable file (cleaned up by the next transaction / the age cleanup)
-    mpipe_backend.send(b'command:resume:' + credential.encode())
-    logger.info('[Restart] Resume credential announced to the supervisor')
 
 
 # =============================================================================
@@ -486,8 +494,8 @@ async def run_graceful_restart(manager=None, hooks=None):
             #    the credential (announce after the write)
             actions = getattr(hooks, 'actions', None)
             if resume_list or actions:
-                credential = write_resume(resume_list, actions=actions)
-                announce_resume_token(credential)
+                credential = GRACEFUL_RESTART.write_resume(resume_list, actions=actions)
+                GRACEFUL_RESTART.announce_resume_token(credential)
             else:
                 logger.info('[Restart] No worker to resume and no action to run, '
                             'restarting backend directly')
@@ -660,7 +668,7 @@ async def resume_after_restart(manager=None):
     with trio.CancelScope() as scope:
         GRACEFUL_RESTART.resume_scope = scope
         try:
-            record = await trio.to_thread.run_sync(read_resume)
+            record = await trio.to_thread.run_sync(GRACEFUL_RESTART.read_resume)
             if record is None:
                 return
             logger.info(f'[Restart] Resume intent accepted: {len(record.configs)} configs, '
