@@ -33,6 +33,7 @@
           { path: "/dev/debug/ws", name: t.WebsocketTest.Title() },
           { path: "/dev/debug/modmanager", name: "Mod Manager" },
           { path: "/dev/debug/workerstatus", name: "Worker Status" },
+          { path: "/dev/debug/restartstatus", name: "Restart Status" },
           { path: "/dev/debug/scheduler", name: "Scheduler" },
           { path: "/dev/debug/preview", name: "Preview" },
           { path: "/dev/debug/dashboard", name: "Dashboard" },

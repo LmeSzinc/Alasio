@@ -28,18 +28,22 @@
 
 <hr />
 <div class="flex flex-col gap-y-1.5">
-  <LayoutHorizontalLike {data}>
+  <!-- The two buttons stack vertically and share the input column: the graceful
+       restart sits on the name row, the forced restart on the help row, so the
+       help text stays in the left column instead of running under the buttons
+       (side by side buttons overflow the 200px input column in English) -->
+  <LayoutHorizontalLike {data} class="gap-y-2">
     {#snippet InputSnippet()}
-      <div class="flex gap-2">
-        <Button onclick={gracefulRpc.open} variant="destructive" class="flex-1" title={t.DevTool.RestartBackendHelp()}>
-          <Power class="mr-2 h-4 w-4" />
-          {t.DevTool.RestartBackend()}
-        </Button>
-        <Button onclick={forceRpc.open} variant="outline" class="flex-1" title={t.DevTool.ForceRestartBackendHelp()}>
-          <Zap class="mr-2 h-4 w-4" />
-          {t.DevTool.ForceRestartBackend()}
-        </Button>
-      </div>
+      <Button onclick={gracefulRpc.open} variant="destructive" class="w-full" title={t.DevTool.RestartBackendHelp()}>
+        <Power class="mr-2 h-4 w-4" />
+        {t.DevTool.RestartBackend()}
+      </Button>
+    {/snippet}
+    {#snippet PlaceholderSnippet()}
+      <Button onclick={forceRpc.open} variant="outline" class="w-full" title={t.DevTool.ForceRestartBackendHelp()}>
+        <Zap class="mr-2 h-4 w-4" />
+        {t.DevTool.ForceRestartBackend()}
+      </Button>
     {/snippet}
   </LayoutHorizontalLike>
 </div>

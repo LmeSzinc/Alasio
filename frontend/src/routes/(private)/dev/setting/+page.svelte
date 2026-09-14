@@ -3,6 +3,7 @@
   import { t } from "$lib/i18n";
   import DisplayTool from "./DisplayTool.svelte";
   import RestartBackendTool from "./RestartBackendTool.svelte";
+  import RestartStatus from "./RestartStatus.svelte";
   import ReturnToLoginTool from "./ReturnToLoginTool.svelte";
   import WindowControlsAvoidTool from "./WindowControlsAvoidTool.svelte";
 </script>
@@ -13,6 +14,8 @@
   </ArgGroupCard>
   <ArgGroupCard title={t.DevTool.SystemTool()} class="max-w-180">
     <RestartBackendTool />
+    <!-- Status of the restart in progress (phase + configs still running) -->
+    <RestartStatus />
     <ReturnToLoginTool />
     <WindowControlsAvoidTool />
   </ArgGroupCard>

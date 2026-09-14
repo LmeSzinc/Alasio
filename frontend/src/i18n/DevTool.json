@@ -77,11 +77,11 @@
     "es-ES": "Solo disponible en la aplicación Electron. Se aplica al reiniciar la aplicación"
   },
   "RestartBackend": {
-    "en-US": "Gracefully Restart Backend",
+    "en-US": "Graceful Restart",
     "zh-CN": "优雅重启",
     "ja-JP": "優雅に再起動",
     "zh-TW": "優雅重啟",
-    "es-ES": "Reiniciar elegantemente"
+    "es-ES": "Reinicio elegante"
   },
   "RestartBackendHelp": {
     "en-US": "Running configs stop after the current task and resume automatically after the restart (up to 10 minutes). Force restart kills them immediately without resuming.",
@@ -104,27 +104,6 @@
     "zh-TW": "強制重啟",
     "es-ES": "Reinicio forzado"
   },
-  "RestartPhaseStopping": {
-    "en-US": "Waiting for the running configs to stop…",
-    "zh-CN": "正在等待运行中的配置优雅停止…",
-    "ja-JP": "実行中の設定が停止するのを待っています…",
-    "zh-TW": "正在等待運行中的設定優雅停止…",
-    "es-ES": "Esperando a que las configuraciones en ejecución se detengan…"
-  },
-  "RestartPhaseShuttingDown": {
-    "en-US": "All configs stopped, restarting the backend…",
-    "zh-CN": "所有配置已停止，正在重启后端…",
-    "ja-JP": "すべての設定が停止しました。バックエンドを再起動しています…",
-    "zh-TW": "所有設定已停止，正在重啟後端…",
-    "es-ES": "Todas las configuraciones se detuvieron, reiniciando el backend…"
-  },
-  "RestartPhaseResuming": {
-    "en-US": "Restoring the configs…",
-    "zh-CN": "正在恢复配置…",
-    "ja-JP": "設定を復元しています…",
-    "zh-TW": "正在恢復設定…",
-    "es-ES": "Restaurando las configuraciones…"
-  },
   "RestartBackendConfirmTitle": {
     "en-US": "Gracefully restart the backend?",
     "zh-CN": "确认优雅重启后端？",
@@ -138,13 +117,6 @@
     "ja-JP": "バックエンドを強制再起動しますか？",
     "zh-TW": "確認強制重啟後端？",
     "es-ES": "¿Forzar el reinicio del backend?"
-  },
-  "RestartProgress": {
-    "en-US": "{stopped}/{total} configs stopped",
-    "zh-CN": "{stopped}/{total} 个配置已停止",
-    "ja-JP": "{stopped}/{total} 件の設定が停止しました",
-    "zh-TW": "{stopped}/{total} 個設定已停止",
-    "es-ES": "{stopped}/{total} configuraciones detenidas"
   },
   "RestartBackendConfirmHelp": {
     "en-US": "Running configs stop after the current task and resume automatically after the restart. The graceful wait can take up to 10 minutes.",
@@ -166,6 +138,41 @@
     "ja-JP": "キャンセル",
     "zh-TW": "取消",
     "es-ES": "Cancelar"
+  },
+  "RestartPhaseStopping": {
+    "en-US": "Waiting for the running configs to stop…",
+    "zh-CN": "正在等待运行中的配置优雅停止…",
+    "ja-JP": "実行中の設定が停止するのを待っています…",
+    "zh-TW": "正在等待運行中的設定優雅停止…",
+    "es-ES": "Esperando a que las configuraciones en ejecución se detengan…"
+  },
+  "RestartPhaseShuttingDown": {
+    "en-US": "All configs stopped, restarting the backend…",
+    "zh-CN": "所有配置已停止，正在重启后端…",
+    "ja-JP": "すべての設定が停止しました。バックエンドを再起動しています…",
+    "zh-TW": "所有設定已停止，正在重啟後端…",
+    "es-ES": "Todas las configuraciones se detuvieron, reiniciando el backend…"
+  },
+  "RestartPhaseResuming": {
+    "en-US": "Restoring the configs…",
+    "zh-CN": "正在恢复配置…",
+    "ja-JP": "設定を復元しています…",
+    "zh-TW": "正在恢復設定…",
+    "es-ES": "Restaurando las configuraciones…"
+  },
+  "RestartPhaseDone": {
+    "en-US": "Restart finished",
+    "zh-CN": "重启完成",
+    "ja-JP": "再起動が完了しました",
+    "zh-TW": "重啟完成",
+    "es-ES": "Reinicio completado"
+  },
+  "RestartProgress": {
+    "en-US": "{stopped}/{total} configs stopped",
+    "zh-CN": "{stopped}/{total} 个配置已停止",
+    "ja-JP": "{stopped}/{total} 件の設定が停止しました",
+    "zh-TW": "{stopped}/{total} 個設定已停止",
+    "es-ES": "{stopped}/{total} configuraciones detenidas"
   },
   "ReturnToLogin": {
     "en-US": "Return to Login",
