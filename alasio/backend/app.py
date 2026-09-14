@@ -156,7 +156,7 @@ async def lifespan(app):
     # finished: nothing stale can be consumed (a read requires the one-shot
     # credential), this only keeps the disk clean. Tolerant, never blocks the
     # startup.
-    GRACEFUL_RESTART.resume_cleanup()
+    await trio.to_thread.run_sync(GRACEFUL_RESTART.resume_cleanup)
     async with trio.open_nursery() as nursery:
         # inject global context
         GLOBAL_CONTEXT.global_nursery = nursery

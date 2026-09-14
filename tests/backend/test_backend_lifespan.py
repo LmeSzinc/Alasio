@@ -269,8 +269,12 @@ class TestMpipeRecvLoopCancelRestart:
         from alasio.backend import restart as restart_mod
 
         calls = []
-        monkeypatch.setattr(restart_mod, 'cancel_graceful_restart',
-                            lambda reason='': calls.append(reason))
+
+        async def fake_cancel(reason=''):
+            # the mpipe thread drives the async cancel through the trio loop
+            calls.append(reason)
+
+        monkeypatch.setattr(restart_mod, 'cancel_graceful_restart', fake_cancel)
         parent_conn, event, child_conn = self._make(monkeypatch)
 
         async def main():

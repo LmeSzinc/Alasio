@@ -45,7 +45,10 @@ def mpipe_recv_loop(conn, trio_token):
         # import would be circular
         try:
             from alasio.backend.restart import cancel_graceful_restart
-            cancel_graceful_restart('backend stop')
+
+            # async: its blocking parts await the trio thread pool, so drive it
+            # from this (mpipe recv) thread through the loop
+            trio.from_thread.run(cancel_graceful_restart, 'backend stop', trio_token=trio_token)
         except Exception as e:
             logger.error(f'Failed to cancel the graceful restart: {e}')
         try:

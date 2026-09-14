@@ -561,7 +561,7 @@ class TestRunGracefulRestart:
                              description='the worker to enter scheduler-stopping')
             # nothing written while the wait is running
             assert GRACEFUL_RESTART.iter_resume_files() == []
-            cancel_graceful_restart('test cancel')
+            await cancel_graceful_restart('test cancel', manager)
             # no sleep needed: the nursery exit waits for the orchestration task
 
         assert calls == []
@@ -572,12 +572,13 @@ class TestRunGracefulRestart:
         success, msg = manager.worker_start('WorkerTestScheduler', 'cfg_after')
         assert success, msg
 
-    def test_cancel_removes_written_file(self, project_root):
+    @pytest.mark.trio
+    async def test_cancel_removes_written_file(self, project_root):
         credential = GRACEFUL_RESTART.write_resume(['cfg_a'])
         token = credential.partition('-')[0]
         assert GRACEFUL_RESTART.resume_file_of(token).isfile()
 
-        cancel_graceful_restart('test cancel')
+        await cancel_graceful_restart('test cancel')
 
         assert not GRACEFUL_RESTART.resume_file_of(token).isfile()
 
@@ -692,7 +693,7 @@ class TestResumeAfterRestart:
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
         monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.02)
 
-        async def failing_get_mod(config):
+        def failing_get_mod(config):
             if config == 'cfg_b':
                 raise RuntimeError('config gone')
             return 'WorkerTestScheduler'
@@ -774,7 +775,7 @@ class TestResumeAfterRestart:
                 description='the first queued worker to start')
             # the rest is still queued (the 0.5s start interval has not elapsed)
             assert manager.state['cfg_b'].state == 'resuming'
-            cancel_graceful_restart('test cancel')
+            await cancel_graceful_restart('test cancel', manager)
             # no sleep needed: the nursery exit waits for the resume task
 
         # the queue stopped: no further worker was started and the queued
@@ -805,7 +806,7 @@ async def wait_until(predicate, timeout=5.0, interval=0.01, description='conditi
     raise AssertionError(f'Timeout waiting for {description}')
 
 
-async def _fake_get_mod(config):
+def _fake_get_mod(config):
     """
     Resolve every test config to the scheduler test mod (queue tests)
 

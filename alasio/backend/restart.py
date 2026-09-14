@@ -41,7 +41,6 @@ from alasio.backend.mpipe.mpipe_backend import mpipe_backend
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.restart import RestartSource
 from alasio.backend.topic.scan import ConfigScanSource
-from alasio.backend.ws.context import GLOBAL_CONTEXT
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
@@ -116,13 +115,15 @@ class GracefulRestart:
     """
     Runtime state of the restart orchestration (module singleton)
 
-    One instance is one backend process: besides the runtime state it owns the
-    resume file IO (path, credential, write / read / cleanup) of its own
-    transaction.
+    One instance is one backend process: it binds the process-wide worker
+    manager once, and besides the runtime state it owns the resume file IO
+    (path, credential, write / read / cleanup) of its own transaction.
 
     Attributes:
-        manager (WorkerManager): Worker manager driving the orchestration,
-            injectable for tests (defaults to BACKEND_WORKER_MANAGER)
+        WORKER_MANAGER (WorkerManager): The backend worker manager singleton
+            (BACKEND_WORKER_MANAGER), bound once and never reassigned; the
+            orchestration takes it as the default `manager` argument and tests
+            inject their own there
         running (bool): True while this backend owns a restart transaction.
             Set synchronously by the rpc handler (re-entry guard), cleared by
             cancel_graceful_restart(); kept on the success path, the gate stays
@@ -135,8 +136,11 @@ class GracefulRestart:
         resume_owner (str): Owner of the written resume file
     """
 
+    # the worker manager of this backend process, bound once: the orchestration
+    # takes it as its default `manager` argument (tests pass their own)
+    WORKER_MANAGER = BACKEND_WORKER_MANAGER
+
     def __init__(self):
-        self.manager = None
         self.running = False
         self.scope = None
         self.resume_scope = None
@@ -225,15 +229,23 @@ class GracefulRestart:
 
     def write_resume(self, resume_list, owner=OWNER_RESTART, actions=None) -> str:
         """
-        Write the resume intent and mint its one-shot credential
+        Write the resume intent, mint its one-shot credential and announce it
+
+        Blocking (disk write + supervisor pipe): call it through the trio thread
+        pool, never on the event loop.
 
         Called once per restart transaction, after restart_wait() returned (never
         during the wait): the content is the final resume list, there is no
-        intermediate write and no rewrite. Only the file of this transaction is
-        written: other resume files in the folder (another backend, a session that
-        died before its transaction finished) are left untouched -- they can never
-        be consumed without their own credential, and the stale ones are removed
-        by resume_cleanup().
+        intermediate write and no rewrite. The credential is announced at the end
+        of the write, inside this method: the file exists before the supervisor
+        can hand the credential to the next backend, so the invariant "no
+        credential announced => the file is never read" is kept and a call site
+        cannot forget the announce (which would leave an unconsumable file
+        behind). Only the file of this transaction is written: other resume files
+        in the folder (another backend, a session that died before its
+        transaction finished) are left untouched -- they can never be consumed
+        without their own credential, and the stale ones are removed by
+        resume_cleanup().
 
         Args:
             resume_list (list[str]): Configs to auto-resume after the restart
@@ -242,8 +254,8 @@ class GracefulRestart:
                 the resume
 
         Returns:
-            str: Credential string f'{token}-{checksum}' to announce to the
-                supervisor
+            str: Credential string f'{token}-{checksum}', already announced to
+                the supervisor
         """
         token = secrets.token_hex(16)
         record = ResumeRecord(
@@ -260,7 +272,11 @@ class GracefulRestart:
         self.resume_owner = owner
         logger.info(f'[Restart] Resume file written: {file} '
                     f'(owner={owner}, {len(record.configs)} configs, {len(record.actions)} actions)')
-        return f'{token}-{checksum}'
+        credential = f'{token}-{checksum}'
+        # the write is complete before the credential leaves this method: the
+        # supervisor only ever learns about a file that is already on disk
+        self.announce_resume_token(credential)
+        return credential
 
     def read_resume(self) -> "Optional[ResumeRecord]":
         """
@@ -344,6 +360,9 @@ class GracefulRestart:
         """
         Announce the resume credential to the supervisor
 
+        Called by write_resume() right after the file hit the disk (blocking:
+        the pipe send runs in the same thread pool hop as the write).
+
         Sends b'command:resume:<credential>'; the supervisor stores it and injects
         it into the next spawned backend (ALASIO_RESUME_TOKEN). Without a supervisor
         the message is silently dropped (send default), so a file written without a
@@ -366,16 +385,31 @@ GRACEFUL_RESTART = GracefulRestart()
 # Restart topic phase
 # =============================================================================
 
-def push_restart_phase(phase: str):
+def _push_restart_phase(phase: str):
     """
-    Push the restart phase to the Restart topic (any thread safety)
+    Push the restart phase to the Restart topic (blocking, thread pool only)
+
+    Args:
+        phase (str): '' clears the topic, otherwise 'stopping' /
+            'shutting-down' / 'resuming' / 'done'
+    """
+    RestartSource().on_event(phase)
+
+
+async def push_restart_phase(phase: str):
+    """
+    Push the restart phase to the Restart topic (async wrapper)
+
+    The source event entry is a sync function (it locks the source and queues
+    the delivery), so it runs in the trio thread pool -- the event loop never
+    executes it.
 
     Args:
         phase (str): '' clears the topic, otherwise 'stopping' /
             'shutting-down' / 'resuming' / 'done'
     """
     try:
-        RestartSource().on_event(phase)
+        await trio.to_thread.run_sync(_push_restart_phase, phase)
     except Exception as e:
         # the phase is a progress hint, never let it break the restart
         logger.warning(f'[Restart] Failed to push phase "{phase}": {e}')
@@ -418,28 +452,7 @@ def run_resume_actions(actions):
 # Orchestration (old backend)
 # =============================================================================
 
-def _cancel_scope_from_any_thread(scope):
-    """
-    Cancel a trio cancel scope from any thread (cancel scopes are not thread
-    safe, the cancellation must run on the trio thread)
-
-    Args:
-        scope (trio.CancelScope): Scope to cancel
-    """
-    if scope is None:
-        return
-    token = GLOBAL_CONTEXT.trio_token
-    if token is not None:
-        try:
-            token.run_sync_soon(scope.cancel)
-            return
-        except trio.RunFinishedError:
-            # loop already gone, the task is gone with it
-            pass
-    scope.cancel()
-
-
-async def run_graceful_restart(manager=None, hooks=None):
+async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=None):
     """
     Graceful restart orchestration (old backend)
 
@@ -448,23 +461,27 @@ async def run_graceful_restart(manager=None, hooks=None):
     the worker states through the Worker topic while it waits.
 
     The resume file is written once the wait is over -- never during it -- and
-    the credential is announced to the supervisor right after. On the success
-    path the manager gate is kept (until the process exits): a worker started
-    in the restart window would be killed at exit and never resumed.
+    the credential is announced inside that write. Every call into the blocking
+    layer (the manager, the resume file IO, the restart topic push, the backend
+    restart itself) goes through the trio thread pool, so the event loop stays
+    responsive while the frontend watches the worker states through the Worker
+    topic. On the success path the manager gate is kept (until the process
+    exits): a worker started in the restart window would be killed at exit and
+    never resumed.
 
     Args:
         manager (WorkerManager): Manager to drive, defaults to
-            BACKEND_WORKER_MANAGER (injectable for tests)
+            GRACEFUL_RESTART.WORKER_MANAGER (the process singleton, injectable
+            for tests)
         hooks (RestartHooks): Optional hooks of the in-app update flow
     """
-    if manager is None:
-        manager = BACKEND_WORKER_MANAGER
-    GRACEFUL_RESTART.manager = manager
     with trio.CancelScope() as scope:
         GRACEFUL_RESTART.scope = scope
         try:
             try:
-                waiting = manager.restart_begin()
+                # blocking: snapshots the running workers and sends the graceful
+                # stop requests over the worker pipes
+                waiting = await trio.to_thread.run_sync(manager.restart_begin)
             except Exception as e:
                 # already restarting (the rpc re-entry guard makes this
                 # unreachable) or nothing to begin: release the rpc flag
@@ -472,7 +489,7 @@ async def run_graceful_restart(manager=None, hooks=None):
                 GRACEFUL_RESTART.running = False
                 return
 
-            push_restart_phase('stopping')
+            await push_restart_phase('stopping')
             # the returned list is the whole waiting set of this restart (the
             # final resume list is the return value of restart_wait later)
             logger.info(
@@ -484,18 +501,19 @@ async def run_graceful_restart(manager=None, hooks=None):
             #    (thread-safe, no trio), the timeout escalation happens inside
             #    restart_wait and the abort event makes it return early
             resume_list = await trio.to_thread.run_sync(manager.restart_wait, GRACEFUL_STOP_TIMEOUT)
+            # restart_aborted() is a plain threading.Event read: no lock, no IO
             if manager.restart_aborted():
                 # cancelled while waiting (force restart / backend stop):
                 # never write a resume file and never restart
                 logger.info('[Restart] Graceful restart was cancelled')
                 return
 
-            # 2) the wait is over: write the resume intent once and announce
-            #    the credential (announce after the write)
+            # 2) the wait is over: write the resume intent once; the credential
+            #    is announced inside the write. Blocking (disk + pipe) -> pool
             actions = getattr(hooks, 'actions', None)
             if resume_list or actions:
-                credential = GRACEFUL_RESTART.write_resume(resume_list, actions=actions)
-                GRACEFUL_RESTART.announce_resume_token(credential)
+                await trio.to_thread.run_sync(
+                    GRACEFUL_RESTART.write_resume, resume_list, OWNER_RESTART, actions)
             else:
                 logger.info('[Restart] No worker to resume and no action to run, '
                             'restarting backend directly')
@@ -508,14 +526,14 @@ async def run_graceful_restart(manager=None, hooks=None):
             # 4) all workers stopped: enter the existing backend restart step.
             #    The success path does NOT release the gate: it stays until the
             #    process exits, so no worker is started (and lost) in between
-            push_restart_phase('shutting-down')
+            await push_restart_phase('shutting-down')
             logger.info(f'[Restart] All workers stopped, restarting backend, resume list: {resume_list}')
             await lifespan_restart()
         except trio.Cancelled:
             # the cancel path (cancel_graceful_restart) owns the cleanup
             raise
         except Exception as e:
-            cancel_graceful_restart(f'graceful restart failed: {e}')
+            await cancel_graceful_restart(f'graceful restart failed: {e}', manager)
             logger.error(f'[Restart] Graceful restart failed: {e}')
             logger.exception(e)
             raise
@@ -528,48 +546,62 @@ async def run_graceful_restart(manager=None, hooks=None):
 # Cancel
 # =============================================================================
 
-def cancel_graceful_restart(reason: str = ''):
+async def cancel_graceful_restart(reason: str = '', manager=GRACEFUL_RESTART.WORKER_MANAGER):
     """
-    Cancel the graceful restart in progress (idempotent, any thread)
+    Cancel the graceful restart in progress (idempotent)
 
-    Called by the force_restart rpc and the backend shutdown paths (stdin stop
-    / supervisor pipe EOF). Cancels the orchestration task (old backend) and
-    the resume task (new backend), releases the manager gate, removes the
-    resume file this transaction wrote (owner='restart' only: an update-owned
-    file belongs to the update transaction) and clears the Restart topic.
+    Async: the rpc methods await it, the mpipe shutdown thread (lifespan.py)
+    drives it through trio.from_thread.run(). Everything blocking inside (the
+    manager reset, the resume file removal, the topic push) runs in the trio
+    thread pool.
+
+    Cancels the orchestration task (old backend) and the resume task (new
+    backend), releases the manager gate, removes the resume file this
+    transaction wrote (owner='restart' only: an update-owned file belongs to
+    the update transaction) and clears the Restart topic.
 
     Args:
         reason (str): Log message
+        manager (WorkerManager): Manager whose gate / marks are released,
+            defaults to GRACEFUL_RESTART.WORKER_MANAGER
     """
-    # 1) cancel the orchestration / resume task: they must not continue with
-    #    the restart or the resume queue (the scheduled cancel runs on the
-    #    trio thread, the waiting thread stops through the manager abort event)
-    _cancel_scope_from_any_thread(GRACEFUL_RESTART.scope)
-    _cancel_scope_from_any_thread(GRACEFUL_RESTART.resume_scope)
-    GRACEFUL_RESTART.running = False
-    # 2) release the manager gate, clear the marks, drop the parked entries
-    manager = GRACEFUL_RESTART.manager
-    if manager is not None:
+    # the cleanup must complete even when the caller runs inside a cancelled
+    # scope (the orchestration task being cancelled, a backend shutdown): every
+    # await below is shielded
+    with trio.CancelScope(shield=True):
+        # 1) cancel the orchestration / resume task: they must not continue with
+        #    the restart or the resume queue. This runs on the trio thread (the
+        #    rpc / trio.from_thread.run / the orchestration itself), so the
+        #    cancel scopes are touched directly; a scope that already exited
+        #    ignores the cancel. The waiting thread stops through the manager
+        #    abort event below
+        if GRACEFUL_RESTART.scope is not None:
+            GRACEFUL_RESTART.scope.cancel()
+        if GRACEFUL_RESTART.resume_scope is not None:
+            GRACEFUL_RESTART.resume_scope.cancel()
+        GRACEFUL_RESTART.running = False
+        # 2) release the manager gate, clear the marks, drop the parked entries
+        #    (blocking: manager lock)
         try:
-            manager.restart_cancel()
+            await trio.to_thread.run_sync(manager.restart_cancel)
         except Exception as e:
             logger.warning(f'[Restart] Failed to cancel the manager state: {e}')
-    # 3) defensive cleanup of the resume file written by this transaction: the
-    #    write happens after the wait, when the restart is no longer
-    #    cancellable, so this only covers a failure in between
-    file = GRACEFUL_RESTART.resume_file
-    owner = GRACEFUL_RESTART.resume_owner
-    GRACEFUL_RESTART.resume_file = None
-    GRACEFUL_RESTART.resume_owner = ''
-    if file is not None and owner == OWNER_RESTART:
-        try:
-            if atomic_remove(file):
-                logger.info(f'[Restart] Resume file removed by the cancel: {file}')
-        except OSError as e:
-            logger.warning(f'[Restart] Failed to remove the resume file {file}: {e}')
-    # 4) no restart in progress any more
-    push_restart_phase('')
-    logger.info(f'[Restart] Graceful restart cancelled: {reason}')
+        # 3) defensive cleanup of the resume file written by this transaction:
+        #    the write happens after the wait, when the restart is no longer
+        #    cancellable, so this only covers a failure in between
+        file = GRACEFUL_RESTART.resume_file
+        owner = GRACEFUL_RESTART.resume_owner
+        GRACEFUL_RESTART.resume_file = None
+        GRACEFUL_RESTART.resume_owner = ''
+        if file is not None and owner == OWNER_RESTART:
+            try:
+                if await trio.to_thread.run_sync(atomic_remove, file):
+                    logger.info(f'[Restart] Resume file removed by the cancel: {file}')
+            except OSError as e:
+                logger.warning(f'[Restart] Failed to remove the resume file {file}: {e}')
+        # 4) no restart in progress any more
+        await push_restart_phase('')
+        logger.info(f'[Restart] Graceful restart cancelled: {reason}')
 
 
 # =============================================================================
@@ -613,9 +645,11 @@ async def _wait_configs_ready(configs, timeout=None):
         await trio.sleep(0.5)
 
 
-async def _resume_one(manager, config: str):
+def _resume_one(manager, config: str):
     """
-    Resolve one queued config and start it (failures are logged, not raised)
+    Resolve one queued config and start it (blocking, thread pool only)
+
+    Failures are logged, not raised: one broken config must not stop the queue.
 
     Args:
         manager (WorkerManager): Worker manager
@@ -623,20 +657,20 @@ async def _resume_one(manager, config: str):
     """
     try:
         from alasio.backend.topic.worker import get_mod
-        mod = await get_mod(config)
+        mod = get_mod(config)
     except Exception as e:
         # config / mod gone: drop the queue entry (it must not block a manual
         # start), log and continue with the rest
         logger.error(f'[Restart] Resume dropped, cannot load config "{config}": {e}')
-        await trio.to_thread.run_sync(manager.worker_kill, config)
+        manager.worker_kill(config)
         return
     try:
-        success, msg = await trio.to_thread.run_sync(manager.worker_resume, mod, config)
+        success, msg = manager.worker_resume(mod, config)
     except Exception as e:
         # the spawn failed: the entry is stuck in "starting" with no process,
         # clean it up so the config can be started again
         logger.error(f'[Restart] Resume failed: "{config}": {e}')
-        await trio.to_thread.run_sync(manager.worker_force_kill, config)
+        manager.worker_force_kill(config)
         return
     if not success:
         # cancelled by the user, started by someone else, or superseded by a
@@ -646,7 +680,7 @@ async def _resume_one(manager, config: str):
     logger.info(f'[Restart] Worker resumed: {config}')
 
 
-async def resume_after_restart(manager=None):
+async def resume_after_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
     """
     Consume the resume intent and start the recorded workers (new backend)
 
@@ -657,13 +691,15 @@ async def resume_after_restart(manager=None):
     between two starts. A user stop on a queued config cancels its resume
     (worker_resume returns False, the queue skips it).
 
+    Every call into the blocking layer (the resume file read, the actions, the
+    manager queue, the worker starts, the topic pushes) goes through the trio
+    thread pool.
+
     Args:
         manager (WorkerManager): Manager to drive, defaults to
-            BACKEND_WORKER_MANAGER (injectable for tests)
+            GRACEFUL_RESTART.WORKER_MANAGER (the process singleton, injectable
+            for tests)
     """
-    if manager is None:
-        manager = BACKEND_WORKER_MANAGER
-    GRACEFUL_RESTART.manager = manager
     queued = []
     with trio.CancelScope() as scope:
         GRACEFUL_RESTART.resume_scope = scope
@@ -679,25 +715,27 @@ async def resume_after_restart(manager=None):
             if not configs:
                 logger.info('[Restart] Resume queue is empty, nothing to start')
                 return
-            queued = manager.mark_resume(configs)
+            # blocking: the queue takes the manager lock and parks the entries
+            queued = await trio.to_thread.run_sync(manager.mark_resume, configs)
             if not queued:
                 logger.info('[Restart] Resume queue is empty, nothing to start')
                 return
-            push_restart_phase('resuming')
+            await push_restart_phase('resuming')
             logger.info(f'[Restart] Resume queue: {len(queued)} configs, '
                         f'starting with {WORKER_START_INTERVAL}s interval')
             for config in queued:
                 if SHUTDOWN_EVENT.is_set():
                     logger.info(f'[Restart] Resume interrupted by the shutdown: {config}')
                     return
-                await _resume_one(manager, config)
+                # blocking (mod resolution + process spawn) -> thread pool
+                await trio.to_thread.run_sync(_resume_one, manager, config)
                 # interval between two starts, measured from the worker_resume
                 # return (do not wait for the worker to reach "running")
                 await trio.sleep(WORKER_START_INTERVAL)
-            push_restart_phase('done')
+            await push_restart_phase('done')
             # 'done' is transient: the phase disappears right after, "phase
             # present" means "a restart is in progress" for the frontend
-            push_restart_phase('')
+            await push_restart_phase('')
         except trio.Cancelled:
             # the cancel path (cancel_graceful_restart) owns the cleanup
             raise
@@ -711,7 +749,7 @@ async def resume_after_restart(manager=None):
                     await trio.to_thread.run_sync(manager.worker_kill, config)
                 except Exception:
                     pass
-            push_restart_phase('')
+            await push_restart_phase('')
         finally:
             if GRACEFUL_RESTART.resume_scope is scope:
                 GRACEFUL_RESTART.resume_scope = None

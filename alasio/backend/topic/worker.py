@@ -8,7 +8,7 @@ from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 
 
-async def get_mod(config: str):
+def get_mod(config: str):
     """
     Get Mod object from config
     """
@@ -41,7 +41,7 @@ class Worker(BaseTopic):
         """
         Start running a config
         """
-        mod = await get_mod(config)
+        mod = get_mod(config)
 
         success, msg = await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.worker_start, mod, config)
         if not success:
@@ -59,7 +59,7 @@ class Worker(BaseTopic):
                 (default) cancels it
         """
         # Validate config/mod existence
-        await get_mod(config)
+        get_mod(config)
 
         success, msg = await trio.to_thread.run_sync(
             BACKEND_WORKER_MANAGER.worker_scheduler_stop, config, restart_resume)
@@ -72,7 +72,7 @@ class Worker(BaseTopic):
         Request to continue scheduler loop, to cancel previous "scheduler-stopping"
         """
         # Validate config/mod existence
-        await get_mod(config)
+        get_mod(config)
 
         success, msg = await trio.to_thread.run_sync(BACKEND_WORKER_MANAGER.worker_scheduler_continue, config)
         if not success:
@@ -90,7 +90,7 @@ class Worker(BaseTopic):
                 the backend restart), False (default) stops it for good
         """
         # Validate config/mod existence
-        await get_mod(config)
+        get_mod(config)
 
         success, msg = await trio.to_thread.run_sync(
             BACKEND_WORKER_MANAGER.worker_kill, config, restart_resume)
@@ -107,7 +107,7 @@ class Worker(BaseTopic):
             restart_resume (bool): See kill()
         """
         # Validate config/mod existence
-        await get_mod(config)
+        get_mod(config)
 
         success, msg = await trio.to_thread.run_sync(
             BACKEND_WORKER_MANAGER.worker_force_kill, config, restart_resume)

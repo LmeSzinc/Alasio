@@ -102,7 +102,7 @@ class ConnState(BaseTopic):
 
         # a graceful restart in progress (or a resume queue of the previous
         # one) is cancelled first: no worker of it may be resumed
-        cancel_graceful_restart('force restart')
+        await cancel_graceful_restart('force restart')
         await lifespan_restart()
 
     @rpc

@@ -72,7 +72,7 @@ class TestForceRestartRpc:
     async def test_force_restart_cancels_first(self, state, monkeypatch):
         calls = []
 
-        def fake_cancel(reason=''):
+        async def fake_cancel(reason=''):
             calls.append(('cancel', reason))
 
         async def fake_lifespan_restart():
