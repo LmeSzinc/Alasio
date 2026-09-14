@@ -54,6 +54,16 @@ def worker_test_run3():
         backend.test_wait.wait(timeout=0.05)
 
 
+def worker_test_exit():
+    # A worker that finishes its entry function right after the bridge started:
+    # a stop request that is still unread in its pipe has nothing left to stop
+    # (the recv thread reads it late, or the pipe breaks when the process exits).
+    # Used by tests/backend/worker/test_spawn_window.py to pin the manager
+    # behavior for that scheduling order.
+    backend = BackendBridge()
+    backend.send_worker_state('running')
+
+
 def worker_test_error():
     # A worker that will raise error
     backend = BackendBridge()
@@ -166,6 +176,7 @@ def worker_test_entry(mod_name, config_name, child_conn):
 WORKER_TEST_MODS = {
     'WorkerTestInfinite': worker_test_infinite,
     'WorkerTestRun3': worker_test_run3,
+    'WorkerTestExit': worker_test_exit,
     'WorkerTestError': worker_test_error,
     'WorkerTestScheduler': worker_test_scheduler,
     'WorkerTestSleep': worker_test_sleep,

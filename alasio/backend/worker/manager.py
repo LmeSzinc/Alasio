@@ -231,7 +231,13 @@ class WorkerManager(metaclass=Singleton):
         """
         with self._lock:
             state_before = state.state
-            self._set_state(state, 'disconnected')
+            # A disconnect publishes state only for the entry currently registered
+            # for the config: an entry that was closed (manager close) or already
+            # finalized / replaced has its state decided there -- publishing here
+            # would resurrect a stale one or clobber the new entry of the config.
+            publish = self.state.get(state.config, None) is state
+            if publish:
+                self._set_state(state, 'disconnected')
 
         process = state.process
         if process:
@@ -259,6 +265,8 @@ class WorkerManager(metaclass=Singleton):
             state.conn = None
             state.process = None
             state.recv_thread = None
+            if not publish:
+                return
             if state.pending_restart:
                 # stopped for the graceful backend restart: park the worker in
                 # "restarting" (the entry stays in the dict, blocks a manual
@@ -465,7 +473,25 @@ class WorkerManager(metaclass=Singleton):
             name=f"Worker-{mod}-{config}",
             daemon=True
         )
-        process.start()
+        try:
+            process.start()
+        except Exception as e:
+            # Spawning failed in the parent (the interpreter / OS could not create
+            # the process, or the startup data could not be sent): no process
+            # exists and none will ever report for this entry, so it must not stay
+            # "starting" -- the config could not be started again and no
+            # disconnect would ever finalize it. A child that dies after start()
+            # returned (import error, broken mod, scheduler crash) is the
+            # disconnect path's business: its pipe reaches EOF and the entry is
+            # finalized as usual (error / restarting).
+            state.conn_close()
+            with self._lock:
+                state.conn = None
+                # a marked worker is parked like a crashed startup (the new
+                # backend retries it), an unmarked one returns to error
+                self._set_state(state, 'restarting' if state.pending_restart else 'error')
+            logger.exception(e)
+            raise
         # close child_conn of the parent side immediately
         child_conn.close()
 
@@ -591,6 +617,9 @@ class WorkerManager(metaclass=Singleton):
 
         The call blocks until the worker stops. If the worker does not stop
         within KILL_WAIT_TIMEOUT seconds, escalate to worker_force_kill().
+        A worker that is still spawning has no process to stop yet: its kill
+        request is buffered by its pipe and it stops as soon as it boots (the
+        call returns without waiting for that boot, see worker_force_kill()).
 
         Args:
             config (str): Config name
@@ -677,6 +706,19 @@ class WorkerManager(metaclass=Singleton):
                 state.pending_restart = False
             # mark immediately
             self._set_state(state, 'force-killing')
+            # read with the state transition: the process is registered by
+            # _worker_start_process() once process.start() returned
+            spawned = state.process is not None
+
+        if not spawned:
+            # The worker is still spawning: there is no process to terminate yet.
+            # The kill travels through the pipe -- a "starting" worker always has
+            # one (see _mark_starting_locked) -- so the worker stops itself the
+            # moment it boots, and its own disconnect finalizes the entry.
+            # Finalizing it here would leave the process created afterwards
+            # untracked while the manager already reported it as stopped.
+            state.send_command(CommandEvent(c='force-killing'))
+            return True, 'Success'
 
         # cleanup
         state.process_graceful_kill()
