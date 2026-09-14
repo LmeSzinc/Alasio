@@ -1,11 +1,10 @@
 import importlib.util
-import os
 
 from alasio.codegen.python.libscan import EnvLibraryScanner, ModuleType
+from alasio.ext import env
 
 # Alasio repo root, used as the scanner's classification root.
-# Current file is tests/codegen/python/test_libscan.py
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+PROJECT_ROOT = env.ALASIO_ROOT
 
 
 class TestEnvLibraryScanner:

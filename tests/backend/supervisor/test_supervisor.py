@@ -5,6 +5,7 @@ import time
 import psutil
 import yaml
 
+from alasio.ext import env
 from alasio.testing.managed_process import ManagedProcess
 
 # Absolute path of the real config/deploy.yaml. The stdin contract tests
@@ -12,7 +13,7 @@ from alasio.testing.managed_process import ManagedProcess
 # deploy.yaml) against the real config file and restore the original
 # values afterwards, so the file keeps its comments (the backend writes it
 # through YamlConfig, which preserves comments).
-DEPLOY_YAML = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'config', 'deploy.yaml'))
+DEPLOY_YAML = env.ALASIO_ROOT.joinpath('config/deploy.yaml')
 
 
 def create_supervisor_process(backend_type: str) -> ManagedProcess:
