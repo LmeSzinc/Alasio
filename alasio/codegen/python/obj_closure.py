@@ -37,6 +37,9 @@ class ClosureWithName(ClosureObject):
     closure_start = ''
     closure_end = ''
     closure_empty = ''
+    # True to keep the trailing comma of a single item, because "(item)" is a
+    # parenthesized expression instead of a tuple
+    trailing_comma_when_single = False
 
     def __init__(self, gen, name):
         super().__init__(gen)
@@ -72,7 +75,9 @@ class ClosureWithName(ClosureObject):
         # Linebreak markers have no item_str; skip them for inline representation
         inline_items = [i for i in self.items if not isinstance(i, Linebreak)]
         gi = GatherItems(wrap='inline').add(inline_items)
-        content = gi.get_inline()
+        # a single item tuple must keep the trailing comma, "(item)" is not a tuple
+        trailing_comma = self.trailing_comma_when_single and len(self.items) == 1
+        content = gi.get_inline(trailing_comma=trailing_comma)
         return f'{self.closure_start}{content}{self.closure_end}{ending}'
 
     def generate(self):
@@ -95,12 +100,14 @@ class ClosureWithName(ClosureObject):
             return
 
         gi = GatherItems(wrap=wrap).add(self.items)
+        # a single item tuple must keep the trailing comma, "(item)" is not a tuple
+        trailing_comma = self.trailing_comma_when_single and len(self.items) == 1
 
         # --- auto mode: check if everything fits on one line ---
         if wrap == 'auto':
             # Linebreak markers have no item_str; exclude them for inline check
             inline_items = [i for i in self.items if not isinstance(i, Linebreak)]
-            inline_str = GatherItems(wrap='inline').add(inline_items).get_inline()
+            inline_str = GatherItems(wrap='inline').add(inline_items).get_inline(trailing_comma=trailing_comma)
             total_len = (len(self.indent_str) + len(prefix) + len(self.closure_start)
                          + len(inline_str) + len(self.closure_end) + len(suffix))
             if total_len <= GatherItems.DEFAULT_WIDTH:
@@ -110,7 +117,7 @@ class ClosureWithName(ClosureObject):
             wrap = 'expand'
 
         # --- multi-line layout ---
-        rows = list(gi.iter_multiline())
+        rows = list(gi.iter_multiline(trailing_comma=trailing_comma))
 
         if not rows:
             yield f'{self.indent_str}{prefix}{self.closure_empty}{suffix}{ending}'
@@ -125,7 +132,9 @@ class ClosureWithName(ClosureObject):
 
         # inline or int
         if len(rows) == 1:
-            row = rows[0].rstrip(',')
+            row = rows[0]
+            if not trailing_comma:
+                row = row.rstrip(',')
             yield f'{self.indent_str}{prefix}{self.closure_start}{row}{self.closure_end}{suffix}{ending}'
         else:
             yield f'{self.indent_str}{prefix}{self.closure_start}'
@@ -208,9 +217,16 @@ class Dict(ClosureWithName):
 
 
 class Tuple(ClosureWithName):
+    """
+    Define a tuple.
+    A single item tuple keeps the trailing comma, e.g. (item,) instead of (item),
+    because (item) is a parenthesized expression instead of a tuple.
+    """
+
     closure_start = '('
     closure_end = ')'
     closure_empty = '()'
+    trailing_comma_when_single = True
 
 
 class Set(ClosureWithName):

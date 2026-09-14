@@ -230,10 +230,15 @@ class GatherItems:
             self.items.append(item)
         return self
 
-    def get_inline(self):
+    def get_inline(self, trailing_comma=False):
         """
         Return a single string with all items joined on one line.
         Trailing line_ending (e.g. comma) is stripped.
+
+        Args:
+            trailing_comma (bool): True to keep the trailing line_ending of the last
+                item, because "(item)" is a parenthesized expression instead of a
+                single item tuple "(item,)". Defaults to False.
 
         Returns:
             str: Joined inline string, or empty string if no items.
@@ -241,11 +246,13 @@ class GatherItems:
         if not self.items:
             return ''
         result = ' '.join(item.item_str for item in self.items)
+        if trailing_comma:
+            return result
         if result.endswith(','):
             result = result[:-1]
         return result
 
-    def iter_multiline(self):
+    def iter_multiline(self, trailing_comma=False):
         """
         Yield content rows respecting wrap mode and Linebreak markers.
 
@@ -258,11 +265,15 @@ class GatherItems:
         Generated rows do NOT include indent prefix — the caller is
         responsible for adding indentation.
 
+        Args:
+            trailing_comma (bool): True to keep the trailing comma of the last item
+                in the inline row, see get_inline(). Defaults to False.
+
         Yields:
             str: Content row.
         """
         if self.wrap == 'inline':
-            yield self.get_inline()
+            yield self.get_inline(trailing_comma=trailing_comma)
             return
 
         if not self.items:

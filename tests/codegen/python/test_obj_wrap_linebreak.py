@@ -23,9 +23,30 @@ class TestGetInline:
         gi = GatherItems(wrap='inline').add(gen.items[0].items)
         assert gi.get_inline() == "'only'"
 
+    def test_trailing_comma_basic(self):
+        gen = CodeGen()
+        with gen.List('l'):
+            gen.Item(1)
+            gen.Item(2)
+        gi = GatherItems(wrap='inline').add(gen.items[0].items)
+        assert gi.get_inline(trailing_comma=True) == "1, 2,"
+
+    def test_trailing_comma_single_item(self):
+        gen = CodeGen()
+        with gen.Tuple('t'):
+            gen.Item('only')
+        gi = GatherItems(wrap='inline').add(gen.items[0].items)
+        assert gi.get_inline() == "'only'"
+        assert gi.get_inline(trailing_comma=True) == "'only',"
+
     def test_empty(self):
         gi = GatherItems()
         assert gi.get_inline() == ""
+
+    def test_empty_trailing_comma(self):
+        """No item, no comma, even if a trailing comma is requested."""
+        gi = GatherItems()
+        assert gi.get_inline(trailing_comma=True) == ""
 
     def test_dict_vars(self):
         gen = CodeGen()
@@ -50,6 +71,15 @@ class TestIterMultilineLinebreak:
             gen.Item(2)
         gi = GatherItems(wrap='inline').add(gen.items[0].items)
         assert list(gi.iter_multiline()) == ["1, 2"]
+
+    def test_inline_mode_trailing_comma(self):
+        """wrap='inline' -> the comma of the last item is kept when requested."""
+        gen = CodeGen()
+        with gen.Tuple('t'):
+            gen.Item('only')
+        gi = GatherItems(wrap='inline').add(gen.items[0].items)
+        assert list(gi.iter_multiline()) == ["'only'"]
+        assert list(gi.iter_multiline(trailing_comma=True)) == ["'only',"]
 
     def test_newline_mode(self):
         """wrap='newline' -> each item on its own row, no trailing comma."""
