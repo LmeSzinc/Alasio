@@ -225,9 +225,13 @@ class TestRestrictedTopic:
             nursery.start_soon(harness.run_serve)
             await harness.wait_connected()
             harness.send_sub('restricted')
-            await trio.sleep(0.1)
+            await harness.wait_for(
+                lambda: any(e.get('t') == 'restricted' and e.get('o') == 'full'
+                            for e in event_dicts(harness.fake_ws)),
+                description='the restricted topic full event')
             assert 'restricted' in harness.server.subscribed
-            fulls = [e for e in event_dicts(harness.fake_ws) if e.get('t') == 'restricted' and e.get('o') == 'full']
+            fulls = [e for e in event_dicts(harness.fake_ws)
+                     if e.get('t') == 'restricted' and e.get('o') == 'full']
             assert fulls and fulls[0]['v'] == {'x': 1}
             await harness.stop()
 
@@ -255,9 +259,9 @@ class TestRenewal:
             assert harness.server.auth_token == 'tok1'
             code = renewal_manager.issue()
             harness.send(RequestEvent(t='', o='auth', v=code))
-            await trio.sleep(0.1)
             # updated to the latest token in the table
-            assert harness.server.auth_token == 'tok2'
+            await harness.wait_for(lambda: harness.server.auth_token == 'tok2',
+                                   description='the renewed auth token')
             await harness.stop()
 
     @pytest.mark.trio
@@ -272,14 +276,16 @@ class TestRenewal:
             nursery.start_soon(harness.run_serve)
             await harness.wait_connected()
             harness.send(RequestEvent(t='', o='auth', v='deadbeef'))
-            await trio.sleep(0.1)
+            await harness.wait_for(
+                lambda: any(e.get('t') == 'error' for e in event_dicts(harness.fake_ws)),
+                description='the invalid renewal code error')
             errors = [e for e in event_dicts(harness.fake_ws) if e.get('t') == 'error']
             assert len(errors) == 1
             assert 'Invalid or expired renewal code' in errors[0]['v']
             # connection keeps working (public rpc still callable)
             harness.send_sub('mixed')
-            await trio.sleep(0.1)
-            assert 'mixed' in harness.server.subscribed
+            await harness.wait_for(lambda: 'mixed' in harness.server.subscribed,
+                                   description='the subscription after the rejected code')
             await harness.stop()
 
     @pytest.mark.trio
@@ -330,7 +336,10 @@ class TestRenewal:
             # rotate: tok2 enters, tok1 still in the window
             token_table.handle_token('tok2')
             await notify_rotation()
-            await trio.sleep(0.1)
+            await harness.wait_for(
+                lambda: any(e.get('t') == 'auth' and e.get('v') == 'renew'
+                            for e in event_dicts(harness.fake_ws)),
+                description='the renew control message')
             renews = [e for e in event_dicts(harness.fake_ws) if e.get('t') == 'auth' and e.get('v') == 'renew']
             assert len(renews) == 1
             await harness.stop()
@@ -349,14 +358,15 @@ class TestRenewal:
             nursery.start_soon(harness.run_serve)
             await harness.wait_connected()
             harness.send_sub('restricted')
-            await trio.sleep(0.1)
+            await harness.wait_for(lambda: 'restricted' in harness.server.subscribed,
+                                   description='the restricted topic subscription')
             # evict tok1 from the window
             token_table.handle_token('tok2')
             token_table.handle_token('tok3')
             assert not token_table.verify('tok1')
             await notify_rotation()
-            await trio.sleep(0.1)
-            assert (4002, 'token rotated') in harness.fake_ws.closed
+            await harness.wait_for(lambda: (4002, 'token rotated') in harness.fake_ws.closed,
+                                   description='the 4002 close of the evicted connection')
             await harness.stop()
 
 
@@ -370,9 +380,11 @@ class TestRestrictedRpc:
             await harness.wait_connected()
             # must subscribe the public topic first (rpc requires subscription)
             harness.send_sub('mixed')
-            await trio.sleep(0.1)
+            await harness.wait_for(lambda: 'mixed' in harness.server.subscribed,
+                                   description='the public topic subscription')
             harness.send_rpc('mixed', 'private_op', rpc_id='r2')
-            await trio.sleep(0.1)
+            await harness.wait_for(lambda: any(e.get('i') == 'r2' for e in event_dicts(harness.fake_ws)),
+                                   description='the rpc response r2')
             responses = [e for e in event_dicts(harness.fake_ws) if e.get('i') == 'r2']
             assert len(responses) == 1
             assert responses[0]['v'] == 'ElectronOnlyError: Electron token required'
@@ -390,9 +402,11 @@ class TestRestrictedRpc:
             nursery.start_soon(harness.run_serve)
             await harness.wait_connected()
             harness.send_sub('mixed')
-            await trio.sleep(0.1)
+            await harness.wait_for(lambda: 'mixed' in harness.server.subscribed,
+                                   description='the public topic subscription')
             harness.send_rpc('mixed', 'private_op', rpc_id='r3')
-            await trio.sleep(0.1)
+            await harness.wait_for(lambda: any(e.get('i') == 'r3' for e in event_dicts(harness.fake_ws)),
+                                   description='the rpc response r3')
             responses = [e for e in event_dicts(harness.fake_ws) if e.get('i') == 'r3']
             assert len(responses) == 1
             # success: value omitted
@@ -407,9 +421,11 @@ class TestRestrictedRpc:
             nursery.start_soon(harness.run_serve)
             await harness.wait_connected()
             harness.send_sub('mixed')
-            await trio.sleep(0.1)
+            await harness.wait_for(lambda: 'mixed' in harness.server.subscribed,
+                                   description='the public topic subscription')
             harness.send_rpc('mixed', 'public_op', rpc_id='r4')
-            await trio.sleep(0.1)
+            await harness.wait_for(lambda: any(e.get('i') == 'r4' for e in event_dicts(harness.fake_ws)),
+                                   description='the rpc response r4')
             responses = [e for e in event_dicts(harness.fake_ws) if e.get('i') == 'r4']
             assert len(responses) == 1
             assert 'v' not in responses[0]
@@ -434,7 +450,9 @@ class TestRestrictedRpc:
             token_table.handle_token('tok3')
             assert not token_table.verify('tok1')
             harness.send_sub('restricted')
-            await trio.sleep(0.1)
+            await harness.wait_for(
+                lambda: any(e.get('t') == 'error' for e in event_dicts(harness.fake_ws)),
+                description='the restricted topic error')
             errors = [e for e in event_dicts(harness.fake_ws) if e.get('t') == 'error']
             assert len(errors) == 1
             assert 'Topic requires electron' in errors[0]['v']

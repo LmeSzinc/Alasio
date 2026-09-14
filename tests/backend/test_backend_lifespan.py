@@ -105,7 +105,7 @@ class TestMpipeRecvLoop:
             thread = threading.Thread(
                 target=mpipe_recv_loop, args=(child_conn, token), daemon=True)
             thread.start()
-            await trio.sleep(0.1)
+            # the pipe buffers: no need to wait for the recv thread to start
             parent_conn.send_bytes(b'command:stop')
             with trio.fail_after(5):
                 await event.wait()
@@ -188,7 +188,7 @@ class TestMpipeRecvLoop:
                 thread = threading.Thread(
                     target=mpipe_recv_loop, args=(child_conn, token), daemon=True)
                 thread.start()
-                await trio.sleep(0.1)
+                # the pipe buffers: no need to wait for the recv thread to start
                 parent_conn.send_bytes(b'command:stop')
                 with trio.fail_after(5):
                     await event.wait()

@@ -475,8 +475,10 @@ class TestResourceManagement:
             state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
             if cycle % 2 == 0:
+                # force kill is synchronous: the entry is idle (and removable)
+                # the moment it returns, a stale disconnect of the old process
+                # must not clobber the next start
                 manager.worker_force_kill(config)
-                time.sleep(0.2)
             else:
                 # 快速推进到完成
                 for _ in range(5):
@@ -559,7 +561,6 @@ class TestManagerLifecycle:
         state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
         manager1.close()
-        time.sleep(0.3)
 
         # Create new manager
         manager2 = WorkerManager()

@@ -18,13 +18,12 @@ imports mirror the real spawn sequence (gui.py module level re-import +
 pickle target / args deserialization + entry body).
 """
 import importlib.util
-import os
 
+from alasio.ext import env
 from tests.backend.import_testing import HeavyImportTest
 
-# Project root, gui.py sits at the top level
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-GUI_PATH = os.path.join(ROOT, 'gui.py')
+# gui.py sits at the project root
+GUI_PATH = env.ALASIO_ROOT.joinpath('gui.py')
 
 # Blacklists per process: modules a process must never import at startup.
 #

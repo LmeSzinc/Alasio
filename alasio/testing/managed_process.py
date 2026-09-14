@@ -5,7 +5,7 @@ import sys
 import threading
 from typing import List, Optional
 
-import alasio
+from alasio.ext.env import ALASIO_ROOT
 from alasio.testing.timeout import AssertTimeout
 
 
@@ -67,9 +67,8 @@ class ManagedProcess:
         # package is pip-installed. Inject the project root into PYTHONPATH
         # so child processes can always ``import alasio``.
         env = os.environ.copy()
-        project_root = os.path.dirname(os.path.dirname(alasio.__file__))
         existing = env.get("PYTHONPATH")
-        env["PYTHONPATH"] = project_root + (os.pathsep + existing if existing else "")
+        env["PYTHONPATH"] = ALASIO_ROOT + (os.pathsep + existing if existing else "")
 
         if sys.platform == "win32":
             # Windows: 创建新的进程组

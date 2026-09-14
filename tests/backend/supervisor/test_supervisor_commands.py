@@ -151,11 +151,14 @@ class TestStartStdinListener:
         supervisor, child_conn = make_supervisor_with_pipe()
 
         thread = supervisor.start_stdin_listener()
-        # give the listener time to drain the input; the parent stays alive
-        time.sleep(0.2)
-        assert thread.is_alive()
-        assert not child_conn.poll(timeout=0.2)
+        # The pipe preserves order, so the first message the listener forwards
+        # must be the known command written after the two unknown lines: a
+        # forwarded "hello world" would come out first and fail the assert
+        os.write(write_fd, b'command:set_lang:zh-CN\n')
+        assert recv_with_timeout(child_conn) == b'command:set_lang:zh-CN'
+        assert not child_conn.poll()
         assert supervisor.stop_requested is False
+        assert thread.is_alive()
 
         supervisor.stop_stdin_listener()
         assert not thread.is_alive()
@@ -172,7 +175,8 @@ class TestStartStdinListener:
 
         assert not thread.is_alive()
         assert recv_with_timeout(child_conn) == b'command:stop'
-        assert not child_conn.poll(timeout=0.2)
+        # the listener has exited: nothing more can arrive
+        assert not child_conn.poll()
 
     def test_stdin_eof_triggers_shutdown(self, replace_stdin):
         # Closing stdin on a pipe means the parent process (Electron) is
@@ -187,7 +191,8 @@ class TestStartStdinListener:
         thread.join(timeout=2)
 
         assert not thread.is_alive()
-        assert not child_conn.poll(timeout=0.2)
+        # the listener has exited: nothing more can arrive
+        assert not child_conn.poll()
         assert supervisor.stop_requested is False
         assert supervisor._stdin_eof.is_set()
 
@@ -220,7 +225,8 @@ class TestStartStdinListener:
 
         assert not thread.is_alive()
         assert recv_with_timeout(child_conn) == b'command:set_lang:zh-CN'
-        assert not child_conn.poll(timeout=0.2)
+        # the listener has exited: nothing more can arrive
+        assert not child_conn.poll()
         assert supervisor.stop_requested is False
         assert supervisor._stdin_eof.is_set()
 
@@ -235,7 +241,8 @@ class TestStartStdinListener:
         thread.join(timeout=2)
 
         assert not thread.is_alive()
-        assert not child_conn.poll(timeout=0.2)
+        # the listener has exited: nothing more can arrive
+        assert not child_conn.poll()
         assert supervisor.stop_requested is False
         assert supervisor._stdin_eof.is_set() is False
 
@@ -294,18 +301,22 @@ class TestStartStdinListener:
         assert supervisor._stdin_thread is None
 
 
-class TestStopStdinListenerWhenBlocked:
-    """The listener must exit even when stuck on a blocking readline."""
+class TestStdinListenerPartialLine:
+    """A line without its newline yet must be buffered, never block the listener."""
 
-    def test_unblocks_blocked_readline(self, replace_stdin):
-        # Pipe holds data without a newline, so readline() blocks forever
-        stream, write_fd = fake_stdin_from_pipe(b'partial data without newline')
+    def test_partial_line_completed_later(self, replace_stdin):
+        # The listener reads whatever the pipe has (no blocking readline): the
+        # first half of a line is kept until the rest arrives, then the whole
+        # command is forwarded
+        stream, write_fd = fake_stdin_from_pipe(b'command:set_l')
         replace_stdin(stream)
-        supervisor, _ = make_supervisor_with_pipe()
+        supervisor, child_conn = make_supervisor_with_pipe()
 
         thread = supervisor.start_stdin_listener()
-        # Give the listener time to enter the blocking readline
-        time.sleep(0.2)
+        # completing the line is the event: only a listener that read the first
+        # half can forward the whole command
+        os.write(write_fd, b'ang:zh-CN\n')
+        assert recv_with_timeout(child_conn) == b'command:set_lang:zh-CN'
         assert thread.is_alive()
 
         supervisor.stop_stdin_listener()
@@ -315,16 +326,16 @@ class TestStopStdinListenerWhenBlocked:
         os.close(write_fd)
 
     def test_stop_while_pipe_partially_written(self, replace_stdin):
-        # Partial data without a newline used to block readline() forever;
-        # the listener must still exit promptly on stop
-        stream, write_fd = fake_stdin_from_pipe(b'command:st')
+        # A dangling partial line used to block readline() forever; the stop
+        # must still exit the listener
+        stream, write_fd = fake_stdin_from_pipe(b'command:set_lang:zh-CN\ncommand:st')
         replace_stdin(stream)
-        supervisor, _ = make_supervisor_with_pipe()
+        supervisor, child_conn = make_supervisor_with_pipe()
 
         thread = supervisor.start_stdin_listener()
-        time.sleep(0.2)
-        assert thread.is_alive()
-
+        # the complete line proves the listener is running; the partial line
+        # after it is still buffered when the stop arrives
+        assert recv_with_timeout(child_conn) == b'command:set_lang:zh-CN'
         supervisor.stop_stdin_listener()
 
         assert not thread.is_alive()
@@ -662,7 +673,7 @@ class TestRecvLoopStartsListener:
         assert result['raised'] == 'ParentProcessExited'
         assert supervisor._stdin_eof.is_set()
         # the listener only flags the shutdown, it does not send stop
-        assert not child_conn.poll(timeout=0.2)
+        assert not child_conn.poll()
 
         supervisor.stop_stdin_listener()
         assert supervisor._stdin_thread is None
@@ -789,7 +800,7 @@ class TestHandleStdinLine:
 
         assert supervisor._handle_stdin_line(b'garbage\n') is False
         assert supervisor.stop_requested is False
-        assert not child_conn.poll(timeout=0.2)
+        assert not child_conn.poll()
 
     def test_line_with_surrounding_spaces(self):
         supervisor, _ = make_supervisor_with_pipe()
@@ -1096,7 +1107,8 @@ class TestGracefulShutdown:
         supervisor.process = FakeProcess(alive=False)
 
         assert supervisor.graceful_shutdown() is True
-        assert not child_conn.poll(timeout=0.5)
+        # no command was sent (the call is synchronous)
+        assert not child_conn.poll()
 
     def test_timeout_returns_false(self):
         supervisor = Supervisor(graceful_shutdown_timeout=0.5)

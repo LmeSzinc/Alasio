@@ -22,9 +22,13 @@ import sys
 import tempfile
 import time
 
+import pytest
+
+from alasio.ext.env import ALASIO_ROOT
+
 # Project root, the value passed as --root (also the repo layout)
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'root_propagation.py')
+ROOT = ALASIO_ROOT
+SCRIPT = ALASIO_ROOT.joinpath('tests/backend/root_propagation.py')
 
 # generous window: the chain imports starlette / trio / hypercorn
 START_TIMEOUT = 30
@@ -43,10 +47,12 @@ def _run_chain():
     foreign_cwd = tempfile.mkdtemp(prefix='alasio_root_test_cwd_')
     env = os.environ.copy()
     existing = env.get('PYTHONPATH')
-    env['PYTHONPATH'] = ROOT + (os.pathsep + existing if existing else '')
+    # the launcher computes the root with stdlib, i.e. with the platform separator
+    root = os.path.normpath(ROOT)
+    env['PYTHONPATH'] = root + (os.pathsep + existing if existing else '')
 
     proc = subprocess.Popen(
-        [sys.executable, SCRIPT, '--root', ROOT],
+        [sys.executable, SCRIPT, '--root', root],
         cwd=foreign_cwd,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -109,27 +115,36 @@ def _norm(value):
     return os.path.normpath(value)
 
 
+@pytest.fixture(scope='module')
+def chain_output():
+    """
+    Output of the whole chain, started once for the three tests on it
+
+    The chain is a real supervisor -> backend -> worker startup (~1.4s) and
+    every test asserts on a different marker of the same run: running it once
+    per test only pays the startup cost three times.
+    """
+    return _run_chain()
+
+
 class TestRootPropagation:
     """
     --root set by the supervisor must reach backend and worker, and the
     backend cwd must follow the root (chdir) even from a foreign cwd.
     """
 
-    def test_backend_cwd_and_project_root_equal_root(self):
-        output = _run_chain()
-        assert _norm(_marker(output, 'BACKEND_CWD')) == ROOT, output
-        assert _norm(_marker(output, 'BACKEND_ROOT')) == ROOT, output
+    def test_backend_cwd_and_project_root_equal_root(self, chain_output):
+        assert _norm(_marker(chain_output, 'BACKEND_CWD')) == _norm(ROOT), chain_output
+        assert _norm(_marker(chain_output, 'BACKEND_ROOT')) == _norm(ROOT), chain_output
 
-    def test_worker_project_root_propagates(self):
-        output = _run_chain()
-        assert _norm(_marker(output, 'WORKER_ROOT')) == ROOT, output
+    def test_worker_project_root_propagates(self, chain_output):
+        assert _norm(_marker(chain_output, 'WORKER_ROOT')) == _norm(ROOT), chain_output
 
-    def test_worker_cwd_is_mod_root(self):
+    def test_worker_cwd_is_mod_root(self, chain_output):
         """
         The worker chdirs to the mod folder (mod_entry, the mod's
         relative-path base); the mod_root marker must match the worker cwd.
         """
-        output = _run_chain()
-        mod_root = _marker(output, 'MOD_ROOT')
-        assert mod_root is not None, output
-        assert _marker(output, 'WORKER_CWD') == mod_root, output
+        mod_root = _marker(chain_output, 'MOD_ROOT')
+        assert mod_root is not None, chain_output
+        assert _marker(chain_output, 'WORKER_CWD') == mod_root, chain_output

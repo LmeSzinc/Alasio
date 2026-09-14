@@ -9,20 +9,24 @@ from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
 
 
-def clear_init_event(parent_conn, timeout=0.1):
+def clear_init_event(parent_conn, timeout=5.0):
     """
-    Helper function to clear the initial WorkerState event sent during bridge.init()
+    Consume the initial WorkerState event sent during bridge.init()
+
+    The wait ends as soon as the event arrives (no fixed head start), and a
+    bridge that never sends it fails the test instead of leaving the event in
+    the pipe for the next assertion to trip over.
 
     Args:
         parent_conn: Parent end of the pipe connection
-        timeout: Timeout in seconds to wait for the event
+        timeout (float): Timeout in seconds to wait for the event
     """
-    if parent_conn.poll(timeout):
-        init_data = parent_conn.recv_bytes()
-        init_event = decode(init_data, type=ConfigEvent)
-        # Verify it's the expected init event
-        assert init_event.t == 'WorkerState'
-        assert init_event.v == 'running'
+    assert parent_conn.poll(timeout), 'the initial WorkerState event was not sent'
+    init_data = parent_conn.recv_bytes()
+    init_event = decode(init_data, type=ConfigEvent)
+    # Verify it's the expected init event
+    assert init_event.t == 'WorkerState'
+    assert init_event.v == 'running'
 
 
 def recv_with_timeout(parent_conn, timeout=5.0):
@@ -64,7 +68,6 @@ def bridge_instance():
     bridge.init('TestMod', 'test_config', child_conn)
 
     # Clear the initial WorkerState event sent during init
-    time.sleep(0.05)
     clear_init_event(parent_conn)
 
     yield bridge, parent_conn
@@ -395,19 +398,13 @@ def test_send_rapid_fire_without_acquire(bridge_instance):
     for i in range(num_events):
         bridge.send(ConfigEvent(t='RapidEvent', v=f'message{i}'))
 
-    # Give time for background thread to process
-    time.sleep(0.3)
-
-    # Verify all events were received
-    received_count = 0
-    while parent_conn.poll(timeout=0.1):
-        data = parent_conn.recv_bytes()
-        event = decode(data, type=ConfigEvent)
-        assert event.t == 'RapidEvent'
-        assert event.v == f'message{received_count}'
-        received_count += 1
-
-    assert received_count == num_events
+    # Verify all events were received in order: recv_with_timeout() waits for
+    # the background thread instead of giving it a fixed head start
+    events = [decode(recv_with_timeout(parent_conn), type=ConfigEvent) for _ in range(num_events)]
+    assert [event.t for event in events] == ['RapidEvent'] * num_events
+    assert [event.v for event in events] == [f'message{i}' for i in range(num_events)]
+    # nothing else was sent
+    assert not parent_conn.poll()
 
 
 def test_singleton_lifecycle():
@@ -452,11 +449,8 @@ def test_init_sends_worker_state():
     bridge = BackendBridge()
     bridge.init('TestMod', 'test_config', child_conn)
 
-    # Wait for init event
-    time.sleep(0.05)
-
-    # Verify the init event is sent
-    assert parent_conn.poll(timeout=0.1), "Expected init WorkerState event not received"
+    # Verify the init event is sent (wait for it, no fixed head start)
+    assert parent_conn.poll(timeout=5), "Expected init WorkerState event not received"
 
     init_data = parent_conn.recv_bytes()
     init_event = decode(init_data, type=ConfigEvent)
@@ -511,12 +505,12 @@ def test_close_method():
     bridge.init('TestMod', 'test_config', child_conn)
 
     # Clear init event
-    time.sleep(0.05)
     clear_init_event(parent_conn)
 
-    # Send an event
+    # Send an event and wait for it to be delivered before closing
     bridge.send(ConfigEvent(t='TestEvent', v='test_value'))
-    time.sleep(0.05)
+    event = decode(recv_with_timeout(parent_conn), type=ConfigEvent)
+    assert event.t == 'TestEvent'
 
     # Close the bridge
     bridge.close()
@@ -553,14 +547,10 @@ def test_close_prevents_error_logging():
     bridge.init('TestMod', 'test_config', child_conn)
 
     # Clear init event
-    time.sleep(0.05)
     clear_init_event(parent_conn)
 
-    # Close bridge gracefully
+    # Close bridge gracefully (close() joins both threads itself)
     bridge.close()
-
-    # Give threads time to finish
-    time.sleep(0.1)
 
     # Now close parent_conn - should not cause error logs
     # because bridge is already closed

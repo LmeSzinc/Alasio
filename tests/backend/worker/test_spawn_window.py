@@ -23,9 +23,15 @@ final transition; close() closes the pipe, which the process created afterwards
 observes as EOF. Either way no process survives, and a disconnect of an entry
 that is not registered any more publishes no state.
 
-The pre-fix code fails these tests with "Worker processes still alive:
-{'Worker-WorkerTestScheduler-...'}" (verified by running them against
-manager.py @43c211f8).
+The spawn is held by a SpawnGate (tests/backend/worker/spawn_gate.py): the tests
+send their request while the spawn is parked in the window and release it
+afterwards, so "the request lands in the window" is an event, not a delay.
+
+Running these tests against manager.py @737d30c8 (the spawn-window pipe fix is
+in, the cleanup fix is not) fails them for the pinned reasons: the entries end
+in "error" instead of "idle" -- the disconnect of an entry that is already
+final was still published -- and a spawn that fails in the parent leaves its
+entry "starting" forever (TestSpawnFailure).
 """
 import multiprocessing
 import threading
@@ -35,11 +41,8 @@ import pytest
 
 from alasio.backend.worker.manager import WorkerManager, WorkerState
 from tests.backend.worker.const import *
+from tests.backend.worker.spawn_gate import SpawnGate
 from tests.backend.worker.test_worker_lifespan import assert_recv_thread_gone, assert_worker_gone
-
-# Seconds the spawn is delayed: longer than the pinned KILL_WAIT_TIMEOUT, so a
-# kill escalates while state.process is still None (i.e. inside the window)
-SPAWN_DELAY = 0.6
 
 
 @pytest.fixture
@@ -96,39 +99,26 @@ def wait_until(predicate, timeout=5.0, description='condition'):
     raise AssertionError(f'Timeout waiting for {description}')
 
 
-def slow_spawn(monkeypatch, delay=SPAWN_DELAY):
+def start_into_window(manager, monkeypatch, config, mod='WorkerTestScheduler'):
     """
-    Delay process.start() so a request sent now lands in the spawn window
+    Start a worker in a thread and return once it is parked in its spawn window
 
-    Args:
-        monkeypatch: pytest monkeypatch fixture
-        delay (float): Seconds between the "starting" mark and process.start()
-    """
-    original = WorkerManager._worker_start_process
-
-    def slow(self, *args, **kwargs):
-        time.sleep(delay)
-        return original(self, *args, **kwargs)
-
-    monkeypatch.setattr(WorkerManager, '_worker_start_process', slow)
-
-
-def start_into_window(manager, config, mod='WorkerTestScheduler'):
-    """
-    Start a worker in a thread, return once it sits in its spawn window
-
-    The window is "marked starting, process not spawned yet".
+    The spawn is held by a SpawnGate: the window is open and stays open until
+    the test releases it, so a request sent now is inside the window by
+    construction (no delay, no race).
 
     Args:
         manager (WorkerManager): Manager to start on
+        monkeypatch: pytest monkeypatch fixture (installs the gate)
         config (str): Config name
         mod (str): Mod name to start
 
     Returns:
-        tuple: (threading.Thread, dict, WorkerState) the starting thread, the
-            dict it fills with the worker_start() return value and the worker
-            entry of the window
+        tuple: (threading.Thread, dict, WorkerState, SpawnGate) the starting
+            thread, the dict it fills with the worker_start() return value, the
+            worker entry of the window and the gate that holds it
     """
+    gate = SpawnGate(monkeypatch)
     result = {}
 
     def start():
@@ -136,13 +126,15 @@ def start_into_window(manager, config, mod='WorkerTestScheduler'):
 
     thread = threading.Thread(target=start)
     thread.start()
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        state = manager.state.get(config, None)
-        if state is not None and state.state == 'starting' and state.process is None:
-            return thread, result, state
-        time.sleep(0.01)
-    raise AssertionError('The worker never entered its spawn window')
+    gate.wait_entered()
+
+    state = manager.state.get(config, None)
+    assert state is not None, f'The started worker "{config}" has no state entry'
+    assert state.state == 'starting', f'"{config}" is not starting: {state.state}'
+    assert state.process is None, f'The spawn of "{config}" already created its process'
+    assert state.conn is not None, \
+        f'The spawn window of "{config}" has no pipe: a stop command would be dropped'
+    return thread, result, state, gate
 
 
 def assert_spawned(thread, result, config):
@@ -158,7 +150,52 @@ def assert_spawned(thread, result, config):
     """
     thread.join(timeout=10)
     assert not thread.is_alive(), f'The spawn thread of "{config}" did not finish'
-    assert result['start'] == (True, 'Success'), f'The spawn of "{config}" failed: {result}'
+    assert result.get('start') == (True, 'Success'), f'The spawn of "{config}" failed: {result}'
+
+
+def kill_in_thread(manager, config, restart_resume=False):
+    """
+    Run worker_kill() in a thread and return the handle to join it
+
+    worker_kill() blocks until the worker stopped (up to KILL_WAIT_TIMEOUT
+    before it escalates): with the spawn still parked the wait has nothing to
+    observe, so it runs in a thread and the tests release the window while it
+    waits -- the wait then ends through the real stop instead of the timeout.
+
+    Args:
+        manager (WorkerManager): Manager to kill on
+        config (str): Config name
+        restart_resume (bool): Passed through to worker_kill()
+
+    Returns:
+        tuple: (threading.Thread, dict) the killing thread and the dict it
+            fills with the worker_kill() return value
+    """
+    killed = {}
+
+    def kill():
+        killed['kill'] = manager.worker_kill(config, restart_resume=restart_resume)
+
+    thread = threading.Thread(target=kill)
+    thread.start()
+    return thread, killed
+
+
+def join_kill(thread, killed, timeout=10):
+    """
+    Wait for the killing thread and return what worker_kill() returned
+
+    Args:
+        thread (threading.Thread): Thread of kill_in_thread()
+        killed (dict): Result dict of kill_in_thread()
+        timeout (float): Seconds to wait at most
+
+    Returns:
+        tuple: (bool, str) the worker_kill() return value
+    """
+    thread.join(timeout=timeout)
+    assert not thread.is_alive(), 'worker_kill() did not return'
+    return killed['kill']
 
 
 def wait_worker_stopped(config, timeout=5.0, mod='WorkerTestScheduler'):
@@ -204,17 +241,21 @@ class TestCleanupDuringSpawn:
 
     def test_kill_in_window_leaves_no_process(self, manager, state_events, monkeypatch):
         """Default kill (= stop, no resume) during the spawn window"""
-        slow_spawn(monkeypatch)
-        # escalate while the process does not exist yet: this is the window
-        monkeypatch.setattr('alasio.backend.worker.manager.KILL_WAIT_TIMEOUT', 0.2)
-        thread, result, state = start_into_window(manager, 'cfg_kill')
+        # the spawn is parked, so the wait of worker_kill() cannot be satisfied
+        # and escalates to a force kill: with no process to wait for, a timeout
+        # of 0 takes the same branch as the production 1.0s (and immediately)
+        monkeypatch.setattr('alasio.backend.worker.manager.KILL_WAIT_TIMEOUT', 0)
+        thread, result, state, gate = start_into_window(manager, monkeypatch, 'cfg_kill')
 
+        # worker_kill() escalates to a force kill while state.process is still
+        # None: this is the window that used to leave a live process behind
         success, msg = manager.worker_kill('cfg_kill')
         assert success, msg
+        gate.release()
         assert_spawned(thread, result, 'cfg_kill')
 
-        # the kill request was buffered by the pipe: the worker stops itself as
-        # soon as it boots, and its own disconnect finalizes the entry (idle
+        # the kill requests were buffered by the pipe: the worker stops itself
+        # as soon as it boots, and its own disconnect finalizes the entry (idle
         # removes it)
         wait_until(lambda: 'cfg_kill' not in manager.state,
                    description='the finalized entry of "cfg_kill"')
@@ -224,11 +265,12 @@ class TestCleanupDuringSpawn:
 
     def test_force_kill_in_window_leaves_no_process(self, manager, state_events, monkeypatch):
         """Force kill during the spawn window (the request travels through the pipe too)"""
-        slow_spawn(monkeypatch)
-        thread, result, state = start_into_window(manager, 'cfg_force')
+        thread, result, state, gate = start_into_window(manager, monkeypatch, 'cfg_force')
 
+        # a process-less force kill returns right after asking the worker to die
         success, msg = manager.worker_force_kill('cfg_force')
         assert success, msg
+        gate.release()
         assert_spawned(thread, result, 'cfg_force')
 
         wait_until(lambda: 'cfg_force' not in manager.state,
@@ -242,13 +284,14 @@ class TestCleanupDuringSpawn:
         "Force stop, keep resume" during the spawn window: the config must be
         parked in "restarting" (collected by restart_wait) without a process
         """
-        slow_spawn(monkeypatch)
-        monkeypatch.setattr('alasio.backend.worker.manager.KILL_WAIT_TIMEOUT', 0.2)
-        thread, result, state = start_into_window(manager, 'cfg_keep')
+        thread, result, state, gate = start_into_window(manager, monkeypatch, 'cfg_keep')
 
+        # parked spawn: the kill cannot wait for a process, it escalates at once
+        monkeypatch.setattr('alasio.backend.worker.manager.KILL_WAIT_TIMEOUT', 0)
         assert manager.restart_begin() == ['cfg_keep']
         success, msg = manager.worker_kill('cfg_keep', restart_resume=True)
         assert success, msg
+        gate.release()
         assert_spawned(thread, result, 'cfg_keep')
 
         # the worker is parked for the resume, no process survives it and the
@@ -264,14 +307,14 @@ class TestCleanupDuringSpawn:
 
     def test_close_in_window_leaves_no_process(self, manager, state_events, monkeypatch):
         """Manager close (backend exit) during the spawn window"""
-        slow_spawn(monkeypatch)
-        thread, result, state = start_into_window(manager, 'cfg_close')
+        thread, result, state, gate = start_into_window(manager, monkeypatch, 'cfg_close')
 
         manager.close()
         # close() returns while the spawn is still in flight: the process is
         # created afterwards, sees its pipe closed and is terminated by the
         # disconnect; the closed entry publishes no state any more
         assert manager.state == {}
+        gate.release()
         assert_spawned(thread, result, 'cfg_close')
         wait_worker_stopped('cfg_close')
         assert_no_orphan('cfg_close')
@@ -288,13 +331,14 @@ class TestWorkerFinishesWithPendingStop:
 
     def test_kill_then_entry_finishes_by_itself(self, manager, state_events, monkeypatch):
         """Kill requested in the spawn window, the worker finishes on its own"""
-        slow_spawn(monkeypatch)
-        monkeypatch.setattr('alasio.backend.worker.manager.KILL_WAIT_TIMEOUT', 0.2)
-        thread, result, state = start_into_window(manager, 'cfg_done', mod='WorkerTestExit')
+        thread, result, state, gate = start_into_window(
+            manager, monkeypatch, 'cfg_done', mod='WorkerTestExit')
 
-        success, msg = manager.worker_kill('cfg_done')
-        assert success, msg
+        killer, killed = kill_in_thread(manager, 'cfg_done')
+        wait_until(lambda: state.state == 'killing', description='the kill request of "cfg_done"')
+        gate.release()
         assert_spawned(thread, result, 'cfg_done')
+        assert join_kill(killer, killed) == (True, 'Success')
 
         # the worker is already done when its recv thread reads the kill: the
         # child exits (exitcode 0, or 1 when the injected interrupt landed in
@@ -310,14 +354,16 @@ class TestWorkerFinishesWithPendingStop:
         Same as above with the resume kept: a worker that finished on its own is
         still parked in "restarting" (the restart promised to bring it back)
         """
-        slow_spawn(monkeypatch)
-        monkeypatch.setattr('alasio.backend.worker.manager.KILL_WAIT_TIMEOUT', 0.2)
-        thread, result, state = start_into_window(manager, 'cfg_done_keep', mod='WorkerTestExit')
+        thread, result, state, gate = start_into_window(
+            manager, monkeypatch, 'cfg_done_keep', mod='WorkerTestExit')
 
         assert manager.restart_begin() == ['cfg_done_keep']
-        success, msg = manager.worker_kill('cfg_done_keep', restart_resume=True)
-        assert success, msg
+        killer, killed = kill_in_thread(manager, 'cfg_done_keep', restart_resume=True)
+        wait_until(lambda: state.state == 'killing',
+                   description='the kill request of "cfg_done_keep"')
+        gate.release()
         assert_spawned(thread, result, 'cfg_done_keep')
+        assert join_kill(killer, killed) == (True, 'Success')
 
         wait_until(lambda: state.state == 'restarting',
                    description='the parked entry of "cfg_done_keep"')

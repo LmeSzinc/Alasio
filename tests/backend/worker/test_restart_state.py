@@ -14,6 +14,7 @@ import pytest
 from alasio.backend.worker.manager import WORKER_STOPPED_STATE, WorkerManager, WorkerState
 from alasio.logger import logger
 from tests.backend.worker.const import *
+from tests.backend.worker.spawn_gate import SpawnGate
 from tests.backend.worker.test_worker_lifespan import assert_recv_thread_gone, assert_worker_gone
 
 
@@ -267,7 +268,7 @@ class TestRestartWait:
 
         assert result['resume'] == ['cfg_a']
 
-    def test_abort_returns_early(self, manager):
+    def test_abort_returns_early(self, manager, monkeypatch):
         # a worker that never stops gracefully: only the abort can end the wait
         add_state(manager, 'cfg_inf', 'scheduler-stopping')
 
@@ -276,11 +277,17 @@ class TestRestartWait:
         with manager._lock:
             manager.state['cfg_inf'].state = 'scheduler-stopping'
 
+        # observe the first iteration of the wait loop: the thread is provably
+        # parked in restart_wait once it ran one
+        entered = threading.Event()
+        remaining = manager._restart_remaining
+        monkeypatch.setattr(manager, '_restart_remaining',
+                            lambda: (entered.set(), remaining())[1])
+
         result = {}
         thread = threading.Thread(target=lambda: result.update(resume=manager.restart_wait(600)))
         thread.start()
-        # give the waiting thread time to enter the loop
-        time.sleep(0.3)
+        assert entered.wait(5), 'restart_wait did not reach its poll loop'
         assert thread.is_alive()
 
         manager.restart_cancel()
@@ -543,74 +550,41 @@ class TestStopRequestDuringSpawn:
     was dropped (send_command() found no pipe), the worker kept running while
     the manager believed it was stopping, and a graceful restart only ended
     through the timeout escalation (10 minutes in production).
+
+    The spawn window is held open by a SpawnGate, so the request of the test is
+    inside it by construction (no delay, no race).
     """
-
-    @staticmethod
-    def _slow_spawn(monkeypatch, delay=0.4):
-        """
-        Make the spawn window observable: delay process.start()
-
-        Args:
-            monkeypatch: pytest monkeypatch fixture
-            delay (float): Seconds the spawn is delayed (the pipe is already
-                registered when this delay runs)
-        """
-        original = WorkerManager._worker_start_process
-
-        def slow(self, state, mod, config, child_conn, project_root='', mod_root='', path_main=''):
-            time.sleep(delay)
-            return original(self, state, mod, config, child_conn, project_root, mod_root, path_main)
-
-        monkeypatch.setattr(WorkerManager, '_worker_start_process', slow)
-
-    @staticmethod
-    def _start_and_wait_for_spawn_window(manager, config):
-        """
-        Start a worker in a thread and wait until it sits in its spawn window
-
-        The window is "marked starting, process not spawned yet": the stop
-        request of this test is sent from inside it.
-
-        Args:
-            manager (WorkerManager): Manager to start on
-            config (str): Config name
-
-        Returns:
-            tuple: (threading.Thread, dict) the starting thread and the result
-                dict it fills with the worker_start() return value
-        """
-        result = {}
-
-        def start():
-            result['start'] = manager.worker_start('WorkerTestScheduler', config)
-
-        thread = threading.Thread(target=start)
-        thread.start()
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            state = manager.state.get(config, None)
-            if state is not None and state.state == 'starting' and state.process is None:
-                return thread, result
-            time.sleep(0.01)
-        raise AssertionError('The worker never entered its spawn window')
 
     def test_restart_begin_during_spawn_stops_the_worker(self, manager, monkeypatch):
         """
         A restart that begins in the spawn window must still stop the worker
         gracefully, not through the timeout escalation
         """
-        self._slow_spawn(monkeypatch)
-        thread, result = self._start_and_wait_for_spawn_window(manager, 'cfg_spawn')
+        gate = SpawnGate(monkeypatch)
+        result = {}
+
+        def start():
+            result['start'] = manager.worker_start('WorkerTestScheduler', 'cfg_spawn')
+
+        thread = threading.Thread(target=start)
+        thread.start()
+        gate.wait_entered()
+
         # the pipe is opened before the state flips: a command sent now is
         # buffered by the pipe and read when the worker starts
         state = manager.state['cfg_spawn']
+        assert state.state == 'starting'
+        assert state.process is None, 'the spawn already created its process'
         assert state.conn is not None, 'the spawn window has no pipe: a stop command would be dropped'
 
         with logger.mock_capture_writer() as capture:
             waiting = manager.restart_begin()
             assert waiting == ['cfg_spawn']
-            assert manager.state['cfg_spawn'].state == 'scheduler-stopping'
+            assert state.state == 'scheduler-stopping'
 
+            # the stop request is in the pipe: release the window so the worker
+            # boots, reads the buffered command and stops by itself
+            gate.release()
             started = time.monotonic()
             resume = manager.restart_wait(6.0)
             duration = time.monotonic() - started
@@ -626,7 +600,6 @@ class TestStopRequestDuringSpawn:
         assert duration < 4.5, f'Stopped through the timeout escalation: {duration:.2f}s'
         assert resume == ['cfg_spawn']
 
-        state = manager.state['cfg_spawn']
         assert state.state == 'restarting'
         assert state.process is None
         assert_worker_gone([state])

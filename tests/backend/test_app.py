@@ -156,8 +156,10 @@ class TestBindAnnounce:
         try:
             with pytest.raises(OSError):
                 config.create_sockets()
-            # no announce: the startup window must stay open on bind failure
-            assert not parent_conn.poll(timeout=0.5)
+            # no announce: the startup window must stay open on bind failure.
+            # announce_started() lives in create_sockets() and runs after the
+            # bind, so nothing can be written once it raised
+            assert not parent_conn.poll()
         finally:
             blocker.close()
             parent_conn.close()
