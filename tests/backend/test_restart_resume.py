@@ -583,6 +583,45 @@ class TestRunGracefulRestart:
         assert not GRACEFUL_RESTART.resume_file_of(token).isfile()
 
 
+class TestCancelLog:
+    """The cancellation is reported only when it interrupted something"""
+
+    @pytest.mark.trio
+    async def test_idle_backend_reports_no_cancel(self, project_root, manager):
+        """A force restart (or a backend stop) of an idle backend cancels nothing"""
+        with logger.mock_capture_writer() as capture:
+            await cancel_graceful_restart('force restart', manager)
+            # nothing was in flight: the cleanup ran, but no restart was cancelled
+            assert not capture.fd.any_contains('Graceful restart cancelled')
+            assert GRACEFUL_RESTART.restart_in_progress() is False
+
+    @pytest.mark.trio
+    async def test_in_flight_restart_reports_cancel(self, project_root, manager, monkeypatch):
+        """A restart interrupted by a force restart is reported"""
+        monkeypatch.setattr(restart, 'GRACEFUL_STOP_TIMEOUT', 60.0)
+        # a worker that ignores scheduler-stopping keeps the wait open
+        start_worker(manager, 'WorkerTestInfinite', 'cfg_inf')
+
+        async def fake_lifespan_restart():
+            raise AssertionError('the backend must not restart')
+
+        monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', lambda credential: None)
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_graceful_restart, manager)
+            await wait_until(lambda: manager.state['cfg_inf'].state == 'scheduler-stopping',
+                             description='the worker to enter scheduler-stopping')
+            assert GRACEFUL_RESTART.restart_in_progress() is True
+            with logger.mock_capture_writer() as capture:
+                await cancel_graceful_restart('force restart', manager)
+                assert capture.fd.any_contains('[Restart] Graceful restart cancelled: force restart')
+            # no sleep needed: the nursery exit waits for the orchestration task
+
+        # the cancel reached the manager: nothing may be resumed after the restart
+        assert manager.restart_aborted() is True
+
+
 # ============================================================================
 # Resume (new backend)
 # ============================================================================

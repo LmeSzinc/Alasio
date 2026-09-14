@@ -157,6 +157,21 @@ class GracefulRestart:
         """
         self.__init__()
 
+    def restart_in_progress(self) -> bool:
+        """
+        Whether a restart transaction (or its resume queue) is in flight
+
+        `running` is the rpc re-entry flag: set on the click, cleared by the
+        cancel and kept on the success path until the process exits. The scopes
+        cover the tasks themselves: the orchestration of the old backend and the
+        resume queue of the new one.
+
+        Returns:
+            bool: True when cancel_graceful_restart() actually interrupts
+                something (an idle backend has nothing to cancel)
+        """
+        return bool(self.running or self.scope is not None or self.resume_scope is not None)
+
     # =========================================================================
     # Resume file: path, credential, read / write / cleanup
     # =========================================================================
@@ -560,6 +575,10 @@ async def cancel_graceful_restart(reason: str = '', manager=GRACEFUL_RESTART.WOR
     transaction wrote (owner='restart' only: an update-owned file belongs to
     the update transaction) and clears the Restart topic.
 
+    A cancellation is only logged when there was something to interrupt: a
+    force restart (or a backend stop) of an idle backend cancels nothing and
+    must not claim it cancelled a graceful restart.
+
     Args:
         reason (str): Log message
         manager (WorkerManager): Manager whose gate / marks are released,
@@ -569,6 +588,10 @@ async def cancel_graceful_restart(reason: str = '', manager=GRACEFUL_RESTART.WOR
     # scope (the orchestration task being cancelled, a backend shutdown): every
     # await below is shielded
     with trio.CancelScope(shield=True):
+        # read before the cleanup below resets it: only a transaction actually
+        # in flight reports the cancellation (the cleanup itself is idempotent
+        # and runs unconditionally: it is the shutdown guarantee)
+        in_progress = GRACEFUL_RESTART.restart_in_progress()
         # 1) cancel the orchestration / resume task: they must not continue with
         #    the restart or the resume queue. This runs on the trio thread (the
         #    rpc / trio.from_thread.run / the orchestration itself), so the
@@ -601,7 +624,8 @@ async def cancel_graceful_restart(reason: str = '', manager=GRACEFUL_RESTART.WOR
                 logger.warning(f'[Restart] Failed to remove the resume file {file}: {e}')
         # 4) no restart in progress any more
         await push_restart_phase('')
-        logger.info(f'[Restart] Graceful restart cancelled: {reason}')
+        if in_progress:
+            logger.info(f'[Restart] Graceful restart cancelled: {reason}')
 
 
 # =============================================================================
