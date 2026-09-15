@@ -78,9 +78,6 @@ WORKER_START_INTERVAL = 1.0
 # consumed (a read requires the one-shot credential), this only keeps the disk
 # clean after a session was killed before its transaction finished
 RESUME_CLEANUP_AGE = 3 * 24 * 3600.0
-# Seconds to wait for the config scan to expose the recorded configs (a config
-# created right before the restart may not be visible yet)
-RESUME_CONFIG_WAIT = 60.0
 # Environment variable the supervisor injects into the new backend
 RESUME_TOKEN_ENV = 'ALASIO_RESUME_TOKEN'
 # Resume file name prefix / suffix (resume-{token}.json)
@@ -906,50 +903,6 @@ async def cancel_graceful_restart(reason: str = '', manager=GRACEFUL_RESTART.WOR
 # Resume (new backend)
 # =============================================================================
 
-async def _wait_configs_ready(configs, manager, timeout=None):
-    """
-    Wait until the config scan exposes the queued configs
-
-    The lifespan startup does not order the config scan warmup against the
-    resume task: a config may not be visible yet when the queue reaches it. The
-    scan cache is refreshed (disk re-read, TTL-throttled) until every config is
-    known or the timeout ends (the still missing ones are abandoned by the
-    caller, the others are resumed). A graceful restart that begins while the
-    wait runs owns the queued marks (restart_begin() re-collects them): the
-    wait then reports the takeover instead of waiting for a queue that is no
-    longer this task's to drain.
-
-    Args:
-        configs (list[str]): Config names to wait for
-        manager (WorkerManager): Manager whose restart gate ends the wait
-        timeout (float): Seconds to wait at most. Defaults to
-            RESUME_CONFIG_WAIT, read when the call runs (a default argument
-            would bind the constant at import time and defeat monkeypatching)
-
-    Returns:
-        list[str] | None: Configs visible in the scan (input order), or None
-            when a graceful restart took the queue over while waiting
-    """
-    if timeout is None:
-        timeout = RESUME_CONFIG_WAIT
-    deadline = trio.current_time() + timeout
-    while True:
-        if manager.restarting:
-            return None
-        source = ConfigScanSource()
-        await source.reinit()
-        data = source.data
-        ready = [config for config in configs if config in data]
-        if len(ready) == len(configs):
-            return ready
-        if trio.current_time() >= deadline:
-            missing = [config for config in configs if config not in data]
-            logger.warning('[Restart] Resume abandoned, configs not found after '
-                           f'{timeout:.0f}s: {", ".join(missing)}')
-            return ready
-        await trio.sleep(0.5)
-
-
 def _resume_one(manager, config: str):
     """
     Resolve one queued config and start it (blocking, thread pool only)
@@ -998,6 +951,12 @@ async def resume_after_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
     queued config cancels its resume (worker_resume returns False, the queue
     skips it).
 
+    A recorded config was running before the restart, so its file exists and the
+    restart itself does not remove it: the queue never waits for a config to
+    appear. A config the config scan does not expose (its file was deleted
+    outside the backend) is dropped instead of started -- starting it would
+    recreate the file with the default settings, which the user did not ask for.
+
     The queue lives in the manager, so a new graceful restart can take it over
     (the latest user command wins, F6): restart_begin() re-collects its marks
     into the new resume list, and this task ends early as soon as it finds that
@@ -1043,11 +1002,11 @@ async def resume_after_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
                 logger.info(f'[Restart] Resume intent accepted: {len(record.configs)} configs, '
                             f'{len(record.actions)} actions, owner={record.owner}')
                 # mark the recorded configs right away -- the manager owns the
-                # intent from here on. No config scan is needed to mark; the wait
-                # below is only about starting (the mod of a config must be
-                # resolvable). The manager refuses the queue while it is
-                # restarting: a restart that already took the backend over owns
-                # the resume list, this task has nothing to do
+                # intent from here on. No config scan is needed to mark; the scan
+                # below is only about resolving the configs (a config must exist
+                # and its mod must be resolvable). The manager refuses the queue
+                # while it is restarting: a restart that already took the backend
+                # over owns the resume list, this task has nothing to do
                 queued = await trio.to_thread.run_sync(manager.mark_resume, record.configs)
             # 2) actions carried by the resume file (an update cleanup): they run
             #    whenever a record was accepted, also when nothing was queued
@@ -1060,17 +1019,32 @@ async def resume_after_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
                 else:
                     logger.info('[Restart] Resume queue is empty, nothing to start')
                 return
-            # 3) wait for the config scan (a config created right before the
-            #    restart may not be visible yet; the manager gate ends the wait)
-            configs = await _wait_configs_ready(queued, manager)
-            if configs is None:
-                logger.info('[Restart] Resume queue taken over by a new graceful restart')
-                return
-            # the configs the scan did not expose are abandoned: drop their
-            # still queued marks (an entry a new restart already collected is
-            # not ours to drop, drop_resume leaves it alone)
-            missing = [config for config in queued if config not in configs]
+            # 3) resolve the queued configs against the config scan: a config
+            #    recorded in the resume file was running before the restart, so
+            #    its file exists and the restart itself does not remove it --
+            #    there is nothing to wait for. One forced refresh decides (a
+            #    cached answer may still show a config whose file was deleted
+            #    meanwhile); the configs the scan does not expose are dropped,
+            #    never started: starting one would recreate its file with the
+            #    default settings, which the user never asked for
+            source = ConfigScanSource()
+            try:
+                # the disk read runs in the thread pool (inside reinit)
+                await source.reinit(force=True)
+            except Exception as e:
+                # the scan decides whether a config exists: a failing refresh
+                # must not abandon the whole queue, the resolution below falls
+                # back to the data the source currently holds (get_mod() reads
+                # the same data)
+                logger.error(f'[Restart] Config scan refresh failed: {e}')
+            data = source.data
+            configs = [config for config in queued if config in data]
+            # drop the still queued marks of the missing configs (an entry a new
+            # restart already collected is not ours to drop, drop_resume leaves
+            # it alone)
+            missing = [config for config in queued if config not in data]
             if missing:
+                logger.warning(f'[Restart] Resume abandoned, configs not found: {missing}')
                 await trio.to_thread.run_sync(manager.drop_resume, missing)
             if not configs:
                 logger.info('[Restart] Resume queue is empty, nothing to start')

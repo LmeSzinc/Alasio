@@ -41,8 +41,13 @@ class FakeScan:
 
     def __init__(self, data):
         self.data = data
+        # force flags of the refreshes the resume queue asked for: exactly one
+        # forced refresh (the configs must exist now), never a wait for one to
+        # appear
+        self.reinit_forces = []
 
     async def reinit(self, force=False):
+        self.reinit_forces.append(force)
         return None
 
 
@@ -1170,19 +1175,51 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_missing_from_scan_is_abandoned(self, project_root, manager, monkeypatch):
+        """
+        A config the scan does not expose is dropped at once: its file existed
+        before the restart (the config was running) and a backend restart does
+        not remove it, so there is nothing to wait for -- and it must never be
+        started, that would recreate the file with the default settings
+        """
         credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
-        # the scan only knows cfg_a: cfg_b is abandoned after the wait
-        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({'cfg_a': 1}))
-        monkeypatch.setattr(restart, 'RESUME_CONFIG_WAIT', 0.1)
+        # the scan only knows cfg_a: cfg_b is abandoned, the queue does not wait
+        fake = FakeScan({'cfg_a': 1})
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
         monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.02)
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
 
-        await resume_after_restart(manager)
+        with logger.mock_capture_writer() as capture:
+            await resume_after_restart(manager)
+            assert capture.fd.any_contains("Resume abandoned, configs not found: ['cfg_b']")
 
+        # one forced refresh, no waiting; cfg_a resumes, cfg_b is dropped
+        assert fake.reinit_forces == [True]
         assert manager.state['cfg_a'].wait_running(timeout=WORKER_STARTUP_TIMEOUT)
         assert 'cfg_b' not in manager.state
         assert GRACEFUL_RESTART.iter_resume_files() == []
+
+    @pytest.mark.trio
+    async def test_scan_refresh_failure_does_not_drop_the_queue(self, project_root, manager, monkeypatch):
+        """A failing scan refresh must not abandon the whole queue (F10)"""
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+
+        class FailingScan(FakeScan):
+            async def reinit(self, force=False):
+                self.reinit_forces.append(force)
+                raise RuntimeError('scan failed')
+
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FailingScan({'cfg_a': 1}))
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.02)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+
+        with logger.mock_capture_writer() as capture:
+            await resume_after_restart(manager)
+            assert capture.fd.any_contains('Config scan refresh failed: scan failed')
+
+        # the resolution falls back to the data the source holds: cfg_a resumes
+        assert manager.state['cfg_a'].wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
     @pytest.mark.trio
     async def test_actions_run_before_resume(self, project_root, manager, monkeypatch):
@@ -1311,17 +1348,27 @@ class TestRestartTakesOverResumeQueue:
         assert RestartSource().data['phase'] == 'shutting-down'
 
     @pytest.mark.trio
-    async def test_intent_survives_a_restart_during_the_scan_wait(self, project_root, manager, monkeypatch):
+    async def test_intent_survives_a_restart_before_the_queue_starts(self, project_root, manager, monkeypatch):
         """
-        F6 scenario 1: the queue marks the configs before its config scan wait,
-        so a restart landing in that wait collects the marks instead of losing
-        the intent of the already consumed resume file
+        F6 scenario 1: the queue marks the configs right after the read, so a
+        restart landing while the queue still resolves the config scan collects
+        the marks instead of losing the intent of the already consumed file
         """
         credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
-        # the scan exposes nothing: the queue parks in the config wait
-        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({}))
-        monkeypatch.setattr(restart, 'RESUME_CONFIG_WAIT', 5.0)
+        entered = trio.Event()
+        release = trio.Event()
+
+        class ParkedScan(FakeScan):
+            async def reinit(self, force=False):
+                self.reinit_forces.append(force)
+                entered.set()
+                with trio.move_on_after(5):
+                    await release.wait()
+
+        # the queue parks in the scan read: nothing has been started yet
+        monkeypatch.setattr(restart, 'ConfigScanSource',
+                            lambda: ParkedScan({'cfg_a': 1, 'cfg_b': 1}))
 
         async def fake_lifespan_restart():
             return None
@@ -1332,14 +1379,16 @@ class TestRestartTakesOverResumeQueue:
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(resume_after_restart, manager)
-            # the file was consumed and its configs marked before the search of
-            # the scan: the marks are what a restart can pick up
+            # the file was consumed and its configs marked before the queue
+            # resolved anything: the marks are what a restart can pick up
             await wait_until(lambda: manager.state.get('cfg_b') is not None
                              and manager.state['cfg_b'].state == 'resuming',
                              description='the resume marks to be created')
             assert manager.state['cfg_a'].state == 'resuming'
+            await wait_until(entered.is_set, description='the queue to reach the scan')
 
             await run_graceful_restart(manager)
+            release.set()
 
         # the intent was carried over: the configs are in the new resume file
         assert len(credentials) == 1
@@ -1347,6 +1396,10 @@ class TestRestartTakesOverResumeQueue:
         assert read_record(GRACEFUL_RESTART.resume_file_of(token)).configs == ['cfg_a', 'cfg_b']
         for config in ('cfg_a', 'cfg_b'):
             assert manager.state[config].state == 'restarting'
+            assert manager.state[config].process is None
+        # the queue ended silently: the phases of the new restart are the last
+        # word, the queue pushed nothing over them
+        assert RestartSource().data['phase'] == 'shutting-down'
         assert GRACEFUL_RESTART.resume_scope is None
 
     @pytest.mark.trio
@@ -1413,20 +1466,6 @@ class TestRestartTakesOverResumeQueue:
             assert manager.state[config].process is None
         # the queue never pushed a terminal phase over the restart's phases
         assert phases == ['resuming']
-
-    @pytest.mark.trio
-    async def test_wait_ends_on_the_restart_gate(self, project_root, manager, monkeypatch):
-        """_wait_configs_ready gives up as soon as the manager restarts (F6)"""
-        monkeypatch.setattr(restart, 'RESUME_CONFIG_WAIT', 60.0)
-        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({}))
-        manager.restart_begin()
-
-        started = trio.current_time()
-        assert await restart._wait_configs_ready(['cfg_a'], manager) is None
-        # it did not wait for the timeout: the gate ended the wait
-        assert trio.current_time() - started < 1.0
-
-        manager.restart_cancel()
 
 
 class TestTakeoverLock:
