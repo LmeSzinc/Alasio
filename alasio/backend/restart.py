@@ -926,10 +926,13 @@ def _resume_one(manager, config: str):
     try:
         success, msg = manager.worker_resume(mod, config)
     except Exception as e:
-        # the spawn failed: the entry is stuck in "starting" with no process,
-        # clean it up so the config can be started again
+        # the spawn failed: the manager finalized the entry on the way out
+        # (error / restarting), so the cleanup only ends what this attempt
+        # created. restart_resume=True: an entry a new restart already
+        # collected is not this attempt's to cancel -- the crashed startup
+        # stays in the new resume list and the new backend retries it (F9)
         logger.error(f'[Restart] Resume failed: "{config}": {e}')
-        manager.worker_force_kill(config)
+        manager.worker_force_kill(config, restart_resume=True)
         return
     if not success:
         # cancelled by the user, started by someone else, or superseded by a

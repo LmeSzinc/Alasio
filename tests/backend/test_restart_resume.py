@@ -51,6 +51,23 @@ class FakeScan:
         return None
 
 
+class FailingProcess:
+    """
+    Multiprocessing process stand-in whose start() fails in the parent
+
+    Reproduces the parent-side spawn failure (the interpreter cannot be
+    launched): process.start() raises before any process exists, exactly the
+    failure WorkerManager._worker_start_process() handles by finalizing the
+    entry (error / restarting).
+    """
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def start(self):
+        raise OSError('cannot launch the worker interpreter')
+
+
 class SpawnSafeManager(WorkerManager):
     """
     WorkerManager that lifts the fake filesystem while spawning a worker
@@ -1174,6 +1191,86 @@ class TestResumeAfterRestart:
         assert 'cfg_b' not in manager.state
 
     @pytest.mark.trio
+    async def test_queue_failure_leaves_the_resumed_workers_running(self, project_root, manager, monkeypatch):
+        """
+        F9: the fallback cleanup of the queue only releases the entries still
+        waiting; the worker it already resumed keeps running
+        """
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b', 'cfg_c'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        fake = FakeScan({'cfg_a': 1, 'cfg_b': 1, 'cfg_c': 1})
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.02)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+
+        # the queue fails right after the first worker was resumed
+        original = restart._resume_one
+        visited = []
+
+        def broken_one(manager_, config):
+            visited.append(config)
+            if config == 'cfg_a':
+                return original(manager_, config)
+            raise RuntimeError('the queue broke')
+
+        monkeypatch.setattr(restart, '_resume_one', broken_one)
+
+        with logger.mock_capture_writer() as capture:
+            await resume_after_restart(manager)
+            assert capture.fd.any_contains('Auto-resume failed: the queue broke')
+
+        # the queue stopped at cfg_b: the worker it resumed keeps running, the
+        # entries it never reached are released for a manual start
+        assert visited == ['cfg_a', 'cfg_b']
+        state = manager.state['cfg_a']
+        assert state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+        assert state.process.is_alive()
+        assert 'cfg_b' not in manager.state
+        assert 'cfg_c' not in manager.state
+
+    @pytest.mark.trio
+    async def test_spawn_failure_does_not_stop_the_queue(self, project_root, manager, monkeypatch):
+        """
+        A spawn failing in the parent leaves its entry finalized by the manager
+        (error, no process, startable again) and the queue continues with the
+        next config
+        """
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        fake = FakeScan({'cfg_a': 1, 'cfg_b': 1})
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.02)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+
+        # only the first spawn of cfg_a fails, later spawns are real
+        real_process = manager._ctx.Process
+        failed = []
+
+        def flaky_process(*args, **kwargs):
+            if not failed and kwargs.get('name', '').endswith('-cfg_a'):
+                failed.append(True)
+                return FailingProcess(*args, **kwargs)
+            return real_process(*args, **kwargs)
+
+        monkeypatch.setattr(manager._ctx, 'Process', flaky_process)
+
+        with logger.mock_capture_writer() as capture:
+            await resume_after_restart(manager)
+            assert capture.fd.any_contains('Resume failed: "cfg_a"')
+
+        # cfg_a is not stuck in a queue state: its pipe is closed, no process
+        # is left and it can be started by hand again
+        state = manager.state['cfg_a']
+        assert state.state == 'error'
+        assert state.conn is None
+        assert state.process is None
+        success, msg = manager.worker_start('WorkerTestScheduler', 'cfg_a')
+        assert success, msg
+        assert state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+        # the queue did not stop at the broken config
+        assert manager.state['cfg_b'].wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+
+    @pytest.mark.trio
     async def test_missing_from_scan_is_abandoned(self, project_root, manager, monkeypatch):
         """
         A config the scan does not expose is dropped at once: its file existed
@@ -1466,6 +1563,43 @@ class TestRestartTakesOverResumeQueue:
             assert manager.state[config].process is None
         # the queue never pushed a terminal phase over the restart's phases
         assert phases == ['resuming']
+
+    @pytest.mark.trio
+    async def test_spawn_failure_keeps_the_collected_intent(self, project_root, manager, monkeypatch):
+        """
+        F9: a spawn failure landing after a new restart collected the entry
+        must not cancel the collect -- the crashed startup stays in the new
+        resume list and the new backend retries it
+        """
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        fake = FakeScan({'cfg_a': 1, 'cfg_b': 1})
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.02)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+
+        # the spawn of cfg_a fails inside its spawn window (no process is ever
+        # created) and the restart lands in the window before the failure:
+        # the entry is collected (pending_restart) by the time it fails
+        monkeypatch.setattr(manager._ctx, 'Process', FailingProcess)
+        real_start_process = manager._worker_start_process
+
+        def failing_start_process(*args, **kwargs):
+            manager.restart_begin()
+            return real_start_process(*args, **kwargs)
+
+        monkeypatch.setattr(manager, '_worker_start_process', failing_start_process)
+
+        with logger.mock_capture_writer() as capture:
+            await resume_after_restart(manager)
+            assert capture.fd.any_contains('Resume failed: "cfg_a"')
+
+        # the failure did not cancel the collect: cfg_a is still in the resume
+        # list the restart will write (with cfg_b, converted by restart_begin)
+        assert manager.restarting is True
+        assert manager.state['cfg_a'].state == 'restarting'
+        assert manager.state['cfg_a'].process is None
+        assert manager.restart_wait(2.0) == (True, ['cfg_a', 'cfg_b'])
 
 
 class TestTakeoverLock:
