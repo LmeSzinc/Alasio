@@ -1379,6 +1379,51 @@ class TestResumeAfterRestart:
         assert 'cfg_b' not in manager.state
         assert 'cfg_c' not in manager.state
 
+    @pytest.mark.trio
+    async def test_shutdown_interrupts_the_queue(self, project_root, manager, monkeypatch):
+        """
+        A backend shutdown while the queue drains ends it: the configs not
+        started yet are left queued and never started (a worker started now
+        would only be killed at the exit), and no terminal phase is pushed
+        """
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b', 'cfg_c'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        fake = FakeScan({'cfg_a': 1, 'cfg_b': 1, 'cfg_c': 1})
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.02)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+
+        # the shutdown lands while the first worker is being resumed: the queue
+        # must not reach cfg_b / cfg_c any more
+        event = trio.Event()
+        monkeypatch.setattr(restart, 'SHUTDOWN_EVENT', event)
+        starts = []
+        original = manager.worker_resume
+
+        def spy(mod, config, *args, **kwargs):
+            starts.append(config)
+            result = original(mod, config, *args, **kwargs)
+            if config == 'cfg_a':
+                # the spy runs in the trio thread pool: the event belongs to
+                # the loop thread
+                trio.from_thread.run_sync(event.set)
+            return result
+
+        monkeypatch.setattr(manager, 'worker_resume', spy)
+
+        with logger.mock_capture_writer() as capture:
+            await resume_after_restart(manager)
+            assert capture.fd.any_contains('Resume interrupted by the shutdown: cfg_b')
+
+        # cfg_a was resumed, the rest was never started and is not dropped
+        # either: the shutdown owns the cleanup, the queue only stops
+        assert starts == ['cfg_a']
+        assert manager.state['cfg_a'].wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+        assert manager.state['cfg_b'].state == 'resuming'
+        assert manager.state['cfg_c'].state == 'resuming'
+        # the interruption pushes no terminal phase: 'resuming' stands
+        assert RestartSource().data['phase'] == 'resuming'
+
 
 class TestRestartTakesOverResumeQueue:
     """
