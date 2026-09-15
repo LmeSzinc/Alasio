@@ -4,8 +4,12 @@ Tests for GameStateBase class.
 States are class-based (no instantiation). Field assignment goes through _StateMeta.__setattr__
 which validates via msgspec.convert against the struct model.
 """
+import asyncio
+import inspect
+
 import msgspec
 import pytest
+import trio
 
 from alasio.base.state import GameStateBase
 
@@ -285,3 +289,183 @@ class TestGameStateMatchLang:
         assert CustomGS.match_lang('ja-JP') is True
         assert CustomGS.match_lang('zh-CN') is False
         assert CustomGS.match_lang('zh-CN', 'ja-JP') is True
+
+
+@pytest.fixture
+def sample_fixture_value():
+    """Sample fixture value, used to check that a patched test function keeps its arguments."""
+    return 42
+
+
+class TestGameStatePatch:
+    """Tests for GameStateBase.patch() and the patch_server() / patch_lang() shortcuts."""
+
+    def setup_method(self):
+        """Reset class-level state before each test."""
+        GameStateBase.reset_all_fields()
+
+    def teardown_method(self):
+        """Reset class-level state after each test."""
+        GameStateBase.reset_all_fields()
+
+    def test_patch_server_inside_call(self):
+        """server should be patched while the decorated function is running."""
+        @GameStateBase.patch_server('en')
+        def func():
+            return GameStateBase.server
+
+        assert func() == 'en'
+
+    def test_patch_server_restores_previous_value(self):
+        """The server before the call should be restored after the call."""
+        GameStateBase.server = 'jp'
+
+        @GameStateBase.patch_server('en')
+        def func():
+            return GameStateBase.server
+
+        assert func() == 'en'
+        assert GameStateBase.server == 'jp'
+
+    def test_patch_restores_on_exception(self):
+        """The state should be restored even if the decorated function raises."""
+        GameStateBase.lang = 'ja-JP'
+
+        @GameStateBase.patch_lang('en-US')
+        def func():
+            raise RuntimeError('boom')
+
+        with pytest.raises(RuntimeError, match='boom'):
+            func()
+        assert GameStateBase.lang == 'ja-JP'
+
+    def test_patch_multiple_fields(self):
+        """patch() should patch several fields at once."""
+        @GameStateBase.patch(server='en', lang='en-US')
+        def func():
+            return GameStateBase.server, GameStateBase.lang
+
+        assert func() == ('en', 'en-US')
+        assert GameStateBase.server == 'cn'
+        assert GameStateBase.lang == 'zh-CN'
+
+    def test_patch_server_on_subclass(self):
+        """Patching through a subclass should not touch the parent class."""
+        class CustomGS(GameStateBase):
+            server: str = 'jp'
+
+        @CustomGS.patch_server('en')
+        def func():
+            return CustomGS.server, GameStateBase.server
+
+        assert func() == ('en', 'cn')
+        assert CustomGS.server == 'jp'
+        assert GameStateBase.server == 'cn'
+
+    def test_patch_inherited_field_is_not_leaked_to_subclass(self):
+        """An inherited field should be dropped after the call instead of copied onto the subclass."""
+        class CustomGS(GameStateBase):
+            pass
+
+        @CustomGS.patch_server('en')
+        def func():
+            return CustomGS.server
+
+        assert func() == 'en'
+        assert 'server' not in CustomGS.__dict__
+        # the subclass should follow the parent class again
+        GameStateBase.server = 'jp'
+        assert CustomGS.server == 'jp'
+
+    def test_patch_mutable_field_is_restored_by_copy(self):
+        """In-place modifications of a patched mutable field should not leak."""
+        class CustomGS(GameStateBase):
+            servers: list = ['cn']
+
+        @CustomGS.patch(servers=['en'])
+        def func():
+            CustomGS.servers.append('jp')
+            return list(CustomGS.servers)
+
+        assert func() == ['en', 'jp']
+        assert CustomGS.servers == ['cn']
+
+    def test_patch_nested_same_field(self):
+        """Nested patches of the same field should be restored in reverse order."""
+        @GameStateBase.patch_server('en')
+        def outer():
+            @GameStateBase.patch_server('jp')
+            def inner():
+                return GameStateBase.server
+
+            assert GameStateBase.server == 'en'
+            value = inner()
+            assert GameStateBase.server == 'en'
+            return value
+
+        assert outer() == 'jp'
+        assert GameStateBase.server == 'cn'
+
+    def test_patch_unknown_field_raises_at_decoration(self):
+        """A typo in the field name should raise instead of silently patching nothing."""
+        with pytest.raises(ValueError, match='State field GameStateBase.servre does not exist'):
+            @GameStateBase.patch(servre='en')
+            def func():
+                return GameStateBase.server
+
+        assert GameStateBase.server == 'cn'
+
+    def test_patch_invalid_value_patches_nothing(self):
+        """A rejected value should leave every field untouched."""
+        @GameStateBase.patch_server('en')
+        @GameStateBase.patch(lang=1)
+        def func():
+            return GameStateBase.server, GameStateBase.lang
+
+        with pytest.raises(msgspec.ValidationError):
+            func()
+        assert GameStateBase.server == 'cn'
+        assert GameStateBase.lang == 'zh-CN'
+
+    def test_patch_supports_async_function(self):
+        """patch() should keep async functions awaitable."""
+        @GameStateBase.patch_server('en')
+        async def func():
+            return GameStateBase.server
+
+        assert inspect.iscoroutinefunction(func) is True
+        assert asyncio.run(func()) == 'en'
+        assert GameStateBase.server == 'cn'
+
+    def test_patch_keeps_function_metadata(self):
+        """The decorator should keep the name, the docstring and the signature of the function."""
+        @GameStateBase.patch_server('en')
+        def func(server, *args, **kwargs):
+            """Docstring."""
+            return server, args, kwargs
+
+        assert func('c', 1, key=2) == ('c', (1,), {'key': 2})
+        assert func.__name__ == 'func'
+        assert func.__doc__ == 'Docstring.'
+        assert list(inspect.signature(func).parameters) == ['server', 'args', 'kwargs']
+
+
+class TestGameStatePatchAsTestDecorator:
+    """Tests for the patch decorator applied to a real pytest test function."""
+
+    def teardown_method(self):
+        """Reset class-level state after each test."""
+        GameStateBase.reset_all_fields()
+
+    @GameStateBase.patch_server('en')
+    def test_patched_test_keeps_fixture_arguments(self, sample_fixture_value):
+        """The decorated test should still be collected and receive its fixture arguments."""
+        assert sample_fixture_value == 42
+        assert GameStateBase.server == 'en'
+
+    @pytest.mark.trio
+    @GameStateBase.patch_server('en')
+    async def test_patched_trio_test_stays_async(self):
+        """The decorated async test should still be found by pytest-trio."""
+        await trio.sleep(0)
+        assert GameStateBase.server == 'en'

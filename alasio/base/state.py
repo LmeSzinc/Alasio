@@ -377,6 +377,47 @@ class _StateDispatcher:
         return types.MethodType(self, instance)
 
 
+class _StatePatchContext:
+    """
+    Context manager that temporarily patches state fields, the previous values are restored on exit
+    """
+
+    def __init__(self, cls, patch):
+        """
+        Args:
+            cls (type): state class, all fields in `patch` must exist in the state class
+            patch (dict): field names and the temporary values
+        """
+        self.cls = cls
+        self.patch = patch
+        # {name: (is_own_attribute, previous_value)}
+        self.snapshot = {}
+
+    def __enter__(self):
+        for name in self.patch:
+            # field name is validated by GameStateBase.patch()
+            value = getattr(self.cls, name)
+            if isinstance(value, (list, dict, set)):
+                # copy mutable containers, in case they are modified in place
+                # by the code being tested
+                value = copy.deepcopy(value)
+            self.snapshot[name] = (name in self.cls.__dict__, value)
+        # atomic, nothing is patched if validation fails
+        self.cls.update(**self.patch)
+        return self.cls
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # restore through update() to bypass any active batch_set() buffer
+        restore = {name: value for name, (is_own, value) in self.snapshot.items() if is_own}
+        if restore:
+            self.cls.update(**restore)
+        for name, (is_own, value) in self.snapshot.items():
+            if not is_own:
+                # the field is inherited, drop the patched attribute
+                # so that the value of the parent class takes effect again
+                delattr(self.cls, name)
+
+
 class GameStateBase(GlobalState):
     """
     Examples:
@@ -415,6 +456,99 @@ class GameStateBase(GlobalState):
             if cls.match(lang=item):
                 return True
         return False
+
+    @classmethod
+    def patch(cls, **kwargs):
+        """
+        Return a decorator that patches state fields while the decorated function is running,
+        the previous values are restored afterwards, even if the function raises
+
+        Examples:
+            @GameState.patch(server='en', lang='en-US')
+            def test_commission_en():
+                # GameState.server == 'en' and GameState.lang == 'en-US' inside the function
+                ...
+            # GameState.server and GameState.lang are restored here
+
+            # nested patches are restored in reverse order
+            @GameState.patch_server('en')
+            @GameState.patch_lang('en-US')
+            def test_nested():
+                ...
+
+        Args:
+            kwargs: state fields to patch, e.g. server='en'
+
+        Returns:
+            callable: decorator for a sync or async function
+        """
+        # local import, only needed when a patch decorator is created
+        import inspect
+
+        for name in kwargs:
+            # update() silently ignores unknown fields, which would make
+            # a typo silently patch nothing, so fail fast instead
+            if name not in cls.__dict_defaults__:
+                raise ValueError(f'State field {cls.__name__}.{name} does not exist')
+
+        def decorator(func):
+            if inspect.iscoroutinefunction(func):
+                @functools.wraps(func)
+                async def wrapper(*args, **call_kwargs):
+                    with _StatePatchContext(cls, kwargs):
+                        return await func(*args, **call_kwargs)
+            else:
+                @functools.wraps(func)
+                def wrapper(*args, **call_kwargs):
+                    with _StatePatchContext(cls, kwargs):
+                        return func(*args, **call_kwargs)
+
+            # `functools.wraps` only sets `__wrapped__`, which pytest does not always follow
+            # when resolving test arguments, so copy the signature explicitly
+            wrapper.__signature__ = inspect.signature(func)
+            return wrapper
+
+        return decorator
+
+    @classmethod
+    def patch_server(cls, server):
+        """
+        Return a decorator that patches the server field while the decorated function is running
+
+        Examples:
+            @GameState.patch_server('en')
+            def test_commission_en():
+                # GameState.server == 'en' inside the function
+                ...
+            # GameState.server is restored here
+
+        Args:
+            server (str): server to patch
+
+        Returns:
+            callable: decorator for a sync or async function
+        """
+        return cls.patch(server=server)
+
+    @classmethod
+    def patch_lang(cls, lang):
+        """
+        Return a decorator that patches the lang field while the decorated function is running
+
+        Examples:
+            @GameState.patch_lang('en-US')
+            def test_commission_en():
+                # GameState.lang == 'en-US' inside the function
+                ...
+            # GameState.lang is restored here
+
+        Args:
+            lang (str): language to patch
+
+        Returns:
+            callable: decorator for a sync or async function
+        """
+        return cls.patch(lang=lang)
 
 
 class _ConfigDispatcher:
