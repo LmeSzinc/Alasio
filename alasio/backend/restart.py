@@ -608,6 +608,16 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
     exits): a worker started in the restart window would be killed at exit and
     never resumed.
 
+    An error raised after the wait (a failing update hook, the supervisor pipe
+    gone) is handled exactly like a cancel -- the manager state is reset (the
+    workers back to idle, a manual retry is possible), the resume file is
+    withdrawn and the Restart topic is cleared -- and it never escapes this
+    task: the task runs in the lifespan global nursery, where a raised error
+    would cancel every other lifespan task and take the whole backend process
+    down (the supervisor would count it as a crash instead of leaving the user
+    with an idle backend). The backend stays alive and the error is reported
+    through the logs (F5).
+
     Args:
         manager (WorkerManager): Manager to drive, defaults to
             GRACEFUL_RESTART.WORKER_MANAGER (the process singleton, injectable
@@ -682,10 +692,18 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
             # the cancel path (cancel_graceful_restart) owns the cleanup
             raise
         except Exception as e:
-            await cancel_graceful_restart(f'graceful restart failed: {e}', manager)
+            # the failure is treated as a cancel, never raised: see the
+            # docstring -- a raised error would travel through the lifespan
+            # global nursery and kill the backend process
             logger.error(f'[Restart] Graceful restart failed: {e}')
             logger.exception(e)
-            raise
+            try:
+                await cancel_graceful_restart(f'graceful restart failed: {e}', manager)
+            except Exception as cancel_error:
+                # every step of the cancel is already guarded; this only keeps
+                # the orchestration task from raising under any circumstance
+                logger.error(f'[Restart] Failed to cancel the failed restart: {cancel_error}')
+            return
         finally:
             if GRACEFUL_RESTART.scope is scope:
                 GRACEFUL_RESTART.scope = None

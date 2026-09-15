@@ -519,6 +519,14 @@ class TestRunGracefulRestart:
 
     @pytest.mark.trio
     async def test_hook_failure_cancels_the_restart(self, project_root, manager, monkeypatch):
+        """
+        F5: a failing update hook cancels the restart, the task returns normally
+
+        The error must never escape the orchestration task: it runs in the
+        lifespan global nursery (GLOBAL_CONTEXT.global_nursery), where a raised
+        error cancels every other lifespan task and takes the whole backend
+        process down.
+        """
         start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
 
         async def failing_hook():
@@ -531,8 +539,14 @@ class TestRunGracefulRestart:
         monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', lambda credential: None)
 
         hooks = restart.RestartHooks(on_all_stopped=failing_hook)
-        with pytest.raises(RuntimeError, match='replacement failed'):
+        with logger.mock_capture_writer() as capture:
             await run_graceful_restart(manager, hooks)
+            # the failure is logged (the fd log and the backend log stream the
+            # frontend subscribes to) and then treated as a cancel
+            assert capture.fd.any_contains('Graceful restart failed: replacement failed')
+            assert capture.fd.any_contains(
+                'Graceful restart cancelled: graceful restart failed: replacement failed')
+            assert capture.backend.any_contains('Graceful restart failed: replacement failed')
 
         # cancelled: no resume file, the gate is released, entries are back to idle
         assert GRACEFUL_RESTART.iter_resume_files() == []
@@ -542,6 +556,15 @@ class TestRunGracefulRestart:
 
     @pytest.mark.trio
     async def test_restart_failure_cancels_and_removes_file(self, project_root, manager, monkeypatch):
+        """
+        F5: a failing backend restart is cancelled, never raised
+
+        lifespan_restart() raises when the supervisor pipe is gone (no
+        supervisor, broken pipe): the resume file written just before must be
+        withdrawn again and the backend must stay alive (the supervisor would
+        otherwise restart a crashed process instead of leaving the user with an
+        idle backend to retry).
+        """
         start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
 
         async def failing_restart():
@@ -551,15 +574,55 @@ class TestRunGracefulRestart:
         credentials = []
         monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
 
-        with pytest.raises(PermissionError):
+        with logger.mock_capture_writer() as capture:
             await run_graceful_restart(manager)
+            assert capture.fd.any_contains(
+                'Graceful restart failed: Cannot restart backend running without supervisor')
+            assert capture.backend.any_contains(
+                'Graceful restart failed: Cannot restart backend running without supervisor')
 
         # the credential was announced before the failure, the cancel removed
-        # the file (owner=restart) and released the manager
-        assert credentials
+        # the file (owner=restart) released the manager and took the credential
+        # back (the retraction is the last announcement)
+        assert credentials[-1] == ''
+        assert len(credentials) == 2
         assert GRACEFUL_RESTART.iter_resume_files() == []
         assert GRACEFUL_RESTART.restart_in_progress() is False
         assert 'cfg_a' not in manager.state
+
+    @pytest.mark.trio
+    async def test_failure_does_not_reach_the_nursery(self, project_root, manager, monkeypatch):
+        """
+        F5: the orchestration error never reaches the nursery that runs it
+
+        The task is started with GLOBAL_CONTEXT.global_nursery.start_soon: a
+        re-raised error (the old behaviour) cancelled every sibling lifespan
+        task and propagated out of the lifespan into hypercorn. The nursery
+        below stands in for that one -- it only exits cleanly when nothing
+        escapes the task, and the backend is usable again afterwards.
+        """
+        start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
+
+        async def failing_hook():
+            raise RuntimeError('replacement failed')
+
+        async def fake_lifespan_restart():
+            raise AssertionError('the backend must not restart')
+
+        monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', lambda credential: None)
+
+        hooks = restart.RestartHooks(on_all_stopped=failing_hook)
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_graceful_restart, manager, hooks)
+            await wait_until(
+                lambda: 'cfg_a' not in manager.state
+                and GRACEFUL_RESTART.restart_in_progress() is False,
+                description='the failed restart to be cancelled')
+
+        # the backend survived: the gate was released, a manual start works
+        success, msg = manager.worker_start('WorkerTestScheduler', 'cfg_new')
+        assert success, msg
 
     @pytest.mark.trio
     async def test_cancel_during_wait_writes_nothing(self, project_root, manager, monkeypatch):
