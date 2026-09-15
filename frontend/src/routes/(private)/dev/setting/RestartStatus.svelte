@@ -46,11 +46,12 @@
   const workers = $derived(workersOverride === undefined ? (workerClient.data ?? {}) : workersOverride);
 
   // Configs the graceful stop is still waiting for: a worker that finished its
-  // current task and stopped is marked "restarting" by the backend, so every
-  // other alive state means "still running"
+  // current task and stopped is marked "restarting" by the backend, and one
+  // waiting in the auto-resume queue is "resuming" (no process either), so
+  // every other alive state means "still running"
   const stoppingWorkers = $derived.by(() =>
     Object.entries(workers)
-      .filter(([, state]) => state !== "restarting" && state !== "idle" && state !== "error")
+      .filter(([, state]) => state !== "restarting" && state !== "resuming" && state !== "idle" && state !== "error")
       .map(([name, state]) => ({ name, state })),
   );
   // Auto-resume queue of the new backend: waiting for its turn or starting
@@ -59,8 +60,13 @@
       .filter(([, state]) => state === "resuming" || state === "starting")
       .map(([name, state]) => ({ name, state })),
   );
-  // Already stopped, waiting for the new backend to start
-  const stoppedCount = $derived(Object.values(workers).filter((state) => state === "restarting").length);
+  // Already stopped, waiting for the new backend to start: "restarting" for
+  // this restart and "resuming" for the queue it took over (a leftover of the
+  // previous restart's auto-resume) -- neither has a process, both count as
+  // stopped, and neither is a config the graceful stop still waits for
+  const stoppedCount = $derived(
+    Object.values(workers).filter((state) => state === "restarting" || state === "resuming").length,
+  );
 
   type View = {
     phase: RestartPhase;

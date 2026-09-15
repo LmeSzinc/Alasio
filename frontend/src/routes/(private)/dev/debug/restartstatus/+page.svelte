@@ -56,6 +56,12 @@
       workers: {},
     },
     {
+      label: "Stopping · leftover resume queue",
+      note: "A restart takes over while the previous auto-resume queue is still waiting: the queued configs have no process, so they count as stopped and are not part of the waiting list.",
+      phase: "stopping",
+      workers: { cfg_a: "restarting", cfg_b: "resuming", cfg_c: "running" },
+    },
+    {
       label: "Stopping · long config name",
       note: "The name truncates, the state stays at the right edge of the row.",
       phase: "stopping",
