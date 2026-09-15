@@ -189,7 +189,6 @@ class TestRestartBegin:
         assert queued.state == 'idle'
         assert 'cfg_park' not in manager.state
         assert 'cfg_queued' not in manager.state
-        assert manager.restart_aborted() is True
 
         # the gate is open again
         success, msg = manager.worker_start('WorkerTestInfinite', 'cfg_after_cancel')
@@ -207,7 +206,7 @@ class TestRestartBegin:
 # ============================================================================
 
 class TestRestartWait:
-    """restart_wait blocks for the stops and returns the final resume list"""
+    """restart_wait blocks for the stops and returns (success, resume list)"""
 
     def test_all_stopped_returns_resume_list(self, manager):
         start_worker(manager, 'WorkerTestScheduler', 'cfg_b')
@@ -220,7 +219,7 @@ class TestRestartWait:
         thread.join(timeout=15)
 
         assert not thread.is_alive(), 'restart_wait did not return'
-        assert result['resume'] == ['cfg_a', 'cfg_b']
+        assert result['resume'] == (True, ['cfg_a', 'cfg_b'])
         for config in ('cfg_a', 'cfg_b'):
             assert manager.state[config].state == 'restarting'
             assert manager.state[config].process is None
@@ -242,7 +241,7 @@ class TestRestartWait:
         thread.join(timeout=15)
 
         assert not thread.is_alive(), 'restart_wait did not return'
-        assert result['resume'] == ['cfg_inf']
+        assert result['resume'] == (True, ['cfg_inf'])
         assert state.state == 'restarting'
         assert state.pending_restart is True
         assert state.process is None
@@ -266,7 +265,7 @@ class TestRestartWait:
         thread.start()
         thread.join(timeout=15)
 
-        assert result['resume'] == ['cfg_a']
+        assert result['resume'] == (True, ['cfg_a'])
 
     def test_abort_returns_early(self, manager, monkeypatch):
         # a worker that never stops gracefully: only the abort can end the wait
@@ -278,10 +277,11 @@ class TestRestartWait:
             manager.state['cfg_inf'].state = 'scheduler-stopping'
 
         # observe the first iteration of the wait loop: the thread is provably
-        # parked in restart_wait once it ran one
+        # parked in restart_wait once it ran one (the hook runs under the
+        # manager lock, the original it delegates to is lock free)
         entered = threading.Event()
-        remaining = manager._restart_remaining
-        monkeypatch.setattr(manager, '_restart_remaining',
+        remaining = manager._restart_pending_configs_locked
+        monkeypatch.setattr(manager, '_restart_pending_configs_locked',
                             lambda: (entered.set(), remaining())[1])
 
         result = {}
@@ -294,8 +294,71 @@ class TestRestartWait:
         thread.join(timeout=5)
 
         assert not thread.is_alive(), 'restart_wait did not return on abort'
-        # cancelled: no config is parked in "restarting"
-        assert result['resume'] == []
+        # cancelled: the wait reports it and carries no resume list
+        assert result['resume'] == (False, [])
+
+    def test_abort_in_the_kill_phase_returns_without_freezing(self, manager, no_send, monkeypatch):
+        """
+        An abort landing in the second phase -- after the timeout escalation,
+        while the kills are still running -- returns without freezing the list:
+        the transaction is gone and the cancel path owns the state cleanup
+        """
+        # the escalation must not spend its KILL_WAIT_TIMEOUT on the fabricated
+        # entry below (its kill only travels through the pipe of a real process)
+        monkeypatch.setattr('alasio.backend.worker.manager.KILL_WAIT_TIMEOUT', 0)
+        # an entry that never stops by itself and has no process to end: the
+        # escalation cannot finish it, so the wait parks in the kill phase
+        add_state(manager, 'cfg_park', 'scheduler-stopping')
+        manager.restart_begin()
+
+        result = {}
+        thread = threading.Thread(target=lambda: result.update(resume=manager.restart_wait(0.1)))
+        thread.start()
+
+        # the graceful wait timed out and the escalation ran: the entry is being
+        # killed and the second loop waits for it
+        for _ in range(200):
+            if manager.state['cfg_park'].state == 'force-killing':
+                break
+            time.sleep(0.01)
+        assert manager.state['cfg_park'].state == 'force-killing', 'the escalation did not run'
+        assert thread.is_alive(), 'the wait did not continue into the kill phase'
+
+        manager.restart_cancel()
+        thread.join(timeout=5)
+
+        assert not thread.is_alive(), 'restart_wait did not return on abort'
+        assert result['resume'] == (False, [])
+        # nothing was frozen: a "restarting" entry of the cancel window can
+        # still be stopped
+        parked = add_state(manager, 'cfg_late', 'restarting', pending_restart=True)
+        success, msg = manager.worker_kill('cfg_late')
+        assert success, msg
+        assert parked.state == 'idle'
+
+    def test_abort_landing_at_the_freeze_wins(self, manager, no_send, monkeypatch):
+        """
+        The freeze re-checks the abort in its own critical section: the wait
+        observes "every worker stopped" in one section, the freeze runs in the
+        next, and a cancel landing in between wins -- nothing is frozen and the
+        wait reports the cancellation (a (True, [...]) here would let the
+        orchestration write a resume file and restart after the cancel)
+        """
+        add_state(manager, 'cfg_park', 'restarting', pending_restart=True)
+        manager.restart_begin()
+
+        def remaining_after_a_cancel():
+            # the wait observed "every worker stopped" and a cancel landed
+            # before the freeze took its section: the abort event is what
+            # restart_cancel() sets (the hook runs under the manager lock, so
+            # the cancel itself cannot be called from here)
+            manager._restart_abort.set()
+            return []
+
+        monkeypatch.setattr(manager, '_restart_pending_configs_locked', remaining_after_a_cancel)
+
+        # the wait must not report a completed restart after the cancel
+        assert manager.restart_wait(1) == (False, [])
 
     def test_begin_converts_resuming_to_restarting(self, manager, no_send):
         """
@@ -308,13 +371,13 @@ class TestRestartWait:
         manager.restart_begin()
 
         assert queued.state == 'restarting'
-        assert manager.restart_wait(1) == ['cfg_queued']
+        assert manager.restart_wait(1) == (True, ['cfg_queued'])
 
     def test_wait_without_workers(self, manager, no_send):
         """No worker at all: the wait returns an empty list immediately"""
         started = time.monotonic()
         manager.restart_begin()
-        assert manager.restart_wait(10) == []
+        assert manager.restart_wait(10) == (True, [])
         assert time.monotonic() - started < 1
 
 
@@ -398,6 +461,152 @@ class TestStopRouting:
         success, msg = manager.worker_kill('nonexistent')
         assert not success
         assert 'no such worker' in msg.lower()
+
+
+# ============================================================================
+# Frozen resume list (F4)
+# ============================================================================
+
+class TestRestartSealed:
+    """
+    The resume list is frozen once the wait is over
+
+    The orchestration writes exactly the list restart_wait() returned into the
+    resume file, so from that instant a cancel of a config of the list cancels
+    nothing (the written file keeps resuming it): it is refused with an explicit
+    error instead of silently dropping the entry from the manager. A
+    "restarting" entry outside the list has no recorded resume intent and stays
+    cancellable.
+    """
+
+    def seal(self, manager, config='cfg_park'):
+        """Park one fabricated worker and run a whole wait over it"""
+        parked = add_state(manager, config, 'restarting', pending_restart=True)
+        manager.restart_begin()
+        assert manager.restart_wait(1) == (True, [config])
+        return parked
+
+    def test_cancel_after_the_wait_is_refused(self, manager, no_send):
+        parked = self.seal(manager)
+
+        success, msg = manager.worker_kill('cfg_park')
+
+        # the rpc layer turns the message into an RpcValueError (frontend toast)
+        assert not success
+        assert 'point of no return' in msg
+        assert 'cfg_park' in msg
+        # the entry did not move: it resumes after the backend restart
+        assert parked.state == 'restarting'
+        assert parked.pending_restart is True
+        assert 'cfg_park' in manager.state
+
+    @pytest.mark.parametrize('method', ['worker_scheduler_stop', 'worker_kill', 'worker_force_kill'])
+    def test_entry_outside_the_frozen_list_is_still_cancellable(self, manager, no_send, method):
+        """
+        The refusal covers exactly the recorded configs: a "restarting" entry
+        that is not in the frozen resume list has no resume intent, so the
+        default stop keeps its plain meaning ("stop, do not resume") and is
+        honoured without an error
+        """
+        recorded = self.seal(manager, 'cfg_a')
+        # parked after the seal: not part of the recorded list
+        late = add_state(manager, 'cfg_b', 'restarting', pending_restart=True)
+
+        success, msg = getattr(manager, method)('cfg_a')
+        assert not success
+        assert 'point of no return' in msg
+        assert recorded.state == 'restarting'
+
+        # no conflict: nothing resumes this config, the stop is honoured
+        success, msg = getattr(manager, method)('cfg_b')
+        assert success, msg
+        assert late.state == 'idle'
+        assert 'cfg_b' not in manager.state
+
+    @pytest.mark.parametrize('method', ['worker_scheduler_stop', 'worker_kill', 'worker_force_kill'])
+    def test_refused_on_every_stop_function(self, manager, no_send, method):
+        parked = self.seal(manager)
+
+        success, msg = getattr(manager, method)('cfg_park')
+
+        assert not success
+        assert 'point of no return' in msg
+        assert parked.state == 'restarting'
+
+    @pytest.mark.parametrize('method', ['worker_scheduler_stop', 'worker_kill', 'worker_force_kill'])
+    def test_keep_resume_after_the_wait_is_still_a_noop(self, manager, no_send, method):
+        parked = self.seal(manager)
+
+        success, msg = getattr(manager, method)('cfg_park', restart_resume=True)
+
+        assert success, msg
+        assert parked.state == 'restarting'
+
+    def test_cancel_during_the_wait_is_still_honoured(self, manager):
+        """
+        Before the seal a cancel of an already parked entry still works (the
+        wait is open, the list is not written yet): the config leaves the
+        resume list
+        """
+        parked = add_state(manager, 'cfg_park', 'restarting', pending_restart=True)
+        # a worker that ignores scheduler-stopping keeps the wait open
+        start_worker(manager, 'WorkerTestInfinite', 'cfg_inf')
+
+        manager.restart_begin()
+        success, msg = manager.worker_kill('cfg_park')
+        assert success, msg
+        assert parked.state == 'idle'
+
+        # the wait escalates cfg_inf and returns: the killed config is not in
+        # the final resume list (it never reaches the resume file)
+        assert manager.restart_wait(0.5) == (True, ['cfg_inf'])
+
+    def test_queued_resuming_entry_is_still_cancelled(self, manager, no_send):
+        """
+        The seal covers the parked entries of the old backend: an entry queued
+        for the auto-resume of the new backend is still cancelled by a stop
+        (mark_resume runs there, the seal of the old backend is long gone)
+        """
+        self.seal(manager)
+        queued = add_state(manager, 'cfg_queued', 'resuming')
+
+        success, msg = manager.worker_kill('cfg_queued')
+
+        assert success, msg
+        assert queued.state == 'idle'
+        assert 'cfg_queued' not in manager.state
+
+    def test_cancelled_wait_freezes_nothing(self, manager, no_send):
+        """
+        restart_wait() returning after restart_cancel() (force restart /
+        backend stop) freezes nothing: the transaction is gone and a worker
+        parked in the race window of the cancel can still be stopped
+        """
+        add_state(manager, 'cfg_inf', 'scheduler-stopping')
+        manager.restart_begin()
+        manager.restart_cancel()
+
+        assert manager.restart_wait(1) == (False, [])
+
+        parked = add_state(manager, 'cfg_park', 'restarting', pending_restart=True)
+        success, msg = manager.worker_kill('cfg_park')
+        assert success, msg
+        assert parked.state == 'idle'
+
+    def test_next_transaction_decides_again(self, manager, no_send):
+        """The seal belongs to one transaction: restart_cancel() drops it"""
+        self.seal(manager, 'cfg_a')
+        assert not manager.worker_kill('cfg_a')[0]
+
+        manager.restart_cancel()
+        assert 'cfg_a' not in manager.state
+
+        # the next transaction starts unsealed
+        second = add_state(manager, 'cfg_b', 'restarting', pending_restart=True)
+        assert manager.restart_begin() == []
+        success, msg = manager.worker_kill('cfg_b')
+        assert success, msg
+        assert second.state == 'idle'
 
 
 # ============================================================================
@@ -598,7 +807,7 @@ class TestStopRequestDuringSpawn:
         assert not thread.is_alive()
         assert result['start'] == (True, 'Success')
         assert duration < 4.5, f'Stopped through the timeout escalation: {duration:.2f}s'
-        assert resume == ['cfg_spawn']
+        assert resume == (True, ['cfg_spawn'])
 
         assert state.state == 'restarting'
         assert state.process is None

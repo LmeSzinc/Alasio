@@ -536,7 +536,7 @@ class TestRunGracefulRestart:
 
         # cancelled: no resume file, the gate is released, entries are back to idle
         assert GRACEFUL_RESTART.iter_resume_files() == []
-        assert manager.restart_aborted() is True
+        assert GRACEFUL_RESTART.restart_in_progress() is False
         assert 'cfg_a' not in manager.state
         assert RestartSource().data == {}
 
@@ -558,7 +558,7 @@ class TestRunGracefulRestart:
         # the file (owner=restart) and released the manager
         assert credentials
         assert GRACEFUL_RESTART.iter_resume_files() == []
-        assert manager.restart_aborted() is True
+        assert GRACEFUL_RESTART.restart_in_progress() is False
         assert 'cfg_a' not in manager.state
 
     @pytest.mark.trio
@@ -588,10 +588,48 @@ class TestRunGracefulRestart:
         assert calls == []
         assert credentials == []
         assert GRACEFUL_RESTART.iter_resume_files() == []
-        assert manager.restart_aborted() is True
-        # the gate is released: a new worker may start
+        # the transaction is gone: the gate is released, a new worker may start
+        assert GRACEFUL_RESTART.restart_in_progress() is False
         success, msg = manager.worker_start('WorkerTestScheduler', 'cfg_after')
         assert success, msg
+
+    @pytest.mark.trio
+    async def test_cancel_after_the_write_is_refused(self, project_root, manager, monkeypatch):
+        """
+        F4: past the point of no return the per-config cancel is refused
+
+        The resume file is written from the final list restart_wait() returned:
+        dropping the entry from the manager afterwards would cancel nothing (the
+        written file keeps resuming the config), so the stop is refused with an
+        explicit error instead. The frontend disables the button from
+        'shutting-down' on; a stale UI gets the same explicit error through the
+        rpc layer (a (False, msg) result becomes an RpcValueError).
+        """
+        start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
+
+        async def fake_lifespan_restart():
+            return None
+
+        monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
+        credentials = []
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
+
+        await run_graceful_restart(manager)
+
+        # the file is written and the frontend reads the phase that disables
+        # the cancel button
+        assert RestartSource().data['phase'] == 'shutting-down'
+        token = credentials[0].partition('-')[0]
+        file = GRACEFUL_RESTART.resume_file_of(token)
+        assert read_record(file).configs == ['cfg_a']
+
+        # "cancel resume" in this window: refused, the entry stays parked and
+        # the file keeps resuming it
+        success, msg = manager.worker_kill('cfg_a')
+        assert not success
+        assert 'point of no return' in msg
+        assert manager.state['cfg_a'].state == 'restarting'
+        assert read_record(file).configs == ['cfg_a']
 
     @pytest.mark.trio
     async def test_cancel_during_write_drops_the_file(self, project_root, manager, monkeypatch):
@@ -655,9 +693,9 @@ class TestRunGracefulRestart:
             await wait_until(entered.is_set, description='the write to start')
             nursery.start_soon(force_cancel)
             # the cancel interrupts the transaction (and drops its scope) before
-            # it reaches the withdrawal
-            await wait_until(manager.restart_aborted,
-                             description='the cancel to interrupt the transaction')
+            # it reaches the withdrawal: the manager state is reset first
+            await wait_until(lambda: 'cfg_a' not in manager.state,
+                             description='the cancel to reset the manager state')
             # the publication section cannot be interrupted: the cancel waits for
             # the publication to run to completion instead of returning mid-write
             assert not cancel_done.is_set(), 'the cancel returned while the write was in flight'
@@ -673,7 +711,7 @@ class TestRunGracefulRestart:
         assert credentials == [writer_credential, '']
         assert GRACEFUL_RESTART.iter_resume_files() == []
         assert GRACEFUL_RESTART.resume_file is None
-        assert manager.restart_aborted() is True
+        assert GRACEFUL_RESTART.restart_in_progress() is False
 
     @pytest.mark.trio
     async def test_publish_waiting_for_the_lock_is_cancelled(self, project_root, manager, monkeypatch):
@@ -720,8 +758,10 @@ class TestRunGracefulRestart:
                 lambda: GRACEFUL_RESTART._publication_lock.statistics().tasks_waiting == 1,
                 description='the write to wait for the publication section')
             nursery.start_soon(cancel_graceful_restart, 'force restart', manager)
-            await wait_until(manager.restart_aborted,
-                             description='the cancel to interrupt the transaction')
+            # the cancel interrupts the transaction (and drops its scope) before
+            # it reaches the withdrawal: the manager state is reset first
+            await wait_until(lambda: 'cfg_a' not in manager.state,
+                             description='the cancel to reset the manager state')
             # the transaction is cancelled: releasing the section cannot make the
             # write run any more, its task is cancelled before it publishes
             GRACEFUL_RESTART._publication_lock.release()
@@ -732,7 +772,7 @@ class TestRunGracefulRestart:
         assert credentials == []
         assert GRACEFUL_RESTART.iter_resume_files() == []
         assert GRACEFUL_RESTART.resume_file is None
-        assert manager.restart_aborted() is True
+        assert GRACEFUL_RESTART.restart_in_progress() is False
 
     @pytest.mark.trio
     async def test_cancel_removes_written_file(self, project_root):
@@ -831,8 +871,9 @@ class TestCancelLog:
                 assert capture.fd.any_contains('[Restart] Graceful restart cancelled: force restart')
             # no sleep needed: the nursery exit waits for the orchestration task
 
-        # the cancel reached the manager: nothing may be resumed after the restart
-        assert manager.restart_aborted() is True
+        # the cancel reached the manager: the mark is dropped, nothing may be
+        # resumed after the restart
+        assert manager.state['cfg_inf'].pending_restart is False
 
 
 # ============================================================================

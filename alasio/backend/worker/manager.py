@@ -210,9 +210,20 @@ class WorkerManager(metaclass=Singleton):
         # until the process exits on the success path.
         self._restarting = False
         # Set by restart_cancel() to make a blocking restart_wait() return
-        # early (a trio cancel cannot interrupt the waiting thread, the abort
-        # event is the cooperative wake-up). Cleared by restart_begin().
+        # early with (False, []) (a trio cancel cannot interrupt the waiting
+        # thread, the abort event is the cooperative wake-up). Cleared by
+        # restart_begin().
         self._restart_abort = threading.Event()
+        # The frozen resume list of the current transaction: exactly the configs
+        # the orchestration records in the resume file. Set by restart_wait()
+        # when the wait is over (in the same critical section that returns the
+        # list), cleared by restart_begin() / restart_cancel(). A stop request
+        # on a config of that list cannot cancel its auto-resume any more (the
+        # written file resumes it whatever the manager does), so it is refused
+        # with an explicit error; a "restarting" entry outside the list carries
+        # no recorded resume intent, the default stop keeps its plain meaning
+        # ("stop, do not resume") and is honoured silently (F4).
+        self._restart_resume_frozen: "set[str]" = set()
 
     def get_state_info(self):
         """
@@ -749,6 +760,16 @@ class WorkerManager(metaclass=Singleton):
         already stopped, keep waiting (no-op success). "resuming" is always
         cancelled (no process exists, any stop means cancel).
 
+        A frozen resume list (_restart_resume_frozen, set when restart_wait()
+        ended) refuses the cancel of a "restarting" entry it contains with an
+        explicit error: the resume file is written from exactly that list, so
+        dropping the entry here would cancel nothing but the manager state and
+        the config would still resume (F4). An entry outside the list holds no
+        recorded resume intent, so its cancel is honoured like any other stop
+        (nothing resumes the config, the two semantics do not conflict). The
+        refusal is a plain failed call result, which the rpc layer turns into an
+        RpcValueError for the frontend.
+
         Args:
             state (WorkerState): Worker state, looked up under the lock
             restart_resume (bool): True keeps the pending resume of
@@ -756,15 +777,26 @@ class WorkerManager(metaclass=Singleton):
 
         Returns:
             Optional[tuple[bool, str]]: The call result when the state is
-                "restarting" / "resuming", None for any other state (the
-                caller continues with its normal routing)
+                "restarting" / "resuming" (such a request is always answered
+                here: keep-resume no-op, the refusal of a recorded config, or
+                the cancel), None for any other state (the caller continues
+                with its normal routing, which needs a live process)
         """
         if state.state == 'restarting':
             if restart_resume:
+                # the worker is already stopped for the restart, keep waiting
                 return True, 'Success'
+            if state.config in self._restart_resume_frozen:
+                return False, (f'Restart is beyond the point of no return, the config will be resumed '
+                               f'after the backend restart: "{state.config}"')
+            # not recorded for the resume: no conflict, the stop cancels the
+            # auto-resume like any other (falls through, never returns None --
+            # the caller's routing would send a command to a process that does
+            # not exist and leave a stuck entry behind)
         elif state.state != 'resuming':
+            # not a process-less restart state: the caller owns the routing
             return None
-        # cancel the auto-resume
+        # cancel the auto-resume: clear the mark, drop the entry, report success
         state.pending_restart = False
         self._set_state(state, 'idle')
         self.on_worker_info(state.config, f'[WorkerManager] Auto resume cancelled: {state.config}')
@@ -800,6 +832,8 @@ class WorkerManager(metaclass=Singleton):
             # no worker can slip between the gate and the snapshot
             self._restarting = True
             self._restart_abort.clear()
+            # a new transaction freezes its own list, when its wait is over
+            self._restart_resume_frozen.clear()
             running = [
                 state for state in self.state.values()
                 if state.state in ['starting', 'running', 'scheduler-waiting']
@@ -825,87 +859,104 @@ class WorkerManager(metaclass=Singleton):
 
         return waiting
 
-    def restart_wait(self, timeout=None) -> "List[str]":
+    def restart_wait(self, timeout=None) -> "tuple[bool, List[str]]":
         """
         Block until every worker stopped for the graceful restart
 
         Must run in its own thread (the async orchestrator calls it through
-        trio.to_thread.run_sync): the wait can last up to the timeout. When the
-        wait exceeds the timeout, every remaining worker is escalated to
-        worker_kill(restart_resume=True) (which itself escalates to a force
-        kill) and the wait continues until all of them stopped. restart_cancel()
-        (abort) makes the wait return early.
+        trio.to_thread.run_sync): the wait can last up to the timeout. It runs
+        in two phases:
+
+        1. the graceful wait: every worker gets `timeout` seconds to stop by
+           itself (None waits forever);
+        2. when the timeout ended it, the escalation: every worker still
+           running is killed through worker_kill(restart_resume=True), which
+           itself escalates to a force kill (a kill of a worker still spawning
+           is buffered by its pipe and lands when the worker boots), and the
+           wait continues without a deadline until all of them stopped.
+
+        Both phases poll (RESTART_WAIT_POLL) and restart_cancel() (abort) makes
+        the wait return from either of them: it then reports the cancellation
+        (False) and the caller must not continue with the restart -- the cancel
+        path owns the state cleanup and no resume file may be written.
+
+        On success the returned list is frozen by this call (see
+        _freeze_restart_resume_list): the orchestration writes exactly it into
+        the resume file, so a stop request on one of its configs after the wait
+        is refused with an explicit error instead of cancelling something the
+        file keeps (F4).
 
         Args:
             timeout (float): Seconds to wait for the graceful stop before
                 escalating to kill. None waits forever
 
         Returns:
-            List[str]: Configs to resume after the restart = the workers whose
-                state is "restarting" when the wait ends (sorted). A worker the
-                user stopped (default kill, no restart_resume) is not in it
+            tuple[bool, List[str]]: Whether the restart may continue, and the
+                configs to resume after it = the workers whose state is
+                "restarting" when the wait ends (sorted). A worker the user
+                stopped (default kill, no restart_resume) is not in it. A
+                cancelled wait carries no resume list ((False, []))
         """
         deadline = None if timeout is None else time.monotonic() + timeout
-        escalated = False
+
+        # 1) graceful wait: until every worker stopped (return), the wait was
+        #    cancelled (return) or the timeout ended it (escalate below)
         while True:
-            remaining = self._restart_remaining()
+            with self._lock:
+                remaining = self._restart_pending_configs_locked()
             if not remaining:
-                break
+                # every worker stopped: the resume list is final from here on
+                # (the freeze re-checks the abort in its own critical section)
+                return self._freeze_restart_resume_list()
             if self._restart_abort.is_set():
-                # cancelled: return early, the cancel path owns the state cleanup
+                # cancelled: never write a resume file and never restart
+                return False, []
+            if deadline is not None and time.monotonic() >= deadline:
                 break
-            if not escalated and deadline is not None and time.monotonic() >= deadline:
-                logger.info(f'[WorkerManager] Graceful stop timeout ({timeout}s), '
-                            f'killing workers: {", ".join(remaining)}')
-                escalated = True
-                for config in remaining:
-                    self.worker_kill(config, restart_resume=True)
-                continue
             # wait on the abort event: a cancel wakes the loop immediately,
             # otherwise the poll does not outlive the poll interval
             self._restart_abort.wait(RESTART_WAIT_POLL)
-        return self._restart_resume_list()
+
+        # 2) the timeout is over: the workers still running did not stop by
+        #    themselves, end them (restart_resume=True keeps their resume intent)
+        logger.info(f'[WorkerManager] Graceful stop timeout ({timeout}s), '
+                    f'killing workers: {", ".join(remaining)}')
+        for config in remaining:
+            self.worker_kill(config, restart_resume=True)
+
+        # 3) wait for the kills: no deadline any more, the workers are being
+        #    terminated (a kill of a worker still spawning lands when it boots)
+        while True:
+            with self._lock:
+                remaining = self._restart_pending_configs_locked()
+            if not remaining:
+                return self._freeze_restart_resume_list()
+            if self._restart_abort.is_set():
+                # cancelled while the kills were running
+                return False, []
+            self._restart_abort.wait(RESTART_WAIT_POLL)
 
     def restart_cancel(self) -> None:
         """
         Cancel the graceful restart in progress (idempotent)
 
-        Sets the abort event (a blocking restart_wait() returns early), clears
-        the restarting gate, drops every pending_restart mark and returns the
-        process-less "restarting" / "resuming" entries to idle (removed from
-        the state dict). Workers still stopping (scheduler-stopping / killing)
-        only lose their marks: they stop through their normal path to idle and
-        are not resumed.
+        Sets the abort event (a blocking restart_wait() returns early with
+        (False, []), no resume list and nothing frozen), clears the restarting
+        gate (and the frozen resume list of its transaction), drops every
+        pending_restart mark and returns the process-less "restarting" /
+        "resuming" entries to idle (removed from the state dict). Workers still
+        stopping (scheduler-stopping / killing) only lose their marks: they
+        stop through their normal path to idle and are not resumed.
         """
         self._restart_abort.set()
         with self._lock:
             self._restarting = False
+            self._restart_resume_frozen.clear()
             for state in list(self.state.values()):
                 if state.pending_restart:
                     state.pending_restart = False
                 if state.state in ['restarting', 'resuming']:
                     self._set_state(state, 'idle')
-
-    def restart_aborted(self) -> bool:
-        """
-        Whether the graceful restart in progress was cancelled
-
-        Returns:
-            bool: True after restart_cancel() and before the next
-                restart_begin()
-        """
-        return self._restart_abort.is_set()
-
-    def _restart_remaining(self) -> "List[str]":
-        """
-        Configs still waiting to stop for the graceful restart
-
-        Returns:
-            List[str]: Sorted config names, see
-                _restart_pending_configs_locked()
-        """
-        with self._lock:
-            return self._restart_pending_configs_locked()
 
     def _restart_pending_configs_locked(self) -> "List[str]":
         """
@@ -923,18 +974,37 @@ class WorkerManager(metaclass=Singleton):
             if state.state not in ['idle', 'error', 'restarting']
         )
 
-    def _restart_resume_list(self) -> "List[str]":
+    def _freeze_restart_resume_list(self) -> "tuple[bool, List[str]]":
         """
-        Configs to resume after the restart (state == "restarting")
+        Freeze the resume list of the finished wait and report the wait result
+
+        Called by restart_wait() when it observed that every worker stopped.
+        The observation takes the lock on its own, so the abort is re-checked
+        here, in the section the freeze (and the stop routing) runs in: a
+        restart_cancel() landing in between wins, nothing is frozen and the wait
+        reports the cancellation (the transaction is gone and the cancel path
+        owns the cleanup). On success the frozen list and the returned one are
+        the same, taken in the critical section the stop routing also takes: a
+        stop request either lands before -- and leaves the config out of the
+        list -- or is refused.
 
         Returns:
-            List[str]: Sorted config names
+            tuple[bool, List[str]]: (True, the frozen resume list) when the
+                restart may continue, (False, []) when the wait was cancelled
         """
         with self._lock:
-            return sorted(
+            # a cancel landing in the meantime wins: nothing is frozen and the
+            # caller must not continue with the restart
+            if self._restart_abort.is_set():
+                return False, []
+            resume_list = sorted(
                 config for config, state in self.state.items()
                 if state.state == 'restarting'
             )
+            # the frozen list is exactly the returned one: the orchestration
+            # writes the resume file from it
+            self._restart_resume_frozen = set(resume_list)
+            return True, resume_list
 
     # ---------------- auto-resume queue (new backend) ----------------
 

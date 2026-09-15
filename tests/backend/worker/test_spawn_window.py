@@ -302,7 +302,7 @@ class TestCleanupDuringSpawn:
         assert_no_orphan('cfg_keep')
         assert state.pending_restart is True
         assert state.process is None
-        assert manager.restart_wait(2.0) == ['cfg_keep']
+        assert manager.restart_wait(2.0) == (True, ['cfg_keep'])
         assert states_of(state_events, 'cfg_keep')[-1] == 'restarting'
 
     def test_close_in_window_leaves_no_process(self, manager, state_events, monkeypatch):
@@ -370,7 +370,7 @@ class TestWorkerFinishesWithPendingStop:
         wait_worker_stopped('cfg_done_keep', mod='WorkerTestExit')
         assert_no_orphan('cfg_done_keep', mod='WorkerTestExit')
         assert state.pending_restart is True
-        assert manager.restart_wait(2.0) == ['cfg_done_keep']
+        assert manager.restart_wait(2.0) == (True, ['cfg_done_keep'])
         assert states_of(state_events, 'cfg_done_keep')[-1] == 'restarting'
 
 

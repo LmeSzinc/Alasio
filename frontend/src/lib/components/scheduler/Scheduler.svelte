@@ -39,6 +39,10 @@
   // progress ('done' is pushed right before the topic is cleared)
   const restartClient = useTopic<RestartTopicLike>("Restart");
   const isBackendRestarting = $derived(!!restartClient.data?.phase && restartClient.data?.phase !== "done");
+  // 'shutting-down' = the resume list is frozen and the backend is about to
+  // exit: a config recorded for the resume cannot cancel it any more (the
+  // backend refuses, the config resumes after the restart)
+  const isResumeFrozen = $derived(restartClient.data?.phase === "shutting-down");
 
   // Show 3 tasks, or 2 if a task is running
   let nextTasksToShow = $derived.by(() => {
@@ -208,10 +212,11 @@
         />
       {/if}
     {:else if displayState.value === "restarting"}
-      <!-- restarting: the backend will resume it, start is disabled, the round
-           button cancels the auto-resume -->
+      <!-- restarting: the backend will resume it, start is disabled; the round
+           button cancels the auto-resume (disabled once the resume list is
+           frozen: 'shutting-down' is beyond the point of no return) -->
       <ActionStart disabled title={t.Scheduler.Start()} class="flex-1" />
-      <ActionCancelResume onclick={handleCancelResume} title={t.Scheduler.CancelResume()} />
+      <ActionCancelResume onclick={handleCancelResume} disabled={isResumeFrozen} title={t.Scheduler.CancelResume()} />
     {:else if displayState.value === "resuming"}
       <!-- queued for auto-resume: start is refused (it starts by itself soon),
            a stop cancels the resume -->

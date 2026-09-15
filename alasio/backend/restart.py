@@ -629,8 +629,9 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
                 return
 
             await push_restart_phase('stopping')
-            # the returned list is the whole waiting set of this restart (the
-            # final resume list is the return value of restart_wait later)
+            # the waiting set of restart_begin() is the whole set this restart
+            # waits for (the final resume list is the second element of the
+            # restart_wait() result below)
             logger.info(
                 f'[Restart] Graceful restart requested, '
                 f'waiting up to {GRACEFUL_STOP_TIMEOUT:.0f}s for the workers to stop, '
@@ -638,12 +639,15 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
 
             # 1) block for every worker to stop; the wait lives in the manager
             #    (thread-safe, no trio), the timeout escalation happens inside
-            #    restart_wait and the abort event makes it return early
-            resume_list = await trio.to_thread.run_sync(manager.restart_wait, GRACEFUL_STOP_TIMEOUT)
-            # restart_aborted() is a plain threading.Event read: no lock, no IO
-            if manager.restart_aborted():
-                # cancelled while waiting (force restart / backend stop):
-                # never write a resume file and never restart
+            #    restart_wait and the abort event makes it return early. Its
+            #    success flag is the whole verdict of the wait: a cancelled one
+            #    (force restart / backend stop) must never write a resume file
+            #    and never restart
+            success, resume_list = await trio.to_thread.run_sync(
+                manager.restart_wait, GRACEFUL_STOP_TIMEOUT)
+            if not success:
+                # cancelled while waiting (force restart / backend stop); the
+                # cancel path already owns the state cleanup
                 logger.info('[Restart] Graceful restart was cancelled')
                 return
 
@@ -651,7 +655,11 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
             #    its credential are one step; the credential is announced inside
             #    the write). A cancel landing while the section is held waits for
             #    it and withdraws it, one landing before it cancels this task at
-            #    the lock acquire instead
+            #    the lock acquire instead. The list is frozen from here on: a
+            #    per-config cancel of a config of this list is refused from now
+            #    on, because this file resumes it whatever the request does; a
+            #    "restarting" entry outside the list carries no resume intent
+            #    and stays cancellable
             actions = getattr(hooks, 'actions', None)
             if resume_list or actions:
                 await GRACEFUL_RESTART.write_resume(resume_list, OWNER_RESTART, actions)
