@@ -697,6 +697,96 @@ class TestResumeQueue:
 
 
 # ============================================================================
+# Resume queue takeover (F6)
+# ============================================================================
+
+class TestResumeQueueTakeover:
+    """
+    The manager owns the auto-resume queue, so a graceful restart takes it over
+
+    The queue of the new backend lives in the state dict as "resuming" marks:
+    restart_begin() re-collects them into its own resume list, mark_resume() /
+    worker_resume() are refused while the gate is on (the queue task ends early
+    on that refusal), and drop_resume() only drops entries still waiting.
+    """
+
+    def test_begin_recollects_the_queued_marks(self, manager):
+        assert manager.mark_resume(['cfg_a', 'cfg_b']) == ['cfg_a', 'cfg_b']
+
+        waiting = manager.restart_begin()
+
+        # the queue is not started: it becomes the resume list of this restart
+        assert waiting == []
+        for config in ('cfg_a', 'cfg_b'):
+            state = manager.state[config]
+            assert state.state == 'restarting'
+            assert state.pending_restart is True
+            assert state.process is None
+        assert manager.restart_wait(1) == (True, ['cfg_a', 'cfg_b'])
+
+    def test_begin_leaves_a_started_queued_config_alone(self, manager):
+        """A config the queue already started goes through its own entry"""
+        manager.mark_resume(['cfg_run', 'cfg_new'])
+        success, msg = manager.worker_resume('WorkerTestScheduler', 'cfg_run')
+        assert success, msg
+        state = manager.state['cfg_run']
+        assert state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+
+        waiting = manager.restart_begin()
+
+        # the running one was stopped gracefully through its entry (the entry is
+        # not re-parked, its process bookkeeping stays there)
+        assert state.pending_restart is True
+        assert state.state == 'scheduler-stopping'
+        assert waiting == ['cfg_run']
+        # ... the config the queue never reached is collected as a mark
+        assert manager.state['cfg_new'].state == 'restarting'
+        assert manager.restart_wait(10) == (True, ['cfg_new', 'cfg_run'])
+
+    def test_mark_resume_refused_while_restarting(self, manager):
+        """
+        A queue materialized under the gate is refused: the restart collected
+        the marks it wanted, new "resuming" entries would only stall its wait
+        """
+        manager.restart_begin()
+
+        with logger.mock_capture_writer() as capture:
+            queued = manager.mark_resume(['cfg_late'])
+            assert capture.fd.any_contains('Resume queue refused')
+
+        assert queued == []
+        assert 'cfg_late' not in manager.state
+
+    def test_drop_resume_drops_only_waiting_entries(self, manager):
+        """
+        An abandon drops the queued configs: an entry a restart collected or a
+        config the queue already started is not the caller's to drop
+        """
+        manager.mark_resume(['cfg_wait', 'cfg_started', 'cfg_taken'])
+        success, msg = manager.worker_resume('WorkerTestInfinite', 'cfg_started')
+        assert success, msg
+        # the restart of the race window collected this one
+        taken = manager.state['cfg_taken']
+        taken.pending_restart = True
+        manager._set_state(taken, 'restarting')
+
+        dropped = manager.drop_resume(['cfg_wait', 'cfg_started', 'cfg_taken'])
+
+        assert dropped == ['cfg_wait']
+        assert 'cfg_wait' not in manager.state
+        assert manager.state['cfg_started'].state in ['starting', 'running']
+        assert taken.state == 'restarting'
+        assert taken.pending_restart is True
+
+    def test_restarting_flag_reflects_the_gate(self, manager):
+        assert manager.restarting is False
+        manager.restart_begin()
+        assert manager.restarting is True
+        manager.restart_cancel()
+        assert manager.restarting is False
+
+
+# ============================================================================
 # Disconnect handling / close
 # ============================================================================
 

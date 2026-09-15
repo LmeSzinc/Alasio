@@ -1159,6 +1159,350 @@ class TestResumeAfterRestart:
         assert 'cfg_c' not in manager.state
 
 
+class TestRestartTakesOverResumeQueue:
+    """
+    F6: a new graceful restart takes the auto-resume queue over
+
+    The latest user command wins: the queue lives in the manager as "resuming"
+    marks, so restart_begin() re-collects them into its own resume list, and
+    the queue task ends early as soon as the manager refuses it (mark_resume /
+    worker_resume are refused while the gate is on) -- it starts nothing under
+    the gate and pushes no terminal phase over the phases of the new restart.
+    """
+
+    @pytest.mark.trio
+    async def test_pending_queue_is_carried_into_the_new_restart(self, project_root, manager, monkeypatch):
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b', 'cfg_c'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        fake = FakeScan({'cfg_a': 1, 'cfg_b': 1, 'cfg_c': 1})
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.5)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+
+        async def fake_lifespan_restart():
+            return None
+
+        monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
+        credentials = []
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
+        # record every phase push of both the queue and the new orchestration
+        phases = []
+        original_push = restart._push_restart_phase
+        monkeypatch.setattr(
+            restart, '_push_restart_phase',
+            lambda phase: (phases.append(phase), original_push(phase))[1])
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(resume_after_restart, manager)
+            # cfg_a resumed (its worker runs), cfg_b / cfg_c still queued
+            await wait_until(
+                lambda: manager.state.get('cfg_a') is not None
+                and manager.state['cfg_a'].state in ('starting', 'running'),
+                description='the first queued worker to start')
+            assert manager.state['cfg_b'].state == 'resuming'
+            assert manager.state['cfg_c'].state == 'resuming'
+
+            await run_graceful_restart(manager)
+
+        # the new restart carried the whole intent over: the worker it stopped
+        # and the two configs the queue never reached
+        assert len(credentials) == 1
+        token = credentials[0].partition('-')[0]
+        record = read_record(GRACEFUL_RESTART.resume_file_of(token))
+        assert record.configs == ['cfg_a', 'cfg_b', 'cfg_c']
+        for config in ('cfg_a', 'cfg_b', 'cfg_c'):
+            assert manager.state[config].state == 'restarting'
+            assert manager.state[config].process is None
+        assert_worker_gone(list(manager.state.values()))
+
+        # the queue was refused by the gate and ended without pushing a terminal
+        # phase over the restart's phases: a 'done' / '' after 'stopping' would
+        # degrade the frontend buttons ('done' may only be the last word of the
+        # old task, before 'stopping')
+        stopping = phases.index('stopping')
+        assert phases[stopping:] == ['stopping', 'shutting-down']
+        assert RestartSource().data['phase'] == 'shutting-down'
+
+    @pytest.mark.trio
+    async def test_intent_survives_a_restart_during_the_scan_wait(self, project_root, manager, monkeypatch):
+        """
+        F6 scenario 1: the queue marks the configs before its config scan wait,
+        so a restart landing in that wait collects the marks instead of losing
+        the intent of the already consumed resume file
+        """
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        # the scan exposes nothing: the queue parks in the config wait
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({}))
+        monkeypatch.setattr(restart, 'RESUME_CONFIG_WAIT', 5.0)
+
+        async def fake_lifespan_restart():
+            return None
+
+        monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
+        credentials = []
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(resume_after_restart, manager)
+            # the file was consumed and its configs marked before the search of
+            # the scan: the marks are what a restart can pick up
+            await wait_until(lambda: manager.state.get('cfg_b') is not None
+                             and manager.state['cfg_b'].state == 'resuming',
+                             description='the resume marks to be created')
+            assert manager.state['cfg_a'].state == 'resuming'
+
+            await run_graceful_restart(manager)
+
+        # the intent was carried over: the configs are in the new resume file
+        assert len(credentials) == 1
+        token = credentials[0].partition('-')[0]
+        assert read_record(GRACEFUL_RESTART.resume_file_of(token)).configs == ['cfg_a', 'cfg_b']
+        for config in ('cfg_a', 'cfg_b'):
+            assert manager.state[config].state == 'restarting'
+        assert GRACEFUL_RESTART.resume_scope is None
+
+    @pytest.mark.trio
+    async def test_queue_ends_early_when_the_manager_is_restarting(self, project_root, manager, monkeypatch):
+        """
+        mark_resume is refused while the manager is restarting: the task ends
+        without starting anything and without promising a phase
+        """
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({'cfg_a': 1}))
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+        phases = []
+        original_push = restart._push_restart_phase
+        monkeypatch.setattr(
+            restart, '_push_restart_phase',
+            lambda phase: (phases.append(phase), original_push(phase))[1])
+
+        # a restart took the backend over before the queue was built
+        manager.restart_begin()
+
+        with logger.mock_capture_writer() as capture:
+            await resume_after_restart(manager)
+            assert capture.fd.any_contains('Resume queue refused: a graceful restart is in progress')
+
+        assert manager.state == {}
+        assert phases == []
+        assert GRACEFUL_RESTART.resume_scope is None
+
+    @pytest.mark.trio
+    async def test_drain_ends_when_a_restart_begins(self, project_root, manager, monkeypatch):
+        """
+        A restart that begins while the queue drains ends it: worker_resume is
+        refused by the gate, the task stops instead of walking the rest, and
+        every remaining mark is the new restart's resume list
+        """
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b', 'cfg_c'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        fake = FakeScan({'cfg_a': 1, 'cfg_b': 1, 'cfg_c': 1})
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.02)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+        phases = []
+        original_push = restart._push_restart_phase
+        monkeypatch.setattr(
+            restart, '_push_restart_phase',
+            lambda phase: (phases.append(phase), original_push(phase))[1])
+        original_resume = manager.worker_resume
+
+        def spy(mod, config, *args, **kwargs):
+            if config == 'cfg_a':
+                # the user clicks restart while cfg_a is being resumed
+                manager.restart_begin()
+            return original_resume(mod, config)
+
+        monkeypatch.setattr(manager, 'worker_resume', spy)
+
+        await resume_after_restart(manager)
+
+        # the gate refused the start of cfg_a and the queue ended there: the
+        # restart collected every mark (none was started)
+        for config in ('cfg_a', 'cfg_b', 'cfg_c'):
+            assert manager.state[config].state == 'restarting'
+            assert manager.state[config].process is None
+        # the queue never pushed a terminal phase over the restart's phases
+        assert phases == ['resuming']
+
+    @pytest.mark.trio
+    async def test_wait_ends_on_the_restart_gate(self, project_root, manager, monkeypatch):
+        """_wait_configs_ready gives up as soon as the manager restarts (F6)"""
+        monkeypatch.setattr(restart, 'RESUME_CONFIG_WAIT', 60.0)
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({}))
+        manager.restart_begin()
+
+        started = trio.current_time()
+        assert await restart._wait_configs_ready(['cfg_a'], manager) is None
+        # it did not wait for the timeout: the gate ended the wait
+        assert trio.current_time() - started < 1.0
+
+        manager.restart_cancel()
+
+
+class TestTakeoverLock:
+    """
+    F6（完整版）：takeover 锁把恢复队列与重启/取消串成一个整体
+
+    `GracefulRestart._takeover_lock` 的四个使用点：恢复任务的前置准备
+    （读文件 → 清理 → `mark_resume`）与它每一次相位推送（锁内检查门禁）、
+    编排的 `restart_begin` + 首个相位、cancel 的 `restart_cancel` + 清 topic。
+    因此：重启一定等准备做完再接管（标记不会漏收）；取消一定等准备收尾才复位
+    （不会有迟到的标记）；队列的相位不可能盖到新事务的相位上。
+    """
+
+    @pytest.mark.trio
+    async def test_restart_waits_for_the_resume_preparation(self, project_root, manager, monkeypatch):
+        """
+        问题 1：重启落在"文件已读、标记未建"窗口时，等准备做完再接管，
+        把准备创建的标记全部收进新恢复列表
+        """
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        fake = FakeScan({'cfg_a': 1, 'cfg_b': 1})
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.02)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+
+        entered = threading.Event()
+        release = threading.Event()
+        real_read = GRACEFUL_RESTART.read_resume
+
+        def parked_read():
+            # the first step of the preparation, inside the takeover lock
+            entered.set()
+            assert release.wait(5), 'the test never released the read'
+            return real_read()
+
+        monkeypatch.setattr(GRACEFUL_RESTART, 'read_resume', parked_read)
+
+        async def fake_lifespan_restart():
+            return None
+
+        monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
+        credentials = []
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(resume_after_restart, manager)
+            await wait_until(entered.is_set, description='the resume preparation to start')
+
+            nursery.start_soon(run_graceful_restart, manager)
+            # the restart waits on the takeover lock: no gate, no phase yet
+            await wait_until(
+                lambda: GRACEFUL_RESTART._takeover_lock.statistics().tasks_waiting == 1,
+                description='the restart to wait for the preparation')
+            assert manager.restarting is False
+            assert RestartSource().data == {}
+
+            # the preparation finishes (marks created), the restart takes over
+            release.set()
+
+        # the marks the preparation created were collected: the whole intent is
+        # in the new resume file
+        assert manager.restarting is True
+        assert len(credentials) == 1
+        token = credentials[0].partition('-')[0]
+        assert read_record(GRACEFUL_RESTART.resume_file_of(token)).configs == ['cfg_a', 'cfg_b']
+        assert GRACEFUL_RESTART.resume_scope is None
+
+    @pytest.mark.trio
+    async def test_queue_terminal_phase_cannot_overwrite_the_new_restart(self, project_root, manager, monkeypatch):
+        """
+        问题 2：队列的终态相位（done / ''）在锁内推送并锁内看门禁，新一轮重启的
+        `stopping` 只能落在它之后——队列不再能盖掉新事务的相位
+        """
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({'cfg_a': 1}))
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.02)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+
+        entered = threading.Event()
+        release = threading.Event()
+        applied = []
+        original_push = restart._push_restart_phase
+
+        def parked_push(phase):
+            if phase == 'done':
+                # the queue's terminal phase is in flight (inside the lock)
+                entered.set()
+                assert release.wait(5), 'the test never released the done push'
+            original_push(phase)
+            # recorded after the topic was written: the applied order
+            applied.append(phase)
+
+        monkeypatch.setattr(restart, '_push_restart_phase', parked_push)
+
+        async def fake_lifespan_restart():
+            return None
+
+        monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', lambda credential: None)
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(resume_after_restart, manager)
+            await wait_until(entered.is_set, description='the terminal phase to be pushed')
+
+            nursery.start_soon(run_graceful_restart, manager)
+            # the restart cannot even begin while the queue holds the section
+            await wait_until(
+                lambda: GRACEFUL_RESTART._takeover_lock.statistics().tasks_waiting == 1,
+                description='the restart to wait for the queue section')
+            release.set()
+
+        # whatever the interleaving, the restart's phases are the last word
+        stopping = applied.index('stopping')
+        assert applied[stopping:] == ['stopping', 'shutting-down']
+        assert RestartSource().data['phase'] == 'shutting-down'
+
+    @pytest.mark.trio
+    async def test_cancel_waits_for_the_resume_preparation(self, project_root, manager, monkeypatch):
+        """
+        取消的 manager 复位也等准备收尾：准备中的任务在下一个 await 处被取消、
+        释放锁，复位之后不可能再冒出标记
+        """
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({'cfg_a': 1}))
+
+        entered = threading.Event()
+        release = threading.Event()
+        real_read = GRACEFUL_RESTART.read_resume
+
+        def parked_read():
+            entered.set()
+            assert release.wait(5), 'the test never released the read'
+            return real_read()
+
+        monkeypatch.setattr(GRACEFUL_RESTART, 'read_resume', parked_read)
+
+        cancel_done = trio.Event()
+
+        async def do_cancel():
+            await cancel_graceful_restart('test cancel', manager)
+            cancel_done.set()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(resume_after_restart, manager)
+            await wait_until(entered.is_set, description='the preparation to start')
+            nursery.start_soon(do_cancel)
+            # the reset waits for the preparation section
+            await wait_until(
+                lambda: GRACEFUL_RESTART._takeover_lock.statistics().tasks_waiting == 1,
+                description='the cancel to wait for the preparation')
+            assert not cancel_done.is_set(), 'the cancel returned while the preparation was in flight'
+            release.set()
+            await wait_until(cancel_done.is_set, description='the cancel to settle')
+
+        # the cancelled preparation never created a mark after the reset
+        assert manager.state == {}
+        assert GRACEFUL_RESTART.resume_scope is None
+        assert GRACEFUL_RESTART.restart_in_progress() is False
+
+
 async def wait_until(predicate, timeout=5.0, interval=0.01, description='condition'):
     """
     Wait until the predicate holds (event driven, no fixed sleep)

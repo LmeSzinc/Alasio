@@ -39,6 +39,12 @@ with command:resume:<credential>; the supervisor stores it and injects it into
 the next spawned backend as ALASIO_RESUME_TOKEN, then clears it once the new
 backend announced startup completion (command:started). An empty credential is
 the retraction: the stored slot is cleared and nothing is injected any more.
+
+The auto-resume queue of the new backend can be superseded by another graceful
+restart (the latest user command wins): the restart gate makes mark_resume() /
+worker_resume() refuse, the queue task ends early on that refusal, and the
+marks it already created are re-collected by restart_begin() into the new
+restart's resume list.
 """
 import hashlib
 import hmac
@@ -169,6 +175,24 @@ class GracefulRestart:
         # publishes nothing; one that holds the section is left to run to
         # completion and is withdrawn afterwards
         self._publication_lock = trio.Lock()
+        # The takeover lock: the critical section of "who owns the backend"
+        # between the auto-resume queue of the new backend and a restart that
+        # takes over. Four holders, all on the trio thread and only for short
+        # local work (file IO / memory, no network, no long wait):
+        # - the auto-resume task, around its preparation (read the resume file,
+        #   clean stale leftovers, mark the configs in the manager) and around
+        #   every phase it pushes (with the restart gate checked inside);
+        # - the orchestration, around restart_begin() and its first phase
+        #   ("stopping") -- this is what makes a restart wait for a preparation
+        #   in flight, so the marks of a consumed resume file always exist
+        #   before the restart collects them;
+        # - cancel_graceful_restart(), around the manager reset and the topic
+        #   clear (the resume scope is cancelled before, so the task aborts at
+        #   its next await and releases the lock there).
+        # Lock order everywhere is _takeover_lock -> manager lock (the manager
+        # never takes the former), and the sections are bounded by the local IO
+        # above: the cancel path cannot be delayed beyond that.
+        self._takeover_lock = trio.Lock()
         # resume_folder is a cached_property: drop the cache on a re-init
         # (reset(), a caller repointing PROJECT_ROOT) so the current
         # PROJECT_ROOT is read again
@@ -516,6 +540,10 @@ class GracefulRestart:
         else:
             logger.info('[Restart] Resume credential retracted from the supervisor')
 
+    # =========================================================================
+    # Auto-resume task of the new backend
+    # =========================================================================
+
 
 GRACEFUL_RESTART = GracefulRestart()
 
@@ -552,6 +580,32 @@ async def push_restart_phase(phase: str):
     except Exception as e:
         # the phase is a progress hint, never let it break the restart
         logger.warning(f'[Restart] Failed to push phase "{phase}": {e}')
+
+
+async def _push_resume_phase(manager, phase: str) -> bool:
+    """
+    Push a phase of the auto-resume queue, unless a restart owns the backend
+
+    The queue only ever speaks about its own phases while no restart took the
+    backend over: the restart gate is checked and the phase pushed inside one
+    critical section of the takeover lock, the same section the orchestration
+    takes to set the gate and push its first phase. The queue's phase therefore
+    either lands before the new transaction's phases or is dropped -- it can
+    never overwrite them (F6), whatever the thread pool schedules.
+
+    Args:
+        manager (WorkerManager): Manager whose restart gate decides
+        phase (str): 'resuming' / 'done' / '' (a queue phase)
+
+    Returns:
+        bool: True when the phase was pushed, False when a restart (or a
+            cancel) owns the topic and the queue must stop here
+    """
+    async with GRACEFUL_RESTART._takeover_lock:
+        if manager.restarting:
+            return False
+        await push_restart_phase(phase)
+        return True
 
 
 # =============================================================================
@@ -608,6 +662,12 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
     exits): a worker started in the restart window would be killed at exit and
     never resumed.
 
+    A queue of the previous restart that is still running (the backend is
+    restarted again right after) is handed over by restart_begin() itself: the
+    "resuming" marks it left are re-collected into this restart's resume list,
+    and the queue task -- whose mark_resume() / worker_resume() are refused by
+    the gate -- ends early on that refusal (the latest user command wins, F6).
+
     An error raised after the wait (a failing update hook, the supervisor pipe
     gone) is handled exactly like a cancel -- the manager state is reset (the
     workers back to idle, a manual retry is possible), the resume file is
@@ -628,9 +688,19 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
         GRACEFUL_RESTART.scope = scope
         try:
             try:
-                # blocking: snapshots the running workers and sends the graceful
-                # stop requests over the worker pipes
-                waiting = await trio.to_thread.run_sync(manager.restart_begin)
+                # the takeover is one critical section of the takeover lock:
+                # the restart gate, the marks of a resume queue that is still
+                # being prepared or drained (restart_begin re-collects them) and
+                # this transaction's first phase. The preparation of the new
+                # backend takes the same lock, so it is waited for and the marks
+                # of an already consumed resume file always exist before the
+                # restart collects them (F6); a queue phase cannot overwrite the
+                # phases below either
+                async with GRACEFUL_RESTART._takeover_lock:
+                    # blocking: snapshots the running workers and sends the
+                    # graceful stop requests over the worker pipes
+                    waiting = await trio.to_thread.run_sync(manager.restart_begin)
+                    await push_restart_phase('stopping')
             except Exception as e:
                 # already restarting (the rpc re-entry guard makes this
                 # unreachable) or nothing to begin: release the rpc flag
@@ -638,7 +708,6 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
                 GRACEFUL_RESTART.running = False
                 return
 
-            await push_restart_phase('stopping')
             # the waiting set of restart_begin() is the whole set this restart
             # waits for (the final resume list is the second element of the
             # restart_wait() result below)
@@ -760,12 +829,21 @@ async def cancel_graceful_restart(reason: str = '', manager=GRACEFUL_RESTART.WOR
         # as soon as the cancel ran; the finally then sees the slot moved on and
         # leaves it alone
         GRACEFUL_RESTART.scope = None
-        # 2) release the manager gate, clear the marks, drop the parked entries
-        #    (blocking: manager lock)
-        try:
-            await trio.to_thread.run_sync(manager.restart_cancel)
-        except Exception as e:
-            logger.warning(f'[Restart] Failed to cancel the manager state: {e}')
+        # 2) the manager reset and the topic clear are one critical section of
+        #    the takeover lock: a resume preparation still in flight finishes
+        #    first (the scope was cancelled above, so the task stops at its next
+        #    await inside the section and never creates a mark after the reset),
+        #    a queue phase in flight lands before the clear, and a queue still
+        #    waiting for the section finds the scope cancelled at its acquire.
+        #    The section is bounded: the preparation is local file IO / memory
+        async with GRACEFUL_RESTART._takeover_lock:
+            try:
+                await trio.to_thread.run_sync(manager.restart_cancel)
+            except Exception as e:
+                logger.warning(f'[Restart] Failed to cancel the manager state: {e}')
+            # no restart in progress any more (inside the section: no queue phase
+            # can land after it)
+            await push_restart_phase('')
         # 3) withdraw the publication of this transaction: the lock is held by
         #    the tasks, so a publish still waiting for the section never happens
         #    (its task is cancelled at the acquire) and one in flight is left to
@@ -776,8 +854,6 @@ async def cancel_graceful_restart(reason: str = '', manager=GRACEFUL_RESTART.WOR
             await GRACEFUL_RESTART.withdraw_resume()
         except Exception as e:
             logger.warning(f'[Restart] Failed to withdraw the resume publication: {e}')
-        # 4) no restart in progress any more
-        await push_restart_phase('')
         if in_progress:
             logger.info(f'[Restart] Graceful restart cancelled: {reason}')
 
@@ -786,29 +862,36 @@ async def cancel_graceful_restart(reason: str = '', manager=GRACEFUL_RESTART.WOR
 # Resume (new backend)
 # =============================================================================
 
-async def _wait_configs_ready(configs, timeout=None):
+async def _wait_configs_ready(configs, manager, timeout=None):
     """
-    Wait until the config scan exposes the recorded configs
+    Wait until the config scan exposes the queued configs
 
     The lifespan startup does not order the config scan warmup against the
-    resume task: a config may not be visible yet when the resume runs. The
-    scan cache is refreshed (disk re-read, TTL-throttled) until every recorded
-    config is known or the timeout ends (the still missing ones are abandoned
-    with a log, the others are resumed).
+    resume task: a config may not be visible yet when the queue reaches it. The
+    scan cache is refreshed (disk re-read, TTL-throttled) until every config is
+    known or the timeout ends (the still missing ones are abandoned by the
+    caller, the others are resumed). A graceful restart that begins while the
+    wait runs owns the queued marks (restart_begin() re-collects them): the
+    wait then reports the takeover instead of waiting for a queue that is no
+    longer this task's to drain.
 
     Args:
         configs (list[str]): Config names to wait for
+        manager (WorkerManager): Manager whose restart gate ends the wait
         timeout (float): Seconds to wait at most. Defaults to
             RESUME_CONFIG_WAIT, read when the call runs (a default argument
             would bind the constant at import time and defeat monkeypatching)
 
     Returns:
-        list[str]: Configs visible in the scan, input order
+        list[str] | None: Configs visible in the scan (input order), or None
+            when a graceful restart took the queue over while waiting
     """
     if timeout is None:
         timeout = RESUME_CONFIG_WAIT
     deadline = trio.current_time() + timeout
     while True:
+        if manager.restarting:
+            return None
         source = ConfigScanSource()
         await source.reinit()
         data = source.data
@@ -838,9 +921,10 @@ def _resume_one(manager, config: str):
         mod = get_mod(config)
     except Exception as e:
         # config / mod gone: drop the queue entry (it must not block a manual
-        # start), log and continue with the rest
+        # start), log and continue with the rest. drop_resume only touches an
+        # entry still waiting: one a restart collected is not ours to drop
         logger.error(f'[Restart] Resume dropped, cannot load config "{config}": {e}')
-        manager.worker_kill(config)
+        manager.drop_resume([config])
         return
     try:
         success, msg = manager.worker_resume(mod, config)
@@ -864,10 +948,18 @@ async def resume_after_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
 
     Runs as a trio background task of the lifespan startup. Without a resume
     credential (no supervisor, cold start, killed session) nothing is read.
-    The recorded workers are queued first (the frontend sees every one of them
-    as "queued for resume"), then started one by one with WORKER_START_INTERVAL
-    between two starts. A user stop on a queued config cancels its resume
-    (worker_resume returns False, the queue skips it).
+    The recorded configs are marked as queued as soon as they are read (the
+    frontend sees every one of them as "queued for resume"), then started one
+    by one with WORKER_START_INTERVAL between two starts. A user stop on a
+    queued config cancels its resume (worker_resume returns False, the queue
+    skips it).
+
+    The queue lives in the manager, so a new graceful restart can take it over
+    (the latest user command wins, F6): restart_begin() re-collects its marks
+    into the new resume list, and this task ends early as soon as it finds that
+    the manager is restarting (mark_resume / worker_resume refuse then) -- it
+    starts nothing under the gate and pushes no terminal phase over the phases
+    of the new restart.
 
     Every call into the blocking layer (the resume file read, the actions, the
     manager queue, the worker starts, the topic pushes) goes through the trio
@@ -884,64 +976,104 @@ async def resume_after_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
     with trio.CancelScope() as scope:
         GRACEFUL_RESTART.resume_scope = scope
         try:
-            # 1) consume the file of THIS session first: read_resume deletes it,
-            #    so the stale file cleanup below can never race it
-            record = None
-            try:
-                record = await trio.to_thread.run_sync(GRACEFUL_RESTART.read_resume)
-            except Exception as e:
-                # an unexpected failure of the read must not skip the housekeeping
-                logger.error(f'[Restart] Resume file read failed: {e}')
-                logger.exception(e)
-            # 2) then the leftovers of sessions killed before their transaction
-            #    finished. Same task, strict order: the two must never run as
-            #    independent tasks (the cleanup would race the file just read)
-            await trio.to_thread.run_sync(GRACEFUL_RESTART.resume_cleanup)
-            if record is None:
-                return
-            logger.info(f'[Restart] Resume intent accepted: {len(record.configs)} configs, '
-                        f'{len(record.actions)} actions, owner={record.owner}')
+            # 1) the preparation is one critical section of the takeover lock:
+            #    read the resume file (the read deletes it), clean the leftovers
+            #    of dead sessions and mark the configs in the manager. A graceful
+            #    restart that begins meanwhile waits for the section, so the
+            #    marks of a consumed resume file always exist before it collects
+            #    them (F6); a cancel waits too and drops them in its own section
+            async with GRACEFUL_RESTART._takeover_lock:
+                record = None
+                try:
+                    record = await trio.to_thread.run_sync(GRACEFUL_RESTART.read_resume)
+                except Exception as e:
+                    # an unexpected failure of the read must not skip the housekeeping
+                    logger.error(f'[Restart] Resume file read failed: {e}')
+                    logger.exception(e)
+                # the leftovers of sessions killed before their transaction
+                # finished. Same task, strict order: the two must never run as
+                # independent tasks (the cleanup would race the file just read)
+                await trio.to_thread.run_sync(GRACEFUL_RESTART.resume_cleanup)
+                if record is None:
+                    return
+                logger.info(f'[Restart] Resume intent accepted: {len(record.configs)} configs, '
+                            f'{len(record.actions)} actions, owner={record.owner}')
+                # mark the recorded configs right away -- the manager owns the
+                # intent from here on. No config scan is needed to mark; the wait
+                # below is only about starting (the mod of a config must be
+                # resolvable). The manager refuses the queue while it is
+                # restarting: a restart that already took the backend over owns
+                # the resume list, this task has nothing to do
+                queued = await trio.to_thread.run_sync(manager.mark_resume, record.configs)
+            # 2) actions carried by the resume file (an update cleanup): they run
+            #    whenever a record was accepted, also when nothing was queued
+            #    (an actions-only file) or when a restart refused the queue
             if record.actions:
                 await trio.to_thread.run_sync(run_resume_actions, record.actions)
-            configs = await _wait_configs_ready(record.configs)
+            if not queued:
+                if manager.restarting:
+                    logger.info('[Restart] Resume queue refused: a graceful restart is in progress')
+                else:
+                    logger.info('[Restart] Resume queue is empty, nothing to start')
+                return
+            # 3) wait for the config scan (a config created right before the
+            #    restart may not be visible yet; the manager gate ends the wait)
+            configs = await _wait_configs_ready(queued, manager)
+            if configs is None:
+                logger.info('[Restart] Resume queue taken over by a new graceful restart')
+                return
+            # the configs the scan did not expose are abandoned: drop their
+            # still queued marks (an entry a new restart already collected is
+            # not ours to drop, drop_resume leaves it alone)
+            missing = [config for config in queued if config not in configs]
+            if missing:
+                await trio.to_thread.run_sync(manager.drop_resume, missing)
             if not configs:
                 logger.info('[Restart] Resume queue is empty, nothing to start')
                 return
-            # blocking: the queue takes the manager lock and parks the entries
-            queued = await trio.to_thread.run_sync(manager.mark_resume, configs)
-            if not queued:
-                logger.info('[Restart] Resume queue is empty, nothing to start')
+            # 4) every phase of the queue is pushed under the takeover lock with
+            #    the restart gate checked inside it: a restart that took the
+            #    backend over drops the phase (its phases are the last word) and
+            #    the queue ends here (F6)
+            if not await _push_resume_phase(manager, 'resuming'):
+                logger.info('[Restart] Resume queue interrupted by a new graceful restart')
                 return
-            await push_restart_phase('resuming')
-            logger.info(f'[Restart] Resume queue: {len(queued)} configs, '
+            logger.info(f'[Restart] Resume queue: {len(configs)} configs, '
                         f'starting with {WORKER_START_INTERVAL}s interval')
-            for config in queued:
+            for config in configs:
                 if SHUTDOWN_EVENT.is_set():
                     logger.info(f'[Restart] Resume interrupted by the shutdown: {config}')
                     return
+                if manager.restarting:
+                    break
                 # blocking (mod resolution + process spawn) -> thread pool
                 await trio.to_thread.run_sync(_resume_one, manager, config)
                 # interval between two starts, measured from the worker_resume
                 # return (do not wait for the worker to reach "running")
                 await trio.sleep(WORKER_START_INTERVAL)
-            await push_restart_phase('done')
-            # 'done' is transient: the phase disappears right after, "phase
-            # present" means "a restart is in progress" for the frontend
-            await push_restart_phase('')
+            # 5) the terminal phases, refused together when a restart took the
+            #    backend over while the last config was starting: 'done' is
+            #    transient, "phase present" means "a restart is in progress" for
+            #    the frontend
+            if not await _push_resume_phase(manager, 'done'):
+                logger.info('[Restart] Resume queue interrupted by a new graceful restart')
+                return
+            await _push_resume_phase(manager, '')
         except trio.Cancelled:
-            # the cancel path (cancel_graceful_restart) owns the cleanup
+            # the cancel path (cancel_graceful_restart) owns the cleanup: the
+            # queued marks are dropped by the manager reset, nothing here
             raise
         except Exception as e:
             logger.error(f'[Restart] Auto-resume failed: {e}')
             logger.exception(e)
-            # release the still queued entries so they do not block a manual
-            # start (worker_kill on a "resuming" entry = cancel the resume)
-            for config in queued:
-                try:
-                    await trio.to_thread.run_sync(manager.worker_kill, config)
-                except Exception:
-                    pass
-            await push_restart_phase('')
+            # release the entries still waiting so they do not block a manual
+            # start (an entry a restart collected is not ours to drop)
+            try:
+                await trio.to_thread.run_sync(manager.drop_resume, queued)
+            except Exception:
+                pass
+            # the phase of the queue is cleared unless a restart owns the topic
+            await _push_resume_phase(manager, '')
         finally:
             if GRACEFUL_RESTART.resume_scope is scope:
                 GRACEFUL_RESTART.resume_scope = None

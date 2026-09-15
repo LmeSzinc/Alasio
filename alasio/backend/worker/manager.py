@@ -225,6 +225,27 @@ class WorkerManager(metaclass=Singleton):
         # ("stop, do not resume") and is honoured silently (F4).
         self._restart_resume_frozen: "set[str]" = set()
 
+    @property
+    def restarting(self) -> bool:
+        """
+        Whether a graceful restart owns this manager (the restart gate)
+
+        Set by restart_begin() and kept until restart_cancel() releases it (or
+        the process exits on the success path). While it is on, every way in
+        which a worker can be started is refused: worker_start() (a worker
+        started now would die with the backend and never resume),
+        worker_resume() and mark_resume() -- the resume queue of the new backend
+        stops there, the graceful restart re-collects its marks instead.
+
+        Read without the lock: it is a hint for the auto-resume task to end
+        early when a restart takes the backend over, the authoritative refusal
+        happens in the locked entry points above.
+
+        Returns:
+            bool: True while a graceful restart is in progress
+        """
+        return self._restarting
+
     def get_state_info(self):
         """
         Returns:
@@ -812,8 +833,10 @@ class WorkerManager(metaclass=Singleton):
         workers ({starting, running, scheduler-waiting}) and marks them
         "pending_restart", and converts the entries queued by a previous
         auto-resume ("resuming") into "restarting" so this restart collects
-        them too. The stop requests are sent outside the lock. The call
-        returns immediately, the wait belongs to restart_wait().
+        them too: the resume intent of a queue that is still being built or
+        drained becomes this restart's resume list. The stop requests are sent
+        outside the lock. The call returns immediately, the wait belongs to
+        restart_wait().
 
         Returns:
             List[str]: Sorted configs the wait will cover -- every worker that
@@ -843,11 +866,15 @@ class WorkerManager(metaclass=Singleton):
             # a resume queue of a previous restart that has not been drained
             # yet (the backend is restarted again right after): the entries
             # have no process and are already "stopped for restart", turn
-            # them into "restarting" so restart_wait() collects them into
-            # this restart's resume list instead of leaving them to be
-            # started under the gate
+            # them into "restarting" (with the mark) so restart_wait() collects
+            # them into this restart's resume list. A queue that is still being
+            # built (mark_resume) or waiting for the config scan has the same
+            # entries by then -- that is the handover -- and a queue whose task
+            # sees this gate refuses to build more (mark_resume / worker_resume)
+            # and ends early
             for state in list(self.state.values()):
                 if state.state == 'resuming':
+                    state.pending_restart = True
                     self._set_state(state, 'restarting')
             waiting = self._restart_pending_configs_locked()
 
@@ -1017,14 +1044,28 @@ class WorkerManager(metaclass=Singleton):
         cannot be started twice. Configs already started (the user started them
         before the queue reached them) are skipped.
 
+        The entries are the resume intent: a graceful restart that begins while
+        they wait (restart_begin) re-collects them into its own resume list, so
+        the caller should mark as early as it knows the configs.
+
         Args:
             configs (list[str]): Config names recorded in the resume file
 
         Returns:
-            List[str]: Actually queued configs, in input order
+            List[str]: Actually queued configs, in input order; empty when a
+                graceful restart is in progress (the queue is refused, the
+                manager is restarting: the marks of this call were not created)
         """
         queued = []
         with self._lock:
+            if self._restarting:
+                # the manager stopped accepting resumes: a graceful restart owns
+                # the backend and collects the marks itself. Creating "resuming"
+                # entries now would leave configs that no restart converts and
+                # that only stall the restart wait through its timeout
+                logger.warning('[WorkerManager] Resume queue refused: '
+                               'a graceful restart is in progress')
+                return queued
             for config in configs:
                 state = self.state.get(config, None)
                 if state and state.state not in ['idle', 'error']:
@@ -1036,6 +1077,36 @@ class WorkerManager(metaclass=Singleton):
                 self._set_state(state, 'resuming')
                 queued.append(config)
         return queued
+
+    def drop_resume(self, configs) -> "List[str]":
+        """
+        Drop configs from the auto-resume queue (new backend)
+
+        The caller gives up on these configs (the config scan never exposed
+        them, or the queue failed): their "resuming" entries are cancelled
+        (back to idle, removed), so the config can be started by hand again.
+        Only entries still waiting to be started are dropped -- an entry a
+        graceful restart already collected is "restarting" and its intent
+        belongs to that restart, and a config the user started or cancelled is
+        not the caller's to touch (the entry is gone or has a process).
+
+        Args:
+            configs (list[str]): Config names to drop from the queue
+
+        Returns:
+            List[str]: Configs actually dropped, in input order
+        """
+        dropped = []
+        with self._lock:
+            for config in configs:
+                state = self.state.get(config, None)
+                if state is None or state.state != 'resuming':
+                    continue
+                self._set_state(state, 'idle')
+                dropped.append(config)
+        if dropped:
+            logger.info(f'[WorkerManager] Resume queue entries dropped: {", ".join(dropped)}')
+        return dropped
 
     def worker_resume(self, mod: str, config: str, project_root='', mod_root='', path_main='') -> "tuple[bool, str]":
         """
