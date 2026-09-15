@@ -1042,6 +1042,27 @@ class TestResumeCredential:
 
         assert observed['token'] == 'second-checksum'
 
+    def test_empty_announcement_retracts_credential(self, monkeypatch):
+        """
+        The cancel retracts the credential with an empty announcement: the
+        stored copy is cleared and the next spawn carries nothing, so a
+        cancelled restart resumes nothing whatever survives on disk
+        """
+        monkeypatch.delenv('ALASIO_RESUME_TOKEN', raising=False)
+        supervisor, _ = make_supervisor_with_pipe()
+        supervisor.handle_backend_message(b'command:resume:token123-checksum456')
+        assert supervisor.resume_token == 'token123-checksum456'
+
+        # the cancel of the restart withdraws the publication
+        supervisor.handle_backend_message(b'command:resume:')
+
+        assert supervisor.resume_token == ''
+        observed = self._record_spawn_env(monkeypatch)
+        supervisor.start_backend([])
+        assert observed['count'] == 1
+        assert observed['present'] is False
+        assert observed['token'] is None
+
     def test_startup_completion_clears_credential(self, monkeypatch):
         """
         After command:started the credential must be gone from the stored

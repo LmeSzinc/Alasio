@@ -11,6 +11,7 @@ points env.PROJECT_ROOT at the fake root.
 import builtins
 import json
 import multiprocessing
+import threading
 import time
 
 import msgspec
@@ -170,8 +171,9 @@ def read_record(file):
 class TestResumeFileIO:
     """write_resume / read_resume and the token-checksum credential"""
 
-    def test_write_read_roundtrip(self, project_root, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
+    @pytest.mark.trio
+    async def test_write_read_roundtrip(self, project_root, monkeypatch):
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
         token, sep, checksum = credential.partition('-')
         assert sep and token and checksum
 
@@ -194,8 +196,9 @@ class TestResumeFileIO:
         # read once: the file is deleted by the read
         assert not file.isfile()
 
-    def test_write_with_actions_and_owner(self, project_root):
-        GRACEFUL_RESTART.write_resume([], owner='update', actions=['test_action'])
+    @pytest.mark.trio
+    async def test_write_with_actions_and_owner(self, project_root):
+        await GRACEFUL_RESTART.write_resume([], owner='update', actions=['test_action'])
         files = GRACEFUL_RESTART.iter_resume_files()
         assert len(files) == 1
         record = read_record(files[0])
@@ -203,20 +206,22 @@ class TestResumeFileIO:
         assert record.actions == ['test_action']
         assert record.owner == 'update'
 
-    def test_write_keeps_other_files(self, project_root):
+    @pytest.mark.trio
+    async def test_write_keeps_other_files(self, project_root):
         # another backend (or a dead session) may share the folder: a write
         # must never delete a foreign resume file. Only the credential holder
         # can consume a file, so a leftover is harmless
         foreign = GRACEFUL_RESTART.resume_file_of('0123456789abcdef')
         foreign.atomic_write(b'{"foreign": true}')
 
-        GRACEFUL_RESTART.write_resume(['cfg_a'])
+        await GRACEFUL_RESTART.write_resume(['cfg_a'])
 
         assert foreign.isfile()
         assert len(GRACEFUL_RESTART.iter_resume_files()) == 2
 
-    def test_read_only_reads_own_token_file(self, project_root, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a'])
+    @pytest.mark.trio
+    async def test_read_only_reads_own_token_file(self, project_root, monkeypatch):
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
         # a foreign file (another token) must be neither read nor deleted
         foreign = GRACEFUL_RESTART.resume_file_of('ffffffffffffffff')
         foreign.atomic_write(b'{"foreign": true}')
@@ -227,8 +232,9 @@ class TestResumeFileIO:
         assert read is not None
         assert foreign.isfile()
 
-    def test_read_without_credential_touches_nothing(self, project_root, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a'])
+    @pytest.mark.trio
+    async def test_read_without_credential_touches_nothing(self, project_root, monkeypatch):
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
         file = GRACEFUL_RESTART.resume_file_of(credential.partition('-')[0])
 
         monkeypatch.delenv(RESUME_TOKEN_ENV, raising=False)
@@ -249,8 +255,9 @@ class TestResumeFileIO:
         assert GRACEFUL_RESTART.read_resume() is None
         assert file.isfile()
 
-    def test_read_tampered_payload_rejected_and_deleted(self, project_root, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a'])
+    @pytest.mark.trio
+    async def test_read_tampered_payload_rejected_and_deleted(self, project_root, monkeypatch):
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
         token = credential.partition('-')[0]
         file = GRACEFUL_RESTART.resume_file_of(token)
         payload = bytearray(file.atomic_read_bytes())
@@ -274,9 +281,10 @@ class TestResumeFileIO:
         assert GRACEFUL_RESTART.read_resume() is None
         assert not GRACEFUL_RESTART.resume_file_of(token).isfile()
 
-    def test_read_rejects_tampered_with_own_token(self, project_root, monkeypatch):
+    @pytest.mark.trio
+    async def test_read_rejects_tampered_with_own_token(self, project_root, monkeypatch):
         """The token alone is not enough: the checksum comes from the credential"""
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
         token = credential.partition('-')[0]
         # rewrite the file with a different payload under the same token
         GRACEFUL_RESTART.resume_file_of(token).atomic_write(
@@ -341,6 +349,19 @@ class TestAnnounceResumeToken:
     def test_no_supervisor_is_noop(self, monkeypatch):
         monkeypatch.delattr(builtins, '__mpipe_conn__', raising=False)
         GRACEFUL_RESTART.announce_resume_token('token123-checksum456')
+
+    def test_empty_credential_retracts(self, monkeypatch):
+        """An empty credential is the retraction; the supervisor slot is latest-wins"""
+        parent_conn, child_conn = multiprocessing.Pipe()
+        monkeypatch.setattr(builtins, '__mpipe_conn__', child_conn, raising=False)
+        try:
+            GRACEFUL_RESTART.announce_resume_token('')
+
+            assert parent_conn.poll(timeout=1)
+            assert parent_conn.recv_bytes() == b'command:resume:'
+        finally:
+            parent_conn.close()
+            child_conn.close()
 
 
 # ============================================================================
@@ -573,14 +594,206 @@ class TestRunGracefulRestart:
         assert success, msg
 
     @pytest.mark.trio
+    async def test_cancel_during_write_drops_the_file(self, project_root, manager, monkeypatch):
+        """
+        F3: a force restart landing inside the write window leaves no intent
+
+        The publication is one critical section of the task-held lock: the write
+        and its credential are one step inside it, and the withdrawal needs the
+        same lock, so the cancel lets the publication run to completion (it must
+        not return while the write is still in flight, asserted below), removes
+        the file and retracts the credential -- the retraction is the last word
+        the supervisor hears. Without the fix the write survived the cancel,
+        credential included, so the forced restart resumed the very workers it
+        promised to drop.
+        """
+        start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
+
+        entered = threading.Event()
+        release = threading.Event()
+        original_write = restart.atomic_write
+
+        def parked_write(file, payload):
+            # the write window: the file is not on disk yet, the cancel lands here
+            entered.set()
+            assert release.wait(5), 'the test never released the write'
+            return original_write(file, payload)
+
+        monkeypatch.setattr(restart, 'atomic_write', parked_write)
+
+        async def fake_lifespan_restart():
+            raise AssertionError('the forced restart owns the restart, not the orchestration')
+
+        monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
+        credentials = []
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
+        writer_done = threading.Event()
+        published = []
+        original_write_resume = GRACEFUL_RESTART.write_resume
+
+        async def spy_write_resume(*args, **kwargs):
+            try:
+                credential = await original_write_resume(*args, **kwargs)
+                published.append(credential)
+                return credential
+            finally:
+                # the publication section is released here: whatever it
+                # published is visible to the assertions below
+                writer_done.set()
+
+        monkeypatch.setattr(GRACEFUL_RESTART, 'write_resume', spy_write_resume)
+
+        cancel_done = trio.Event()
+
+        async def force_cancel():
+            await cancel_graceful_restart('force restart', manager)
+            cancel_done.set()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_graceful_restart, manager)
+            # the worker stopped, the write thread sits inside the window
+            await wait_until(entered.is_set, description='the write to start')
+            nursery.start_soon(force_cancel)
+            # the cancel interrupts the transaction (and drops its scope) before
+            # it reaches the withdrawal
+            await wait_until(manager.restart_aborted,
+                             description='the cancel to interrupt the transaction')
+            # the publication section cannot be interrupted: the cancel waits for
+            # the publication to run to completion instead of returning mid-write
+            assert not cancel_done.is_set(), 'the cancel returned while the write was in flight'
+            release.set()
+            # the parked write finishes and hands its file over, the withdrawal
+            # removes it before the cancel returns
+            await wait_until(cancel_done.is_set, description='the cancel to settle after the write')
+            await wait_until(writer_done.is_set, description='the interrupted write to return')
+
+        # the cancelled write published its credential, the cancel retracted it
+        # last: the force restart resumes nothing, whatever the file does
+        writer_credential, = published
+        assert credentials == [writer_credential, '']
+        assert GRACEFUL_RESTART.iter_resume_files() == []
+        assert GRACEFUL_RESTART.resume_file is None
+        assert manager.restart_aborted() is True
+
+    @pytest.mark.trio
+    async def test_publish_waiting_for_the_lock_is_cancelled(self, project_root, manager, monkeypatch):
+        """
+        The publication lock is held by the task, never by a pool thread: a
+        write that is still waiting for the section when the cancel lands is
+        cancelled at the acquire (a checkpoint) and never reaches the disk
+
+        This is the window the task-held lock closes structurally: with the lock
+        taken inside the pool thread, the cancel could be over before the write
+        ran, and the write would then publish a file plus a live credential with
+        nobody left to take them back.
+        """
+        start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
+
+        writes = []
+        original_write = restart.atomic_write
+
+        def spy_write(file, payload):
+            writes.append(file)
+            return original_write(file, payload)
+
+        monkeypatch.setattr(restart, 'atomic_write', spy_write)
+
+        async def fake_lifespan_restart():
+            raise AssertionError('the forced restart owns the restart, not the orchestration')
+
+        monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
+        credentials = []
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
+
+        # hold the publication section: the write of the restart has to wait
+        await GRACEFUL_RESTART._publication_lock.acquire()
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_graceful_restart, manager)
+            # the workers stopped: the orchestration is at (or about to enter)
+            # the publication section
+            await wait_until(
+                lambda: manager.state.get('cfg_a') is not None
+                and manager.state['cfg_a'].state == 'restarting',
+                description='the worker to be restarting')
+            # the orchestration is parked on the publication section
+            await wait_until(
+                lambda: GRACEFUL_RESTART._publication_lock.statistics().tasks_waiting == 1,
+                description='the write to wait for the publication section')
+            nursery.start_soon(cancel_graceful_restart, 'force restart', manager)
+            await wait_until(manager.restart_aborted,
+                             description='the cancel to interrupt the transaction')
+            # the transaction is cancelled: releasing the section cannot make the
+            # write run any more, its task is cancelled before it publishes
+            GRACEFUL_RESTART._publication_lock.release()
+
+        # the write never reached the disk and nothing was announced: no file, no
+        # credential, nothing to resume
+        assert writes == []
+        assert credentials == []
+        assert GRACEFUL_RESTART.iter_resume_files() == []
+        assert GRACEFUL_RESTART.resume_file is None
+        assert manager.restart_aborted() is True
+
+    @pytest.mark.trio
     async def test_cancel_removes_written_file(self, project_root):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
         token = credential.partition('-')[0]
         assert GRACEFUL_RESTART.resume_file_of(token).isfile()
 
         await cancel_graceful_restart('test cancel')
 
         assert not GRACEFUL_RESTART.resume_file_of(token).isfile()
+
+    @pytest.mark.trio
+    async def test_failed_removal_still_retracts(self, project_root, monkeypatch):
+        """
+        The retraction is what seals the cancel: a file the removal could not
+        take away (a lock on the file, Windows) is inert from then on, because
+        the credential the write had announced was taken back
+        """
+        credentials = []
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
+        await GRACEFUL_RESTART.write_resume(['cfg_a'])
+        file = GRACEFUL_RESTART.resume_file
+        assert file.isfile()
+
+        def locked_file(path):
+            raise OSError('the file is locked by another process')
+
+        monkeypatch.setattr(restart, 'atomic_remove', locked_file)
+        with logger.mock_capture_writer() as capture:
+            await cancel_graceful_restart('test cancel')
+            assert capture.fd.any_contains('Failed to remove the resume file')
+
+        # the file survives, the intent does not: the last credential the
+        # supervisor heard is the retraction, and a backend reading with it
+        # resumes nothing
+        assert file.isfile()
+        assert credentials[-1] == ''
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credentials[-1])
+        assert GRACEFUL_RESTART.read_resume() is None
+
+    @pytest.mark.trio
+    async def test_cancel_keeps_update_owned_file(self, project_root, monkeypatch):
+        """
+        Only the publication of the restart transaction is withdrawn: the file of
+        the in-app update transaction keeps its file and its credential (F7)
+        """
+        credentials = []
+        monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
+        await GRACEFUL_RESTART.write_resume(['cfg_a'], owner='update')
+        file = GRACEFUL_RESTART.resume_file
+        assert file.isfile()
+        assert len(credentials) == 1
+
+        with logger.mock_capture_writer() as capture:
+            await cancel_graceful_restart('test cancel')
+            assert not capture.fd.any_contains('Resume file removed by the cancel')
+
+        # neither the file nor the credential of the update transaction is touched
+        assert file.isfile()
+        assert GRACEFUL_RESTART.resume_file == file
+        assert len(credentials) == 1
 
 
 class TestCancelLog:
@@ -631,7 +844,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_resume_starts_queued_workers(self, project_root, manager, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
         fake = FakeScan({'cfg_a': 1, 'cfg_b': 1})
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
@@ -669,7 +882,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_no_credential_starts_nothing(self, project_root, manager, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
         file = GRACEFUL_RESTART.resume_file_of(credential.partition('-')[0])
         monkeypatch.delenv(RESUME_TOKEN_ENV, raising=False)
 
@@ -681,7 +894,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_bad_checksum_deletes_and_starts_nothing(self, project_root, manager, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
         token = credential.partition('-')[0]
         monkeypatch.setenv(RESUME_TOKEN_ENV, f'{token}-0000000000000000')
 
@@ -693,7 +906,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_queue_order_and_interval(self, project_root, manager, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b', 'cfg_c'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b', 'cfg_c'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
         fake = FakeScan({'cfg_a': 1, 'cfg_b': 1, 'cfg_c': 1})
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
@@ -719,7 +932,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_queued_cancel_skips_config(self, project_root, manager, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b', 'cfg_c'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b', 'cfg_c'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
         fake = FakeScan({'cfg_a': 1, 'cfg_b': 1, 'cfg_c': 1})
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
@@ -745,7 +958,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_config_gone_is_dropped(self, project_root, manager, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
         fake = FakeScan({'cfg_a': 1, 'cfg_b': 1})
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
@@ -766,7 +979,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_missing_from_scan_is_abandoned(self, project_root, manager, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
         # the scan only knows cfg_a: cfg_b is abandoned after the wait
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({'cfg_a': 1}))
@@ -782,7 +995,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_actions_run_before_resume(self, project_root, manager, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a'], actions=['test_action'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'], actions=['test_action'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
         fake = FakeScan({'cfg_a': 1})
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
@@ -805,7 +1018,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_unknown_action_logged(self, project_root, manager, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume([], actions=['no_such_action'])
+        credential = await GRACEFUL_RESTART.write_resume([], actions=['no_such_action'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({}))
 
@@ -818,7 +1031,7 @@ class TestResumeAfterRestart:
 
     @pytest.mark.trio
     async def test_cancel_during_resume_stops_queue(self, project_root, manager, monkeypatch):
-        credential = GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b', 'cfg_c'])
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a', 'cfg_b', 'cfg_c'])
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
         fake = FakeScan({'cfg_a': 1, 'cfg_b': 1, 'cfg_c': 1})
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)

@@ -19,12 +19,26 @@ File protocol (see doc/2026-09-13_graceful-backend-restart.md):
   the checksum is NOT stored in the file, so a file whose credential was never
   announced is never consumed (the read requires the token from the
   credential);
-- the file is read at most once and always deleted right after the read.
+- the file is read at most once and always deleted right after the read;
+- the publication and the withdrawal are two critical sections of one lock
+  held by the tasks (GracefulRestart._publication_lock): the publication writes
+  the file AND announces its credential, the withdrawal removes the file AND
+  retracts the credential (announces an empty one; the supervisor slot is
+  latest-wins). The lock is held by the task around the pool hop, not by the
+  pool thread, so trio orders the two by itself: a transaction cancelled while
+  it waits for the section is cancelled at the lock acquire (a checkpoint) and
+  publishes nothing, and one cancelled while the section is held leaves its
+  file and credential to the withdrawal, which waits for the section and
+  retracts the credential last. A cancelled transaction therefore leaves no
+  file behind, and a file whose removal failed is inert: "no credential
+  announced => the file is never read" holds again, because the credential the
+  write may have announced was taken back.
 
 Credential handover (same session): the old backend announces the credential
 with command:resume:<credential>; the supervisor stores it and injects it into
 the next spawned backend as ALASIO_RESUME_TOKEN, then clears it once the new
-backend announced startup completion (command:started).
+backend announced startup completion (command:started). An empty credential is
+the retraction: the stored slot is cleared and nothing is injected any more.
 """
 import hashlib
 import hmac
@@ -128,12 +142,13 @@ class GracefulRestart:
             Set synchronously by the rpc handler (re-entry guard), cleared by
             cancel_graceful_restart(); kept on the success path, the gate stays
             until the process exits
-        scope (trio.CancelScope): Orchestration task scope, cancelled by
-            cancel_graceful_restart()
+        scope (trio.CancelScope): Orchestration task scope, cancelled and
+            dropped by cancel_graceful_restart()
         resume_scope (trio.CancelScope): Resume task scope of the new backend
-        resume_file (PathStr): Resume file written by this transaction (for
-            the defensive cancel cleanup), None when nothing was written yet
-        resume_owner (str): Owner of the written resume file
+        resume_file (PathStr): Resume file published by this transaction (the
+            withdrawal removes it and retracts its credential), None when
+            nothing was published yet
+        resume_owner (str): Owner of the published resume file
     """
 
     # the worker manager of this backend process, bound once: the orchestration
@@ -146,6 +161,14 @@ class GracefulRestart:
         self.resume_scope = None
         self.resume_file: "Optional[PathStr]" = None
         self.resume_owner = ''
+        # critical sections of the resume publication, held by the tasks (not by
+        # the pool threads): write_resume() writes the file and announces the
+        # credential inside it, withdraw_resume() removes the file and retracts
+        # the credential inside it. A task that only waits for the section is
+        # cancelled at the acquire (a checkpoint), so a cancelled transaction
+        # publishes nothing; one that holds the section is left to run to
+        # completion and is withdrawn afterwards
+        self._publication_lock = trio.Lock()
         # resume_folder is a cached_property: drop the cache on a re-init
         # (reset(), a caller repointing PROJECT_ROOT) so the current
         # PROJECT_ROOT is read again
@@ -242,25 +265,95 @@ class GracefulRestart:
             files.append(folder.joinpath(name))
         return files
 
-    def write_resume(self, resume_list, owner=OWNER_RESTART, actions=None) -> str:
+    async def withdraw_resume(self):
         """
-        Write the resume intent, mint its one-shot credential and announce it
+        Withdraw this transaction's publication: remove the file, retract its
+        credential (cancel)
 
-        Blocking (disk write + supervisor pipe): call it through the trio thread
-        pool, never on the event loop.
+        The mirror of write_resume(), in the same critical section: the
+        publication writes the file and announces the credential, the withdrawal
+        removes the file and announces '' (the supervisor slot is latest-wins,
+        so the empty announcement takes the credential back). The lock is held by
+        the task, so a publication in flight is left to run to completion first,
+        and a publication still waiting for the section never happens at all
+        (its task is cancelled at the acquire): whatever the timing, the
+        retraction is the last word the supervisor hears about this transaction,
+        and a file whose removal failed is inert from then on. The blocking work
+        (the removal and the pipe send) runs in the trio thread pool, inside the
+        section. cancel_graceful_restart() calls it right after it cancelled the
+        orchestration, inside a shielded scope: a cancel must complete.
+
+        An idle cancel is a no-op, and the file of another owner (the in-app
+        update transaction) is left completely alone: that transaction keeps its
+        file and its credential (update architecture §4.6).
+
+        Returns:
+            PathStr | None: The removed file, None when there was nothing to
+                remove (nothing published, or published by another owner)
+        """
+        async with self._publication_lock:
+            file = self.resume_file
+            owner = self.resume_owner
+            if file is None or owner != OWNER_RESTART:
+                # nothing of this transaction to withdraw: no file of ours to
+                # remove and no credential of ours to retract
+                return None
+            self.resume_file = None
+            self.resume_owner = ''
+            removed = await trio.to_thread.run_sync(self._remove_and_retract, file)
+        if not removed:
+            return None
+        logger.info(f'[Restart] Resume file removed by the cancel: {file}')
+        return file
+
+    def _remove_and_retract(self, file):
+        """
+        Remove the resume file and retract its credential (blocking, pool only)
+
+        Called inside the withdrawal section, after the file was taken out of the
+        slot.
+
+        Args:
+            file (PathStr): The file published by this transaction
+
+        Returns:
+            bool: True when the file was removed
+        """
+        try:
+            removed = atomic_remove(file)
+        except OSError as e:
+            logger.warning(f'[Restart] Failed to remove the resume file {file}: {e}')
+            removed = False
+        # the retraction is announced after the removal (failed or not) and
+        # always after the announcement the write made in the same section: the
+        # supervisor only keeps this empty credential from now on
+        self.announce_resume_token('')
+        return removed
+
+    async def write_resume(self, resume_list, owner=OWNER_RESTART, actions=None) -> str:
+        """
+        Publish the resume intent: write the file and announce its credential
+
+        The publication section of this transaction: async, with the blocking
+        work (disk write + supervisor pipe) in the trio thread pool, so the event
+        loop stays responsive.
 
         Called once per restart transaction, after restart_wait() returned (never
         during the wait): the content is the final resume list, there is no
-        intermediate write and no rewrite. The credential is announced at the end
-        of the write, inside this method: the file exists before the supervisor
-        can hand the credential to the next backend, so the invariant "no
-        credential announced => the file is never read" is kept and a call site
-        cannot forget the announce (which would leave an unconsumable file
-        behind). Only the file of this transaction is written: other resume files
-        in the folder (another backend, a session that died before its
-        transaction finished) are left untouched -- they can never be consumed
-        without their own credential, and the stale ones are removed by
-        resume_cleanup().
+        intermediate write and no rewrite. The file hits the disk and the
+        credential is announced inside the section, so the file exists before the
+        supervisor can hand the credential to the next backend ("no credential
+        announced => the file is never read"), a call site cannot forget the
+        announce, and no cancel can interleave between the file and its
+        credential. The lock is held by this task: a transaction cancelled while
+        this call waits for the section is cancelled at the acquire (a
+        checkpoint) and publishes nothing, and one cancelled while the section is
+        held leaves the file and the credential to the withdrawal, which waits
+        for the section and retracts the credential afterwards (F3). Only the
+        file of this transaction is written: other resume files in the folder
+        (another backend, a session that died before its transaction finished)
+        are left untouched -- they can never be consumed without their own
+        credential, and the stale ones are removed by resume_cleanup().
 
         Args:
             resume_list (list[str]): Configs to auto-resume after the restart
@@ -272,6 +365,30 @@ class GracefulRestart:
             str: Credential string f'{token}-{checksum}', already announced to
                 the supervisor
         """
+        async with self._publication_lock:
+            file, credential = await trio.to_thread.run_sync(
+                self._write_and_announce, resume_list, owner, actions)
+            # the slot belongs to the trio thread; the section stays held until
+            # the withdrawal can see what this call published
+            self.resume_file = file
+            self.resume_owner = owner
+        return credential
+
+    def _write_and_announce(self, resume_list, owner, actions):
+        """
+        Write the resume file and announce its credential (blocking, pool only)
+
+        Called inside the publication section: the file and its credential are
+        one step and are never separated by a cancel.
+
+        Args:
+            resume_list (list[str]): Configs to auto-resume after the restart
+            owner (str): Transaction owner
+            actions (list[str]): Optional action tags
+
+        Returns:
+            tuple[PathStr, str]: The written file and its credential
+        """
         token = secrets.token_hex(16)
         record = ResumeRecord(
             ts=time.time(),
@@ -280,18 +397,15 @@ class GracefulRestart:
             actions=list(actions) if actions else [],
         )
         payload = msgspec.json.encode(record)
-        checksum = self.resume_checksum(token, payload)
+        credential = f'{token}-{self.resume_checksum(token, payload)}'
         file = self.resume_file_of(token)
         atomic_write(file, payload)
-        self.resume_file = file
-        self.resume_owner = owner
-        logger.info(f'[Restart] Resume file written: {file} '
-                    f'(owner={owner}, {len(record.configs)} configs, {len(record.actions)} actions)')
-        credential = f'{token}-{checksum}'
         # the write is complete before the credential leaves this method: the
         # supervisor only ever learns about a file that is already on disk
         self.announce_resume_token(credential)
-        return credential
+        logger.info(f'[Restart] Resume file written: {file} '
+                    f'(owner={owner}, {len(record.configs)} configs, {len(record.actions)} actions)')
+        return file, credential
 
     def read_resume(self) -> "Optional[ResumeRecord]":
         """
@@ -373,24 +487,34 @@ class GracefulRestart:
 
     def announce_resume_token(self, credential: str):
         """
-        Announce the resume credential to the supervisor
+        Announce (or retract) the resume credential over the supervisor pipe
 
-        Called by write_resume() right after the file hit the disk (blocking:
-        the pipe send runs in the same thread pool hop as the write).
+        Called by write_resume() right after the file hit the disk and by
+        withdraw_resume() for its retraction (blocking: the pipe send runs in
+        the caller's thread pool hop).
 
-        Sends b'command:resume:<credential>'; the supervisor stores it and injects
-        it into the next spawned backend (ALASIO_RESUME_TOKEN). Without a supervisor
-        the message is silently dropped (send default), so a file written without a
-        supervisor is never consumed: the credential cannot be handed over.
+        Sends b'command:resume:<credential>'; the supervisor stores the latest
+        announcement and injects it into the next spawned backend
+        (ALASIO_RESUME_TOKEN). An empty credential is the retraction: the stored
+        slot is cleared and nothing is injected any more, so a cancelled
+        transaction cannot be consumed whatever the state of its file. Without a
+        supervisor the message is silently dropped (send default), so a file
+        written without a supervisor is never consumed: the credential cannot be
+        handed over.
 
         Args:
-            credential (str): Credential string returned by write_resume()
+            credential (str): Credential string returned by write_resume(), or
+                '' to retract the announced one
         """
-        # write the file first, announce after: the invariant is "no credential
-        # announced => the file is never read", so a crash in between leaves an
-        # unconsumable file (cleaned up by the next transaction / the age cleanup)
+        # the file exists before the credential leaves this method, and the cancel
+        # announces the retraction after the write (the publication section orders
+        # the two): the invariant "no credential announced => the file is never
+        # read" holds in both directions
         mpipe_backend.send(b'command:resume:' + credential.encode())
-        logger.info('[Restart] Resume credential announced to the supervisor')
+        if credential:
+            logger.info('[Restart] Resume credential announced to the supervisor')
+        else:
+            logger.info('[Restart] Resume credential retracted from the supervisor')
 
 
 GRACEFUL_RESTART = GracefulRestart()
@@ -523,12 +647,14 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
                 logger.info('[Restart] Graceful restart was cancelled')
                 return
 
-            # 2) the wait is over: write the resume intent once; the credential
-            #    is announced inside the write. Blocking (disk + pipe) -> pool
+            # 2) the wait is over: publish the resume intent once (the file and
+            #    its credential are one step; the credential is announced inside
+            #    the write). A cancel landing while the section is held waits for
+            #    it and withdraws it, one landing before it cancels this task at
+            #    the lock acquire instead
             actions = getattr(hooks, 'actions', None)
             if resume_list or actions:
-                await trio.to_thread.run_sync(
-                    GRACEFUL_RESTART.write_resume, resume_list, OWNER_RESTART, actions)
+                await GRACEFUL_RESTART.write_resume(resume_list, OWNER_RESTART, actions)
             else:
                 logger.info('[Restart] No worker to resume and no action to run, '
                             'restarting backend directly')
@@ -603,25 +729,27 @@ async def cancel_graceful_restart(reason: str = '', manager=GRACEFUL_RESTART.WOR
         if GRACEFUL_RESTART.resume_scope is not None:
             GRACEFUL_RESTART.resume_scope.cancel()
         GRACEFUL_RESTART.running = False
+        # the transaction is gone: the scope slot is dropped here (rather than
+        # left to the orchestration's finally) so restart_in_progress() is false
+        # as soon as the cancel ran; the finally then sees the slot moved on and
+        # leaves it alone
+        GRACEFUL_RESTART.scope = None
         # 2) release the manager gate, clear the marks, drop the parked entries
         #    (blocking: manager lock)
         try:
             await trio.to_thread.run_sync(manager.restart_cancel)
         except Exception as e:
             logger.warning(f'[Restart] Failed to cancel the manager state: {e}')
-        # 3) defensive cleanup of the resume file written by this transaction:
-        #    the write happens after the wait, when the restart is no longer
-        #    cancellable, so this only covers a failure in between
-        file = GRACEFUL_RESTART.resume_file
-        owner = GRACEFUL_RESTART.resume_owner
-        GRACEFUL_RESTART.resume_file = None
-        GRACEFUL_RESTART.resume_owner = ''
-        if file is not None and owner == OWNER_RESTART:
-            try:
-                if await trio.to_thread.run_sync(atomic_remove, file):
-                    logger.info(f'[Restart] Resume file removed by the cancel: {file}')
-            except OSError as e:
-                logger.warning(f'[Restart] Failed to remove the resume file {file}: {e}')
+        # 3) withdraw the publication of this transaction: the lock is held by
+        #    the tasks, so a publish still waiting for the section never happens
+        #    (its task is cancelled at the acquire) and one in flight is left to
+        #    run to completion, then removed and retracted. The retraction is the
+        #    last word the supervisor hears, which makes a cancelled restart
+        #    unresumable whatever the file does (F3)
+        try:
+            await GRACEFUL_RESTART.withdraw_resume()
+        except Exception as e:
+            logger.warning(f'[Restart] Failed to withdraw the resume publication: {e}')
         # 4) no restart in progress any more
         await push_restart_phase('')
         if in_progress:

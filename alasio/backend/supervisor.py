@@ -575,8 +575,10 @@ class Supervisor:
             # One-shot resume credential announcement (graceful restart or
             # crash takeover): the next start_backend() injects it into the
             # backend child through ALASIO_RESUME_TOKEN. Latest announcement
-            # wins; a malformed payload is ignored instead of killing the
-            # supervision loop.
+            # wins, so an empty credential -- the cancel of a restart retracts
+            # its publication -- clears the stored one: from then on nothing is
+            # injected, whatever the resume file does. A malformed payload is
+            # ignored instead of killing the supervision loop.
             try:
                 self.resume_token = msg[len(b'command:resume:'):].decode()
             except UnicodeDecodeError as e:
