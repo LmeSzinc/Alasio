@@ -80,7 +80,10 @@ class TestFunctionDrop:
             target(10, b=20)
 
         # Full __qualname__ includes the test class and <locals>
-        assert any("target(10, b=20)" in log for log in capture.stdout.logs)
+        # The mock writer inits a backend, so logs go to backend + file, not stdout
+        expected = f'Dropped: {target.__qualname__}(10, b=20)'
+        assert [log['m'] for log in capture.backend.logs] == [expected]
+        assert capture.fd.any_contains(expected)
 
     def test_log_false(self):
         """When log=False no log message is emitted on drop."""
@@ -91,7 +94,8 @@ class TestFunctionDrop:
         with _logger.mock_capture_writer() as capture:
             target()
 
-        assert len(capture.stdout.logs) == 0
+        assert capture.fd.logs == []
+        assert capture.backend.logs == []
 
     def test_no_args(self):
         """Function with no arguments works correctly."""
@@ -152,9 +156,10 @@ class TestFunctionDropMethod:
         with _logger.mock_capture_writer() as capture:
             obj.my_method(1, b=2)
 
-        logs = list(capture.stdout.logs)
-        # Full __qualname__ includes <locals> nesting; verify key content
-        assert any("MyClass.my_method(1, b=2)" in log for log in logs)
+        # Full __qualname__ includes <locals> nesting; self is excluded from the log
+        expected = f'Dropped: {MyClass.my_method.__qualname__}(1, b=2)'
+        assert [log['m'] for log in capture.backend.logs] == [expected]
+        assert capture.fd.any_contains(expected)
 
     def test_method_log_no_args(self):
         """Log message for a method with only self excludes self."""
@@ -167,8 +172,9 @@ class TestFunctionDropMethod:
         with _logger.mock_capture_writer() as capture:
             obj.my_method()
 
-        logs = list(capture.stdout.logs)
-        assert any("MyClass.my_method()" in log for log in logs)
+        expected = f'Dropped: {MyClass.my_method.__qualname__}()'
+        assert [log['m'] for log in capture.backend.logs] == [expected]
+        assert capture.fd.any_contains(expected)
 
     def test_method_not_dropped(self):
         """Method with drop_rate=0 calls the real method correctly."""
@@ -201,8 +207,10 @@ class TestFunctionDropMethod:
         with _logger.mock_capture_writer() as capture:
             MyClass.my_classmethod(1, b=2)
 
-        logs = list(capture.stdout.logs)
-        assert any("MyClass.my_classmethod(1, b=2)" in log for log in logs)
+        # cls is excluded from the log, the class name is in __qualname__
+        expected = f'Dropped: {MyClass.my_classmethod.__qualname__}(1, b=2)'
+        assert [log['m'] for log in capture.backend.logs] == [expected]
+        assert capture.fd.any_contains(expected)
 
     def test_staticmethod_log(self):
         """Log message for a staticmethod uses __qualname__ (includes class prefix)."""
@@ -215,5 +223,7 @@ class TestFunctionDropMethod:
         with _logger.mock_capture_writer() as capture:
             MyClass.my_staticmethod(1, b=2)
 
-        logs = list(capture.stdout.logs)
-        assert any("MyClass.my_staticmethod(1, b=2)" in log for log in logs)
+        # No self/cls to exclude, __qualname__ still carries the class prefix
+        expected = f'Dropped: {MyClass.my_staticmethod.__qualname__}(1, b=2)'
+        assert [log['m'] for log in capture.backend.logs] == [expected]
+        assert capture.fd.any_contains(expected)
