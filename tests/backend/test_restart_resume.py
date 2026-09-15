@@ -246,6 +246,93 @@ class TestResumeFileIO:
         monkeypatch.setenv(RESUME_TOKEN_ENV, '00ff00ff-checksum')
         assert GRACEFUL_RESTART.read_resume() is None
 
+    def test_read_permission_denied_file_is_not_removed(self, project_root, monkeypatch):
+        """A permission denial skips the removal attempt (it would be denied too)"""
+        token = 'aabbccdd00112233'
+        file = GRACEFUL_RESTART.resume_file_of(token)
+        file.atomic_write(b'{}')
+
+        def denied(path):
+            raise PermissionError(13, 'Permission denied')
+
+        calls = []
+        monkeypatch.setattr(restart, 'atomic_read_bytes', denied)
+        monkeypatch.setattr(restart, 'atomic_remove', lambda path: calls.append(path))
+        monkeypatch.setenv(RESUME_TOKEN_ENV, f'{token}-checksum')
+        with logger.mock_capture_writer() as capture:
+            assert GRACEFUL_RESTART.read_resume() is None
+            assert capture.fd.any_contains('Resume file not readable')
+        # no removal was attempted at all, the 3 day stale cleanup takes it
+        assert calls == []
+        assert file.isfile()
+
+    def test_read_unreadable_file_removed_best_effort(self, project_root, monkeypatch):
+        """F8: the read-once contract covers a file whose read failed"""
+        token = 'aabbccdd00112233'
+        file = GRACEFUL_RESTART.resume_file_of(token)
+        file.atomic_write(b'{}')
+
+        def unreadable(path):
+            raise OSError(5, 'Input/output error')
+
+        calls = []
+        real_remove = restart.atomic_remove
+
+        def spy_remove(path):
+            calls.append(path)
+            return real_remove(path)
+
+        monkeypatch.setattr(restart, 'atomic_read_bytes', unreadable)
+        monkeypatch.setattr(restart, 'atomic_remove', spy_remove)
+        monkeypatch.setenv(RESUME_TOKEN_ENV, f'{token}-checksum')
+        with logger.mock_capture_writer() as capture:
+            assert GRACEFUL_RESTART.read_resume() is None
+            assert capture.fd.any_contains('Resume file not readable')
+        # the unreadable file falls through to the same removal call
+        assert calls == [file]
+        assert not file.isfile()
+
+    def test_read_unreadable_file_kept_when_removal_fails(self, project_root, monkeypatch):
+        """A removal that fails only logs, the file stays for the stale cleanup"""
+        token = 'aabbccdd00112233'
+        file = GRACEFUL_RESTART.resume_file_of(token)
+        file.atomic_write(b'{}')
+
+        def unreadable(path):
+            raise OSError(5, 'Input/output error')
+
+        def locked_file(path):
+            raise OSError('the file is locked by another process')
+
+        monkeypatch.setattr(restart, 'atomic_read_bytes', unreadable)
+        monkeypatch.setattr(restart, 'atomic_remove', locked_file)
+        monkeypatch.setenv(RESUME_TOKEN_ENV, f'{token}-checksum')
+        with logger.mock_capture_writer() as capture:
+            assert GRACEFUL_RESTART.read_resume() is None
+            assert capture.fd.any_contains('Failed to remove the resume file')
+        # the fallback is resume_cleanup(), the read itself does not fail
+        assert file.isfile()
+
+    @pytest.mark.trio
+    async def test_removal_failure_does_not_block_the_resume(self, project_root, monkeypatch):
+        """A read file whose removal fails still yields its payload (best effort)"""
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
+        token = credential.partition('-')[0]
+        file = GRACEFUL_RESTART.resume_file_of(token)
+
+        def locked_file(path):
+            raise OSError('the file is locked by another process')
+
+        monkeypatch.setattr(restart, 'atomic_remove', locked_file)
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        with logger.mock_capture_writer() as capture:
+            record = GRACEFUL_RESTART.read_resume()
+            assert capture.fd.any_contains('Failed to remove the resume file')
+        assert isinstance(record, ResumeRecord)
+        assert record.configs == ['cfg_a']
+        # the leftover is inert (its credential was used), the stale cleanup ends it
+        assert file.isfile()
+
     def test_read_malformed_credential_returns_none(self, project_root, monkeypatch):
         file = GRACEFUL_RESTART.resume_file_of('deadbeef')
         file.atomic_write(b'{}')

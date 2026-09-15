@@ -440,6 +440,10 @@ class GracefulRestart:
         never be consumed. With a credential the file named by its token is read
         and deleted immediately -- a file never survives a read, whatever the
         verification result -- then the payload is verified against the checksum.
+        A file that cannot be read at all is removed best effort too, except
+        when the read was denied by permissions (the denial is taken as covering
+        the removal): the one-shot credential has no holder left, so nobody can
+        ever consume the file again.
 
         Returns:
             ResumeRecord | None: The verified record, or None (no credential, no
@@ -454,16 +458,9 @@ class GracefulRestart:
             logger.warning('[Restart] Resume file not read: malformed credential')
             return None
         file = self.resume_file_of(token)
-        try:
-            payload = atomic_read_bytes(file)
-        except FileNotFoundError:
-            logger.info(f'[Restart] Resume file not found: {file}')
+        payload = self._read_resume_file(file)
+        if payload is None:
             return None
-        except OSError as e:
-            logger.warning(f'[Restart] Resume file not readable: {file}: {e}')
-            return None
-        # read once: the file never survives a read, valid or not
-        atomic_remove(file)
         actual = self.resume_checksum(token, payload)
         if not hmac.compare_digest(actual, checksum):
             logger.warning('[Restart] Resume file dropped: checksum mismatch (tampered or corrupted)')
@@ -474,6 +471,53 @@ class GracefulRestart:
             logger.warning(f'[Restart] Resume file dropped: invalid payload: {e}')
             return None
         return record
+
+    def _read_resume_file(self, file):
+        """
+        Read the resume file, delete it, and return its payload
+
+        The read and the deletion are one step (read-once): a file that was read
+        never survives, whatever the verification result of its payload. A file
+        whose read failed is removed by the same call below -- this read was the
+        only holder of the one-shot credential, so nobody can ever consume it
+        again. The deletion is best effort: a failure only logs and leaves the
+        file to the 3 day stale cleanup, the payload (when there is one) is
+        returned all the same. Two failures return early: a missing file has
+        nothing to delete, and a permission denial is taken as covering the
+        removal as well (no attempt, and no retry loop on Windows).
+
+        Args:
+            file (PathStr): The file named by the credential
+
+        Returns:
+            bytes | None: The payload, or None (missing or unreadable)
+        """
+        try:
+            payload = atomic_read_bytes(file)
+        except FileNotFoundError:
+            logger.info(f'[Restart] Resume file not found: {file}')
+            return None
+        except PermissionError as e:
+            logger.warning(f'[Restart] Resume file not readable: {file}: {e}')
+            # the denial is taken as covering the removal too: no attempt (and
+            # no retry loop on Windows), the stale cleanup takes it
+            return None
+        except OSError as e:
+            logger.warning(f'[Restart] Resume file not readable: {file}: {e}')
+            # fall through to the removal below: this read was the only holder
+            # of the one-shot credential, so the file can never be consumed any
+            # more and must not linger for the 3 day stale cleanup
+            payload = None
+        # read once: the file never survives a read, valid or not (an unreadable
+        # file falls through to the same removal; a missing file and a permission
+        # denial returned early above)
+        try:
+            atomic_remove(file)
+        except OSError as e:
+            # best effort: a failed removal only leaves the file to the 3 day
+            # stale cleanup, the payload is returned all the same
+            logger.warning(f'[Restart] Failed to remove the resume file {file}: {e}')
+        return payload
 
     def resume_cleanup(self):
         """
