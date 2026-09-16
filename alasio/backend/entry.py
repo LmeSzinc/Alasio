@@ -35,7 +35,10 @@ def backend_entry(args):
     Args:
         args (list[str] | None): Command line args for the backend
     """
-    from alasio.backend.app import run
+    # asgi (the server layer) instead of app: asgi imports the ASGI app
+    # lazily, only after create_config() set PROJECT_ROOT -- the app chain
+    # binds env.PROJECT_ROOT at import time (see asgi.py)
+    from alasio.backend.asgi import run
     run(args)
 
 

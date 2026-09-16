@@ -1,166 +1,60 @@
 """
-Tests for alasio.backend.app.create_config.
+Tests for alasio.backend.app (create_app).
 
-Focus: the hypercorn SSL wiring. hypercorn Config uses `keyfile` /
-`certfile` field names (not uvicorn-style `ssl_keyfile` /
-`ssl_certfile`); assigning the wrong names would silently create plain
-instance attributes and leave the port plaintext.
+The SPA is served from the frontend build of the alasio root
+(<ALASIO_ROOT>/frontend/build, next to the package the backend was imported
+from). Building that path from PathStr(__file__) instead keeps the platform
+separators: uppath() on a Windows __file__ (backslashes) returns '' and the
+mount silently falls back to the cwd-relative 'frontend/build', which only
+resolves while the cwd happens to be the same tree.
 """
+import os
 
 import pytest
 
-from alasio.backend.app import create_config
+from alasio.backend.app import create_app
+from alasio.backend.dev.assets import SPANoCacheStaticFiles
+from alasio.ext.env import ALASIO_ROOT
+
+FRONTEND_BUILD = ALASIO_ROOT.joinpath('frontend/build')
 
 
-class FakeBackend:
-    def __init__(self, ssl):
-        self.Host = ''
-        self.Port = 0
-        self.WebuiSSLKey = '/path/key.pem' if ssl else None
-        self.WebuiSSLCert = '/path/cert.pem' if ssl else None
-
-
-class FakeDeployData:
-    def __init__(self, ssl):
-        self.Backend = FakeBackend(ssl)
-        # create_config reads `DeployConfig().config.data`
-        self.data = self
-        # create_config reformats the config after reading it
-        self.write_calls = 0
-
-    def show(self):
-        # create_config logs the deploy config through `.config.show()`
-        pass
-
-    def write(self, skip_same=True):
-        # create_config rewrites the config so read errors / comments are
-        # normalized (YamlConfig.write); the fake only records the call
-        self.write_calls += 1
-        return False
-
-
-class FakeDeployConfig:
-    def __init__(self, ssl):
-        self.config = FakeDeployData(ssl)
-
-
-class TestCreateConfig:
-    def test_ssl_sets_hypercorn_keyfile_certfile(self, monkeypatch):
-        """SSL configured: hypercorn must be given keyfile/certfile."""
-        monkeypatch.setattr(
-            'alasio.backend.app.apply_hypercorn_exclusivity_patch', lambda: None)
-        monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
-        monkeypatch.setattr(
-            'alasio.backend.app.DeployConfig',
-            lambda: FakeDeployConfig(ssl=True),
-        )
-
-        config = create_config([])
-
-        # the field names hypercorn actually reads
-        assert config.keyfile == '/path/key.pem'
-        assert config.certfile == '/path/cert.pem'
-        assert config.ssl_enabled
-
-    def test_no_ssl_leaves_plaintext(self, monkeypatch):
-        """No SSL configured: hypercorn stays plaintext."""
-        monkeypatch.setattr(
-            'alasio.backend.app.apply_hypercorn_exclusivity_patch', lambda: None)
-        monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
-        monkeypatch.setattr(
-            'alasio.backend.app.DeployConfig',
-            lambda: FakeDeployConfig(ssl=False),
-        )
-
-        config = create_config([])
-
-        assert config.keyfile is None
-        assert config.certfile is None
-        assert not config.ssl_enabled
-
-    def test_reformats_deploy_yaml_after_read(self, monkeypatch):
-        """The loaded config is written back, so the file is normalized
-        (comments / read errors) before the backend serves"""
-        monkeypatch.setattr(
-            'alasio.backend.app.apply_hypercorn_exclusivity_patch', lambda: None)
-        monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
-        fake = FakeDeployConfig(ssl=False)
-        monkeypatch.setattr('alasio.backend.app.DeployConfig', lambda: fake)
-
-        create_config([])
-
-        assert fake.config.write_calls == 1
-
-
-class TestBindAnnounce:
+def _norm(path):
     """
-    After a successful bind the backend must announce command:started to
-    the supervisor pipe, so recv_loop's startup window (and with it the
-    stdin listener) starts without waiting out startup_timeout.
+    Normalize a path for comparison: paths from the app are PathStr (forward
+    slashes) while the test builds them with os.path (platform separator).
+
+    Args:
+        path (str | None):
+
+    Returns:
+        str | None:
+    """
+    if path is None:
+        return None
+    return os.path.normcase(os.path.normpath(path))
+
+
+class TestFrontendMount:
+    """
+    create_app() must serve the SPA from the frontend build of the alasio
+    root.
     """
 
-    def test_create_sockets_announces_started(self, monkeypatch, free_port):
-        import builtins
-        import multiprocessing
-
-        parent_conn, child_conn = multiprocessing.Pipe()
-        monkeypatch.setattr(builtins, '__mpipe_conn__', child_conn, raising=False)
-        monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
-        monkeypatch.setattr(
-            'alasio.backend.app.DeployConfig',
-            lambda: FakeDeployConfig(ssl=False),
-        )
-
-        config = create_config(['--host', '127.0.0.1', '--port', str(free_port)])
-        sockets = config.create_sockets()
-        try:
-            assert parent_conn.poll(timeout=1)
-            assert parent_conn.recv_bytes() == b'command:started'
-        finally:
-            for sock in sockets.secure_sockets + sockets.insecure_sockets:
-                sock.close()
-            parent_conn.close()
-            child_conn.close()
-
-    def test_bind_failure_does_not_announce(self, monkeypatch):
+    def test_mounts_frontend_build_from_alasio_root(self):
         """
-        A bind failure (port in use) must raise without announcing: the
-        startup window stays open, so the supervisor treats the crash as a
-        startup failure instead of restart-looping.
+        The frontend mount resolves to <ALASIO_ROOT>/frontend/build, not to a
+        cwd-relative path.
         """
-        import builtins
-        import multiprocessing
-        import socket
-        import sys
+        app = create_app()
+        mounts = [route for route in app.routes
+                  if isinstance(getattr(route, 'app', None), SPANoCacheStaticFiles)]
 
-        # Occupy a port so create_sockets' bind must fail. On Windows the
-        # blocker needs SO_EXCLUSIVEADDRUSE: a plain bind could otherwise
-        # succeed against it (the port preemption the exclusivity patch
-        # exists to prevent).
-        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        if sys.platform == 'win32':
-            blocker.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-        blocker.bind(('127.0.0.1', 0))
-        blocker.listen()
-        port = blocker.getsockname()[1]
+        # a checkout without a built frontend: mount() logs and skips it
+        # (frontend/build is git-ignored, it exists after `pnpm build`)
+        if not os.path.isdir(FRONTEND_BUILD):
+            assert mounts == [], mounts
+            pytest.skip('frontend/build is not built in this checkout')
 
-        parent_conn, child_conn = multiprocessing.Pipe()
-        monkeypatch.setattr(builtins, '__mpipe_conn__', child_conn, raising=False)
-        monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
-        monkeypatch.setattr(
-            'alasio.backend.app.DeployConfig',
-            lambda: FakeDeployConfig(ssl=False),
-        )
-
-        config = create_config(['--host', '127.0.0.1', '--port', str(port)])
-        try:
-            with pytest.raises(OSError):
-                config.create_sockets()
-            # no announce: the startup window must stay open on bind failure.
-            # announce_started() lives in create_sockets() and runs after the
-            # bind, so nothing can be written once it raised
-            assert not parent_conn.poll()
-        finally:
-            blocker.close()
-            parent_conn.close()
-            child_conn.close()
+        assert len(mounts) == 1, mounts
+        assert _norm(mounts[0].app.directory) == _norm(FRONTEND_BUILD)

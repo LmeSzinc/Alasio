@@ -12,7 +12,7 @@ class TestAnnounceStarted:
     """
     Tests for announce_started: the pipe readiness announcement that ends
     the supervisor's startup window early (see BackendConfig.create_sockets
-    in app.py).
+    in asgi.py).
     """
 
     def test_sends_command_started_on_pipe(self, monkeypatch):

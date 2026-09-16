@@ -3,10 +3,11 @@ Supervisor-side script for root propagation tests.
 
 Started by tests/backend/test_root_propagation.py from a foreign cwd with
 --root <project root>. The backend entry calls the REAL create_config
-(production code path: env.set_project_root + os.chdir), prints its cwd and
-PROJECT_ROOT, then spawns a real mod worker which prints its own cwd and
-PROJECT_ROOT. All prints go to the process stdout, which the test collects
-(spawn children inherit the stdio chain).
+(production code path: env.set_project_root + os.chdir), prints its cwd,
+PROJECT_ROOT and the root the mod loader got bound to, then spawns a real
+mod worker which prints its own cwd and PROJECT_ROOT. All prints go to the
+process stdout, which the test collects (spawn children inherit the stdio
+chain).
 
 The module-level code stays light: it is re-executed by every spawn child
 (backend / worker) as __mp_main__.
@@ -40,13 +41,19 @@ class Scheduler:
 class RootPropagationSupervisor(Supervisor):
     @staticmethod
     def backend_entry(args):
-        # production code: parses --root, sets PROJECT_ROOT and chdirs
-        from alasio.backend.app import create_config
+        # production code: the server layer parses --root, sets PROJECT_ROOT
+        # and chdirs. The app chain may only be imported after that: the
+        # loader (MOD_LOADER = ModLoader(env.PROJECT_ROOT)) binds PROJECT_ROOT
+        # at import time and an earlier import would freeze an empty root.
+        from alasio.backend.asgi import create_config
         from alasio.ext import env
 
         create_config(args)
         print(f'BACKEND_CWD={os.getcwd()}', flush=True)
         print(f'BACKEND_ROOT={env.PROJECT_ROOT}', flush=True)
+
+        from alasio.config.entry.loader import MOD_LOADER
+        print(f'LOADER_ROOT={MOD_LOADER.root}', flush=True)
 
         # spawn a real mod worker (mod_entry real-mod branch: chdir to
         # mod_root, set_project_root(project_root), import entry, run)

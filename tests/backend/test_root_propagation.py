@@ -7,6 +7,12 @@ from the entry file) must reach every process of the chain:
 - backend: create_config sets env.PROJECT_ROOT and os.chdir() to the root,
   so both PROJECT_ROOT and cwd equal the supervisor-provided root even when
   the chain was started from a foreign cwd
+- loader: MOD_LOADER is bound to env.PROJECT_ROOT at import time
+  (MOD_LOADER = ModLoader(env.PROJECT_ROOT)), so the import chain that
+  reaches config/entry/loader must only run after create_config(). An
+  earlier import freezes the root to '', the mods that resolve their own
+  root through it get an empty one and workers are spawned with an empty
+  mod_root (see asgi.py)
 - worker: PROJECT_ROOT propagates through the spawn args (mod_entry calls
   env.set_project_root(project_root)); the worker cwd is the mod_root by
   design (mod_entry chdirs to the mod folder as the mod's relative-path
@@ -129,13 +135,22 @@ def chain_output():
 
 class TestRootPropagation:
     """
-    --root set by the supervisor must reach backend and worker, and the
-    backend cwd must follow the root (chdir) even from a foreign cwd.
+    --root set by the supervisor must reach backend, loader and worker, and
+    the backend cwd must follow the root (chdir) even from a foreign cwd.
     """
 
     def test_backend_cwd_and_project_root_equal_root(self, chain_output):
         assert _norm(_marker(chain_output, 'BACKEND_CWD')) == _norm(ROOT), chain_output
         assert _norm(_marker(chain_output, 'BACKEND_ROOT')) == _norm(ROOT), chain_output
+
+    def test_loader_root_equal_root(self, chain_output):
+        """
+        The mod loader binds env.PROJECT_ROOT when it is imported: importing
+        it before create_config() freezes the root to '' (and every mod that
+        resolves its own root through it), which makes worker_start() spawn
+        workers with an empty mod_root.
+        """
+        assert _norm(_marker(chain_output, 'LOADER_ROOT')) == _norm(ROOT), chain_output
 
     def test_worker_project_root_propagates(self, chain_output):
         assert _norm(_marker(chain_output, 'WORKER_ROOT')) == _norm(ROOT), chain_output
