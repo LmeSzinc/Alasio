@@ -1,41 +1,40 @@
 """
 Supervisor-side script for root propagation tests.
 
-Started by tests/backend/test_root_propagation.py from a foreign cwd with
---root <project root>. The backend entry calls the REAL create_config
-(production code path: env.set_project_root + os.chdir), prints its cwd,
-PROJECT_ROOT and the root the mod loader got bound to, then spawns a real
-mod worker which prints its own cwd and PROJECT_ROOT. All prints go to the
-process stdout, which the test collects (spawn children inherit the stdio
-chain).
+Started by tests/backend/test_root_propagation.py from a foreign cwd (the
+tests/backend folder) with --root <project root>. The backend entry calls the
+REAL create_config (production code path: env.set_project_root + os.chdir),
+prints its cwd, PROJECT_ROOT and the root the mod loader got bound to, then
+spawns a real mod worker which prints its own cwd and PROJECT_ROOT. All prints
+go to the process stdout, which the test collects (spawn children inherit the
+stdio chain).
 
-The module-level code stays light: it is re-executed by every spawn child
-(backend / worker) as __mp_main__.
+The module-level code stays light and is re-executed by every spawn child
+(backend / worker) as __mp_main__, which is what makes the log mute below
+reach all of them.
 """
 import builtins
 import multiprocessing
 import os
-import tempfile
 
 from alasio.backend.supervisor import Supervisor
 from alasio.backend.worker.bridge import mod_entry
+from alasio.logger import logger
 
-# Entry module of the throwaway worker mod: prints the worker's cwd and
-# PROJECT_ROOT, then returns immediately so the worker process exits.
-ENTRY_CODE = '''\
-import os
+# Mod the worker runs: the fixed fixture folder next to this script with its
+# entry file, so the test writes nothing at run time. path_main is relative to
+# mod_root, like a real mod entry.
+MOD_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'root_propagation_mod')
+PATH_MAIN = 'main.py'
 
-from alasio.ext import env
-
-
-class Scheduler:
-    def __init__(self, config_name):
-        print(f"WORKER_CWD={os.getcwd()}", flush=True)
-        print(f"WORKER_ROOT={env.PROJECT_ROOT}", flush=True)
-
-    def run(self):
-        pass
-'''
+# Every process of this chain is test-only, mute the log file target at the
+# module level, which each spawn child (backend / worker) re-executes: the
+# backend logs its 'Start' banner (create_config) BEFORE it sets PROJECT_ROOT,
+# and at that moment the log folder comes from the cwd, which is the test
+# directory (the chain is started from a foreign cwd on purpose). Unmuted, the
+# chain would leave a log folder next to the test. Same as the other test-only
+# processes, see supervisor/backends.py and worker_mods.mute_test_worker_logging.
+logger.mute(fd=True)
 
 
 class RootPropagationSupervisor(Supervisor):
@@ -57,18 +56,13 @@ class RootPropagationSupervisor(Supervisor):
 
         # spawn a real mod worker (mod_entry real-mod branch: chdir to
         # mod_root, set_project_root(project_root), import entry, run)
-        # path_main is relative to mod_root, like real mod entries
-        mod_root = tempfile.mkdtemp(prefix='alasio_root_test_mod_')
-        path_main = 'main.py'
-        with open(os.path.join(mod_root, path_main), 'w', encoding='utf-8') as f:
-            f.write(ENTRY_CODE)
-        print(f'MOD_ROOT={mod_root}', flush=True)
+        print(f'MOD_ROOT={MOD_ROOT}', flush=True)
 
         ctx = multiprocessing.get_context('spawn')
         parent_conn, child_conn = ctx.Pipe()
         proc = ctx.Process(
             target=mod_entry,
-            args=('RootTestMod', 'root_test', child_conn, str(env.PROJECT_ROOT), mod_root, path_main),
+            args=('RootTestMod', 'root_test', child_conn, str(env.PROJECT_ROOT), MOD_ROOT, PATH_MAIN),
             name='root-test-worker',
             daemon=True,
         )

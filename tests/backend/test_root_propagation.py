@@ -18,14 +18,15 @@ from the entry file) must reach every process of the chain:
   design (mod_entry chdirs to the mod folder as the mod's relative-path
   base), while the worker's initial cwd inherits the backend cwd (= root)
 
-The test launches tests/backend/root_propagation.py from a temporary
-foreign cwd and asserts on the stdout markers printed by the backend and
-the worker processes.
+The test launches tests/backend/root_propagation.py from a foreign cwd (the
+tests/backend folder, a cwd that is not the project root, so the root can only
+come from --root) and asserts on the stdout markers printed by the backend and
+the worker processes. The worker runs the fixed fixture mod
+tests/backend/root_propagation_mod (main.py).
 """
 import os
 import subprocess
 import sys
-import tempfile
 import time
 
 import pytest
@@ -34,7 +35,9 @@ from alasio.ext.env import ALASIO_ROOT
 
 # Project root, the value passed as --root (also the repo layout)
 ROOT = ALASIO_ROOT
-SCRIPT = ALASIO_ROOT.joinpath('tests/backend/root_propagation.py')
+# the test folder holds both the script and the fixture mod it spawns
+BACKEND_TEST_DIR = ALASIO_ROOT.joinpath('tests/backend')
+SCRIPT = BACKEND_TEST_DIR.joinpath('root_propagation.py')
 
 # generous window: the chain imports starlette / trio / hypercorn
 START_TIMEOUT = 30
@@ -50,7 +53,6 @@ def _run_chain():
     Returns:
         str: Full stdout of the whole process chain
     """
-    foreign_cwd = tempfile.mkdtemp(prefix='alasio_root_test_cwd_')
     env = os.environ.copy()
     existing = env.get('PYTHONPATH')
     # the launcher computes the root with stdlib, i.e. with the platform separator
@@ -59,7 +61,9 @@ def _run_chain():
 
     proc = subprocess.Popen(
         [sys.executable, SCRIPT, '--root', root],
-        cwd=foreign_cwd,
+        # foreign cwd: the test folder itself, it only has to be a path that is
+        # not the project root (no temp folder is created per run)
+        cwd=BACKEND_TEST_DIR,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
