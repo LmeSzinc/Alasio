@@ -92,26 +92,26 @@ class TestDeepIterDepth2:
 class TestDeepIter:
     def test_deep_iter_basic(self):
         d = {'a': {'b': {'c': 1}}}
-        # list[key], value
-        assert list(deep_iter(d, depth=3)) == [(['a', 'b', 'c'], 1)]
-        assert list(deep_keys(d, depth=3)) == [['a', 'b', 'c']]
+        # tuple[key], value
+        assert list(deep_iter(d, depth=3)) == [(('a', 'b', 'c'), 1)]
+        assert list(deep_keys(d, depth=3)) == [('a', 'b', 'c')]
         assert list(deep_values(d, depth=3)) == [1]
 
     def test_deep_iter_depth1(self):
         d = {'a': 1, 'b': {'c': 2}}
-        assert list(deep_iter(d, depth=1)) == [(['a'], 1), (['b'], {'c': 2})]
-        assert list(deep_keys(d, depth=1)) == [['a'], ['b']]
+        assert list(deep_iter(d, depth=1)) == [(('a',), 1), (('b',), {'c': 2})]
+        assert list(deep_keys(d, depth=1)) == [('a',), ('b',)]
         assert list(deep_values(d, depth=1)) == [1, {'c': 2}]
 
     def test_deep_iter_min_depth(self):
         d = {'a': 1, 'b': {'c': 2}}
         res = list(deep_iter(d, min_depth=1, depth=2))
-        assert (['a'], 1) in res
-        assert (['b', 'c'], 2) in res
+        assert (('a',), 1) in res
+        assert (('b', 'c'), 2) in res
 
     def test_deep_iter_min_eq_depth(self):
         d = {'a': {'b': 1}}
-        assert list(deep_iter(d, min_depth=2, depth=2)) == [(['a', 'b'], 1)]
+        assert list(deep_iter(d, min_depth=2, depth=2)) == [(('a', 'b'), 1)]
 
     def test_deep_iter_aggressive(self):
         # Empty dict
@@ -130,24 +130,24 @@ class TestDeepIter:
         d['a'] = d
         # Should not infinite loop
         res = list(deep_iter(d, depth=5))
-        # depth 1: (['a'], d)
-        # depth 2: (['a', 'a'], d)
+        # depth 1: (('a',), d)
+        # depth 2: (('a', 'a'), d)
         # ...
         assert len(res) == 1
-        assert res[0][0] == ['a', 'a', 'a', 'a', 'a']
+        assert res[0][0] == ('a',) * 5
 
     def test_deep_iter_complex(self):
         all_items = list(deep_iter(COMPLEX_DICT, min_depth=1, depth=4))
 
         expected_paths = [
-            (['a'], 1),
-            (['b', 'c'], 2),
-            (['b', 'd', 'e'], 3),
-            (['b', 'd', 'f', 'f1'], 4),
-            (['b', 'g'], 5),
-            (['h', 'i'], 6),
-            (['j'], 7),
-            (['k'], [8, 9])
+            (('a',), 1),
+            (('b', 'c'), 2),
+            (('b', 'd', 'e'), 3),
+            (('b', 'd', 'f', 'f1'), 4),
+            (('b', 'g'), 5),
+            (('h', 'i'), 6),
+            (('j',), 7),
+            (('k',), [8, 9])
         ]
 
         for path, val in expected_paths:
@@ -159,18 +159,18 @@ class TestDeepIter:
         # b: c, d, g
         # h: i
         # only depth 2 items are yielded
-        assert (['b', 'c'], 2) in res
-        assert (['b', 'd'], {'e': 3, 'f': {'f1': 4}}) in res
-        assert (['b', 'g'], 5) in res
-        assert (['h', 'i'], 6) in res
+        assert (('b', 'c'), 2) in res
+        assert (('b', 'd'), {'e': 3, 'f': {'f1': 4}}) in res
+        assert (('b', 'g'), 5) in res
+        assert (('h', 'i'), 6) in res
         assert len(res) == 4
 
     def test_deep_iter_depth2_min1(self):
         res = list(deep_iter(COMPLEX_DICT, min_depth=1, depth=2))
         # a, j, k (depth 1)
         # b.c, b.d, b.g, h.i (depth 2)
-        assert (['a'], 1) in res
-        assert (['b', 'c'], 2) in res
+        assert (('a',), 1) in res
+        assert (('b', 'c'), 2) in res
         assert len(res) == 7
 
     def test_deep_iter_depth2_3(self):
@@ -178,12 +178,12 @@ class TestDeepIter:
         res = list(deep_iter(COMPLEX_DICT, min_depth=2, depth=3))
         # Depth 2: b.c, b.g, h.i
         # Depth 3: b.d.e, b.d.f
-        assert (['b', 'c'], 2) in res
-        assert (['b', 'd', 'e'], 3) in res
+        assert (('b', 'c'), 2) in res
+        assert (('b', 'd', 'e'), 3) in res
         # b.d.f is dict, so it's not yielded if current < depth?
         # current=2: b.d is dict, added to q.
         # current=3: b.d.e (yield), b.d.f (yield as it's the target depth)
-        assert (['b', 'd', 'f'], {'f1': 4}) in res
+        assert (('b', 'd', 'f'), {'f1': 4}) in res
         assert len(res) == 5
 
 
@@ -199,33 +199,33 @@ class TestDeepIterUnlimited:
 
     def test_deep_iter_unlimited(self):
         assert list(deep_iter(self.DATA)) == [
-            (['a'], 1),
-            (['b', 'c'], 2),
-            (['b', 'd', 'e'], 3),
+            (('a',), 1),
+            (('b', 'c'), 2),
+            (('b', 'd', 'e'), 3),
         ]
 
     def test_deep_iter_unlimited_complex(self):
         # Values of all depths are yielded, level by level (BFS)
         assert list(deep_iter(COMPLEX_DICT)) == [
-            (['a'], 1),
-            (['j'], 7),
-            (['k'], [8, 9]),
-            (['b', 'c'], 2),
-            (['b', 'g'], 5),
-            (['h', 'i'], 6),
-            (['b', 'd', 'e'], 3),
-            (['b', 'd', 'f', 'f1'], 4),
+            (('a',), 1),
+            (('j',), 7),
+            (('k',), [8, 9]),
+            (('b', 'c'), 2),
+            (('b', 'g'), 5),
+            (('h', 'i'), 6),
+            (('b', 'd', 'e'), 3),
+            (('b', 'd', 'f', 'f1'), 4),
         ]
 
     def test_deep_iter_unlimited_min_depth(self):
         # min_depth works the same as with a depth limit
         assert list(deep_iter(self.DATA, min_depth=2)) == [
-            (['b', 'c'], 2),
-            (['b', 'd', 'e'], 3),
+            (('b', 'c'), 2),
+            (('b', 'd', 'e'), 3),
         ]
 
     def test_deep_keys_unlimited(self):
-        assert list(deep_keys(self.DATA)) == [['a'], ['b', 'c'], ['b', 'd', 'e']]
+        assert list(deep_keys(self.DATA)) == [('a',), ('b', 'c'), ('b', 'd', 'e')]
 
     def test_deep_values_unlimited(self):
         assert list(deep_values(self.DATA)) == [1, 2, 3]
@@ -242,18 +242,18 @@ class TestDeepIterUnlimited:
 
     def test_deep_iter_unlimited_empty_dict(self):
         # An empty dict has nothing to yield, it is stepped into and dropped
-        assert list(deep_iter({'a': {}, 'b': 1})) == [(['b'], 1)]
-        assert list(deep_keys({'a': {}, 'b': 1})) == [['b']]
+        assert list(deep_iter({'a': {}, 'b': 1})) == [(('b',), 1)]
+        assert list(deep_keys({'a': {}, 'b': 1})) == [('b',)]
         assert list(deep_values({'a': {}, 'b': 1})) == [1]
 
     def test_deep_iter_unlimited_shared_dict(self):
         # A dict met twice is stepped into twice, the same as with a depth limit
         shared = {'x': 1}
         d = {'a': shared, 'b': shared}
-        assert list(deep_iter(d)) == [(['a', 'x'], 1), (['b', 'x'], 1)]
-        assert list(deep_keys(d)) == [['a', 'x'], ['b', 'x']]
+        assert list(deep_iter(d)) == [(('a', 'x'), 1), (('b', 'x'), 1)]
+        assert list(deep_keys(d)) == [('a', 'x'), ('b', 'x')]
         assert list(deep_values(d)) == [1, 1]
-        assert list(deep_iter(d, min_depth=2, depth=2)) == [(['a', 'x'], 1), (['b', 'x'], 1)]
+        assert list(deep_iter(d, min_depth=2, depth=2)) == [(('a', 'x'), 1), (('b', 'x'), 1)]
 
     def test_deep_iter_unlimited_circular_raises(self):
         # A circular reference raises instead of looping forever
@@ -266,16 +266,16 @@ class TestDeepIterUnlimited:
         with pytest.raises(RecursionError):
             list(deep_values(d))
         # A `depth` bounds the iteration, no error is raised
-        assert list(deep_iter(d, min_depth=3, depth=3)) == [(['a', 'a', 'a'], d)]
+        assert list(deep_iter(d, min_depth=3, depth=3)) == [(('a', 'a', 'a'), d)]
 
     def test_deep_iter_unlimited_deep_data(self):
         # A deep dict within max_recursion is fully iterated
         d = build_chain(90)
-        assert list(deep_iter(d)) == [(['k'] * 90 + ['leaf'], 1)]
+        assert list(deep_iter(d)) == [(('k',) * 90 + ('leaf',), 1)]
 
     def test_deep_iter_max_recursion_default(self):
         # max_recursion defaults to 1000, the default recursion limit of python
-        assert list(deep_iter(build_chain(999))) == [(['k'] * 999 + ['leaf'], 1)]
+        assert list(deep_iter(build_chain(999))) == [(('k',) * 999 + ('leaf',), 1)]
         with pytest.raises(RecursionError):
             list(deep_iter(build_chain(1000)))
 
@@ -289,9 +289,9 @@ class TestDeepIterUnlimited:
         with pytest.raises(RecursionError):
             list(deep_values(d, max_recursion=10))
         # A bigger max_recursion iterates the whole chain
-        assert list(deep_iter(d, max_recursion=16)) == [(['k'] * 15 + ['leaf'], 1)]
+        assert list(deep_iter(d, max_recursion=16)) == [(('k',) * 15 + ('leaf',), 1)]
         # An explicit `depth` is not bounded by max_recursion
-        assert list(deep_iter(d, depth=16)) == [(['k'] * 15 + ['leaf'], 1)]
+        assert list(deep_iter(d, depth=16)) == [(('k',) * 15 + ('leaf',), 1)]
 
 
 class TestDeepIterDiff:
@@ -300,35 +300,35 @@ class TestDeepIterDiff:
         d2 = {'a': 2, 'b': {'c': 2, 'd': 3}}
         diff = list(deep_iter_diff(d1, d2))
         # path, val_before, val_after
-        assert (['a'], 1, 2) in diff
-        assert (['b', 'd'], None, 3) in diff
+        assert (('a',), 1, 2) in diff
+        assert (('b', 'd'), None, 3) in diff
 
     def test_deep_iter_diff_identical(self):
         d = {'a': 1, 'b': {'c': 2}}
         assert list(deep_iter_diff(d, {'a': 1, 'b': {'c': 2}})) == []
 
     def test_deep_iter_diff_non_dict(self):
-        assert list(deep_iter_diff({'a': 1}, 2)) == [([], {'a': 1}, 2)]
-        assert list(deep_iter_diff(1, {'a': 2})) == [([], 1, {'a': 2})]
+        assert list(deep_iter_diff({'a': 1}, 2)) == [((), {'a': 1}, 2)]
+        assert list(deep_iter_diff(1, {'a': 2})) == [((), 1, {'a': 2})]
 
     def test_deep_iter_diff_nested_non_dict(self):
         # Test when nested values have different types
         d1 = {'a': {'b': 1}}
         d2 = {'a': 2}
         diff = list(deep_iter_diff(d1, d2))
-        assert (['a'], {'b': 1}, 2) in diff
+        assert (('a',), {'b': 1}, 2) in diff
 
     def test_deep_iter_diff_deleted(self):
         d1 = {'a': 1, 'b': 2}
         d2 = {'a': 1}
         diff = list(deep_iter_diff(d1, d2))
-        assert (['b'], 2, None) in diff
+        assert (('b',), 2, None) in diff
 
     def test_deep_iter_diff_equal_value_different_type(self):
         # [1, 2] != (1, 2), and neither is a dict -> reported as a diff
         d1 = {'a': [1, 2]}
         d2 = {'a': (1, 2)}
-        assert list(deep_iter_diff(d1, d2)) == [(['a'], [1, 2], (1, 2))]
+        assert list(deep_iter_diff(d1, d2)) == [(('a',), [1, 2], (1, 2))]
 
     def test_deep_iter_diff_circular(self):
         # Circular references must not raise RecursionError or loop forever
@@ -347,7 +347,7 @@ class TestDeepIterDiff:
         d2['a'] = d2
         d2['x'] = 2
         diff = list(deep_iter_diff(d1, d2))
-        assert (['x'], 1, 2) in diff
+        assert (('x',), 1, 2) in diff
 
     def test_deep_iter_diff_deep_equal(self):
         # Very deep nested equal dicts must not raise RecursionError
@@ -369,30 +369,30 @@ class TestDeepIterPatch:
         after = {'a': 1, 'c': 3}
         patch = list(deep_iter_patch(before, after))
         # op, path, val_after
-        assert (OP_DEL, ['b'], None) in patch
-        assert (OP_ADD, ['c'], 3) in patch
+        assert (OP_DEL, ('b',), None) in patch
+        assert (OP_ADD, ('c',), 3) in patch
 
     def test_deep_iter_patch_identical(self):
         d = {'a': 1}
         assert list(deep_iter_patch(d, {'a': 1})) == []
 
     def test_deep_iter_patch_non_dict(self):
-        assert list(deep_iter_patch({'a': 1}, 2)) == [(OP_SET, [], 2)]
+        assert list(deep_iter_patch({'a': 1}, 2)) == [(OP_SET, (), 2)]
 
     def test_deep_iter_patch_set(self):
         before = {'a': 1}
         after = {'a': 2}
-        assert list(deep_iter_patch(before, after)) == [(OP_SET, ['a'], 2)]
+        assert list(deep_iter_patch(before, after)) == [(OP_SET, ('a',), 2)]
 
     def test_deep_iter_patch_nested_add(self):
         before = {'a': {'b': 1}}
         after = {'a': {'b': 1, 'c': 2}}
-        assert list(deep_iter_patch(before, after)) == [(OP_ADD, ['a', 'c'], 2)]
+        assert list(deep_iter_patch(before, after)) == [(OP_ADD, ('a', 'c'), 2)]
 
     def test_deep_iter_patch_nested_del(self):
         before = {'a': {'b': 1, 'c': 2}}
         after = {'a': {'b': 1}}
-        assert list(deep_iter_patch(before, after)) == [(OP_DEL, ['a', 'c'], None)]
+        assert list(deep_iter_patch(before, after)) == [(OP_DEL, ('a', 'c'), None)]
 
     def test_deep_iter_patch_circular(self):
         # Circular references must not raise RecursionError or loop forever

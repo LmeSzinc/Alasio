@@ -700,7 +700,7 @@ def deep_iter(data, min_depth=None, depth=None, max_recursion=1000):
             RecursionError, pass a bigger value to iterate a legit deep dict
 
     Yields:
-        tuple[list[Any], Any]: list[key], value
+        tuple[tuple[Any, ...], Any]: tuple[key], value
     """
     if min_depth is None:
         min_depth = 1 if depth is None else depth
@@ -711,13 +711,13 @@ def deep_iter(data, min_depth=None, depth=None, max_recursion=1000):
     try:
         if depth == 1:
             for k, v in data.items():
-                yield [k], v
+                yield (k,), v
             return
         # Iter first depth
         elif min_depth == 1:
             q = deque()
             for k, v in data.items():
-                key = [k]
+                key = (k,)
                 if type(v) is dict:
                     q.append((key, v))
                 else:
@@ -726,7 +726,7 @@ def deep_iter(data, min_depth=None, depth=None, max_recursion=1000):
         else:
             q = deque()
             for k, v in data.items():
-                key = [k]
+                key = (k,)
                 if type(v) is dict:
                     q.append((key, v))
     except AttributeError:
@@ -741,12 +741,12 @@ def deep_iter(data, min_depth=None, depth=None, max_recursion=1000):
         if current == depth:
             for key, data in q:
                 for k, v in data.items():
-                    yield [*key, k], v
+                    yield key + (k,), v
         # in target depth, or unlimited depth
         elif depth is None or min_depth <= current < depth:
             for key, data in q:
                 for k, v in data.items():
-                    subkey = [*key, k]
+                    subkey = key + (k,)
                     if type(v) is dict:
                         new_q.append((subkey, v))
                     else:
@@ -755,7 +755,7 @@ def deep_iter(data, min_depth=None, depth=None, max_recursion=1000):
         else:
             for key, data in q:
                 for k, v in data.items():
-                    subkey = [*key, k]
+                    subkey = key + (k,)
                     if type(v) is dict:
                         new_q.append((subkey, v))
         q = new_q
@@ -784,7 +784,7 @@ def deep_keys(data, min_depth=None, depth=None, max_recursion=1000):
             RecursionError, pass a bigger value to iterate a legit deep dict
 
     Yields:
-        list[Any]: list[key]
+        tuple[Any, ...]: tuple[key]
     """
     if min_depth is None:
         min_depth = 1 if depth is None else depth
@@ -795,13 +795,13 @@ def deep_keys(data, min_depth=None, depth=None, max_recursion=1000):
     try:
         if depth == 1:
             for k, v in data.items():
-                yield [k]
+                yield (k,)
             return
         # Iter first depth
         elif min_depth == 1:
             q = deque()
             for k, v in data.items():
-                key = [k]
+                key = (k,)
                 if type(v) is dict:
                     q.append((key, v))
                 else:
@@ -810,7 +810,7 @@ def deep_keys(data, min_depth=None, depth=None, max_recursion=1000):
         else:
             q = deque()
             for k, v in data.items():
-                key = [k]
+                key = (k,)
                 if type(v) is dict:
                     q.append((key, v))
     except AttributeError:
@@ -825,12 +825,12 @@ def deep_keys(data, min_depth=None, depth=None, max_recursion=1000):
         if current == depth:
             for key, data in q:
                 for k in data.keys():
-                    yield [*key, k]
+                    yield key + (k,)
         # in target depth, or unlimited depth
         elif depth is None or min_depth <= current < depth:
             for key, data in q:
                 for k, v in data.items():
-                    subkey = [*key, k]
+                    subkey = key + (k,)
                     if type(v) is dict:
                         new_q.append((subkey, v))
                     else:
@@ -839,7 +839,7 @@ def deep_keys(data, min_depth=None, depth=None, max_recursion=1000):
         else:
             for key, data in q:
                 for k, v in data.items():
-                    subkey = [*key, k]
+                    subkey = key + (k,)
                     if type(v) is dict:
                         new_q.append((subkey, v))
         q = new_q
@@ -941,7 +941,7 @@ def deep_iter_diff(before, after):
         after:
 
     Yields:
-        list[str]: Key path
+        tuple[str, ...]: Key path
         Any: Value in before, or None if not exists
         Any: Value in after, or None if not exists
     """
@@ -952,12 +952,12 @@ def deep_iter_diff(before, after):
         # Circular reference or too deep to compare: fall through to diff
         pass
     if type(before) is not dict or type(after) is not dict:
-        yield [], before, after
+        yield (), before, after
         return
 
     # Guard against circular references
     visited = set()
-    queue = deque([([], before, after)])
+    queue = deque([((), before, after)])
     while True:
         new_queue = deque()
         for path, d1, d2 in queue:
@@ -974,12 +974,12 @@ def deep_iter_diff(before, after):
                 except KeyError:
                     # Safe to access d1[key], because key came from the union of both
                     # If it's not in d2 then it's in d1
-                    yield path + [key], d1[key], None
+                    yield path + (key,), d1[key], None
                     continue
                 try:
                     val1 = d1[key]
                 except KeyError:
-                    yield path + [key], None, val2
+                    yield path + (key,), None, val2
                     continue
                 # Compare dict first, which is pretty fast
                 try:
@@ -989,9 +989,9 @@ def deep_iter_diff(before, after):
                     diff = True
                 if diff:
                     if type(val1) is dict and type(val2) is dict:
-                        new_queue.append((path + [key], val1, val2))
+                        new_queue.append((path + (key,), val1, val2))
                     else:
-                        yield path + [key], val1, val2
+                        yield path + (key,), val1, val2
         queue = new_queue
         if not queue:
             break
@@ -1009,7 +1009,7 @@ def deep_iter_patch(before, after):
 
     Yields:
         str: OP_ADD, OP_SET, OP_DEL
-        list[str]: Key path
+        tuple[str, ...]: Key path
         Any: Value in after,
             or None of event is OP_DEL
     """
@@ -1020,12 +1020,12 @@ def deep_iter_patch(before, after):
         # Circular reference or too deep to compare: fall through to patch
         pass
     if type(before) is not dict or type(after) is not dict:
-        yield OP_SET, [], after
+        yield OP_SET, (), after
         return
 
     # Guard against circular references
     visited = set()
-    queue = deque([([], before, after)])
+    queue = deque([((), before, after)])
     while True:
         new_queue = deque()
         for path, d1, d2 in queue:
@@ -1040,12 +1040,12 @@ def deep_iter_patch(before, after):
                 try:
                     val2 = d2[key]
                 except KeyError:
-                    yield OP_DEL, path + [key], None
+                    yield OP_DEL, path + (key,), None
                     continue
                 try:
                     val1 = d1[key]
                 except KeyError:
-                    yield OP_ADD, path + [key], val2
+                    yield OP_ADD, path + (key,), val2
                     continue
                 # Compare dict first, which is pretty fast
                 try:
@@ -1055,9 +1055,9 @@ def deep_iter_patch(before, after):
                     diff = True
                 if diff:
                     if type(val1) is dict and type(val2) is dict:
-                        new_queue.append((path + [key], val1, val2))
+                        new_queue.append((path + (key,), val1, val2))
                     else:
-                        yield OP_SET, path + [key], val2
+                        yield OP_SET, path + (key,), val2
         queue = new_queue
         if not queue:
             break
