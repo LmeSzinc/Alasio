@@ -29,18 +29,16 @@ block calls, so an archive is never left open by accident.
 import hashlib
 import os
 
+import msgspec
+
 from alasio.ext.cache import InstanceCacheOperation, cached_property
-from alasio.ext.deep import deep_get, deep_pop
 from alasio.ext.path.atomic import CHUNK_SIZE, atomic_open, file_write
 from alasio.ext.path.validate import validate_filename, validate_filepath, validate_resolve_filepath
 
 from .crawl import crawl_folder
 from .errors import AsarEntryNotFoundError, AsarError, AsarFormatError, AsarPathError, AsarUnsupportedError
-from .format import read_header
-from .model import (
-    KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, canonical_entries, decode_header, ensure_dir, has_unpacked_ancestor,
-    read_entries, set_leaf
-)
+from .format import MAX_PATH_DEPTH, read_header
+from .model import KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, canonical_entries, keys_path, path_keys, read_entries
 from .pack import ContentVerifier, hash_file, pack_archive, write_content
 from .scan import REGION_BUDGET, Member, build_regions, scan_regions
 from .source import LocalFileSource, MemorySource, RangeSource
@@ -60,7 +58,7 @@ class _Header:
     Attributes:
         data_offset (int): Offset of the first content byte, the header is what
             comes before it, the 8 bytes of the frame of the archive included
-        files (dict): Nested entry table, see ``AsarArchive.files``
+        files (dict): Flat entry table, see ``AsarArchive.files``
     """
     __slots__ = ('data_offset', 'files')
 
@@ -83,7 +81,7 @@ def check_archive_path(path):
         path (str): Path inside the archive, POSIX separators
 
     Returns:
-        str: Normalized archive path
+        tuple: Path segments, the key of the entry in the table
 
     Raises:
         AsarPathError: If the path is absolute, empty or has an invalid segment
@@ -93,12 +91,14 @@ def check_archive_path(path):
     normalized = path.replace('\\', '/')
     if normalized.startswith('/'):
         raise AsarPathError(f'Archive path must be relative, got "{path}"')
-    for part in normalized.split('/'):
+    # The only split of a path that is added: everything below takes the segments
+    keys = path_keys(normalized)
+    for name in keys:
         try:
-            validate_filename(part)
+            validate_filename(name)
         except ValueError as e:
             raise AsarPathError(f'Invalid archive path "{path}": {e}')
-    return normalized
+    return keys
 
 
 def check_target_path(root, path):
@@ -246,10 +246,11 @@ class AsarArchive:
         max_size (int): Refuse an archive larger than this, in bytes, None to
             accept any size. An archive may come from the network, so the update
             flow should pass the expected size limit
-        files (dict): Nested entry table, a directory is a dict of its children
-            and a file or a link is an ``AsarFileInfo``. The attributes of a
-            directory itself are stored under the ``None`` key, so a plain
-            directory is just ``{name: child}``
+        files (dict): Flat entry table, ``{keys: AsarFileInfo}`` where ``keys``
+            is the tuple of the path segments of an entry. A directory is an
+            entry like any other, so an empty directory and the unpacked flag
+            of a directory are part of the table. ``entry(path)`` and
+            ``iter_entries()`` are the ways to read it
         header_size (int): Header pickle length, the data area starts at 8 + it
         data_offset (int): Offset of the first content byte
         fd (io.IOBase): Open handle of the archive file, None for an archive
@@ -319,18 +320,29 @@ class AsarArchive:
         # header leaves it, on the first content byte
         archive_size = os.fstat(f.fileno()).st_size
         json_bytes, data_offset = read_header(f)
+        # The header JSON is the input of the module that comes from the outside,
+        # so its errors are translated to the module ones here
+        try:
+            header = msgspec.json.decode(json_bytes)
+        except msgspec.DecodeError as e:
+            raise AsarFormatError(f'Header is not valid JSON: {e}')
+        except RecursionError:
+            # msgspec raises RecursionError instead of DecodeError on a deep
+            # nesting, see MAX_PATH_DEPTH
+            raise AsarFormatError(f'Header is nested too deeply, over {MAX_PATH_DEPTH} segments')
         # The table carries the source of every content, and the source of an
         # unpacked entry is the file it is copied to next to the archive
-        files = read_entries(decode_header(json_bytes), archive_size, data_offset, self.unpacked_path)
+        files = read_entries(header, archive_size, data_offset, self.unpacked_path)
         return _Header(data_offset, files)
 
     @property
     def files(self):
         """
-        Get the nested entry table of the archive.
+        Get the flat entry table of the archive.
 
         Returns:
-            dict: ``{name: dict | AsarFileInfo}``, see the class documentation
+            dict[tuple[str, ...], AsarFileInfo]: The entries of the archive, see
+                the class documentation
         """
         return self.header.files
 
@@ -410,39 +422,27 @@ class AsarArchive:
             name (str): Archive path
 
         Returns:
-            AsarFileInfo: Entry, the attributes of a directory that has none of
-                its own are built on the fly
+            AsarFileInfo: Entry
 
         Raises:
             AsarEntryNotFoundError: If there is no such entry
         """
-        node = deep_get(self.files, name.split('/'))
-        if node is None:
+        info = self.files.get(path_keys(name))
+        if info is None:
             raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
-        if type(node) is dict:
-            info = node.get(None)
-            if info is not None:
-                return info
-            return AsarFileInfo(path=name, kind=KIND_DIR)
-        return node
+        return info
 
     def iter_entries(self):
         """
         Iter every entry of the archive, the directories included.
 
         Yields:
-            (str, AsarFileInfo): Path and entry, in the canonical order of an
-                archive this module writes, a directory comes before its content
+            tuple[str, AsarFileInfo]: Path and entry, in the canonical order of
+                an archive this module writes, a directory comes before its
+                content
         """
-        for keys, node in canonical_entries(self.files):
-            path = '/'.join(keys)
-            if type(node) is dict:
-                info = node.get(None)
-                if info is None:
-                    info = AsarFileInfo(path=path, kind=KIND_DIR)
-                yield path, info
-                continue
-            yield path, node
+        for keys, info in canonical_entries(self.files):
+            yield keys_path(keys), info
 
     def resolve(self, name):
         """
@@ -456,30 +456,36 @@ class AsarArchive:
             name (str): Archive path
 
         Returns:
-            (str, AsarFileInfo): Path and entry it points to
+            tuple[str, AsarFileInfo]: Path and entry it points to
 
         Raises:
             AsarEntryNotFoundError: If the entry or a link target is missing
             AsarFormatError: If the links are circular or too deep
         """
+        keys = path_keys(name)
         visited = set()
         while True:
-            parts = name.split('/')
             replaced = False
             # An intermediate segment may be a link to another directory
-            for index in range(len(parts) - 1):
-                info = deep_get(self.files, parts[:index + 1])
-                if info is None or type(info) is dict or info.kind != KIND_LINK:
+            for depth in range(1, len(keys)):
+                info = self.files.get(keys[:depth])
+                if info is None or info.kind != KIND_LINK:
                     continue
-                name = f'{self._follow("/".join(parts[:index + 1]), info, visited)}/{"/".join(parts[index + 1:])}'
+                # The target of the link is followed and the rest of the path is
+                # appended to it, the segments of the path stay segments
+                keys = path_keys(self._follow(keys_path(keys[:depth]), info, visited)) + keys[depth:]
                 replaced = True
                 break
             if replaced:
                 continue
-            info = self.entry(name)
+            info = self.files.get(keys)
+            if info is None:
+                raise AsarEntryNotFoundError(
+                    f'Entry "{keys_path(keys)}" does not exist in the archive'
+                )
             if info.kind != KIND_LINK:
-                return name, info
-            name = self._follow(name, info, visited)
+                return keys_path(keys), info
+            keys = path_keys(self._follow(keys_path(keys), info, visited))
 
     def _follow(self, name, info, visited):
         """
@@ -536,27 +542,77 @@ class AsarArchive:
             if path is None:
                 raise ValueError('add_file() needs an arc_path when there is no path')
             arc_path = os.path.basename(path)
-        arc_path = check_archive_path(arc_path)
-        keys = arc_path.split('/')
-        previous = deep_get(self.files, keys)
-        if previous is not None and type(previous) is dict:
-            raise AsarPathError(f'Archive path "{arc_path}" is already a directory')
+        keys = check_archive_path(arc_path)
+        return self._set_file(keys, MemorySource(data) if data is not None else LocalFileSource(path), unpacked)
+
+    def _set_file(self, keys, source, unpacked):
+        """
+        Put a file entry into the table, creating the directories above it.
+
+        Args:
+            keys (tuple): Path segments of the entry
+            source (ContentSource): Where the content of the file comes from
+            unpacked (bool): Store the content next to the archive, None to
+                inherit the flag of the entry that is replaced or of the
+                directory the entry is added to
+
+        Returns:
+            AsarFileInfo: The entry
+
+        Raises:
+            AsarPathError: If the path is used by a directory, or if a parent of
+                it is used by a file
+        """
+        previous = self.files.get(keys)
+        if previous is not None and previous.kind == KIND_DIR:
+            raise AsarPathError(f'Archive path "{keys_path(keys)}" is already a directory')
+        # One pass over the parents: the missing ones are created, a file in the
+        # way is refused, and a directory that is stored unpacked is reported
+        inherited = self._ensure_parents(keys)
         if unpacked is None:
-            if previous is not None:
-                unpacked = previous.unpacked
-            else:
-                # A new entry follows the directory it is added to, so that a
-                # native module added below an unpacked directory is stored the
-                # same way as its neighbours
-                unpacked = has_unpacked_ancestor(self.files, keys)
-        info = AsarFileInfo(
-            path=arc_path,
-            kind=KIND_FILE,
-            unpacked=bool(unpacked),
-            source=MemorySource(data) if data is not None else LocalFileSource(path),
-        )
-        set_leaf(self.files, arc_path, info)
+            # A new entry follows the directory it is added to, so that a native
+            # module added below an unpacked directory is stored the same way as
+            # its neighbours
+            unpacked = inherited if previous is None else previous.unpacked
+        info = AsarFileInfo(kind=KIND_FILE, unpacked=bool(unpacked), source=source)
+        # Replacing an entry keeps its position: assigning a key of a dict a
+        # second time does not move it
+        self.files[keys] = info
         return info
+
+    def _ensure_parents(self, keys):
+        """
+        Create the directories above an entry and check the path it is put at.
+
+        Missing levels are created as directories, a level that is used by a
+        file is refused, and the unpacked flag of the directories is reported so
+        that the caller can let the entry inherit it. One pass over the prefixes
+        of the path: a caller that has to look the path up anyway (the entry it
+        replaces, the conflict of its name) does it on its own, but the path is
+        never walked a second time.
+
+        Args:
+            keys (tuple): Path segments of the entry, the entry itself is not
+                looked at
+
+        Returns:
+            bool: True when a directory above the entry is stored unpacked
+
+        Raises:
+            AsarPathError: If a parent of the entry is used by a file
+        """
+        unpacked = False
+        parent_keys = ()
+        for name in keys[:-1]:
+            parent_keys += (name,)
+            parent = self.files.get(parent_keys)
+            if parent is None:
+                self.files[parent_keys] = AsarFileInfo(kind=KIND_DIR)
+            elif parent.kind != KIND_DIR:
+                raise AsarPathError(f'Archive path "{keys_path(parent_keys)}" is already a file')
+            elif parent.unpacked:
+                unpacked = True
+        return unpacked
 
     def add_folder(self, root, include=None, exclude=None, unpack=None, unpack_dir=None):
         """
@@ -583,13 +639,23 @@ class AsarArchive:
             root, include=include, exclude=exclude, unpack=unpack, unpack_dir=unpack_dir,
         )
         for arc_path, local_path, kind, unpacked in entries:
-            arc_path = check_archive_path(arc_path)
+            # The path is checked once here, the entry is put into the table with
+            # the segments it gives: the tree of the directory is not validated
+            # a second time by the file entries
+            keys = check_archive_path(arc_path)
             if kind != KIND_DIR:
-                self.add_file(path=local_path, arc_path=arc_path, unpacked=unpacked)
+                self._set_file(keys, LocalFileSource(local_path), unpacked)
                 continue
-            children = ensure_dir(self.files, arc_path)
-            if unpacked and children.get(None) is None:
-                children[None] = AsarFileInfo(path=arc_path, kind=KIND_DIR, unpacked=True)
+            # A directory of the crawl may only be kept because it matches the
+            # include patterns, its parents may be missing from the archive
+            self._ensure_parents(keys)
+            info = self.files.get(keys)
+            if info is None:
+                self.files[keys] = AsarFileInfo(kind=KIND_DIR, unpacked=unpacked)
+            elif info.kind != KIND_DIR:
+                raise AsarPathError(f'Archive path "{keys_path(keys)}" is already a file')
+            elif unpacked:
+                info.unpacked = True
         return len(entries)
 
     def del_file(self, name):
@@ -606,12 +672,13 @@ class AsarArchive:
             AsarEntryNotFoundError: If there is no such entry
             AsarPathError: If the entry is a directory, use ``del_folder()``
         """
-        node = deep_get(self.files, name.split('/'))
-        if node is None:
+        keys = path_keys(name)
+        info = self.files.get(keys)
+        if info is None:
             raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
-        if type(node) is dict:
+        if info.kind == KIND_DIR:
             raise AsarPathError(f'Entry "{name}" is a directory, use del_folder() to delete it')
-        deep_pop(self.files, name.split('/'))
+        del self.files[keys]
         return 1
 
     def del_folder(self, name):
@@ -631,24 +698,19 @@ class AsarArchive:
             AsarEntryNotFoundError: If there is no such entry
             AsarPathError: If the entry is a file, use ``del_file()``
         """
-        node = deep_get(self.files, name.split('/'))
-        if node is None:
+        keys = path_keys(name)
+        info = self.files.get(keys)
+        if info is None:
             raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
-        if type(node) is not dict:
+        if info.kind != KIND_DIR:
             raise AsarPathError(f'Entry "{name}" is a file, use del_file() to delete it')
-        # The subtree is counted before it is removed, and it is removed in one
-        # pop, never while a caller iterates the table
-        count = 1
-        stack = [node]
-        while stack:
-            for child_name, child in stack.pop().items():
-                if child_name is None:
-                    continue
-                count += 1
-                if type(child) is dict:
-                    stack.append(child)
-        deep_pop(self.files, name.split('/'))
-        return count
+        # The subtree is counted and collected before it is removed, never while
+        # the table is iterated, and one key of the table is one pop
+        depth = len(keys)
+        removed = [entry_keys for entry_keys in self.files if entry_keys[:depth] == keys]
+        for entry_keys in removed:
+            del self.files[entry_keys]
+        return len(removed)
 
     # --------------------------------------------------------------- reading
 

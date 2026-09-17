@@ -149,7 +149,8 @@ def spied_archive(fs, monkeypatch, path):
         path (str): Path of the archive
 
     Returns:
-        (AsarArchive, SpyHandle): The archive and the handle it reads through
+        tuple[AsarArchive, SpyHandle]: The archive and the handle it reads
+            through
     """
     original = archive_module.atomic_open
     handles = []

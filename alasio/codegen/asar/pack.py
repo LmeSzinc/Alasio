@@ -16,11 +16,13 @@ size, and no temporary file is used to spool the content.
 import hashlib
 import os
 
+import msgspec
+
 from alasio.ext.path.atomic import CHUNK_SIZE, file_read_bytes_stream, file_write, replace_tmp, to_tmp_file
 
 from .errors import AsarError, AsarUnsupportedError
 from .format import BLOCK_SIZE, UINT32_MAX, pack_header
-from .model import KIND_FILE, Integrity, build_header, canonical_entries, encode_header, mark_unpacked
+from .model import KIND_DIR, KIND_FILE, Integrity, build_header, canonical_entries, keys_path
 
 # Content of files not larger than this is kept in memory after pass 1, so that
 # an archive of many small files (the common case) is read only once
@@ -175,9 +177,9 @@ def hash_content(chunks, integrity=True):
         integrity (bool): Calculate the SHA256 hashes
 
     Returns:
-        (int, Integrity, bytearray): ``(size, integrity or None, cached
-            content)``, the cache is None once the content grows over
-            ``CACHE_FILE_SIZE``
+        tuple[int, Integrity, bytearray]: The size, the integrity of the content
+            (None when it was not calculated) and the cached content, the cache
+            is None once the content grows over ``CACHE_FILE_SIZE``
 
     Raises:
         AsarUnsupportedError: If the content is larger than the format allows
@@ -220,11 +222,12 @@ def hash_content(chunks, integrity=True):
     return size, Integrity.new(hasher.hexdigest(), block_hashes), cache
 
 
-def iter_entry_content(info, fd=None, chunk_size=CHUNK_SIZE):
+def iter_entry_content(keys, info, fd=None, chunk_size=CHUNK_SIZE):
     """
     Stream the content of one entry from its source.
 
     Args:
+        keys (tuple): Path segments of the entry, only used to build error messages
         info (AsarFileInfo): Entry to read
         fd (io.IOBase): Open handle of the archive, for the entries that read
             their content from it
@@ -239,16 +242,17 @@ def iter_entry_content(info, fd=None, chunk_size=CHUNK_SIZE):
     source = info.source
     if source is None:
         raise AsarError(
-            f'Entry "{info.path}" has no content source, it can not be written to an archive'
+            f'Entry "{keys_path(keys)}" has no content source, it can not be written to an archive'
         )
     yield from source.iter_chunks(fd=fd, chunk_size=chunk_size)
 
 
-def iter_write_content(info, fd, cache, chunk_size=CHUNK_SIZE):
+def iter_write_content(keys, info, fd, cache, chunk_size=CHUNK_SIZE):
     """
     Stream the content of one entry for pass 2, reusing the pass 1 cache.
 
     Args:
+        keys (tuple): Path segments of the entry, only used to build error messages
         info (AsarFileInfo): Entry to read
         fd (io.IOBase): Open handle of the archive
         cache (dict): ``{id(entry): content}`` of the entries read in pass 1
@@ -261,7 +265,7 @@ def iter_write_content(info, fd, cache, chunk_size=CHUNK_SIZE):
     if buffer is not None:
         yield buffer
         return
-    yield from iter_entry_content(info, fd, chunk_size=chunk_size)
+    yield from iter_entry_content(keys, info, fd, chunk_size=chunk_size)
 
 
 def write_content(dest, chunks, verifier=None, mode=None):
@@ -291,16 +295,49 @@ def write_content(dest, chunks, verifier=None, mode=None):
         raise
 
 
+def mark_unpacked(files):
+    """
+    Mark every entry that lives inside an unpacked directory as unpacked.
+
+    The reference implementation marks the directories matched by ``unpackDir``
+    and every entry below them, so an entry that was added later under such a
+    directory must inherit the flag as well. Unpacked files are copied next to
+    the archive instead of being stored in it, so they have no offset.
+
+    The entries are walked from the shortest path to the longest one: the path
+    of a directory is a proper prefix of the path of every entry it holds, so a
+    directory is always settled before the entries below it and an entry only
+    has to look at the directory right above it. One pass over the table, and
+    the order the entries are stored in does not matter.
+
+    Args:
+        files (dict): Flat entry table, modified in place
+    """
+    for keys in sorted(files, key=len):
+        info = files[keys]
+        if info.unpacked:
+            continue
+        # A directory that is inside an unpacked subtree carries the flag as
+        # well, so a directory is enough to tell whether the entries below it
+        # are unpacked: only a directory carries the flag down
+        parent = files.get(keys[:-1])
+        if parent is None or parent.kind != KIND_DIR or not parent.unpacked:
+            continue
+        info.unpacked = True
+        if info.kind == KIND_FILE:
+            info.offset = None
+
+
 def pack_archive(files, dest, integrity=True, fd=None, release=None):
     """
-    Write the nested entry table to an archive file.
+    Write the flat entry table to an archive file.
 
     Sizes and integrity are recalculated from the content of the entries and the
     offsets are allocated in the canonical order, so the table describes the
     written archive exactly when this returns.
 
     Args:
-        files (dict): Nested entry table, see ``AsarArchive.files``
+        files (dict): Flat entry table, see ``AsarArchive.files``
         dest (str): Target archive path
         integrity (bool): Write the per file SHA256 integrity of the reference
             implementation, disable it to save the hashing time
@@ -325,11 +362,11 @@ def pack_archive(files, dest, integrity=True, fd=None, release=None):
     cache = {}
     cache_budget = CACHE_BUDGET
     for keys, info in entries:
-        if type(info) is dict or info.kind != KIND_FILE:
+        if info.kind != KIND_FILE:
             continue
         source = info.source
         size, content_integrity, buffer = hash_content(
-            iter_entry_content(info, fd), integrity=integrity,
+            iter_entry_content(keys, info, fd), integrity=integrity,
         )
         info.size = size
         info.integrity = content_integrity
@@ -345,7 +382,7 @@ def pack_archive(files, dest, integrity=True, fd=None, release=None):
     offset = 0
     unpacked_count = 0
     for keys, info in entries:
-        if type(info) is dict or info.kind != KIND_FILE:
+        if info.kind != KIND_FILE:
             continue
         if info.unpacked:
             info.offset = None
@@ -355,22 +392,22 @@ def pack_archive(files, dest, integrity=True, fd=None, release=None):
         offset += info.size
 
     # The header is written before the contents, but it describes them, so it is
-    # encoded first
-    json_bytes = encode_header(build_header(entries))
+    # encoded first (msgspec.json emits the same bytes as JSON.stringify)
+    json_bytes = msgspec.json.encode(build_header(entries))
 
     # The unpacked content is written before the archive, so that a new header
     # never points at an unpacked file that does not exist yet
     if unpacked_count:
         unpacked_dir = f'{dest}.unpacked'
         for keys, info in entries:
-            if type(info) is dict or info.kind != KIND_FILE or not info.unpacked:
+            if info.kind != KIND_FILE or not info.unpacked:
                 continue
             verifier = ContentVerifier(
-                info.path, info.size, info.integrity.hash if info.integrity else None,
+                keys_path(keys), info.size, info.integrity.hash if info.integrity else None,
             )
             write_content(
                 os.path.join(unpacked_dir, *keys),
-                iter_entry_content(info, fd),
+                iter_entry_content(keys, info, fd),
                 verifier=verifier,
                 mode=0o755 if info.executable and os.name != 'nt' else None,
             )
@@ -380,12 +417,12 @@ def pack_archive(files, dest, integrity=True, fd=None, release=None):
     try:
         writer.write(pack_header(json_bytes))
         for keys, info in entries:
-            if type(info) is dict or info.kind != KIND_FILE or info.unpacked:
+            if info.kind != KIND_FILE or info.unpacked:
                 continue
             verifier = ContentVerifier(
-                info.path, info.size, info.integrity.hash if info.integrity else None,
+                keys_path(keys), info.size, info.integrity.hash if info.integrity else None,
             )
-            for chunk in iter_write_content(info, fd, cache):
+            for chunk in iter_write_content(keys, info, fd, cache):
                 verifier.update(chunk)
                 writer.write(chunk)
             verifier.check()

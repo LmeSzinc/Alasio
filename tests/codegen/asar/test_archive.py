@@ -16,7 +16,9 @@ from alasio.codegen.asar.errors import (
     AsarEntryNotFoundError, AsarError, AsarFormatError, AsarPathError, AsarUnsupportedError
 )
 from alasio.codegen.asar.format import read_header
-from alasio.codegen.asar.model import KIND_DIR, KIND_FILE, KIND_LINK, iter_entries as header_entries
+from alasio.codegen.asar.model import (
+    KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, iter_entries as header_entries, keys_path
+)
 from alasio.ext.cache import InstanceCacheOperation
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -215,6 +217,92 @@ class TestOpen:
         assert AsarArchive().unpacked_path is None
 
 
+class TestEnsureParents:
+    """
+    The parents of an entry, one pass over the prefixes of its path.
+
+    The helper is a method of the archive because it works on the table of one:
+    it creates the missing directories, refuses a file in the way, and reports
+    the unpacked flag of the directories. The tests of the entry points that use
+    it (``add_file()``, ``add_folder()``) are in test_pack.py.
+    """
+    @staticmethod
+    def archive_with(files):
+        """
+        Build a memory archive whose table holds the given entries.
+
+        Args:
+            files (dict): Entries to put into the table
+
+        Returns:
+            AsarArchive: The archive
+        """
+        archive = AsarArchive()
+        archive.files.update(files)
+        return archive
+
+    def test_below_the_root(self):
+        """An entry directly below the root has no parent to create."""
+        archive = self.archive_with({})
+        assert archive._ensure_parents(('a.txt',)) is False
+        assert archive.files == {}
+
+    def test_creates_missing_levels(self):
+        """Every missing level of the path is created as a directory."""
+        archive = self.archive_with({})
+        assert archive._ensure_parents(('a', 'b', 'c', 'd.txt')) is False
+        assert archive.files == {
+            ('a',): AsarFileInfo(kind=KIND_DIR),
+            ('a', 'b'): AsarFileInfo(kind=KIND_DIR),
+            ('a', 'b', 'c'): AsarFileInfo(kind=KIND_DIR),
+        }
+
+    def test_existing_is_kept(self):
+        """A directory that already exists is not touched, its flag is reported."""
+        archive = self.archive_with({
+            ('a',): AsarFileInfo(kind=KIND_DIR),
+            ('a', 'b'): AsarFileInfo(kind=KIND_DIR, unpacked=True),
+        })
+        assert archive._ensure_parents(('a', 'b', 'c.txt')) is True
+        assert archive.files == {
+            ('a',): AsarFileInfo(kind=KIND_DIR),
+            ('a', 'b'): AsarFileInfo(kind=KIND_DIR, unpacked=True),
+        }
+
+    def test_the_entry_itself_is_not_an_ancestor(self):
+        """The flag of the entry does not count, only a directory above it."""
+        archive = self.archive_with({
+            ('a',): AsarFileInfo(kind=KIND_DIR),
+            ('a', 'b.txt'): AsarFileInfo(kind=KIND_FILE, unpacked=True),
+        })
+        assert archive._ensure_parents(('a', 'b.txt')) is False
+
+    @pytest.mark.parametrize('keys, files, expected', [
+        (('a', 'b'), {('a',): AsarFileInfo(kind=KIND_FILE)}, 'Archive path "a" is already a file'),
+        (('a.txt', 'b'), {('a.txt',): AsarFileInfo(kind=KIND_FILE)},
+         'Archive path "a.txt" is already a file'),
+        (('a', 'b', 'c'), {('a',): AsarFileInfo(kind=KIND_FILE)}, 'Archive path "a" is already a file'),
+    ])
+    def test_parent_is_a_file(self, keys, files, expected):
+        """A file can not be walked through, the table is left as it was."""
+        archive = self.archive_with(files)
+        with pytest.raises(AsarPathError) as e:
+            archive._ensure_parents(keys)
+        assert str(e.value) == expected
+        assert list(archive.files) == [keys[:1]]
+
+    def test_a_parent_is_created_before_the_error(self):
+        """The levels before the one that fails are already created."""
+        archive = self.archive_with({('a', 'b'): AsarFileInfo(kind=KIND_FILE)})
+        with pytest.raises(AsarPathError) as e:
+            archive._ensure_parents(('a', 'b', 'c', 'd.txt'))
+        assert str(e.value) == 'Archive path "a/b" is already a file'
+        assert archive.files == {
+            ('a',): AsarFileInfo(kind=KIND_DIR),
+            ('a', 'b'): AsarFileInfo(kind=KIND_FILE),
+        }
+
+
 class TestLifecycle:
     def test_fd_is_opened_once(self, fs, monkeypatch):
         """The file is opened on the first use, and only once."""
@@ -368,7 +456,11 @@ class TestErrors:
         )
 
     @pytest.mark.parametrize('data, expected', [
+        (b'', 'Header is not valid JSON: '),
+        (b'{', 'Header is not valid JSON: '),
         (b'{"files":{}', 'Header is not valid JSON: '),
+        (b'{"files":}', 'Header is not valid JSON: '),
+        (b'{"files":{}}extra', 'Header is not valid JSON: '),
         (b'{"files":[]}', 'Header "files" must be a plain object'),
         (b'{}', 'Header must be a directory with a "files" property'),
         (b'[]', 'Header must be a JSON object'),
@@ -658,7 +750,7 @@ class TestRealArchive:
                 for path, info in archive.iter_entries() if info.kind == KIND_FILE
             } == expected
             # The stored header order is the canonical order of the entries
-            stored = [path for path, _, _ in header_entries(
+            stored = [keys_path(keys) for keys, _, _ in header_entries(
                 parse_header(stored_header('/app.repacked.asar'))
             )]
             assert stored == canonical_paths

@@ -115,12 +115,12 @@ class TestRealProduct:
             # The offsets follow the order of the archive, which is the order the
             # file system gave the packer, not the canonical order of this module
             files = sorted(
-                (info for _, info in archive.iter_entries() if info.kind == KIND_FILE),
-                key=lambda info: info.offset,
+                ((path, info) for path, info in archive.iter_entries() if info.kind == KIND_FILE),
+                key=lambda entry: entry[1].offset,
             )
             offset = 0
-            for info in files:
-                assert info.offset == offset, info.path
+            for path, info in files:
+                assert info.offset == offset, path
                 offset += info.size
             assert offset == os.path.getsize(ARCHIVE) - archive.data_offset
 

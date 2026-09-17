@@ -20,7 +20,7 @@ from alasio.ext.path.atomic import CHUNK_SIZE
 
 from .archive import REGION_BUDGET, AsarArchive, pack_sha256
 from .format import read_header
-from .model import KIND_DIR, KIND_FILE, KIND_LINK, build_header, canonical_entries, encode_header
+from .model import KIND_DIR, KIND_FILE, KIND_LINK, build_header, canonical_entries
 
 
 def count_entries(archive):
@@ -31,7 +31,8 @@ def count_entries(archive):
         archive (AsarArchive): Archive to count
 
     Returns:
-        (int, int, int, int): ``(packed files, unpacked files, directories, links)``
+        tuple[int, int, int, int]: Packed files, unpacked files, directories and
+            links
     """
     packed = 0
     unpacked = 0
@@ -65,7 +66,7 @@ def unpack_archive(archive, dest, verify=False, region_budget=REGION_BUDGET, chu
         chunk_size (int): Read chunk size of a streamed region
 
     Returns:
-        (int, int, int, int): ``(files, directories, unpacked files, links)``
+        tuple[int, int, int, int]: Files, directories, unpacked files and links
     """
     with AsarArchive(archive) as asar:
         packed, unpacked, directories, links = count_entries(asar)
@@ -229,7 +230,7 @@ def cmd_header(args):
     with AsarArchive(args.archive) as archive:
         if args.entries:
             # Rebuilt from the entry table, useful to compare with what a pack writes
-            data = encode_header(build_header(canonical_entries(archive.files)))
+            data = msgspec.json.encode(build_header(canonical_entries(archive.files)))
         else:
             data = stored_header(archive)
     if args.json:

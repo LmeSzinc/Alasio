@@ -65,7 +65,7 @@ def read_header(fd):
             its beginning whatever the position of the handle is
 
     Returns:
-        (bytes, int): Header JSON, and the offset of the first content byte
+        tuple[bytes, int]: Header JSON, and the offset of the first content byte
 
     Raises:
         AsarFormatError: If the archive is truncated, or if the frame does not
