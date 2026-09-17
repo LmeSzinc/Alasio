@@ -14,7 +14,7 @@ import os
 
 import pytest
 
-from alasio.codegen.asar.archive import AsarArchive, unpack
+from alasio.codegen.asar import AsarArchive
 from alasio.codegen.asar.format import BLOCK_SIZE
 from alasio.codegen.asar.model import KIND_FILE
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -72,34 +72,34 @@ class TestRealProduct:
         Load the release archive.
 
         Returns:
-            AsarArchive: The archive
+            AsarArchive: The archive, to be used as a context manager
         """
         if not os.path.isfile(ARCHIVE):
             pytest.skip(f'{ARCHIVE} is not built')
-        return AsarArchive.read_asar(ARCHIVE)
+        return AsarArchive(ARCHIVE)
 
     def test_entries_match_the_source_tree(self):
         """Every entry of the archive is the file vite and the packer wrote."""
-        archive = self.archive_or_skip()
-        # The archive holds the content of `webapp/dist` plus `package.json`,
-        # both relative to the root of the desktop client
-        expected = {
-            f'dist/{path}': digest
-            for path, digest in tree_hashes(os.path.join(WEBAPP, 'dist')).items()
-        }
-        with open(os.path.join(WEBAPP, 'package.json'), 'rb') as f:
-            expected['package.json'] = sha256(f.read())
-        actual = {
-            path: sha256(bytes(archive.read_file(path)))
-            for path, info in archive.files.items() if info.kind == KIND_FILE
-        }
+        with self.archive_or_skip() as archive:
+            # The archive holds the content of `webapp/dist` plus `package.json`,
+            # both relative to the root of the desktop client
+            expected = {
+                f'dist/{path}': digest
+                for path, digest in tree_hashes(os.path.join(WEBAPP, 'dist')).items()
+            }
+            with open(os.path.join(WEBAPP, 'package.json'), 'rb') as f:
+                expected['package.json'] = sha256(f.read())
+            actual = {
+                path: sha256(bytes(archive.read_file(path)))
+                for path, info in archive.iter_entries() if info.kind == KIND_FILE
+            }
         assert actual == expected
         assert len(actual) == 28
 
     def test_directories(self):
         """The archive has no empty directory, but it stores the ones it needs."""
-        archive = self.archive_or_skip()
-        dirs = sorted(path for path, info in archive.files.items() if info.kind != KIND_FILE)
+        with self.archive_or_skip() as archive:
+            dirs = sorted(path for path, info in archive.iter_entries() if info.kind != KIND_FILE)
         assert dirs == [
             'dist', 'dist/main', 'dist/preload', 'dist/renderer',
             'dist/renderer/_app', 'dist/renderer/_app/immutable',
@@ -111,19 +111,23 @@ class TestRealProduct:
 
     def test_offsets_are_back_to_back(self):
         """The entries are stored one after the other, without padding."""
-        archive = self.archive_or_skip()
-        offset = 0
-        for path, info in archive.files.items():
-            if info.kind != KIND_FILE:
-                continue
-            assert info.offset == offset, path
-            offset += info.size
-        assert offset == len(archive.data) - archive.data_offset
+        with self.archive_or_skip() as archive:
+            # The offsets follow the order of the archive, which is the order the
+            # file system gave the packer, not the canonical order of this module
+            files = sorted(
+                (info for _, info in archive.iter_entries() if info.kind == KIND_FILE),
+                key=lambda info: info.offset,
+            )
+            offset = 0
+            for info in files:
+                assert info.offset == offset, info.path
+                offset += info.size
+            assert offset == os.path.getsize(ARCHIVE) - archive.data_offset
 
     def test_validate(self):
         """The structure and every content hash of the real archive are valid."""
-        archive = self.archive_or_skip()
-        archive.validate(verify_content=True)
+        with self.archive_or_skip() as archive:
+            archive.validate(verify_content=True)
 
     def test_streaming_extraction(self, fs):
         """The sequential scan extracts the same content as the memory reader."""
@@ -134,15 +138,12 @@ class TestRealProduct:
         if original is None:
             pytest.skip(f'{fixture.RELEASE_ARCHIVE} is not built')
         fs.create_file('/app.asar', contents=original)
-        archive = AsarArchive.read_asar('/app.asar')
-        result = unpack('/app.asar', '/out', verify=True)
-        assert result.seek_count == 0
-        assert result.file_count == 28
-        assert result.dir_count == 10
-        expected = {
-            path: sha256(bytes(archive.read_file(path)))
-            for path, info in archive.files.items() if info.kind == KIND_FILE
-        }
+        with AsarArchive('/app.asar') as archive:
+            expected = {
+                path: sha256(bytes(archive.read_file(path)))
+                for path, info in archive.iter_entries() if info.kind == KIND_FILE
+            }
+            archive.extract_all('/out', verify=True)
         # the extracted tree, read back through the fake filesystem
         assert tree_hashes('/out') == expected
 
@@ -151,8 +152,8 @@ class TestVersionDifferences:
     def test_empty_file_block(self, fs):
         """Both versions write a single empty block for an empty file."""
         fs.create_file('/packthis.asar', contents=fixture.packthis_430())
-        archive = AsarArchive.read_asar('/packthis.asar')
-        blocks = archive.files['emptyfile.txt'].integrity['blocks']
+        with AsarArchive('/packthis.asar') as archive:
+            blocks = archive.entry('emptyfile.txt').integrity.blocks
         assert blocks == [sha256(b'')]
 
     def test_extra_block_of_341(self, fs):
@@ -173,10 +174,10 @@ class TestVersionDifferences:
             },
         }
         fs.create_file('/legacy.asar', contents=fixture.make_archive(header, content))
-        archive = AsarArchive.read_asar('/legacy.asar')
-        assert archive.files['big.bin'].integrity['blocks'] == [sha256(content), sha256(b'')]
-        # The reader accepts it, the hashes are never checked block by block
-        archive.validate(verify_content=True)
+        with AsarArchive('/legacy.asar') as archive:
+            assert archive.entry('big.bin').integrity.blocks == [sha256(content), sha256(b'')]
+            # The reader accepts it, the hashes are never checked block by block
+            archive.validate(verify_content=True)
 
     def test_blocks_are_not_compared(self, fs):
         """Atom does not compare the blocks either, only the whole file hash."""
@@ -196,7 +197,8 @@ class TestVersionDifferences:
             },
         }
         fs.create_file('/odd.asar', contents=fixture.make_archive(header, content))
-        AsarArchive.read_asar('/odd.asar').validate(verify_content=True)
+        with AsarArchive('/odd.asar') as archive:
+            archive.validate(verify_content=True)
 
     def test_deduplicated_offsets(self, fs):
         """A 4.3.0 archive shares the content of identical files."""
@@ -220,8 +222,8 @@ class TestVersionDifferences:
             },
         }
         fs.create_file('/dedup.asar', contents=fixture.make_archive(header, shared))
-        archive = AsarArchive.read_asar('/dedup.asar')
-        assert archive.files['a.txt'].offset == archive.files['b.txt'].offset == 0
-        archive.validate(verify_content=True)
-        # The data area is only 4 bytes long, the entries overlap
-        assert len(archive.data) - archive.data_offset == 4
+        with AsarArchive('/dedup.asar') as archive:
+            assert archive.entry('a.txt').offset == archive.entry('b.txt').offset == 0
+            archive.validate(verify_content=True)
+            # The data area is only 4 bytes long, the entries overlap
+            assert os.path.getsize('/dedup.asar') - archive.data_offset == 4

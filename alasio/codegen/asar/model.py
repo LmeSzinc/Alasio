@@ -1,31 +1,54 @@
 """
 Data models of the asar header, and the converters between the header tree and
-the flat entry table.
+the nested entry table of an archive.
 
-Writing uses one ``msgspec.Struct`` per node type, so that the field order of
-the emitted JSON is fixed by the class definition and always matches the
-reference implementation::
+Writing uses one ``msgspec.Struct`` per kind of node, so that the field set and
+the field order of every kind are fixed by a class definition and always match
+the reference implementation::
 
     directory       : unpacked?, files
     file            : size, offset, executable?, integrity?
     unpacked file   : size, unpacked, executable?, integrity?
     link            : unpacked?, link
 
-msgspec refuses an untagged union of multiple structs, so the reader and the
-validation work on the plain objects produced by ``msgspec.json.decode()``
-instead, which is exactly the shape the JS implementation validates. Reading is
-lenient where the format allows it (unknown fields, missing integrity) and
-strict where safety depends on it (entry names, sizes, offsets).
+The same structs are the schema of the reader: a node is converted to the struct
+of its kind, so msgspec checks the types and the fields the kind requires (a
+directory has ``files``, a file has a ``size`` and an ``offset``, an unpacked
+file has the flag) and only the fields of that kind are looked at, which is what
+the reference does (it takes the branch of the field it finds first and never
+looks at the fields of the others).
+
+The kind of a node is decided by ``check_node()``, which also enforces the rules
+the format adds on top of the types (the decimal offset, a link with a target).
+msgspec refuses a union of several untagged structs, so the four kinds cannot be
+dispatched on by a single conversion.
+
+The entry table (``AsarArchive.files``) mirrors that tree: a directory is a
+dict of its children, the root table is the root directory, and a file or a
+link is an ``AsarFileInfo``. The attributes a directory may have of its own are
+stored under the ``None`` key, so a plain directory is just ``{name: child}``
+and only an unpacked directory carries an extra entry. ``read_entries()`` builds
+that table from a decoded header and gives every file entry the source its
+content is read from, so nothing has to walk the table again to find it.
+
+An entry is not a node and can not be one: the header stores the offset of a
+file as a decimal string while the table needs the number, an entry carries what
+only lives in memory (its ``path``, its ``kind`` and the ``source`` of its
+content) and msgspec would write those fields to the header, and an entry that
+was added to the archive is not written yet (it has no size and no offset at
+all). ``_build_file_node()`` and ``check_node()`` are the two directions of that
+mapping.
 """
-import math
-import re
-from typing import Any, Dict, Optional, Union
+import os
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import msgspec
 from msgspec import UNSET, UnsetType
+from typing_extensions import Annotated
 
-from .errors import AsarError, AsarFormatError
+from .errors import AsarError, AsarFormatError, AsarPathError
 from .format import BLOCK_SIZE, MAX_PATH_DEPTH, UINT32_MAX
+from .source import ContentSource, LocalFileSource, RangeSource
 
 # Entry kinds, the header only stores 'dir' as a node with 'files' and 'file'
 # as a node with 'size' and either 'offset' or 'unpacked'
@@ -33,71 +56,87 @@ KIND_FILE = 'file'
 KIND_DIR = 'dir'
 KIND_LINK = 'link'
 
-# `offset` is a decimal string on the wire, the regex is ASCII only so that
-# unicode digits (which JSON.parse plus /^\d+$/ would reject as well) fail here
-REGEX_OFFSET = re.compile(r'^\d+$', re.ASCII)
+# `offset` is a decimal string on the wire, the check of it uses str.isascii()
+# and str.isdecimal() rather than a regex: it is the same rule (JSON.parse plus
+# /^\d+$/ rejects unicode digits as well) and about three times faster
 # A larger offset can not be valid, it also bounds the cost of int() conversion
 MAX_OFFSET_DIGITS = 20
 ALGORITHM = 'SHA256'
 
 
-class AsarFileInfo(msgspec.Struct):
+class Integrity(msgspec.Struct):
     """
-    One entry of an archive: a file, a directory or a link.
+    Integrity object of a file node,
+    ``{'algorithm': 'SHA256', 'hash': ..., 'blockSize': 4194304, 'blocks': [...]}``.
 
-    Attributes:
-        path (str): Path inside the archive, POSIX separators, no leading '/'
-        kind (str): 'file', 'dir' or 'link'
-        size (int): Content byte length, None for directories
-        offset (int): Offset of the content in the data area, None for
-            directories and unpacked files, and for local files that have not
-            been written to an archive yet
-        integrity (dict): {'algorithm', 'hash', 'blockSize', 'blocks'}, None
-            when the archive was packed without integrity
-        unpacked (bool): True when the content lives in '<archive>.unpacked/'
-            instead of the archive body
-        executable (bool): POSIX executable bit
-        link (str): Link target inside the archive, for kind='link'
+    The field order of the struct is the order of the wire.
     """
-    path: str
-    kind: str
-    size: "Optional[int]" = None
-    offset: "Optional[int]" = None
-    integrity: "Optional[Dict[str, Any]]" = None
-    unpacked: bool = False
-    executable: bool = False
-    link: "Optional[str]" = None
+    algorithm: str
+    hash: str
+    # The reference refuses a file larger than a uint32 (filesystem.js, "file
+    # size can not be larger than 4.2GB"), so a block can not be larger either
+    blockSize: Annotated[int, msgspec.Meta(gt=0, le=UINT32_MAX)]
+    blocks: List[str]
+
+    @classmethod
+    def new(cls, file_hash, block_hashes):
+        """
+        Build the integrity of a content, in the wire field order.
+
+        Args:
+            file_hash (str): SHA256 of the whole file, hex digest
+            block_hashes (list): SHA256 of every block, hex digests
+
+        Returns:
+            Integrity: Algorithm, hash, block size and block hashes
+        """
+        return cls(
+            algorithm=ALGORITHM,
+            hash=file_hash,
+            blockSize=BLOCK_SIZE,
+            blocks=list(block_hashes),
+        )
 
 
-class DirNode(msgspec.Struct):
+class DirNode(msgspec.Struct, kw_only=True):
     """
     Directory node, ``{'unpacked': true, 'files': {...}}``.
+
+    Keyword only, because msgspec requires every required field to come after
+    the optional ones, while the wire order is ``unpacked`` then ``files``.
     """
-    unpacked: "Union[bool, UnsetType]" = UNSET
-    files: "Dict[str, Any]" = UNSET
+    unpacked: Union[bool, UnsetType] = UNSET
+    files: Dict[str, Any]
 
 
-class FileNode(msgspec.Struct):
+class FileNode(msgspec.Struct, kw_only=True):
     """
     File node, ``{'size': 1, 'offset': '0', 'integrity': {...}}``.
+
+    The size of a file can not be larger than the archive that stores it, which
+    a uint32 holds many times over, and the offset is the decimal string of the
+    wire (the entry table stores it as an int).
     """
-    size: int
+    size: Annotated[int, msgspec.Meta(ge=0, le=UINT32_MAX)]
     offset: str
-    executable: "Union[bool, UnsetType]" = UNSET
-    integrity: "Union[Dict[str, Any], UnsetType]" = UNSET
+    executable: Union[bool, UnsetType] = UNSET
+    integrity: Union[Integrity, UnsetType] = UNSET
+    # A packed file may carry the flag, the reference checks it as well, the
+    # writer never writes it (a packed file has an offset instead)
+    unpacked: Union[bool, UnsetType] = UNSET
 
 
-class UnpackedFileNode(msgspec.Struct):
+class UnpackedFileNode(msgspec.Struct, kw_only=True):
     """
     Unpacked file node, ``{'size': 1, 'unpacked': true, 'integrity': {...}}``.
 
     The content is not stored in the archive body, it is copied next to the
     archive as ``<archive>.unpacked/<path>``.
     """
-    size: int
+    size: Annotated[int, msgspec.Meta(ge=0, le=UINT32_MAX)]
     unpacked: bool
-    executable: "Union[bool, UnsetType]" = UNSET
-    integrity: "Union[Dict[str, Any], UnsetType]" = UNSET
+    executable: Union[bool, UnsetType] = UNSET
+    integrity: Union[Integrity, UnsetType] = UNSET
 
 
 class LinkNode(msgspec.Struct, kw_only=True):
@@ -107,27 +146,50 @@ class LinkNode(msgspec.Struct, kw_only=True):
     Keyword only, because msgspec requires every required field to come after
     the optional ones, while the wire order is ``unpacked`` then ``link``.
     """
-    unpacked: "Union[bool, UnsetType]" = UNSET
+    unpacked: Union[bool, UnsetType] = UNSET
     link: str
 
 
-def new_integrity(file_hash, block_hashes):
+class AsarFileInfo(msgspec.Struct):
     """
-    Build an integrity object in the wire field order.
+    One entry of an archive: a file, a directory or a link.
 
-    Args:
-        file_hash (str): SHA256 of the whole file, hex digest
-        block_hashes (list): SHA256 of every block, hex digests
+    An entry is not a node of the header and can not be one: the header stores
+    the offset of a file as a decimal string while the table needs the number,
+    an entry carries what only lives in memory (its ``path``, its ``kind`` and
+    the ``source`` of its content) and msgspec would write those fields to the
+    header, and an entry that was added to the archive is not written yet (it
+    has no size and no offset at all). ``_build_file_node()`` and
+    ``check_node()`` are the two directions of that mapping.
 
-    Returns:
-        dict: {'algorithm', 'hash', 'blockSize', 'blocks'}
+    Attributes:
+        path (str): Path inside the archive, POSIX separators, no leading '/'
+        kind (str): 'file', 'dir' or 'link', see the type of the field
+        size (int): Content byte length, None for directories
+        offset (int): Offset of the content in the data area, None for
+            directories and unpacked files, and for local files that have not
+            been written to an archive yet
+        integrity (Integrity): Algorithm, hash, block size and block hashes of
+            the content, None when the archive was packed without integrity
+        unpacked (bool): True when the content lives in '<archive>.unpacked/'
+            instead of the archive body
+        executable (bool): POSIX executable bit
+        link (str): Link target inside the archive, for kind='link'
+        source (ContentSource): Where the content of a file comes from, it is
+            only known in memory and never stored in the header. A directory
+            and a link hold no content, an entry that was added holds what was
+            handed over, and an entry that was read from an archive holds the
+            range of the archive or the file of its unpacked directory
     """
-    return {
-        'algorithm': ALGORITHM,
-        'hash': file_hash,
-        'blockSize': BLOCK_SIZE,
-        'blocks': list(block_hashes),
-    }
+    path: str
+    kind: Literal['file', 'dir', 'link']
+    size: Optional[int] = None
+    offset: Optional[int] = None
+    integrity: Optional[Integrity] = None
+    unpacked: bool = False
+    executable: bool = False
+    link: Optional[str] = None
+    source: Optional[ContentSource] = None
 
 
 def check_name(name, path):
@@ -150,90 +212,50 @@ def check_name(name, path):
         raise AsarFormatError(f'Invalid entry name at "{path}": "{name}"')
 
 
-def _check_bool(node, key, path):
+def _convert_node(node, type_, path):
     """
-    Check an optional boolean field.
-    """
-    if key in node and not isinstance(node[key], bool):
-        raise AsarFormatError(f'Invalid entry at "{path}": "{key}" must be a boolean')
+    Convert a decoded node to the struct of its kind.
 
+    The structs of this module are the schema of the header: msgspec checks the
+    type of every field they declare and the fields they require, which is what
+    the reference ``validateHeader`` of @electron/asar checks as well. Only the
+    fields of the kind of node are looked at, a field of another kind (a size on
+    a link, for instance) is ignored exactly like the reference ignores it.
 
-def _check_size(node, path):
-    """
-    Check the 'size' field of a file node and return it as an int.
-    """
-    size = node.get('size')
-    if isinstance(size, bool) or not isinstance(size, (int, float)):
-        raise AsarFormatError(f'Invalid entry at "{path}": "size" must be a number')
-    if not math.isfinite(size) or size < 0:
-        raise AsarFormatError(f'Invalid entry at "{path}": "size" must be a non-negative number')
-    if int(size) != size:
-        raise AsarFormatError(f'Invalid entry at "{path}": "size" must be an integer')
-    if size > UINT32_MAX:
-        raise AsarFormatError(
-            f'Invalid entry at "{path}": "size" must not exceed {UINT32_MAX} bytes'
-        )
-    return int(size)
+    Args:
+        node (dict): Decoded header node
+        type_ (type): Struct of the kind of node
+        path (str): Path of the node, only used to build error messages
 
+    Returns:
+        Struct: The node
 
-def _check_offset(node, path):
+    Raises:
+        AsarFormatError: If a field of the node has the wrong type, or if a
+            required one is missing
     """
-    Check the 'offset' field of a file node and return it as an int.
-    """
-    offset = node['offset']
-    if not isinstance(offset, str):
-        raise AsarFormatError(f'Invalid entry at "{path}": "offset" must be a string')
-    if len(offset) > MAX_OFFSET_DIGITS or not REGEX_OFFSET.match(offset):
-        raise AsarFormatError(
-            f'Invalid entry at "{path}": "offset" must be a decimal string, got "{offset}"'
-        )
-    return int(offset)
-
-
-def _check_integrity(node, path):
-    """
-    Check the 'integrity' field of a file node, see the reference validateIntegrity.
-    """
-    if 'integrity' not in node:
-        return
-    integrity = node['integrity']
-    if not isinstance(integrity, dict):
-        raise AsarFormatError(f'Invalid entry at "{path}": "integrity" must be an object')
-    if not isinstance(integrity.get('algorithm'), str):
-        raise AsarFormatError(f'Invalid entry at "{path}": "integrity.algorithm" must be a string')
-    if not isinstance(integrity.get('hash'), str):
-        raise AsarFormatError(f'Invalid entry at "{path}": "integrity.hash" must be a string')
-    block_size = integrity.get('blockSize')
-    if isinstance(block_size, bool) or not isinstance(block_size, (int, float)):
-        raise AsarFormatError(
-            f'Invalid entry at "{path}": "integrity.blockSize" must be a positive number'
-        )
-    if not math.isfinite(block_size) or block_size <= 0:
-        raise AsarFormatError(
-            f'Invalid entry at "{path}": "integrity.blockSize" must be a positive number'
-        )
-    blocks = integrity.get('blocks')
-    if not isinstance(blocks, list):
-        raise AsarFormatError(f'Invalid entry at "{path}": "integrity.blocks" must be an array')
-    for index, block in enumerate(blocks):
-        if not isinstance(block, str):
-            raise AsarFormatError(
-                f'Invalid entry at "{path}": "integrity.blocks[{index}]" must be a string'
-            )
+    try:
+        return msgspec.convert(node, type_)
+    except msgspec.ValidationError as e:
+        raise AsarFormatError(f'Invalid entry at "{path}": {e}')
 
 
 def check_node(node, path):
     """
-    Validate one header node and classify it, following the reference
+    Check one header node and classify it, following the reference
     ``validateHeader`` of @electron/asar.
+
+    A node is converted to the struct of its kind, so the types of the fields
+    and the fields the kind requires are checked by msgspec, and only the fields
+    of that kind are looked at.
 
     Args:
         node (dict): Decoded header node
         path (str): Path of the node, only used to build error messages
 
     Returns:
-        str: 'dir', 'file' for a normal file, 'unpacked' for an unpacked file,
-            or 'link'
+        (str, Struct): The kind of the node ('dir', 'file', 'unpacked' or
+            'link'), and the node as the struct of that kind
 
     Raises:
         AsarFormatError: If the node is not a valid asar node
@@ -241,30 +263,26 @@ def check_node(node, path):
     if not isinstance(node, dict):
         raise AsarFormatError(f'Invalid entry at "{path}": entry must be an object')
     if 'link' in node:
-        link = node['link']
-        if not isinstance(link, str):
-            raise AsarFormatError(f'Invalid entry at "{path}": "link" must be a string')
-        if not link:
+        link = _convert_node(node, LinkNode, path)
+        if not link.link:
             raise AsarFormatError(f'Invalid entry at "{path}": "link" must not be empty')
-        _check_bool(node, 'unpacked', path)
-        return 'link'
+        return 'link', link
     if 'files' in node:
-        if not isinstance(node['files'], dict):
-            raise AsarFormatError(f'Invalid entry at "{path}": "files" must be a plain object')
-        _check_bool(node, 'unpacked', path)
-        return 'dir'
+        return 'dir', _convert_node(node, DirNode, path)
     if 'offset' in node:
-        _check_offset(node, path)
-        _check_size(node, path)
-        _check_bool(node, 'unpacked', path)
-        _check_bool(node, 'executable', path)
-        _check_integrity(node, path)
-        return 'file'
+        file = _convert_node(node, FileNode, path)
+        offset = file.offset
+        # `str.isdecimal()` is true for the digits of every script, the
+        # reference only knows the ASCII ones (`JSON.parse` goes through
+        # `/^\d+$/`), and nothing longer than MAX_OFFSET_DIGITS can be a valid
+        # offset
+        if len(offset) > MAX_OFFSET_DIGITS or not (offset.isascii() and offset.isdecimal()):
+            raise AsarFormatError(
+                f'Invalid entry at "{path}": "offset" must be a decimal string, got "{offset}"'
+            )
+        return 'file', file
     if node.get('unpacked') is True and 'size' in node:
-        _check_size(node, path)
-        _check_bool(node, 'executable', path)
-        _check_integrity(node, path)
-        return 'unpacked'
+        return 'unpacked', _convert_node(node, UnpackedFileNode, path)
     raise AsarFormatError(
         f'Invalid entry at "{path}": entry must be a directory (with "files"), '
         f'a file (with "offset" or "unpacked"), or a link (with "link")'
@@ -283,8 +301,9 @@ def iter_entries(header):
         header (dict): Header JSON, as decoded by ``msgspec.json.decode()``
 
     Yields:
-        (str, str, dict): ``(path, kind, node)`` triples, parents before their
-            children, in the order the entries are stored in the header
+        (str, str, Struct): ``(path, kind, node)`` triples, parents before their
+            children, in the order the entries are stored in the header. The
+            node is the struct of its kind, see ``check_node()``.
 
     Raises:
         AsarFormatError: If the header is not a valid asar header
@@ -303,93 +322,279 @@ def iter_entries(header):
         parent, name, node, depth = stack.pop()
         check_name(name, parent if parent else '/')
         path = f'{parent}/{name}' if parent else name
-        kind = check_node(node, path)
+        kind, node = check_node(node, path)
         yield path, kind, node
         if kind != 'dir':
             continue
         if depth >= MAX_PATH_DEPTH:
             raise AsarFormatError(f'Path "{path}" is deeper than {MAX_PATH_DEPTH} segments')
-        for child_name, child in reversed(list(node['files'].items())):
+        for child_name, child in reversed(list(node.files.items())):
             stack.append((path, child_name, child, depth + 1))
 
 
-def validate_header(header):
+def read_entries(header, archive_size, data_offset, unpacked_path):
     """
-    Check a decoded header against the reference ``validateHeader`` rules.
+    Build the nested entry table of a decoded header.
 
-    Args:
-        header (dict): Header JSON, as decoded by ``msgspec.json.decode()``
-
-    Raises:
-        AsarFormatError: If the header is not a valid asar header
-    """
-    # The generator validates while walking
-    for _ in iter_entries(header):
-        pass
-
-
-def read_entries(header, archive_size, data_offset):
-    """
-    Build the flat entry table of a decoded header.
-
-    Entry order is the header order, which is also the order in which the
-    contents are stored, so re-packing an untouched archive reproduces the same
-    offsets.
+    The table mirrors the header tree, the order of the entries is the order of
+    the header, and every file entry holds the source its content is read from:
+    the byte range of the archive for a packed file, the file of the unpacked
+    directory for an unpacked one.
 
     Args:
         header (dict): Header JSON, as decoded by ``msgspec.json.decode()``
         archive_size (int): Total byte length of the archive
-        data_offset (int): Offset of the data area, see ``calc_data_offset()``
+        data_offset (int): Offset of the data area, the second value of
+            ``format.read_header()``
+        unpacked_path (str): Directory the unpacked content of the archive lives
+            in, ``<archive>.unpacked``
 
     Returns:
-        dict: ``{path: AsarFileInfo}``
+        dict: ``{name: dict | AsarFileInfo}``, the root directory
 
     Raises:
         AsarFormatError: If the header is invalid or an entry points outside of
             the archive
     """
     files = {}
+    # The table itself is the root directory, every directory is registered
+    # while it is walked so a child always finds its parent
+    directories = {'': files}
     data_size = archive_size - data_offset
     for path, kind, node in iter_entries(header):
+        parent, _, name = path.rpartition('/')
+        children = directories[parent]
+        if kind == 'dir':
+            child = {}
+            children[name] = child
+            directories[path] = child
+            if node.unpacked is True:
+                child[None] = AsarFileInfo(path=path, kind=KIND_DIR, unpacked=True)
+            continue
         if kind == 'file':
-            size = _check_size(node, path)
-            offset = _check_offset(node, path)
-            if offset + size > data_size:
+            offset = int(node.offset)
+            if offset + node.size > data_size:
                 raise AsarFormatError(
                     f'Invalid entry at "{path}": content is outside of the archive, '
-                    f'offset {offset} + size {size} exceeds the data area of {data_size} bytes'
+                    f'offset {offset} + size {node.size} exceeds the data area of {data_size} bytes'
                 )
-            files[path] = AsarFileInfo(
+            children[name] = AsarFileInfo(
                 path=path,
                 kind=KIND_FILE,
-                size=size,
+                size=node.size,
                 offset=offset,
-                integrity=node.get('integrity'),
-                executable=node.get('executable', False),
+                integrity=None if node.integrity is UNSET else node.integrity,
+                executable=node.executable is True,
+                source=RangeSource(data_offset + offset, node.size),
             )
         elif kind == 'unpacked':
-            files[path] = AsarFileInfo(
+            children[name] = AsarFileInfo(
                 path=path,
                 kind=KIND_FILE,
-                size=_check_size(node, path),
-                integrity=node.get('integrity'),
+                size=node.size,
+                integrity=None if node.integrity is UNSET else node.integrity,
                 unpacked=True,
-                executable=node.get('executable', False),
-            )
-        elif kind == 'dir':
-            files[path] = AsarFileInfo(
-                path=path,
-                kind=KIND_DIR,
-                unpacked=node.get('unpacked') is True,
+                executable=node.executable is True,
+                source=LocalFileSource(os.path.join(unpacked_path, *path.split('/'))),
             )
         else:
-            files[path] = AsarFileInfo(
+            children[name] = AsarFileInfo(
                 path=path,
                 kind=KIND_LINK,
-                unpacked=node.get('unpacked') is True,
-                link=node['link'],
+                unpacked=node.unpacked is True,
+                link=node.link,
             )
     return files
+
+
+def flatten_entries(files):
+    """
+    Flatten the nested entry table to a list of entries.
+
+    The walk is iterative, so a deep tree is fine, and every entry is reported
+    including the directories (a directory is a dict and would be skipped by a
+    walk that only reports the leaves, which would lose an empty directory).
+
+    Args:
+        files (dict): Nested entry table
+
+    Returns:
+        list: ``[(keys, entry)]``, ``keys`` is the list of path segments, in no
+            particular order
+    """
+    entries = []
+    stack = [([], files)]
+    while stack:
+        keys, children = stack.pop()
+        for name, child in children.items():
+            if name is None:
+                # The attributes of the directory itself, not an entry
+                continue
+            child_keys = keys + [name]
+            entries.append((child_keys, child))
+            if type(child) is dict:
+                stack.append((child_keys, child))
+    return entries
+
+
+def canonical_entries(files):
+    """
+    Flatten the nested entry table and sort it into the canonical archive order.
+
+    The order is the one electron-builder uses (``orderFileSet()``): the
+    ``.node`` files come last, everything else is sorted by path. The comparison
+    is done on the path segments instead of the path string, so it does not
+    depend on the separator of the platform and can not be disturbed by a
+    directory whose name is the prefix of a file name at the same level.
+
+    Segment order already puts a parent before its content and keeps a subtree
+    together, so the offsets, the data area and the header of an archive that is
+    written share this single order: any sequence of operations gives the same
+    bytes.
+
+    Args:
+        files (dict): Nested entry table
+
+    Returns:
+        list: ``[(keys, entry)]``, in the order an archive stores them
+    """
+    entries = flatten_entries(files)
+    entries.sort(key=_canonical_key)
+    return entries
+
+
+def _canonical_key(entry):
+    """
+    Sort key of the canonical order.
+
+    Args:
+        entry (tuple): ``(keys, entry)``
+
+    Returns:
+        tuple: ``(is_a_native_module, tuple of the path segments)``
+    """
+    keys = entry[0]
+    return keys[-1].endswith('.node'), tuple(keys)
+
+
+def ensure_dir(files, path):
+    """
+    Get a directory of the nested table, creating it and its parents.
+
+    Args:
+        files (dict): Nested entry table, modified in place
+        path (str): Archive path of the directory, an empty path is the root
+
+    Returns:
+        dict: The children of the directory, ``files`` itself for the root
+
+    Raises:
+        AsarPathError: If the path or one of its parents is used by a file
+    """
+    if not path:
+        return files
+    children = files
+    end = 0
+    length = len(path)
+    while end < length:
+        separator = path.find('/', end)
+        if separator == -1:
+            separator = length
+        name = path[end:separator]
+        child = children.get(name)
+        if child is None:
+            child = {}
+            children[name] = child
+        elif type(child) is not dict:
+            raise AsarPathError(f'Archive path "{path[:separator]}" is already a file')
+        children = child
+        end = separator + 1
+    return children
+
+
+def set_leaf(files, path, info):
+    """
+    Put a file or a link entry into the nested table, creating its parents.
+
+    An entry that is already at the path is replaced, an entry that is a
+    directory is refused: a file and a directory can not share a path.
+
+    Args:
+        files (dict): Nested entry table, modified in place
+        path (str): Archive path of the entry
+        info (AsarFileInfo): Entry to store
+
+    Raises:
+        AsarPathError: If the path or one of its parents is a directory
+    """
+    parent, _, name = path.rpartition('/')
+    children = ensure_dir(files, parent)
+    if type(children.get(name)) is dict:
+        raise AsarPathError(f'Archive path "{path}" is already a directory')
+    children[name] = info
+
+
+def has_unpacked_ancestor(files, keys):
+    """
+    Check whether an entry lives inside a directory that is stored unpacked.
+
+    Args:
+        files (dict): Nested entry table
+        keys (list[str]): Path segments of the entry, the entry itself is not
+            looked at
+
+    Returns:
+        bool: True if a directory above the entry is unpacked
+    """
+    children = files
+    for name in keys[:-1]:
+        child = children.get(name)
+        if type(child) is not dict:
+            return False
+        info = child.get(None)
+        if info is not None and info.unpacked:
+            return True
+        children = child
+    return False
+
+
+def mark_unpacked(files):
+    """
+    Mark every entry that lives inside an unpacked directory as unpacked.
+
+    The reference implementation marks the directories matched by ``unpackDir``
+    and every entry below them, so an entry that was added later under such a
+    directory must inherit the flag as well. Unpacked files are copied next to
+    the archive instead of being stored in it, so they have no offset.
+
+    Args:
+        files (dict): Nested entry table, modified in place
+    """
+    stack = [('', files, False)]
+    while stack:
+        path, children, unpacked = stack.pop()
+        info = children.get(None)
+        if info is not None and info.unpacked:
+            unpacked = True
+        elif unpacked and path:
+            # A directory inside an unpacked subtree carries the flag as well,
+            # its own attributes are stored under the None key
+            if info is None:
+                info = AsarFileInfo(path=path, kind=KIND_DIR)
+                children[None] = info
+            info.unpacked = True
+        for name, child in children.items():
+            if name is None:
+                continue
+            child_path = f'{path}/{name}' if path else name
+            if type(child) is dict:
+                stack.append((child_path, child, unpacked))
+                continue
+            if not unpacked or child.unpacked:
+                continue
+            child.unpacked = True
+            if child.kind == KIND_FILE:
+                child.offset = None
 
 
 def has_parent(path, parents):
@@ -415,36 +620,9 @@ def has_parent(path, parents):
         start = separator + 1
 
 
-def propagate_unpacked(files):
-    """
-    Mark every entry that lives inside an unpacked directory as unpacked.
-
-    The reference implementation marks the directories matched by ``unpackDir``
-    and every file below them, so a file added later under such a directory must
-    inherit the flag as well. Unpacked files are copied next to the archive, so
-    they have no offset.
-
-    Args:
-        files (dict): ``{path: AsarFileInfo}``, modified in place
-    """
-    unpacked_dirs = {
-        path for path, info in files.items() if info.kind == KIND_DIR and info.unpacked
-    }
-    if not unpacked_dirs:
-        return
-    for path, info in files.items():
-        if info.unpacked:
-            continue
-        if not has_parent(path, unpacked_dirs):
-            continue
-        info.unpacked = True
-        if info.kind == KIND_FILE:
-            info.offset = None
-
-
 def _build_file_node(info, path):
     """
-    Build a file or link node of the header tree.
+    Build the header node of one file or link entry.
 
     Args:
         info (AsarFileInfo): Entry to convert
@@ -480,74 +658,40 @@ def _build_file_node(info, path):
     )
 
 
-def build_header(files):
+def build_header(entries):
     """
-    Build the header tree of an archive from the flat entry table.
+    Build the header tree of an archive from its entries.
 
-    Entry order decides the node order of every directory, and the offset
-    allocation order follows it, so the flat table is the single source of
-    truth of the layout. ``propagate_unpacked()`` must have been called before,
-    directories marked as unpacked put their whole subtree next to the archive.
+    The entries have to come from ``canonical_entries()``: a parent is built
+    before its content, and the node order of every directory is the order in
+    which the entries are stored, which is also the order of the data area.
 
     Args:
-        files (dict): ``{path: AsarFileInfo}``, insertion order is the archive
-            order, see ``AsarArchive.files``
+        entries (list): ``[(keys, entry)]`` in canonical order
 
     Returns:
         DirNode: Root node of the header tree
 
     Raises:
-        AsarError: If a path is used by both a file and a directory, or if a
-            file entry has no offset and is not unpacked
+        AsarError: If a file entry has no offset and is not unpacked
     """
-    tree = {}
-    for path, info in files.items():
-        parts = path.split('/')
-        children = tree
-        for part in parts[:-1]:
-            child = children.get(part)
-            if child is None:
-                child = children[part] = {}
-            elif not isinstance(child, dict):
-                raise AsarError(f'Path "{path}" is used by both a file and a directory')
-            children = child
-        name = parts[-1]
-        child = children.get(name)
-        if info.kind == KIND_DIR:
-            # A directory is a container, its own fields are looked up from the
-            # flat table by path
-            if child is None:
-                children[name] = {}
-            elif not isinstance(child, dict):
-                raise AsarError(f'Path "{path}" is used by both a file and a directory')
-            continue
-        if child is not None:
-            raise AsarError(f'Path "{path}" is already used by another entry')
-        children[name] = info
-    # Collect the directories, a parent is always collected before its children,
-    # so building the nodes in reverse order builds every child first
-    order = []
-    stack = [('', tree)]
-    while stack:
-        path, children = stack.pop()
-        order.append((path, children))
-        prefix = f'{path}/' if path else ''
-        for name, child in children.items():
-            if isinstance(child, dict):
-                stack.append((prefix + name, child))
-    built = {}
-    for path, children in reversed(order):
-        nodes = {}
-        prefix = f'{path}/' if path else ''
-        for name, child in children.items():
-            if isinstance(child, dict):
-                nodes[name] = built[id(child)]
-            else:
-                nodes[name] = _build_file_node(child, prefix + name)
-        info = files.get(path)
-        unpacked = True if info is not None and info.unpacked else UNSET
-        built[id(children)] = DirNode(unpacked=unpacked, files=nodes)
-    return built[id(tree)]
+    root = DirNode(files={})
+    # ``keys`` of a directory, the root is the empty tuple, so a child always
+    # finds the node of its parent
+    built = {(): root}
+    for keys, entry in entries:
+        children = built[tuple(keys[:-1])]
+        if type(entry) is dict:
+            info = entry.get(None)
+            node = DirNode(
+                unpacked=True if info is not None and info.unpacked else UNSET,
+                files={},
+            )
+            built[tuple(keys)] = node
+        else:
+            node = _build_file_node(entry, entry.path)
+        children.files[keys[-1]] = node
+    return root
 
 
 def encode_header(root):
@@ -556,7 +700,7 @@ def encode_header(root):
 
     msgspec.json emits the same bytes as ``JSON.stringify``
     (``json.dumps(separators=(',', ':'), ensure_ascii=False)`` as well), and the
-    field order of every node comes from the struct definition.
+    field order of every node comes from the struct of its kind.
 
     Args:
         root (DirNode): Root node, see ``build_header()``

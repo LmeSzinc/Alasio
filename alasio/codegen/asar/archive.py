@@ -1,31 +1,50 @@
 """
-Reading, building and extracting asar archives.
+Reading, building, changing and extracting asar archives.
 
-``AsarArchive`` is the entry point of the module: it holds the flat entry table
-of an archive, the content of the archive when it was read from a file, and the
-local sources of the entries that were added to it.
+``AsarArchive`` is the single entry point of the module. It holds the entry
+table of an archive, the source of the content of every entry, and — when the
+archive was read from or written to a file — the open handle of that file::
 
-Extraction of a whole archive uses a single sequential scan of the data area
-(see ``unpack()``), while random access by path uses the loaded content or the
-file the archive was written to.
+    # Open an archive that exists
+    with AsarArchive('app.asar') as asar:
+        asar.extract_all('output')
+
+    # Build one from scratch
+    with AsarArchive() as asar:
+        asar.add_folder('webapp', include=['dist/**', 'package.json'])
+        asar.add_file(data=b'{"name":"alasio"}', arc_path='build.json')
+        asar.write('app.asar')
+
+An archive that was opened can be changed and written back, the content of an
+entry that was not touched is read from the archive it came from::
+
+    with AsarArchive('app.asar') as asar:
+        asar.add_file('new-main.js', 'dist/main.js')
+        asar.del_file('dist/main.js.map')
+        asar.write()                       # replaces app.asar, atomically
+
+The handle is opened on demand and released by ``close()``, which the ``with``
+block calls, so an archive is never left open by accident.
 """
 import hashlib
 import os
 
-import msgspec
-
-from alasio.ext.path.atomic import CHUNK_SIZE, atomic_open, file_read_bytes, file_write
+from alasio.ext.cache import InstanceCacheOperation, cached_property
+from alasio.ext.deep import deep_get, deep_pop
+from alasio.ext.path.atomic import CHUNK_SIZE, atomic_open, file_write
 from alasio.ext.path.validate import validate_filename, validate_filepath, validate_resolve_filepath
 
 from .crawl import crawl_folder
 from .errors import AsarEntryNotFoundError, AsarError, AsarFormatError, AsarPathError, AsarUnsupportedError
-from .format import MAX_HEADER_SIZE, parse_header_pickle, parse_size_pickle
-from .model import KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, decode_header, read_entries
-from .pack import AtomicChunkWriter, ContentVerifier, FileRange, hash_file, iter_entry_chunks, pack_archive, write_entry
+from .format import read_header
+from .model import (
+    KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, canonical_entries, decode_header, ensure_dir, has_unpacked_ancestor,
+    read_entries, set_leaf
+)
+from .pack import ContentVerifier, hash_file, pack_archive, write_content
+from .scan import REGION_BUDGET, Member, build_regions, scan_regions
+from .source import LocalFileSource, MemorySource, RangeSource
 
-# Regions up to this size are read in one piece, it is about the cost of one
-# seek on a mechanical disk (~1 MB of sequential reading)
-REGION_BUDGET = 1048576
 # Maximum number of links followed when resolving an entry, matches the
 # SYMLOOP_MAX of the reference implementation
 SYMLINK_MAX_DEPTH = 40
@@ -33,118 +52,24 @@ SYMLINK_MAX_DEPTH = 40
 EMPTY_SHA256 = hashlib.sha256(b'').hexdigest()
 
 
-class UnpackResult(msgspec.Struct):
+class _Header:
     """
-    Statistics of an extraction, returned by ``unpack()`` and
-    ``AsarArchive.extract_all()``.
-
-    ``region_count`` and ``seek_count`` only describe the sequential scan of
-    ``unpack()``, the in memory reader writes its entries directly and always
-    reports 0 for both.
+    Everything the header of an archive gives: the layout of the file and the
+    entry table it describes.
 
     Attributes:
-        dest (str): Target directory
-        file_count (int): Number of file entries extracted
-        dir_count (int): Number of directory entries created
-        unpacked_count (int): Number of files read from ``<archive>.unpacked/``
-        link_count (int): Number of link entries created
-        data_size (int): Number of bytes read from the data area
-        region_count (int): Number of regions the data area was split into
-        seek_count (int): Number of seeks the scan needed, 0 for a well formed
-            archive (the entries are stored back to back)
+        data_offset (int): Offset of the first content byte, the header is what
+            comes before it, the 8 bytes of the frame of the archive included
+        files (dict): Nested entry table, see ``AsarArchive.files``
     """
-    dest: str
-    file_count: int
-    dir_count: int
-    unpacked_count: int
-    link_count: int
-    data_size: int
-    region_count: int
-    seek_count: int
+    __slots__ = ('data_offset', 'files')
 
+    def __init__(self, data_offset, files):
+        self.data_offset = data_offset
+        self.files = files
 
-class _Member:
-    """
-    One entry inside a region of the data area.
-    """
-    __slots__ = ('start', 'end', 'path', 'target', 'verifier', 'writer')
-
-    def __init__(self, start, end, path, target, verifier=None):
-        self.start = start
-        self.end = end
-        self.path = path
-        self.target = target
-        self.verifier = verifier
-        self.writer = None
-
-
-class _Region:
-    """
-    A part of the data area that is read in one go.
-    """
-    __slots__ = ('start', 'end', 'members')
-
-    def __init__(self, start, end, members):
-        self.start = start
-        self.end = end
-        self.members = members
-
-
-def check_header_size(header_size, archive_size):
-    """
-    Check the header length of an archive against its size.
-
-    Args:
-        header_size (int): Header pickle length, from the frame
-        archive_size (int): Total byte length of the archive
-
-    Raises:
-        AsarFormatError: If the header can not be inside the archive
-    """
-    if header_size < 8:
-        raise AsarFormatError(
-            f'Header size {header_size} is smaller than the 8 bytes a header pickle needs'
-        )
-    if header_size > MAX_HEADER_SIZE:
-        raise AsarFormatError(
-            f'Header size {header_size} exceeds the {MAX_HEADER_SIZE} bytes limit'
-        )
-    if header_size + 8 > archive_size:
-        raise AsarFormatError(
-            f'Header size {header_size} exceeds the archive size of {archive_size} bytes'
-        )
-
-
-def read_exact(file, size):
-    """
-    Read exactly a number of bytes.
-
-    Args:
-        file (io.IOBase): Binary file object
-        size (int): Byte count to read
-
-    Returns:
-        bytes: The bytes read
-
-    Raises:
-        AsarFormatError: If the file ends before the requested size
-    """
-    data = file.read(size)
-    if len(data) == size:
-        return data
-    chunks = [data]
-    remaining = size - len(data)
-    while remaining > 0:
-        chunk = file.read(remaining)
-        if not chunk:
-            break
-        chunks.append(chunk)
-        remaining -= len(chunk)
-    if remaining:
-        raise AsarFormatError(
-            f'Archive is truncated, expected {size} bytes but got {size - remaining}'
-        )
-    return b''.join(chunks)
+    def __repr__(self):
+        return f'_Header({len(self.files)} entries)'
 
 
 def check_archive_path(path):
@@ -198,63 +123,73 @@ def check_target_path(root, path):
         raise AsarPathError(f'Invalid archive path "{path}": {e}')
 
 
-def build_regions(members):
+def entry_mode(info):
     """
-    Merge the entries of the data area into regions.
-
-    Entries that overlap or touch each other are merged, so that the content of
-    duplicated entries (4.3.0 writes identical content once), of entries that
-    share a prefix and of nested entries is read once. Entries of a real archive
-    are stored back to back, so the whole data area is usually a single region.
+    Get the POSIX mode a file entry is extracted with.
 
     Args:
-        members (list): ``_Member`` list, sorted by start offset
+        info (AsarFileInfo): Entry
 
     Returns:
-        list: ``_Region`` list, in offset order
+        int: 0o755 for an executable entry, None to keep the default mode,
+            always None on Windows, which has no executable bit
     """
-    regions = []
-    for member in members:
-        if regions and member.start <= regions[-1].end:
-            region = regions[-1]
-            if member.end > region.end:
-                region.end = member.end
-            region.members.append(member)
-        else:
-            regions.append(_Region(member.start, member.end, [member]))
-    return regions
+    if info.executable and os.name != 'nt':
+        return 0o755
+    return None
 
 
-def finish_member(member):
+def check_link_target(root, name, link):
     """
-    Close the file of a member and check its content.
+    Check the target of a link entry before the link is created.
 
     Args:
-        member (_Member): Member whose content was fully written
+        root (str): Root of the extraction
+        name (str): Archive path of the link, only used in error messages
+        link (str): Target of the link, relative to the archive root
 
     Raises:
-        AsarError: If the content does not match the header
+        AsarPathError: If the target is unsafe or leaves the extraction
+            directory
     """
-    member.writer.close()
-    member.writer = None
-    if member.verifier is not None:
-        member.verifier.check()
+    try:
+        validate_filepath(link)
+        validate_resolve_filepath(root, link)
+    except ValueError as e:
+        raise AsarPathError(f'Invalid link target of "{name}": {e}')
 
 
-def write_member(member, content):
+def create_link(archive, name, dest, target):
     """
-    Write a member from a buffer.
+    Create the link of an entry.
+
+    The link and its target are both inside the extracted tree, so the link is
+    created with the relative path the header stores. Windows needs elevation to
+    create a symbolic link, a link to a file is materialized as a copy there and
+    a link to a directory can not be extracted at all.
 
     Args:
-        member (_Member): Member to write
-        content (memoryview): Whole content of the member
+        archive (AsarArchive): Archive holding the entry
+        name (str): Archive path of the link
+        dest (str): Root of the extraction
+        target (str): Path of the link on disk
+
+    Raises:
+        AsarPathError: If the target of the link leaves the extraction directory
+        AsarUnsupportedError: If a directory link is extracted on Windows
     """
-    member.writer = AtomicChunkWriter(member.target)
-    if len(content):
-        member.writer.write(content)
-        if member.verifier is not None:
-            member.verifier.update(content)
-    finish_member(member)
+    info = archive.entry(name)
+    check_link_target(dest, name, info.link)
+    if os.name != 'nt':
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        os.symlink(info.link, target)
+        return
+    _, target_info = archive.resolve(name)
+    if target_info.kind == KIND_DIR:
+        raise AsarUnsupportedError(
+            f'Link "{name}" points to a directory, which can not be extracted on Windows'
+        )
+    archive.extract_file(name, target)
 
 
 def entry_hash(path, info, verify):
@@ -274,7 +209,7 @@ def entry_hash(path, info, verify):
     """
     if not verify:
         return None
-    expected = info.integrity.get('hash') if info.integrity else None
+    expected = info.integrity.hash if info.integrity else None
     if expected is None:
         raise AsarFormatError(f'Entry "{path}" has no integrity hash to verify')
     return expected
@@ -302,93 +237,170 @@ def check_empty_content(path, info, verify):
 
 class AsarArchive:
     """
-    An asar archive: the flat entry table, plus the archive content when it was
-    read from a file.
+    An asar archive: the entry table, the source of every content, and the file
+    the archive lives in when there is one.
 
     Attributes:
-        files (dict): ``{path: AsarFileInfo}``, the insertion order is the order
-            of the entries in the archive, which is also the order in which the
-            offsets are allocated when the archive is written
-        data (memoryview): Content of the archive that was read, None for an
-            archive that was built from local files or written already
-        archive_path (str): Path of the archive, None when it was never read
-            from or written to a file
+        file (str): Path of the archive, None for an archive that was built in
+            memory and was never written
+        max_size (int): Refuse an archive larger than this, in bytes, None to
+            accept any size. An archive may come from the network, so the update
+            flow should pass the expected size limit
+        files (dict): Nested entry table, a directory is a dict of its children
+            and a file or a link is an ``AsarFileInfo``. The attributes of a
+            directory itself are stored under the ``None`` key, so a plain
+            directory is just ``{name: child}``
         header_size (int): Header pickle length, the data area starts at 8 + it
         data_offset (int): Offset of the first content byte
+        fd (io.IOBase): Open handle of the archive file, None for an archive
+            that has no file
     """
 
-    def __init__(self):
-        self.files = {}
-        self.data = None
-        self.archive_path = None
-        self.header_size = 0
-        self.data_offset = 0
-        # {path: local file path or content} of the entries that have a source
-        # of their own, the other entries are read from `data`
-        self._sources = {}
+    def __init__(self, file=None, max_size=None):
+        """
+        Args:
+            file (str): Path of the archive, None to build a new archive
+            max_size (int): Refuse an archive larger than this, in bytes
+        """
+        # A path is kept as a plain string, the entry points of the module work
+        # with str and the caller may pass any path like object
+        self.file = None if file is None else str(file)
+        self.max_size = max_size
 
     def __repr__(self):
-        return f'AsarArchive(entries={len(self.files)}, path={self.archive_path!r})'
+        # No IO, a debugger may print an archive that can not be read
+        header = InstanceCacheOperation.get(self, 'header')
+        if header is None:
+            return f'AsarArchive(file={self.file!r})'
+        return f'AsarArchive(file={self.file!r}, entries={len(header.files)})'
+
+    @cached_property
+    def fd(self):
+        """
+        Open the archive file, on demand.
+
+        Returns:
+            io.IOBase: Handle of the archive, None when the archive has no file
+
+        Raises:
+            AsarUnsupportedError: If the archive is larger than `max_size`
+        """
+        file = self.file
+        if file is None:
+            return None
+        f = atomic_open(file, 'rb', buffering=0)
+        if self.max_size is not None:
+            size = os.fstat(f.fileno()).st_size
+            if size > self.max_size:
+                f.close()
+                raise AsarUnsupportedError(
+                    f'Archive is larger than the {self.max_size} bytes limit of this call'
+                )
+        return f
+
+    @cached_property
+    def header(self):
+        """
+        Read and parse the header of the archive, on demand.
+
+        Returns:
+            _Header: Header of the archive, an empty one for an archive that has
+                no file yet
+
+        Raises:
+            AsarFormatError: If the file is not a valid asar archive
+        """
+        f = self.fd
+        if f is None:
+            # No file, no header: the table of the archive is the archive
+            return _Header(0, {})
+        # The size is needed to check that every entry points inside the archive,
+        # it comes from the handle so that the position stays where reading the
+        # header leaves it, on the first content byte
+        archive_size = os.fstat(f.fileno()).st_size
+        json_bytes, data_offset = read_header(f)
+        # The table carries the source of every content, and the source of an
+        # unpacked entry is the file it is copied to next to the archive
+        files = read_entries(decode_header(json_bytes), archive_size, data_offset, self.unpacked_path)
+        return _Header(data_offset, files)
+
+    @property
+    def files(self):
+        """
+        Get the nested entry table of the archive.
+
+        Returns:
+            dict: ``{name: dict | AsarFileInfo}``, see the class documentation
+        """
+        return self.header.files
+
+    @property
+    def header_size(self):
+        """
+        Get the header pickle length of the archive.
+
+        Returns:
+            int: Header length, the data area starts at 8 + it, 0 for an archive
+                that has no file
+        """
+        # The 8 bytes of the frame of the archive come first, the header is what
+        # the data area comes after
+        data_offset = self.header.data_offset
+        return data_offset - 8 if data_offset else 0
+
+    @property
+    def data_offset(self):
+        """
+        Get the offset of the first content byte of the archive.
+
+        Returns:
+            int: Offset of the data area
+        """
+        return self.header.data_offset
 
     @property
     def unpacked_path(self):
         """
-        Directory of the unpacked content of this archive.
+        Get the directory of the unpacked content of this archive.
 
         Returns:
             str: Path of ``<archive>.unpacked``, None when there is no archive file
         """
-        return f'{self.archive_path}.unpacked' if self.archive_path else None
+        return f'{self.file}.unpacked' if self.file else None
 
-    @property
-    def data_area(self):
+    def close(self):
         """
-        Data area of the loaded archive, where the entry offsets point.
+        Release the archive file and drop everything that was read from it.
 
-        Returns:
-            memoryview: View starting at the first content byte, None when no
-                archive is loaded
+        The entries are re-read the next time they are used, so an archive that
+        is changed and then closed loses the changes that were not written, and
+        an archive whose file was replaced meanwhile is never read through stale
+        metadata. An archive without a file only holds its entry table, closing
+        it does nothing.
+
+        Can be called more than once.
         """
-        if self.data is None:
-            return None
-        if not self.data_offset:
-            return self.data
-        return self.data[self.data_offset:]
+        f = InstanceCacheOperation.pop(self, 'fd')
+        if f is None:
+            # Nothing was opened, or the archive has no file: the entries are
+            # the archive, they can not be dropped
+            return
+        f.close()
+        # The handle and the table live and die together, a table without its
+        # handle would read the content of the old file at the new offsets
+        InstanceCacheOperation.pop(self, 'header')
 
-    @classmethod
-    def read_asar(cls, file, max_size=None):
-        """
-        Load a whole archive into memory and parse it.
+    def __enter__(self):
+        # Read the header here, so that a broken archive is reported where it is
+        # opened instead of at the first use of its entries
+        InstanceCacheOperation.warm(self, 'header')
+        return self
 
-        Args:
-            file (str): Path of the archive
-            max_size (int): Refuse an archive larger than this, in bytes, None to
-                accept any size. An archive may come from the network, so the
-                update flow should pass the expected size limit.
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+        return False
 
-        Returns:
-            AsarArchive: Archive with its entries and its content loaded
-
-        Raises:
-            AsarFormatError: If the file is not a valid asar archive
-            AsarUnsupportedError: If the archive is larger than `max_size`
-        """
-        with open(file, 'rb') as f:
-            data = f.read() if max_size is None else f.read(max_size + 1)
-        if max_size is not None and len(data) > max_size:
-            raise AsarUnsupportedError(
-                f'Archive is larger than the {max_size} bytes limit of this call'
-            )
-        archive = cls()
-        archive.archive_path = str(file)
-        archive.data = memoryview(data)
-        header_size = parse_size_pickle(archive.data[:8])
-        check_header_size(header_size, len(data))
-        archive.header_size = header_size
-        archive.data_offset = 8 + header_size
-        header = decode_header(parse_header_pickle(archive.data[8:archive.data_offset]))
-        archive.files = read_entries(header, len(data), archive.data_offset)
-        return archive
+    # ------------------------------------------------------------------ table
 
     def entry(self, name):
         """
@@ -398,15 +410,39 @@ class AsarArchive:
             name (str): Archive path
 
         Returns:
-            AsarFileInfo: Entry
+            AsarFileInfo: Entry, the attributes of a directory that has none of
+                its own are built on the fly
 
         Raises:
             AsarEntryNotFoundError: If there is no such entry
         """
-        try:
-            return self.files[name]
-        except KeyError:
+        node = deep_get(self.files, name.split('/'))
+        if node is None:
             raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
+        if type(node) is dict:
+            info = node.get(None)
+            if info is not None:
+                return info
+            return AsarFileInfo(path=name, kind=KIND_DIR)
+        return node
+
+    def iter_entries(self):
+        """
+        Iter every entry of the archive, the directories included.
+
+        Yields:
+            (str, AsarFileInfo): Path and entry, in the canonical order of an
+                archive this module writes, a directory comes before its content
+        """
+        for keys, node in canonical_entries(self.files):
+            path = '/'.join(keys)
+            if type(node) is dict:
+                info = node.get(None)
+                if info is None:
+                    info = AsarFileInfo(path=path, kind=KIND_DIR)
+                yield path, info
+                continue
+            yield path, node
 
     def resolve(self, name):
         """
@@ -432,11 +468,10 @@ class AsarArchive:
             replaced = False
             # An intermediate segment may be a link to another directory
             for index in range(len(parts) - 1):
-                prefix = '/'.join(parts[:index + 1])
-                info = self.files.get(prefix)
-                if info is None or info.kind != KIND_LINK:
+                info = deep_get(self.files, parts[:index + 1])
+                if info is None or type(info) is dict or info.kind != KIND_LINK:
                     continue
-                name = f'{self._follow(prefix, info, visited)}/{"/".join(parts[index + 1:])}'
+                name = f'{self._follow("/".join(parts[:index + 1]), info, visited)}/{"/".join(parts[index + 1:])}'
                 replaced = True
                 break
             if replaced:
@@ -468,36 +503,14 @@ class AsarArchive:
         visited.add(name)
         return info.link
 
-    # ------------------------------------------------------------------ build
+    # -------------------------------------------------------------- changing
 
-    def _ensure_parents(self, arc_path):
-        """
-        Make sure every parent directory of a path is an entry.
-
-        A directory is added before its content, so the entry order of the table
-        still decides the order of the header and of the content.
-
-        Args:
-            arc_path (str): Archive path of an entry
-
-        Raises:
-            AsarPathError: If a parent path is already used by a file
-        """
-        parts = arc_path.split('/')[:-1]
-        for index in range(1, len(parts) + 1):
-            parent = '/'.join(parts[:index])
-            info = self.files.get(parent)
-            if info is None:
-                self.files[parent] = AsarFileInfo(path=parent, kind=KIND_DIR)
-            elif info.kind != KIND_DIR:
-                raise AsarPathError(f'Archive path "{parent}" is already a file')
-
-    def add_file(self, path=None, arc_path=None, data=None, unpacked=False):
+    def add_file(self, path=None, arc_path=None, data=None, unpacked=None):
         """
         Add a single file to the archive.
 
-        The file is not read yet, its content is read when the archive is
-        written, so a large file never sits in memory.
+        The content of a file on disk is not read now, it is read when the
+        archive is written, so a large file never sits in memory.
 
         Args:
             path (str): Local file path
@@ -506,14 +519,16 @@ class AsarArchive:
             data (bytes): Content, added instead of reading `path`, for a file
                 that does not exist on disk (a generated package.json and the like)
             unpacked (bool): Store the content next to the archive instead of
-                inside it
+                inside it, None to keep the flag of the entry that is replaced,
+                or the flag of the directory the entry is added to
 
         Returns:
             AsarFileInfo: The added entry
 
         Raises:
             ValueError: If neither `path` nor `data` is given
-            AsarPathError: If `arc_path` is not a valid archive path
+            AsarPathError: If `arc_path` is not a valid archive path, or if it
+                is used by a directory
         """
         if path is None and data is None:
             raise ValueError('add_file() needs a path or a content')
@@ -522,21 +537,25 @@ class AsarArchive:
                 raise ValueError('add_file() needs an arc_path when there is no path')
             arc_path = os.path.basename(path)
         arc_path = check_archive_path(arc_path)
-        self._ensure_parents(arc_path)
-        info = self.files.get(arc_path)
-        if info is not None and info.kind != KIND_FILE:
+        keys = arc_path.split('/')
+        previous = deep_get(self.files, keys)
+        if previous is not None and type(previous) is dict:
             raise AsarPathError(f'Archive path "{arc_path}" is already a directory')
-        if info is None:
-            info = AsarFileInfo(path=arc_path, kind=KIND_FILE)
-            self.files[arc_path] = info
-        # The entry keeps its position, only its content changes
-        info.size = None
-        info.offset = None
-        info.integrity = None
-        info.unpacked = bool(unpacked)
-        info.executable = False
-        info.link = None
-        self._sources[arc_path] = data if data is not None else str(path)
+        if unpacked is None:
+            if previous is not None:
+                unpacked = previous.unpacked
+            else:
+                # A new entry follows the directory it is added to, so that a
+                # native module added below an unpacked directory is stored the
+                # same way as its neighbours
+                unpacked = has_unpacked_ancestor(self.files, keys)
+        info = AsarFileInfo(
+            path=arc_path,
+            kind=KIND_FILE,
+            unpacked=bool(unpacked),
+            source=MemorySource(data) if data is not None else LocalFileSource(path),
+        )
+        set_leaf(self.files, arc_path, info)
         return info
 
     def add_folder(self, root, include=None, exclude=None, unpack=None, unpack_dir=None):
@@ -565,58 +584,73 @@ class AsarArchive:
         )
         for arc_path, local_path, kind, unpacked in entries:
             arc_path = check_archive_path(arc_path)
-            if kind == KIND_DIR:
-                if self.files.get(arc_path) is not None and self.files[arc_path].kind != KIND_DIR:
-                    raise AsarPathError(f'Archive path "{arc_path}" is already a file')
-                info = AsarFileInfo(path=arc_path, kind=KIND_DIR, unpacked=unpacked)
-                self.files[arc_path] = info
+            if kind != KIND_DIR:
+                self.add_file(path=local_path, arc_path=arc_path, unpacked=unpacked)
                 continue
-            self.add_file(path=local_path, arc_path=arc_path, unpacked=unpacked)
+            children = ensure_dir(self.files, arc_path)
+            if unpacked and children.get(None) is None:
+                children[None] = AsarFileInfo(path=arc_path, kind=KIND_DIR, unpacked=True)
         return len(entries)
 
-    def write_asar(self, dest, integrity=True):
+    def del_file(self, name):
         """
-        Write the archive to a file.
-
-        The content of every entry is read from its source, its real byte count
-        and its hashes are calculated, then the content is written and checked
-        against the first pass, so a source that changed in between fails the
-        pack instead of producing an archive that lies about its content.
+        Delete a file or a link from the archive.
 
         Args:
-            dest (str): Target archive path
-            integrity (bool): Write the per file SHA256 integrity of the reference
-                implementation, disable it to save the hashing time
+            name (str): Archive path
 
         Returns:
-            PackResult: Statistics of the written archive
+            int: Number of deleted entries, always 1
 
         Raises:
-            AsarError: If an entry has no content source, or if a source changed
-                while packing
-            AsarUnsupportedError: If an entry is larger than the format allows
+            AsarEntryNotFoundError: If there is no such entry
+            AsarPathError: If the entry is a directory, use ``del_folder()``
         """
-        result = pack_archive(
-            self.files,
-            self._sources,
-            dest,
-            data_area=self.data_area,
-            integrity=integrity,
-            unpacked_root=self.unpacked_path,
-        )
-        self.archive_path = str(dest)
-        self.header_size = result.header_size
-        self.data_offset = 8 + result.header_size
-        # The entries now live in the written file, the archive that was read
-        # before is neither their source nor an up to date view of them
-        for path, info in self.files.items():
-            if path in self._sources or info.kind != KIND_FILE or info.unpacked:
-                continue
-            self._sources[path] = FileRange(dest, self.data_offset + info.offset, info.size)
-        self.data = None
-        return result
+        node = deep_get(self.files, name.split('/'))
+        if node is None:
+            raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
+        if type(node) is dict:
+            raise AsarPathError(f'Entry "{name}" is a directory, use del_folder() to delete it')
+        deep_pop(self.files, name.split('/'))
+        return 1
 
-    # ---------------------------------------------------------------- reading
+    def del_folder(self, name):
+        """
+        Delete a directory and its whole content from the archive.
+
+        The parents of the directory are kept, an empty directory is a valid
+        part of an archive.
+
+        Args:
+            name (str): Archive path
+
+        Returns:
+            int: Number of deleted entries, the directory included
+
+        Raises:
+            AsarEntryNotFoundError: If there is no such entry
+            AsarPathError: If the entry is a file, use ``del_file()``
+        """
+        node = deep_get(self.files, name.split('/'))
+        if node is None:
+            raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
+        if type(node) is not dict:
+            raise AsarPathError(f'Entry "{name}" is a file, use del_file() to delete it')
+        # The subtree is counted before it is removed, and it is removed in one
+        # pop, never while a caller iterates the table
+        count = 1
+        stack = [node]
+        while stack:
+            for child_name, child in stack.pop().items():
+                if child_name is None:
+                    continue
+                count += 1
+                if type(child) is dict:
+                    stack.append(child)
+        deep_pop(self.files, name.split('/'))
+        return count
+
+    # --------------------------------------------------------------- reading
 
     def iter_content(self, name, chunk_size=CHUNK_SIZE):
         """
@@ -635,11 +669,10 @@ class AsarArchive:
         name, info = self.resolve(name)
         if info.kind != KIND_FILE:
             raise AsarError(f'Entry "{name}" is a directory')
-        for chunk in iter_entry_chunks(
-            name, info, self._sources.get(name), self.data_area, self.unpacked_path,
-            chunk_size=chunk_size,
-        ):
-            yield chunk
+        source = info.source
+        if source is None:
+            raise AsarError(f'Entry "{name}" has no content source')
+        yield from source.iter_chunks(fd=self.fd, chunk_size=chunk_size)
 
     def read_file(self, name):
         """
@@ -649,7 +682,7 @@ class AsarArchive:
             name (str): Archive path, links are followed
 
         Returns:
-            memoryview: Content, a read only view when it is already in memory
+            memoryview: Content, a read only view when it is kept in memory
 
         Raises:
             AsarError: If the entry is not a file, or if its content is missing
@@ -657,31 +690,11 @@ class AsarArchive:
         name, info = self.resolve(name)
         if info.kind != KIND_FILE:
             raise AsarError(f'Entry "{name}" is a directory')
-        source = self._sources.get(name)
-        if source is not None and not isinstance(source, (str, FileRange)):
+        source = info.source
+        if isinstance(source, MemorySource):
             # Content that was added to the archive, no copy needed
-            return memoryview(source)
-        if source is None:
-            if info.unpacked:
-                return memoryview(file_read_bytes(self._unpacked_target(name)))
-            if self.data_area is not None:
-                return self.data_area[info.offset:info.offset + info.size]
+            return memoryview(source.data)
         return memoryview(b''.join(self.iter_content(name)))
-
-    def _unpacked_target(self, name):
-        """
-        Path of the unpacked content of an entry.
-
-        Args:
-            name (str): Archive path
-
-        Returns:
-            str: Path inside ``<archive>.unpacked/``, validated
-        """
-        root = self.unpacked_path
-        if root is None:
-            raise AsarError(f'Entry "{name}" is unpacked but the archive has no file path')
-        return check_target_path(root, name)
 
     def extract_file(self, name, dest):
         """
@@ -698,63 +711,89 @@ class AsarArchive:
         if info.kind == KIND_DIR:
             os.makedirs(dest, exist_ok=True)
             return
-        writer = AtomicChunkWriter(dest)
-        try:
-            for chunk in self.iter_content(name):
-                writer.write(chunk)
-            writer.close()
-        except BaseException:
-            writer.abort()
-            raise
+        write_content(dest, self.iter_content(name), mode=entry_mode(info))
 
-    def extract_all(self, dest):
+    def extract_all(self, dest, verify=False, region_budget=REGION_BUDGET, chunk_size=CHUNK_SIZE):
         """
         Extract the whole archive to a directory.
 
-        Directories are created first, then the content, then the links, so that
-        a link target always exists when the link is created. On Windows a link
-        to a file is materialized as a copy, a link to a directory is not
-        supported because Windows needs elevation to create a symlink.
+        The entries that are stored in the archive are extracted with a single
+        sequential pass over the data area, the other ones are copied from their
+        own source. Directories are created first, then the content, then the
+        links, so that a link target always exists when the link is created. On
+        Windows a link to a file is materialized as a copy, a link to a
+        directory is not supported because Windows needs elevation to create a
+        symlink.
 
         Args:
             dest (str): Target directory
-
-        Returns:
-            UnpackResult: Statistics of the extraction
+            verify (bool): Compare every content that is stored in the archive
+                with the integrity of the header while extracting, it costs no
+                extra I/O because the content is read anyway
+            region_budget (int): Regions up to this size are read in one piece, 0
+                streams everything
+            chunk_size (int): Read chunk size of a streamed region
 
         Raises:
             AsarPathError: If an entry would escape the target directory
+            AsarFormatError: If the archive is malformed, or if a content hash
+                does not match
             AsarUnsupportedError: If a directory link is extracted on Windows
         """
+        entries = list(self.iter_entries())
         os.makedirs(dest, exist_ok=True)
-        dir_count = 0
-        file_count = 0
-        link_count = 0
-        for path, info in self.files.items():
-            if info.kind != KIND_DIR:
+        for path, info in entries:
+            if info.kind == KIND_DIR:
+                os.makedirs(check_target_path(dest, path), exist_ok=True)
+
+        # The content that lives in the archive is read in one pass over the
+        # data area, whatever the order of the entries is
+        members = []
+        for path, info in entries:
+            source = info.source
+            if info.kind != KIND_FILE or not isinstance(source, RangeSource):
                 continue
-            os.makedirs(check_target_path(dest, path), exist_ok=True)
-            dir_count += 1
-        for path, info in self.files.items():
-            if info.kind != KIND_FILE:
+            target = check_target_path(dest, path)
+            if info.size == 0:
+                check_empty_content(path, info, verify)
+                file_write(target, b'')
                 continue
-            self.extract_file(path, check_target_path(dest, path))
-            file_count += 1
-        for path, info in self.files.items():
-            if info.kind != KIND_LINK:
+            verifier = None
+            expected = entry_hash(path, info, verify)
+            if expected is not None:
+                verifier = ContentVerifier(path, info.size, expected, error=AsarFormatError)
+            members.append(Member(
+                source.offset, source.offset + source.size, path, target, verifier, entry_mode(info),
+            ))
+        if members:
+            members.sort(key=lambda member: (member.start, -member.end, member.path))
+            regions = build_regions(members)
+            f = self.fd
+            if f.tell() != regions[0].start:
+                # A second extraction of the same archive starts where the first
+                # one ended, this is the only seek of a real archive
+                f.seek(regions[0].start)
+            scan_regions(f, regions, region_budget=region_budget, chunk_size=chunk_size)
+
+        # The content that has a source of its own is copied entry by entry, it
+        # is not part of the archive and has nothing to be checked against
+        for path, info in entries:
+            source = info.source
+            if info.kind != KIND_FILE or isinstance(source, RangeSource):
                 continue
-            create_link(self, path, check_target_path(dest, path))
-            link_count += 1
-        return UnpackResult(
-            dest=dest,
-            file_count=file_count,
-            dir_count=dir_count,
-            unpacked_count=sum(1 for info in self.files.values() if info.kind == KIND_FILE and info.unpacked),
-            link_count=link_count,
-            data_size=sum(info.size for info in self.files.values() if info.kind == KIND_FILE),
-            region_count=0,
-            seek_count=0,
-        )
+            verifier = None
+            if verify and info.integrity is not None:
+                verifier = ContentVerifier(
+                    path, info.size, info.integrity.hash, error=AsarFormatError,
+                )
+            write_content(
+                check_target_path(dest, path), source.iter_chunks(self.fd, chunk_size),
+                verifier=verifier, mode=entry_mode(info),
+            )
+
+        for path, info in entries:
+            if info.kind == KIND_LINK:
+                create_link(self, path, dest, check_target_path(dest, path))
 
     def validate(self, verify_content=False):
         """
@@ -769,7 +808,7 @@ class AsarArchive:
                 does not match
             AsarPathError: If an entry path can not be extracted safely
         """
-        for path, info in self.files.items():
+        for path, info in self.iter_entries():
             try:
                 validate_filepath(path)
             except ValueError as e:
@@ -783,10 +822,10 @@ class AsarArchive:
                 self.resolve(path)
         if not verify_content:
             return
-        for path, info in self.files.items():
+        for path, info in self.iter_entries():
             if info.kind != KIND_FILE:
                 continue
-            expected = info.integrity.get('hash') if info.integrity else None
+            expected = info.integrity.hash if info.integrity else None
             if expected is None:
                 raise AsarFormatError(f'Entry "{path}" has no integrity hash to verify')
             hasher = hashlib.sha256()
@@ -799,218 +838,56 @@ class AsarArchive:
                     f'it is {digest} instead of {expected}'
                 )
 
+    # --------------------------------------------------------------- writing
 
-def archive_of_entries(archive_path, files, header_size, data_offset):
-    """
-    Build an archive object over the entries of an archive that is on disk.
+    def write(self, dest=None, integrity=True):
+        """
+        Write the archive to a file.
 
-    The content of the packed entries is read from the archive file itself, so
-    that a helper of the class (resolving a link, extracting one entry) can be
-    reused without loading the whole archive.
+        The content of every entry is read from its source, its real byte count
+        and its hashes are calculated, then the content is written and checked
+        against the first pass, so a source that changed in between fails the
+        pack instead of producing an archive that lies about its content. The
+        entries are stored in the canonical order, so any sequence of operations
+        that ends with the same entries writes the same bytes.
 
-    Args:
-        archive_path (str): Path of the archive
-        files (dict): ``{path: AsarFileInfo}``
-        header_size (int): Header pickle length
-        data_offset (int): Offset of the data area
+        Without `dest` the archive is written back to its own file: the content
+        of the entries that were not touched is read from that file, the archive
+        replaces it only once it is complete, and the handle this archive holds
+        is released just before, which Windows requires.
 
-    Returns:
-        AsarArchive: Archive whose content is read from the file
-    """
-    archive = AsarArchive()
-    archive.files = files
-    archive.archive_path = archive_path
-    archive.header_size = header_size
-    archive.data_offset = data_offset
-    for path, info in files.items():
-        if info.kind == KIND_FILE and not info.unpacked:
-            archive._sources[path] = FileRange(
-                archive_path, data_offset + info.offset, info.size,
-            )
-    return archive
+        Args:
+            dest (str): Target archive path, None to write to ``self.file``
+            integrity (bool): Write the per file SHA256 integrity of the
+                reference implementation, disable it to save the hashing time
 
+        Raises:
+            AsarError: If there is no target path, if an entry has no content
+                source, or if a source changed while packing
+            AsarUnsupportedError: If an entry is larger than the format allows
+        """
+        file = self.file
+        if dest is None:
+            if file is None:
+                raise AsarError('write() needs a dest path, this archive has no file')
+            dest = file
+        else:
+            dest = str(dest)
+        # The handle is taken before anything is written, and released after the
+        # last content was read: a file can not be replaced while it is open on
+        # Windows, and the handle would point at the old file afterwards
+        fd = self.fd
 
-def create_link(archive, name, target):
-    """
-    Create the link of an entry.
+        def release():
+            handle = InstanceCacheOperation.pop(self, 'fd')
+            if handle is not None:
+                handle.close()
 
-    Args:
-        archive (AsarArchive): Archive holding the entry
-        name (str): Archive path of the link
-        target (str): Target path of the link on disk
-
-    Raises:
-        AsarUnsupportedError: If a directory link is extracted on Windows
-    """
-    if os.name != 'nt':
-        # A relative symlink, the link and its target are both inside the tree
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        os.symlink(archive.files[name].link, target)
-        return
-    # Windows needs elevation to create a symbolic link, materialize the content
-    _, info = archive.resolve(name)
-    if info.kind == KIND_DIR:
-        raise AsarUnsupportedError(
-            f'Link "{name}" points to a directory, which can not be extracted on Windows'
-        )
-    archive.extract_file(name, target)
-
-
-def unpack(archive, dest, region_budget=REGION_BUDGET, chunk_size=CHUNK_SIZE, verify=False):
-    """
-    Extract a whole archive to a directory with a single sequential scan.
-
-    The entries are merged into regions of the data area which are processed in
-    offset order, so the data area is read once from start to end: no seek, no
-    content kept between regions, and the memory usage is bounded by
-    `region_budget` (or by `chunk_size` for a larger region). Entries that share
-    their content, a prefix or a whole range share the same read.
-
-    Args:
-        archive (str): Path of the archive
-        dest (str): Target directory
-        region_budget (int): Regions up to this size are read in one piece, 0
-            streams everything
-        chunk_size (int): Read chunk size of a streamed region
-        verify (bool): Compare the content of every entry with the integrity of
-            the header while extracting, it costs no extra I/O
-
-    Returns:
-        UnpackResult: Statistics of the extraction
-
-    Raises:
-        AsarFormatError: If the archive is malformed, or if a content hash does
-            not match
-        AsarPathError: If an entry would escape the target directory
-    """
-    archive = str(archive)
-    dest = str(dest)
-    f = atomic_open(archive, 'rb', buffering=0)
-    try:
-        archive_size = f.seek(0, 2)
-        f.seek(0)
-        header_size = parse_size_pickle(read_exact(f, 8))
-        check_header_size(header_size, archive_size)
-        data_offset = 8 + header_size
-        header = decode_header(parse_header_pickle(read_exact(f, header_size)))
-        files = read_entries(header, archive_size, data_offset)
-
-        os.makedirs(dest, exist_ok=True)
-        dir_count = 0
-        for path, info in files.items():
-            if info.kind != KIND_DIR:
-                continue
-            os.makedirs(check_target_path(dest, path), exist_ok=True)
-            dir_count += 1
-
-        # Empty and unpacked entries hold no byte of the data area, they are
-        # written before the scan and never enter a region
-        scan = []
-        file_count = 0
-        unpacked_count = 0
-        for path, info in files.items():
-            if info.kind != KIND_FILE:
-                continue
-            target = check_target_path(dest, path)
-            file_count += 1
-            if info.unpacked:
-                entry_hash(path, info, verify)
-                source = os.path.join(f'{archive}.unpacked', *path.split('/'))
-                write_entry(target, path, info, source, verify=verify, error=AsarFormatError)
-                unpacked_count += 1
-                continue
-            if info.size == 0:
-                check_empty_content(path, info, verify)
-                file_write(target, b'')
-                continue
-            expected = entry_hash(path, info, verify)
-            verifier = None
-            if expected is not None:
-                verifier = ContentVerifier(path, info.size, expected, error=AsarFormatError)
-            scan.append(_Member(info.offset, info.offset + info.size, path, target, verifier))
-
-        # The offsets of a well formed archive are back to back and sorted, the
-        # sort also keeps a hand made or deduplicated archive in offset order
-        scan.sort(key=lambda member: (member.start, -member.end, member.path))
-        regions = build_regions(scan)
-
-        position = data_offset
-        seek_count = 0
-        data_size = 0
-        for region in regions:
-            length = region.end - region.start
-            data_size += length
-            start = data_offset + region.start
-            if start != position:
-                # Only entries that are not back to back need this, a real
-                # archive never does
-                f.seek(start)
-                position = start
-                seek_count += 1
-            if length <= region_budget:
-                # The whole region fits in the budget, read it once and slice it
-                buffer = read_exact(f, length)
-                position += length
-                view = memoryview(buffer)
-                for member in region.members:
-                    write_member(member, view[member.start - region.start:member.end - region.start])
-                continue
-            # Larger than the budget, stream it and feed every member that
-            # overlaps the current chunk
-            members = region.members
-            active = []
-            index = 0
-            offset_in_region = 0
-            while offset_in_region < length:
-                take = min(chunk_size, length - offset_in_region)
-                chunk = read_exact(f, take)
-                position += take
-                chunk_start = region.start + offset_in_region
-                chunk_end = chunk_start + take
-                view = memoryview(chunk)
-                while index < len(members) and members[index].start < chunk_end:
-                    member = members[index]
-                    member.writer = AtomicChunkWriter(member.target)
-                    active.append(member)
-                    index += 1
-                remaining = []
-                for member in active:
-                    piece_start = max(chunk_start, member.start)
-                    piece_end = min(chunk_end, member.end)
-                    if piece_start < piece_end:
-                        piece = view[piece_start - chunk_start:piece_end - chunk_start]
-                        member.writer.write(piece)
-                        if member.verifier is not None:
-                            member.verifier.update(piece)
-                    if member.end <= chunk_end:
-                        finish_member(member)
-                    else:
-                        remaining.append(member)
-                active = remaining
-                offset_in_region += take
-
-        link_count = 0
-        if any(info.kind == KIND_LINK for info in files.values()):
-            # Links are created last, a real archive has few of them
-            archive_object = archive_of_entries(archive, files, header_size, data_offset)
-            for path, info in files.items():
-                if info.kind != KIND_LINK:
-                    continue
-                target = check_target_path(dest, path)
-                create_link(archive_object, path, target)
-                link_count += 1
-    finally:
-        f.close()
-    return UnpackResult(
-        dest=dest,
-        file_count=file_count,
-        dir_count=dir_count,
-        unpacked_count=unpacked_count,
-        link_count=link_count,
-        data_size=data_size,
-        region_count=len(regions),
-        seek_count=seek_count,
-    )
+        pack_archive(self.files, dest, integrity=integrity, fd=fd, release=release)
+        # Everything from the old file is stale now, the entries are re-read
+        # from the archive that was just written
+        InstanceCacheOperation.pop(self, 'header')
+        self.file = dest
 
 
 def pack_sha256(path):

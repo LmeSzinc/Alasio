@@ -39,7 +39,7 @@ class TestCommands:
         assert 'usage: python -m alasio.codegen.asar' in capsys.readouterr().out
 
     def test_list(self, fs, capsys):
-        """list prints the path of every entry, in archive order."""
+        """list prints the path of every entry, in the canonical order."""
         fs.create_file('/tiny.asar', contents=fixture.tiny_341())
         assert main(['list', '/tiny.asar']) == 0
         assert capsys.readouterr().out == 'hello.txt\nsub\nsub/bin.dat\n'
@@ -109,8 +109,9 @@ class TestCommands:
         out = capsys.readouterr().out
         assert out.startswith(f'Packed 4 entries from {root} to /packed.asar\n')
         assert '  3 files in the archive, 0 unpacked\n' in out
+        assert '  sha256 ' in out
         assert main(['list', '/packed.asar']) == 0
-        assert capsys.readouterr().out == 'dist\npackage.json\n' or capsys.readouterr().out == ''
+        assert capsys.readouterr().out == 'dist\ndist/main.js\ndist/style.css\npackage.json\n'
         assert main(['unpack', '/packed.asar', '/out', '--verify']) == 0
         assert file_read_bytes('/out/dist/main.js') == b'main'
         assert file_read_bytes('/out/package.json') == b'{"name":"alasio"}'
@@ -152,9 +153,22 @@ class TestCommands:
             'unpack', '/packthis.asar', '/out',
             '--region-budget', '0', '--chunk-size', '4096',
         ]) == 0
-        out = capsys.readouterr().out
-        assert '  226 bytes of data read in 1 regions, 0 seeks\n' in out
+        assert capsys.readouterr().out == (
+            'Extracted 6 files and 2 directories to /out\n'
+            '  0 unpacked files, 0 links\n'
+        )
         assert file_read_bytes('/out/file0.txt') == b'file0 content'
+
+    def test_unpack_summary(self, fs, capsys):
+        """unpack counts the entries of the archive it extracted."""
+        fs.create_file('/unpack.asar', contents=fixture.packthis_unpack_430())
+        for name, content in fixture.unpacked_430_files().items():
+            fs.create_file(f'/unpack.asar.unpacked/{name}', contents=content)
+        assert main(['unpack', '/unpack.asar', '/out']) == 0
+        assert capsys.readouterr().out == (
+            'Extracted 5 files and 2 directories to /out\n'
+            '  1 unpacked files, 0 links\n'
+        )
 
     def test_errors(self, fs, capsys):
         """A missing entry and a missing archive raise the module errors."""

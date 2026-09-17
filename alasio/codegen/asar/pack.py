@@ -16,68 +16,17 @@ size, and no temporary file is used to spool the content.
 import hashlib
 import os
 
-import msgspec
-
-from alasio.ext.path.atomic import CHUNK_SIZE, atomic_open, file_read_bytes_stream, file_write, replace_tmp, to_tmp_file
+from alasio.ext.path.atomic import CHUNK_SIZE, file_read_bytes_stream, file_write, replace_tmp, to_tmp_file
 
 from .errors import AsarError, AsarUnsupportedError
-from .format import BLOCK_SIZE, UINT32_MAX, calc_header_size, pack_header_pickle, pack_size_pickle
-from .model import (
-    KIND_FILE, build_header, decode_header, encode_header, new_integrity, propagate_unpacked, validate_header
-)
+from .format import BLOCK_SIZE, UINT32_MAX, pack_header
+from .model import KIND_FILE, Integrity, build_header, canonical_entries, encode_header, mark_unpacked
 
 # Content of files not larger than this is kept in memory after pass 1, so that
 # an archive of many small files (the common case) is read only once
 CACHE_FILE_SIZE = 2 * 1024 * 1024
 # Total memory budget of that cache, small files beyond it are read twice
 CACHE_BUDGET = 64 * 1024 * 1024
-
-
-class FileRange:
-    """
-    A byte range of a local file.
-
-    It is the content of an entry that lives in an archive which is not loaded
-    in memory anymore, typically the archive a previous ``write_asar()`` wrote.
-    """
-
-    __slots__ = ('path', 'offset', 'size')
-
-    def __init__(self, path, offset, size):
-        """
-        Args:
-            path (str): Path of the file holding the range
-            offset (int): Offset of the range in the file
-            size (int): Byte length of the range
-        """
-        self.path = path
-        self.offset = offset
-        self.size = size
-
-    def __repr__(self):
-        return f'FileRange({self.path!r}, {self.offset}, {self.size})'
-
-
-class PackResult(msgspec.Struct):
-    """
-    Result of ``AsarArchive.write_asar()``.
-
-    Attributes:
-        dest (str): Path of the written archive
-        file_count (int): Number of file entries stored in the archive body
-        unpacked_count (int): Number of file entries stored next to the archive
-        archive_size (int): Total byte length of the archive
-        header_size (int): Header pickle length, the data area starts at 8 + it
-        data_size (int): Byte length of the data area
-        sha256 (str): SHA256 of the whole archive, hex digest
-    """
-    dest: str
-    file_count: int
-    unpacked_count: int
-    archive_size: int
-    header_size: int
-    data_size: int
-    sha256: str
 
 
 class AtomicChunkWriter:
@@ -90,12 +39,16 @@ class AtomicChunkWriter:
     project's atomic helpers is reused, an archive may be read by another process.
     """
 
-    def __init__(self, file):
+    def __init__(self, file, mode=None):
         """
         Args:
             file (str): Target file path
+            mode (int): POSIX mode of the target file, set on the temporary file
+                before it replaces the target, so the mode of the target is
+                never observable in between
         """
         self.file = file
+        self.mode = mode
         self.tmp = to_tmp_file(file)
         self.size = 0
         self._f = None
@@ -136,6 +89,8 @@ class AtomicChunkWriter:
             os.fsync(self._f.fileno())
             self._f.close()
             self._f = None
+        if self.mode is not None:
+            os.chmod(self.tmp, self.mode)
         replace_tmp(self.tmp, self.file)
 
     def abort(self):
@@ -220,8 +175,9 @@ def hash_content(chunks, integrity=True):
         integrity (bool): Calculate the SHA256 hashes
 
     Returns:
-        (int, dict, bytearray): ``(size, integrity or None, cached content)``, the
-            cache is None once the content grows over ``CACHE_FILE_SIZE``
+        (int, Integrity, bytearray): ``(size, integrity or None, cached
+            content)``, the cache is None once the content grows over
+            ``CACHE_FILE_SIZE``
 
     Raises:
         AsarUnsupportedError: If the content is larger than the format allows
@@ -261,163 +217,135 @@ def hash_content(chunks, integrity=True):
     # exactly one block size has one block and an empty file has one empty block
     if block_size > 0 or not block_hashes:
         block_hashes.append(block_hasher.hexdigest())
-    return size, new_integrity(hasher.hexdigest(), block_hashes), cache
+    return size, Integrity.new(hasher.hexdigest(), block_hashes), cache
 
 
-def iter_file_chunks(file, chunk_size=CHUNK_SIZE):
+def iter_entry_content(info, fd=None, chunk_size=CHUNK_SIZE):
     """
-    Stream a local file.
+    Stream the content of one entry from its source.
 
     Args:
-        file (str): Source file path
+        info (AsarFileInfo): Entry to read
+        fd (io.IOBase): Open handle of the archive, for the entries that read
+            their content from it
         chunk_size (int): Read chunk size
-
-    Yields:
-        bytes: Content chunks
-    """
-    for chunk in file_read_bytes_stream(file, chunk_size=chunk_size):
-        yield chunk
-
-
-def iter_file_range(file, offset, size, chunk_size=CHUNK_SIZE):
-    """
-    Stream a byte range of a local file.
-
-    Args:
-        file (str): Source file path
-        offset (int): Offset of the range
-        size (int): Byte length of the range
-        chunk_size (int): Read chunk size
-
-    Yields:
-        bytes: Content chunks
-
-    Raises:
-        AsarError: If the file ends before the end of the range
-    """
-    if size <= 0:
-        return
-    with atomic_open(file, 'rb', buffering=0) as f:
-        f.seek(offset)
-        remaining = size
-        while remaining > 0:
-            chunk = f.read(min(chunk_size, remaining))
-            if not chunk:
-                raise AsarError(
-                    f'Content of "{file}" is truncated, {remaining} bytes are missing'
-                )
-            remaining -= len(chunk)
-            yield chunk
-
-
-def iter_entry_chunks(path, info, source, data_area, unpacked_root=None, chunk_size=CHUNK_SIZE):
-    """
-    Stream the content of one entry.
-
-    Args:
-        path (str): Archive path of the entry
-        info (AsarFileInfo): Entry, gives the size and offset of archive content
-        source (str | bytes | FileRange): Local file path, memory content or byte
-            range, None when the content comes from an archive that was read before
-        data_area (memoryview): Data area of the archive the entries were read
-            from, it starts at the first content byte
-        unpacked_root (str): Directory of the unpacked content of the archive
-        chunk_size (int): Read chunk size of a local file
 
     Yields:
         bytes | memoryview: Content chunks
 
     Raises:
-        AsarError: If an entry has neither a source nor archive content
+        AsarError: If the entry has no content source
     """
-    if isinstance(source, FileRange):
-        for chunk in iter_file_range(source.path, source.offset, source.size, chunk_size=chunk_size):
-            yield chunk
-        return
-    if source is not None:
-        if isinstance(source, str):
-            for chunk in iter_file_chunks(source, chunk_size=chunk_size):
-                yield chunk
-        else:
-            yield memoryview(source)
-        return
-    if info.unpacked:
-        if unpacked_root is None:
-            raise AsarError(f'Entry "{path}" is unpacked but there is no unpacked directory')
-        file = os.path.join(unpacked_root, *path.split('/'))
-        for chunk in iter_file_chunks(file, chunk_size=chunk_size):
-            yield chunk
-        return
-    if data_area is None:
-        raise AsarError(f'Entry "{path}" has no source and the archive data was not loaded')
-    start = info.offset
-    yield data_area[start:start + info.size]
+    source = info.source
+    if source is None:
+        raise AsarError(
+            f'Entry "{info.path}" has no content source, it can not be written to an archive'
+        )
+    yield from source.iter_chunks(fd=fd, chunk_size=chunk_size)
 
 
-def check_written_header(json_bytes):
+def iter_write_content(info, fd, cache, chunk_size=CHUNK_SIZE):
     """
-    Check the encoded header against the reference ``validateHeader`` rules.
-
-    The check runs on the decoded bytes, so it sees exactly what a reader sees:
-    an archive that we would refuse to read is a bug, not a valid pack.
+    Stream the content of one entry for pass 2, reusing the pass 1 cache.
 
     Args:
-        json_bytes (bytes): Encoded header JSON
+        info (AsarFileInfo): Entry to read
+        fd (io.IOBase): Open handle of the archive
+        cache (dict): ``{id(entry): content}`` of the entries read in pass 1
+        chunk_size (int): Read chunk size
+
+    Yields:
+        bytes | memoryview: Content chunks
+    """
+    buffer = cache.pop(id(info), None)
+    if buffer is not None:
+        yield buffer
+        return
+    yield from iter_entry_content(info, fd, chunk_size=chunk_size)
+
+
+def write_content(dest, chunks, verifier=None, mode=None):
+    """
+    Write the content of one entry to its own file, atomically and checked.
+
+    Args:
+        dest (str): Target file path, the parent directory is created
+        chunks (Iterable): Content chunks
+        verifier (ContentVerifier): Checker of the content, None to write as is
+        mode (int): POSIX mode of the target file, None to keep the default
 
     Raises:
-        AsarFormatError: If the encoded header is not a valid asar header
+        AsarError: If the content does not match the entry it belongs to
     """
-    validate_header(decode_header(json_bytes))
+    writer = AtomicChunkWriter(dest, mode=mode)
+    try:
+        for chunk in chunks:
+            if verifier is not None:
+                verifier.update(chunk)
+            writer.write(chunk)
+        if verifier is not None:
+            verifier.check()
+        writer.close()
+    except BaseException:
+        writer.abort()
+        raise
 
 
-def pack_archive(files, sources, dest, data_area=None, integrity=True, unpacked_root=None):
+def pack_archive(files, dest, integrity=True, fd=None, release=None):
     """
-    Write the flat entry table to an archive file.
+    Write the nested entry table to an archive file.
 
-    Sizes and integrity of the entries are recalculated from the content, and
-    the offsets are allocated in entry order, so ``files`` is updated in place
-    and becomes an exact description of the written archive.
+    Sizes and integrity are recalculated from the content of the entries and the
+    offsets are allocated in the canonical order, so the table describes the
+    written archive exactly when this returns.
 
     Args:
-        files (dict): ``{path: AsarFileInfo}``, see ``AsarArchive.files``
-        sources (dict): ``{path: local file path or content}``, an entry without a
-            source is read from ``data_area``
+        files (dict): Nested entry table, see ``AsarArchive.files``
         dest (str): Target archive path
-        data_area (memoryview): Data area of the archive the entries were read
-            from, it starts at the first content byte
-        integrity (bool): Write the per file SHA256 integrity
-        unpacked_root (str): Directory holding the unpacked content
-
-    Returns:
-        PackResult: Statistics of the written archive
+        integrity (bool): Write the per file SHA256 integrity of the reference
+            implementation, disable it to save the hashing time
+        fd (io.IOBase): Open handle of the archive the entries were read from,
+            the sources that live in an archive read through it
+        release (Callable): Called after the last byte was read and before the
+            temporary file replaces `dest`. The caller closes the handle it holds
+            on `dest` there: Windows refuses to replace an open file, and the
+            handle would point at the replaced file afterwards. It is never
+            called when the pack fails, so a failed pack leaves the archive it
+            reads from untouched
 
     Raises:
         AsarError: If an entry has no content source, or if a source changes
             between the two passes
         AsarUnsupportedError: If an entry is larger than the format allows
     """
-    propagate_unpacked(files)
+    mark_unpacked(files)
+    entries = canonical_entries(files)
 
     # Pass 1: real size and content hash of every entry
     cache = {}
     cache_budget = CACHE_BUDGET
-    for path, info in files.items():
-        if info.kind != KIND_FILE:
+    for keys, info in entries:
+        if type(info) is dict or info.kind != KIND_FILE:
             continue
-        chunks = iter_entry_chunks(path, info, sources.get(path), data_area, unpacked_root)
-        size, content_integrity, buffer = hash_content(chunks, integrity=integrity)
+        source = info.source
+        size, content_integrity, buffer = hash_content(
+            iter_entry_content(info, fd), integrity=integrity,
+        )
         info.size = size
         info.integrity = content_integrity
+        if source.mode is not None and os.name != 'nt':
+            # Only POSIX has an executable bit, and only a file of its own
+            # knows it, an entry read from an archive keeps what the header says
+            info.executable = bool(source.mode & 0o100)
         if buffer is not None and len(buffer) <= cache_budget:
-            cache[path] = buffer
+            cache[id(info)] = buffer
             cache_budget -= len(buffer)
 
-    # Offsets are relative to the data area and follow the entry order
+    # Offsets are relative to the data area and follow the canonical order
     offset = 0
-    file_count = 0
     unpacked_count = 0
-    for path, info in files.items():
-        if info.kind != KIND_FILE:
+    for keys, info in entries:
+        if type(info) is dict or info.kind != KIND_FILE:
             continue
         if info.unpacked:
             info.offset = None
@@ -425,114 +353,44 @@ def pack_archive(files, sources, dest, data_area=None, integrity=True, unpacked_
             continue
         info.offset = offset
         offset += info.size
-        file_count += 1
-    data_size = offset
 
-    # Pass 2: the header first, it is written before the contents
-    json_bytes = encode_header(build_header(files))
-    check_written_header(json_bytes)
-    header_size = calc_header_size(len(json_bytes))
+    # The header is written before the contents, but it describes them, so it is
+    # encoded first
+    json_bytes = encode_header(build_header(entries))
 
     # The unpacked content is written before the archive, so that a new header
     # never points at an unpacked file that does not exist yet
     if unpacked_count:
         unpacked_dir = f'{dest}.unpacked'
-        for path, info in files.items():
-            if info.kind != KIND_FILE or not info.unpacked:
-                continue
-            write_entry(
-                os.path.join(unpacked_dir, *path.split('/')), path, info,
-                sources.get(path), data_area, unpacked_root,
-            )
-
-    writer = AtomicChunkWriter(dest)
-    hasher = hashlib.sha256()
-    try:
-        for chunk in (pack_size_pickle(header_size), pack_header_pickle(json_bytes)):
-            hasher.update(chunk)
-            writer.write(chunk)
-        for path, info in files.items():
-            if info.kind != KIND_FILE or info.unpacked:
+        for keys, info in entries:
+            if type(info) is dict or info.kind != KIND_FILE or not info.unpacked:
                 continue
             verifier = ContentVerifier(
-                path, info.size, info.integrity['hash'] if info.integrity else None,
+                info.path, info.size, info.integrity.hash if info.integrity else None,
             )
-            for chunk in iter_content_with_cache(path, info, sources, data_area, cache, unpacked_root):
-                verifier.update(chunk)
-                hasher.update(chunk)
-                writer.write(chunk)
-            verifier.check()
-        writer.close()
-    except BaseException:
-        writer.abort()
-        raise
-    return PackResult(
-        dest=dest,
-        file_count=file_count,
-        unpacked_count=unpacked_count,
-        archive_size=writer.size,
-        header_size=header_size,
-        data_size=data_size,
-        sha256=hasher.hexdigest(),
-    )
+            write_content(
+                os.path.join(unpacked_dir, *keys),
+                iter_entry_content(info, fd),
+                verifier=verifier,
+                mode=0o755 if info.executable and os.name != 'nt' else None,
+            )
 
-
-def iter_content_with_cache(path, info, sources, data_area, cache, unpacked_root=None):
-    """
-    Stream the content of one entry, reusing the pass 1 cache when possible.
-
-    Args:
-        path (str): Archive path of the entry
-        info (AsarFileInfo): Entry
-        sources (dict): ``{path: source}``
-        data_area (memoryview): Data area of the archive the entries were read from
-        cache (dict): ``{path: content}`` of the entries read in pass 1
-        unpacked_root (str): Directory holding the unpacked content
-
-    Yields:
-        bytes | memoryview: Content chunks
-    """
-    buffer = cache.get(path)
-    if buffer is not None:
-        del cache[path]
-        yield buffer
-        return
-    for chunk in iter_entry_chunks(path, info, sources.get(path), data_area, unpacked_root):
-        yield chunk
-
-
-def write_entry(dest, path, info, source, data_area=None, unpacked_root=None, verify=True,
-                error=AsarError, chunk_size=CHUNK_SIZE):
-    """
-    Write one entry to its own file, atomically and verified.
-
-    Args:
-        dest (str): Target file path
-        path (str): Archive path of the entry, only used in error messages
-        info (AsarFileInfo): Entry
-        source (str | bytes | memoryview): Content source
-        data_area (memoryview): Data area of the archive the entries were read from
-        unpacked_root (str): Directory holding the unpacked content
-        verify (bool): Check the content against the size and hash of the entry
-        error (type): Exception to raise on a mismatch
-        chunk_size (int): Read chunk size when the source is a file
-
-    Raises:
-        AsarError: If the content does not match the entry
-    """
-    verifier = None
-    if verify:
-        verifier = ContentVerifier(
-            path, info.size, info.integrity['hash'] if info.integrity else None, error=error,
-        )
+    # Pass 2: the content, recomputed and checked against pass 1
     writer = AtomicChunkWriter(dest)
     try:
-        for chunk in iter_entry_chunks(path, info, source, data_area, unpacked_root, chunk_size=chunk_size):
-            if verifier is not None:
+        writer.write(pack_header(json_bytes))
+        for keys, info in entries:
+            if type(info) is dict or info.kind != KIND_FILE or info.unpacked:
+                continue
+            verifier = ContentVerifier(
+                info.path, info.size, info.integrity.hash if info.integrity else None,
+            )
+            for chunk in iter_write_content(info, fd, cache):
                 verifier.update(chunk)
-            writer.write(chunk)
-        if verifier is not None:
+                writer.write(chunk)
             verifier.check()
+        if release is not None:
+            release()
         writer.close()
     except BaseException:
         writer.abort()
@@ -551,6 +409,6 @@ def hash_file(file, chunk_size=CHUNK_SIZE):
         str: SHA256 hex digest
     """
     hasher = hashlib.sha256()
-    for chunk in iter_file_chunks(file, chunk_size=chunk_size):
+    for chunk in file_read_bytes_stream(file, chunk_size=chunk_size):
         hasher.update(chunk)
     return hasher.hexdigest()

@@ -22,7 +22,7 @@ import os
 
 import msgspec
 
-from alasio.codegen.asar.format import calc_header_size, pack_header_pickle, pack_size_pickle
+from alasio.codegen.asar.format import pack_header
 
 # tiny.asar, 549 bytes
 TINY_341 = (
@@ -266,7 +266,28 @@ def make_archive(header, data=b'', header_size=None):
     Returns:
         bytes: Archive bytes
     """
-    json_bytes = msgspec.json.encode(header)
-    if header_size is None:
-        header_size = calc_header_size(len(json_bytes))
-    return pack_size_pickle(header_size) + pack_header_pickle(json_bytes) + data
+    return make_archive_bytes(msgspec.json.encode(header), data, header_size=header_size)
+
+
+def make_archive_bytes(json_bytes, data=b'', header_size=None):
+    """
+    Build an archive around header JSON bytes.
+
+    The malformed cases of the tests need a header that is not valid JSON at
+    all, so the bytes are taken as they are.
+
+    Args:
+        json_bytes (bytes): Header JSON, UTF-8 encoded
+        data (bytes): Content of the data area
+        header_size (int): Value written in the frame, defaults to the real
+            header length, an override builds a deliberately broken archive
+
+    Returns:
+        bytes: Archive bytes
+    """
+    frame = pack_header(json_bytes)
+    if header_size is not None:
+        # Broken on purpose: the frame claims a header length the file does not
+        # have, the constant payload length of the leading pickle is kept
+        frame = b'\x04\x00\x00\x00' + header_size.to_bytes(4, 'little') + frame[8:]
+    return frame + data

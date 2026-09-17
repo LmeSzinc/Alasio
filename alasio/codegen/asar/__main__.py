@@ -11,32 +11,66 @@ Command line interface of the asar packer / unpacker::
 The same features are available from Python, see ``AsarArchive``.
 """
 import argparse
+import os
 import sys
 
 import msgspec
 
 from alasio.ext.path.atomic import CHUNK_SIZE
 
-from .archive import REGION_BUDGET, AsarArchive, check_header_size, unpack
-from .format import parse_header_pickle, parse_size_pickle
-from .model import KIND_FILE, build_header, encode_header
+from .archive import REGION_BUDGET, AsarArchive, pack_sha256
+from .format import read_header
+from .model import KIND_DIR, KIND_FILE, KIND_LINK, build_header, canonical_entries, encode_header
 
 
-def read_header_json(archive):
+def count_entries(archive):
     """
-    Read the header JSON of an archive the way it is stored.
+    Count the entries of an archive by kind.
+
+    Args:
+        archive (AsarArchive): Archive to count
+
+    Returns:
+        (int, int, int, int): ``(packed files, unpacked files, directories, links)``
+    """
+    packed = 0
+    unpacked = 0
+    directories = 0
+    links = 0
+    for _, info in archive.iter_entries():
+        if info.kind == KIND_DIR:
+            directories += 1
+        elif info.kind == KIND_LINK:
+            links += 1
+        elif info.unpacked:
+            unpacked += 1
+        else:
+            packed += 1
+    return packed, unpacked, directories, links
+
+
+def unpack_archive(archive, dest, verify=False, region_budget=REGION_BUDGET, chunk_size=CHUNK_SIZE):
+    """
+    Extract a whole archive, for the command line.
+
+    The library returns no statistics, so what the summary needs is counted here
+    while the archive is open.
 
     Args:
         archive (str): Path of the archive
+        dest (str): Target directory
+        verify (bool): Check every content against the integrity of the header
+        region_budget (int): Regions up to this size are read in one piece, 0
+            streams everything
+        chunk_size (int): Read chunk size of a streamed region
 
     Returns:
-        bytes: Header JSON, UTF-8 encoded
+        (int, int, int, int): ``(files, directories, unpacked files, links)``
     """
-    with open(archive, 'rb') as f:
-        data = f.read()
-    header_size = parse_size_pickle(data[:8])
-    check_header_size(header_size, len(data))
-    return bytes(parse_header_pickle(data[8:8 + header_size]))
+    with AsarArchive(archive) as asar:
+        packed, unpacked, directories, links = count_entries(asar)
+        asar.extract_all(dest, verify=verify, region_budget=region_budget, chunk_size=chunk_size)
+    return packed + unpacked, directories, unpacked, links
 
 
 def cmd_pack(args):
@@ -49,22 +83,24 @@ def cmd_pack(args):
     Returns:
         int: Exit code
     """
-    archive = AsarArchive()
-    count = archive.add_folder(
-        args.src,
-        include=args.file,
-        exclude=args.exclude,
-        unpack=args.unpack,
-        unpack_dir=args.unpack_dir,
-    )
-    result = archive.write_asar(args.dest, integrity=not args.no_integrity)
-    print(
-        f'Packed {count} entries from {args.src} to {result.dest}\n'
-        f'  {result.file_count} files in the archive, {result.unpacked_count} unpacked\n'
-        f'  archive {result.archive_size} bytes, header {result.header_size} bytes, '
-        f'data {result.data_size} bytes\n'
-        f'  sha256 {result.sha256}'
-    )
+    with AsarArchive() as archive:
+        count = archive.add_folder(
+            args.src,
+            include=args.file,
+            exclude=args.exclude,
+            unpack=args.unpack,
+            unpack_dir=args.unpack_dir,
+        )
+        archive.write(args.dest, integrity=not args.no_integrity)
+        packed, unpacked, _, _ = count_entries(archive)
+        archive_size = os.path.getsize(args.dest)
+        print(
+            f'Packed {count} entries from {args.src} to {args.dest}\n'
+            f'  {packed} files in the archive, {unpacked} unpacked\n'
+            f'  archive {archive_size} bytes, header {archive.header_size} bytes, '
+            f'data {archive_size - archive.data_offset} bytes\n'
+            f'  sha256 {pack_sha256(args.dest)}'
+        )
     return 0
 
 
@@ -78,7 +114,7 @@ def cmd_unpack(args):
     Returns:
         int: Exit code
     """
-    result = unpack(
+    files, directories, unpacked, links = unpack_archive(
         args.archive,
         args.dest,
         region_budget=args.region_budget,
@@ -86,11 +122,8 @@ def cmd_unpack(args):
         verify=args.verify,
     )
     print(
-        f'Extracted {result.file_count} files and {result.dir_count} directories '
-        f'to {result.dest}\n'
-        f'  {result.unpacked_count} unpacked files, {result.link_count} links\n'
-        f'  {result.data_size} bytes of data read in {result.region_count} regions, '
-        f'{result.seek_count} seeks'
+        f'Extracted {files} files and {directories} directories to {args.dest}\n'
+        f'  {unpacked} unpacked files, {links} links'
     )
     return 0
 
@@ -105,22 +138,22 @@ def cmd_list(args):
     Returns:
         int: Exit code
     """
-    archive = AsarArchive.read_asar(args.archive)
-    for path, info in archive.files.items():
-        if not args.long:
-            print(path)
-            continue
-        size = '-' if info.size is None else str(info.size)
-        offset = '-' if info.offset is None else str(info.offset)
-        if info.kind != KIND_FILE:
-            flags = info.kind
-            if info.unpacked:
-                flags += ' unpack'
-        else:
-            flags = 'unpack' if info.unpacked else 'pack'
-            if info.executable:
-                flags += ' executable'
-        print(f'{size:>10} {offset:>10} {flags:<20} {path}')
+    with AsarArchive(args.archive) as archive:
+        for path, info in archive.iter_entries():
+            if not args.long:
+                print(path)
+                continue
+            size = '-' if info.size is None else str(info.size)
+            offset = '-' if info.offset is None else str(info.offset)
+            if info.kind != KIND_FILE:
+                flags = info.kind
+                if info.unpacked:
+                    flags += ' unpack'
+            else:
+                flags = 'unpack' if info.unpacked else 'pack'
+                if info.executable:
+                    flags += ' executable'
+            print(f'{size:>10} {offset:>10} {flags:<20} {path}')
     return 0
 
 
@@ -134,8 +167,8 @@ def cmd_extract(args):
     Returns:
         int: Exit code
     """
-    archive = AsarArchive.read_asar(args.archive)
-    archive.extract_file(args.name, args.dest)
+    with AsarArchive(args.archive) as archive:
+        archive.extract_file(args.name, args.dest)
     print(f'Extracted {args.name} to {args.dest}')
     return 0
 
@@ -150,8 +183,8 @@ def cmd_stat(args):
     Returns:
         int: Exit code
     """
-    archive = AsarArchive.read_asar(args.archive)
-    info = archive.entry(args.name)
+    with AsarArchive(args.archive) as archive:
+        info = archive.entry(args.name)
     size = '-' if info.size is None else str(info.size)
     offset = '-' if info.offset is None else str(info.offset)
     print(
@@ -159,6 +192,28 @@ def cmd_stat(args):
         f'{str(info.unpacked).lower()} {str(info.executable).lower()}'
     )
     return 0
+
+
+def stored_header(archive):
+    """
+    Read the header JSON of an archive as it is stored in the file.
+
+    The reader keeps the entry table the header describes, not the bytes it was
+    written in, and the two are not the same: an archive may store its entries
+    in any order while a table that is written back is rebuilt in the canonical
+    one, so the file is read again here to print what is really stored.
+
+    Args:
+        archive (AsarArchive): Open archive
+
+    Returns:
+        bytes: Header JSON, UTF-8 encoded
+    """
+    fd = archive.fd
+    # The frame tells how long the header is, reading it leaves the handle on
+    # the first content byte
+    fd.seek(0)
+    return read_header(fd)[0]
 
 
 def cmd_header(args):
@@ -171,11 +226,12 @@ def cmd_header(args):
     Returns:
         int: Exit code
     """
-    if args.entries:
-        # Rebuilt from the entry table, useful to compare with what a pack writes
-        data = encode_header(build_header(AsarArchive.read_asar(args.archive).files))
-    else:
-        data = read_header_json(args.archive)
+    with AsarArchive(args.archive) as archive:
+        if args.entries:
+            # Rebuilt from the entry table, useful to compare with what a pack writes
+            data = encode_header(build_header(canonical_entries(archive.files)))
+        else:
+            data = stored_header(archive)
     if args.json:
         data = msgspec.json.format(data, indent=2)
     sys.stdout.write(data.decode('utf-8'))

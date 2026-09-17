@@ -1,38 +1,40 @@
 """
 Electron app.asar packer and unpacker.
 
-Reading an archive::
+Reading an archive, and extracting it with a single sequential pass over the
+data area::
 
     from alasio.codegen.asar import AsarArchive
 
-    archive = AsarArchive.read_asar('app.asar')
-    print(archive.files['package.json'].size)
-    archive.extract_all('output')
+    with AsarArchive('app.asar') as archive:
+        print(archive.entry('package.json').size)
+        archive.extract_all('output')
 
-Building an archive::
+Building an archive from a directory::
 
-    archive = AsarArchive()
-    archive.add_folder('webapp', include=['dist/**', 'package.json'])
-    archive.add_file(data=b'{"name":"alasio"}', arc_path='build.json')
-    result = archive.write_asar('app.asar')
-    print(result.sha256)
+    with AsarArchive() as archive:
+        archive.add_folder('webapp', include=['dist/**', 'package.json'])
+        archive.add_file(data=b'{"name":"alasio"}', arc_path='build.json')
+        archive.write('app.asar')
 
-Extracting without loading the archive in memory (a single sequential pass)::
+Updating the archive of a client in place, one entry at a time::
 
-    from alasio.codegen.asar import unpack
-
-    unpack('app.asar', 'output', verify=True)
+    with AsarArchive('app.asar') as archive:
+        archive.add_file('build/main.js', 'dist/main.js')
+        archive.del_folder('dist/renderer')
+        archive.write()
 """
-from .archive import (
-    REGION_BUDGET as REGION_BUDGET, AsarArchive as AsarArchive, UnpackResult as UnpackResult,
-    pack_sha256 as pack_sha256, unpack as unpack
-)
+from .archive import REGION_BUDGET as REGION_BUDGET, AsarArchive as AsarArchive, pack_sha256 as pack_sha256
 from .errors import (
     AsarEntryNotFoundError as AsarEntryNotFoundError, AsarError as AsarError, AsarFormatError as AsarFormatError,
     AsarPathError as AsarPathError, AsarUnsupportedError as AsarUnsupportedError
 )
+from .format import BLOCK_SIZE as BLOCK_SIZE, MAX_HEADER_SIZE as MAX_HEADER_SIZE, MAX_PATH_DEPTH as MAX_PATH_DEPTH
 from .model import KIND_DIR as KIND_DIR, KIND_FILE as KIND_FILE, KIND_LINK as KIND_LINK, AsarFileInfo as AsarFileInfo
-from .pack import PackResult as PackResult
+from .source import (
+    ContentSource as ContentSource, LocalFileSource as LocalFileSource, MemorySource as MemorySource,
+    RangeSource as RangeSource
+)
 
 __all__ = [
     'AsarArchive',
@@ -42,12 +44,16 @@ __all__ = [
     'AsarFormatError',
     'AsarPathError',
     'AsarUnsupportedError',
+    'BLOCK_SIZE',
+    'ContentSource',
     'KIND_DIR',
     'KIND_FILE',
     'KIND_LINK',
-    'PackResult',
+    'LocalFileSource',
+    'MAX_HEADER_SIZE',
+    'MAX_PATH_DEPTH',
+    'MemorySource',
     'REGION_BUDGET',
-    'UnpackResult',
+    'RangeSource',
     'pack_sha256',
-    'unpack',
 ]

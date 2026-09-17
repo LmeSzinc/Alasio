@@ -15,7 +15,12 @@ The archive is a Chromium Pickle frame followed by the file contents::
 Every integer is a little endian uint32, and a Chromium Pickle writes each value
 padded to a 4 byte boundary (this naming is kept because ``pickle`` is a stdlib
 module, and this is NOT the stdlib pickle format).
+
+The frame is a detail of the format: ``read_header()`` gives the header JSON and
+the offset of the content, ``pack_header()`` gives the bytes an archive starts
+with. Nothing else in the module works with the frame.
 """
+import os
 import struct
 
 from .errors import AsarFormatError
@@ -24,8 +29,6 @@ from .errors import AsarFormatError
 ALIGNMENT = 4
 # Payload length of the leading size pickle, it holds a single uint32
 SIZE_PICKLE_PAYLOAD = 4
-# Byte length of the frame integers before the header JSON
-FRAME_SIZE = 16
 # Integrity block size used by @electron/asar (4 MiB)
 BLOCK_SIZE = 4194304
 # asar stores the file size in a uint32, checked from both sides
@@ -37,7 +40,7 @@ MAX_HEADER_SIZE = 16 * 1024 * 1024
 MAX_PATH_DEPTH = 256
 
 
-def align4(size):
+def _align4(size):
     """
     Round a byte size up to the next 4 byte boundary.
 
@@ -50,115 +53,81 @@ def align4(size):
     return (size + 3) & ~3
 
 
-def calc_header_size(json_size):
+def read_header(fd):
     """
-    Calculate the header pickle length of a header JSON.
+    Read the header of an archive.
+
+    The handle is left on the first content byte, so a sequential read of the
+    data area (``extract_all()``) starts right where the header ends.
 
     Args:
-        json_size (int): Header JSON byte length
+        fd (io.IOBase): Open handle of the archive file, the file is read from
+            its beginning whatever the position of the handle is
 
     Returns:
-        int: Header pickle length, ``8 + align4(json_size)``
-    """
-    return 2 * ALIGNMENT + align4(json_size)
-
-
-def calc_data_offset(json_size):
-    """
-    Calculate the offset of the first file content.
-
-    Args:
-        json_size (int): Header JSON byte length
-
-    Returns:
-        int: Offset of the data area, ``16 + align4(json_size)``
-    """
-    return FRAME_SIZE + align4(json_size)
-
-
-def pack_size_pickle(header_size):
-    """
-    Build the leading size pickle, it holds the length of the header pickle.
-
-    Args:
-        header_size (int): Header pickle length, see ``calc_header_size()``
-
-    Returns:
-        bytes: Size pickle, 8 bytes
-    """
-    return struct.pack('<II', SIZE_PICKLE_PAYLOAD, header_size)
-
-
-def pack_header_pickle(data):
-    """
-    Build the header pickle, it holds the header JSON as a length prefixed string.
-
-    Args:
-        data (bytes): Header JSON, UTF-8 encoded
-
-    Returns:
-        bytes: Header pickle, ``8 + align4(len(data))`` bytes
-    """
-    size = len(data)
-    padding = align4(size) - size
-    return b''.join((
-        struct.pack('<II', SIZE_PICKLE_PAYLOAD + align4(size), size),
-        data,
-        b'\x00' * padding,
-    ))
-
-
-def parse_size_pickle(data):
-    """
-    Parse the leading size pickle to get the header pickle length.
-
-    Args:
-        data (bytes): The first 8 bytes of an archive
-
-    Returns:
-        int: Header pickle length
+        (bytes, int): Header JSON, and the offset of the first content byte
 
     Raises:
-        AsarFormatError: If the frame is truncated or the payload length is not
-            the constant 4 written by Chromium Pickle
+        AsarFormatError: If the archive is truncated, or if the frame does not
+            match the header it holds
     """
-    if len(data) < 8:
-        raise AsarFormatError(
-            f'Archive is truncated, expected 8 bytes of size pickle, got {len(data)}'
-        )
-    payload, header_size = struct.unpack_from('<II', data, 0)
+    # The size comes from the file itself, seeking to its end and back would
+    # move the handle without telling anything new about it
+    archive_size = os.fstat(fd.fileno()).st_size
+    fd.seek(0)
+    frame = fd.read(8)
+    if len(frame) != 8:
+        raise AsarFormatError(f'Archive is truncated, expected 8 bytes but got {len(frame)}')
+    payload, header_size = struct.unpack('<II', frame)
     if payload != SIZE_PICKLE_PAYLOAD:
         raise AsarFormatError(
             f'Broken size pickle, expected a payload of {SIZE_PICKLE_PAYLOAD} bytes, got {payload}'
         )
-    return header_size
-
-
-def parse_header_pickle(data):
-    """
-    Extract the header JSON from a header pickle.
-
-    Args:
-        data (bytes): Header pickle bytes
-
-    Returns:
-        memoryview: Header JSON bytes, a view on ``data``
-
-    Raises:
-        AsarFormatError: If the pickle is truncated or its lengths do not match
-    """
-    if len(data) < 8:
+    if header_size < 8:
         raise AsarFormatError(
-            f'Header pickle is truncated, expected at least 8 bytes, got {len(data)}'
+            f'Header size {header_size} is smaller than the 8 bytes a header pickle needs'
         )
-    payload, json_size = struct.unpack_from('<II', data, 0)
-    if payload + 4 > len(data):
+    if header_size > MAX_HEADER_SIZE:
         raise AsarFormatError(
-            f'Header pickle is truncated, payload claims {payload} bytes, got {len(data) - 4}'
+            f'Header size {header_size} exceeds the {MAX_HEADER_SIZE} bytes limit'
         )
-    if ALIGNMENT + align4(json_size) > payload:
+    if header_size + 8 > archive_size:
+        raise AsarFormatError(
+            f'Header size {header_size} exceeds the archive size of {archive_size} bytes'
+        )
+    pickle = fd.read(header_size)
+    if len(pickle) != header_size:
+        raise AsarFormatError(
+            f'Archive is truncated, expected {header_size} bytes but got {len(pickle)}'
+        )
+    payload, json_size = struct.unpack_from('<II', pickle, 0)
+    if payload + 4 > header_size:
+        raise AsarFormatError(
+            f'Header pickle is truncated, payload claims {payload} bytes, got {header_size - 4}'
+        )
+    if ALIGNMENT + _align4(json_size) > payload:
         raise AsarFormatError(
             f'Header JSON does not fit in the header pickle, '
             f'JSON claims {json_size} bytes, payload is {payload}'
         )
-    return memoryview(data)[8:8 + json_size]
+    return pickle[8:8 + json_size], 8 + header_size
+
+
+def pack_header(json_bytes):
+    """
+    Build the frame an archive starts with.
+
+    Args:
+        json_bytes (bytes): Header JSON, UTF-8 encoded
+
+    Returns:
+        bytes: Size pickle and header pickle, the content goes right after them
+    """
+    json_size = len(json_bytes)
+    aligned = _align4(json_size)
+    return b''.join((
+        struct.pack('<II', SIZE_PICKLE_PAYLOAD, 2 * ALIGNMENT + aligned),
+        struct.pack('<II', SIZE_PICKLE_PAYLOAD + aligned, json_size),
+        json_bytes,
+        b'\x00' * (aligned - json_size),
+    ))
