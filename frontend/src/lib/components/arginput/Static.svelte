@@ -12,7 +12,9 @@
   const arg = $derived(useArgValue<any>(data));
 </script>
 
-<div class={cn("relative flex h-7 w-full p-1 px-2", className)}>
+<!-- w-fit: a static value has no input box to fill, hugging the content lets
+     the value column's justify-center center it, like the checkbox -->
+<div class={cn("relative flex h-7 w-fit items-center p-1 px-2", className)}>
   <span
     class={cn(
       "text-primary/80 truncate font-semibold",
