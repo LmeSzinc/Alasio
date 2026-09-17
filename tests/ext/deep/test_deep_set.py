@@ -2,6 +2,8 @@
 Tests for the write functions in ``alasio.ext.deep``:
 
 - ``deep_set``: set a value into a nested dict, creating missing levels
+- ``deep_set_no_replace``: like ``deep_set``, but a non-dict met on the key path
+  raises TypeError instead of being replaced
 - ``deep_default``: set a value only when the key does not exist
 - ``dict_update``: safely update a dict
 - ``dict_copy``: safely shallow-copy a dict
@@ -17,7 +19,7 @@ from collections import deque
 
 import pytest
 
-from alasio.ext.deep import deep_default, deep_set, deep_set_with_error, dict_copy, dict_update
+from alasio.ext.deep import deep_default, deep_set, deep_set_no_replace, deep_set_with_error, dict_copy, dict_update
 
 # Non-dict value types used to exercise the override correction of deep_set()
 NON_DICT_VALUES = [
@@ -422,3 +424,224 @@ class TestDeepSetWithError:
         assert deep_set_with_error(d, ('a', 'b'), 2) == {'a': {'b': 2}}
         d = {'a': {'b': 1}}
         assert deep_set_with_error(d, deque(['a', 'b']), 2) == {'a': {'b': 2}}
+
+
+class TestDeepSetNoReplace:
+    """
+    deep_set_no_replace() creates missing levels like deep_set(), but a level
+    that is not a dict is never replaced: the write is attempted eagerly and a
+    TypeError telling the key and the value at it is raised instead. The value
+    at the last key is the only thing overwritten.
+    """
+
+    def test_deep_set_no_replace_basic(self):
+        d = {'a': {'b': 1}}
+        assert deep_set_no_replace(d, 'a.b', 2) == {'a': {'b': 2}}
+        assert d == {'a': {'b': 2}}
+
+    def test_deep_set_no_replace_create(self):
+        d = {}
+        assert deep_set_no_replace(d, 'a.b.c', 1) == {'a': {'b': {'c': 1}}}
+        assert d == {'a': {'b': {'c': 1}}}
+
+    def test_deep_set_no_replace_returns_same_object(self):
+        # The root object is always returned, non-dict levels are never rebuilt
+        d = {}
+        assert deep_set_no_replace(d, 'a.b', 1) is d
+        d = {'a': {}}
+        assert deep_set_no_replace(d, 'a.b', 1) is d
+
+    def test_deep_set_no_replace_overwrite_last_key(self):
+        # The value at the last key is overwritten, whatever it was
+        d = {'a': 1}
+        assert deep_set_no_replace(d, 'a', 2) == {'a': 2}
+        d = {'a': {'b': 1}}
+        assert deep_set_no_replace(d, 'a.b', 2) == {'a': {'b': 2}}
+        # A dict at the last key is the value to overwrite, not a level of the
+        # key path, so it is replaced
+        d = {'a': {'b': {'c': 1}}}
+        assert deep_set_no_replace(d, 'a.b', 2) == {'a': {'b': 2}}
+
+    def test_deep_set_no_replace_none_value(self):
+        d = {}
+        assert deep_set_no_replace(d, 'a.b', None) == {'a': {'b': None}}
+
+    def test_deep_set_no_replace_tuple_deque_keys(self):
+        d = {'a': {'b': 1}}
+        assert deep_set_no_replace(d, ('a', 'b'), 2) == {'a': {'b': 2}}
+        d = {'a': {'b': 1}}
+        assert deep_set_no_replace(d, deque(['a', 'b']), 2) == {'a': {'b': 2}}
+
+    @pytest.mark.parametrize('non_dict_value', NON_DICT_VALUES)
+    def test_deep_set_no_replace_root_non_dict_raises(self, non_dict_value):
+        # deep_set() would rebuild a non-dict root, here the write fails
+        with pytest.raises(TypeError):
+            deep_set_no_replace(non_dict_value, 'a', 2)
+        # Empty keys is an error before the root is written
+        with pytest.raises(IndexError):
+            deep_set_no_replace(non_dict_value, [], 2)
+
+    @pytest.mark.parametrize('non_dict_value', NON_DICT_VALUES)
+    def test_deep_set_no_replace_middle_non_dict_raises(self, non_dict_value):
+        # A non-dict level of the key path is an error, not replaced
+        d = {'a': non_dict_value}
+        with pytest.raises(TypeError):
+            deep_set_no_replace(d, 'a.b', 2)
+        assert d == {'a': non_dict_value}
+        d = {'a': {'b': non_dict_value}}
+        with pytest.raises(TypeError):
+            deep_set_no_replace(d, 'a.b.c', 2)
+        assert d == {'a': {'b': non_dict_value}}
+        d = {'a': {'b': {'c': non_dict_value}}}
+        with pytest.raises(TypeError):
+            deep_set_no_replace(d, 'a.b.c.d', 2)
+        assert d == {'a': {'b': {'c': non_dict_value}}}
+
+    def test_deep_set_no_replace_none_middle_raises(self):
+        # None is not a dict, it must not be treated as a missing key
+        d = {'a': None}
+        with pytest.raises(TypeError):
+            deep_set_no_replace(d, 'a.b', 2)
+        assert d == {'a': None}
+
+    def test_deep_set_no_replace_list_middle_raises(self):
+        # Write ops are duck typed: a list indexed by the str key of a 'a.0.b'
+        # key path is an error
+        d = {'a': [1]}
+        with pytest.raises(TypeError):
+            deep_set_no_replace(d, 'a.0.b', 2)
+        assert d == {'a': [1]}
+
+    def test_deep_set_no_replace_list_int_index(self):
+        # Write ops are duck typed: a list indexed by int works like deep_get(),
+        # the list is written through, not replaced by a dict
+        d = {'a': [1, 2]}
+        assert deep_set_no_replace(d, ['a', 0], 3) == {'a': [3, 2]}
+        assert d == {'a': [3, 2]}
+
+    def test_deep_set_no_replace_dict_subclass(self):
+        # Write ops are duck typed, a dict subclass stays usable as a level
+        class MyDict(dict):
+            pass
+
+        d = MyDict(a=MyDict(b=1))
+        assert deep_set_no_replace(d, 'a.b', 2) is d
+        assert d == {'a': {'b': 2}}
+        # A missing level is still created as a plain dict
+        d = MyDict(a=MyDict())
+        deep_set_no_replace(d, 'a.b.c', 1)
+        assert d == {'a': {'b': {'c': 1}}}
+        assert type(d['a']['b']) is dict
+
+    def test_deep_set_no_replace_non_iterable_keys_raises(self):
+        with pytest.raises(TypeError):
+            deep_set_no_replace({'a': 1}, 123, 2)
+
+    def test_deep_set_no_replace_unhashable_key_raises(self):
+        # A non-hashable key cannot be a dict key: deep_set() returns raw_d,
+        # here it is an error
+        d = {'a': 1}
+        with pytest.raises(TypeError):
+            deep_set_no_replace(d, [['x']], 2)
+        assert d == {'a': 1}
+        d = {'a': 1}
+        with pytest.raises(TypeError):
+            deep_set_no_replace(d, [['x'], 'y'], 2)
+        assert d == {'a': 1}
+        # Levels before the error have been created, `d` is partially modified
+        d = {}
+        with pytest.raises(TypeError):
+            deep_set_no_replace(d, ['a', 'b', ['x']], 2)
+        assert d == {'a': {'b': {}}}
+
+    def test_deep_set_no_replace_empty_keys_raises(self):
+        d = {'a': 1}
+        with pytest.raises(IndexError):
+            deep_set_no_replace(d, [], 2)
+        assert d == {'a': 1}
+
+    @pytest.mark.parametrize('non_dict_value, expected', [
+        (1, "deep_set_no_replace() expected dict at key 'a', got int: 1"),
+        (1.5, "deep_set_no_replace() expected dict at key 'a', got float: 1.5"),
+        ('text', "deep_set_no_replace() expected dict at key 'a', got str: 'text'"),
+        ([1, 2], "deep_set_no_replace() expected dict at key 'a', got list: [1, 2]"),
+        (None, "deep_set_no_replace() expected dict at key 'a', got NoneType: None"),
+    ])
+    def test_deep_set_no_replace_error_message(self, non_dict_value, expected):
+        # The message tells which key is not a dict and the value at it
+        d = {'a': non_dict_value}
+        with pytest.raises(TypeError) as e:
+            deep_set_no_replace(d, 'a.b', 2)
+        assert str(e.value) == expected
+        assert d == {'a': non_dict_value}
+        # The TypeError of python is chained
+        assert e.value.__cause__ is not None
+
+    def test_deep_set_no_replace_error_message_lookup(self):
+        # The error can be raised when stepping into a deeper level
+        d = {'a': 1}
+        with pytest.raises(TypeError) as e:
+            deep_set_no_replace(d, 'a.b.c', 2)
+        assert str(e.value) == "deep_set_no_replace() expected dict at key 'a', got int: 1"
+        assert d == {'a': 1}
+
+    def test_deep_set_no_replace_error_message_deep(self):
+        # The key of the message is the last one that is not a dict
+        d = {'a': {'b': 1}}
+        with pytest.raises(TypeError) as e:
+            deep_set_no_replace(d, 'a.b.c', 2)
+        assert str(e.value) == "deep_set_no_replace() expected dict at key 'b', got int: 1"
+        assert d == {'a': {'b': 1}}
+
+    def test_deep_set_no_replace_error_message_root(self):
+        # The root has no key, so the message does not have one
+        with pytest.raises(TypeError) as e:
+            deep_set_no_replace(1, 'a', 2)
+        assert str(e.value) == 'deep_set_no_replace() expected dict, got int: 1'
+
+    def test_deep_set_no_replace_error_message_truncate(self):
+        # A huge value is truncated, the message stays readable
+        value = list(range(1000))
+        d = {'a': value}
+        with pytest.raises(TypeError) as e:
+            deep_set_no_replace(d, 'a.b', 2)
+        assert str(e.value) == (
+            f"deep_set_no_replace() expected dict at key 'a', got list: {repr(value)[:200]}...")
+        assert d == {'a': value}
+
+    @pytest.mark.parametrize('length, truncated', [
+        # repr of 'x' * length is `length + 2` characters long
+        (198, False),
+        (199, True),
+    ])
+    def test_deep_set_no_replace_error_message_truncate_boundary(self, length, truncated):
+        # A value at the limit is kept as is, only a longer one is truncated
+        value = 'x' * length
+        d = {'a': value}
+        with pytest.raises(TypeError) as e:
+            deep_set_no_replace(d, 'a.b', 2)
+        head = "deep_set_no_replace() expected dict at key 'a', got str: "
+        expected = f'{head}{value!r}'
+        if truncated:
+            expected = f'{expected[:len(head) + 200]}...'
+        assert str(e.value) == expected
+
+    def test_deep_set_no_replace_unhashable_key_message(self):
+        # A non-hashable key cannot be a dict key, the python message is kept
+        with pytest.raises(TypeError) as e:
+            deep_set_no_replace({'a': 1}, [['x'], 'y'], 2)
+        assert str(e.value) == "unhashable type: 'list'"
+
+    def test_deep_set_no_replace_non_iterable_keys_message(self):
+        # `keys` is not iterable, the python message is kept
+        with pytest.raises(TypeError) as e:
+            deep_set_no_replace({'a': 1}, 123, 2)
+        assert str(e.value) == "'int' object is not iterable"
+
+    def test_deep_set_no_replace_contrast_with_deep_set(self):
+        # deep_set() repairs a non-dict level, deep_set_no_replace() refuses
+        assert deep_set({'a': 1}, 'a.b', 2) == {'a': {'b': 2}}
+        d = {'a': 1}
+        with pytest.raises(TypeError):
+            deep_set_no_replace(d, 'a.b', 2)
+        assert d == {'a': 1}

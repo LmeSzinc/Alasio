@@ -210,6 +210,104 @@ def deep_set(d, keys, value):
                 return {}
 
 
+def _truncate_repr(obj, max_length=200):
+    """
+    Return the repr of `obj`, cut to `max_length` characters with a trailing
+    '...' if it is too long. Used to keep error messages readable when a huge
+    value is met.
+
+    Args:
+        obj: Object to repr
+        max_length (int): Max length of the repr before cutting. Defaults to 200
+
+    Returns:
+        str: repr of `obj`, or its first `max_length` characters plus '...'
+    """
+    text = repr(obj)
+    if len(text) > max_length:
+        text = f'{text[:max_length]}...'
+    return text
+
+
+def deep_set_no_replace(d, keys, value):
+    """
+    Set value into nested dict safely, imitating deep_set().
+    Missing levels are created as dicts, but unlike deep_set() a level that is
+    not a dict is never replaced with a dict: the write is attempted eagerly
+    and a TypeError telling the key and the value at it is raised instead.
+    Write operations are duck typed, a level stays usable as long as it
+    supports the key path: a list indexed by int works like deep_get(), a list
+    indexed by the str key of a 'a.0.b' key path raises TypeError.
+    Only the value at the last key is overwritten and the root is never
+    rebuilt, so the return value is always the same object as `d`.
+    Note that `d` is partially modified if an error is raised, levels before
+    the error have been created.
+
+    Args:
+        d (dict):
+        keys (str | list | tuple | deque): Such as ['Scheduler', 'NextRun', 'value']
+        value:
+
+    Returns:
+        dict: The same object as `d`, modified in place
+
+    Raises:
+        TypeError: If a level on the key path does not support the write, the
+            message tells which key is not a dict and the value at it, such as
+            ``expected dict at key 'a', got int: 1``, a value longer than 200
+            characters is truncated. The TypeError of python is chained as
+            ``e.__cause__``. Also raised if `keys` is not iterable
+        IndexError: If `keys` is empty, or a key is out of index of a list
+    """
+    # 140 * depth (ns)
+    if type(keys) is str:
+        keys = keys.split('.')
+
+    raw_d = d
+    first = True
+    prev_k = None
+    key_d = None
+    try:
+        for k in keys:
+            if first:
+                prev_k = k
+                first = False
+                continue
+            try:
+                # Missing key, create a sub dict and step into it
+                sub = d[prev_k]
+            except KeyError:
+                sub = {}
+                d[prev_k] = sub
+            # `key_d` is the key whose value is `d`
+            key_d = prev_k
+            d = sub
+            prev_k = k
+        # keys is empty
+        if first:
+            raise IndexError('deep_set_no_replace() keys is empty')
+        d[prev_k] = value
+        return raw_d
+    # `d` is not a dict on the key path, write ops assume dict only,
+    # do not replace the level with a dict
+    except TypeError as e:
+        if first or type(d) is dict:
+            # `keys` is not iterable, or `prev_k` is not hashable
+            raise
+        # A huge value is cut to keep the message readable
+        value_repr = _truncate_repr(d)
+        if key_d is None:
+            # `d` is `raw_d`, the root is not a dict
+            raise TypeError(
+                f'deep_set_no_replace() expected dict, got {type(d).__name__}: {value_repr}') from e
+        raise TypeError(
+            f'deep_set_no_replace() expected dict at key {key_d!r}, got {type(d).__name__}: {value_repr}'
+        ) from e
+    # Input `keys` out of index
+    except IndexError:
+        raise
+
+
 def deep_set_with_error(d, keys, value):
     """
     Set value into nested dict strictly, raise on any error. Unlike deep_set(),
