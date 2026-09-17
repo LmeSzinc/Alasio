@@ -681,23 +681,31 @@ def deep_values_depth2(data):
         return
 
 
-def deep_iter(data, min_depth=None, depth=3):
+def deep_iter(data, min_depth=None, depth=None, max_recursion=1000):
     """
     Iter key and value in nested dict
     300us on alas.json depth=3 (530+ rows)
     Can only iter dict
+    Note that a circular reference raises RecursionError when there is no depth
+    limit, pass a bigger `max_recursion` to iterate a legit deep dict
 
     Args:
         data:
-        min_depth:
-        depth:
+        min_depth: Minimal depth of the keys to yield, defaults to `depth`,
+            only the deepest level is yielded then. Defaults to 1 if `depth`
+            is None, so values of all depths are yielded
+        depth: Max depth to iterate, None means unlimited
+        max_recursion: Max depth of an unlimited iteration, defaults to 1000,
+            the default recursion limit of python. Deeper data raises
+            RecursionError, pass a bigger value to iterate a legit deep dict
 
     Yields:
         tuple[list[Any], Any]: list[key], value
     """
     if min_depth is None:
-        min_depth = depth
-    assert 1 <= min_depth <= depth
+        min_depth = 1 if depth is None else depth
+    assert min_depth >= 1
+    assert depth is None or min_depth <= depth
 
     # Equivalent to dict.items()
     try:
@@ -727,15 +735,15 @@ def deep_iter(data, min_depth=None, depth=3):
 
     # Iter depths
     current = 2
-    while current <= depth:
+    while q:
         new_q = deque()
         # max depth
         if current == depth:
             for key, data in q:
                 for k, v in data.items():
                     yield [*key, k], v
-        # in target depth
-        elif min_depth <= current < depth:
+        # in target depth, or unlimited depth
+        elif depth is None or min_depth <= current < depth:
             for key, data in q:
                 for k, v in data.items():
                     subkey = [*key, k]
@@ -752,24 +760,36 @@ def deep_iter(data, min_depth=None, depth=3):
                         new_q.append((subkey, v))
         q = new_q
         current += 1
+        # `q` is not empty means there is still a level to iterate
+        if depth is None and current > max_recursion and q:
+            raise RecursionError(
+                f'deep_iter() iterated deeper than max_recursion={max_recursion}, maybe a circular reference')
 
 
-def deep_keys(data, min_depth=None, depth=3):
+def deep_keys(data, min_depth=None, depth=None, max_recursion=1000):
     """
     Iter key in nested dict
     Can only iter dict
+    Note that a circular reference raises RecursionError when there is no depth
+    limit, pass a bigger `max_recursion` to iterate a legit deep dict
 
     Args:
         data:
-        min_depth:
-        depth:
+        min_depth: Minimal depth of the keys to yield, defaults to `depth`,
+            only the deepest level is yielded then. Defaults to 1 if `depth`
+            is None, so keys of all depths are yielded
+        depth: Max depth to iterate, None means unlimited
+        max_recursion: Max depth of an unlimited iteration, defaults to 1000,
+            the default recursion limit of python. Deeper data raises
+            RecursionError, pass a bigger value to iterate a legit deep dict
 
     Yields:
         list[Any]: list[key]
     """
     if min_depth is None:
-        min_depth = depth
-    assert 1 <= min_depth <= depth
+        min_depth = 1 if depth is None else depth
+    assert min_depth >= 1
+    assert depth is None or min_depth <= depth
 
     # Equivalent to dict.items()
     try:
@@ -799,15 +819,15 @@ def deep_keys(data, min_depth=None, depth=3):
 
     # Iter depths
     current = 2
-    while current <= depth:
+    while q:
         new_q = deque()
         # max depth
         if current == depth:
             for key, data in q:
                 for k in data.keys():
                     yield [*key, k]
-        # in target depth
-        elif min_depth <= current < depth:
+        # in target depth, or unlimited depth
+        elif depth is None or min_depth <= current < depth:
             for key, data in q:
                 for k, v in data.items():
                     subkey = [*key, k]
@@ -824,24 +844,36 @@ def deep_keys(data, min_depth=None, depth=3):
                         new_q.append((subkey, v))
         q = new_q
         current += 1
+        # `q` is not empty means there is still a level to iterate
+        if depth is None and current > max_recursion and q:
+            raise RecursionError(
+                f'deep_keys() iterated deeper than max_recursion={max_recursion}, maybe a circular reference')
 
 
-def deep_values(data, min_depth=None, depth=3):
+def deep_values(data, min_depth=None, depth=None, max_recursion=1000):
     """
     Iter value in nested dict
     Can only iter dict
+    Note that a circular reference raises RecursionError when there is no depth
+    limit, pass a bigger `max_recursion` to iterate a legit deep dict
 
     Args:
         data:
-        min_depth:
-        depth:
+        min_depth: Minimal depth of the values to yield, defaults to `depth`,
+            only the deepest level is yielded then. Defaults to 1 if `depth`
+            is None, so values of all depths are yielded
+        depth: Max depth to iterate, None means unlimited
+        max_recursion: Max depth of an unlimited iteration, defaults to 1000,
+            the default recursion limit of python. Deeper data raises
+            RecursionError, pass a bigger value to iterate a legit deep dict
 
     Yields:
         Any: Value
     """
     if min_depth is None:
-        min_depth = depth
-    assert 1 <= min_depth <= depth
+        min_depth = 1 if depth is None else depth
+    assert min_depth >= 1
+    assert depth is None or min_depth <= depth
 
     # Equivalent to dict.items()
     try:
@@ -869,15 +901,15 @@ def deep_values(data, min_depth=None, depth=3):
 
     # Iter depths
     current = 2
-    while current <= depth:
+    while q:
         new_q = deque()
         # max depth
         if current == depth:
             for data in q:
                 for v in data.values():
                     yield v
-        # in target depth
-        elif min_depth <= current < depth:
+        # in target depth, or unlimited depth
+        elif depth is None or min_depth <= current < depth:
             for data in q:
                 for v in data.values():
                     if type(v) is dict:
@@ -892,6 +924,10 @@ def deep_values(data, min_depth=None, depth=3):
                         new_q.append(v)
         q = new_q
         current += 1
+        # `q` is not empty means there is still a level to iterate
+        if depth is None and current > max_recursion and q:
+            raise RecursionError(
+                f'deep_values() iterated deeper than max_recursion={max_recursion}, maybe a circular reference')
 
 
 def deep_iter_diff(before, after):

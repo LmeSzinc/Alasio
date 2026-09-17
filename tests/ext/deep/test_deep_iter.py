@@ -4,11 +4,13 @@ Tests for the iteration functions in ``alasio.ext.deep``:
 - Fixed-depth helpers: ``deep_iter_depth1``/``deep_keys_depth1``/
   ``deep_values_depth1`` and ``deep_iter_depth2``/``deep_keys_depth2``/
   ``deep_values_depth2``
-- Depth-limited iterators: ``deep_iter``/``deep_keys``/``deep_values``
+- Depth iterators: ``deep_iter``/``deep_keys``/``deep_values``, unlimited when
+  ``depth`` is None (the default)
 - Diff/patch generators: ``deep_iter_diff``/``deep_iter_patch``
 
-All iterators suppress errors on non-dict input and are bounded by ``depth``,
-which also makes them safe against circular references.
+All iterators suppress errors on non-dict input. An unlimited iteration (no
+``depth``) is bounded by ``max_recursion``, deeper data raises ``RecursionError``
+instead of looping forever on a circular reference.
 """
 
 import pytest
@@ -34,6 +36,20 @@ COMPLEX_DICT = {
     'j': 7,
     'k': [8, 9]
 }
+
+
+def build_chain(n_dict):
+    """
+    A chain of `n_dict` dicts, with a leaf value at the bottom, used to test
+    the depth limit of an unlimited iteration
+    """
+    d = {}
+    cur = d
+    for _ in range(n_dict):
+        cur['k'] = {}
+        cur = cur['k']
+    cur['leaf'] = 1
+    return d
 
 
 class TestDeepIterDepth1:
@@ -104,9 +120,9 @@ class TestDeepIter:
         with pytest.raises(AssertionError):
             list(deep_iter({}, min_depth=2, depth=1))
         # Non-dict
-        assert list(deep_iter(None)) == []
-        assert list(deep_keys(None)) == []
-        assert list(deep_values(None)) == []
+        assert list(deep_iter(None, depth=3)) == []
+        assert list(deep_keys(None, depth=3)) == []
+        assert list(deep_values(None, depth=3)) == []
 
     def test_deep_iter_circular(self):
         # deep_iter should be safe against circular references due to depth limit
@@ -169,6 +185,113 @@ class TestDeepIter:
         # current=3: b.d.e (yield), b.d.f (yield as it's the target depth)
         assert (['b', 'd', 'f'], {'f1': 4}) in res
         assert len(res) == 5
+
+
+class TestDeepIterUnlimited:
+    """
+    depth=None (the default) iterates without a depth limit, min_depth defaults
+    to 1 then, so values of all depths are yielded. An unlimited iteration is
+    bounded by max_recursion (1000 by default, the recursion limit of python),
+    a deeper dict or a circular reference raises RecursionError.
+    """
+
+    DATA = {'a': 1, 'b': {'c': 2, 'd': {'e': 3}}}
+
+    def test_deep_iter_unlimited(self):
+        assert list(deep_iter(self.DATA)) == [
+            (['a'], 1),
+            (['b', 'c'], 2),
+            (['b', 'd', 'e'], 3),
+        ]
+
+    def test_deep_iter_unlimited_complex(self):
+        # Values of all depths are yielded, level by level (BFS)
+        assert list(deep_iter(COMPLEX_DICT)) == [
+            (['a'], 1),
+            (['j'], 7),
+            (['k'], [8, 9]),
+            (['b', 'c'], 2),
+            (['b', 'g'], 5),
+            (['h', 'i'], 6),
+            (['b', 'd', 'e'], 3),
+            (['b', 'd', 'f', 'f1'], 4),
+        ]
+
+    def test_deep_iter_unlimited_min_depth(self):
+        # min_depth works the same as with a depth limit
+        assert list(deep_iter(self.DATA, min_depth=2)) == [
+            (['b', 'c'], 2),
+            (['b', 'd', 'e'], 3),
+        ]
+
+    def test_deep_keys_unlimited(self):
+        assert list(deep_keys(self.DATA)) == [['a'], ['b', 'c'], ['b', 'd', 'e']]
+
+    def test_deep_values_unlimited(self):
+        assert list(deep_values(self.DATA)) == [1, 2, 3]
+
+    def test_deep_iter_unlimited_assert(self):
+        # min_depth must be >= 1
+        with pytest.raises(AssertionError):
+            list(deep_iter({}, min_depth=0))
+
+    def test_deep_iter_unlimited_non_dict(self):
+        assert list(deep_iter(None)) == []
+        assert list(deep_keys(None)) == []
+        assert list(deep_values(None)) == []
+
+    def test_deep_iter_unlimited_empty_dict(self):
+        # An empty dict has nothing to yield, it is stepped into and dropped
+        assert list(deep_iter({'a': {}, 'b': 1})) == [(['b'], 1)]
+        assert list(deep_keys({'a': {}, 'b': 1})) == [['b']]
+        assert list(deep_values({'a': {}, 'b': 1})) == [1]
+
+    def test_deep_iter_unlimited_shared_dict(self):
+        # A dict met twice is stepped into twice, the same as with a depth limit
+        shared = {'x': 1}
+        d = {'a': shared, 'b': shared}
+        assert list(deep_iter(d)) == [(['a', 'x'], 1), (['b', 'x'], 1)]
+        assert list(deep_keys(d)) == [['a', 'x'], ['b', 'x']]
+        assert list(deep_values(d)) == [1, 1]
+        assert list(deep_iter(d, min_depth=2, depth=2)) == [(['a', 'x'], 1), (['b', 'x'], 1)]
+
+    def test_deep_iter_unlimited_circular_raises(self):
+        # A circular reference raises instead of looping forever
+        d = {}
+        d['a'] = d
+        with pytest.raises(RecursionError):
+            list(deep_iter(d))
+        with pytest.raises(RecursionError):
+            list(deep_keys(d))
+        with pytest.raises(RecursionError):
+            list(deep_values(d))
+        # A `depth` bounds the iteration, no error is raised
+        assert list(deep_iter(d, min_depth=3, depth=3)) == [(['a', 'a', 'a'], d)]
+
+    def test_deep_iter_unlimited_deep_data(self):
+        # A deep dict within max_recursion is fully iterated
+        d = build_chain(90)
+        assert list(deep_iter(d)) == [(['k'] * 90 + ['leaf'], 1)]
+
+    def test_deep_iter_max_recursion_default(self):
+        # max_recursion defaults to 1000, the default recursion limit of python
+        assert list(deep_iter(build_chain(999))) == [(['k'] * 999 + ['leaf'], 1)]
+        with pytest.raises(RecursionError):
+            list(deep_iter(build_chain(1000)))
+
+    def test_deep_iter_unlimited_deeper_than_max_raises(self):
+        # Data deeper than max_recursion raises, give a bigger one to iterate it
+        d = build_chain(15)
+        with pytest.raises(RecursionError):
+            list(deep_iter(d, max_recursion=10))
+        with pytest.raises(RecursionError):
+            list(deep_keys(d, max_recursion=10))
+        with pytest.raises(RecursionError):
+            list(deep_values(d, max_recursion=10))
+        # A bigger max_recursion iterates the whole chain
+        assert list(deep_iter(d, max_recursion=16)) == [(['k'] * 15 + ['leaf'], 1)]
+        # An explicit `depth` is not bounded by max_recursion
+        assert list(deep_iter(d, depth=16)) == [(['k'] * 15 + ['leaf'], 1)]
 
 
 class TestDeepIterDiff:
