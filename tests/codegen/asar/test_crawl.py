@@ -7,9 +7,11 @@ before its content, siblings sorted by name in Unicode code point order.
 """
 import pytest
 
+from alasio.codegen.asar import crawl
 from alasio.codegen.asar.crawl import crawl_folder, crawl_tree, list_dir
 from alasio.codegen.asar.errors import AsarError
 from alasio.codegen.asar.model import KIND_DIR, KIND_FILE
+from alasio.codegen.asar.pattern import GlobPattern
 from alasio.testing.filesystem import fs  # noqa: F401
 
 
@@ -56,26 +58,32 @@ class TestListDir:
         ]
 
     def test_list_dir_missing(self, fs):
-        """Listing a missing directory is an error."""
+        """Listing a missing directory is an error, the OSError is its cause."""
         build_tree(fs)
         with pytest.raises(AsarError) as e:
             list_dir(f'{fs.root_dir.path}/nope')
         assert str(e.value).startswith('Unable to list directory')
+        assert isinstance(e.value.__cause__, FileNotFoundError)
+
+    def test_list_dir_missing_ok(self, fs):
+        """A directory that is not there is empty when the caller allows it."""
+        build_tree(fs)
+        assert list_dir(f'{fs.root_dir.path}/nope', missing_ok=True) == []
 
 
 class TestCrawlTree:
     def test_crawl_tree_order(self, fs):
-        """The walk is depth first, directory entries come before their content."""
+        """The walk is level by level, directory entries come before their content."""
         root = build_tree(fs)
         assert crawl_tree(root) == [
             ('.hidden.txt', f'{root}/.hidden.txt', KIND_FILE),
             ('dir', f'{root}/dir', KIND_DIR),
+            ('empty_dir', f'{root}/empty_dir', KIND_DIR),
+            ('z.txt', f'{root}/z.txt', KIND_FILE),
             ('dir/a.txt', f'{root}/dir/a.txt', KIND_FILE),
             ('dir/b.log', f'{root}/dir/b.log', KIND_FILE),
             ('dir/sub', f'{root}/dir/sub', KIND_DIR),
             ('dir/sub/c.txt', f'{root}/dir/sub/c.txt', KIND_FILE),
-            ('empty_dir', f'{root}/empty_dir', KIND_DIR),
-            ('z.txt', f'{root}/z.txt', KIND_FILE),
         ]
 
     def test_crawl_tree_deep(self, fs):
@@ -96,6 +104,91 @@ class TestCrawlTree:
         fs.create_dir('/empty')
         assert crawl_tree('/empty') == []
 
+    def test_crawl_tree_directory_that_is_gone(self, fs, monkeypatch):
+        """A directory that is not there any more is packed as an empty one."""
+        root = build_tree(fs)
+        real_list_dir = crawl.list_dir
+
+        def list_dir_gone(local_path, arc_prefix=None, missing_ok=False):
+            if local_path == f'{root}/dir/sub':
+                # What os.scandir() reports for a Windows junction whose target
+                # is gone: the directory is listed, nothing lists it
+                assert missing_ok, 'the walk asks for a missing directory to be empty'
+                return []
+            return real_list_dir(local_path, arc_prefix=arc_prefix, missing_ok=missing_ok)
+
+        monkeypatch.setattr(crawl, 'list_dir', list_dir_gone)
+        assert crawl_tree(root) == [
+            ('.hidden.txt', f'{root}/.hidden.txt', KIND_FILE),
+            ('dir', f'{root}/dir', KIND_DIR),
+            ('empty_dir', f'{root}/empty_dir', KIND_DIR),
+            ('z.txt', f'{root}/z.txt', KIND_FILE),
+            ('dir/a.txt', f'{root}/dir/a.txt', KIND_FILE),
+            ('dir/b.log', f'{root}/dir/b.log', KIND_FILE),
+            ('dir/sub', f'{root}/dir/sub', KIND_DIR),
+        ]
+
+    def test_crawl_tree_root_that_is_not_there(self, fs):
+        """A source directory that is not there fails the walk."""
+        build_tree(fs)
+        with pytest.raises(AsarError) as e:
+            crawl_tree(f'{fs.root_dir.path}/nope')
+        assert str(e.value).startswith('Unable to list directory')
+
+    def test_crawl_tree_directory_that_can_not_be_read(self, fs, monkeypatch):
+        """A directory that is there but can not be read fails the walk."""
+        root = build_tree(fs)
+        real_list_dir = crawl.list_dir
+
+        def list_dir_denied(local_path, arc_prefix=None, missing_ok=False):
+            if local_path == f'{root}/dir':
+                raise AsarError(
+                    f'Unable to list directory "{local_path}"'
+                ) from PermissionError(13, 'Permission denied', local_path)
+            return real_list_dir(local_path, arc_prefix=arc_prefix, missing_ok=missing_ok)
+
+        monkeypatch.setattr(crawl, 'list_dir', list_dir_denied)
+        with pytest.raises(AsarError) as e:
+            crawl_tree(root)
+        assert isinstance(e.value.__cause__, PermissionError)
+
+    def test_crawl_tree_include_prunes_the_walk(self, fs, monkeypatch):
+        """A directory that no include pattern can reach is not entered."""
+        root = build_tree(fs)
+        fs.create_dir(f'{root}/node_modules/pkg')
+        fs.create_file(f'{root}/node_modules/pkg/index.js', contents='x')
+        listed = []
+        real_list_dir = crawl.list_dir
+
+        def list_dir_spy(local_path, arc_prefix=None, missing_ok=False):
+            listed.append(arc_prefix)
+            return real_list_dir(local_path, arc_prefix=arc_prefix, missing_ok=missing_ok)
+
+        monkeypatch.setattr(crawl, 'list_dir', list_dir_spy)
+        order = crawl_tree(root, include=GlobPattern(['dir/**']))
+        # The whole subtree of node_modules is left unread
+        assert 'node_modules' not in listed
+        assert 'dir/sub' in listed
+        # The directory itself stays an entry, the include filter below sees the
+        # same tree either way
+        assert ('node_modules', f'{root}/node_modules', KIND_DIR) in order
+        assert all(path != 'node_modules/pkg' for path, *_ in order)
+
+    def test_crawl_tree_without_include_walks_every_directory(self, fs, monkeypatch):
+        """Without an include list every directory is entered."""
+        root = build_tree(fs)
+        fs.create_dir(f'{root}/node_modules')
+        listed = []
+        real_list_dir = crawl.list_dir
+
+        def list_dir_spy(local_path, arc_prefix=None, missing_ok=False):
+            listed.append(arc_prefix)
+            return real_list_dir(local_path, arc_prefix=arc_prefix, missing_ok=missing_ok)
+
+        monkeypatch.setattr(crawl, 'list_dir', list_dir_spy)
+        crawl_tree(root)
+        assert 'node_modules' in listed
+
 
 class TestCrawlFolder:
     def test_crawl_folder_all(self, fs):
@@ -105,12 +198,12 @@ class TestCrawlFolder:
         assert [(path, kind, unpacked) for path, _, kind, unpacked in entries] == [
             ('.hidden.txt', KIND_FILE, False),
             ('dir', KIND_DIR, False),
+            ('empty_dir', KIND_DIR, False),
+            ('z.txt', KIND_FILE, False),
             ('dir/a.txt', KIND_FILE, False),
             ('dir/b.log', KIND_FILE, False),
             ('dir/sub', KIND_DIR, False),
             ('dir/sub/c.txt', KIND_FILE, False),
-            ('empty_dir', KIND_DIR, False),
-            ('z.txt', KIND_FILE, False),
         ]
 
     def test_crawl_folder_include_files(self, fs):
@@ -148,11 +241,11 @@ class TestCrawlFolder:
         assert [(path, kind) for path, _, kind, _ in entries] == [
             ('.hidden.txt', KIND_FILE),
             ('dir', KIND_DIR),
+            ('empty_dir', KIND_DIR),
+            ('z.txt', KIND_FILE),
             ('dir/a.txt', KIND_FILE),
             ('dir/b.log', KIND_FILE),
             ('dir/sub', KIND_DIR),
-            ('empty_dir', KIND_DIR),
-            ('z.txt', KIND_FILE),
         ]
 
     def test_crawl_folder_exclude_glob(self, fs):
@@ -161,8 +254,8 @@ class TestCrawlFolder:
         entries = crawl_folder(root, exclude=['**/*.log', '**/*.txt'])
         assert [(path, kind) for path, _, kind, _ in entries] == [
             ('dir', KIND_DIR),
-            ('dir/sub', KIND_DIR),
             ('empty_dir', KIND_DIR),
+            ('dir/sub', KIND_DIR),
         ]
 
     def test_crawl_folder_exclude_dir(self, fs):
@@ -194,12 +287,35 @@ class TestCrawlFolder:
             ('z.txt', KIND_FILE),
         ]
 
+    def test_crawl_folder_include_prunes_the_walk(self, fs, monkeypatch):
+        """The entries do not change, the walk is only shorter."""
+        root = build_tree(fs)
+        fs.create_dir(f'{root}/node_modules/pkg')
+        fs.create_file(f'{root}/node_modules/pkg/index.js', contents='x')
+        listed = []
+        real_list_dir = crawl.list_dir
+
+        def list_dir_spy(local_path, arc_prefix=None, missing_ok=False):
+            listed.append(arc_prefix)
+            return real_list_dir(local_path, arc_prefix=arc_prefix, missing_ok=missing_ok)
+
+        monkeypatch.setattr(crawl, 'list_dir', list_dir_spy)
+        entries = crawl_folder(root, include=['dir/**'])
+        assert 'node_modules' not in listed
+        assert [(path, kind) for path, _, kind, _ in entries] == [
+            ('dir', KIND_DIR),
+            ('dir/a.txt', KIND_FILE),
+            ('dir/b.log', KIND_FILE),
+            ('dir/sub', KIND_DIR),
+            ('dir/sub/c.txt', KIND_FILE),
+        ]
+
     @pytest.mark.parametrize('patterns, expected', [
         # A pattern without a separator matches the file name
         (['*.log'], ['dir/b.log']),
         (['b.log'], ['dir/b.log']),
         # A pattern with a separator is matched on the whole path
-        (['**/*.txt'], ['.hidden.txt', 'dir/a.txt', 'dir/sub/c.txt', 'z.txt']),
+        (['**/*.txt'], ['.hidden.txt', 'z.txt', 'dir/a.txt', 'dir/sub/c.txt']),
         (['dir/*'], ['dir/a.txt', 'dir/b.log']),
         (['dir/**'], ['dir/a.txt', 'dir/b.log', 'dir/sub/c.txt']),
         ([], []),

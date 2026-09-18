@@ -258,7 +258,7 @@ class TestAddFile:
 
 class TestAddFolder:
     def test_add_folder_tiny(self, fs):
-        """A tree is added depth first, directories before their content."""
+        """A tree is added level by level, directories before their content."""
         root = build_source_tree(fs)
         archive = AsarArchive()
         assert archive.add_folder(root) == 3
