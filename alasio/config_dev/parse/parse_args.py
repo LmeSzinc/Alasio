@@ -211,7 +211,9 @@ def preprocess_arg(arg: dict) -> dict:
         arg['option'] = ['true', 'false']
 
     # Check if literal args have option
-    if dt in TYPE_ARG_LITERAL and 'option' not in arg:
+    # dt="secondary-select" is checked in the block below, because its options
+    # may be given as "option_dict"
+    if dt in TYPE_ARG_LITERAL and dt != 'secondary-select' and 'option' not in arg:
         raise DefinitionError(f'datatype "{dt}" must have "option" defined')
 
     # populate secondary-select

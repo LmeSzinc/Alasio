@@ -62,7 +62,7 @@
       },
     }),
     // dt=select shows option_i18n labels, options can be any literal type
-    Select: makeCard(info("Select", "Select", "dt=select · labels from option_i18n"), {
+    Select: makeCard(info("Select", "Select", "dt=select · dt=secondary-select · labels from option_i18n"), {
       Select: {
         Str: arg("Select", "Str", "select", "auto", {
           name: "select",
@@ -70,6 +70,28 @@
           option_i18n: { auto: "Auto", manual: "Manual", disabled: "Disabled" },
         }),
         Int: arg("Select", "Int", "select", 1, { name: "select (int)", option: [1, 2, 3] }),
+        // dt=secondary-select splits the options into groups: the left column
+        // is a navigation aid (it is not stored), only an option commits
+        Chapter: arg("Select", "Chapter", "secondary-select", "2-3", {
+          name: "secondary-select",
+          option_dict: {
+            chapter1: ["1-1", "1-2", "1-3"],
+            chapter2: ["2-1", "2-2", "2-3"],
+            chapter3: ["3-1", "3-2", "3-3"],
+            chapter4: ["4-1", "4-2", "4-3"],
+            // A group name longer than the column, to check the truncation
+            chapter_extra: ["5-1", "5-2", "5-3"],
+          },
+          // Group labels come from option_i18n as well, options fall back to
+          // their own value when no translation is given
+          option_i18n: {
+            chapter1: "Chapter 1",
+            chapter2: "Chapter 2",
+            chapter3: "Chapter 3",
+            chapter4: "Chapter 4",
+            chapter_extra: "Chapter Extra Long Name",
+          },
+        }),
       },
     }),
     CheckboxStatic: makeCard(info("CheckboxStatic", "Checkbox & Static", "dt=checkbox on/off · dt=static read-only"), {

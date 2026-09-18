@@ -3,6 +3,7 @@
   import Checkbox from "../arginput/Checkbox.svelte";
   import Enable from "../arginput/Enable.svelte";
   import Input from "../arginput/Input.svelte";
+  import SecondarySelect from "../arginput/SecondarySelect.svelte";
   import Select from "../arginput/Select.svelte";
   import Static from "../arginput/Static.svelte";
   import Textarea from "../arginput/Textarea.svelte";
@@ -19,6 +20,7 @@
     input: Input,
     checkbox: Checkbox,
     select: Select,
+    "secondary-select": SecondarySelect,
     enable: Enable,
     textarea: Textarea,
     filter: Textarea,

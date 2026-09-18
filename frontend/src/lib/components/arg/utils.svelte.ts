@@ -60,6 +60,13 @@ export type ArgData = {
   layout?: "hori" | "vert" | "vert-rev" | "desc";
 
   option?: any[];
+  /**
+   * Groups of options if arg is `dt=secondary-select`, might be
+   * `{chapter1: [1-1, 1-2], chapter2: [2-1, 2-2]}`
+   * The group is only a navigation aid of the frontend, the value stores the
+   * option only
+   */
+  option_dict?: Record<string, any[]>;
   option_i18n?: Record<any, string>;
   // Msgspec constraints
   // https://jcristharif.com/msgspec/constraints.html

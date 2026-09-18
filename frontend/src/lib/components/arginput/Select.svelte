@@ -58,6 +58,10 @@
         "group bg-card dark:bg-card relative h-7! w-full border-0 p-1 pl-2 shadow-none",
         "focus:shadow-none",
         "focus:ring-ring focus:ring-offset-background focus:z-10 focus:ring-2 focus:ring-offset-5",
+        // The shadcn trigger draws a wider translucent ring on keyboard focus
+        // (focus-visible:ring-3 ring-ring/50); the arg inputs draw the plain
+        // theme color ring, so the row keeps that one.
+        "focus-visible:ring-ring focus-visible:ring-2",
         "transition-shadow duration-200",
       )}
       bind:ref={triggerEl}
