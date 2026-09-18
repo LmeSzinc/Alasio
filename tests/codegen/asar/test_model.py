@@ -10,7 +10,7 @@ import os
 import msgspec
 import pytest
 
-from alasio.codegen.asar.errors import AsarError, AsarFormatError
+from alasio.codegen.asar.errors import AsarError, AsarFormatError, AsarPathError
 from alasio.codegen.asar.format import BLOCK_SIZE, UINT32_MAX
 from alasio.codegen.asar.model import (
     MAX_OFFSET_DIGITS, AsarFileInfo, DirNode, FileNode, Integrity, LinkNode, UnpackedFileNode, build_header,
@@ -168,12 +168,35 @@ class TestCheckName:
             validate_header(header)
         assert str(e.value) == expected
 
+    @pytest.mark.parametrize('name, expected', [
+        ('a:b', 'Invalid entry name at "/": "a:b", Filename should not contain character: ":"'),
+        ('CON', 'Invalid entry name at "/": "CON", Filename cannot be reserved system name: CON'),
+        ('a.', 'Invalid entry name at "/": "a.", Filename cannot end with a <dot>'),
+        ('a ', 'Invalid entry name at "/": "a ", Filename cannot end with a <space>'),
+        ('.. ', 'Invalid entry name at "/": ".. ", Filename cannot end with a <space>'),
+    ])
+    def test_check_name_not_creatable(self, name, expected):
+        """A name that no extraction could create is refused while reading."""
+        header = {'files': {name: {'files': {}}}}
+        with pytest.raises(AsarPathError) as e:
+            validate_header(header)
+        assert str(e.value) == expected
+
+    def test_check_name_not_creatable_nested(self):
+        """The error message names the directory the name belongs to."""
+        header = {'files': {'dir': {'files': {'a:b': {'size': 1, 'offset': '0'}}}}}
+        with pytest.raises(AsarPathError) as e:
+            validate_header(header)
+        assert str(e.value) == (
+            'Invalid entry name at "dir": "a:b", Filename should not contain character: ":"'
+        )
+
     @pytest.mark.parametrize('name', [
-        'a', 'a.txt', '.hidden', '..hidden', 'a.', 'a ', 'a-b_c.d', '中文.txt', '__proto__',
+        'a', 'a.txt', '.hidden', '..hidden', 'a-b_c.d', '中文.txt', '__proto__',
         'constructor', 'a\u2028.txt',
     ])
     def test_check_name_valid(self, name):
-        """Names that are not a separator nor a directory pointer are accepted."""
+        """A name that is a valid file name everywhere is accepted."""
         validate_header({'files': {name: {'files': {}}}})
 
 

@@ -2,9 +2,9 @@
 Command line interface of the asar packer / unpacker::
 
     python -m alasio.codegen.asar pack <src> <dest> [--no-integrity]
-    python -m alasio.codegen.asar unpack <archive> <dest> [--verify]
+    python -m alasio.codegen.asar unpack <archive> <dest> [--no-verify]
     python -m alasio.codegen.asar list <archive> [--long]
-    python -m alasio.codegen.asar extract <archive> <name> <dest>
+    python -m alasio.codegen.asar extract <archive> <name> <dest> [--no-verify]
     python -m alasio.codegen.asar stat <archive> <name>
     python -m alasio.codegen.asar header <archive> [--json]
 
@@ -18,7 +18,7 @@ import msgspec
 
 from alasio.ext.path.atomic import CHUNK_SIZE
 
-from .archive import REGION_BUDGET, AsarArchive, pack_sha256
+from .archive import AsarArchive, pack_sha256
 from .format import read_header
 from .model import KIND_DIR, KIND_FILE, KIND_LINK, build_header, canonical_entries
 
@@ -50,7 +50,7 @@ def count_entries(archive):
     return packed, unpacked, directories, links
 
 
-def unpack_archive(archive, dest, verify=False, region_budget=REGION_BUDGET, chunk_size=CHUNK_SIZE):
+def unpack_archive(archive, dest, verify=True, chunk_size=CHUNK_SIZE):
     """
     Extract a whole archive, for the command line.
 
@@ -60,17 +60,16 @@ def unpack_archive(archive, dest, verify=False, region_budget=REGION_BUDGET, chu
     Args:
         archive (str): Path of the archive
         dest (str): Target directory
-        verify (bool): Check every content against the integrity of the header
-        region_budget (int): Regions up to this size are read in one piece, 0
-            streams everything
-        chunk_size (int): Read chunk size of a streamed region
+        verify (bool): Check every content against the integrity of the header,
+            the default
+        chunk_size (int): Read chunk size of an entry
 
     Returns:
         tuple[int, int, int, int]: Files, directories, unpacked files and links
     """
     with AsarArchive(archive) as asar:
         packed, unpacked, directories, links = count_entries(asar)
-        asar.extract_all(dest, verify=verify, region_budget=region_budget, chunk_size=chunk_size)
+        asar.extract_all(dest, verify=verify, chunk_size=chunk_size)
     return packed + unpacked, directories, unpacked, links
 
 
@@ -112,9 +111,8 @@ def cmd_unpack(args):
     files, directories, unpacked, links = unpack_archive(
         args.archive,
         args.dest,
-        region_budget=args.region_budget,
         chunk_size=args.chunk_size,
-        verify=args.verify,
+        verify=not args.no_verify,
     )
     print(
         f'Extracted {files} files and {directories} directories to {args.dest}\n'
@@ -163,7 +161,7 @@ def cmd_extract(args):
         int: Exit code
     """
     with AsarArchive(args.archive) as archive:
-        archive.extract_file(args.name, args.dest)
+        archive.extract_file(args.name, args.dest, verify=not args.no_verify)
     print(f'Extracted {args.name} to {args.dest}')
     return 0
 
@@ -260,13 +258,10 @@ def main(argv=None):
     unpack_cmd = subparsers.add_parser('unpack', help='extract a whole archive')
     unpack_cmd.add_argument('archive', help='archive path')
     unpack_cmd.add_argument('dest', help='target directory')
-    unpack_cmd.add_argument('--region-budget', type=int, default=REGION_BUDGET,
-                            help=f'regions up to this size are read in one piece, '
-                                 f'default {REGION_BUDGET}')
     unpack_cmd.add_argument('--chunk-size', type=int, default=CHUNK_SIZE,
-                            help=f'read chunk size of a streamed region, default {CHUNK_SIZE}')
-    unpack_cmd.add_argument('--verify', action='store_true',
-                            help='check every file against the integrity of the header')
+                            help=f'read chunk size of an entry, default {CHUNK_SIZE}')
+    unpack_cmd.add_argument('--no-verify', action='store_true',
+                            help='do not check the content against the integrity of the header')
     unpack_cmd.set_defaults(func=cmd_unpack)
 
     list_cmd = subparsers.add_parser('list', help='list the entries of an archive')
@@ -279,6 +274,8 @@ def main(argv=None):
     extract.add_argument('archive', help='archive path')
     extract.add_argument('name', help='path of the entry inside the archive')
     extract.add_argument('dest', help='target file path')
+    extract.add_argument('--no-verify', action='store_true',
+                         help='do not check the content against the integrity of the header')
     extract.set_defaults(func=cmd_extract)
 
     stat = subparsers.add_parser('stat', help='print the fields of one entry')

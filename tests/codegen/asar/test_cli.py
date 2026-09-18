@@ -112,9 +112,19 @@ class TestCommands:
         assert '  sha256 ' in out
         assert main(['list', '/packed.asar']) == 0
         assert capsys.readouterr().out == 'dist\ndist/main.js\ndist/style.css\npackage.json\n'
-        assert main(['unpack', '/packed.asar', '/out', '--verify']) == 0
+        assert main(['unpack', '/packed.asar', '/out']) == 0
         assert file_read_bytes('/out/dist/main.js') == b'main'
         assert file_read_bytes('/out/package.json') == b'{"name":"alasio"}'
+
+    def test_unpack_no_verify(self, fs, capsys):
+        """unpack checks the content by default, --no-verify turns it off."""
+        from alasio.codegen.asar.errors import AsarFormatError
+        fs.create_file('/nohash.asar', contents=fixture.extractthis_430())
+        with pytest.raises(AsarFormatError):
+            main(['unpack', '/nohash.asar', '/out'])
+        assert main(['unpack', '/nohash.asar', '/out2', '--no-verify']) == 0
+        capsys.readouterr()
+        assert file_read_bytes('/out2/file0.txt') == b'file0 content'
 
     def test_pack_no_integrity(self, fs, capsys):
         """pack --no-integrity leaves the hashes out."""
@@ -124,13 +134,10 @@ class TestCommands:
         assert main(['header', '/packed.asar']) == 0
         assert 'integrity' not in capsys.readouterr().out
 
-    def test_unpack_region_options(self, fs, capsys):
-        """unpack --region-budget and --chunk-size reach the scanner."""
+    def test_unpack_chunk_size(self, fs, capsys):
+        """unpack --chunk-size reaches the reader of the entries."""
         fs.create_file('/packthis.asar', contents=fixture.packthis_430())
-        assert main([
-            'unpack', '/packthis.asar', '/out',
-            '--region-budget', '0', '--chunk-size', '4096',
-        ]) == 0
+        assert main(['unpack', '/packthis.asar', '/out', '--chunk-size', '4096']) == 0
         assert capsys.readouterr().out == (
             'Extracted 6 files and 2 directories to /out\n'
             '  0 unpacked files, 0 links\n'

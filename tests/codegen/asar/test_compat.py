@@ -130,7 +130,7 @@ class TestRealProduct:
             archive.validate(verify_content=True)
 
     def test_streaming_extraction(self, fs):
-        """The sequential scan extracts the same content as the memory reader."""
+        """Extracting the whole archive gives the content of every entry."""
         # The release archive is read at import time: this test runs under the
         # in-memory filesystem, which serves every path from memory and never
         # touches the real disk (see fixture.release_archive_bytes).

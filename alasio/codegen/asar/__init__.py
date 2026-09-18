@@ -24,7 +24,7 @@ Updating the archive of a client in place, one entry at a time::
         archive.del_folder('dist/renderer')
         archive.write()
 """
-from .archive import REGION_BUDGET as REGION_BUDGET, AsarArchive as AsarArchive, pack_sha256 as pack_sha256
+from .archive import AsarArchive as AsarArchive, pack_sha256 as pack_sha256
 from .errors import (
     AsarEntryNotFoundError as AsarEntryNotFoundError, AsarError as AsarError, AsarFormatError as AsarFormatError,
     AsarPathError as AsarPathError, AsarUnsupportedError as AsarUnsupportedError
@@ -53,7 +53,6 @@ __all__ = [
     'MAX_HEADER_SIZE',
     'MAX_PATH_DEPTH',
     'MemorySource',
-    'REGION_BUDGET',
     'RangeSource',
     'pack_sha256',
 ]

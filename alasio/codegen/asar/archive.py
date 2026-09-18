@@ -27,28 +27,23 @@ entry that was not touched is read from the archive it came from::
 The handle is opened on demand and released by ``close()``, which the ``with``
 block calls, so an archive is never left open by accident.
 """
-import hashlib
 import os
 
 import msgspec
 
 from alasio.ext.cache import InstanceCacheOperation, cached_property
-from alasio.ext.path.atomic import CHUNK_SIZE, atomic_open, file_write
+from alasio.ext.path.atomic import CHUNK_SIZE, atomic_open
 from alasio.ext.path.validate import validate_filename, validate_filepath, validate_resolve_filepath
 
 from .crawl import crawl_tree
 from .errors import AsarEntryNotFoundError, AsarError, AsarFormatError, AsarPathError, AsarUnsupportedError
 from .format import MAX_PATH_DEPTH, read_header
-from .model import KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, canonical_entries, keys_path, path_keys, read_entries
+from .model import (
+    KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, canonical_entries, check_links, keys_path, path_keys, read_entries,
+    resolve_entry
+)
 from .pack import ContentVerifier, hash_file, pack_archive, write_content
-from .scan import REGION_BUDGET, Member, build_regions, scan_regions
 from .source import LocalFileSource, MemorySource, RangeSource
-
-# Maximum number of links followed when resolving an entry, matches the
-# SYMLOOP_MAX of the reference implementation
-SYMLINK_MAX_DEPTH = 40
-# Hash of an empty content, an empty file must be the only entry with it
-EMPTY_SHA256 = hashlib.sha256(b'').hexdigest()
 
 
 class _Header:
@@ -100,28 +95,6 @@ def check_archive_path(path):
         except ValueError as e:
             raise AsarPathError(f'Invalid archive path "{path}": {e}')
     return keys
-
-
-def check_target_path(root, path):
-    """
-    Resolve an archive path below a target directory.
-
-    Args:
-        root (str): Target directory
-        path (str): Archive path of the entry
-
-    Returns:
-        str: Absolute path of the entry inside the target directory
-
-    Raises:
-        AsarPathError: If the path is unsafe or escapes the target directory
-    """
-    if '\\' in path:
-        raise AsarPathError(f'Invalid archive path "{path}": a path must not contain a backslash')
-    try:
-        return validate_resolve_filepath(root, path)
-    except ValueError as e:
-        raise AsarPathError(f'Invalid archive path "{path}": {e}')
 
 
 def entry_mode(info):
@@ -193,9 +166,9 @@ def create_link(archive, name, dest, target):
     archive.extract_file(name, target)
 
 
-def entry_hash(path, info, verify):
+def content_verifier(path, info, verify):
     """
-    Get the integrity hash of an entry.
+    Build the checker of the content of one entry.
 
     Args:
         path (str): Archive path, only used in error messages
@@ -203,37 +176,29 @@ def entry_hash(path, info, verify):
         verify (bool): Whether a content check was requested
 
     Returns:
-        str: SHA256 hex digest of the entry, None when not verifying
+        ContentVerifier: Checker of the content, None when there is nothing to
+            check
 
     Raises:
-        AsarFormatError: If a content check was requested but the entry has no hash
+        AsarFormatError: If the entry is stored in the archive and a content
+            check was requested but the entry has no hash to check it against
     """
     if not verify:
         return None
-    expected = info.integrity.hash if info.integrity else None
-    if expected is None:
-        raise AsarFormatError(f'Entry "{path}" has no integrity hash to verify')
-    return expected
-
-
-def check_empty_content(path, info, verify):
-    """
-    Check the integrity of an empty file, there is no content to read.
-
-    Args:
-        path (str): Archive path, only used in error messages
-        info (AsarFileInfo): Entry
-        verify (bool): Check the hash
-
-    Raises:
-        AsarFormatError: If the stored hash is not the hash of an empty content
-    """
-    expected = entry_hash(path, info, verify)
-    if expected is not None and expected != EMPTY_SHA256:
-        raise AsarFormatError(
-            f'Content hash of "{path}" does not match, it is empty but its integrity '
-            f'hash is {expected} instead of {EMPTY_SHA256}'
-        )
+    if isinstance(info.source, RangeSource):
+        # What an entry that is stored in the archive holds is described by the
+        # header, which was written by another pass of the module: a mismatch is
+        # reported instead of extracting content the header does not describe
+        expected = info.integrity.hash if info.integrity else None
+        if expected is None:
+            raise AsarFormatError(f'Entry "{path}" has no integrity hash to verify')
+    elif info.integrity is not None:
+        expected = info.integrity.hash
+    else:
+        # Content that was handed over has no hash before it is written into an
+        # archive, there is nothing to compare it with
+        return None
+    return ContentVerifier(path, info.size, expected, error=AsarFormatError)
 
 
 class AsarArchive:
@@ -290,7 +255,7 @@ class AsarArchive:
         file = self.file
         if file is None:
             return None
-        f = atomic_open(file, 'rb', buffering=0)
+        f = atomic_open(file, 'rb')
         if self.max_size is not None:
             size = os.fstat(f.fileno()).st_size
             if size > self.max_size:
@@ -463,52 +428,7 @@ class AsarArchive:
             AsarEntryNotFoundError: If the entry or a link target is missing
             AsarFormatError: If the links are circular or too deep
         """
-        keys = path_keys(name)
-        visited = set()
-        while True:
-            replaced = False
-            # An intermediate segment may be a link to another directory
-            for depth in range(1, len(keys)):
-                info = self.files.get(keys[:depth])
-                if info is None or info.kind != KIND_LINK:
-                    continue
-                # The target of the link is followed and the rest of the path is
-                # appended to it, the segments of the path stay segments
-                keys = path_keys(self._follow(keys_path(keys[:depth]), info, visited)) + keys[depth:]
-                replaced = True
-                break
-            if replaced:
-                continue
-            info = self.files.get(keys)
-            if info is None:
-                raise AsarEntryNotFoundError(
-                    f'Entry "{keys_path(keys)}" does not exist in the archive'
-                )
-            if info.kind != KIND_LINK:
-                return keys_path(keys), info
-            keys = path_keys(self._follow(keys_path(keys), info, visited))
-
-    def _follow(self, name, info, visited):
-        """
-        Check a link and get its target.
-
-        Args:
-            name (str): Archive path of the link
-            info (AsarFileInfo): Entry of the link
-            visited (set): Links already followed
-
-        Returns:
-            str: Target path of the link, relative to the archive root
-
-        Raises:
-            AsarFormatError: If the links are circular or too deep
-        """
-        if name in visited:
-            raise AsarFormatError(f'Circular link at "{name}"')
-        if len(visited) >= SYMLINK_MAX_DEPTH:
-            raise AsarFormatError(f'Too many levels of links at "{name}"')
-        visited.add(name)
-        return info.link
+        return resolve_entry(self.files, name)
 
     # -------------------------------------------------------------- changing
 
@@ -518,6 +438,10 @@ class AsarArchive:
 
         The content of a file on disk is not read now, it is read when the
         archive is written, so a large file never sits in memory.
+
+        The links of the table are checked once the entry is added, so a link
+        that points at the entry is accepted while a link that is left without a
+        target is reported.
 
         Args:
             path (str): Local file path
@@ -545,7 +469,11 @@ class AsarArchive:
                 raise ValueError('add_file() needs an arc_path when there is no path')
             arc_path = os.path.basename(path)
         keys = check_archive_path(arc_path)
-        return self._set_file(keys, MemorySource(data) if data is not None else LocalFileSource(path), unpack)
+        info = self._set_file(keys, MemorySource(data) if data is not None else LocalFileSource(path), unpack)
+        # The links are checked once the entry is in the table: a link may well
+        # point at the entry this call adds
+        check_links(self.files)
+        return info
 
     def _set_file(self, keys, source, unpack):
         """
@@ -626,6 +554,10 @@ class AsarArchive:
         also holds what must not be packed) is not filtered here: the part to
         pack has to be given on its own.
 
+        The links of the table are checked once the whole tree is added, so a
+        link that points at an entry of the tree is accepted while a link that
+        is left without a target is reported.
+
         Args:
             root (str): Root directory, its content is added below the archive root
             unpack (bool): Store the content of the tree next to the archive
@@ -659,6 +591,9 @@ class AsarArchive:
                 raise AsarPathError(f'Archive path "{keys_path(keys)}" is already a file')
             elif unpack:
                 info.unpacked = True
+        # The links are checked once the whole tree is in the table: a link may
+        # well point at an entry of the tree this call adds
+        check_links(self.files)
         return len(entries)
 
     def mark_unpack(self, name):
@@ -800,108 +735,107 @@ class AsarArchive:
             return memoryview(source.data)
         return memoryview(b''.join(self.iter_content(name)))
 
-    def extract_file(self, name, dest):
+    def extract_file(self, name, dest, verify=True):
         """
         Extract one entry to a file path.
 
         Args:
             name (str): Archive path, links are followed
             dest (str): Target file path, the parent directory is created
+            verify (bool): Compare the content with the integrity of the header
+                while it is written, it costs no extra I/O because the content
+                is read anyway. An entry whose archive has no integrity can not
+                be verified, it is extracted with ``verify=False``
 
         Raises:
             AsarError: If the entry can not be read
+            AsarFormatError: If the content does not match the header
         """
         name, info = self.resolve(name)
         if info.kind == KIND_DIR:
             os.makedirs(dest, exist_ok=True)
             return
-        write_content(dest, self.iter_content(name), mode=entry_mode(info))
+        write_content(
+            dest, self.iter_content(name),
+            verifier=content_verifier(name, info, verify), mode=entry_mode(info),
+        )
 
-    def extract_all(self, dest, verify=False, region_budget=REGION_BUDGET, chunk_size=CHUNK_SIZE):
+    def extract_all(self, dest, verify=True, chunk_size=CHUNK_SIZE):
         """
         Extract the whole archive to a directory.
 
-        The entries that are stored in the archive are extracted with a single
-        sequential pass over the data area, the other ones are copied from their
-        own source. Directories are created first, then the content, then the
-        links, so that a link target always exists when the link is created. On
-        Windows a link to a file is materialized as a copy, a link to a
-        directory is not supported because Windows needs elevation to create a
-        symlink.
+        The content that is stored in the archive is read in the order of the
+        data area: the entries of an archive are stored back to back, so the
+        reads follow each other and the buffer of the handle is reused. The
+        other entries are copied from their own source. Directories are created
+        first, then the content, then the links, so that a link target always
+        exists when the link is created. On Windows a link to a file is
+        materialized as a copy, a link to a directory is not supported because
+        Windows needs elevation to create a symlink.
+
+        Every entry of the table holds a path that was checked when it entered
+        the table (added by the caller, or read from the header of an archive),
+        so the target of an entry is its path below `dest`.
 
         Args:
             dest (str): Target directory
             verify (bool): Compare every content that is stored in the archive
                 with the integrity of the header while extracting, it costs no
-                extra I/O because the content is read anyway
-            region_budget (int): Regions up to this size are read in one piece, 0
-                streams everything
-            chunk_size (int): Read chunk size of a streamed region
+                extra I/O because the content is read anyway. An archive whose
+                entries have no integrity can not be verified, it is extracted
+                with ``verify=False``
+            chunk_size (int): Read chunk size of an entry
 
         Raises:
-            AsarPathError: If an entry would escape the target directory
-            AsarFormatError: If the archive is malformed, or if a content hash
+            AsarPathError: If the target of a link leaves the target directory
+            AsarFormatError: If the archive is truncated, or if a content hash
                 does not match
             AsarUnsupportedError: If a directory link is extracted on Windows
         """
-        entries = list(self.iter_entries())
+        entries = canonical_entries(self.files)
         os.makedirs(dest, exist_ok=True)
-        for path, info in entries:
+        for keys, info in entries:
             if info.kind == KIND_DIR:
-                os.makedirs(check_target_path(dest, path), exist_ok=True)
+                os.makedirs(os.path.join(dest, *keys), exist_ok=True)
 
-        # The content that lives in the archive is read in one pass over the
-        # data area, whatever the order of the entries is
-        members = []
-        for path, info in entries:
-            source = info.source
-            if info.kind != KIND_FILE or not isinstance(source, RangeSource):
-                continue
-            target = check_target_path(dest, path)
-            if info.size == 0:
-                check_empty_content(path, info, verify)
-                file_write(target, b'')
-                continue
-            verifier = None
-            expected = entry_hash(path, info, verify)
-            if expected is not None:
-                verifier = ContentVerifier(path, info.size, expected, error=AsarFormatError)
-            members.append(Member(
-                source.offset, source.offset + source.size, path, target, verifier, entry_mode(info),
-            ))
-        if members:
-            members.sort(key=lambda member: (member.start, -member.end, member.path))
-            regions = build_regions(members)
-            f = self.fd
-            if f.tell() != regions[0].start:
-                # A second extraction of the same archive starts where the first
-                # one ended, this is the only seek of a real archive
-                f.seek(regions[0].start)
-            scan_regions(f, regions, region_budget=region_budget, chunk_size=chunk_size)
+        # The entries that live in the archive are read in the order of the data
+        # area, so that the reads of a real archive follow each other; a source
+        # seeks to the offset of its own entry
+        stored = [
+            (info.source.offset, keys, info)
+            for keys, info in entries
+            if info.kind == KIND_FILE and isinstance(info.source, RangeSource)
+        ]
+        stored.sort(key=lambda entry: entry[0])
+        for _, keys, info in stored:
+            path = keys_path(keys)
+            write_content(
+                os.path.join(dest, *keys), info.source.iter_chunks(self.fd, chunk_size),
+                verifier=content_verifier(path, info, verify), mode=entry_mode(info),
+            )
 
         # The content that has a source of its own is copied entry by entry, it
         # is not part of the archive and has nothing to be checked against
-        for path, info in entries:
+        for keys, info in entries:
             source = info.source
             if info.kind != KIND_FILE or isinstance(source, RangeSource):
                 continue
-            verifier = None
-            if verify and info.integrity is not None:
-                verifier = ContentVerifier(
-                    path, info.size, info.integrity.hash, error=AsarFormatError,
-                )
             write_content(
-                check_target_path(dest, path), source.iter_chunks(self.fd, chunk_size),
-                verifier=verifier, mode=entry_mode(info),
+                os.path.join(dest, *keys), source.iter_chunks(self.fd, chunk_size),
+                verifier=content_verifier(keys_path(keys), info, verify), mode=entry_mode(info),
             )
 
-        for path, info in entries:
+        for keys, info in entries:
             if info.kind == KIND_LINK:
-                create_link(self, path, dest, check_target_path(dest, path))
+                create_link(self, keys_path(keys), dest, os.path.join(dest, *keys))
 
     def validate(self, verify_content=False):
         """
         Check the archive structure, and optionally its content.
+
+        The paths of the entries were checked when they entered the table, so
+        what is left is the target of a link (the header does not keep it inside
+        the archive) and, on demand, the content of every file.
 
         Args:
             verify_content (bool): Stream every file, recalculate its SHA256 and
@@ -910,20 +844,17 @@ class AsarArchive:
         Raises:
             AsarFormatError: If an entry can not be read, or if a content hash
                 does not match
-            AsarPathError: If an entry path can not be extracted safely
+            AsarPathError: If the target of a link can not be extracted safely
         """
         for path, info in self.iter_entries():
+            if info.kind != KIND_LINK:
+                continue
             try:
-                validate_filepath(path)
+                validate_filepath(info.link)
             except ValueError as e:
-                raise AsarPathError(f'Invalid archive path "{path}": {e}')
-            if info.kind == KIND_LINK:
-                try:
-                    validate_filepath(info.link)
-                except ValueError as e:
-                    raise AsarPathError(f'Invalid link target of "{path}": {e}')
-                # Dangling and circular links break extraction
-                self.resolve(path)
+                raise AsarPathError(f'Invalid link target of "{path}": {e}')
+            # Dangling and circular links break extraction
+            self.resolve(path)
         if not verify_content:
             return
         for path, info in self.iter_entries():
@@ -932,15 +863,10 @@ class AsarArchive:
             expected = info.integrity.hash if info.integrity else None
             if expected is None:
                 raise AsarFormatError(f'Entry "{path}" has no integrity hash to verify')
-            hasher = hashlib.sha256()
+            verifier = ContentVerifier(path, info.size, expected, error=AsarFormatError)
             for chunk in self.iter_content(path):
-                hasher.update(chunk)
-            digest = hasher.hexdigest()
-            if digest != expected:
-                raise AsarFormatError(
-                    f'Content hash of "{path}" does not match, '
-                    f'it is {digest} instead of {expected}'
-                )
+                verifier.update(chunk)
+            verifier.check()
 
     # --------------------------------------------------------------- writing
 
@@ -960,6 +886,9 @@ class AsarArchive:
         replaces it only once it is complete, and the handle this archive holds
         is released just before, which Windows requires.
 
+        The links of the table are checked first: an archive whose links do not
+        resolve is one this module could not read back, it is never written.
+
         Args:
             dest (str): Target archive path, None to write to ``self.file``
             integrity (bool): Write the per file SHA256 integrity of the
@@ -977,6 +906,9 @@ class AsarArchive:
             dest = file
         else:
             dest = str(dest)
+        # An archive whose links do not resolve is one this module could not read
+        # back, it is never written
+        check_links(self.files)
         # The handle is taken before anything is written, and released after the
         # last content was read: a file can not be replaced while it is open on
         # Windows, and the handle would point at the old file afterwards

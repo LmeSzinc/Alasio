@@ -53,7 +53,9 @@ import msgspec
 from msgspec import UNSET, UnsetType
 from typing_extensions import Annotated
 
-from .errors import AsarError, AsarFormatError
+from alasio.ext.path.validate import validate_filename, validate_filepath
+
+from .errors import AsarEntryNotFoundError, AsarError, AsarFormatError, AsarPathError
 from .format import BLOCK_SIZE, MAX_PATH_DEPTH, UINT32_MAX
 from .source import ContentSource, LocalFileSource, RangeSource
 
@@ -69,6 +71,10 @@ KIND_LINK = 'link'
 # A larger offset can not be valid, it also bounds the cost of int() conversion
 MAX_OFFSET_DIGITS = 20
 ALGORITHM = 'SHA256'
+
+# Maximum number of links followed when resolving an entry, matches the
+# SYMLOOP_MAX of the reference implementation
+SYMLINK_MAX_DEPTH = 40
 
 
 def path_keys(path):
@@ -276,6 +282,10 @@ def check_name(name, keys):
     """
     Check a single path segment of the header tree.
 
+    The name is checked once, when the entry enters the table: an entry the
+    extraction can not create on every supported platform is refused here, so
+    nothing below has to look at the path of an entry again.
+
     Args:
         name (str): Segment name
         keys (tuple): Path segments of the entry, only used to build the error
@@ -284,6 +294,8 @@ def check_name(name, keys):
     Raises:
         AsarFormatError: If the name contains a path separator or is a directory
             pointer, the header stores one segment per level
+        AsarPathError: If the name is not a valid file name on every supported
+            platform
     """
     if '/' in name or '\\' in name:
         raise AsarFormatError(
@@ -292,6 +304,12 @@ def check_name(name, keys):
         )
     if name == '.' or name == '..':
         raise AsarFormatError(f'Invalid entry name at "{keys_path(keys[:-1]) or "/"}": "{name}"')
+    try:
+        validate_filename(name)
+    except ValueError as e:
+        raise AsarPathError(
+            f'Invalid entry name at "{keys_path(keys[:-1]) or "/"}": "{name}", {e}'
+        )
 
 
 def _convert_node(node, type_, keys):
@@ -444,6 +462,9 @@ def read_entries(header, archive_size, data_offset, unpacked_path):
     Raises:
         AsarFormatError: If the header is invalid or an entry points outside of
             the archive
+        AsarPathError: If an entry name or the target of a link is not a valid
+            path
+        AsarEntryNotFoundError: If a link points at an entry that is not there
     """
     files = {}
     data_size = archive_size - data_offset
@@ -481,7 +502,105 @@ def read_entries(header, archive_size, data_offset, unpacked_path):
                 unpacked=node.unpacked is True,
                 link=node.link,
             )
+    # The paths and the names are checked while the table is built, the links
+    # are checked once it holds every entry they can point at
+    check_links(files)
     return files
+
+
+def check_links(files):
+    """
+    Check that every link of a table points at an entry of the same archive.
+
+    A link is the only entry that names another one, so it is the only one that
+    can be broken. It is checked once, when the table is built, so that nothing
+    below (extraction, reading an entry) has to look at a link target again.
+
+    Args:
+        files (dict): Flat entry table, see ``read_entries()``
+
+    Raises:
+        AsarPathError: If the target of a link is not a valid archive path
+        AsarEntryNotFoundError: If a link points at an entry that is not there
+        AsarFormatError: If the links are circular or too deep
+    """
+    for keys, info in files.items():
+        if info.kind != KIND_LINK:
+            continue
+        path = keys_path(keys)
+        try:
+            validate_filepath(info.link)
+        except ValueError as e:
+            raise AsarPathError(f'Invalid link target of "{path}": {e}')
+        resolve_entry(files, path)
+
+
+def resolve_entry(files, name):
+    """
+    Look up an entry, following the link entries of the path.
+
+    A link may be the entry itself or an intermediate directory of the path,
+    the reference implementation resolves both (a link to `A` makes
+    `Current/real.txt` point at `A/real.txt`).
+
+    Args:
+        files (dict): Flat entry table, see ``read_entries()``
+        name (str): Archive path
+
+    Returns:
+        tuple[str, AsarFileInfo]: Path and entry it points to
+
+    Raises:
+        AsarEntryNotFoundError: If the entry or a link target is missing
+        AsarFormatError: If the links are circular or too deep
+    """
+    keys = path_keys(name)
+    visited = set()
+    while True:
+        replaced = False
+        # An intermediate segment may be a link to another directory
+        for depth in range(1, len(keys)):
+            info = files.get(keys[:depth])
+            if info is None or info.kind != KIND_LINK:
+                continue
+            # The target of the link is followed and the rest of the path is
+            # appended to it, the segments of the path stay segments
+            keys = path_keys(_follow(keys_path(keys[:depth]), info, visited)) + keys[depth:]
+            replaced = True
+            break
+        if replaced:
+            continue
+        info = files.get(keys)
+        if info is None:
+            raise AsarEntryNotFoundError(
+                f'Entry "{keys_path(keys)}" does not exist in the archive'
+            )
+        if info.kind != KIND_LINK:
+            return keys_path(keys), info
+        keys = path_keys(_follow(keys_path(keys), info, visited))
+
+
+def _follow(name, info, visited):
+    """
+    Check a link and get its target.
+
+    Args:
+        name (str): Archive path of the link
+        info (AsarFileInfo): Entry of the link
+        visited (set): Links already followed
+
+    Returns:
+        str: Target path of the link, relative to the archive root
+
+    Raises:
+        AsarFormatError: If the links are circular or too deep
+    """
+    if name in visited:
+        raise AsarFormatError(f'Circular link at "{name}"')
+    if len(visited) >= SYMLINK_MAX_DEPTH:
+        raise AsarFormatError(f'Too many levels of links at "{name}"')
+    visited.add(name)
+    return info.link
 
 
 def canonical_entries(files):

@@ -567,39 +567,40 @@ class TestValidate:
             AsarArchive('/extractthis.asar').validate(verify_content=True)
         assert str(e.value) == 'Entry "dir1/file1.txt" has no integrity hash to verify'
 
-    @pytest.mark.parametrize('name, expected', [
-        ('CON', 'Invalid archive path "CON": Path component cannot be reserved system name: CON'),
-        ('a:b', 'Invalid archive path "a:b": Path component should not contain character: ":"'),
-        ('trailing.', 'Invalid archive path "trailing.": Path component cannot end with a <dot>'),
-        ('trailing ', 'Invalid archive path "trailing ": Path component cannot end with a <space>'),
-    ])
-    def test_validate_bad_path(self, fs, name, expected):
-        """An entry that can not be extracted on every platform is reported."""
+    @pytest.mark.parametrize('name', ['CON', 'a:b', 'trailing.', 'trailing '])
+    def test_entry_name_that_can_not_be_created(self, fs, name):
+        """A name that no extraction could create is refused while reading."""
+        # The name can not be created on every platform, so the entry is refused
+        # when the table is built: the extraction never has to look at the path
+        # of an entry again
         content = fixture.make_archive({'files': {name: {'size': 0, 'offset': '0'}}})
         fs.create_file('/broken.asar', contents=content)
         with pytest.raises(AsarPathError) as e:
-            AsarArchive('/broken.asar').validate()
-        assert str(e.value) == expected
+            with AsarArchive('/broken.asar'):
+                pass
+        assert str(e.value).startswith(f'Invalid entry name at "/": "{name}"')
 
     @pytest.mark.parametrize('link', ['../escape', '/absolute', 'dir/../../escape'])
-    def test_validate_link_escape(self, fs, link):
-        """A link that leaves the archive is reported."""
+    def test_link_target_outside_the_archive(self, fs, link):
+        """A link that leaves the archive is refused while the table is built."""
         content = fixture.make_archive({'files': {'l.txt': {'link': link}}})
         fs.create_file('/broken.asar', contents=content)
         with pytest.raises(AsarPathError) as e:
-            AsarArchive('/broken.asar').validate()
+            with AsarArchive('/broken.asar'):
+                pass
         assert str(e.value).startswith('Invalid link target of "l.txt": ')
 
-    def test_validate_link_missing(self, fs):
-        """A link to a missing entry is reported."""
+    def test_link_target_missing(self, fs):
+        """A link to an entry that is not there is refused while the table is built."""
         content = fixture.make_archive({'files': {'l.txt': {'link': 'nope.txt'}}})
         fs.create_file('/broken.asar', contents=content)
         with pytest.raises(AsarEntryNotFoundError) as e:
-            AsarArchive('/broken.asar').validate()
+            with AsarArchive('/broken.asar'):
+                pass
         assert str(e.value) == 'Entry "nope.txt" does not exist in the archive'
 
-    def test_validate_link_circular(self, fs):
-        """Two links pointing at each other are reported."""
+    def test_link_circular(self, fs):
+        """Two links pointing at each other are refused while the table is built."""
         content = fixture.make_archive({
             'files': {
                 'a.txt': {'link': 'b.txt'},
@@ -608,16 +609,68 @@ class TestValidate:
         })
         fs.create_file('/broken.asar', contents=content)
         with pytest.raises(AsarFormatError) as e:
-            AsarArchive('/broken.asar').validate()
+            with AsarArchive('/broken.asar'):
+                pass
         assert str(e.value) == 'Circular link at "a.txt"'
 
-    def test_validate_link_self(self, fs):
-        """A link pointing at itself is reported."""
+    def test_link_self(self, fs):
+        """A link pointing at itself is refused while the table is built."""
         content = fixture.make_archive({'files': {'a.txt': {'link': 'a.txt'}}})
         fs.create_file('/broken.asar', contents=content)
         with pytest.raises(AsarFormatError) as e:
-            AsarArchive('/broken.asar').validate()
+            with AsarArchive('/broken.asar'):
+                pass
         assert str(e.value) == 'Circular link at "a.txt"'
+
+    def test_validate_after_a_target_is_deleted(self, fs):
+        """validate() checks the links of the table as it is now."""
+        fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
+        with AsarArchive('/links.asar') as archive:
+            archive.del_folder('A')
+            with pytest.raises(AsarEntryNotFoundError) as e:
+                archive.validate()
+        assert str(e.value) == 'Entry "A" does not exist in the archive'
+
+    def test_add_repairs_the_target_of_a_link(self, fs):
+        """The call that adds what a link points at is the one that repairs it."""
+        fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
+        with AsarArchive('/links.asar') as archive:
+            archive.del_file('A/real.txt')
+            # The links are checked once the entry is in the table, so the
+            # intermediate state above is not an error of its own
+            archive.add_file(data=b'repaired', arc_path='A/real.txt')
+            assert archive.resolve('Current/real.txt')[0] == 'A/real.txt'
+            assert bytes(archive.read_file('Current/real.txt')) == b'repaired'
+
+    def test_add_reports_a_link_without_a_target(self, fs):
+        """Adding an entry reports a link the table holds without a target."""
+        fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
+        with AsarArchive('/links.asar') as archive:
+            archive.del_folder('A')
+            with pytest.raises(AsarEntryNotFoundError) as e:
+                archive.add_file(data=b'x', arc_path='new.txt')
+        assert str(e.value) == 'Entry "A" does not exist in the archive'
+
+    def test_add_folder_reports_a_link_without_a_target(self, fs):
+        """A tree is added whole before the links of the table are checked."""
+        fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
+        fs.create_dir('/tree')
+        fs.create_file('/tree/a.txt', contents=b'a')
+        with AsarArchive('/links.asar') as archive:
+            archive.del_folder('A')
+            with pytest.raises(AsarEntryNotFoundError) as e:
+                archive.add_folder('/tree')
+        assert str(e.value) == 'Entry "A" does not exist in the archive'
+
+    def test_write_refuses_a_broken_link(self, fs):
+        """An archive whose links do not resolve is not written."""
+        fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
+        with AsarArchive('/links.asar') as archive:
+            archive.del_folder('A')
+            with pytest.raises(AsarEntryNotFoundError) as e:
+                archive.write('/out.asar')
+        assert str(e.value) == 'Entry "A" does not exist in the archive'
+        assert not os.path.exists('/out.asar')
 
 
 class TestExtractAll:
@@ -665,18 +718,6 @@ class TestExtractAll:
             with AsarArchive('/broken.asar') as archive:
                 archive.extract_all('/out')
         assert expected in str(e.value)
-
-    def test_extract_all_escape_after_read(self, fs):
-        """An entry that escapes the target directory is refused when read."""
-        # `a:b` passes the format check of the header, but can not be created on
-        # every platform, so extraction must still refuse it
-        content = fixture.make_archive({'files': {'a:b': {'size': 1, 'offset': '0'}}}, b'x')
-        fs.create_file('/broken.asar', contents=content)
-        with AsarArchive('/broken.asar') as archive:
-            assert [path for path, _ in archive.iter_entries()] == ['a:b']
-            with pytest.raises(AsarPathError) as e:
-                archive.extract_all('/out')
-        assert str(e.value).startswith('Invalid archive path "a:b"')
 
     def test_extract_file_target_path(self, fs):
         """extract_file takes a file path and creates its parent directory."""
