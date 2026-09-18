@@ -1,7 +1,7 @@
 """
 Command line interface of the asar packer / unpacker::
 
-    python -m alasio.codegen.asar pack <src> <dest> [--file PATTERN] [--exclude PATTERN]
+    python -m alasio.codegen.asar pack <src> <dest> [--no-integrity]
     python -m alasio.codegen.asar unpack <archive> <dest> [--verify]
     python -m alasio.codegen.asar list <archive> [--long]
     python -m alasio.codegen.asar extract <archive> <name> <dest>
@@ -85,13 +85,7 @@ def cmd_pack(args):
         int: Exit code
     """
     with AsarArchive() as archive:
-        count = archive.add_folder(
-            args.src,
-            include=args.file,
-            exclude=args.exclude,
-            unpack=args.unpack,
-            unpack_dir=args.unpack_dir,
-        )
+        count = archive.add_folder(args.src)
         archive.write(args.dest, integrity=not args.no_integrity)
         packed, unpacked, _, _ = count_entries(archive)
         archive_size = os.path.getsize(args.dest)
@@ -259,14 +253,6 @@ def main(argv=None):
     pack = subparsers.add_parser('pack', help='pack a directory into an archive')
     pack.add_argument('src', help='source directory')
     pack.add_argument('dest', help='target archive path')
-    pack.add_argument('--file', action='append', metavar='PATTERN',
-                      help='only pack files matching the pattern, can be repeated')
-    pack.add_argument('--exclude', action='append', metavar='PATTERN',
-                      help='drop files matching the pattern, can be repeated')
-    pack.add_argument('--unpack', action='append', metavar='PATTERN',
-                      help='store matching files next to the archive, can be repeated')
-    pack.add_argument('--unpack-dir', action='append', metavar='PATTERN',
-                      help='store matching directories next to the archive, can be repeated')
     pack.add_argument('--no-integrity', action='store_true',
                       help='do not write the per file SHA256 integrity')
     pack.set_defaults(func=cmd_pack)

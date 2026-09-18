@@ -9,8 +9,7 @@ on Linux.
 import os
 
 from .errors import AsarError, AsarUnsupportedError
-from .model import KIND_DIR, KIND_FILE, has_parent
-from .pattern import GlobDirPattern, GlobPattern
+from .model import KIND_DIR, KIND_FILE
 
 
 def list_dir(local_path, arc_prefix=None, missing_ok=False):
@@ -60,16 +59,12 @@ def list_dir(local_path, arc_prefix=None, missing_ok=False):
     return result
 
 
-def crawl_tree(root, include=None):
+def crawl_tree(root):
     """
     Walk a directory tree level by level.
 
     Args:
         root (str): Root directory
-        include (GlobPattern): Patterns the archive keeps, None to walk the whole
-            tree. A directory that no pattern can reach is not entered, so an
-            include list of `dist/**` and `package.json` never reads
-            `node_modules`
 
     Returns:
         list: ``[(arc_path, local_path, kind)]``, a directory always comes
@@ -94,93 +89,6 @@ def crawl_tree(root, include=None):
             order.append((arc_path, local_path, kind))
             if kind != KIND_DIR:
                 continue
-            if include is not None and not include.may_match_below(arc_path):
-                # The directory stays an entry of the tree, it is only not
-                # entered: nothing below it can be selected, so there is
-                # nothing to read
-                continue
             next_level.extend(list_dir(local_path, arc_prefix=arc_path, missing_ok=True))
         level = next_level
     return order
-
-
-def crawl_folder(root, include=None, exclude=None, unpack=None, unpack_dir=None):
-    """
-    Walk a directory tree and decide what goes into the archive.
-
-    Args:
-        root (str): Root directory
-        include (list): Glob patterns of the entries to add, None to add every
-            file of the tree. An empty directory that matches is kept.
-        exclude (list): Glob patterns of the entries to drop, dropping a
-            directory drops its whole subtree
-        unpack (list): Glob patterns of the files to store next to the archive
-            instead of inside it, a pattern without '/' matches the file name
-        unpack_dir (list): Patterns of the directories to store next to the
-            archive, their whole content follows
-
-    Returns:
-        list: ``[(arc_path, local_path, kind, unpacked)]`` in archive order
-    """
-    # The patterns are compiled once here, and released with the crawl
-    include = GlobPattern(include) if include else None
-    exclude = GlobPattern(exclude) if exclude else None
-    unpack = GlobPattern(unpack, match_base=True) if unpack else None
-    unpack_dir = GlobDirPattern(unpack_dir) if unpack_dir else None
-
-    order = crawl_tree(root, include=include)
-    # A dropped directory drops everything below it
-    dropped = set()
-    for arc_path, _, kind in order:
-        if kind != KIND_DIR:
-            continue
-        if has_parent(arc_path, dropped):
-            dropped.add(arc_path)
-        elif exclude and exclude.match(arc_path):
-            dropped.add(arc_path)
-
-    # A file is kept when it is not excluded and matches the include patterns
-    files = []
-    for arc_path, local_path, kind in order:
-        if kind != KIND_FILE or has_parent(arc_path, dropped):
-            continue
-        if exclude and exclude.match(arc_path):
-            continue
-        if include and not include.match(arc_path):
-            continue
-        files.append((arc_path, local_path))
-
-    # Directories are kept when their content is kept, or when they match the
-    # include patterns themselves (so an empty directory can be added on purpose)
-    needed = set()
-    if include:
-        for arc_path, _, kind in order:
-            if kind == KIND_DIR and include.match(arc_path):
-                needed.add(arc_path)
-    for arc_path, _ in files:
-        while True:
-            arc_path = arc_path.rpartition('/')[0]
-            if not arc_path or arc_path in needed:
-                break
-            needed.add(arc_path)
-
-    entries = []
-    included = set(path for path, _ in files)
-    for arc_path, local_path, kind in order:
-        if arc_path in dropped or has_parent(arc_path, dropped):
-            continue
-        if kind == KIND_DIR:
-            if include and arc_path not in needed:
-                continue
-            unpacked = False
-            if unpack_dir:
-                unpacked = unpack_dir.match(arc_path)
-            entries.append((arc_path, local_path, KIND_DIR, unpacked))
-            continue
-        if arc_path not in included:
-            continue
-        unpacked = False
-        if unpack:
-            unpacked = unpack.match(arc_path)
-        entries.append((arc_path, local_path, KIND_FILE, unpacked))
-    return entries

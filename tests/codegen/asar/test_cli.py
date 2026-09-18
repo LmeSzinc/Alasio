@@ -116,28 +116,6 @@ class TestCommands:
         assert file_read_bytes('/out/dist/main.js') == b'main'
         assert file_read_bytes('/out/package.json') == b'{"name":"alasio"}'
 
-    def test_pack_include(self, fs, capsys):
-        """pack --file only packs the matching entries."""
-        root = build_source_tree(fs)
-        assert main(['pack', root, '/packed.asar', '--file', 'dist/**']) == 0
-        capsys.readouterr()
-        assert main(['list', '/packed.asar']) == 0
-        assert capsys.readouterr().out == 'dist\ndist/main.js\ndist/style.css\n'
-
-    def test_pack_unpack_dir(self, fs, capsys):
-        """pack --unpack-dir stores content next to the archive."""
-        root = build_source_tree(fs)
-        assert main(['pack', root, '/packed.asar', '--unpack-dir', 'dist']) == 0
-        assert '  1 files in the archive, 2 unpacked\n' in capsys.readouterr().out
-        assert file_read_bytes('/packed.asar.unpacked/dist/main.js') == b'main'
-        assert main(['list', '/packed.asar', '--long']) == 0
-        assert capsys.readouterr().out == (
-            '         -          - dir unpack           dist\n'
-            '         4          - unpack               dist/main.js\n'
-            '         6          - unpack               dist/style.css\n'
-            f'        17          0 pack                 package.json\n'
-        )
-
     def test_pack_no_integrity(self, fs, capsys):
         """pack --no-integrity leaves the hashes out."""
         root = build_source_tree(fs)

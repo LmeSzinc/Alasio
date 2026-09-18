@@ -13,7 +13,7 @@ data area::
 Building an archive from a directory::
 
     with AsarArchive() as archive:
-        archive.add_folder('webapp', include=['dist/**', 'package.json'])
+        archive.add_folder('build/app')
         archive.add_file(data=b'{"name":"alasio"}', arc_path='build.json')
         archive.write('app.asar')
 

@@ -14,7 +14,7 @@ from alasio.codegen.asar.errors import AsarError, AsarFormatError
 from alasio.codegen.asar.format import BLOCK_SIZE, UINT32_MAX
 from alasio.codegen.asar.model import (
     MAX_OFFSET_DIGITS, AsarFileInfo, DirNode, FileNode, Integrity, LinkNode, UnpackedFileNode, build_header,
-    canonical_entries, check_node, has_parent, iter_entries, keys_path, path_keys, read_entries
+    canonical_entries, check_node, iter_entries, keys_path, path_keys, read_entries
 )
 from alasio.codegen.asar.source import LocalFileSource, RangeSource
 
@@ -666,19 +666,3 @@ class TestCanonicalEntries:
         # The entries in canonical order, taken from the table itself
         again = {keys: info for keys, info in canonical_entries(files)}
         assert canonical_entries(again) == canonical_entries(files)
-
-
-class TestHasParent:
-    @pytest.mark.parametrize('path, unpacked_dirs, expected', [
-        ('a/b/c.txt', set(), False),
-        ('a/b/c.txt', {'a'}, True),
-        ('a/b/c.txt', {'a/b'}, True),
-        ('a/b/c.txt', {'a/b/c.txt'}, False),
-        ('a/b/c.txt', {'ab'}, False),
-        ('a/b/c.txt', {'a/b/c'}, False),
-        ('a.txt', {'a'}, False),
-        ('a.txt', {'b'}, False),
-    ])
-    def test_has_parent(self, path, unpacked_dirs, expected):
-        """Only real parent directories count as ancestors."""
-        assert has_parent(path, unpacked_dirs) is expected

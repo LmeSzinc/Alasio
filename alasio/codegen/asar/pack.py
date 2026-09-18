@@ -299,10 +299,11 @@ def mark_unpacked(files):
     """
     Mark every entry that lives inside an unpacked directory as unpacked.
 
-    The reference implementation marks the directories matched by ``unpackDir``
-    and every entry below them, so an entry that was added later under such a
-    directory must inherit the flag as well. Unpacked files are copied next to
-    the archive instead of being stored in it, so they have no offset.
+    An entry that is added below a directory that is unpacked belongs to the
+    '.unpacked' content of the archive whatever the call that added it said: a
+    caller may add a single file of its own into such a directory (a patch, a
+    build output) without thinking about the flag. Unpacked files are copied
+    next to the archive instead of being stored in it, so they have no offset.
 
     The entries are walked from the shortest path to the longest one: the path
     of a directory is a proper prefix of the path of every entry it holds, so a

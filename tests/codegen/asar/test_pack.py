@@ -12,7 +12,7 @@ import msgspec
 import pytest
 
 from alasio.codegen.asar import AsarArchive, pack_sha256
-from alasio.codegen.asar.errors import AsarError, AsarPathError, AsarUnsupportedError
+from alasio.codegen.asar.errors import AsarEntryNotFoundError, AsarError, AsarPathError, AsarUnsupportedError
 from alasio.codegen.asar.format import BLOCK_SIZE, read_header
 from alasio.codegen.asar.model import KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, Integrity, iter_entries, keys_path
 from alasio.codegen.asar.pack import CACHE_FILE_SIZE, ContentVerifier, hash_content, mark_unpacked, write_content
@@ -193,7 +193,7 @@ class TestAddFile:
             assert bytes(reader.read_file('package.json')) == b'{"name":"alasio"}'
 
     @pytest.mark.parametrize('kwargs, expected', [
-        ({}, 'add_file() needs a path or a content'),
+        ({}, 'add_file() needs a path or a content, use mark_unpack() to mark an entry'),
         ({'data': b'x'}, 'add_file() needs an arc_path when there is no path'),
     ])
     def test_add_file_arguments(self, fs, kwargs, expected):
@@ -265,72 +265,64 @@ class TestAddFolder:
         archive.write('/out.asar')
         assert file_read_bytes('/out.asar') == fixture.tiny_341()
 
-    def test_add_folder_include(self, fs):
-        """Only the selected files are packed, their directories follow."""
-        root = build_source_tree(fs)
-        archive = AsarArchive()
-        archive.add_folder(root, include=['sub/**'])
-        archive.write('/out.asar')
-        with AsarArchive('/out.asar') as reader:
-            assert entry_paths(reader) == ['sub', 'sub/bin.dat']
-
-    def test_add_folder_include_keeps_empty_dir(self, fs):
-        """An empty directory that matches include is kept."""
+    def test_add_folder_keeps_empty_dirs(self, fs):
+        """Empty directories are entries of the archive, nested ones as well."""
         root = build_source_tree(fs)
         fs.create_dir(f'{root}/empty')
+        fs.create_dir(f'{root}/sub/deeper')
         archive = AsarArchive()
-        archive.add_folder(root, include=['empty', 'hello.txt'])
+        archive.add_folder(root)
+        assert entry_paths(archive) == [
+            'empty', 'hello.txt', 'sub', 'sub/bin.dat', 'sub/deeper',
+        ]
         archive.write('/out.asar')
         with AsarArchive('/out.asar') as reader:
-            assert entry_paths(reader) == ['empty', 'hello.txt']
+            assert entry_paths(reader) == ['empty', 'hello.txt', 'sub', 'sub/bin.dat', 'sub/deeper']
             assert reader.entry('empty').kind == KIND_DIR
-
-    def test_add_folder_exclude(self, fs):
-        """Excluded entries are dropped, an excluded directory takes its subtree."""
-        root = build_source_tree(fs)
-        archive = AsarArchive()
-        archive.add_folder(root, exclude=['sub'])
-        archive.write('/out.asar')
-        with AsarArchive('/out.asar') as reader:
-            assert entry_paths(reader) == ['hello.txt']
+            assert reader.entry('sub/deeper').kind == KIND_DIR
 
     def test_add_folder_unpack(self, fs):
-        """An unpacked file is stored next to the archive, not inside it."""
+        """A tree that is added unpacked is stored next to the archive."""
         root = build_source_tree(fs)
         archive = AsarArchive()
-        archive.add_folder(root, unpack=['*.dat'])
+        archive.add_folder(root, unpack=True)
         archive.write('/out.asar')
+        assert file_read_bytes('/out.asar.unpacked/hello.txt') == b'hello asar'
         assert file_read_bytes('/out.asar.unpacked/sub/bin.dat') == b'PAYLOAD'
         header = stored_header('/out.asar')
-        assert header['files']['sub']['files']['bin.dat'] == {
-            'size': 7,
+        assert header['files']['hello.txt'] == {
+            'size': 10,
             'unpacked': True,
             'integrity': {
                 'algorithm': 'SHA256',
-                'hash': sha256(b'PAYLOAD'),
+                'hash': sha256(b'hello asar'),
                 'blockSize': BLOCK_SIZE,
-                'blocks': [sha256(b'PAYLOAD')],
+                'blocks': [sha256(b'hello asar')],
             },
         }
+        assert header['files']['sub']['unpacked'] is True
+        assert 'offset' not in header['files']['sub']['files']['bin.dat']
+        with AsarArchive('/out.asar') as reader:
+            assert counts(reader) == (0, 2, 1, 0)
+            assert bytes(reader.read_file('sub/bin.dat')) == b'PAYLOAD'
+            assert bytes(reader.read_file('hello.txt')) == b'hello asar'
+
+    def test_add_file_unpack(self, fs):
+        """A single file can be marked as unpacked with add_file()."""
+        root = build_source_tree(fs)
+        archive = AsarArchive()
+        archive.add_folder(root)
+        archive.add_file(f'{root}/sub/bin.dat', arc_path='sub/bin.dat', unpack=True)
+        archive.write('/out.asar')
+        assert file_read_bytes('/out.asar.unpacked/sub/bin.dat') == b'PAYLOAD'
+        header = stored_header('/out.asar')
+        assert header['files']['hello.txt']['offset'] == '0'
+        assert header['files']['sub']['files']['bin.dat']['unpacked'] is True
+        assert 'offset' not in header['files']['sub']['files']['bin.dat']
         with AsarArchive('/out.asar') as reader:
             assert counts(reader) == (1, 1, 1, 0)
             assert bytes(reader.read_file('sub/bin.dat')) == b'PAYLOAD'
             assert bytes(reader.read_file('hello.txt')) == b'hello asar'
-
-    def test_add_folder_unpack_dir(self, fs):
-        """An unpacked directory takes its whole subtree with it."""
-        root = build_source_tree(fs)
-        archive = AsarArchive()
-        archive.add_folder(root, unpack_dir=['sub'])
-        archive.write('/out.asar')
-        assert file_read_bytes('/out.asar.unpacked/sub/bin.dat') == b'PAYLOAD'
-        header = stored_header('/out.asar')
-        assert header['files']['sub']['unpacked'] is True
-        assert header['files']['sub']['files']['bin.dat']['unpacked'] is True
-        assert 'offset' not in header['files']['sub']['files']['bin.dat']
-        assert header['files']['hello.txt']['offset'] == '0'
-        with AsarArchive('/out.asar') as reader:
-            assert bytes(reader.read_file('sub/bin.dat')) == b'PAYLOAD'
 
     def test_add_folder_stale_unpacked_is_kept(self, fs):
         """An old unpacked file is not removed, the caller owns the directory."""
@@ -340,19 +332,6 @@ class TestAddFolder:
         archive.add_folder(root)
         archive.write('/out.asar')
         assert file_read_bytes('/out.asar.unpacked/old.txt') == b'old'
-
-    def test_add_folder_include_keeps_a_nested_empty_dir(self, fs):
-        """The parents of a kept directory are written when they hold nothing."""
-        root = build_source_tree(fs)
-        fs.create_dir(f'{root}/sub/deeper')
-        archive = AsarArchive()
-        archive.add_folder(root, include=['sub/deeper'])
-        assert entry_paths(archive) == ['sub', 'sub/deeper']
-        archive.write('/out.asar')
-        with AsarArchive('/out.asar') as reader:
-            assert entry_paths(reader) == ['sub', 'sub/deeper']
-            assert reader.entry('sub').kind == KIND_DIR
-            assert reader.entry('sub/deeper').kind == KIND_DIR
 
     def test_add_folder_empty(self, fs):
         """An empty directory packs to an empty archive."""
@@ -378,16 +357,26 @@ class TestAddFolder:
 class TestUnpackedInheritance:
     def test_a_new_entry_follows_its_directory(self, fs):
         """A file added below an unpacked directory is stored unpacked as well."""
+        root = build_source_tree(fs)
         archive = AsarArchive()
-        archive.add_folder(build_source_tree(fs), unpack_dir=['sub'])
+        archive.add_folder(root, unpack=True)
         info = archive.add_file(data=b'added', arc_path='sub/added.txt')
         assert info.unpacked is True
-        assert archive.entry('hello.txt').unpacked is False
+
+    def test_a_packed_tree_stays_packed(self, fs):
+        """A file added below a packed directory stays packed."""
+        root = build_source_tree(fs)
+        archive = AsarArchive()
+        archive.add_folder(root)
+        info = archive.add_file(data=b'added', arc_path='sub/added.txt')
+        assert info.unpacked is False
 
     def test_replacing_keeps_the_flag(self, fs):
         """A file that replaces an unpacked entry stays unpacked."""
+        root = build_source_tree(fs)
         archive = AsarArchive()
-        archive.add_folder(build_source_tree(fs), unpack=['*.dat'])
+        archive.add_folder(root)
+        archive.add_file(f'{root}/sub/bin.dat', arc_path='sub/bin.dat', unpack=True)
         assert archive.entry('sub/bin.dat').unpacked is True
         info = archive.add_file(data=b'replaced', arc_path='sub/bin.dat')
         assert info.unpacked is True
@@ -396,16 +385,16 @@ class TestUnpackedInheritance:
         """An explicit flag wins over what the entry or its directory says."""
         archive = AsarArchive()
         archive.add_file(data=b'one', arc_path='packed/a.txt')
-        archive.add_file(data=b'two', arc_path='packed/b.txt', unpacked=True)
+        archive.add_file(data=b'two', arc_path='packed/b.txt', unpack=True)
         assert archive.entry('packed/b.txt').unpacked is True
-        archive.add_file(data=b'three', arc_path='packed/b.txt', unpacked=False)
+        archive.add_file(data=b'three', arc_path='packed/b.txt', unpack=False)
         assert archive.entry('packed/b.txt').unpacked is False
 
     def test_written_archive(self, fs):
         """The inherited flag reaches the archive and the .unpacked directory."""
         root = build_source_tree(fs)
         archive = AsarArchive()
-        archive.add_folder(root, unpack_dir=['sub'])
+        archive.add_folder(root, unpack=True)
         archive.add_file(data=b'added', arc_path='sub/added.txt')
         archive.write('/out.asar')
         header = stored_header('/out.asar')
@@ -414,6 +403,85 @@ class TestUnpackedInheritance:
         assert file_read_bytes('/out.asar.unpacked/sub/added.txt') == b'added'
         with AsarArchive('/out.asar') as reader:
             assert bytes(reader.read_file('sub/added.txt')) == b'added'
+
+
+class TestMarkUnpack:
+    def test_mark_a_file(self, fs):
+        """A marked file keeps its content next to the archive."""
+        root = build_source_tree(fs)
+        archive = AsarArchive()
+        archive.add_folder(root)
+        assert archive.mark_unpack('sub/bin.dat') == 1
+        assert archive.entry('sub/bin.dat').unpacked is True
+        assert archive.entry('sub/bin.dat').offset is None
+        assert archive.entry('hello.txt').unpacked is False
+        archive.write('/out.asar')
+        assert file_read_bytes('/out.asar.unpacked/sub/bin.dat') == b'PAYLOAD'
+        with AsarArchive('/out.asar') as reader:
+            assert counts(reader) == (1, 1, 1, 0)
+            assert bytes(reader.read_file('sub/bin.dat')) == b'PAYLOAD'
+            assert bytes(reader.read_file('hello.txt')) == b'hello asar'
+
+    def test_mark_a_directory(self, fs):
+        """A marked directory takes its whole subtree with it."""
+        root = build_source_tree(fs)
+        archive = AsarArchive()
+        archive.add_folder(root)
+        assert archive.mark_unpack('sub') == 2
+        assert archive.entry('sub').unpacked is True
+        assert archive.entry('sub/bin.dat').unpacked is True
+        assert archive.entry('hello.txt').unpacked is False
+        archive.write('/out.asar')
+        header = stored_header('/out.asar')
+        assert header['files']['sub']['unpacked'] is True
+        assert header['files']['sub']['files']['bin.dat']['unpacked'] is True
+        assert 'offset' not in header['files']['sub']['files']['bin.dat']
+
+    def test_mark_a_link(self, fs):
+        """A link below a marked directory carries the flag as well."""
+        fs.create_file('/link.asar', contents=fixture.make_archive(
+            {'files': {'dir': {'files': {
+                'a.txt': {'size': 1, 'offset': '0'},
+                'l.txt': {'link': 'dir/a.txt'},
+            }}}},
+            b'x',
+        ))
+        with AsarArchive('/link.asar') as archive:
+            assert archive.mark_unpack('dir') == 3
+            archive.write('/out.asar')
+        header = stored_header('/out.asar')
+        assert header['files']['dir']['unpacked'] is True
+        assert header['files']['dir']['files']['a.txt']['unpacked'] is True
+        assert header['files']['dir']['files']['l.txt']['unpacked'] is True
+        assert file_read_bytes('/out.asar.unpacked/dir/a.txt') == b'x'
+
+    def test_mark_twice(self, fs):
+        """Marking what is unpacked already marks nothing."""
+        root = build_source_tree(fs)
+        archive = AsarArchive()
+        archive.add_folder(root)
+        assert archive.mark_unpack('sub') == 2
+        assert archive.mark_unpack('sub') == 0
+        assert archive.mark_unpack('sub/bin.dat') == 0
+
+    def test_mark_a_missing_entry(self, fs):
+        """Marking an entry that is not there is an error."""
+        archive = AsarArchive()
+        with pytest.raises(AsarEntryNotFoundError) as e:
+            archive.mark_unpack('nope.txt')
+        assert str(e.value) == 'Entry "nope.txt" does not exist in the archive'
+
+    def test_mark_an_entry_of_an_archive(self, fs):
+        """An entry of an archive is copied out of the body when it is marked."""
+        fs.create_file('/tiny.asar', contents=fixture.tiny_341())
+        with AsarArchive('/tiny.asar') as archive:
+            assert archive.mark_unpack('hello.txt') == 1
+            archive.write('/out.asar')
+        assert file_read_bytes('/out.asar.unpacked/hello.txt') == b'hello asar'
+        with AsarArchive('/out.asar') as reader:
+            assert counts(reader) == (1, 1, 1, 0)
+            assert bytes(reader.read_file('hello.txt')) == b'hello asar'
+            assert bytes(reader.read_file('sub/bin.dat')) == b'PAYLOAD'
 
 
 class TestMarkUnpacked:
@@ -774,7 +842,7 @@ class TestWrite:
         """
         root = build_source_tree(fs)
         archive = AsarArchive()
-        archive.add_folder(root, unpack_dir=['sub'])
+        archive.add_folder(root, unpack=True)
         archive.add_file(data=b'', arc_path='empty.txt')
         archive.add_file(data=b'a' * 10, arc_path='nested/deep/big.bin')
         archive.write('/out.asar')

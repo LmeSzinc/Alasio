@@ -9,9 +9,10 @@ archive was read from or written to a file — the open handle of that file::
     with AsarArchive('app.asar') as asar:
         asar.extract_all('output')
 
-    # Build one from scratch
+    # Build one from scratch: the source tree mirrors the archive
     with AsarArchive() as asar:
-        asar.add_folder('webapp', include=['dist/**', 'package.json'])
+        # dist/main.js is stored as dist/main.js
+        asar.add_folder('build/app')
         asar.add_file(data=b'{"name":"alasio"}', arc_path='build.json')
         asar.write('app.asar')
 
@@ -35,7 +36,7 @@ from alasio.ext.cache import InstanceCacheOperation, cached_property
 from alasio.ext.path.atomic import CHUNK_SIZE, atomic_open, file_write
 from alasio.ext.path.validate import validate_filename, validate_filepath, validate_resolve_filepath
 
-from .crawl import crawl_folder
+from .crawl import crawl_tree
 from .errors import AsarEntryNotFoundError, AsarError, AsarFormatError, AsarPathError, AsarUnsupportedError
 from .format import MAX_PATH_DEPTH, read_header
 from .model import KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, canonical_entries, keys_path, path_keys, read_entries
@@ -511,7 +512,7 @@ class AsarArchive:
 
     # -------------------------------------------------------------- changing
 
-    def add_file(self, path=None, arc_path=None, data=None, unpacked=None):
+    def add_file(self, path=None, arc_path=None, data=None, unpack=None):
         """
         Add a single file to the archive.
 
@@ -524,9 +525,10 @@ class AsarArchive:
                 `path`
             data (bytes): Content, added instead of reading `path`, for a file
                 that does not exist on disk (a generated package.json and the like)
-            unpacked (bool): Store the content next to the archive instead of
-                inside it, None to keep the flag of the entry that is replaced,
-                or the flag of the directory the entry is added to
+            unpack (bool): Store the content next to the archive instead of
+                inside it, for a file that has to be a real file on disk (a
+                native module and the like). None to keep the flag of the entry
+                that is replaced, or to follow the directory the entry is added to
 
         Returns:
             AsarFileInfo: The added entry
@@ -537,24 +539,24 @@ class AsarArchive:
                 is used by a directory
         """
         if path is None and data is None:
-            raise ValueError('add_file() needs a path or a content')
+            raise ValueError('add_file() needs a path or a content, use mark_unpack() to mark an entry')
         if arc_path is None:
             if path is None:
                 raise ValueError('add_file() needs an arc_path when there is no path')
             arc_path = os.path.basename(path)
         keys = check_archive_path(arc_path)
-        return self._set_file(keys, MemorySource(data) if data is not None else LocalFileSource(path), unpacked)
+        return self._set_file(keys, MemorySource(data) if data is not None else LocalFileSource(path), unpack)
 
-    def _set_file(self, keys, source, unpacked):
+    def _set_file(self, keys, source, unpack):
         """
         Put a file entry into the table, creating the directories above it.
 
         Args:
             keys (tuple): Path segments of the entry
             source (ContentSource): Where the content of the file comes from
-            unpacked (bool): Store the content next to the archive, None to
-                inherit the flag of the entry that is replaced or of the
-                directory the entry is added to
+            unpack (bool): Store the content next to the archive, None to inherit
+                the flag of the entry that is replaced or of the directory the
+                entry is added to
 
         Returns:
             AsarFileInfo: The entry
@@ -569,12 +571,12 @@ class AsarArchive:
         # One pass over the parents: the missing ones are created, a file in the
         # way is refused, and a directory that is stored unpacked is reported
         inherited = self._ensure_parents(keys)
-        if unpacked is None:
+        if unpack is None:
             # A new entry follows the directory it is added to, so that a native
             # module added below an unpacked directory is stored the same way as
             # its neighbours
-            unpacked = inherited if previous is None else previous.unpacked
-        info = AsarFileInfo(kind=KIND_FILE, unpacked=bool(unpacked), source=source)
+            unpack = inherited if previous is None else previous.unpacked
+        info = AsarFileInfo(kind=KIND_FILE, unpacked=bool(unpack), source=source)
         # Replacing an entry keeps its position: assigning a key of a dict a
         # second time does not move it
         self.files[keys] = info
@@ -614,19 +616,22 @@ class AsarArchive:
                 unpacked = True
         return unpacked
 
-    def add_folder(self, root, include=None, exclude=None, unpack=None, unpack_dir=None):
+    def add_folder(self, root, unpack=False):
         """
         Add a directory tree to the archive.
 
+        Every entry of the tree is added, the archive paths are the paths
+        relative to `root`, so the caller points the method at a tree that
+        mirrors what the archive should hold. A mixed tree (a source root that
+        also holds what must not be packed) is not filtered here: the part to
+        pack has to be given on its own.
+
         Args:
             root (str): Root directory, its content is added below the archive root
-            include (list): Glob patterns of the entries to add, None to add every
-                file of the tree
-            exclude (list): Glob patterns of the entries to drop, dropping a
-                directory drops its whole subtree
-            unpack (list): Glob patterns of the files to store next to the archive
-            unpack_dir (list): Patterns of the directories to store next to the
-                archive, their whole content follows
+            unpack (bool): Store the content of the tree next to the archive
+                instead of inside it, for the entries that have to be real files
+                (native modules and the like). A directory that is unpacked
+                already keeps its flag
 
         Returns:
             int: Number of added entries
@@ -635,28 +640,65 @@ class AsarArchive:
             AsarError: If the directory can not be listed
             AsarPathError: If a path of the tree is not a valid archive path
         """
-        entries = crawl_folder(
-            root, include=include, exclude=exclude, unpack=unpack, unpack_dir=unpack_dir,
-        )
-        for arc_path, local_path, kind, unpacked in entries:
+        entries = crawl_tree(root)
+        for arc_path, local_path, kind in entries:
             # The path is checked once here, the entry is put into the table with
             # the segments it gives: the tree of the directory is not validated
             # a second time by the file entries
             keys = check_archive_path(arc_path)
             if kind != KIND_DIR:
-                self._set_file(keys, LocalFileSource(local_path), unpacked)
+                self._set_file(keys, LocalFileSource(local_path), unpack)
                 continue
-            # A directory of the crawl may only be kept because it matches the
-            # include patterns, its parents may be missing from the archive
+            # The parents of a directory are entries of the crawl as well, the
+            # archive may already hold them (an archive that was opened)
             self._ensure_parents(keys)
             info = self.files.get(keys)
             if info is None:
-                self.files[keys] = AsarFileInfo(kind=KIND_DIR, unpacked=unpacked)
+                self.files[keys] = AsarFileInfo(kind=KIND_DIR, unpacked=unpack)
             elif info.kind != KIND_DIR:
                 raise AsarPathError(f'Archive path "{keys_path(keys)}" is already a file')
-            elif unpacked:
+            elif unpack:
                 info.unpacked = True
         return len(entries)
+
+    def mark_unpack(self, name):
+        """
+        Mark an entry and everything below it as unpacked.
+
+        An unpacked entry keeps its content next to the archive instead of
+        inside it, which is what a file that has to be a real file on disk
+        needs (a native module and the like). A directory takes its whole
+        subtree with it, a file or a link is marked on its own. The content of
+        an entry that was read from an archive is copied out of it when the
+        archive is written.
+
+        Args:
+            name (str): Archive path of the entry
+
+        Returns:
+            int: Number of entries that were packed before this call and are
+                unpacked now, the entry itself included
+
+        Raises:
+            AsarEntryNotFoundError: If there is no such entry
+        """
+        keys = path_keys(name)
+        if keys not in self.files:
+            raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
+        # The subtree of a path is every key the path is a prefix of, at any
+        # depth: a directory is marked by the same pass as the entries below it
+        depth = len(keys)
+        marked = 0
+        for entry_keys, entry in self.files.items():
+            if entry_keys[:depth] != keys or entry.unpacked:
+                continue
+            entry.unpacked = True
+            if entry.kind == KIND_FILE:
+                # The content does not live in the body any more, the offset
+                # belongs to a layout the entry is not part of
+                entry.offset = None
+            marked += 1
+        return marked
 
     def del_file(self, name):
         """

@@ -525,29 +525,6 @@ def _canonical_key(entry):
     return keys[-1].endswith('.node'), keys
 
 
-def has_parent(path, parents):
-    """
-    Check whether any parent directory of a path is in a set of directories.
-
-    Args:
-        path (str): Archive path, POSIX separators
-        parents (set): Archive paths of the directories to look for
-
-    Returns:
-        bool: True if a parent of the path is in the set
-    """
-    if not parents:
-        return False
-    start = 0
-    while True:
-        separator = path.find('/', start)
-        if separator == -1:
-            return False
-        if path[:separator] in parents:
-            return True
-        start = separator + 1
-
-
 def build_header(entries):
     """
     Build the header tree of an archive from its entries.
