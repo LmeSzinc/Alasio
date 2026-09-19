@@ -801,6 +801,53 @@ describe("TestReconnect", () => {
     expect(client.topicReady).toEqual({});
   });
 
+  it("does not open a new connection after an auth failure", () => {
+    // The session was rejected (4001): reconnecting with the same invalid
+    // credentials can only be rejected again, and a page that keeps
+    // replaying its rpcs would revive the connection on every open (the
+    // default subscription is marked ready on open, which is the exact
+    // signal resilient rpcs wait for). That loop makes the auth-failure
+    // navigation unreachable: connect -> 4001 -> goto -> replay -> connect.
+    const client = new WebsocketManager();
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+    client.sub("ConnState");
+    client.registerRpcCall("rpc-1", { onSuccess: vi.fn(), onError: vi.fn() });
+
+    FakeWebSocket.last!.serverClose(4001);
+
+    expect(goto).toHaveBeenCalledWith("/auth");
+    // The session is rejected: the client refuses to connect until the
+    // login page has taken over.
+    expect(routeState.public).toBe(true);
+    // The pending rpc is dropped right away: its timeout callback only
+    // toasts while the call is still registered, so the login page is not
+    // buried under a pile of stale error toasts.
+    expect(client.hasRpcCall("rpc-1")).toBe(false);
+
+    const created = FakeWebSocket.instances.length;
+    // A resilient rpc replays its last call (LangSelector and the config
+    // layout do this on every reconnect).
+    client.sendRaw({ t: "ConnState", o: "rpc", f: "set_lang", v: { lang: "en-US" }, i: "rpc-2" });
+    // A component that mounts during the navigation subscribes too.
+    client.sub("ConfigScan");
+    // And no timer resurrects the connection later on.
+    vi.advanceTimersByTime(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(created);
+
+    // The rejected session is over: once the login page tears the client
+    // down and a new private session connects, no stale message from the
+    // dead session may be replayed.
+    client.disconnect();
+    routeState.public = false;
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+    // The next session connects normally and carries nothing over from the
+    // dead one.
+    expect(client.connectionState).toBe("open");
+    expect(FakeWebSocket.last!.sent).toHaveLength(0);
+  });
+
   it("invalidates all data on other 4xxx close codes", () => {
     const client = new WebsocketManager();
     client.connect();

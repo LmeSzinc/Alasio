@@ -93,10 +93,13 @@ export class WebsocketManager {
     // The (public) layout owns routeState.public; once a private page
     // mounts its components subscribe after the layout destroy hook
     // cleared the flag, and this method runs again to establish the
-    // connection.
+    // connection. A rejected session (close 4001) raises the same flag
+    // ahead of that navigation, so every ws client keeps refusing to
+    // connect until the login page is reached (see #handleAuthFailure).
     if (routeState.public) {
-      // Drop any scheduled reconnect: retrying on a public page is
-      // pointless and would burn the retry budget into invalidateAll().
+      // Drop any scheduled reconnect: retrying on a public page, or on a
+      // session whose credentials were just refused, is pointless and
+      // would burn the retry budget into invalidateAll().
       if (this.#reconnectTimeout !== undefined) {
         clearTimeout(this.#reconnectTimeout);
         this.#reconnectTimeout = undefined;
@@ -167,9 +170,8 @@ export class WebsocketManager {
       // Decide action based on the close code.
       if (event.code === 4001) {
         // Custom code for Authentication failure
-        console.error("Authentication failed. Redirecting to login via goto().");
-        this.#clearAll();
-        goto("/auth");
+        console.error("Authentication failed: the session must log in again.");
+        this.#handleAuthFailure();
         return;
       }
       if (event.code === 4002) {
@@ -245,12 +247,7 @@ export class WebsocketManager {
     }
     this.#messageQueue = [];
     this.#rpcCallbacks.clear();
-    if (this.#flushHandle !== null) {
-      cancelAnimationFrame(this.#flushHandle);
-      clearTimeout(this.#flushHandle);
-      this.#flushHandle = null;
-    }
-    this.#pendingScrollUpdates.clear();
+    this.#cancelScrollFlush();
     this.connectionState = "closed";
   }
 
@@ -409,6 +406,18 @@ export class WebsocketManager {
   }
 
   /**
+   * Cancels the pending scroll flush and drops the buffered updates.
+   */
+  #cancelScrollFlush() {
+    if (this.#flushHandle !== null) {
+      cancelAnimationFrame(this.#flushHandle);
+      clearTimeout(this.#flushHandle);
+      this.#flushHandle = null;
+    }
+    this.#pendingScrollUpdates.clear();
+  }
+
+  /**
    * Flushes buffered updates for scroll topics.
    * This runs at most once per frame (approx. 60fps).
    */
@@ -455,6 +464,51 @@ export class WebsocketManager {
     for (const key in this.topicReady) {
       delete this.topicReady[key];
     }
+  }
+
+  /**
+   * Handles a session the server rejected with close 4001 (invalid
+   * credentials or login required).
+   *
+   * The session is over: every further attempt over the same credentials
+   * can only be refused again, so this client stops connecting until the
+   * login page takes over. Everything the dead session holds is dropped
+   * right here instead of waiting for that navigation to finish — the
+   * page would otherwise keep its pending rpcs (each one toasting a
+   * timeout over the login page) and replay them on every open (the
+   * default subscription is marked ready the moment a connection opens,
+   * which is exactly the signal resilient rpcs wait for), reviving the
+   * connection forever — connect -> 4001 -> goto -> replay -> connect —
+   * and cancelling the navigation over and over, so the emptied private
+   * view would never give way to the login page.
+   *
+   * routeState.public stops every ws client (the preview client inherits
+   * this handler and is never disconnected by the (public) layout's
+   * load), and the navigation is left to the first client that sees the
+   * rejection: a second goto would cancel the first one.
+   */
+  #handleAuthFailure() {
+    const navigate = !routeState.public;
+    routeState.public = true;
+    // A session that can never come back must not burn the retry budget
+    // into invalidateAll().
+    if (this.#reconnectTimeout !== undefined) {
+      clearTimeout(this.#reconnectTimeout);
+      this.#reconnectTimeout = undefined;
+    }
+    this.#reconnectAttempts = 0;
+    this.#clearAll();
+    // Outgoing messages of the dead session are dropped, not queued: they
+    // can never be answered, and replaying them into the next
+    // (logged-in) session would re-run stale operations.
+    this.#messageQueue = [];
+    // Pending rpcs are unregistered so their timeout callbacks stay
+    // silent (a timeout only toasts while its call is still registered):
+    // the page is on its way to the login page, reporting per-call
+    // failures of a session that is already over is noise.
+    this.#rpcCallbacks.clear();
+    this.#cancelScrollFlush();
+    if (navigate) goto("/auth");
   }
 
   /**

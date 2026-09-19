@@ -1,6 +1,7 @@
 import { toast } from "svelte-sonner";
 import { effect_root } from "svelte/internal/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { goto } from "$app/navigation";
 import { FakeWebSocket } from "$lib/test-utils/fake-websocket";
 import { flushEffects } from "$lib/test-utils/flush-effects";
 import { websocketClient } from "./client.svelte";
@@ -342,8 +343,11 @@ describe("TestCreateResilientRpc", () => {
     FakeWebSocket.instances.forEach((ws) => ws.serverClose(1006));
     FakeWebSocket.reset();
     // The singleton client persists across tests; drop subscription and
-    // topic state so each test starts clean.
-    websocketClient.unsubAll();
+    // topic state so each test starts clean. disconnect() tears the
+    // session down as a whole — unsubAll() would queue an unsub per topic
+    // and open a fresh connection (polluting the instance list read by
+    // the assertions below).
+    websocketClient.disconnect();
     for (const key of Object.keys(websocketClient.topics)) {
       delete websocketClient.topics[key];
     }
@@ -435,5 +439,33 @@ describe("TestCreateResilientRpc", () => {
     websocketClient.topicReady["ConnState"] = true;
     await flushEffects();
     expect(ws1.sent).toHaveLength(0);
+  });
+
+  it("does not revive the connection after an auth failure", async () => {
+    // A rejected session (4001) never gets a replay. The replay signal —
+    // the default subscription marked ready on open — fires on every
+    // 4001-refused connection, so a replay would keep the client in a
+    // connect -> 4001 -> goto -> replay loop whose navigation never
+    // completes, and its pending call would toast a timeout over the
+    // login page.
+    const ws0 = connectClient();
+    await makeResilientRpc("ConnState");
+
+    rpc.call("set_lang", { lang: "en-US" });
+
+    ws0.serverClose(4001);
+    await flushEffects();
+
+    expect(goto).toHaveBeenCalledWith("/auth");
+    // The rejected session raises the shared flag that stops every client
+    // from connecting until the login page takes over.
+    expect(routeState.public).toBe(true);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    // The dropped call stays silent: no error toast, no retry, and no
+    // connection ever comes back over the rejected session.
+    vi.advanceTimersByTime(60_000);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(1);
   });
 });
