@@ -450,6 +450,29 @@ class TestValidateResolveFilepath:
         with pytest.raises(ValueError, match="Path traversal detected"):
             validate_resolve_filepath(temp_fs["safe_dir"], "link_to_secret")
 
+    def test_a_root_reached_through_a_link(self, fs):
+        """A root that is itself reached through a link is not a traversal.
+
+        The combined path is resolved, so the root has to be resolved as well:
+        a temporary directory of macOS lives under the "/var" link and a
+        junction of Windows may hold anything, and every path of such a root
+        used to be reported as a traversal of the directory it really is.
+        """
+        root = 'C:/test_root' if os.name == 'nt' else '/test_root'
+        fs.create_dir(f'{root}/real/safe_dir')
+        fs.create_file(f'{root}/real/safe_dir/file.txt', contents='content')
+        fs.create_file(f'{root}/outside/secret.txt', contents='secret')
+        os.symlink(f'{root}/real', f'{root}/junction')
+        # the root is named through the link, the resolved path is inside the
+        # directory the root really is
+        assert validate_resolve_filepath(
+            f'{root}/junction/safe_dir', 'file.txt'
+        ) == f'{root}/real/safe_dir/file.txt'
+        # a link of the tree that points outside of it is still refused
+        os.symlink(f'{root}/outside/secret.txt', f'{root}/real/safe_dir/link_to_secret')
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            validate_resolve_filepath(f'{root}/junction/safe_dir', 'link_to_secret')
+
     @pytest.mark.parametrize("valid_path, expected_suffix", [
         ("file.txt", "file.txt"),
         ("new_dir/new_file.txt", "new_dir/new_file.txt"),

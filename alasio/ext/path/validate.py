@@ -219,7 +219,9 @@ def validate_resolve_filepath(root, path):
     If any check fails, raises a ValueError.
 
     Args:
-        root (str): The absolute path to the safe "jail" directory.
+        root (str): The absolute path to the safe "jail" directory. It may be
+            reached through symbolic links, the path is resolved before the
+            boundary is checked.
         path (str): The untrusted relative path provided by the user.
 
     Returns:
@@ -237,8 +239,12 @@ def validate_resolve_filepath(root, path):
     # The input string is clean. Now, check where it *actually* points.
 
     # Ensure the base directory is a valid, absolute path to a directory.
-    # This is a server configuration check.
-    root = os.path.abspath(root)
+    # This is a server configuration check. The path is resolved as well, because
+    # the combined path below is: a root that is reached through a symbolic link
+    # (a junction on Windows, "/var" on macOS) would otherwise be compared with
+    # the canonical path of its own content and every path would look like a
+    # traversal.
+    root = os.path.realpath(root)
 
     # Combine the safe base with the sanitized user path.
     combined_path = os.path.join(root, path)
@@ -248,8 +254,11 @@ def validate_resolve_filepath(root, path):
     combined_path = os.path.realpath(combined_path)
 
     # The final check: ensure the resolved path is still inside our safe directory.
+    # The two sides are normalized for the comparison: commonpath() rebuilds the
+    # path with the separator of the platform while realpath() keeps the one it
+    # was given, and on Windows the file names are compared without case
     common_path = os.path.commonpath([root, combined_path])
-    if common_path != root:
+    if os.path.normcase(common_path) != os.path.normcase(root):
         raise ValueError('Path traversal detected: The path resolves to a location outside the allowed directory.')
 
     # If all checks pass, return the safe, absolute, canonical path.

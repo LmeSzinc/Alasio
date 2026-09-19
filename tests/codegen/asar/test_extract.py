@@ -15,7 +15,7 @@ import os
 import pytest
 
 from alasio.codegen.asar import archive as archive_module
-from alasio.codegen.asar.archive import AsarArchive
+from alasio.codegen.asar.archive import AsarArchive, check_link_target, relative_link_target
 from alasio.codegen.asar.errors import AsarEntryNotFoundError, AsarFormatError, AsarPathError, AsarUnsupportedError
 from alasio.codegen.asar.model import KIND_DIR, KIND_FILE, KIND_LINK
 from alasio.ext.cache import InstanceCacheOperation
@@ -551,3 +551,146 @@ class TestMixedTable:
             archive.add_file('/local.txt', 'local.txt')
             archive.extract_file('local.txt', '/deep/local.txt')
         assert file_read_bytes('/deep/local.txt') == b'local content'
+
+
+@pytest.fixture
+def posix_links(monkeypatch):
+    """
+    Run the symbolic link branch of ``create_link()`` on every platform.
+
+    Creating a symbolic link needs elevation on Windows, so the branch that
+    writes the links of an archive is only exercised where the platform allows
+    it (the tests that use the real os.symlink() are skipped here). The
+    in-memory filesystem implements symlink() and resolves the links it holds,
+    so the branch and the tree it builds are checked on every platform this way.
+
+    Args:
+        monkeypatch (MonkeyPatch): Patch helper of pytest
+    """
+    monkeypatch.setattr(archive_module, 'CAN_SYMLINK', True)
+
+
+class TestRelativeLinkTarget:
+    """
+    The text of a symbolic link, rebased on the directory that holds it.
+
+    The header stores the target of a link relative to the root of the archive,
+    the file system needs it relative to the link. ``os.path`` of the platform
+    is what builds the expectation, so the test runs everywhere.
+    """
+    @pytest.mark.parametrize('dest, target, link, expected', [
+        # a link at the root of the extraction, the two are the same path
+        ('/out', '/out/l.txt', 'a.txt', 'a.txt'),
+        ('/out', '/out/l.txt', 'dir/a.txt', os.path.join('dir', 'a.txt')),
+        # a link inside a directory, the target is the hop to its own directory
+        ('/out', '/out/dir/l.txt', 'dir/a.txt', 'a.txt'),
+        ('/out', '/out/dir/deep/up.txt', 'dir/a.txt', os.path.join('..', 'a.txt')),
+        ('/out', '/out/A/reverse.txt', 'B/reverse.txt', os.path.join('..', 'B', 'reverse.txt')),
+        ('/out', '/out/a/b/c.txt', 'd/e.txt', os.path.join('..', '..', 'd', 'e.txt')),
+    ])
+    def test_relative_link_target(self, dest, target, link, expected):
+        """The hop from the directory of the link to its target."""
+        assert relative_link_target(dest, target, link) == expected
+
+
+class TestLinkTarget:
+    """
+    The links of an extracted tree.
+
+    ``packthis_symlink_430`` holds a link inside a directory
+    (``A/reverse-symlink.txt`` points at ``B/reverse-symlink.txt``), which the
+    extraction used to write as the path of the header, a path that only means
+    the right file when the link is at the root of the archive.
+    """
+    def test_a_link_of_a_subdirectory(self, fs, posix_links):
+        """A link below the root points at its target from its own directory."""
+        fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
+        with AsarArchive('/links.asar') as archive:
+            archive.extract_all('/out')
+        assert os.readlink('/out/A/reverse-symlink.txt') == os.path.join('..', 'B', 'reverse-symlink.txt')
+        assert os.path.realpath('/out/A/reverse-symlink.txt') == os.path.realpath('/out/B/reverse-symlink.txt')
+
+    def test_the_links_of_the_root(self, fs, posix_links):
+        """A link at the root of the archive keeps the path the header stores."""
+        fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
+        with AsarArchive('/links.asar') as archive:
+            archive.extract_all('/out')
+        assert os.readlink('/out/Current') == 'A'
+        assert os.readlink('/out/real.txt') == os.path.join('Current', 'real.txt')
+
+    def test_the_content_is_reachable_through_the_link(self, fs, posix_links):
+        """The extracted tree resolves, reading through a link gives the content."""
+        fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
+        with AsarArchive('/links.asar') as archive:
+            archive.extract_all('/out')
+        assert file_read_bytes('/out/A/reverse-symlink.txt') == b'I SYMLINK TO SUPER DIR'
+        assert file_read_bytes('/out/A/real.txt') == b'I AM REAL TXT FILE\n'
+
+    def test_a_link_to_a_neighbour_and_to_the_directory_above(self, fs, posix_links):
+        """The text of a link is relative to the directory it lives in."""
+        header = {
+            'files': {
+                'dir': {
+                    'files': {
+                        'a.txt': entry(5, 0, b'hello'),
+                        'l.txt': {'link': 'dir/a.txt'},
+                        'deep': {'files': {'up.txt': {'link': 'dir/a.txt'}}},
+                    },
+                },
+            },
+        }
+        fs.create_file('/links.asar', contents=fixture.make_archive(header, b'hello'))
+        with AsarArchive('/links.asar') as archive:
+            archive.extract_all('/out')
+        # the target is a neighbour of the link itself
+        assert os.readlink('/out/dir/l.txt') == 'a.txt'
+        # the target is above the directory of the link
+        assert os.readlink('/out/dir/deep/up.txt') == os.path.join('..', 'a.txt')
+        assert file_read_bytes('/out/dir/l.txt') == b'hello'
+        assert file_read_bytes('/out/dir/deep/up.txt') == b'hello'
+
+    def test_extracting_twice_replaces_the_links(self, fs, posix_links):
+        """A second extraction over the first one replaces the links it finds."""
+        fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
+        for _ in range(2):
+            with AsarArchive('/links.asar') as archive:
+                archive.extract_all('/out')
+        assert os.readlink('/out/A/reverse-symlink.txt') == os.path.join('..', 'B', 'reverse-symlink.txt')
+        assert file_read_bytes('/out/A/reverse-symlink.txt') == b'I SYMLINK TO SUPER DIR'
+
+    def test_the_link_replaces_the_file_of_the_last_extraction(self, fs, posix_links):
+        """The path of a link is replaced by the link, whatever was there."""
+        fs.create_file('/plain.asar', contents=fixture.make_archive(
+            {'files': {'A': {'files': {'reverse-symlink.txt': entry(4, 0, b'file')}}}},
+            b'file',
+        ))
+        with AsarArchive('/plain.asar') as archive:
+            archive.extract_all('/out')
+        assert file_read_bytes('/out/A/reverse-symlink.txt') == b'file'
+        fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
+        with AsarArchive('/links.asar') as archive:
+            archive.extract_all('/out')
+        assert os.path.islink('/out/A/reverse-symlink.txt')
+        assert file_read_bytes('/out/A/reverse-symlink.txt') == b'I SYMLINK TO SUPER DIR'
+
+
+class TestLinkCheck:
+    """The check of the target of a link, before the link is created."""
+    def test_a_root_reached_through_a_link(self, fs):
+        """A root that is itself a link is not a traversal of the directory it holds.
+
+        The root of the extraction may be named through a symbolic link (a
+        junction of Windows, "/var" of macOS), while the target of a link is
+        checked on the path it really is.
+        """
+        fs.create_dir('/real')
+        fs.create_symlink('/junction', '/real')
+        check_link_target('/junction/out', 'sub/l.txt', 'a.txt')
+
+    def test_a_target_that_leaves_the_tree(self, fs):
+        """A target that is not inside the extraction is refused."""
+        fs.create_dir('/real')
+        fs.create_symlink('/junction', '/real')
+        with pytest.raises(AsarPathError) as e:
+            check_link_target('/junction/out', 'sub/l.txt', '../escape.txt')
+        assert str(e.value).startswith('Invalid link target of "sub/l.txt": ')

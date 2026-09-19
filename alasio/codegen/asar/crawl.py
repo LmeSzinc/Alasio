@@ -7,9 +7,47 @@ gives the same bytes, and a tree packed on Windows matches the same tree packed
 on Linux.
 """
 import os
+import stat
 
 from .errors import AsarError, AsarUnsupportedError
 from .model import KIND_DIR, KIND_FILE
+
+# Attribute of a Windows directory whose content lives somewhere else: a
+# junction and the other reparse points alias a directory without being a
+# symbolic link. The constant and the attribute it is read from are not there
+# on POSIX, where every alias of a directory is a symbolic link.
+FILE_ATTRIBUTE_REPARSE_POINT = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0)
+
+
+def is_a_way_back(entry):
+    """
+    Tell whether a link of a directory points back at a directory that holds it.
+
+    Following such a link walks the directory that holds the link again, and
+    the link with it: the walk would never end. Only a link is looked at, and
+    what it points at is resolved (a junction of Windows is not a symbolic
+    link, but it aliases a directory the same way) before it is compared with
+    the path that reached the entry.
+
+    Args:
+        entry (os.DirEntry): Directory entry, of a directory
+
+    Returns:
+        bool: True when following the entry would walk the tree forever
+    """
+    if not entry.is_symlink():
+        # The attribute of the entry is not there on every platform, and it is
+        # None when a stat result was built without it
+        attributes = getattr(entry.stat(follow_symlinks=False), 'st_file_attributes', 0) or 0
+        if not attributes & FILE_ATTRIBUTE_REPARSE_POINT:
+            return False
+    path = os.path.normcase(os.path.normpath(entry.path))
+    target = os.path.normcase(os.path.normpath(os.path.realpath(entry.path)))
+    # The entry is inside the directory the link points at, so that directory
+    # holds the link and walking it walks the link again. The target is given a
+    # trailing separator to only match whole names, and the root of a file
+    # system (where every path is inside) is kept as it is
+    return path.startswith(os.path.join(target, ''))
 
 
 def list_dir(local_path, arc_prefix=None, missing_ok=False):
@@ -31,7 +69,8 @@ def list_dir(local_path, arc_prefix=None, missing_ok=False):
 
     Raises:
         AsarError: If the directory can not be listed
-        AsarUnsupportedError: If an entry is neither a file nor a directory
+        AsarUnsupportedError: If an entry is neither a file nor a directory, or
+            if a link points back at a directory that holds it
     """
     try:
         with os.scandir(local_path) as it:
@@ -49,6 +88,11 @@ def list_dir(local_path, arc_prefix=None, missing_ok=False):
         # is_dir() and is_file() follow symbolic links, the same way the JS
         # packer resolves them (a link to a file is packed as a file)
         if entry.is_dir():
+            if is_a_way_back(entry):
+                raise AsarUnsupportedError(
+                    f'Directory "{arc_path}" is a link back to a directory above it, '
+                    f'it would be walked forever'
+                )
             result.append((arc_path, entry.path, KIND_DIR))
         elif entry.is_file():
             result.append((arc_path, entry.path, KIND_FILE))
@@ -73,6 +117,8 @@ def crawl_tree(root):
     Raises:
         AsarError: If the root is not there, or if a directory that is there can
             not be listed
+        AsarUnsupportedError: If a link of the tree points back at a directory
+            that holds it, see ``is_a_way_back()``
     """
     root = os.path.abspath(root)
     # The entries of one level are read together and only the directories they

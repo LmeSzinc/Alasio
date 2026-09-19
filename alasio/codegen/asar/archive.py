@@ -45,6 +45,10 @@ from .model import (
 from .pack import ContentVerifier, hash_file, pack_archive, write_content
 from .source import LocalFileSource, MemorySource, RangeSource
 
+# Whether the file system can hold a symbolic link: Windows needs elevation to
+# create one, so the extraction materializes a link as a copy of its target there
+CAN_SYMLINK = os.name != 'nt'
+
 
 class _Header:
     """
@@ -133,14 +137,36 @@ def check_link_target(root, name, link):
         raise AsarPathError(f'Invalid link target of "{name}": {e}')
 
 
+def relative_link_target(dest, target, link):
+    """
+    Get the text of the symbolic link that stands for an entry.
+
+    The link of the header is relative to the root of the archive, while a
+    symbolic link of a file system is relative to the directory that holds it:
+    the target is rebased on the directory of the link, the same way the
+    reference implementation does it (``path.relative()`` between the directory
+    of the target and the directory of the link).
+
+    Args:
+        dest (str): Root of the extraction
+        target (str): Path the link is created at
+        link (str): Target of the link, relative to the archive root
+
+    Returns:
+        str: Target of the link, relative to the directory of the link
+    """
+    return os.path.relpath(os.path.join(dest, *path_keys(link)), os.path.dirname(target))
+
+
 def create_link(archive, name, dest, target):
     """
     Create the link of an entry.
 
     The link and its target are both inside the extracted tree, so the link is
-    created with the relative path the header stores. Windows needs elevation to
-    create a symbolic link, a link to a file is materialized as a copy there and
-    a link to a directory can not be extracted at all.
+    created with the path the header stores, rebased on the directory of the
+    link. Windows needs elevation to create a symbolic link, a link to a file is
+    materialized as a copy there and a link to a directory can not be extracted
+    at all.
 
     Args:
         archive (AsarArchive): Archive holding the entry
@@ -154,9 +180,16 @@ def create_link(archive, name, dest, target):
     """
     info = archive.entry(name)
     check_link_target(dest, name, info.link)
-    if os.name != 'nt':
+    if CAN_SYMLINK:
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        os.symlink(info.link, target)
+        # The tree of a previous extraction holds the link already, and a
+        # symbolic link is never created over an existing path: the file of the
+        # last extraction is replaced, a directory in the way is an error
+        try:
+            os.unlink(target)
+        except FileNotFoundError:
+            pass
+        os.symlink(relative_link_target(dest, target, info.link), target)
         return
     _, target_info = archive.resolve(name)
     if target_info.kind == KIND_DIR:

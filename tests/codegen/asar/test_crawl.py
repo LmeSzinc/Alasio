@@ -9,7 +9,7 @@ import pytest
 
 from alasio.codegen.asar import crawl
 from alasio.codegen.asar.crawl import crawl_tree, list_dir
-from alasio.codegen.asar.errors import AsarError
+from alasio.codegen.asar.errors import AsarError, AsarUnsupportedError
 from alasio.codegen.asar.model import KIND_DIR, KIND_FILE
 from alasio.testing.filesystem import fs  # noqa: F401
 
@@ -170,3 +170,62 @@ class TestCrawlTree:
         assert 'node_modules/pkg' in listed
         assert ('node_modules', f'{root}/node_modules', KIND_DIR) in order
         assert ('node_modules/pkg/index.js', f'{root}/node_modules/pkg/index.js', KIND_FILE) in order
+
+
+class TestSymbolicLinks:
+    """
+    Symbolic links of a source tree.
+
+    A link to a file is followed, the content of the file it points at is
+    packed, and so is a link to a directory that is not an ancestor of itself.
+    What the walk refuses is a link that points back at a directory above it:
+    following it would walk the same directory again and again, forever. The
+    check is done on the identity of the directory, because a junction of
+    Windows is not a symbolic link and aliases of a directory are what both of
+    them are.
+
+    The in-memory filesystem does not list a directory through a symbolic link,
+    so a test below can only assert that the walk enters a linked directory
+    instead of refusing it: the children are the work of the next level.
+    """
+    def test_a_link_to_a_file_is_packed_as_a_file(self, fs):
+        """A symbolic link to a file is the file it points at."""
+        root = build_tree(fs)
+        fs.create_symlink(f'{root}/alias.txt', f'{root}/z.txt')
+        assert ('alias.txt', f'{root}/alias.txt', KIND_FILE) in list_dir(root)
+        assert ('alias.txt', f'{root}/alias.txt', KIND_FILE) in crawl_tree(root)
+
+    def test_a_link_to_another_directory_is_walked(self, fs):
+        """A link to a directory that is not an ancestor is not refused."""
+        root = build_tree(fs)
+        fs.create_symlink(f'{root}/alias_dir', f'{root}/dir/sub')
+        assert ('alias_dir', f'{root}/alias_dir', KIND_DIR) in crawl_tree(root)
+
+    def test_a_link_to_the_root_is_refused(self, fs):
+        """A link to the root is a walk that can never end."""
+        root = build_tree(fs)
+        fs.create_symlink(f'{root}/loop', root)
+        with pytest.raises(AsarUnsupportedError) as e:
+            crawl_tree(root)
+        assert str(e.value) == (
+            'Directory "loop" is a link back to a directory above it, it would be walked forever'
+        )
+
+    def test_a_link_to_a_directory_above_it_is_refused(self, fs):
+        """The entry that closes the cycle is named with its archive path."""
+        root = build_tree(fs)
+        fs.create_symlink(f'{root}/dir/sub/loop', f'{root}/dir')
+        with pytest.raises(AsarUnsupportedError) as e:
+            crawl_tree(root)
+        assert str(e.value) == (
+            'Directory "dir/sub/loop" is a link back to a directory above it, '
+            'it would be walked forever'
+        )
+
+    def test_two_paths_to_one_directory_are_not_a_cycle(self, fs):
+        """A directory that is linked twice on the same level is packed twice."""
+        root = build_tree(fs)
+        fs.create_symlink(f'{root}/dir/alias', f'{root}/dir/sub')
+        order = crawl_tree(root)
+        assert ('dir/alias', f'{root}/dir/alias', KIND_DIR) in order
+        assert ('dir/sub', f'{root}/dir/sub', KIND_DIR) in order
