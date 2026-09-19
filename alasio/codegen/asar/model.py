@@ -608,10 +608,13 @@ def canonical_entries(files):
     Sort the entry table into the canonical archive order.
 
     The order is the one electron-builder uses (``orderFileSet()``): the
-    ``.node`` files come last, everything else is sorted by path. The comparison
-    is done on the path segments instead of the path string, so it does not
-    depend on the separator of the platform and can not be disturbed by a
-    directory whose name is the prefix of a file name at the same level.
+    ``.node`` files come last, everything else is sorted by path. Only a file
+    can be one: a directory named ``x.node`` is an ordinary directory and its
+    content stays with it (the reference orders a set of files, where the
+    directories are implicit). The comparison is done on the path segments
+    instead of the path string, so it does not depend on the separator of the
+    platform and can not be disturbed by a directory whose name is the prefix of
+    a file name at the same level.
 
     Segment order already puts a parent before its content and keeps a subtree
     together, so the offsets, the data area and the header of an archive that is
@@ -634,14 +637,25 @@ def _canonical_key(entry):
     """
     Sort key of the canonical order.
 
+    The ``.node`` flag is about the files the reference orders: a directory is
+    never an addon (a flagged directory sorts after the content stored below
+    it, which the header refuses), and neither is a file below a directory
+    named ``*.node`` (its subtree stays in the normal group instead of being
+    lifted away from its directory).
+
     Args:
-        entry (tuple): ``(keys, entry)``
+        entry (tuple): ``(keys, info)`` of the flat entry table
 
     Returns:
         tuple: ``(is_a_native_module, tuple of the path segments)``
     """
-    keys = entry[0]
-    return keys[-1].endswith('.node'), keys
+    keys, info = entry
+    is_node = (
+        info.kind == KIND_FILE
+        and keys[-1].endswith('.node')
+        and not any(segment.endswith('.node') for segment in keys[:-1])
+    )
+    return is_node, keys
 
 
 def build_header(entries):

@@ -281,6 +281,20 @@ class TestAddFolder:
             assert reader.entry('empty').kind == KIND_DIR
             assert reader.entry('sub/deeper').kind == KIND_DIR
 
+    def test_add_folder_with_a_directory_named_node(self, fs):
+        """A source tree with a ``*.node`` directory packs in path order."""
+        fs.create_dir('/tree/native.node')
+        fs.create_file('/tree/native.node/module.js', contents=b'MODULE')
+        fs.create_file('/tree/app.js', contents=b'APP')
+        archive = AsarArchive()
+        archive.add_folder('/tree')
+        archive.write('/out.asar')
+        assert stored_paths('/out.asar') == ['app.js', 'native.node', 'native.node/module.js']
+        with AsarArchive('/out.asar') as reader:
+            assert entry_paths(reader) == ['app.js', 'native.node', 'native.node/module.js']
+            assert bytes(reader.read_file('native.node/module.js')) == b'MODULE'
+            assert bytes(reader.read_file('app.js')) == b'APP'
+
     def test_add_folder_unpack(self, fs):
         """A tree that is added unpacked is stored next to the archive."""
         root = build_source_tree(fs)
@@ -700,6 +714,29 @@ class TestWrite:
         assert header['files']['e.node']['offset'] == str(
             len(b'a.txt') + len(b'c/d.txt') + len(b'b/x.node')
         )
+
+    def test_directory_named_node(self, fs):
+        """A directory named ``*.node`` does not break the pack.
+
+        The canonical order used to treat such a directory as an addon (the
+        ``.node`` check is about files), which stored its content before the
+        directory itself: the header refused the table and no archive holding
+        one could be written.
+        """
+        archive = AsarArchive()
+        archive.add_file(data=b'child', arc_path='x.node/child.txt')
+        archive.add_file(data=b'plain', arc_path='plain.txt')
+        archive.write('/out.asar')
+        assert stored_paths('/out.asar') == ['plain.txt', 'x.node', 'x.node/child.txt']
+        # The data area follows the flat order: the child of the directory is
+        # stored right after the plain file
+        header = stored_header('/out.asar')
+        assert header['files']['plain.txt']['offset'] == '0'
+        assert header['files']['x.node']['files']['child.txt']['offset'] == str(len(b'plain'))
+        with AsarArchive('/out.asar') as reader:
+            assert entry_paths(reader) == ['plain.txt', 'x.node', 'x.node/child.txt']
+            assert bytes(reader.read_file('x.node/child.txt')) == b'child'
+            assert bytes(reader.read_file('plain.txt')) == b'plain'
 
     def test_order_does_not_depend_on_the_operations(self, fs):
         """Any sequence of operations that ends with the same entries writes them the same."""

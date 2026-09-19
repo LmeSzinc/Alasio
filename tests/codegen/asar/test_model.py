@@ -681,6 +681,55 @@ class TestCanonicalEntries:
             'a.txt', 'b', 'b/y.txt', 'b/x.node', 'e.node',
         ]
 
+    def test_a_directory_named_node_is_not_an_addon(self):
+        """A directory named ``*.node`` is an ordinary directory.
+
+        The flag is about files: a directory that carries the name used to
+        jump into the addon group, which stored its content -- not an addon by
+        name -- before the directory itself and made ``build_header()`` refuse
+        every table holding one.
+        """
+        files = {
+            ('plain.txt',): entry(size=5, offset=0),
+            ('x.node',): AsarFileInfo(kind='dir'),
+            ('x.node', 'child.txt'): entry(size=3, offset=5),
+        }
+        assert [keys_path(keys) for keys, _ in canonical_entries(files)] == [
+            'plain.txt', 'x.node', 'x.node/child.txt',
+        ]
+        assert msgspec.json.encode(build_header(canonical_entries(files))) == (
+            b'{"files":{"plain.txt":{"size":5,"offset":"0"},'
+            b'"x.node":{"files":{"child.txt":{"size":3,"offset":"5"}}}}}'
+        )
+
+    def test_nested_directories_named_node(self):
+        """Nested ``*.node`` directories keep the flat order of their paths."""
+        files = {
+            ('a.node',): AsarFileInfo(kind='dir'),
+            ('a.node', 'b.node'): AsarFileInfo(kind='dir'),
+            ('a.node', 'b.node', 'c.txt'): entry(),
+            ('z.node',): entry(),
+        }
+        assert [keys_path(keys) for keys, _ in canonical_entries(files)] == [
+            'a.node', 'a.node/b.node', 'a.node/b.node/c.txt', 'z.node',
+        ]
+
+    def test_a_node_file_below_a_node_directory_stays_with_it(self):
+        """A ``*.node`` file below a ``*.node`` directory is not an addon.
+
+        The subtree of a ``*.node`` directory stays in the normal group: the
+        file would otherwise be lifted away from its directory to the end of
+        the archive.
+        """
+        files = {
+            ('a.node',): AsarFileInfo(kind='dir'),
+            ('a.node', 'b.node'): entry(),
+            ('m.txt',): entry(),
+        }
+        assert [keys_path(keys) for keys, _ in canonical_entries(files)] == [
+            'a.node', 'a.node/b.node', 'm.txt',
+        ]
+
     def test_stable(self):
         """Sorting the entries of a table in canonical order keeps that order."""
         files = {path_keys(path): entry() for path in ['b/x.node', 'a.txt', 'c/d.txt', 'e.node']}
