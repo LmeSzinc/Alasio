@@ -405,18 +405,6 @@ class TestExtractFixtures:
 
 class TestExtractSafety:
     def test_verify_broken_hash(self, fs):
-        """A content that does not match its hash fails the extraction."""
-        header = {
-            'files': {
-                'a.txt': {
-                    'size': 5,
-                    'offset': '0',
-                    'integrity': integrity(b'other'),
-                },
-            },
-        }
-
-    def test_verify_broken_hash(self, fs):
         """A content that does not match its hash fails the extraction, by default."""
         header = {
             'files': {
