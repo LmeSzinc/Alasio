@@ -5,6 +5,7 @@ content is read twice (scan and write) and both passes are compared.
 The byte level expectations come from the reference implementation, see
 ``tests/codegen/asar/fixture.py``.
 """
+import errno
 import hashlib
 import os
 
@@ -15,7 +16,9 @@ from alasio.codegen.asar import AsarArchive, pack_sha256
 from alasio.codegen.asar.errors import AsarEntryNotFoundError, AsarError, AsarPathError, AsarUnsupportedError
 from alasio.codegen.asar.format import BLOCK_SIZE, read_header
 from alasio.codegen.asar.model import KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, Integrity, iter_entries, keys_path
-from alasio.codegen.asar.pack import CACHE_FILE_SIZE, ContentVerifier, hash_content, mark_unpacked, write_content
+from alasio.codegen.asar.pack import (
+    CACHE_FILE_SIZE, ContentVerifier, ContentWriter, hash_content, mark_unpacked, write_content
+)
 from alasio.codegen.asar.source import MemorySource
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -974,6 +977,83 @@ class TestWrite:
         assert archive.entry('a.txt').size == 4
         assert archive.entry('a.txt').offset == 0
         assert archive.entry('b.txt').offset == 4
+
+
+class InlineJob:
+    """A job of the inline pool below, its error is raised by get()."""
+
+    def __init__(self, func, args, kwargs):
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+        self.error = None
+
+    def run(self):
+        """Run the function of the job, a failure is kept for get()."""
+        try:
+            self.func(*self.args, **self.kwargs)
+        except Exception as e:
+            self.error = e
+
+    def get(self):
+        """Raises:
+            Exception: The error of the job, if it has one"""
+        if self.error is not None:
+            raise self.error
+
+
+class InlinePool:
+    """A pool that runs the tasks here and now, to observe what is submitted."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def start_thread_soon(self, func, *args, **kwargs):
+        job = InlineJob(func, args, kwargs)
+        self.jobs.append(job)
+        job.run()
+        return job
+
+
+class TestContentWriter:
+    """The writes of an extraction, one task of the pool per file."""
+
+    def test_one_task_per_file(self, fs):
+        """Every file is one task on the pool, with its content read here."""
+        pool = InlinePool()
+        with ContentWriter(pool) as writer:
+            writer.write('/a.txt', iter([b'one', b'two']))
+            writer.write('/b.txt', iter([b'three']))
+        assert len(pool.jobs) == 2
+        assert file_read_bytes('/a.txt') == b'onetwo'
+        assert file_read_bytes('/b.txt') == b'three'
+
+    def test_content_too_large_for_the_pool(self, fs, monkeypatch):
+        """An entry larger than POOL_FILE_SIZE is written without the pool."""
+        from alasio.codegen.asar import pack
+        monkeypatch.setattr(pack, 'POOL_FILE_SIZE', 4)
+        pool = InlinePool()
+        with ContentWriter(pool) as writer:
+            # The chunks arrive one by one, the limit is crossed in the middle
+            writer.write('/big.txt', iter([b'1234', b'5']))
+        assert pool.jobs == []
+        assert file_read_bytes('/big.txt') == b'12345'
+
+    def test_a_failed_write_is_raised_by_wait(self, fs, monkeypatch):
+        """The error of a task is raised by wait(), the tasks are waited for."""
+        def broken(fd):
+            raise OSError(errno.EIO, 'Input/output error')
+
+        monkeypatch.setattr(os, 'fsync', broken)
+        writer = ContentWriter(InlinePool())
+        writer.write('/a.txt', iter([b'data']))
+        with pytest.raises(OSError) as e:
+            writer.wait()
+        assert 'Input/output error' in str(e.value)
+        # The failing write left nothing behind and the writer is empty: a
+        # second wait reports nothing (no write is left running)
+        assert not os.path.exists('/a.txt')
+        assert writer.wait() is None
 
 
 class TestRoundTrip:

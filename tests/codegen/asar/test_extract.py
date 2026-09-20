@@ -10,11 +10,13 @@ follow each other and every entry is read exactly once. The statistics of an
 extraction are not part of the API (a caller only needs the files), so they are
 observed through a handle that records what is read from the archive.
 """
+import errno
 import os
+import threading
 
 import pytest
 
-from alasio.codegen.asar import archive as archive_module
+from alasio.codegen.asar import archive as archive_module, pack as pack_module
 from alasio.codegen.asar.archive import AsarArchive, check_link_target, relative_link_target
 from alasio.codegen.asar.errors import AsarEntryNotFoundError, AsarFormatError, AsarPathError, AsarUnsupportedError
 from alasio.codegen.asar.model import KIND_DIR, KIND_FILE, KIND_LINK
@@ -694,3 +696,63 @@ class TestLinkCheck:
         with pytest.raises(AsarPathError) as e:
             check_link_target('/junction/out', 'sub/l.txt', '../escape.txt')
         assert str(e.value).startswith('Invalid link target of "sub/l.txt": ')
+
+
+class TestWritePool:
+    """The extracted files are written on the project's thread pool."""
+
+    def test_every_file_is_flushed_on_the_pool(self, fs, monkeypatch):
+        """Every file entry is flushed once, on a worker of the pool."""
+        threads = []
+        real_fsync = os.fsync
+
+        def spy(fd):
+            threads.append(threading.current_thread())
+            return real_fsync(fd)
+
+        monkeypatch.setattr(os, 'fsync', spy)
+        fs.create_file('/packthis.asar', contents=fixture.packthis_430())
+        extract('/packthis.asar', '/out')
+        # One flush per file entry (the pooled write keeps the durability of the
+        # atomic write) and every one of them runs on a pool worker
+        assert len(threads) == 6
+        assert threading.main_thread() not in threads
+
+    def test_a_failing_flush_is_reported(self, fs, monkeypatch):
+        """A flush that fails raises, and nothing temporary is left behind."""
+        real_fsync = os.fsync
+
+        def broken(fd):
+            if '/out/dir1/file1.txt.' in fs._fds[fd].name:
+                raise OSError(errno.EIO, 'Input/output error')
+            return real_fsync(fd)
+
+        monkeypatch.setattr(os, 'fsync', broken)
+        fs.create_file('/packthis.asar', contents=fixture.packthis_430())
+        with pytest.raises(OSError) as e:
+            extract('/packthis.asar', '/out')
+        assert 'Input/output error' in str(e.value)
+        # The file of the failing write is not at its target path, the other
+        # files of the extraction are complete and no temporary file is left
+        assert not os.path.exists('/out/dir1/file1.txt')
+        assert file_read_bytes('/out/file0.txt') == b'file0 content'
+        assert [path for path in fs._files if path.endswith('.tmp')] == []
+
+    def test_a_large_entry_is_written_here(self, fs, monkeypatch):
+        """An entry larger than POOL_FILE_SIZE is written in this thread."""
+        threads = []
+        real_fsync = os.fsync
+
+        def spy(fd):
+            threads.append(threading.current_thread())
+            return real_fsync(fd)
+
+        monkeypatch.setattr(os, 'fsync', spy)
+        monkeypatch.setattr(pack_module, 'POOL_FILE_SIZE', 4)
+        fs.create_file('/tiny.asar', contents=fixture.tiny_341())
+        extract('/tiny.asar', '/out')
+        assert file_read_bytes('/out/hello.txt') == b'hello asar'
+        assert file_read_bytes('/out/sub/bin.dat') == b'PAYLOAD'
+        # Both entries are larger than the 4 bytes of the limit: they are
+        # written here, one after the other, without a task of the pool
+        assert threads == [threading.main_thread(), threading.main_thread()]

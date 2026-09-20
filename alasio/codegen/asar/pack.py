@@ -14,10 +14,12 @@ Memory usage is ``O(chunk size) + O(entry count)``, independent of the archive
 size, and no temporary file is used to spool the content.
 """
 import hashlib
+import itertools
 import os
 
 import msgspec
 
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path.atomic import CHUNK_SIZE, file_read_bytes_stream, file_write, replace_tmp, to_tmp_file
 
 from .errors import AsarError, AsarUnsupportedError
@@ -29,6 +31,10 @@ from .model import KIND_DIR, KIND_FILE, Integrity, build_header, canonical_entri
 CACHE_FILE_SIZE = 2 * 1024 * 1024
 # Total memory budget of that cache, small files beyond it are read twice
 CACHE_BUDGET = 64 * 1024 * 1024
+# Content of an entry larger than this is written in the calling thread instead
+# of being handed to the thread pool: the pool is for the many small files whose
+# flush latency dominates an extraction, one flush of a large file is cheap
+POOL_FILE_SIZE = 2 * 1024 * 1024
 
 
 class AtomicChunkWriter:
@@ -295,6 +301,91 @@ def write_content(dest, chunks, verifier=None, mode=None):
         raise
 
 
+class ContentWriter:
+    """
+    Write the content of an extraction, one thread pool task per file
+
+    The content of every entry is read in the calling thread -- the handle of
+    the archive is shared, it is never read by two threads at once -- and the
+    write of the file (temporary file, flush to the disk, move over the target
+    path) is one task on the thread pool: the flush of a file overlaps with the
+    reads of the entries that follow it and with the flushes of the files around
+    it, instead of every flush waiting for the device on its own. wait() joins
+    the tasks and raises the first error: when it returns, every file is
+    complete, durable and at its target path.
+
+    An entry larger than POOL_FILE_SIZE is written in the calling thread, with
+    its chunks streaming: it costs a single flush (the pool is for the many
+    small files whose flush latency dominates an extraction) and a large entry
+    is never held in memory.
+
+    The pool blocks when every worker of it is busy, so a writer must not be
+    used from a task of that same pool: the task would wait for a free worker
+    that can not come free while it waits.
+
+    Args:
+        pool (ThreadPool): Pool the files are written on, defaults to THREAD_POOL
+    """
+
+    def __init__(self, pool=None):
+        self.pool = THREAD_POOL if pool is None else pool
+        self._jobs = []
+
+    def write(self, dest, chunks, verifier=None, mode=None):
+        """
+        Read the content of one entry and write its file on the pool
+
+        Args:
+            dest (str): Target file path, the parent directory is created
+            chunks (Iterable): Content chunks, all read by this call
+            verifier (ContentVerifier): Checker of the content, None to write as is
+            mode (int): POSIX mode of the target file, None to keep the default
+        """
+        buffer = bytearray()
+        for chunk in chunks:
+            if verifier is not None:
+                verifier.update(chunk)
+            buffer += chunk
+            if len(buffer) > POOL_FILE_SIZE:
+                # Too large to hand over: write it here, streaming the chunks
+                # that are left. The content is complete and checked already
+                if verifier is not None:
+                    verifier.check()
+                write_content(dest, itertools.chain((buffer,), chunks), None, mode)
+                return
+        if verifier is not None:
+            verifier.check()
+        # The buffer is handed over as it is: the task only writes it and the
+        # caller never touches it again
+        self._jobs.append(self.pool.start_thread_soon(write_content, dest, (buffer,), mode=mode))
+
+    def wait(self):
+        """
+        Wait for the write tasks of this writer
+
+        Raises:
+            Exception: The first error of a task, every task is waited for
+                before it is raised (no write is left running)
+        """
+        jobs, self._jobs = self._jobs, []
+        error = None
+        for job in jobs:
+            try:
+                job.get()
+            except Exception as e:
+                if error is None:
+                    error = e
+        if error is not None:
+            raise error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.wait()
+        return False
+
+
 def mark_unpacked(files):
     """
     Mark every entry that lives inside an unpacked directory as unpacked.
@@ -397,21 +488,23 @@ def pack_archive(files, dest, integrity=True, fd=None, release=None):
     json_bytes = msgspec.json.encode(build_header(entries))
 
     # The unpacked content is written before the archive, so that a new header
-    # never points at an unpacked file that does not exist yet
+    # never points at an unpacked file that does not exist yet. The writer waits
+    # for its tasks here: the files are on the disk before the archive goes
     if unpacked_count:
         unpacked_dir = f'{dest}.unpacked'
-        for keys, info in entries:
-            if info.kind != KIND_FILE or not info.unpacked:
-                continue
-            verifier = ContentVerifier(
-                keys_path(keys), info.size, info.integrity.hash if info.integrity else None,
-            )
-            write_content(
-                os.path.join(unpacked_dir, *keys),
-                iter_entry_content(keys, info, fd),
-                verifier=verifier,
-                mode=0o755 if info.executable and os.name != 'nt' else None,
-            )
+        with ContentWriter() as writer:
+            for keys, info in entries:
+                if info.kind != KIND_FILE or not info.unpacked:
+                    continue
+                verifier = ContentVerifier(
+                    keys_path(keys), info.size, info.integrity.hash if info.integrity else None,
+                )
+                writer.write(
+                    os.path.join(unpacked_dir, *keys),
+                    iter_entry_content(keys, info, fd),
+                    verifier=verifier,
+                    mode=0o755 if info.executable and os.name != 'nt' else None,
+                )
 
     # Pass 2: the content, recomputed and checked against pass 1
     writer = AtomicChunkWriter(dest)

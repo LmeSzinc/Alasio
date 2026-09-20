@@ -42,7 +42,7 @@ from .model import (
     KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo, canonical_entries, check_links, keys_path, path_keys, read_entries,
     resolve_entry
 )
-from .pack import ContentVerifier, hash_file, pack_archive, write_content
+from .pack import ContentVerifier, ContentWriter, hash_file, pack_archive, write_content
 from .source import LocalFileSource, MemorySource, RangeSource
 
 # Whether the file system can hold a symbolic link: Windows needs elevation to
@@ -800,11 +800,13 @@ class AsarArchive:
         The content that is stored in the archive is read in the order of the
         data area: the entries of an archive are stored back to back, so the
         reads follow each other and the buffer of the handle is reused. The
-        other entries are copied from their own source. Directories are created
-        first, then the content, then the links, so that a link target always
-        exists when the link is created. On Windows a link to a file is
-        materialized as a copy, a link to a directory is not supported because
-        Windows needs elevation to create a symlink.
+        reads run in this thread, the write of every file is one task on the
+        thread pool (see `ContentWriter`), and the writer is waited for before
+        the links are created, so that a link target is always on the disk when
+        the link is created. Directories are created first, then the content,
+        then the links. On Windows a link to a file is materialized as a copy, a
+        link to a directory is not supported because Windows needs elevation to
+        create a symlink.
 
         Every entry of the table holds a path that was checked when it entered
         the table (added by the caller, or read from the header of an archive),
@@ -833,31 +835,34 @@ class AsarArchive:
 
         # The entries that live in the archive are read in the order of the data
         # area, so that the reads of a real archive follow each other; a source
-        # seeks to the offset of its own entry
-        stored = [
-            (info.source.offset, keys, info)
-            for keys, info in entries
-            if info.kind == KIND_FILE and isinstance(info.source, RangeSource)
-        ]
-        stored.sort(key=lambda entry: entry[0])
-        for _, keys, info in stored:
-            path = keys_path(keys)
-            write_content(
-                os.path.join(dest, *keys), info.source.iter_chunks(self.fd, chunk_size),
-                verifier=content_verifier(path, info, verify), mode=entry_mode(info),
-            )
+        # seeks to the offset of its own entry. Every file is written by its own
+        # task on the thread pool, the writer is waited for below
+        with ContentWriter() as writer:
+            stored = [
+                (info.source.offset, keys, info)
+                for keys, info in entries
+                if info.kind == KIND_FILE and isinstance(info.source, RangeSource)
+            ]
+            stored.sort(key=lambda entry: entry[0])
+            for _, keys, info in stored:
+                path = keys_path(keys)
+                writer.write(
+                    os.path.join(dest, *keys), info.source.iter_chunks(self.fd, chunk_size),
+                    verifier=content_verifier(path, info, verify), mode=entry_mode(info),
+                )
 
-        # The content that has a source of its own is copied entry by entry, it
-        # is not part of the archive and has nothing to be checked against
-        for keys, info in entries:
-            source = info.source
-            if info.kind != KIND_FILE or isinstance(source, RangeSource):
-                continue
-            write_content(
-                os.path.join(dest, *keys), source.iter_chunks(self.fd, chunk_size),
-                verifier=content_verifier(keys_path(keys), info, verify), mode=entry_mode(info),
-            )
+            # The content that has a source of its own is copied entry by entry,
+            # it is not part of the archive and has nothing to be checked against
+            for keys, info in entries:
+                source = info.source
+                if info.kind != KIND_FILE or isinstance(source, RangeSource):
+                    continue
+                writer.write(
+                    os.path.join(dest, *keys), source.iter_chunks(self.fd, chunk_size),
+                    verifier=content_verifier(keys_path(keys), info, verify), mode=entry_mode(info),
+                )
 
+        # Every file is on the disk now, the links of the archive can be created
         for keys, info in entries:
             if info.kind == KIND_LINK:
                 create_link(self, keys_path(keys), dest, os.path.join(dest, *keys))
