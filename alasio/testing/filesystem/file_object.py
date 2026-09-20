@@ -3,10 +3,14 @@ Mock of the file object returned by open().
 
 The file content lives in the shared FakeFile record, so writes are
 visible to every other open handle of the same file, and a replaced
-file keeps its old content for already open handles.
+file keeps its old content for already open handles. The record is a
+shared state: the operations that touch the content take the state lock
+of the filesystem (the same lock as every filesystem operation).
 """
 import io
 import os
+
+from .base import synchronized
 
 
 class FakeFileObject:
@@ -23,7 +27,7 @@ class FakeFileObject:
     __slots__ = (
         '_fs', '_entry', '_mode_str', '_binary', '_readable', '_writable',
         '_append', '_encoding', '_errors', '_newline', '_fd', '_closed',
-        '_pos',
+        '_pos', '_lock',
     )
 
     def __init__(self, fs, entry, mode, binary, readable, writable, append,
@@ -57,6 +61,9 @@ class FakeFileObject:
         self._fd = fd
         self._closed = False
         self._pos = position
+        # the state lock of the filesystem, taken by every operation that
+        # touches the shared record
+        self._lock = fs._lock
 
     """
     Attributes
@@ -163,6 +170,7 @@ class FakeFileObject:
     Read
     """
 
+    @synchronized
     def read(self, size=-1):
         """
         Read data from the current position.
@@ -201,6 +209,7 @@ class FakeFileObject:
             self._pos += len(data)
             return data
 
+    @synchronized
     def readline(self, size=-1):
         """
         Read one line from the current position, the line ending is included.
@@ -240,6 +249,7 @@ class FakeFileObject:
                 self._pos += index + 1
                 return data[:index + 1]
 
+    @synchronized
     def readlines(self, hint=-1):
         """
         Read all lines from the current position.
@@ -263,6 +273,7 @@ class FakeFileObject:
                 break
         return lines
 
+    @synchronized
     def readinto(self, buffer):
         """
         Read bytes into the given buffer, binary mode only.
@@ -286,6 +297,7 @@ class FakeFileObject:
     Write
     """
 
+    @synchronized
     def write(self, data):
         """
         Write data at the current position, or at the end in append mode.
@@ -343,6 +355,7 @@ class FakeFileObject:
         for line in lines:
             self.write(line)
 
+    @synchronized
     def truncate(self, size=None):
         """
         Truncate the file at the given size, or the current position.
@@ -386,6 +399,7 @@ class FakeFileObject:
     Position
     """
 
+    @synchronized
     def seek(self, offset, whence=0):
         """
         Move the position.
@@ -482,6 +496,7 @@ class FakeFileObject:
         self._check_open()
         return True
 
+    @synchronized
     def close(self):
         """
         Close the file and release the file descriptor.

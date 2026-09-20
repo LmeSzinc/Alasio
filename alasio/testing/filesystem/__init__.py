@@ -49,6 +49,11 @@ Symbolic links are supported: os.symlink() / os.readlink() work, and
 stat() / open() / exists() and friends follow the link like the real
 os (os.lstat() and stat(follow_symlinks=False) return the link itself).
 
+The filesystem is thread safe: every operation takes the state lock of
+the filesystem, and the file objects returned by open() take the same
+lock. Code under test may therefore use the filesystem from several
+threads, a thread pool for example, without a race on the records.
+
 The whole alasio/ext/path stack (PathStr, atomic read/write, iter
 folders, makedir) works on the fake filesystem without changes, so it
 is a drop-in replacement of pyfakefs for the deploy tests:

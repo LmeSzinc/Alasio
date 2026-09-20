@@ -1,14 +1,40 @@
 """
 Base types of the in-memory fake filesystem.
 
-Path normalization and the file/directory records (msgspec Struct).
+Path normalization, the file/directory records (msgspec Struct) and the state
+lock helper.
 """
 import os
 import stat
+from functools import wraps
 
 import msgspec
 
 IS_WINDOWS = os.name == 'nt'
+
+
+def synchronized(method):
+    """
+    Run a method of the fake filesystem with the state lock of its filesystem
+
+    The records of the filesystem are a shared state and the code under test may
+    use the filesystem from several threads (a thread pool), so every operation
+    takes the lock of its own filesystem. The lock is reentrant: one operation
+    may call another one, and the file objects of the filesystem take the same
+    lock. The private helpers of the classes are not decorated, they must be
+    called with the lock already held.
+
+    Args:
+        method (callable): Method to wrap
+
+    Returns:
+        callable: The method, guarded by ``self._lock``
+    """
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 def _normpath(path, cwd):

@@ -8,10 +8,11 @@ import errno
 import io
 import os
 import time
+from threading import RLock
 
 import _io
 
-from .base import IS_WINDOWS, FakeDir, FakeFile, FakeSymlink, _normpath
+from .base import IS_WINDOWS, FakeDir, FakeFile, FakeSymlink, _normpath, synchronized
 from .entry import FakeDirEntry, FakeScandirIterator
 from .file_object import FakeFileObject
 
@@ -44,6 +45,12 @@ class FakeFilesystem:
 
     Everything is served from memory, the real disk is never touched.
 
+    The filesystem is thread safe: every public operation takes the state lock
+    of the filesystem (the file objects of it take the same lock), so the code
+    under test may use the filesystem from several threads, a thread pool for
+    example. The private helpers are not guarded, they must be called with the
+    lock already held.
+
     Symbolic links are resolved on the path itself and followed by
     stat() / open() / exists() and friends, like the real os. Symlinks
     in the middle of a path (a symlinked directory) are only resolved
@@ -56,6 +63,8 @@ class FakeFilesystem:
             cwd (str, optional): Initial working directory.
                 Defaults to None, use the real current directory.
         """
+        # the state lock, taken by every public operation
+        self._lock = RLock()
         if cwd is None:
             cwd = os.getcwd()
         self._cwd = _normpath(cwd, cwd)
@@ -232,6 +241,7 @@ class FakeFilesystem:
     Test data helpers
     """
 
+    @synchronized
     def create_file(self, path, contents=b'', st_mode=None, encoding=None, errors=None):
         """
         Create a file, the parent directories are created automatically.
@@ -273,6 +283,7 @@ class FakeFilesystem:
         self._files[path] = file
         return file
 
+    @synchronized
     def create_dir(self, path, st_mode=None):
         """
         Create a directory, the parent directories are created automatically.
@@ -302,6 +313,7 @@ class FakeFilesystem:
         self._dirs[path] = folder
         return folder
 
+    @synchronized
     def create_symlink(self, path, target):
         """
         Create a symbolic link, the parent directories are created automatically.
@@ -330,6 +342,7 @@ class FakeFilesystem:
         self._symlinks[path] = link
         return link
 
+    @synchronized
     def get_object(self, path):
         """
         Get the record at a path.
@@ -349,6 +362,7 @@ class FakeFilesystem:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
         return entry
 
+    @synchronized
     def get_file(self, path):
         """
         Get the file record at a path.
@@ -368,6 +382,7 @@ class FakeFilesystem:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
         return file
 
+    @synchronized
     def get_dir(self, path):
         """
         Get the directory record at a path.
@@ -387,6 +402,7 @@ class FakeFilesystem:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
         return folder
 
+    @synchronized
     def remove(self, path):
         """
         Remove a file, or an empty directory.
@@ -412,6 +428,7 @@ class FakeFilesystem:
             return
         raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
 
+    @synchronized
     def rmtree(self, path):
         """
         Recursively remove a directory and its content, or a file.
@@ -445,6 +462,7 @@ class FakeFilesystem:
     open()
     """
 
+    @synchronized
     def open(self, file, mode='r', buffering=-1, encoding=None, errors=None,
              newline=None, closefd=True, opener=None):
         """
@@ -530,6 +548,7 @@ class FakeFilesystem:
     os.path functions
     """
 
+    @synchronized
     def exists(self, path):
         """
         Mock of os.path.exists(), follows symbolic links.
@@ -542,6 +561,7 @@ class FakeFilesystem:
         """
         return self._get_entry(self._follow_links(self._normpath(path))) is not None
 
+    @synchronized
     def isfile(self, path):
         """
         Mock of os.path.isfile(), follows symbolic links.
@@ -554,6 +574,7 @@ class FakeFilesystem:
         """
         return self._follow_links(self._normpath(path)) in self._files
 
+    @synchronized
     def isdir(self, path):
         """
         Mock of os.path.isdir(), follows symbolic links.
@@ -566,6 +587,7 @@ class FakeFilesystem:
         """
         return self._follow_links(self._normpath(path)) in self._dirs
 
+    @synchronized
     def islink(self, path):
         """
         Mock of os.path.islink().
@@ -578,6 +600,7 @@ class FakeFilesystem:
         """
         return self._normpath(path) in self._symlinks
 
+    @synchronized
     def lexists(self, path):
         """
         Mock of os.path.lexists(), True for a dangling symlink too.
@@ -591,6 +614,7 @@ class FakeFilesystem:
         path = self._normpath(path)
         return path in self._symlinks or self._get_entry(self._follow_links(path)) is not None
 
+    @synchronized
     def readlink(self, path):
         """
         Mock of os.readlink().
@@ -613,6 +637,7 @@ class FakeFilesystem:
             raise OSError(errno.EINVAL, 'Invalid argument', path)
         return link.target
 
+    @synchronized
     def symlink(self, src, dst, target_is_directory=False):
         """
         Mock of os.symlink(), the parent directory of dst must exist.
@@ -643,6 +668,7 @@ class FakeFilesystem:
         )
         self._symlinks[dst] = link
 
+    @synchronized
     def getsize(self, path):
         """
         Mock of os.path.getsize(), follows symbolic links.
@@ -658,6 +684,7 @@ class FakeFilesystem:
         """
         return self.stat(path).st_size
 
+    @synchronized
     def stat(self, path, follow_symlinks=True, **kwargs):
         """
         Mock of os.stat().
@@ -689,6 +716,7 @@ class FakeFilesystem:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
         return entry.stat()
 
+    @synchronized
     def lstat(self, path):
         """
         Mock of os.lstat(), never follows symbolic links.
@@ -711,6 +739,7 @@ class FakeFilesystem:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
         return entry.stat()
 
+    @synchronized
     def realpath(self, path, strict=False):
         """
         Mock of os.path.realpath(), resolves symbolic links component by
@@ -807,6 +836,7 @@ class FakeFilesystem:
     os directory functions
     """
 
+    @synchronized
     def makedirs(self, path, mode=0o777, exist_ok=False):
         """
         Mock of os.makedirs(), creates the parent directories recursively.
@@ -836,6 +866,7 @@ class FakeFilesystem:
             atime=now, mtime=now, ctime=now,
         )
 
+    @synchronized
     def mkdir(self, path, mode=0o777):
         """
         Mock of os.mkdir(), the parent directory must exist.
@@ -862,6 +893,7 @@ class FakeFilesystem:
             atime=now, mtime=now, ctime=now,
         )
 
+    @synchronized
     def rmdir(self, path):
         """
         Mock of os.rmdir(), the directory must be empty.
@@ -883,6 +915,7 @@ class FakeFilesystem:
             raise OSError(errno.ENOTEMPTY, 'Directory not empty', path)
         del self._dirs[path]
 
+    @synchronized
     def unlink(self, path):
         """
         Mock of os.unlink() and os.remove(), removes a symbolic link
@@ -906,6 +939,7 @@ class FakeFilesystem:
             raise IsADirectoryError(errno.EISDIR, 'Is a directory', path)
         raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
 
+    @synchronized
     def rename(self, src, dst):
         """
         Mock of os.rename().
@@ -923,6 +957,7 @@ class FakeFilesystem:
         """
         self._move(src, dst, overwrite=not IS_WINDOWS)
 
+    @synchronized
     def replace(self, src, dst):
         """
         Mock of os.replace(), the target is always replaced.
@@ -999,6 +1034,7 @@ class FakeFilesystem:
             return
         raise FileNotFoundError(errno.ENOENT, 'No such file or directory', src)
 
+    @synchronized
     def scandir(self, path):
         """
         Mock of os.scandir(), returns an iterator of FakeDirEntry.
@@ -1047,6 +1083,7 @@ class FakeFilesystem:
                         is_symlink=True, follow_stat=follow_stat))
         return FakeScandirIterator(entries)
 
+    @synchronized
     def listdir(self, path):
         """
         Mock of os.listdir(), names are sorted for deterministic tests.
@@ -1089,6 +1126,7 @@ class FakeFilesystem:
     Low level fd functions
     """
 
+    @synchronized
     def os_open(self, path, flags, mode=0o777):
         """
         Mock of os.open(), returns a fake file descriptor.
@@ -1132,6 +1170,7 @@ class FakeFilesystem:
         self._fds[fobj._fd] = fobj
         return fobj._fd
 
+    @synchronized
     def os_write(self, fd, data):
         """
         Mock of os.write().
@@ -1151,6 +1190,7 @@ class FakeFilesystem:
             raise OSError(errno.EBADF, 'Bad file descriptor')
         return fobj.write(data)
 
+    @synchronized
     def os_close(self, fd):
         """
         Mock of os.close().
@@ -1166,6 +1206,7 @@ class FakeFilesystem:
             raise OSError(errno.EBADF, 'Bad file descriptor')
         fobj.close()
 
+    @synchronized
     def os_fsync(self, fd):
         """
         Mock of os.fsync(), a no-op because content is already in memory.
@@ -1179,6 +1220,7 @@ class FakeFilesystem:
         if fd not in self._fds:
             raise OSError(errno.EBADF, 'Bad file descriptor')
 
+    @synchronized
     def os_fstat(self, fd):
         """
         Mock of os.fstat().
@@ -1201,6 +1243,7 @@ class FakeFilesystem:
     Other os functions
     """
 
+    @synchronized
     def utime(self, path, times=None, ns=None):
         """
         Mock of os.utime().
@@ -1229,6 +1272,7 @@ class FakeFilesystem:
         entry.atime = atime
         entry.mtime = mtime
 
+    @synchronized
     def chmod(self, path, mode, **kwargs):
         """
         Mock of os.chmod().
@@ -1248,6 +1292,7 @@ class FakeFilesystem:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
         entry.mode = mode & 0o7777
 
+    @synchronized
     def getcwd(self):
         """
         Mock of os.getcwd().
@@ -1257,6 +1302,7 @@ class FakeFilesystem:
         """
         return self._cwd
 
+    @synchronized
     def chdir(self, path):
         """
         Mock of os.chdir().
