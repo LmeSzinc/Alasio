@@ -1166,12 +1166,9 @@ class TestHelpers:
         """Content chunks are written to their own file, atomically."""
         info = AsarFileInfo(
             kind=KIND_FILE, size=5,
-            integrity={
-                'algorithm': 'SHA256', 'hash': sha256(b'hello'),
-                'blockSize': BLOCK_SIZE, 'blocks': [sha256(b'hello')],
-            },
+            integrity=Integrity.new(sha256(b'hello'), [sha256(b'hello')]),
         )
-        verifier = ContentVerifier('a.txt', info.size, info.integrity['hash'])
+        verifier = ContentVerifier('a.txt', info.size, info.integrity.hash)
         write_content('/deep/a.txt', MemorySource(b'hello').iter_chunks(), verifier=verifier)
         assert file_read_bytes('/deep/a.txt') == b'hello'
         assert [name for name in fs._files if name.endswith('.tmp')] == []
