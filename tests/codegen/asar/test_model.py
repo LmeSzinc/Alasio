@@ -10,6 +10,7 @@ import os
 import msgspec
 import pytest
 
+from alasio.codegen.asar import model as model_module
 from alasio.codegen.asar.errors import AsarError, AsarFormatError, AsarPathError
 from alasio.codegen.asar.format import BLOCK_SIZE, UINT32_MAX
 from alasio.codegen.asar.model import (
@@ -557,6 +558,17 @@ class TestReadEntries:
         assert read_entries(header, 25, 20, UNPACKED_PATH)[('a.txt',)].integrity == Integrity(
             algorithm='SHA256', hash=HASH_A, blockSize=BLOCK_SIZE, blocks=[],
         )
+
+    def test_too_many_entries(self, monkeypatch):
+        """A header that describes more entries than the limit is refused."""
+        monkeypatch.setattr(model_module, 'MAX_ENTRY_COUNT', 3)
+        header = {'files': {f'f{i}.txt': {'size': 0, 'offset': '0'} for i in range(4)}}
+        with pytest.raises(AsarFormatError) as e:
+            read_entries(header, 1024, 16, UNPACKED_PATH)
+        assert str(e.value) == 'Archive holds more than 3 entries'
+        # A header that holds the limit itself is not a problem
+        header = {'files': {f'f{i}.txt': {'size': 0, 'offset': '0'} for i in range(3)}}
+        assert len(read_entries(header, 1024, 16, UNPACKED_PATH)) == 3
 
 
 class TestBuildHeader:

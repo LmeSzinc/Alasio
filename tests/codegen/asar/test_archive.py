@@ -10,8 +10,8 @@ import os
 import msgspec
 import pytest
 
-from alasio.codegen.asar import archive as archive_module
-from alasio.codegen.asar.archive import AsarArchive, normalize_path
+from alasio.codegen.asar import archive as archive_module, model as model_module
+from alasio.codegen.asar.archive import DEFAULT_MAX_SIZE, AsarArchive, normalize_path
 from alasio.codegen.asar.errors import (
     AsarEntryNotFoundError, AsarError, AsarFormatError, AsarPathError, AsarUnsupportedError
 )
@@ -443,6 +443,34 @@ class TestLifecycle:
         with AsarArchive('/simple.asar', max_size=1024) as archive:
             assert len(list(archive.iter_entries())) == 2
 
+    def test_default_max_size(self, fs, monkeypatch):
+        """The default limit is applied when the caller does not pass one."""
+        fs.create_file('/simple.asar', contents=simple_archive())
+        assert AsarArchive('/simple.asar').max_size == DEFAULT_MAX_SIZE
+        # The size comes from the handle, so the limit is checked without an
+        # archive of that size
+
+        class Stat:
+            st_size = DEFAULT_MAX_SIZE + 1
+
+        monkeypatch.setattr(archive_module.os, 'fstat', lambda fd: Stat())
+        with pytest.raises(AsarUnsupportedError) as e:
+            with AsarArchive('/simple.asar'):
+                pass
+        assert str(e.value) == f'Archive is larger than the {DEFAULT_MAX_SIZE} bytes limit of this call'
+
+    def test_no_max_size(self, fs, monkeypatch):
+        """A caller that knows its archive may pass None to remove the limit."""
+        fs.create_file('/simple.asar', contents=simple_archive())
+
+        class Stat:
+            st_size = DEFAULT_MAX_SIZE + 1
+
+        monkeypatch.setattr(archive_module.os, 'fstat', lambda fd: Stat())
+        with AsarArchive('/simple.asar', max_size=None) as archive:
+            assert archive.max_size is None
+            assert len(list(archive.iter_entries())) == 2
+
 
 class TestErrors:
     @pytest.mark.parametrize('content, expected', [
@@ -553,6 +581,16 @@ class TestErrors:
             'Invalid entry at "a.txt": content is outside of the archive, '
             'offset 0 + size 100 exceeds the data area of 10 bytes'
         )
+
+    def test_too_many_entries(self, fs, monkeypatch):
+        """An archive whose header holds more entries than the limit is refused."""
+        monkeypatch.setattr(model_module, 'MAX_ENTRY_COUNT', 3)
+        header = {'files': {f'f{i}.txt': {'size': 0, 'offset': '0'} for i in range(4)}}
+        fs.create_file('/many.asar', contents=fixture.make_archive(header, b''))
+        with pytest.raises(AsarFormatError) as e:
+            with AsarArchive('/many.asar'):
+                pass
+        assert str(e.value) == 'Archive holds more than 3 entries'
 
     def test_deep_header(self, fs):
         """A deeply nested header is a format error, not a crash."""

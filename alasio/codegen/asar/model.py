@@ -56,7 +56,7 @@ from typing_extensions import Annotated
 from alasio.ext.path.validate import validate_filename, validate_filepath
 
 from .errors import AsarEntryNotFoundError, AsarError, AsarFormatError, AsarPathError
-from .format import BLOCK_SIZE, MAX_PATH_DEPTH, UINT32_MAX
+from .format import BLOCK_SIZE, MAX_ENTRY_COUNT, MAX_PATH_DEPTH, UINT32_MAX
 from .source import ContentSource, LocalFileSource, RangeSource
 
 # Entry kinds, the header only stores 'dir' as a node with 'files' and 'file'
@@ -463,8 +463,9 @@ def read_entries(header, archive_size, data_offset, unpacked_path):
             header
 
     Raises:
-        AsarFormatError: If the header is invalid or an entry points outside of
-            the archive
+        AsarFormatError: If the header is invalid, an entry points outside of
+            the archive, or the header describes more than ``MAX_ENTRY_COUNT``
+            entries
         AsarPathError: If an entry name or the target of a link is not a valid
             path
         AsarEntryNotFoundError: If a link points at an entry that is not there
@@ -472,6 +473,8 @@ def read_entries(header, archive_size, data_offset, unpacked_path):
     files = {}
     data_size = archive_size - data_offset
     for keys, kind, node in iter_entries(header):
+        if len(files) >= MAX_ENTRY_COUNT:
+            raise AsarFormatError(f'Archive holds more than {MAX_ENTRY_COUNT} entries')
         if kind == 'dir':
             files[keys] = AsarFileInfo(kind=KIND_DIR, unpacked=node.unpacked is True)
             continue

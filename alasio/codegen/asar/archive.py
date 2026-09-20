@@ -49,6 +49,12 @@ from .source import LocalFileSource, MemorySource, RangeSource
 # create one, so the extraction materializes a link as a copy of its target there
 CAN_SYMLINK = os.name != 'nt'
 
+# Default limit of an archive that is read from a file: 512 MiB. It is far above
+# the size of a real app bundle (tens of MiB) while a file that comes from the
+# network is never read without a bound; a caller that knows the expected size
+# passes its own limit, and ``None`` removes the limit
+DEFAULT_MAX_SIZE = 512 * 1024 * 1024
+
 
 class _Header:
     """
@@ -268,8 +274,9 @@ class AsarArchive:
         file (str): Path of the archive, None for an archive that was built in
             memory and was never written
         max_size (int): Refuse an archive larger than this, in bytes, None to
-            accept any size. An archive may come from the network, so the update
-            flow should pass the expected size limit
+            accept any size. An archive may come from the network, so it
+            defaults to ``DEFAULT_MAX_SIZE`` and a caller that knows the
+            expected size of its archive should pass it
         files (dict): Flat entry table, ``{keys: AsarFileInfo}`` where ``keys``
             is the tuple of the path segments of an entry. A directory is an
             entry like any other, so an empty directory and the unpacked flag
@@ -281,11 +288,12 @@ class AsarArchive:
             that has no file
     """
 
-    def __init__(self, file=None, max_size=None):
+    def __init__(self, file=None, max_size=DEFAULT_MAX_SIZE):
         """
         Args:
             file (str): Path of the archive, None to build a new archive
-            max_size (int): Refuse an archive larger than this, in bytes
+            max_size (int): Refuse an archive larger than this, in bytes,
+                defaults to ``DEFAULT_MAX_SIZE``, None to accept any size
         """
         # A path is kept as a plain string, the entry points of the module work
         # with str and the caller may pass any path like object

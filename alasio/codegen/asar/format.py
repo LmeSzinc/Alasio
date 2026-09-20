@@ -38,6 +38,12 @@ MAX_HEADER_SIZE = 16 * 1024 * 1024
 # Refuse to walk a path deeper than this, a deep tree would also break the
 # recursive JSON decoder (msgspec raises RecursionError around 1000 levels)
 MAX_PATH_DEPTH = 256
+# Refuse a header that describes more entries than this: it bounds the table the
+# reader builds (about 250 bytes of Python memory per entry, measured, the names
+# excluded) and everything that walks it, the sort and the link check included.
+# It can not bound the decode of the header itself, which happens before an entry
+# is counted: that is what MAX_HEADER_SIZE is for
+MAX_ENTRY_COUNT = 100_000
 
 
 def _align4(size):
