@@ -186,6 +186,16 @@ class TestAddFile:
             },
         }
 
+    def test_add_file_normalizes_the_separator(self, fs):
+        """A path of another platform is stored with POSIX separators."""
+        archive = AsarArchive()
+        archive.add_file(data=b'x', arc_path='deep\\nested\\a.txt')
+        assert entry_paths(archive) == ['deep', 'deep/nested', 'deep/nested/a.txt']
+        archive.write('/out.asar')
+        assert stored_paths('/out.asar') == ['deep', 'deep/nested', 'deep/nested/a.txt']
+        with AsarArchive('/out.asar') as reader:
+            assert bytes(reader.read_file('deep/nested/a.txt')) == b'x'
+
     def test_add_file_content(self, fs):
         """Content that does not exist on disk can be added."""
         archive = AsarArchive()

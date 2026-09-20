@@ -11,7 +11,7 @@ import msgspec
 import pytest
 
 from alasio.codegen.asar import archive as archive_module
-from alasio.codegen.asar.archive import AsarArchive
+from alasio.codegen.asar.archive import AsarArchive, normalize_path
 from alasio.codegen.asar.errors import (
     AsarEntryNotFoundError, AsarError, AsarFormatError, AsarPathError, AsarUnsupportedError
 )
@@ -215,6 +215,48 @@ class TestOpen:
         fs.create_file('/simple.asar', contents=simple_archive())
         assert AsarArchive('/simple.asar').unpacked_path == '/simple.asar.unpacked'
         assert AsarArchive().unpacked_path is None
+
+
+class TestPathSeparators:
+    """The separator of any platform names the same entry."""
+
+    @pytest.mark.parametrize('path, expected', [
+        ('a.txt', 'a.txt'),
+        ('dir/a.txt', 'dir/a.txt'),
+        ('dir\\a.txt', 'dir/a.txt'),
+        ('dir\\deep/a.txt', 'dir/deep/a.txt'),
+    ])
+    def test_normalize_path(self, path, expected):
+        """The path of a call is converted to POSIX separators."""
+        assert normalize_path(path) == expected
+
+    def test_the_entry_points_take_either_separator(self, fs):
+        """Every entry point of the table normalizes the path it is given."""
+        archive = AsarArchive()
+        archive.add_file(data=b'x', arc_path='deep/nested/a.txt')
+        assert archive.entry('deep\\nested\\a.txt') is archive.entry('deep/nested/a.txt')
+        assert archive.resolve('deep\\nested\\a.txt')[0] == 'deep/nested/a.txt'
+        assert bytes(archive.read_file('deep\\nested\\a.txt')) == b'x'
+        assert bytes(b''.join(archive.iter_content('deep\\nested\\a.txt'))) == b'x'
+        archive.extract_file('deep\\nested\\a.txt', '/out/a.txt')
+        assert file_read_bytes('/out/a.txt') == b'x'
+        assert archive.mark_unpack('deep\\nested\\a.txt') == 1
+        assert archive.entry('deep\\nested\\a.txt').unpacked is True
+        assert archive.del_file('deep\\nested\\a.txt') == 1
+        assert ('deep', 'nested', 'a.txt') not in archive.files
+
+    def test_del_folder_takes_either_separator(self, fs):
+        """A whole subtree is deleted with the path of either separator."""
+        archive = AsarArchive()
+        archive.add_file(data=b'x', arc_path='deep/nested/a.txt')
+        assert archive.del_folder('deep\\nested') == 2
+        assert list(archive.files) == [('deep',)]
+
+    def test_an_entry_of_an_archive(self, fs):
+        """An entry of an archive that was read from a file is found as well."""
+        fs.create_file('/tiny.asar', contents=fixture.tiny_341())
+        with AsarArchive('/tiny.asar') as archive:
+            assert bytes(archive.read_file('sub\\bin.dat')) == b'PAYLOAD'
 
 
 class TestEnsureParents:

@@ -200,6 +200,23 @@ class TestCheckName:
         validate_header({'files': {name: {'files': {}}}})
 
 
+class TestPathKeys:
+    """The splitter of an archive path, only a slash separates."""
+
+    @pytest.mark.parametrize('path, expected', [
+        ('a.txt', ('a.txt',)),
+        ('dir/a.txt', ('dir', 'a.txt')),
+        ('dir/deep/a.txt', ('dir', 'deep', 'a.txt')),
+    ])
+    def test_path_keys(self, path, expected):
+        """A path is split on a slash."""
+        assert path_keys(path) == expected
+
+    def test_a_backslash_is_not_converted(self):
+        """The splitter never converts, only the path of a call is normalized."""
+        assert path_keys('dir\\a.txt') == ('dir\\a.txt',)
+
+
 class TestCheckNode:
     """
     The rules a node has to follow, on top of the types of its fields.

@@ -70,6 +70,26 @@ class _Header:
         return f'_Header({len(self.files)} entries)'
 
 
+def normalize_path(path):
+    """
+    Normalize the separators of an archive path that a caller gives.
+
+    A caller may use the separator of its platform, so the path of a call is
+    converted to POSIX separators at the entry points of the module, and only
+    there: a path that already flows inside (built by ``keys_path()``, or read
+    from a header) is not converted a second time. No name of a table holds a
+    backslash, it is refused when the table is built and when an entry is
+    added, so the two separators can never name different entries.
+
+    Args:
+        path (str): Archive path of a call, either separator
+
+    Returns:
+        str: The same path with POSIX separators
+    """
+    return path.replace('\\', '/')
+
+
 def check_archive_path(path):
     """
     Check the path of a local entry that is about to be added to an archive.
@@ -78,7 +98,8 @@ def check_archive_path(path):
     an archive we write can always be extracted again.
 
     Args:
-        path (str): Path inside the archive, POSIX separators
+        path (str): Path inside the archive; a backslash is a separator as well
+            and is normalized to '/'
 
     Returns:
         tuple: Path segments, the key of the entry in the table
@@ -88,7 +109,7 @@ def check_archive_path(path):
     """
     if not isinstance(path, str) or not path:
         raise AsarPathError(f'Archive path must be a non empty string, got "{path}"')
-    normalized = path.replace('\\', '/')
+    normalized = normalize_path(path)
     if normalized.startswith('/'):
         raise AsarPathError(f'Archive path must be relative, got "{path}"')
     # The only split of a path that is added: everything below takes the segments
@@ -238,6 +259,10 @@ class AsarArchive:
     """
     An asar archive: the entry table, the source of every content, and the file
     the archive lives in when there is one.
+
+    An archive path of a call (the ``name`` of the entry points, the ``arc_path``
+    of ``add_file()``) uses POSIX separators; a backslash is a separator as well,
+    so a path that came from another platform names the same entry.
 
     Attributes:
         file (str): Path of the archive, None for an archive that was built in
@@ -426,7 +451,7 @@ class AsarArchive:
         Raises:
             AsarEntryNotFoundError: If there is no such entry
         """
-        info = self.files.get(path_keys(name))
+        info = self.files.get(path_keys(normalize_path(name)))
         if info is None:
             raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
         return info
@@ -461,7 +486,7 @@ class AsarArchive:
             AsarEntryNotFoundError: If the entry or a link target is missing
             AsarFormatError: If the links are circular or too deep
         """
-        return resolve_entry(self.files, name)
+        return resolve_entry(self.files, normalize_path(name))
 
     # -------------------------------------------------------------- changing
 
@@ -650,7 +675,7 @@ class AsarArchive:
         Raises:
             AsarEntryNotFoundError: If there is no such entry
         """
-        keys = path_keys(name)
+        keys = path_keys(normalize_path(name))
         if keys not in self.files:
             raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
         # The subtree of a path is every key the path is a prefix of, at any
@@ -682,7 +707,7 @@ class AsarArchive:
             AsarEntryNotFoundError: If there is no such entry
             AsarPathError: If the entry is a directory, use ``del_folder()``
         """
-        keys = path_keys(name)
+        keys = path_keys(normalize_path(name))
         info = self.files.get(keys)
         if info is None:
             raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
@@ -708,7 +733,7 @@ class AsarArchive:
             AsarEntryNotFoundError: If there is no such entry
             AsarPathError: If the entry is a file, use ``del_file()``
         """
-        keys = path_keys(name)
+        keys = path_keys(normalize_path(name))
         info = self.files.get(keys)
         if info is None:
             raise AsarEntryNotFoundError(f'Entry "{name}" does not exist in the archive')
@@ -806,7 +831,8 @@ class AsarArchive:
         the link is created. Directories are created first, then the content,
         then the links. On Windows a link to a file is materialized as a copy, a
         link to a directory is not supported because Windows needs elevation to
-        create a symlink.
+        create a symlink. A table that holds a file entry without a content
+        source is refused before the target is touched.
 
         Every entry of the table holds a path that was checked when it entered
         the table (added by the caller, or read from the header of an archive),
@@ -822,28 +848,59 @@ class AsarArchive:
             chunk_size (int): Read chunk size of an entry
 
         Raises:
+            AsarError: If a file entry has no content source
             AsarPathError: If the target of a link leaves the target directory
             AsarFormatError: If the archive is truncated, or if a content hash
                 does not match
             AsarUnsupportedError: If a directory link is extracted on Windows
         """
         entries = canonical_entries(self.files)
+
+        def iter_files():
+            """
+            Yield the file entries of the table, checked while it is walked.
+
+            A file entry that has no content source at all can not be extracted,
+            and a table that can not be extracted as a whole must not leave a
+            half extracted tree behind: it is refused here, before the target is
+            touched.
+
+            Yields:
+                tuple: ``(keys, info)`` of a file entry
+
+            Raises:
+                AsarError: If a file entry has no content source
+            """
+            for keys, info in entries:
+                if info.kind != KIND_FILE:
+                    continue
+                if info.source is None:
+                    raise AsarError(
+                        f'Entry "{keys_path(keys)}" has no content source, it can not be extracted'
+                    )
+                yield keys, info
+
+        # The generator is consumed while `stored` is built, so the table is
+        # walked once and every file entry is checked before the target is
+        # touched. The entries that live in the archive are collected in the
+        # order of the data area: the reads of a real archive follow each other
+        # and the buffer of the handle is reused, and a source seeks to the
+        # offset of its own entry
+        stored = [
+            (info.source.offset, keys, info)
+            for keys, info in iter_files()
+            if isinstance(info.source, RangeSource)
+        ]
+        stored.sort(key=lambda entry: entry[0])
+
         os.makedirs(dest, exist_ok=True)
         for keys, info in entries:
             if info.kind == KIND_DIR:
                 os.makedirs(os.path.join(dest, *keys), exist_ok=True)
 
-        # The entries that live in the archive are read in the order of the data
-        # area, so that the reads of a real archive follow each other; a source
-        # seeks to the offset of its own entry. Every file is written by its own
-        # task on the thread pool, the writer is waited for below
+        # Every file is written by its own task on the thread pool, the writer is
+        # waited for below
         with ContentWriter() as writer:
-            stored = [
-                (info.source.offset, keys, info)
-                for keys, info in entries
-                if info.kind == KIND_FILE and isinstance(info.source, RangeSource)
-            ]
-            stored.sort(key=lambda entry: entry[0])
             for _, keys, info in stored:
                 path = keys_path(keys)
                 writer.write(

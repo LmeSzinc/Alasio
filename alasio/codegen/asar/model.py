@@ -82,7 +82,10 @@ def path_keys(path):
     Split an archive path into its segments, the key of an entry of the table.
 
     The only place of the module that splits a path: an entry point calls it
-    once and every helper of the table takes the segments.
+    once and every helper of the table takes the segments. Only '/' separates:
+    the path of a call is normalized at the entry point before it gets here,
+    and a path that already flows inside the module is POSIX and is never
+    converted a second time.
 
     Args:
         path (str): Archive path, POSIX separators, no leading '/'

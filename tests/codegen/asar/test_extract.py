@@ -18,8 +18,10 @@ import pytest
 
 from alasio.codegen.asar import archive as archive_module, pack as pack_module
 from alasio.codegen.asar.archive import AsarArchive, check_link_target, relative_link_target
-from alasio.codegen.asar.errors import AsarEntryNotFoundError, AsarFormatError, AsarPathError, AsarUnsupportedError
-from alasio.codegen.asar.model import KIND_DIR, KIND_FILE, KIND_LINK
+from alasio.codegen.asar.errors import (
+    AsarEntryNotFoundError, AsarError, AsarFormatError, AsarPathError, AsarUnsupportedError
+)
+from alasio.codegen.asar.model import KIND_DIR, KIND_FILE, KIND_LINK, AsarFileInfo
 from alasio.ext.cache import InstanceCacheOperation
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -457,6 +459,24 @@ class TestExtractSafety:
         with pytest.raises(AsarPathError) as e:
             extract('/broken.asar', '/out')
         assert str(e.value) == 'Invalid entry name at "/": "a:b", Filename should not contain character: ":"'
+
+    def test_a_file_entry_without_a_source(self, fs):
+        """A file entry that has no content to read can not be extracted."""
+        archive = AsarArchive()
+        archive.files[('x.txt',)] = AsarFileInfo(kind=KIND_FILE)
+        with pytest.raises(AsarError) as e:
+            archive.extract_all('/out')
+        assert str(e.value) == 'Entry "x.txt" has no content source, it can not be extracted'
+
+    def test_nothing_is_written_before_the_table_is_checked(self, fs):
+        """The table is refused before the first directory, a broken entry extracts nothing."""
+        archive = AsarArchive()
+        archive.add_file(data=b'good', arc_path='a.txt')
+        archive.files[('b.txt',)] = AsarFileInfo(kind=KIND_FILE)
+        with pytest.raises(AsarError) as e:
+            archive.extract_all('/out')
+        assert str(e.value) == 'Entry "b.txt" has no content source, it can not be extracted'
+        assert not os.path.exists('/out')
 
     def test_broken_archive(self, fs):
         """A truncated archive fails before anything is written."""
