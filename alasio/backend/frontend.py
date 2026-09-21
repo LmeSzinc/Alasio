@@ -46,6 +46,7 @@ from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException
 from starlette.responses import Response
 from starlette.staticfiles import NotModifiedResponse
+from starlette.websockets import WebSocketClose
 
 from alasio.deploy.pack.decode_base import PackDecodeError
 from alasio.deploy.pack.decode_manifest import PackDecodeManifest
@@ -165,6 +166,11 @@ class _Failed:
 # A file that cannot be prepared. The published value is a singleton so the
 # request path recognizes it with `is`.
 _FAILED = _Failed()
+
+# The refusal of a websocket path, starlette's answer to a websocket path no
+# route matched: close 1000, no accept (the browser only surfaces 1006 for a
+# refused handshake, the code is for the client).
+_WEBSOCKET_CLOSE = WebSocketClose()
 
 
 class FrontendSite:
@@ -383,9 +389,18 @@ class FrontendSite:
             send (Send)
 
         Raises:
-            RuntimeError: If the scope is not an http request (the site is
-                mounted at "/", so it sees every path that no route matched)
+            RuntimeError: If the scope is neither an http request nor a
+                websocket (the site is mounted at "/", so it sees every path
+                that no route matched)
         """
+        if scope['type'] == 'websocket':
+            # the site is mounted at "/", so it owns every websocket path no
+            # route matched (a typo in a ws URL, a scanner): refuse the
+            # handshake with starlette's WebSocketClose instead of ending the
+            # connection with a server error. Nothing is logged on purpose: a
+            # request on an unknown path is not an event of the server.
+            await _WEBSOCKET_CLOSE(scope, receive, send)
+            return
         if scope['type'] != 'http':
             raise RuntimeError(f'{type(self).__name__} serves http requests only, got "{scope["type"]}"')
 

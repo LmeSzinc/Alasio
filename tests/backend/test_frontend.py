@@ -665,8 +665,36 @@ class TestRequest:
         assert body['body'] == FILES[INDEX_HTML]
 
     @pytest.mark.trio
-    async def test_non_http_scope_is_rejected(self, site):
-        scope = make_scope('/')
+    async def test_websocket_path_is_refused_silently(self, site):
+        """
+        The site is the last route, so it owns every websocket path no route
+        matched: the handshake is refused with starlette's WebSocketClose, the
+        way starlette's own router refuses an unmatched websocket path. A
+        request on an unknown path is not an event of the server, nothing is
+        logged.
+        """
+        messages = []
+
+        async def receive():
+            return {'type': 'websocket.connect'}
+
+        async def send(message):
+            messages.append(message)
+
+        scope = make_scope('/not-a-websocket-path')
         scope['type'] = 'websocket'
+        with logger.mock_capture_writer() as capture:
+            await site(scope, receive, send)
+        assert messages == [{'type': 'websocket.close', 'code': 1000, 'reason': ''}]
+        assert capture.fd.logs == []
+        assert capture.stdout.logs == []
+        assert capture.backend.logs == []
+
+    @pytest.mark.trio
+    async def test_unknown_scope_type_is_an_error(self, site):
+        """Only http and websocket scopes reach a mounted app: anything else
+        is a wiring mistake and must not pass silently."""
+        scope = make_scope('/')
+        scope['type'] = 'lifespan'
         with pytest.raises(RuntimeError):
             await site(scope, None, None)
