@@ -249,7 +249,7 @@ class ResetJob(JobBase):
                 # the tmp name is built from the index of the record
                 # in self.error, matching the download() convention
                 tmp = self.workspace.joinpath(
-                    f'{info.size}_{info.sha1}_{len(self.error)}.tmp')
+                    f'{info.size}_{info.sha1.hex()}_{len(self.error)}.tmp')
                 if not self._matches(info, self._read_current(tmp)).match:
                     file_write(tmp, current.data)
                 self.error.append(PendingFile(info=info, tmp=tmp, mode=info.mode_decoded))
@@ -259,7 +259,7 @@ class ResetJob(JobBase):
                 # to a tmp file, download() moves it to pending
                 # the tmp name is built from the index of the record
                 # in self.error, matching the download() convention
-                tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{len(self.error)}.tmp')
+                tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{len(self.error)}.tmp')
                 file_write(tmp, result.match_data)
                 self.error.append(PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
@@ -397,7 +397,7 @@ class ResetJob(JobBase):
             PackDecodeError: If the downloaded data fails the size +
                 sha1 check
         """
-        tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
+        tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{index}.tmp')
         if self._matches(info, self._read_current(tmp)).match:
             # a leftover tmp file passes the size + sha1 check, reuse it
             return tmp

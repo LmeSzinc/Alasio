@@ -541,7 +541,7 @@ class TestDownload:
         job.validate_files()
         # write a valid tmp file, download() should reuse it
         item = job.error[0]
-        tmp = job.workspace.joinpath(f'{item.info.size}_{item.info.sha1}_0.tmp')
+        tmp = job.workspace.joinpath(f'{item.info.size}_{item.info.sha1.hex()}_0.tmp')
         os.makedirs(tmp.uppath(), exist_ok=True)
         with open(tmp, 'wb') as f:
             f.write(b'')

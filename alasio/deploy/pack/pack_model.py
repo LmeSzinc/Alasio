@@ -11,9 +11,9 @@ class RefInfo(Struct):
     path: str
     # file size
     size: int = 0
-    # sha1 of file content, length=40 (not git file sha1)
-    # or '' if file should not exist
-    sha1: str = ''
+    # sha1 of file content, the 20 bytes digest (not git file sha1)
+    # or b'' if file should not exist
+    sha1: bytes = b''
 
 
 class FileInfo(RefInfo):

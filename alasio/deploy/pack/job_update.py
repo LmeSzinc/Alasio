@@ -188,7 +188,7 @@ class UpdateJob(JobBase):
                 # without tracking the tmp name
                 tmp = self.workspace.joinpath(self.NEW_INDEX)
             else:
-                tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
+                tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{index}.tmp')
             if result.match:
                 # the target file exists and passes the size + sha1 check
                 if deleted:
@@ -317,7 +317,7 @@ class UpdateJob(JobBase):
                 continue
             info = item.info
             index = self._file_index[info.path]
-            tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
+            tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{index}.tmp')
             if self._matches(info, self._read_current(tmp)).match:
                 # a leftover tmp file passes the size + sha1 check, reuse it
                 pending.append(PendingFile(
@@ -464,7 +464,7 @@ class UpdateJob(JobBase):
             # content is in the tmp file written by the earlier record
             source_info = fileinfo[source_path]
             source_tmp = self.workspace.joinpath(
-                f'{source_info.size}_{source_info.sha1}_{self._file_index[source_path]}.tmp')
+                f'{source_info.size}_{source_info.sha1.hex()}_{self._file_index[source_path]}.tmp')
             current = self._read_current(source_tmp)
             result = self._matches(source_info, current)
             if not result.match and not result.match_data:
@@ -482,13 +482,13 @@ class UpdateJob(JobBase):
         data = current.data
         # the record size and sha1 are of the LF blob, a CRLF working
         # tree file is converted before the check
-        if len(data) == ref.size and (not ref.sha1 or sha1(data).hexdigest() == ref.sha1):
+        if len(data) == ref.size and (not ref.sha1 or sha1(data).digest() == ref.sha1):
             return data
         converted = data.replace(b'\r\n', b'\n')
         if b'\r' in converted:
             # a lone CR, the EOL cannot be converted cleanly
             raise SourceError(source_path)
-        if len(converted) != ref.size or (ref.sha1 and sha1(converted).hexdigest() != ref.sha1):
+        if len(converted) != ref.size or (ref.sha1 and sha1(converted).digest() != ref.sha1):
             raise SourceError(source_path)
         return converted
 

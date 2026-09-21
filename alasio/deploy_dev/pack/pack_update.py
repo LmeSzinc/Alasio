@@ -166,7 +166,7 @@ class PackUpdate(PackEncodeBase):
             old_index = self.old.extract_index_pack()
             ref = dict(ref)
             ref['.pack/index.pack'] = RefInfo(
-                path='.pack/index.pack', size=len(old_index), sha1=sha1(old_index).hexdigest())
+                path='.pack/index.pack', size=len(old_index), sha1=sha1(old_index).digest())
             # keep the old pack decode order, the index path sorts first
             ref = {path: ref[path] for path in sorted(ref, key=_dfs_path_key)}
         return ref

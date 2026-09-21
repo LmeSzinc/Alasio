@@ -40,7 +40,8 @@ class PackDecodeManifest:
         manifest_version (bytes): MANIFEST format version byte.
         checksum (str): Checksum of the manifest, the trailing 20 bytes
             digest in hex, the same value validate() verifies.
-        files (dict[str, RefInfo]): {filepath: RefInfo} records.
+        files (dict[str, RefInfo]): {filepath: RefInfo} records, the sha1
+            of a record is the 20 bytes digest of the file content.
     """
 
     def __init__(self, data):
@@ -153,7 +154,7 @@ class PackDecodeManifest:
                 f'{sha1_length} bytes, expected {count * SHA1_LENGTH}'
             )
         sha1s = [
-            bytes(data[start:start + SHA1_LENGTH]).hex()
+            bytes(data[start:start + SHA1_LENGTH])
             for start in range(offset, self._data_end, SHA1_LENGTH)
         ]
 

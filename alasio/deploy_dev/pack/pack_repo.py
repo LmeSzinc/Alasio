@@ -99,7 +99,7 @@ class PackFull(PackEncodeBase):
             file.data = data
             file.data_size = 0
             file.size = 0
-            file.sha1 = ''
+            file.sha1 = b''
             return 'raw'
         best_data = data
         algo = 0
@@ -146,7 +146,7 @@ class PackFull(PackEncodeBase):
         file.data = best_data
         file.data_size = best_length
         file.size = len(data)
-        file.sha1 = sha1(data).hexdigest()
+        file.sha1 = sha1(data).digest()
         if patch_used:
             return 'zstd_patch'
         return ('raw', 'lzma', 'zstd')[algo]
@@ -199,7 +199,7 @@ class PackFull(PackEncodeBase):
             obj = repo.cat(entry.sha1)
             path = PathStr(path)
             # use git sha1 temporarily
-            info = FileInfo(path=path, sha1=entry.sha1, size=len(obj.decoded))
+            info = FileInfo(path=path, sha1=bytes.fromhex(entry.sha1), size=len(obj.decoded))
             info.mode = self._load_git_mode(entry.mode, path=path)
             out[tuple(path.split('/'))] = info
 
@@ -250,7 +250,7 @@ class PackFull(PackEncodeBase):
                 text = False
             else:
                 # text="auto", decide by content
-                content = repo.cat(file.sha1).decoded
+                content = repo.cat(file.sha1.hex()).decoded
                 if b'\x00' in content:
                     text = False
                 else:
@@ -343,5 +343,5 @@ class PackFull(PackEncodeBase):
             # load new files only, A (added)
             if file.edit == 0 and file.source_lookback == 0:
                 # load data, full pack use lzma only to avoid producing complex list_algo
-                data = repo.cat(file.sha1).decoded
+                data = repo.cat(file.sha1.hex()).decoded
                 self._load_data(file, data, zstd=False)

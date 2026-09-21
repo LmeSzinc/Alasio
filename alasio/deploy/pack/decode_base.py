@@ -382,7 +382,7 @@ class PackDecodeBase:
                 f'expected {count_sha1 * 20}'
             )
         sha1s = iter(
-            self._sha1_part[offset:offset + 20].hex()
+            bytes(self._sha1_part[offset:offset + 20])
             for offset in range(0, len(self._sha1_part), 20)
         )
         for info in info_list[:len_refinfo]:
@@ -639,10 +639,10 @@ class PackDecodeBase:
                 f'Failed to decode {info.path}: size mismatch: '
                 f'decoded {len(content)} bytes, expected {info.size}'
             )
-        if info.sha1 and sha1(content).hexdigest() != info.sha1:
+        if info.sha1 and sha1(content).digest() != info.sha1:
             raise PackDecodeError(
                 f'Failed to decode {info.path}: sha1 mismatch: '
-                f'decoded {sha1(content).hexdigest()}, expected {info.sha1}'
+                f'decoded {sha1(content).digest().hex()}, expected {info.sha1.hex()}'
             )
 
     @cached_property

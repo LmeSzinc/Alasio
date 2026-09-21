@@ -67,7 +67,7 @@ FRONTEND_FILES = {
 }
 
 # sha1 of the empty content, the same digest every implementation computes
-EMPTY_SHA1 = 'da39a3ee5e6b4b0d3255bfef95601890afd80709'
+EMPTY_SHA1 = bytes.fromhex('da39a3ee5e6b4b0d3255bfef95601890afd80709')
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -103,12 +103,12 @@ def records_of(files):
         files (dict[str, bytes]): {path: content}
 
     Returns:
-        tuple[list[str], list[int], list[str]]: (paths, sizes, sha1s)
+        tuple[list[str], list[int], list[bytes]]: (paths, sizes, sha1s)
     """
     return (
         list(files),
         [len(content) for content in files.values()],
-        [sha1(content).hexdigest() for content in files.values()],
+        [sha1(content).digest() for content in files.values()],
     )
 
 
@@ -147,8 +147,8 @@ def build_manifest(paths, sizes, sha1s, prefix_comb=None, suffix_comb=None):
         paths (list[str]): Full paths in the encoded order. Duplicate
             and unsafe paths are allowed, PackEncodeManifest rejects both.
         sizes (list[int]): Size of every record
-        sha1s (list[str]): 40 chars hex digest of every record, written
-            as the raw 20 bytes digest like the encoder does
+        sha1s (list[bytes]): 20 bytes digest of every record, written as-is
+            like the encoder does
         prefix_comb (list[int], optional): Override the prefix comb.
             Defaults to None, encoded from the paths.
         suffix_comb (list[int], optional): Override the suffix comb.
@@ -179,7 +179,7 @@ def build_manifest(paths, sizes, sha1s, prefix_comb=None, suffix_comb=None):
         encode_vlenint(suffix_comb),
         b''.join(list_path),
         encode_vlenint(sizes),
-        b''.join(bytes.fromhex(digest) for digest in sha1s),
+        b''.join(sha1s),
     ])
     return data + sha1(data).digest()
 
@@ -293,7 +293,7 @@ class TestManifestRoundtrip:
         """Every record must decode to the path, size and sha1 of the file."""
         decoder = PackDecodeManifest(MANIFEST_DATA)
         assert decoder.files == {
-            path: RefInfo(path=path, size=len(content), sha1=sha1(content).hexdigest())
+            path: RefInfo(path=path, size=len(content), sha1=sha1(content).digest())
             for path, content in FRONTEND_FILES.items()
         }
 
@@ -303,7 +303,7 @@ class TestManifestRoundtrip:
         assert files['alasio/deploy_data/frontend/index.html'] == RefInfo(
             path='alasio/deploy_data/frontend/index.html',
             size=291,
-            sha1='33a1280773941b718cfd8ae942ce2acfd9cfde47',
+            sha1=bytes.fromhex('33a1280773941b718cfd8ae942ce2acfd9cfde47'),
         )
         assert files['alasio/deploy_data/frontend/empty.txt'] == RefInfo(
             path='alasio/deploy_data/frontend/empty.txt',
@@ -320,8 +320,8 @@ class TestManifestRoundtrip:
         section = data[-40:-20]
         assert section == sha1(content).digest()
         assert section != sha1(content).hexdigest().encode()
-        # the records still hand out the hex digest
-        assert PackDecodeManifest(data).files['a.txt'].sha1 == sha1(content).hexdigest()
+        # the records hand out the same digest
+        assert PackDecodeManifest(data).files['a.txt'].sha1 == sha1(content).digest()
 
     def test_empty_manifest(self):
         """A manifest without files must decode to no record."""
@@ -339,7 +339,7 @@ class TestManifestRoundtrip:
         decoder = PackDecodeManifest(encode_manifest(files))
         decoder.validate()
         assert decoder.files == {
-            'a.txt': RefInfo(path='a.txt', size=5, sha1=sha1(b'hello').hexdigest()),
+            'a.txt': RefInfo(path='a.txt', size=5, sha1=sha1(b'hello').digest()),
         }
 
     def test_many_files(self):
@@ -349,7 +349,7 @@ class TestManifestRoundtrip:
         decoder.validate()
         assert list(decoder.files) == list(files)
         assert decoder.files == {
-            path: RefInfo(path=path, size=len(content), sha1=sha1(content).hexdigest())
+            path: RefInfo(path=path, size=len(content), sha1=sha1(content).digest())
             for path, content in files.items()
         }
 
@@ -363,7 +363,7 @@ class TestManifestSizeEncoding:
         files = {'big.bin': b'x' * size}
         info = PackDecodeManifest(encode_manifest(files)).files['big.bin']
         assert info.size == size
-        assert info.sha1 == sha1(b'x' * size).hexdigest()
+        assert info.sha1 == sha1(b'x' * size).digest()
 
     def test_mixed_sizes(self):
         """Files of different sizes must decode in the encoded order."""
@@ -550,7 +550,7 @@ class TestManifestMalformed:
     def test_sha1_section_longer(self):
         """A sha1 section longer than 20 bytes per record must raise."""
         paths, sizes, sha1s = records_of(FRONTEND_FILES)
-        data = build_manifest(paths, sizes, sha1s + ['0' * 40])
+        data = build_manifest(paths, sizes, sha1s + [b'0' * 20])
         self._assert_rejected(data, 'sha1 out of range')
 
     def test_path_bytes_out_of_range(self):
@@ -572,12 +572,12 @@ class TestManifestMalformed:
     @pytest.mark.parametrize('path', ['/etc/passwd', 'a/CON', 'a/b.txt '])
     def test_unsafe_path_variants(self, path):
         """Absolute, reserved and trailing space paths must be rejected."""
-        data = build_manifest([path], [1], [sha1(b'x').hexdigest()])
+        data = build_manifest([path], [1], [sha1(b'x').digest()])
         self._assert_rejected(data, 'Failed to decode paths')
 
     def test_empty_path(self):
         """An empty path must be rejected."""
-        data = build_manifest([''], [1], [sha1(b'x').hexdigest()])
+        data = build_manifest([''], [1], [sha1(b'x').digest()])
         self._assert_rejected(data, 'Failed to decode paths')
 
 

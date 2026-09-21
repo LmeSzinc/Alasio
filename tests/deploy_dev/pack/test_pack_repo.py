@@ -140,8 +140,8 @@ class TestFileinfoBasic:
         assert '.pack/history.pack' in info
         entry = info['hello.txt']
         assert entry.path == 'hello.txt'
-        # load_data() sets sha1 to sha1(content).hexdigest() (raw content hash)
-        assert entry.sha1 == _sha1(content).hexdigest()
+        # load_data() sets sha1 to sha1(content).digest() (raw content hash)
+        assert entry.sha1 == _sha1(content).digest()
         assert entry.size == len(content)
         assert entry.edit == 0  # A (added)
         assert entry.mode == 0  # 644
@@ -171,13 +171,13 @@ class TestFileinfoBasic:
         assert a_idx < ab_idx < abc_idx, f'Expected DFS order, got {paths}'
 
     def test_empty_file(self):
-        """Empty file: size=0, sha1='' after load_data."""
+        """Empty file: size=0, sha1=b'' after load_data."""
         mock = _make_repo()
         mock.register_file('c1', 'empty.txt', b'')
         pack = PackFull(mock, commit='c1')
         entry = pack.fileinfo['empty.txt']
         assert entry.size == 0
-        assert entry.sha1 == ''
+        assert entry.sha1 == b''
         assert entry.algo == 0
         assert entry.data == b''
 
@@ -476,7 +476,7 @@ class TestFileinfoData:
         entry = pack.fileinfo['data.txt']
         # sha1 from load_data should be sha1(content) not blob_hash
         from hashlib import sha1
-        expected = sha1(content).hexdigest()
+        expected = sha1(content).digest()
         assert entry.sha1 == expected
 
     def test_lzma_compression_large_file(self):

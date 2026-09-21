@@ -398,7 +398,7 @@ class TestMatchResult:
         """A file that is exactly the record blob matches, even with CR."""
         # a pathological LF record whose blob contains a lone CR
         content = b'HOST = "0.0.0.0"\rPORT = 8000\n'
-        info = IdxInfo(path='x', size=len(content), sha1=sha1(content).hexdigest(), eol=0)
+        info = IdxInfo(path='x', size=len(content), sha1=sha1(content).digest(), eol=0)
         job = UnpackJob(WEBSITE_FULL_PACK)
         current = CurrentFile(exist=True, data=content, mode=0o100644)
         result = job._matches(info, current)
@@ -564,7 +564,7 @@ class TestUnpackSkip:
         )
         info = decoder.idx_info[index]
         # write a valid tmp file, unpack() should reuse it
-        tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1}_{index}.tmp'
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1.hex()}_{index}.tmp'
         os.makedirs(tmp.uppath(), exist_ok=True)
         with open(tmp, 'wb') as f:
             f.write(WEBSITE_FILES['backend/main.py'][0])

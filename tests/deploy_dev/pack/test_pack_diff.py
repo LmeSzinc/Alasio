@@ -103,7 +103,7 @@ class TestPackDiffBasic:
         assert info.edit == 0
         assert info.size == 0
         assert info.data_size == 0
-        assert info.sha1 == ''
+        assert info.sha1 == b''
 
     def test_deleted(self):
         """A removed file becomes a D record keyed by the old path."""
@@ -541,118 +541,118 @@ class TestPackDiffFullScenario:
         assert _no_data(diff_info['.gitattributes']) == UpdateInfo(
             path='.gitattributes', edit=1, eol=0, mode=0, algo=2,
             size=85, data_size=14,
-            sha1='4864d5ef0b398e6c74051b4612982e1a5f818f29', source_path='.gitattributes')
+            sha1=bytes.fromhex('4864d5ef0b398e6c74051b4612982e1a5f818f29'), source_path='.gitattributes')
         # M (plain): the commit history changed, too small to compress
         assert _no_data(diff_info['.pack/history.pack']) == UpdateInfo(
             path='.pack/history.pack', edit=1, eol=2, mode=0, algo=0,
             size=16, data_size=16,
-            sha1='b24684c28a51fa5809522373b392b988a67de0fc', source_path='')
+            sha1=bytes.fromhex('b24684c28a51fa5809522373b392b988a67de0fc'), source_path='')
         # A: added, carries the data, the first of the copy chain
         assert _no_data(diff_info['backend/a1.py']) == UpdateInfo(
             path='backend/a1.py', edit=0, eol=0, mode=0, algo=2,
             size=540, data_size=40,
-            sha1='bcfd6ec09f6db21da66c3e3e67d0c474dda5b5e5', source_path='')
+            sha1=bytes.fromhex('bcfd6ec09f6db21da66c3e3e67d0c474dda5b5e5'), source_path='')
         # C: copied from the earlier new file (copy chain)
         assert _no_data(diff_info['backend/a2.py']) == UpdateInfo(
             path='backend/a2.py', edit=0, eol=0, mode=0, algo=2,
             size=540, data_size=40,
-            sha1='bcfd6ec09f6db21da66c3e3e67d0c474dda5b5e5', source_path='backend/a1.py')
+            sha1=bytes.fromhex('bcfd6ec09f6db21da66c3e3e67d0c474dda5b5e5'), source_path='backend/a1.py')
         # C: copied from the earlier new file (copy chain)
         assert _no_data(diff_info['backend/a3.py']) == UpdateInfo(
             path='backend/a3.py', edit=0, eol=0, mode=0, algo=2,
             size=540, data_size=40,
-            sha1='bcfd6ec09f6db21da66c3e3e67d0c474dda5b5e5', source_path='backend/a2.py')
+            sha1=bytes.fromhex('bcfd6ec09f6db21da66c3e3e67d0c474dda5b5e5'), source_path='backend/a2.py')
         # C: copied from the unchanged old file (refinfo)
         assert _no_data(diff_info['backend/copy.py']) == UpdateInfo(
             path='backend/copy.py', edit=0, eol=0, mode=0, algo=0,
             size=43, data_size=43,
-            sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5', source_path='backend/config.py')
+            sha1=bytes.fromhex('80c4a3c2cc87ffa168e205743b3b883ad3e08eb5'), source_path='backend/config.py')
         # A: added, empty file
         assert _no_data(diff_info['backend/empty.txt']) == UpdateInfo(
             path='backend/empty.txt', edit=0, eol=1, mode=0, algo=0,
             size=0, data_size=0,
-            sha1='', source_path='')
+            sha1=b'', source_path='')
         # M (patch): modified, the zstd patch-from wins
         assert _no_data(diff_info['backend/main.py']) == UpdateInfo(
             path='backend/main.py', edit=1, eol=0, mode=0, algo=2,
             size=94, data_size=21,
-            sha1='3216f7cf6a0d9caef5c769f38c1dd0ee69fac744', source_path='backend/main.py')
+            sha1=bytes.fromhex('3216f7cf6a0d9caef5c769f38c1dd0ee69fac744'), source_path='backend/main.py')
         # M (plain): modified, too small to compress
         assert _no_data(diff_info['backend/tiny.py']) == UpdateInfo(
             path='backend/tiny.py', edit=1, eol=0, mode=0, algo=0,
             size=1, data_size=1,
-            sha1='95cb0bfd2977c761298d9624e4b4d4c72a39974a', source_path='')
+            sha1=bytes.fromhex('95cb0bfd2977c761298d9624e4b4d4c72a39974a'), source_path='')
         # A: added, incompressible binary, stored raw
         assert _no_data(diff_info['data/new_blob.bin']) == UpdateInfo(
             path='data/new_blob.bin', edit=0, eol=2, mode=0, algo=0,
             size=12800, data_size=12800,
-            sha1='554c3af44eba0c91d80abd712f1a01fc84097af1', source_path='')
+            sha1=bytes.fromhex('554c3af44eba0c91d80abd712f1a01fc84097af1'), source_path='')
         # C: copied from the unchanged old file, CRLF on both sides
         assert _no_data(diff_info['docs/guide2.txt']) == UpdateInfo(
             path='docs/guide2.txt', edit=0, eol=1, mode=0, algo=0,
             size=30, data_size=30,
-            sha1='fe8170a5c33baa1a71d1913fea45de3734c4fdfa', source_path='docs/guide.txt')
+            sha1=bytes.fromhex('fe8170a5c33baa1a71d1913fea45de3734c4fdfa'), source_path='docs/guide.txt')
         # M (plain): modified CRLF content, too small to compress
         assert _no_data(diff_info['docs/notes.txt']) == UpdateInfo(
             path='docs/notes.txt', edit=1, eol=1, mode=0, algo=0,
             size=13, data_size=13,
-            sha1='04cfda732a5e72c4f024e19fb65c4bd9e33a1d44', source_path='')
+            sha1=bytes.fromhex('04cfda732a5e72c4f024e19fb65c4bd9e33a1d44'), source_path='')
         # C: copied from the unchanged LF old file, the copy keeps its
         # own eol (crlf), a cross eol copy
         assert _no_data(diff_info['docs/readme_copy.txt']) == UpdateInfo(
             path='docs/readme_copy.txt', edit=0, eol=1, mode=0, algo=0,
             size=10, data_size=10,
-            sha1='2cb9d0884150f87ef58e08e6517c854ee00b90c6', source_path='docs/readme.md')
+            sha1=bytes.fromhex('2cb9d0884150f87ef58e08e6517c854ee00b90c6'), source_path='docs/readme.md')
         # C: copied from the earlier new file (copy chain)
         assert _no_data(diff_info['docs/readme_copy2.txt']) == UpdateInfo(
             path='docs/readme_copy2.txt', edit=0, eol=1, mode=0, algo=0,
             size=10, data_size=10,
-            sha1='2cb9d0884150f87ef58e08e6517c854ee00b90c6', source_path='docs/readme_copy.txt')
+            sha1=bytes.fromhex('2cb9d0884150f87ef58e08e6517c854ee00b90c6'), source_path='docs/readme_copy.txt')
         # M (patch): modified, the new content of the copy that follows
         assert _no_data(diff_info['frontend/App.svelte']) == UpdateInfo(
             path='frontend/App.svelte', edit=1, eol=0, mode=0, algo=2,
             size=52, data_size=20,
-            sha1='c797b6c4c27f268e5e6c2181ba7ce52f0a7327d0', source_path='frontend/App.svelte')
+            sha1=bytes.fromhex('c797b6c4c27f268e5e6c2181ba7ce52f0a7327d0'), source_path='frontend/App.svelte')
         # C: copied from the modified new file
         assert _no_data(diff_info['frontend/App2.svelte']) == UpdateInfo(
             path='frontend/App2.svelte', edit=0, eol=0, mode=0, algo=0,
             size=52, data_size=52,
-            sha1='c797b6c4c27f268e5e6c2181ba7ce52f0a7327d0', source_path='frontend/App.svelte')
+            sha1=bytes.fromhex('c797b6c4c27f268e5e6c2181ba7ce52f0a7327d0'), source_path='frontend/App.svelte')
         # RM: renamed + modified, patched from the old file
         assert _no_data(diff_info['scripts/new_tool.py']) == UpdateInfo(
             path='scripts/new_tool.py', edit=3, eol=0, mode=0, algo=2,
             size=750, data_size=22,
-            sha1='74d902ad26e3c957239cf22ab92efab8f67c95f5', source_path='scripts/old_tool.py')
+            sha1=bytes.fromhex('74d902ad26e3c957239cf22ab92efab8f67c95f5'), source_path='scripts/old_tool.py')
         # M: eol-only change, CRLF (v1) to LF (v2), same content
         assert _no_data(diff_info['scripts/run.bat']) == UpdateInfo(
             path='scripts/run.bat', edit=1, eol=0, mode=0, algo=2,
             size=28, data_size=11,
-            sha1='30c7e458805ec8f7c2335f2d26b01f2ba8d66c16', source_path='scripts/run.bat')
+            sha1=bytes.fromhex('30c7e458805ec8f7c2335f2d26b01f2ba8d66c16'), source_path='scripts/run.bat')
         # R: pure rename, no data
         assert _no_data(diff_info['scripts/runner.sh']) == UpdateInfo(
             path='scripts/runner.sh', edit=3, eol=0, mode=0, algo=0,
             size=28, data_size=0,
-            sha1='e0cb6eaf13a42970a3d71a53fe36ac851fa09e95', source_path='scripts/run.sh')
+            sha1=bytes.fromhex('e0cb6eaf13a42970a3d71a53fe36ac851fa09e95'), source_path='scripts/run.sh')
         # C: copied from the unchanged 755 old file (refinfo)
         assert _no_data(diff_info['tools/run.sh']) == UpdateInfo(
             path='tools/run.sh', edit=0, eol=0, mode=1, algo=0,
             size=31, data_size=31,
-            sha1='2690963383249907ec8304c2f09e5d0a5d86f24d', source_path='tools/deploy.sh')
+            sha1=bytes.fromhex('2690963383249907ec8304c2f09e5d0a5d86f24d'), source_path='tools/deploy.sh')
         # M: mode-only change, 755 to 644, same content
         assert _no_data(diff_info['tools/tool.sh']) == UpdateInfo(
             path='tools/tool.sh', edit=1, eol=0, mode=0, algo=2,
             size=29, data_size=11,
-            sha1='c3e8889ba5dbcf9068862da9336f09491c2ab027', source_path='tools/tool.sh')
+            sha1=bytes.fromhex('c3e8889ba5dbcf9068862da9336f09491c2ab027'), source_path='tools/tool.sh')
         # D: deleted
         assert _no_data(diff_info['backend/legacy.py']) == UpdateInfo(
             path='backend/legacy.py', edit=2, eol=0, mode=0, algo=0,
             size=0, data_size=0,
-            sha1='', source_path='')
+            sha1=b'', source_path='')
         # D: deleted, binary
         assert _no_data(diff_info['data/cache.pkl']) == UpdateInfo(
             path='data/cache.pkl', edit=2, eol=0, mode=0, algo=0,
             size=0, data_size=0,
-            sha1='', source_path='')
+            sha1=b'', source_path='')
         # R / D / empty records carry no data
         for path in ('scripts/runner.sh', 'backend/legacy.py', 'data/cache.pkl', 'backend/empty.txt'):
             assert diff_info[path].data == b''
@@ -664,45 +664,45 @@ class TestPackDiffFullScenario:
             # M (patch) source
             '.gitattributes': RefInfo(
                 path='.gitattributes', size=87,
-                sha1='6d71afb94811acaa6f1021f95718d19aeefee5de'),
+                sha1=bytes.fromhex('6d71afb94811acaa6f1021f95718d19aeefee5de')),
             # C source, copied by backend/copy.py
             'backend/config.py': RefInfo(
                 path='backend/config.py', size=43,
-                sha1='80c4a3c2cc87ffa168e205743b3b883ad3e08eb5'),
+                sha1=bytes.fromhex('80c4a3c2cc87ffa168e205743b3b883ad3e08eb5')),
             # M (patch) source
             'backend/main.py': RefInfo(
                 path='backend/main.py', size=94,
-                sha1='01408d658d83912219e67c2d1141640cb4eb643b'),
+                sha1=bytes.fromhex('01408d658d83912219e67c2d1141640cb4eb643b')),
             # C source, copied by docs/guide2.txt
             'docs/guide.txt': RefInfo(
                 path='docs/guide.txt', size=30,
-                sha1='fe8170a5c33baa1a71d1913fea45de3734c4fdfa'),
+                sha1=bytes.fromhex('fe8170a5c33baa1a71d1913fea45de3734c4fdfa')),
             # C source, copied by docs/readme_copy.txt (cross eol)
             'docs/readme.md': RefInfo(
                 path='docs/readme.md', size=10,
-                sha1='2cb9d0884150f87ef58e08e6517c854ee00b90c6'),
+                sha1=bytes.fromhex('2cb9d0884150f87ef58e08e6517c854ee00b90c6')),
             # M (patch) source
             'frontend/App.svelte': RefInfo(
                 path='frontend/App.svelte', size=56,
-                sha1='b9bdefd8b362e86cf6af8b127f5d2d6855b7d631'),
+                sha1=bytes.fromhex('b9bdefd8b362e86cf6af8b127f5d2d6855b7d631')),
             # RM source, renamed + modified to scripts/new_tool.py
             'scripts/old_tool.py': RefInfo(
                 path='scripts/old_tool.py', size=750,
-                sha1='4c9e1b37edb31e5a5f7879d7fedd777281ca0f68'),
+                sha1=bytes.fromhex('4c9e1b37edb31e5a5f7879d7fedd777281ca0f68')),
             # M (patch) source
             'scripts/run.bat': RefInfo(
                 path='scripts/run.bat', size=28,
-                sha1='30c7e458805ec8f7c2335f2d26b01f2ba8d66c16'),
+                sha1=bytes.fromhex('30c7e458805ec8f7c2335f2d26b01f2ba8d66c16')),
             # R source, renamed to scripts/runner.sh
             'scripts/run.sh': RefInfo(
                 path='scripts/run.sh', size=28,
-                sha1='e0cb6eaf13a42970a3d71a53fe36ac851fa09e95'),
+                sha1=bytes.fromhex('e0cb6eaf13a42970a3d71a53fe36ac851fa09e95')),
             # C source, copied by tools/run.sh
             'tools/deploy.sh': RefInfo(
                 path='tools/deploy.sh', size=31,
-                sha1='2690963383249907ec8304c2f09e5d0a5d86f24d'),
+                sha1=bytes.fromhex('2690963383249907ec8304c2f09e5d0a5d86f24d')),
             # M (patch) source
             'tools/tool.sh': RefInfo(
                 path='tools/tool.sh', size=29,
-                sha1='c3e8889ba5dbcf9068862da9336f09491c2ab027'),
+                sha1=bytes.fromhex('c3e8889ba5dbcf9068862da9336f09491c2ab027')),
         }

@@ -150,7 +150,7 @@ class UnpackJob(JobBase):
                 continue
             current = self._read_current(target)
             result = self._matches(info, current)
-            tmp = self.workspace.joinpath(f'{info.size}_{info.sha1}_{index}.tmp')
+            tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{index}.tmp')
             if result.match:
                 # the target file exists and passes the size + sha1 check
                 if result.mode_matched:

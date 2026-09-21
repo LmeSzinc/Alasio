@@ -38,7 +38,7 @@ class PackEncodeManifest:
         """
         validate_filepath(path)
         size = len(content)
-        sha1 = hashlib.sha1(content).hexdigest()
+        sha1 = hashlib.sha1(content).digest()
         self.files[path] = RefInfo(path=path, size=size, sha1=sha1)
 
     def iter_data(self):
@@ -76,7 +76,7 @@ class PackEncodeManifest:
             # this shouldn't happen
             if not file.sha1:
                 raise ValueError(f'Empty sha1 from {file}')
-            yield bytes.fromhex(file.sha1)
+            yield file.sha1
 
     def iter_manifest_data(self):
         checksum = hashlib.sha1()

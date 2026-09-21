@@ -8,7 +8,7 @@ The file list is designed to cover every record type produced by PackFull:
 - eol: 0 (LF), 1 (CRLF via .gitattributes), 2 (binary, contains b'\\x00')
 - mode: 644 (0) and 755 (1) files, mode comes from the git entry mode
 - algo: 0 (raw, small/incompressible files), 1 (lzma, big compressible files)
-- empty files (size = 0, sha1 = ''), deep paths, duplicate contents (C)
+- empty files (size = 0, sha1 = b''), deep paths, duplicate contents (C)
 """
 from hashlib import sha1
 from random import Random
@@ -433,7 +433,7 @@ class MockDecodeBase:
             info = IdxInfo(
                 path=path,
                 size=len(content),
-                sha1=sha1(content).hexdigest() if content else '',
+                sha1=sha1(content).digest() if content else b'',
                 eol=eols.get(path, 0),
                 mode=modes.get(path, 0),
                 edit=edits.get(path, 0),

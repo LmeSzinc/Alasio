@@ -264,7 +264,7 @@ class JobBase:
             blob = data.replace(b'\r\n', b'\n')
             if len(blob) != info.size:
                 return MatchResult(match=False)
-            if info.sha1 and sha1(blob).hexdigest() != info.sha1:
+            if info.sha1 and sha1(blob).digest() != info.sha1:
                 return MatchResult(match=False)
             # the content is the record blob, only the EOL decides:
             # every \n of a clean CRLF file is part of a \r\n, and the
@@ -278,7 +278,7 @@ class JobBase:
             # the record expects LF, compare the file as-is first:
             # a CRLF file is longer than the LF blob and falls through
             if len(data) == info.size and (
-                    not info.sha1 or sha1(data).hexdigest() == info.sha1):
+                    not info.sha1 or sha1(data).digest() == info.sha1):
                 return MatchResult(match=True, mode_matched=JobBase._mode_matches(info, current))
             if b'\r' not in data:
                 # no CR, the content itself differs from the record
@@ -290,13 +290,13 @@ class JobBase:
                 return MatchResult(match=False)
             if len(converted) != info.size:
                 return MatchResult(match=False)
-            if info.sha1 and sha1(converted).hexdigest() != info.sha1:
+            if info.sha1 and sha1(converted).digest() != info.sha1:
                 return MatchResult(match=False)
             return MatchResult(match=False, match_data=converted)
         # binary (eol == 2), compared as-is
         if len(data) != info.size:
             return MatchResult(match=False)
-        if info.sha1 and sha1(data).hexdigest() != info.sha1:
+        if info.sha1 and sha1(data).digest() != info.sha1:
             return MatchResult(match=False)
         return MatchResult(match=True, mode_matched=JobBase._mode_matches(info, current))
 

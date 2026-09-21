@@ -218,7 +218,7 @@ class PackEncodeBase:
             # this shouldn't happen
             if not file.sha1:
                 raise ValueError(f'Empty sha1 from {file}')
-            yield bytes.fromhex(file.sha1)
+            yield file.sha1
         for file in self._iterfile_with_content(iter_file=True):
             # sha1 of empty content is always the same, no need to store it
             if file.data_size == 0:
@@ -226,7 +226,7 @@ class PackEncodeBase:
             # this shouldn't happen
             if not file.sha1:
                 raise ValueError(f'Empty sha1 from {file}')
-            yield bytes.fromhex(file.sha1)
+            yield file.sha1
 
     def iter_file_data(self) -> "Iterator[bytes]":
         for file in self._iterfile_with_content(iter_file=True):

@@ -639,7 +639,7 @@ class TestDownload:
         decoder = PackDecodeBase(UPDATE)
         index = list(decoder.fileinfo).index('docs/readme_copy.txt')
         info = decoder.fileinfo['docs/readme_copy.txt']
-        tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1}_{index}.tmp'
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1.hex()}_{index}.tmp'
         os.makedirs(tmp.uppath(), exist_ok=True)
         with open(tmp, 'wb') as f:
             f.write(b'# Website\r\n')
