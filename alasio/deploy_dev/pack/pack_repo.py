@@ -178,12 +178,12 @@ class PackFull(PackEncodeBase):
         for path, entry in self.filelist.items():
             if path == '.gitattributes':
                 obj = repo.cat(entry.sha1)
-                content = obj.decoded.decode()
+                content = bytes(obj.decoded).decode()
                 attr.load(root='', content=content)
             if path.endswith('/.gitattributes'):
                 root = removesuffix(path, '.gitattributes')
                 obj = repo.cat(entry.sha1)
-                content = obj.decoded.decode()
+                content = bytes(obj.decoded).decode()
                 attr.load(root=root, content=content)
         return attr
 
