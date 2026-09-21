@@ -604,10 +604,24 @@ class TestDecodeStreamInvalid:
             decode_bit2_stream_iter(data, 1)
 
     def test_truncated_short_copy_missing_offset(self):
-        """Short copy missing offset raises IndexError."""
+        """Short copy missing offset raises ValueError."""
         data = memoryview(bytes([64]))
-        with pytest.raises(IndexError):
+        with pytest.raises(ValueError, match="Data truncated"):
             decode_bit2_stream_iter(data, 1)
+
+    def test_truncated_batch_missing_items(self):
+        """Batch literal missing its packed bytes raises ValueError."""
+        # byte 32 declares a batch of 3 items, carried by 1 packed byte
+        data = memoryview(bytes([32]))
+        with pytest.raises(ValueError, match="Data truncated"):
+            decode_bit2_stream_iter(data, 3)
+
+    def test_truncated_batch_partial_items(self):
+        """Batch literal with fewer packed bytes than it declares raises ValueError."""
+        # byte 63 declares a batch of 34 items, carried by 9 packed bytes
+        data = memoryview(bytes([63, 1, 2]))
+        with pytest.raises(ValueError, match="Data truncated"):
+            decode_bit2_stream_iter(data, 34)
 
     def test_truncated_long_copy_missing_bytes(self):
         """Long copy missing length/offset bytes raises ValueError."""
@@ -618,6 +632,34 @@ class TestDecodeStreamInvalid:
         data = memoryview(bytes([113]))  # L_d=0, F_d=1, needs 3 more bytes
         with pytest.raises(ValueError):
             decode_bit2_stream_iter(data, 1)
+
+    @pytest.mark.parametrize("opcodes, total", [
+        ([(0, [i % 4 for i in range(34)])], 34),  # batch literal
+        ([(1, 2, 100)], 100),                   # long run
+        ([(2, 10, 3)], 3),                      # short copy
+        ([(2, 300, 40)], 40),                   # long copy
+        ([(0, [0]), (1, 2, 5), (2, 10, 3)], 9),  # mixed
+    ])
+    def test_any_truncation_raises_value_error(self, opcodes, total):
+        """A truncated stream must raise ValueError, never another exception.
+
+        The opcode bytes are read in several branches, a stream that ends
+        inside one of them is a truncated stream, not an IndexError.
+        """
+        encoded = bytes(encode_bit2_stream_iter(opcodes))
+        assert len(encoded) > 1
+        for end in range(len(encoded)):
+            try:
+                decoded, read = decode_bit2_stream_iter(memoryview(encoded[:end]), total)
+            except ValueError:
+                continue
+            except Exception as e:
+                raise AssertionError(
+                    f"truncate at {end}: raised {type(e).__name__}: {e}") from e
+            # a truncated stream that decodes must have carried enough values
+            count = sum(len(opcode[1]) if opcode[0] == 0 else opcode[2] for opcode in decoded)
+            assert count >= total, f"truncate at {end}: decoded {count} values, total {total}"
+            assert read <= end
 
 
 # ==============================================================================

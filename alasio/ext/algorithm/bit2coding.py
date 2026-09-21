@@ -552,6 +552,10 @@ def decode_bit2_stream_iter(data, total, ext8=False):
 
     Returns:
         tuple[list[int], int]: (list of opcodes, read bytes count)
+
+    Raises:
+        ValueError: If the stream ends before ``total`` numbers are
+            decoded, or an opcode is invalid
     """
     count = 0
     read = 0
@@ -595,7 +599,10 @@ def decode_bit2_stream_iter(data, total, ext8=False):
         #           this indicates to read next byte as F (0~255)
         elif byte >= 64:
             length = (byte % 32) + 1
-            offset = data[read] + 1
+            try:
+                offset = data[read] + 1
+            except IndexError:
+                raise ValueError(f"[decode_bit2] Data truncated, expected {total} numbers, got {count}")
             read += 1
             opcodes.append((2, offset, length))
             count += length
@@ -603,6 +610,10 @@ def decode_bit2_stream_iter(data, total, ext8=False):
         elif byte >= 32:
             n = byte - 29  # 3-34 items
             packed_count = (n + 3) // 4
+            # every packed byte carries 4 items, a stream that ends
+            # before them is truncated, check once instead of per byte
+            if read + packed_count > len(data):
+                raise ValueError(f"[decode_bit2] Data truncated, expected {total} numbers, got {count}")
             remain_n = n
             items = []
             for _ in range(packed_count):
