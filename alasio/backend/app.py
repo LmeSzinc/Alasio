@@ -1,11 +1,13 @@
 import contextlib
 
 import trio
+from starlette import status
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
 
 from alasio.backend.auth import auth
-from alasio.backend.dev.assets import ImageStaticFiles, SPANoCacheStaticFiles
+from alasio.backend.dev.assets import ImageStaticFiles
+from alasio.backend.frontend import SITE
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
 from alasio.backend.reactive.source import BaseSource
 from alasio.backend.restart import resume_after_restart
@@ -18,8 +20,8 @@ from alasio.backend.ws.topic import PreviewServer, WebsocketServer
 from alasio.backport.patch import patch_mimetype
 from alasio.config.entry.model import MOD_JSON_CACHE
 from alasio.db.conn import SQLITE_POOL
-from alasio.ext import env
 from alasio.ext.path.calc import joinnormpath
+from alasio.ext.starapi.param import HTTPExceptionJson
 from alasio.ext.starapi.router import APIRouter, StarAPI
 from alasio.logger import logger
 
@@ -27,6 +29,32 @@ patch_mimetype()
 
 # stored context object
 WorkerContext_obj = None
+
+# The catch-all route of the API namespace answers every method: a function
+# route with methods=None answers GET only, and a non-GET request would be a
+# partial match (a 405 candidate) that lets the frontend mount win.
+API_NOT_FOUND_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'TRACE']
+
+
+async def api_not_found(request):
+    """
+    Answer an unmatched path of the API namespace.
+
+    The frontend page server is mounted at "/" as the last route, so an
+    unknown path under /api would be answered with the SPA page and status 200
+    without this catch-all: a typo in an endpoint URL reads as a successful
+    call and hides the mistake (the frontend only logs "Invalid JSON
+    response"). The route is added after every API route and before the
+    frontend mount, so only the paths no route matched reach it.
+
+    Args:
+        request (Request): The request of the unmatched path
+
+    Raises:
+        HTTPExceptionJson: 404 with the unmatched path
+    """
+    raise HTTPExceptionJson(
+        status.HTTP_404_NOT_FOUND, err='API_NOT_FOUND', data={'path': request.url.path})
 
 
 def patch_context_cls():
@@ -107,6 +135,9 @@ def sync_task_gc(wait=8):
     logger.check_rotate()
     SQLITE_POOL.gc(wait)
     MOD_JSON_CACHE.gc(wait)
+    # frontend: the decoded bodies of the clients without gzip that stopped
+    # asking for them (the gzip bodies are the payload, they stay resident)
+    SITE.identity_cache.gc(wait)
     # data-expiry gc of topic sources: instances whose data TTL expired
     # (membership is static, GC=True classes only; NoCachePush removes
     # itself on the last unsubscribe and never appears here)
@@ -153,6 +184,10 @@ async def lifespan(app):
         nursery.start_soon(task_gc)
         # warmups
         nursery.start_soon(ConfigScanSource.create_default_config)
+        # the frontend: one worker thread reads the manifest and every file in
+        # the background, the 5s startup window of the supervisor must not be
+        # spent on the whole tree (requests prepare their file on demand)
+        nursery.start_soon(SITE.warm_up)
         # auto-resume of the workers recorded before a graceful restart: a
         # no-op without the one-shot credential (normal cold start). The stale
         # resume file cleanup is part of this task: it must run after the read
@@ -228,11 +263,19 @@ def create_app():
     # Mount mod static files
     pass
 
+    # Unknown paths of the API namespace: keep the API error format instead of
+    # falling through to the frontend page server below (see api_not_found)
+    app.routes.append(Route('/api', api_not_found, methods=API_NOT_FOUND_METHODS))
+    app.routes.append(Route('/api/{path:path}', api_not_found, methods=API_NOT_FOUND_METHODS))
+
     # Mount static files
 
-    # for frontend local builds
-    root = env.ALASIO_ROOT.joinpath('frontend/build')
-    SPANoCacheStaticFiles.mount(app, '/', directory=root, name='static')
+    # Mount the frontend page server: the files listed in the delivered
+    # frontend-manifest.pack are served from memory (alasio.backend.frontend).
+    # Nothing is read here, the warmup task of the lifespan loads the manifest
+    # and the files; a deployment always has them, a checkout does not (vite
+    # serves the frontend there) and the site answers 404.
+    app.mount('/', SITE, name='static')
     # since static files mounted at "/", any route after it won't work
 
     return app

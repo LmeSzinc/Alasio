@@ -1,10 +1,8 @@
 """
 Tests for the static asset servers (alasio/backend/dev/assets.py).
 
-- ImageStaticFiles (mod dev assets): no-cache + image-only — non-image
-  content is rejected with 403, no CSP is attached.
-- SPANoCacheStaticFiles (frontend page server): no-cache + SPA fallback +
-  CSP (mirrored from the page's meta, extended with frame-ancestors).
+ImageStaticFiles (mod dev assets): no-cache + image-only — non-image
+content is rejected with 403, no CSP is attached.
 """
 
 import os as os_module
@@ -12,7 +10,7 @@ import os as os_module
 import pytest
 from starlette.exceptions import HTTPException
 
-from alasio.backend.dev.assets import CSP, ImageStaticFiles, SPANoCacheStaticFiles
+from alasio.backend.dev.assets import ImageStaticFiles
 from alasio.testing.filesystem import fs  # noqa: F401
 
 HTML_WITH_META_CSP = """<!doctype html>
@@ -25,8 +23,6 @@ HTML_WITH_META_CSP = """<!doctype html>
   <body>hi</body>
 </html>
 """
-
-HTML_NO_META = """<!doctype html><html><head><title>x</title></head><body>hi</body></html>"""
 
 
 @pytest.fixture(autouse=True)
@@ -135,108 +131,3 @@ class TestDevAssetsImageOnly:
         with pytest.raises(HTTPException) as excinfo:
             await app.get_response('evil.html', make_scope('/evil.html'))
         assert excinfo.value.status_code == 403
-
-
-class TestSpaPageServer:
-    """SPANoCacheStaticFiles: pages carry the CSP, images/assets do not."""
-
-    def make_app(self):
-        return SPANoCacheStaticFiles(directory='/site', html=True, check_dir=False)
-
-    @pytest.mark.trio
-    async def test_html_mirrors_meta_csp(self, fs):
-        fs.create_file('/site/index.html', contents=HTML_WITH_META_CSP)
-        app = self.make_app()
-        resp = await app.get_response('index.html', make_scope('/'))
-        status, headers = await run_response(resp, make_scope('/'))
-        assert status == 200
-        csp = headers.get('content-security-policy', '')
-        # the meta content is served verbatim ...
-        assert csp.startswith("default-src 'self'; script-src 'self' 'sha256-abc='")
-        # ... extended with frame-ancestors (the meta tag ignores it): the
-        # electron host (production) and local loopback dev hosts
-        assert "frame-ancestors 'self' app://bundle http://127.0.0.1:* http://localhost:*" in csp
-
-    @pytest.mark.trio
-    async def test_html_without_meta_uses_fallback(self, fs):
-        fs.create_file('/site/index.html', contents=HTML_NO_META)
-        app = self.make_app()
-        resp = await app.get_response('index.html', make_scope('/'))
-        _, headers = await run_response(resp, make_scope('/'))
-        assert headers.get('content-security-policy', '') == CSP
-
-    @pytest.mark.trio
-    async def test_non_html_has_no_csp(self, fs):
-        fs.create_file('/site/app.css', contents='body{}')
-        fs.create_file('/site/app.js', contents='console.log(1)')
-        fs.create_file('/site/icon.png', contents=b'png')
-        app = self.make_app()
-        for name in ['app.css', 'app.js', 'icon.png']:
-            resp = await app.get_response(name, make_scope(f'/{name}'))
-            _, headers = await run_response(resp, make_scope(f'/{name}'))
-            assert headers.get('content-security-policy', '') == ''
-            assert 'content-security-policy' not in headers
-
-    @pytest.mark.trio
-    async def test_spa_fallback_serves_index_with_csp(self, fs):
-        fs.create_file('/site/index.html', contents=HTML_WITH_META_CSP)
-        app = self.make_app()
-        resp = await app.get_response('some/client/route', make_scope('/some/client/route'))
-        status, headers = await run_response(resp, make_scope('/some/client/route'))
-        assert status == 200
-        assert 'frame-ancestors' in headers.get('content-security-policy', '')
-
-    @pytest.mark.trio
-    async def test_non_image_allowed(self, fs):
-        """The frontend page server is not image-only."""
-        fs.create_file('/site/asset.json', contents='{}')
-        app = self.make_app()
-        resp = await app.get_response('asset.json', make_scope('/asset.json'))
-        status, _ = await run_response(resp, make_scope('/asset.json'))
-        assert status == 200
-
-
-class TestHtmlMetaCspCache:
-    """Meta CSP extraction is cached; unchanged files are not re-read."""
-
-    def make_app(self):
-        return SPANoCacheStaticFiles(directory='/site', html=True, check_dir=False)
-
-    @pytest.mark.trio
-    async def test_unchanged_file_not_reread(self, fs, monkeypatch):
-        """On cache hit the meta extraction must not open the file again."""
-        fs.create_file('/site/index.html', contents=HTML_WITH_META_CSP)
-        app = self.make_app()
-        resp = await app.get_response('index.html', make_scope('/'))
-        await run_response(resp, make_scope('/'))
-
-        # count text-mode opens only: FileResponse still streams the file
-        # once (mode='rb') on send, the meta extraction must not re-read it
-        text_reads = []
-        original_open = open
-
-        def counting_open(file, *args, **kwargs):
-            if args and args[0] == 'r':
-                text_reads.append(file)
-            return original_open(file, *args, **kwargs)
-
-        monkeypatch.setattr('builtins.open', counting_open)
-        resp = await app.get_response('index.html', make_scope('/'))
-        await run_response(resp, make_scope('/'))
-        assert text_reads == []
-
-    @pytest.mark.trio
-    async def test_cache_invalidated_on_content_change(self, fs):
-        """A changed file (new size) must not serve the stale cached CSP."""
-        fs.create_file('/site/index.html', contents=HTML_WITH_META_CSP)
-        app = self.make_app()
-        resp = await app.get_response('index.html', make_scope('/'))
-        _, headers = await run_response(resp, make_scope('/'))
-        assert headers.get('content-security-policy', '').startswith(
-            "default-src 'self'; script-src 'self' 'sha256-abc='")
-
-        fs.remove('/site/index.html')
-        fs.create_file('/site/index.html', contents=HTML_NO_META)
-        resp = await app.get_response('index.html', make_scope('/'))
-        _, headers = await run_response(resp, make_scope('/'))
-        assert headers.get('content-security-policy', '') == CSP
