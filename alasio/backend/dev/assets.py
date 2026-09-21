@@ -1,7 +1,6 @@
 import os
 
 from starlette import status
-from starlette.middleware.gzip import GZipResponder
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
@@ -31,8 +30,11 @@ class NoCacheStaticFiles(StaticFiles):
         resp.headers.setdefault('Expires', '0')
         resp.headers.setdefault('Pragma', 'no-cache')
 
-        # GZipMiddleware
-        resp = GZipResponder(resp, minimum_size=500, compresslevel=9)
+        # No compression: the files of this server are images, already
+        # compressed, and wrapping the response in GZipResponder set
+        # Content-Encoding without checking Accept-Encoding (RFC 9110: an
+        # encoding the client did not ask for must never be sent) while
+        # burning CPU on every response.
 
         return resp
 
