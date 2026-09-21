@@ -4,10 +4,10 @@ Mod loading tests.
 MOD_LOADER binds env.PROJECT_ROOT when it is imported
 (MOD_LOADER = ModLoader(env.PROJECT_ROOT)), so the backend entry
 (entry.backend_entry -> asgi.run) may only import the app chain after
-create_config() set the project root (see alasio/backend/asgi.py).
+create_config() set the project root (see alasio/backend/app/asgi.py).
 
 These tests run the entry startup order in a fresh interpreter
-(tests/backend/mod_loading.py, started from a foreign cwd with
+(tests/backend/app/mod_loading.py, started from a foreign cwd with
 --root <project root>) and assert that the repo mod ExampleMod is loaded from
 the resolved root, in both project layouts:
 
@@ -38,8 +38,8 @@ MOD_NAME = 'example_mod'
 MOD_ROOT = ALASIO_ROOT.joinpath('ExampleMod')
 # the test folder: a cwd that is not the project root, so the probe must
 # resolve everything through --root (no temp folder is created per run)
-BACKEND_TEST_DIR = ALASIO_ROOT.joinpath('tests/backend')
-SCRIPT = BACKEND_TEST_DIR.joinpath('mod_loading.py')
+APP_TEST_DIR = ALASIO_ROOT.joinpath('tests/backend/app')
+SCRIPT = APP_TEST_DIR.joinpath('mod_loading.py')
 
 # project layouts under test, see the module docstring
 CASE_ROOTS = {
@@ -90,7 +90,7 @@ def _probe(root):
     # the probe must import the repo copy of alasio, not an installed one
     env['PYTHONPATH'] = repo + (os.pathsep + existing if existing else '')
     # foreign cwd: the mod must resolve through PROJECT_ROOT, not through the cwd
-    workdir = BACKEND_TEST_DIR
+    workdir = APP_TEST_DIR
 
     proc = subprocess.run(
         [sys.executable, os.path.normpath(SCRIPT), '--root', os.path.normpath(root)],

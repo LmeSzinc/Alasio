@@ -2,13 +2,13 @@
 Tests for the restart / force_restart RPC entry (alasio/backend/topic/state.py)
 
 The rpc only validates and schedules the orchestration: the orchestration
-itself is covered by tests/backend/test_restart_resume.py.
+itself is covered by tests/backend/app/test_restart_resume.py.
 """
 import builtins
 
 import pytest
 
-from alasio.backend import restart
+from alasio.backend.app import restart
 from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.context import GLOBAL_CONTEXT

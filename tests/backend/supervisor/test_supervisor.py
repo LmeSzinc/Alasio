@@ -455,7 +455,7 @@ class TestStdinPrefsCommands:
 
                 # 2. Same value again -> no write. The invalid line sent
                 #    right after is the barrier: the pipe is FIFO and
-                #    mpipe_recv_loop (alasio/backend/lifespan.py) handles
+                #    mpipe_recv_loop (alasio/backend/app/lifespan.py) handles
                 #    messages strictly serially in one thread (recv ->
                 #    validate/persist -> next recv), so when the backend
                 #    logged the invalid value the idempotent line before it

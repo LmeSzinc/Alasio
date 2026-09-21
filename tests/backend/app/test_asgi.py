@@ -1,5 +1,5 @@
 """
-Tests for alasio.backend.asgi.create_config.
+Tests for alasio.backend.app.asgi.create_config.
 
 Focus: the hypercorn SSL wiring. hypercorn Config uses `keyfile` /
 `certfile` field names (not uvicorn-style `ssl_keyfile` /
@@ -9,7 +9,7 @@ instance attributes and leave the port plaintext.
 
 import pytest
 
-from alasio.backend.asgi import create_config
+from alasio.backend.app.asgi import create_config
 
 
 class FakeBackend:
@@ -48,10 +48,10 @@ class TestCreateConfig:
     def test_ssl_sets_hypercorn_keyfile_certfile(self, monkeypatch):
         """SSL configured: hypercorn must be given keyfile/certfile."""
         monkeypatch.setattr(
-            'alasio.backend.asgi.apply_hypercorn_exclusivity_patch', lambda: None)
+            'alasio.backend.app.asgi.apply_hypercorn_exclusivity_patch', lambda: None)
         monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
         monkeypatch.setattr(
-            'alasio.backend.asgi.DeployConfig',
+            'alasio.backend.app.asgi.DeployConfig',
             lambda: FakeDeployConfig(ssl=True),
         )
 
@@ -65,10 +65,10 @@ class TestCreateConfig:
     def test_no_ssl_leaves_plaintext(self, monkeypatch):
         """No SSL configured: hypercorn stays plaintext."""
         monkeypatch.setattr(
-            'alasio.backend.asgi.apply_hypercorn_exclusivity_patch', lambda: None)
+            'alasio.backend.app.asgi.apply_hypercorn_exclusivity_patch', lambda: None)
         monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
         monkeypatch.setattr(
-            'alasio.backend.asgi.DeployConfig',
+            'alasio.backend.app.asgi.DeployConfig',
             lambda: FakeDeployConfig(ssl=False),
         )
 
@@ -82,10 +82,10 @@ class TestCreateConfig:
         """The loaded config is written back, so the file is normalized
         (comments / read errors) before the backend serves"""
         monkeypatch.setattr(
-            'alasio.backend.asgi.apply_hypercorn_exclusivity_patch', lambda: None)
+            'alasio.backend.app.asgi.apply_hypercorn_exclusivity_patch', lambda: None)
         monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
         fake = FakeDeployConfig(ssl=False)
-        monkeypatch.setattr('alasio.backend.asgi.DeployConfig', lambda: fake)
+        monkeypatch.setattr('alasio.backend.app.asgi.DeployConfig', lambda: fake)
 
         create_config([])
 
@@ -107,7 +107,7 @@ class TestBindAnnounce:
         monkeypatch.setattr(builtins, '__mpipe_conn__', child_conn, raising=False)
         monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
         monkeypatch.setattr(
-            'alasio.backend.asgi.DeployConfig',
+            'alasio.backend.app.asgi.DeployConfig',
             lambda: FakeDeployConfig(ssl=False),
         )
 
@@ -148,7 +148,7 @@ class TestBindAnnounce:
         monkeypatch.setattr(builtins, '__mpipe_conn__', child_conn, raising=False)
         monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
         monkeypatch.setattr(
-            'alasio.backend.asgi.DeployConfig',
+            'alasio.backend.app.asgi.DeployConfig',
             lambda: FakeDeployConfig(ssl=False),
         )
 

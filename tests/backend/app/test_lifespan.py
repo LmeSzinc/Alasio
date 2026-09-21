@@ -4,8 +4,8 @@ import threading
 
 import trio
 
-from alasio.backend import lifespan
-from alasio.backend.lifespan import mpipe_recv_loop
+from alasio.backend.app import lifespan
+from alasio.backend.app.lifespan import mpipe_recv_loop
 
 
 class TestAnnounceStarted:
@@ -206,7 +206,7 @@ class TestMpipeRecvLoop:
         command:set_lang must be forwarded to the prefs handler and the
         listener must keep running; command:stop afterwards still works
         """
-        from alasio.backend import lifespan as lifespan_mod
+        from alasio.backend.app import lifespan as lifespan_mod
 
         parent_conn, event, child_conn = self._make(monkeypatch)
 
@@ -266,7 +266,7 @@ class TestMpipeRecvLoopCancelRestart:
         Returns:
             list: Cancel reasons recorded by the spy
         """
-        from alasio.backend import restart as restart_mod
+        from alasio.backend.app import restart as restart_mod
 
         calls = []
 

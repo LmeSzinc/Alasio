@@ -2,9 +2,9 @@ from threading import Thread
 
 import trio
 
+from alasio.backend.app.prefs import handle_stdin_set_dpi_scaling, handle_stdin_set_lang, handle_stdin_set_theme
 from alasio.backend.mpipe.mpipe_backend import mpipe_backend
 from alasio.backend.mpipe.token_backend import token_table
-from alasio.backend.prefs import handle_stdin_set_dpi_scaling, handle_stdin_set_lang, handle_stdin_set_theme
 from alasio.backend.reactive.event import ResponseEvent
 from alasio.backend.ws.ws_server import WebsocketTopicServer
 from alasio.logger import logger
@@ -44,7 +44,7 @@ def mpipe_recv_loop(conn, trio_token):
         # module is imported by restart.py (lifespan_restart), a module level
         # import would be circular
         try:
-            from alasio.backend.restart import cancel_graceful_restart
+            from alasio.backend.app.restart import cancel_graceful_restart
 
             # async: its blocking parts await the trio thread pool, so drive it
             # from this (mpipe recv) thread through the loop

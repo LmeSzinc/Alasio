@@ -1,7 +1,7 @@
 """
-Tests for alasio.backend.app (create_app).
+Tests for alasio.backend.app.app (create_app).
 
-create_app() mounts the frontend page server of alasio.backend.frontend at "/":
+create_app() mounts the frontend page server of alasio.backend.app.frontend at "/":
 the site (SITE, the singleton of the backend process) serves the files of the
 delivered frontend manifest
 (<ALASIO_ROOT>/alasio/deploy_data/frontend-manifest.pack) from memory.
@@ -26,9 +26,9 @@ import pytest
 from starlette.requests import Request
 from starlette.routing import Match, Route
 
-from alasio.backend import frontend
-from alasio.backend.app import api_not_found, create_app
-from alasio.backend.frontend import FRONTEND_FOLDER, MANIFEST_FILE, FrontendSite
+from alasio.backend.app import frontend
+from alasio.backend.app.app import api_not_found, create_app
+from alasio.backend.app.frontend import FRONTEND_FOLDER, MANIFEST_FILE, FrontendSite
 from alasio.ext.env import ALASIO_ROOT
 from alasio.ext.starapi.param import HTTPExceptionJson
 

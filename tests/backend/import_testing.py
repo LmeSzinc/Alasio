@@ -460,7 +460,7 @@ class HeavyImportTest:
             # note that a spawned subprocess requires module-level function, you must define a standalone function here.
             # function with decorator, function inside a function, class method, can't be pickled and run.
             def import_backend():
-                from alasio.backend.app import create_app
+                from alasio.backend.app.app import create_app
                 create_app()
 
             def test_backend_no_heavy_import():

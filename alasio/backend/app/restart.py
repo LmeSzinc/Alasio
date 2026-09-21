@@ -56,7 +56,7 @@ from typing import List, Optional
 import msgspec
 import trio
 
-from alasio.backend.lifespan import SHUTDOWN_EVENT, lifespan_restart
+from alasio.backend.app.lifespan import SHUTDOWN_EVENT, lifespan_restart
 from alasio.backend.mpipe.mpipe_backend import mpipe_backend
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.restart import RestartSource

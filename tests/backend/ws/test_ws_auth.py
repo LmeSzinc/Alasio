@@ -319,7 +319,7 @@ class TestRenewal:
         Rotation check: a restricted-subscription connection with a valid
         token gets the 'renew' control message.
         """
-        from alasio.backend.lifespan import notify_rotation
+        from alasio.backend.app.lifespan import notify_rotation
 
         token_table.seed_from_supervisor(('tok1',))
         harness = AuthHarness(
@@ -347,7 +347,7 @@ class TestRenewal:
     @pytest.mark.trio
     async def test_rotation_evicted_connection_closed_4002(self):
         """An evicted restricted connection is closed with 4002."""
-        from alasio.backend.lifespan import notify_rotation
+        from alasio.backend.app.lifespan import notify_rotation
 
         token_table.seed_from_supervisor(('tok1',))
         harness = AuthHarness(
@@ -506,7 +506,7 @@ class TestNotifyRotationFaultTolerance:
     @pytest.mark.trio
     async def test_broken_send_does_not_abort_others(self):
         """A connection whose send() raises is skipped, others still notified."""
-        from alasio.backend.lifespan import notify_rotation
+        from alasio.backend.app.lifespan import notify_rotation
 
         token_table.seed_from_supervisor(('tok1',))
         good = FakeNotifyServer(subscribed={'restricted'}, auth_token='tok1')
@@ -521,8 +521,8 @@ class TestNotifyRotationFaultTolerance:
     @pytest.mark.trio
     async def test_hanging_send_times_out_and_others_notified(self, monkeypatch):
         """A connection whose send() hangs is cut off by the timeout."""
-        from alasio.backend import lifespan as lifespan_module
-        from alasio.backend.lifespan import notify_rotation
+        from alasio.backend.app import lifespan as lifespan_module
+        from alasio.backend.app.lifespan import notify_rotation
 
         monkeypatch.setattr(lifespan_module, 'ROTATION_NOTIFY_TIMEOUT', 0.1)
         token_table.seed_from_supervisor(('tok1',))
@@ -538,8 +538,8 @@ class TestNotifyRotationFaultTolerance:
     @pytest.mark.trio
     async def test_broken_close_does_not_abort_others(self, monkeypatch):
         """A connection whose close() hangs is cut off, others still closed."""
-        from alasio.backend import lifespan as lifespan_module
-        from alasio.backend.lifespan import notify_rotation
+        from alasio.backend.app import lifespan as lifespan_module
+        from alasio.backend.app.lifespan import notify_rotation
 
         monkeypatch.setattr(lifespan_module, 'ROTATION_NOTIFY_TIMEOUT', 0.1)
         token_table.seed_from_supervisor(('tok1',))
@@ -556,7 +556,7 @@ class TestNotifyRotationFaultTolerance:
     @pytest.mark.trio
     async def test_ordinary_connections_not_notified(self):
         """Connections without restricted subscriptions are untouched."""
-        from alasio.backend.lifespan import notify_rotation
+        from alasio.backend.app.lifespan import notify_rotation
 
         token_table.seed_from_supervisor(('tok1',))
         plain = FakeNotifyServer(subscribed={'public'}, auth_token='tok1')

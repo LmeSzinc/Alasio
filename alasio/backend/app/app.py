@@ -5,12 +5,12 @@ from starlette import status
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
 
+from alasio.backend.app.frontend import SITE
+from alasio.backend.app.restart import resume_after_restart
 from alasio.backend.auth import auth
 from alasio.backend.dev.assets import ImageStaticFiles
-from alasio.backend.frontend import SITE
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
 from alasio.backend.reactive.source import BaseSource
-from alasio.backend.restart import resume_after_restart
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws import renew as ws_renew
@@ -271,7 +271,7 @@ def create_app():
     # Mount static files
 
     # Mount the frontend page server: the files listed in the delivered
-    # frontend-manifest.pack are served from memory (alasio.backend.frontend).
+    # frontend-manifest.pack are served from memory (alasio.backend.app.frontend).
     # Nothing is read here, the warmup task of the lifespan loads the manifest
     # and the files; a deployment always has them, a checkout does not (vite
     # serves the frontend there) and the site answers 404.

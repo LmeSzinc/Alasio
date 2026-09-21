@@ -92,7 +92,7 @@ def import_backend_startup():
     """
     Simulate backend process startup imports: spawn main-script re-import,
     pickle target / args deserialization, entry body, server layer
-    (alasio.backend.asgi), app module level and the worker manager chain
+    (alasio.backend.app.asgi), app module level and the worker manager chain
     (lifespan).
     """
     # spawn re-import of the main script, module level only
@@ -102,9 +102,9 @@ def import_backend_startup():
     from hypercorn.trio import serve  # noqa: F401
 
     # serve_app -> app.py module level (lazy, after create_config set the root)
-    import alasio.backend.app  # noqa: F401
+    import alasio.backend.app.app  # noqa: F401
     # backend_entry -> asgi.py module level (the backend entry module)
-    from alasio.backend.asgi import run  # noqa: F401
+    from alasio.backend.app.asgi import run  # noqa: F401
     # spawn args deserialization (backend_entry callable)
     from alasio.backend.entry import backend_entry  # noqa: F401
     from alasio.backend.entry import backend_process_entry  # noqa: F401

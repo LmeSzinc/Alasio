@@ -378,7 +378,7 @@ class TestSupervisor(Supervisor):
 
         import trio
 
-        from alasio.backend.lifespan import SHUTDOWN_EVENT, mpipe_recv_loop
+        from alasio.backend.app.lifespan import SHUTDOWN_EVENT, mpipe_recv_loop
         from alasio.ext.env import set_project_root
         from alasio.ext.path import PathStr
         # this process only exists for the test: never open a log file in the

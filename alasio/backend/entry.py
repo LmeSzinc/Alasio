@@ -38,7 +38,7 @@ def backend_entry(args):
     # asgi (the server layer) instead of app: asgi imports the ASGI app
     # lazily, only after create_config() set PROJECT_ROOT -- the app chain
     # binds env.PROJECT_ROOT at import time (see asgi.py)
-    from alasio.backend.asgi import run
+    from alasio.backend.app.asgi import run
     run(args)
 
 

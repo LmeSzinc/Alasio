@@ -4,8 +4,8 @@ from tests.backend.import_testing import HeavyImportTest
 def import_backend():
     # backend startup: the server layer (the entry module) is imported first,
     # the ASGI app is imported lazily by serve_app
-    from alasio.backend.app import create_app
-    from alasio.backend.asgi import run  # noqa: F401
+    from alasio.backend.app.app import create_app
+    from alasio.backend.app.asgi import run  # noqa: F401
     create_app()
 
 

@@ -1,10 +1,10 @@
 """
 Mod loading probe.
 
-Started by tests/backend/test_mod_loading.py in a fresh interpreter with
+Started by tests/backend/app/test_mod_loading.py in a fresh interpreter with
 --root <project root>. It walks the backend child startup order:
 
-1. import the server layer (alasio.backend.asgi) -- what entry.backend_entry
+1. import the server layer (alasio.backend.app.asgi) -- what entry.backend_entry
    does, before any project root is known;
 2. set the project root the way create_config does
    (env.set_project_root + os.chdir; create_config itself is covered by
@@ -15,7 +15,7 @@ Started by tests/backend/test_mod_loading.py in a fresh interpreter with
 
 Importing the app chain before step 2 freezes MOD_LOADER.root to an empty
 root (MOD_LOADER = ModLoader(env.PROJECT_ROOT), bound at import time, see
-alasio/backend/asgi.py): a mod declared by the project root itself
+alasio/backend/app/asgi.py): a mod declared by the project root itself
 (module/config/const.py, loaded by ModLoader.self_mod) then resolves its own
 root to '' and worker_start() is handed an empty mod_root.
 
@@ -107,7 +107,7 @@ def build_report(args):
         dict: Probe report
     """
     # 1. the production entry imports the server layer before any root exists
-    import alasio.backend.asgi  # noqa: F401
+    import alasio.backend.app.asgi  # noqa: F401
 
     loader_imported_before_root = 'alasio.config.entry.loader' in sys.modules
 
@@ -118,7 +118,7 @@ def build_report(args):
     os.chdir(root)
 
     # 3. the lazy app import of asgi.serve_app, then the app build
-    from alasio.backend.app import create_app
+    from alasio.backend.app.app import create_app
     app = create_app()
 
     from alasio.config.entry.loader import MOD_LOADER

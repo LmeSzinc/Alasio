@@ -7,7 +7,7 @@ import socket
 import trio
 from hypercorn import Config
 
-from alasio.backend.lifespan import announce_started, get_shutdown_trigger
+from alasio.backend.app.lifespan import announce_started, get_shutdown_trigger
 from alasio.deploy.config.model import DeployConfig
 from alasio.ext import env
 from alasio.logger import logger
@@ -174,7 +174,7 @@ async def serve_app(args=None):
     # imported once PROJECT_ROOT is set (see the module header). The
     # hypercorn WorkerContext patch stays in app.py next to the lifespan
     # that consumes it.
-    from alasio.backend.app import create_app, patch_context_cls
+    from alasio.backend.app.app import create_app, patch_context_cls
 
     app = create_app()
 

@@ -44,7 +44,7 @@ class RootPropagationSupervisor(Supervisor):
         # and chdirs. The app chain may only be imported after that: the
         # loader (MOD_LOADER = ModLoader(env.PROJECT_ROOT)) binds PROJECT_ROOT
         # at import time and an earlier import would freeze an empty root.
-        from alasio.backend.asgi import create_config
+        from alasio.backend.app.asgi import create_config
         from alasio.ext import env
 
         create_config(args)

@@ -1,5 +1,5 @@
 """
-Tests for the graceful backend restart module (alasio/backend/restart.py)
+Tests for the graceful backend restart module (alasio/backend/app/restart.py)
 
 Covers the resume file protocol (write / read / credential verification /
 cleanup), the orchestration of the old backend (run_graceful_restart) and the
@@ -18,8 +18,8 @@ import msgspec
 import pytest
 import trio
 
-from alasio.backend import restart
-from alasio.backend.restart import (
+from alasio.backend.app import restart
+from alasio.backend.app.restart import (
     GRACEFUL_RESTART, RESUME_TOKEN_ENV, ResumeRecord, cancel_graceful_restart, resume_after_restart,
     run_graceful_restart
 )

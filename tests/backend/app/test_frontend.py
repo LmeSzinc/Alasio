@@ -1,5 +1,5 @@
 """
-Tests for the frontend page server (alasio/backend/frontend.py).
+Tests for the frontend page server (alasio/backend/app/frontend.py).
 
 The server is driven by the delivered frontend manifest
 (deploy_data/frontend-manifest.pack): the test data is a mock frontend build
@@ -16,8 +16,8 @@ import pytest
 import trio
 from starlette.exceptions import HTTPException
 
-from alasio.backend import frontend
-from alasio.backend.frontend import (
+from alasio.backend.app import frontend
+from alasio.backend.app.frontend import (
     CSP, FRAME_ANCESTORS, FRONTEND_FOLDER, INDEX_HTML, MANIFEST_FILE, FrontendBody, FrontendSite
 )
 from alasio.backport.patch import patch_mimetype

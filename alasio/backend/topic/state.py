@@ -1,6 +1,6 @@
 from msgspec import Struct
 
-from alasio.backend.lifespan import lifespan_restart
+from alasio.backend.app.lifespan import lifespan_restart
 from alasio.backend.locale.accept_language import negotiate_accept_language
 from alasio.backend.mpipe.mpipe_backend import mpipe_backend
 from alasio.backend.reactive.base_rpc import rpc
@@ -78,7 +78,7 @@ class ConnState(BaseTopic):
         # local import: topic.log imports ConnState from this module, a module
         # level import of restart (-> topic._worker -> topic.log) would be
         # circular
-        from alasio.backend.restart import GRACEFUL_RESTART, run_graceful_restart
+        from alasio.backend.app.restart import GRACEFUL_RESTART, run_graceful_restart
 
         if not mpipe_backend:
             raise PermissionError('Cannot restart backend running without supervisor')
@@ -98,7 +98,7 @@ class ConnState(BaseTopic):
         is ended right away and nothing is resumed after the backend restarted.
         """
         # local import (see restart above)
-        from alasio.backend.restart import cancel_graceful_restart
+        from alasio.backend.app.restart import cancel_graceful_restart
 
         # a graceful restart in progress (or a resume queue of the previous
         # one) is cancelled first: no worker of it may be resumed
