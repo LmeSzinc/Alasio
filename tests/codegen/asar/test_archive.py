@@ -818,61 +818,121 @@ class TestExtractAll:
         assert os.readlink('/out/real.txt') == 'Current/real.txt'
 
 
-class TestRealArchive:
-    """
-    Tests against the archive electron-builder produced for the desktop client,
-    they are skipped when the release build is not present.
-    """
-    ARCHIVE = os.path.join('webapp', 'release', 'app.asar')
+# An app bundle as a packer of the desktop client lays it out: the entries are
+# listed in the order a file system walks the tree, which is not the canonical
+# order of this module. The paths are the ones the archive of the desktop client
+# holds, the content is short on purpose.
+BUNDLE_FILES = {
+    'dist/renderer/index.html': b'<!doctype html>',
+    'dist/renderer/_app/immutable/entry/app.js': b'import("../chunks/index.js")',
+    'dist/renderer/_app/immutable/chunks/index.js': b'export const chunk = 1',
+    'dist/main/index.js': b'const { app } = require("electron")',
+    'package.json': b'{"name":"alasio-webapp"}',
+}
 
-    def test_read_real_archive(self):
-        """The real archive has 38 entries: 28 files and 10 directories."""
-        if not os.path.isfile(self.ARCHIVE):
-            pytest.skip('webapp/release/app.asar is not built')
-        with AsarArchive(self.ARCHIVE) as archive:
-            files = [info for _, info in archive.iter_entries() if info.kind == KIND_FILE]
-            dirs = [info for _, info in archive.iter_entries() if info.kind == KIND_DIR]
-            assert len(files) == 28
-            assert len(dirs) == 10
-            assert sum(info.size for info in files) == 448793
-            assert archive.header_size == 7332
-            assert archive.data_offset == 7340
+# The same tree, in the order ``canonical_entries()`` sorts it into
+BUNDLE_PATHS = [
+    'dist',
+    'dist/main',
+    'dist/main/index.js',
+    'dist/renderer',
+    'dist/renderer/_app',
+    'dist/renderer/_app/immutable',
+    'dist/renderer/_app/immutable/chunks',
+    'dist/renderer/_app/immutable/chunks/index.js',
+    'dist/renderer/_app/immutable/entry',
+    'dist/renderer/_app/immutable/entry/app.js',
+    'dist/renderer/index.html',
+    'package.json',
+]
+
+
+def bundle_archive():
+    """
+    Build the archive of an app bundle, stored as a file system walked it.
+
+    ``fixture.make_archive()`` writes the header it is given as it is, so the
+    order of ``BUNDLE_FILES`` is the order the entries are stored in and the
+    offsets follow it. That is what a packer that does not sort its entries
+    (``createPackageFromFiles()`` of @electron/asar, used by the pack script of
+    ``webapp``) produces.
+
+    Returns:
+        bytes: Archive bytes
+    """
+    root = {}
+    offset = 0
+    for path, content in BUNDLE_FILES.items():
+        children = root
+        *directories, name = path.split('/')
+        for directory in directories:
+            children = children.setdefault(directory, {'files': {}})['files']
+        children[name] = {
+            'size': len(content),
+            'offset': str(offset),
+            'integrity': integrity(content),
+        }
+        offset += len(content)
+    return fixture.make_archive({'files': root}, b''.join(BUNDLE_FILES.values()))
+
+
+class TestTraversalOrder:
+    """
+    An archive whose entries are stored in the order a file system walked the
+    tree, which is not the canonical order of this module.
+
+    The archive of the desktop client is stored that way (its packer writes the
+    entries in the order of its file list), so this is the order a real archive
+    has. Reading follows the offsets the header gives, and what this module
+    writes is stored in the canonical order again.
+    """
+
+    def test_the_entries_are_stored_in_the_traversal_order(self, fs):
+        """The fixture stores the entries in the order of the file system, back to back."""
+        fs.create_file('/bundle.asar', contents=bundle_archive())
+        with AsarArchive('/bundle.asar') as archive:
+            stored = [
+                keys_path(keys) for keys, _, _ in header_entries(parse_header(stored_header('/bundle.asar')))
+            ]
+            # The fixture must not be canonical, or the tests below prove nothing
+            assert stored != BUNDLE_PATHS
+            # The offsets of the files follow the stored order, back to back
+            offset = 0
+            for path in stored:
+                info = archive.entry(path)
+                if info.kind != KIND_FILE:
+                    continue
+                assert info.offset == offset, path
+                offset += info.size
+            assert offset == os.path.getsize('/bundle.asar') - archive.data_offset
+
+    def test_read(self, fs):
+        """Every entry of a bundle is read, whatever the order of the header."""
+        fs.create_file('/bundle.asar', contents=bundle_archive())
+        with AsarArchive('/bundle.asar') as archive:
+            # The table is walked in the canonical order, the header stores the
+            # order of the file system
+            assert [path for path, _ in archive.iter_entries()] == BUNDLE_PATHS
+            for path, content in BUNDLE_FILES.items():
+                assert bytes(archive.read_file(path)) == content, path
             archive.validate(verify_content=True)
 
-    def test_repack_real_archive(self, fs):
-        """Repacking an untouched archive keeps its entries, in the canonical order.
+    def test_repack(self, fs):
+        """Repacking a bundle keeps every content and stores the entries in the canonical order."""
+        fs.create_file('/in.asar', contents=bundle_archive())
+        with AsarArchive('/in.asar') as archive:
+            archive.write('/out.asar')
+        with AsarArchive('/out.asar') as archive:
+            assert {path: bytes(archive.read_file(path)) for path in BUNDLE_FILES} == BUNDLE_FILES
+            assert [
+                keys_path(keys) for keys, _, _ in header_entries(parse_header(stored_header('/out.asar')))
+            ] == BUNDLE_PATHS
 
-        The shipping archive is written in the traversal order of the file
-        system, the canonical order is what this module writes, so the bytes of
-        a repack differ from the original (`fed47aad...` shipped, the canonical
-        repack of the 2026-09-17 build is `e857d551...`). What must hold is that
-        no content changes, that the entries are stored in the canonical order
-        and that writing the repack again changes nothing.
-        """
-        # The release archive is read at import time: this test runs under the
-        # in-memory filesystem, which serves every path from memory and never
-        # touches the real disk (see fixture.release_archive_bytes).
-        original = fixture.release_archive_bytes()
-        if original is None:
-            pytest.skip(f'{fixture.RELEASE_ARCHIVE} is not built')
-        fs.create_file('/app.asar', contents=original)
-        with AsarArchive('/app.asar') as archive:
-            expected = {
-                path: bytes(archive.read_file(path))
-                for path, info in archive.iter_entries() if info.kind == KIND_FILE
-            }
-            canonical_paths = [path for path, _ in archive.iter_entries()]
-            archive.write('/app.repacked.asar')
-            # The entries are re-read from the archive that was just written
-            archive.write('/app.repacked2.asar')
-        with AsarArchive('/app.repacked.asar') as archive:
-            assert {
-                path: bytes(archive.read_file(path))
-                for path, info in archive.iter_entries() if info.kind == KIND_FILE
-            } == expected
-            # The stored header order is the canonical order of the entries
-            stored = [keys_path(keys) for keys, _, _ in header_entries(
-                parse_header(stored_header('/app.repacked.asar'))
-            )]
-            assert stored == canonical_paths
-        assert file_read_bytes('/app.repacked.asar') == file_read_bytes('/app.repacked2.asar')
+    def test_repack_is_a_fixed_point(self, fs):
+        """Writing the repack of a bundle again changes nothing."""
+        fs.create_file('/in.asar', contents=bundle_archive())
+        with AsarArchive('/in.asar') as archive:
+            archive.write('/out.asar')
+        with AsarArchive('/out.asar') as archive:
+            archive.write('/again.asar')
+        assert file_read_bytes('/again.asar') == file_read_bytes('/out.asar')

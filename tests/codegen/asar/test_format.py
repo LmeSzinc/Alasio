@@ -3,11 +3,11 @@ Tests of the asar binary framing.
 
 The frame of an archive is read and written in one call each: a file is read
 back to its header JSON and the offset of its content, and a header JSON is
-written as the bytes an archive starts with. The golden bytes come from the real
-archives, see ``tests/codegen/asar/fixture.py``:
+written as the bytes an archive starts with. The golden bytes come from real
+archives, the binary fixtures are described in ``tests/codegen/asar/fixture.py``:
 
-- ``webapp/release/app.asar`` (electron-builder, @electron/asar 3.4.1):
-  H=7332, J=7322, content at 7340, first bytes ``04 00 00 00 a4 1c 00 00``
+- the app bundle of the desktop client, packed by electron-builder
+  (@electron/asar 3.4.1): H=7332, J=7322, content at 7340
 - ``fixture.tiny_341()`` (@electron/asar 3.4.1): H=524, J=515, content at 532
 """
 import pytest
@@ -17,7 +17,7 @@ from alasio.codegen.asar.format import BLOCK_SIZE, MAX_HEADER_SIZE, MAX_PATH_DEP
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.codegen.asar import fixture
 
-# The first 16 bytes of webapp/release/app.asar
+# The frame of that bundle: header pickle 7332, payload 7328, JSON 7322
 APP_ASAR_FRAME = b'\x04\x00\x00\x00\xa4\x1c\x00\x00\xa0\x1c\x00\x00\x9a\x1c\x00\x00'
 EMPTY_HEADER = b'{"files":{}}'
 
@@ -40,8 +40,8 @@ class TestPackHeader:
             b'{"files":{}}'
         )
 
-    def test_golden_frame_of_the_real_archive(self):
-        """The frame of the real archive reproduces its first 16 bytes."""
+    def test_golden_frame_of_the_app_bundle(self):
+        """The frame of the bundle is reproduced from the size of its header JSON."""
         assert pack_header(b'a' * 7322)[:16] == APP_ASAR_FRAME
 
     def test_padding(self):
@@ -84,17 +84,6 @@ class TestReadHeader:
         assert data_offset == 532
         assert len(json_bytes) == 515
         assert json_bytes.startswith(b'{"files"')
-
-    def test_read_app_asar(self, fs):
-        """The header of the real archive is where the frame says it is."""
-        original = fixture.release_archive_bytes()
-        if original is None:
-            pytest.skip(f'{fixture.RELEASE_ARCHIVE} is not built')
-        fs.create_file('/app.asar', contents=original)
-        with open('/app.asar', 'rb') as f:
-            json_bytes, data_offset = read_header(f)
-        assert data_offset == 7340
-        assert len(json_bytes) == 7322
 
     def test_leaves_the_handle_on_the_content(self, fs):
         """The handle ends on the first content byte, ready for a sequential read."""

@@ -13,12 +13,10 @@ byte level comparison below is only meaningful for a known version:
   (``codeload.github.com/electron/asar/tar.gz/refs/tags/v4.3.0``), files from
   ``test/expected/`` and ``test/input/``.
 
-The only fixture that is not stored here is the release archive of the desktop
-client: electron-builder builds it into ``webapp/release/app.asar``, it is read
-at import time, see ``release_archive_bytes()``.
+Every archive a test needs is stored here: the tests never read a build of
+another project, so a build of the desktop client can not break them.
 """
 import base64
-import os
 
 import msgspec
 
@@ -144,43 +142,6 @@ def _decode(value):
         bytes: Archive bytes
     """
     return base64.b64decode(value)
-
-
-# The archive electron-builder built for the desktop client, the one fixture
-# that is not stored in this file (it needs a release build of webapp/).
-RELEASE_ARCHIVE = os.path.join('webapp', 'release', 'app.asar')
-
-
-def _read_release_archive():
-    """
-    Read the release archive, at import time.
-
-    The tests unpack it under the in-memory filesystem, which serves every
-    path from memory and never touches the real disk: the bytes have to be in
-    hand before a test starts (the same reason why fixture.py is imported at
-    module level).
-
-    Returns:
-        bytes | None: Archive bytes, None when the release build is not present
-    """
-    try:
-        with open(RELEASE_ARCHIVE, 'rb') as f:
-            return f.read()
-    except FileNotFoundError:
-        return None
-
-
-RELEASE_ARCHIVE_BYTES = _read_release_archive()
-
-
-def release_archive_bytes():
-    """
-    Get the bytes of the release archive, read once at import time.
-
-    Returns:
-        bytes | None: Archive bytes, None when the release build is not present
-    """
-    return RELEASE_ARCHIVE_BYTES
 
 
 def tiny_341():
