@@ -16,7 +16,7 @@ which the fake filesystem does not provide.
 """
 import os
 
-import httpx
+import httpx2
 import pytest
 from conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile
 
@@ -708,9 +708,9 @@ class TestDownload:
             f.write(bad)
 
         def _raise(version):
-            request = httpx.Request('GET', 'http://mock/new/full.pack')
-            response = httpx.Response(500, request=request)
-            raise httpx.HTTPStatusError(
+            request = httpx2.Request('GET', 'http://mock/new/full.pack')
+            response = httpx2.Response(500, request=request)
+            raise httpx2.HTTPStatusError(
                 '500 Internal Server Error', request=request, response=response)
         monkeypatch.setattr(SERVER, 'get_index_pack', _raise)
         job = UpdateJob(UPDATE, server=SERVER)

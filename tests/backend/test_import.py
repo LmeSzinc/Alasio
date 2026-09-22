@@ -21,7 +21,7 @@ def test_backend_no_heavy_import():
         'flask', 'tornado', 'django',
         # no pydantic, since we use msgspec
         'pydantic',
-        # no requests, since we use httpx
+        # no requests, since we use httpx2
         'requests',
         # no device connection
         'adbutils', 'uiautomator2',

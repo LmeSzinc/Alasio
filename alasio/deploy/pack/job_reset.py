@@ -1,4 +1,4 @@
-import httpx
+import httpx2
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
@@ -362,7 +362,7 @@ class ResetJob(JobBase):
                 continue
             try:
                 tmp = self._download_file(decoder, server, info, index)
-            except (PackDecodeError, httpx.HTTPError) as e:
+            except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
                 # keep the record in error, this is unsolvable
                 logger.warning(f'Failed to download {info.path}: {e}')

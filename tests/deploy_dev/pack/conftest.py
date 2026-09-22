@@ -13,7 +13,7 @@ The file list is designed to cover every record type produced by PackFull:
 from hashlib import sha1
 from random import Random
 
-import httpx
+import httpx2
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
@@ -127,7 +127,7 @@ class MockServerFile(ServerFile):
     """
     In-memory ServerFile for tests, serves the pack data without http.
 
-    The http requests are intercepted by an httpx.MockTransport client
+    The http requests are intercepted by an httpx2.MockTransport client
     created in __init__, so the whole ServerFile logic (range requests,
     index pack assembly) runs as-is and only the transport differs.
     register_version() stores the full pack and the index pack of a
@@ -137,7 +137,7 @@ class MockServerFile(ServerFile):
 
     def __init__(self, base_url='http://mock'):
         super().__init__(
-            base_url, client=httpx.Client(transport=httpx.MockTransport(self._handle)))
+            base_url, client=httpx2.Client(transport=httpx2.MockTransport(self._handle)))
         # {version: full pack}
         self.full_packs = {}
         # {version: index pack}
@@ -176,10 +176,10 @@ class MockServerFile(ServerFile):
         MockTransport handler, serves the packs from the memory.
 
         Args:
-            request (httpx.Request): The request
+            request (httpx2.Request): The request
 
         Returns:
-            httpx.Response: The response
+            httpx2.Response: The response
         """
         path = request.url.path
         if path.endswith('/latest.pack'):
@@ -189,7 +189,7 @@ class MockServerFile(ServerFile):
             # validates
             checksum = bytes.fromhex(PackDecodeBase(index_pack).index_checksum)
             content = self.latest_version.encode() + checksum
-            return httpx.Response(200, content=content)
+            return httpx2.Response(200, content=content)
         # base_url/{new_version}/from_{old_version}.pack
         version, _, old = path.strip('/').partition('/from_')
         if old:
@@ -198,13 +198,13 @@ class MockServerFile(ServerFile):
                 # an unregistered update pack, the incremental path
                 # is broken: DeployJob.update() falls back to
                 # RebuildJob on the 404
-                return httpx.Response(404, content=b'')
-            return httpx.Response(200, content=content)
+                return httpx2.Response(404, content=b'')
+            return httpx2.Response(200, content=content)
         # base_url/{version}/full.pack, served as a range request
         version = path.strip('/').partition('/')[0]
         start, _, end = request.headers['Range'].partition('=')[2].partition('-')
         content = self.full_packs[version][int(start):int(end) + 1]
-        return httpx.Response(206, content=content)
+        return httpx2.Response(206, content=content)
 
 
 # MockServerFile serving the website packs in memory, read-only test data

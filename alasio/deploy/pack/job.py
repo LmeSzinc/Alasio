@@ -1,4 +1,4 @@
-import httpx
+import httpx2
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase
@@ -167,7 +167,7 @@ class DeployJob:
             # a version mismatch, apply the update pack incrementally
             try:
                 data = server.get_update_pack(local, info.version)
-            except httpx.HTTPStatusError as e:
+            except httpx2.HTTPStatusError as e:
                 # the update pack of the local version is not on the
                 # server (out of the update window or removed), the
                 # incremental path is broken: rebuild from the latest index

@@ -8,7 +8,7 @@ async def aparse_pkt_line(stream_iterator):
     Asynchronously parses a pkt-line formatted stream.
 
     This async generator consumes an async iterator of byte chunks (like one
-    from httpx.aiter_raw() or a trio stream) and yields individual pkt-line
+    from httpx2.aiter_raw() or a trio stream) and yields individual pkt-line
     data payloads. It uses a `bytearray` for efficient buffering.
 
     Args:

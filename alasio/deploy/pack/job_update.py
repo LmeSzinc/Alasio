@@ -1,6 +1,6 @@
 from hashlib import sha1
 
-import httpx
+import httpx2
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
@@ -279,7 +279,7 @@ class UpdateJob(JobBase):
                 # index section
                 new_index_data = server.get_index_pack(self._version)
                 PackDecodeBase(new_index_data).validate_index()
-            except (PackDecodeError, httpx.HTTPError) as e:
+            except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
                 # the record stays in error, this is unsolvable
                 logger.warning(f'Failed to download {self.INDEX_PACK}: {e}')
@@ -335,7 +335,7 @@ class UpdateJob(JobBase):
                 data = server.get_file_content(
                     new_index.version, new_info.data_start, new_info.data_size)
                 content = new_index.decode_content(new_info, data)
-            except (PackDecodeError, httpx.HTTPError) as e:
+            except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
                 # the record stays in error, this is unsolvable
                 logger.warning(f'Failed to download {info.path}: {e}')

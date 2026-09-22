@@ -24,7 +24,9 @@ dependencies = [
     "zstandard>=0.23.0",
     # 6.x releases continue to support Python 3.8
     "PyYAML>=6.0",
-    "httpx",
+    # httpx is no longer maintained, httpx2 is the pydantic fork of httpx
+    # python 3.8 support comes from the py38deps backport wheels
+    "httpx2",
     "psutil",
     # alasio/log
     # rich version is limited because we patched rich.trackback to enable exceptiongroup tracebacks on py<3.11

@@ -1,4 +1,4 @@
-import httpx
+import httpx2
 from msgspec import Struct
 
 from alasio.deploy.pack.decode_base import PackDecodeError
@@ -42,7 +42,7 @@ class ServerFile:
         """
         Args:
             base_url (str): Base URL of the update server
-            client (httpx.Client, optional): Client to reuse, a new
+            client (httpx2.Client, optional): Client to reuse, a new
                 one is created for every request if not given
         """
         self.base_url = base_url
@@ -59,7 +59,7 @@ class ServerFile:
         Raises:
             PackDecodeError: If the response is shorter than the
                 20 bytes checksum
-            httpx.HTTPStatusError: If the request fails
+            httpx2.HTTPStatusError: If the request fails
         """
         response = self._http_get(f'{self.base_url}/latest.pack')
         data = response.content
@@ -87,7 +87,7 @@ class ServerFile:
             bytes: File content of the range
 
         Raises:
-            httpx.HTTPStatusError: If the request fails
+            httpx2.HTTPStatusError: If the request fails
         """
         url = f'{self.base_url}/{version}/full.pack'
         headers = {'Range': f'bytes={offset}-{offset + size - 1}'}
@@ -120,7 +120,7 @@ class ServerFile:
         Raises:
             PackDecodeError: If the index section length vint is not
                 terminated inside the header response
-            httpx.HTTPStatusError: If a request fails
+            httpx2.HTTPStatusError: If a request fails
         """
         header = self.get_file_content(version, 0, self.HEADER_REQUEST_SIZE)
         try:
@@ -146,7 +146,7 @@ class ServerFile:
             bytes: Update pack data
 
         Raises:
-            httpx.HTTPStatusError: If the request fails
+            httpx2.HTTPStatusError: If the request fails
         """
         url = f'{self.base_url}/{new_version}/from_{old_version}.pack'
         response = self._http_get(url)
@@ -161,14 +161,14 @@ class ServerFile:
             headers (dict, optional): Request headers
 
         Returns:
-            httpx.Response: The response
+            httpx2.Response: The response
 
         Raises:
-            httpx.HTTPStatusError: If the request fails
+            httpx2.HTTPStatusError: If the request fails
         """
         client = self._client
         if client is None:
-            with httpx.Client() as client:
+            with httpx2.Client() as client:
                 response = client.get(url, headers=headers)
                 response.raise_for_status()
                 return response

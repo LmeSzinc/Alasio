@@ -1,6 +1,6 @@
 from typing import Optional
 
-import httpx
+import httpx2
 import msgspec
 import trio
 
@@ -95,7 +95,7 @@ class LatencyTest:
 
         try:
             with trio.fail_after(timeout):
-                async with httpx.AsyncClient(follow_redirects=True) as client:
+                async with httpx2.AsyncClient(follow_redirects=True) as client:
                     send_channel, receive_channel = trio.open_memory_channel(len(self.urls))
 
                     async with trio.open_nursery() as nursery:
@@ -155,7 +155,7 @@ class LatencyTest:
         Probes a single URL and sends a preliminary LatencyInfo object.
 
         Args:
-            client (httpx.AsyncClient):
+            client (httpx2.AsyncClient):
             url (str):
             send_channel (trio.MemorySendChannel):
             timeout (float):
@@ -170,9 +170,9 @@ class LatencyTest:
             response.raise_for_status()
             duration_ms = (trio.current_time() - start_time) * 1000
             info = LatencyInfo(state='OK', url=url, latency=duration_ms, status_code=response.status_code)
-        except httpx.TimeoutException:
+        except httpx2.TimeoutException:
             info = LatencyInfo(state='Timeout', url=url, error=f'Request timed out after {timeout}s')
-        except httpx.RequestError as e:
+        except httpx2.RequestError as e:
             info = LatencyInfo(state='Error', url=url, error=f'{type(e).__name__}: {e}')
         except trio.Cancelled:
             # This is the expected outcome for slow tasks, so we don't create a final info object here.

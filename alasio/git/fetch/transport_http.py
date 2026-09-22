@@ -1,4 +1,4 @@
-import httpx
+import httpx2
 
 from alasio.ext.path.atomic import atomic_write
 from alasio.git.fetch.pkt import FetchPayload, agather_bytes, aparse_packfile_stream, aparse_pkt_line, parse_pkt_line
@@ -7,7 +7,7 @@ from alasio.logger import logger
 
 
 class HttpTransport(BaseTransport):
-    """Transport implementation for HTTP/S protocol using `httpx`."""
+    """Transport implementation for HTTP/S protocol using `httpx2`."""
 
     async def fetch_refs(self):
         """
@@ -21,7 +21,7 @@ class HttpTransport(BaseTransport):
         logger.info(f'fetch_refs: {url}')
 
         headers = self.capabilities.headers(protocol_v2=False)
-        async with httpx.AsyncClient(
+        async with httpx2.AsyncClient(
             http2=True, follow_redirects=True, trust_env=False, proxy=self.arguments.proxy
         ) as client:
             response = await client.get(url, headers=headers)
@@ -70,7 +70,7 @@ class HttpTransport(BaseTransport):
         })
         content = payload.build()
 
-        async with httpx.AsyncClient(
+        async with httpx2.AsyncClient(
             http2=True, follow_redirects=True, trust_env=False, proxy=self.arguments.proxy
         ) as client:
             async with client.stream('POST', url, content=content, headers=headers) as response:
@@ -106,7 +106,7 @@ class HttpTransport(BaseTransport):
         # Build v2 payload: command=fetch + delimiter + want/have/done
         content = self._build_v2_payload(payload)
 
-        async with httpx.AsyncClient(
+        async with httpx2.AsyncClient(
             http2=True, follow_redirects=True, trust_env=False, proxy=self.arguments.proxy
         ) as client:
             async with client.stream('POST', url, content=content, headers=headers) as response:

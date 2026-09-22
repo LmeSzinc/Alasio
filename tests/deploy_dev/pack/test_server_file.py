@@ -2,10 +2,10 @@
 Tests for ServerFile: HTTP client of the update server.
 
 Uses conftest.WEBSITE_SERVER (in-memory MockServerFile) and an
-httpx.MockTransport client to exercise the http request logic of
+httpx2.MockTransport client to exercise the http request logic of
 ServerFile without a real server.
 """
-import httpx
+import httpx2
 import pytest
 from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER
 
@@ -18,13 +18,13 @@ def range_handler(requests, data):
     def handler(request):
         requests.append(request)
         start, _, end = request.headers['Range'].partition('=')[2].partition('-')
-        return httpx.Response(206, content=data[int(start):int(end) + 1])
+        return httpx2.Response(206, content=data[int(start):int(end) + 1])
     return handler
 
 
 def make_client(handler):
-    """A httpx.Client with a MockTransport handler."""
-    return httpx.Client(transport=httpx.MockTransport(handler))
+    """A httpx2.Client with a MockTransport handler."""
+    return httpx2.Client(transport=httpx2.MockTransport(handler))
 
 
 class TestMockServerFile:
@@ -71,7 +71,7 @@ class TestServerFile:
         def handler(request):
             requests.append(request)
             content = COMMIT.encode() + checksum
-            return httpx.Response(200, content=content)
+            return httpx2.Response(200, content=content)
 
         server = ServerFile('http://test', client=make_client(handler))
         info = server.get_latest_info()
@@ -82,7 +82,7 @@ class TestServerFile:
     def test_get_latest_info_too_short(self):
         """A response without the 20 bytes checksum fails."""
         def handler(request):
-            return httpx.Response(200, content=b'c1')
+            return httpx2.Response(200, content=b'c1')
         server = ServerFile('http://test', client=make_client(handler))
         with pytest.raises(PackDecodeError):
             server.get_latest_info()
@@ -99,16 +99,16 @@ class TestServerFile:
     def test_get_file_content_range_ignored(self):
         """A 200 response means the server ignored the range request."""
         def handler(request):
-            return httpx.Response(200, content=WEBSITE_FULL_PACK)
+            return httpx2.Response(200, content=WEBSITE_FULL_PACK)
         server = ServerFile('http://test', client=make_client(handler))
         assert server.get_file_content(COMMIT, 5, 10) == WEBSITE_FULL_PACK[5:15]
 
     def test_get_file_content_error(self):
         """A 404 response raises HTTPStatusError."""
         def handler(request):
-            return httpx.Response(404)
+            return httpx2.Response(404)
         server = ServerFile('http://test', client=make_client(handler))
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(httpx2.HTTPStatusError):
             server.get_file_content(COMMIT, 0, 10)
 
     def test_get_index_pack(self):
@@ -131,7 +131,7 @@ class TestServerFile:
     def test_get_index_pack_invalid_header(self):
         """An unterminated length vint fails."""
         def handler(request):
-            return httpx.Response(206, content=b'\x80' * 64)
+            return httpx2.Response(206, content=b'\x80' * 64)
         server = ServerFile('http://test', client=make_client(handler))
         with pytest.raises(PackDecodeError):
             server.get_index_pack(COMMIT)
@@ -142,7 +142,7 @@ class TestServerFile:
 
         def handler(request):
             requests.append(request)
-            return httpx.Response(200, content=b'update pack data')
+            return httpx2.Response(200, content=b'update pack data')
 
         server = ServerFile('http://test', client=make_client(handler))
         assert server.get_update_pack('old', 'new') == b'update pack data'
@@ -151,7 +151,7 @@ class TestServerFile:
     def test_get_update_pack_error(self):
         """A 404 response raises HTTPStatusError."""
         def handler(request):
-            return httpx.Response(404)
+            return httpx2.Response(404)
         server = ServerFile('http://test', client=make_client(handler))
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(httpx2.HTTPStatusError):
             server.get_update_pack('old', 'new')
