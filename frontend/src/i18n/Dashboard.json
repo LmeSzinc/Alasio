@@ -1,18 +1,4 @@
 {
-  "Collapse": {
-    "en-US": "Collapse",
-    "zh-CN": "折叠",
-    "ja-JP": "折り畳む",
-    "zh-TW": "折疊",
-    "es-ES": "Contraer"
-  },
-  "Expand": {
-    "en-US": "Expand",
-    "zh-CN": "展开",
-    "ja-JP": "展開",
-    "zh-TW": "展開",
-    "es-ES": "Expandir"
-  },
   "NoData": {
     "en-US": "No Data",
     "zh-CN": "无数据",

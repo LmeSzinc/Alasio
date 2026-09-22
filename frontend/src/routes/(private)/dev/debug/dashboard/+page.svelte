@@ -265,15 +265,107 @@
     },
   };
 
-  const mockItems: Record<string, Record<string, Record<string, ArgData>>> = {
-    Default: baseItems,
+  // The same items under distinct keys, more items than a single row holds
+  const mockItemsMany: Record<string, Record<string, ArgData>> = Object.fromEntries(
+    [1, 2, 3].flatMap((copy) => Object.entries(baseItems).map(([name, data]) => [`${name}-${copy}`, data])),
+  );
+
+  // The three value forms, one item each: a plain amount, an amount over its
+  // limit (`Total`), and an amount over a dynamic total. Names and times are
+  // long enough to squeeze the info line as well.
+  const valueFormItems: Record<string, Record<string, ArgData>> = {
+    Amount: {
+      _info: {
+        group: "Amount",
+        arg: "_info",
+        task: "Dashboard",
+        dt: "dashboard-value",
+        dashboard: "Amount",
+        dashboard_color: "#f44336",
+        name: "Medals",
+        value: "",
+      },
+      Value: {
+        task: "Dashboard",
+        group: "Amount",
+        arg: "Value",
+        dt: "input-int",
+        value: 42,
+        ge: 0,
+      },
+      Time: {
+        task: "Dashboard",
+        group: "Amount",
+        arg: "Time",
+        dt: "datetime",
+        value: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+      },
+    },
+    Total: {
+      _info: {
+        group: "Total",
+        arg: "_info",
+        task: "Dashboard",
+        dt: "dashboard-total",
+        dashboard: "Total",
+        dashboard_color: "#ffd700",
+        name: "Oil",
+        value: "",
+      },
+      Value: {
+        task: "Dashboard",
+        group: "Total",
+        arg: "Value",
+        dt: "input-int",
+        value: 1234,
+        ge: 0,
+        le: 25000,
+      },
+      Time: {
+        task: "Dashboard",
+        group: "Total",
+        arg: "Time",
+        dt: "datetime",
+        value: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+      },
+    },
+    DynamicTotal: {
+      _info: {
+        group: "DynamicTotal",
+        arg: "_info",
+        task: "Dashboard",
+        dt: "dashboard-total",
+        dashboard: "DynamicTotal",
+        dashboard_color: "#ff9800",
+        name: "Dorm Food",
+        value: "",
+      },
+      Value: {
+        task: "Dashboard",
+        group: "DynamicTotal",
+        arg: "Value",
+        dt: "input-int",
+        value: 5000,
+      },
+      Total: {
+        task: "Dashboard",
+        group: "DynamicTotal",
+        arg: "Total",
+        dt: "static",
+        value: 40000,
+      },
+      Time: {
+        task: "Dashboard",
+        group: "DynamicTotal",
+        arg: "Time",
+        dt: "datetime",
+        value: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      },
+    },
   };
 
-  const mockItemsLong: Record<string, Record<string, Record<string, ArgData>>> = {
-    Group1: baseItems,
-    Group2: baseItems,
-    Group3: baseItems,
-  };
+  // Card widths from the full container down to w-40, one card per step
+  const widthLadder = ["w-full", "w-96", "w-80", "w-72", "w-64", "w-60", "w-56", "w-52", "w-48", "w-44", "w-40"];
 </script>
 
 <div class="container mx-auto flex h-full w-full flex-col gap-4 overflow-auto p-4 pb-20">
@@ -283,32 +375,64 @@
     <div class="space-y-1">
       <h2 class="text-xl font-semibold">Dashboard Overview</h2>
       <p class="text-muted-foreground text-sm">
-        Testing the Dashboard component with mock data. It should show the first group by default and be expandable.
+        Testing the Dashboard component with mock data. All items are displayed, wrapped into rows of at least two
+        columns.
       </p>
     </div>
 
-    <DashboardCard items={mockItems} />
+    <DashboardCard items={baseItems} class="bg-card h-64 rounded-lg" />
   </section>
 
   <section class="space-y-4">
     <div class="space-y-1">
-      <h2 class="text-xl font-semibold">Contextual Test</h2>
+      <h2 class="text-xl font-semibold">Many Items</h2>
       <p class="text-muted-foreground text-sm">
-        Demonstrating how the dashboard sits above other content when expanded.
+        More items than fit into the height of the card: the flow scrolls, as many items per row as their preferred
+        width allows.
       </p>
     </div>
 
-    <div class="space-y-4">
-      <DashboardCard items={mockItemsLong} />
+    <DashboardCard items={mockItemsMany} class="bg-card h-64 rounded-lg" />
+  </section>
 
-      <div class="grid grid-cols-2 gap-4">
-        <div class="bg-muted flex h-64 items-center justify-center rounded-xl font-mono text-sm">
-          Content A (should be covered)
-        </div>
-        <div class="bg-muted flex h-64 items-center justify-center rounded-xl font-mono text-sm">
-          Content B (should be covered)
-        </div>
-      </div>
+  <section class="space-y-4">
+    <div class="space-y-1">
+      <h2 class="text-xl font-semibold">Narrow Container</h2>
+      <p class="text-muted-foreground text-sm">
+        A container too narrow for the preferred item width: items are compressed to keep two columns per row, and the
+        info line degrades in one direction only: <code class="bg-muted rounded px-1">Oil - 3h ago</code> &rarr;
+        <code class="bg-muted rounded px-1">Oil - 3...</code> &rarr; <code class="bg-muted rounded px-1">Oil</code>
+        &rarr; <code class="bg-muted rounded px-1">O..</code> (the name yields last; the whole tail, separator included, is
+        dropped once it cannot show a character of the time).
+      </p>
     </div>
+
+    <DashboardCard items={baseItems} class="bg-card h-64 w-56 rounded-lg" />
+
+    <DashboardCard items={baseItems} class="bg-card h-64 w-40 rounded-lg" />
+  </section>
+
+  <section class="space-y-4">
+    <div class="space-y-1">
+      <h2 class="text-xl font-semibold">Value Forms by Width</h2>
+      <p class="text-muted-foreground text-sm">
+        The three value forms only (Amount, Total, DynamicTotal), from the full container width down to
+        <code class="bg-muted rounded px-1">w-40</code>. Both lines degrade in one direction only as the card gets
+        narrower. The value line reads <code class="bg-muted rounded px-1">1234 / 25000</code> &rarr;
+        <code class="bg-muted rounded px-1">1234 / 2...</code> &rarr; <code class="bg-muted rounded px-1">1234</code>
+        &rarr; <code class="bg-muted rounded px-1">12...</code>, the info line
+        <code class="bg-muted rounded px-1">Oil - 3h ago</code> &rarr;
+        <code class="bg-muted rounded px-1">Oil - 3...</code> &rarr; <code class="bg-muted rounded px-1">Oil</code>
+        &rarr; <code class="bg-muted rounded px-1">O..</code>. Neither line ever shows a cut primary text next to a cut
+        tail, and a tail never outlives its content as a bare separator.
+      </p>
+    </div>
+
+    {#each widthLadder as widthClass (widthClass)}
+      <div class="space-y-1">
+        <p class="text-muted-foreground font-mono text-xs">{widthClass}</p>
+        <DashboardCard items={valueFormItems} class="bg-card h-40 rounded-lg {widthClass}" />
+      </div>
+    {/each}
   </section>
 </div>

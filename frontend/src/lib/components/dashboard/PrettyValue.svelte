@@ -22,15 +22,36 @@
 </script>
 
 {#snippet valueTotal(val: string | number | undefined, denom: string | number | undefined)}
-  <span class={cn("font-medium", variant === "primary" && "font-bold")}>
+  <span class={cn("max-w-full shrink-0 truncate font-medium", variant === "primary" && "font-bold")}>
     {val ?? "NaN"}
   </span>
-  <span class="text-muted-foreground text-[0.8em]">
+  <!--
+    The value line degrades like the item info line (see DashboardItem):
+      "1234 / 14000" -> "1234 / 1..." -> "1234" -> "123..."
+    The value is the primary text and does not yield (`max-w-full shrink-0`),
+    the denominator is the tail and gives up its room first. The tail goes as a
+    whole, it is never left behind as a bare separator: `basis-[2.5em]` is the
+    width it is worth showing from (separator, one character and the ellipsis),
+    so a shorter tail wraps onto the clipped second line instead of rendering
+    "…". "12.. / ..." must never show up: both halves would carry no
+    information while either of them alone still would.
+  -->
+  <span class="text-muted-foreground max-w-max min-w-0 grow basis-[2.5em] truncate text-[0.8em]">
     / {denom ?? "NaN"}
   </span>
 {/snippet}
 
-<div class={cn("relative flex h-6 min-w-0 flex-row items-baseline gap-1", className)}>
+<!--
+  One line high: the value row is a fixed `h-6`, and `overflow-hidden` clips the
+  second flex line that the tail wraps onto when it runs out of room (see the
+  tail snippet above). The text itself never wraps, every span truncates.
+-->
+<div
+  class={cn(
+    "relative flex h-6 min-w-0 flex-row flex-wrap content-start items-baseline gap-1 overflow-hidden",
+    className,
+  )}
+>
   {#if dashboardType === "Amount"}
     <!-- 8654 -->
     <span class={cn("truncate font-medium", variant === "primary" && "font-bold")}>
@@ -44,14 +65,16 @@
     {@render valueTotal(data.Value?.value, data.Total?.value)}
   {:else if dashboardType === "Progress"}
     <!-- 86.54% -->
-    <span class={cn("font-medium", variant === "primary" && "font-bold")}>
+    <span class={cn("truncate font-medium", variant === "primary" && "font-bold")}>
       {formattedProgress(data.Value?.value)}%
     </span>
   {:else if dashboardType === "Planner"}
     <!-- 86.54% >2.3d -->
-    <span class={cn("font-medium", variant === "primary" && "font-bold")}>
+    <span class={cn("max-w-full shrink-0 truncate font-medium", variant === "primary" && "font-bold")}>
       {formattedProgress(data.Progress?.value)}%
     </span>
-    <span class={cn("text-muted-foreground truncate text-[0.8em]")}>&gt;{data.Eta?.value ?? "NaN"}</span>
+    <span class={cn("text-muted-foreground max-w-max min-w-0 grow basis-[2.5em] truncate text-[0.8em]")}
+      >&gt;{data.Eta?.value ?? "NaN"}</span
+    >
   {/if}
 </div>
