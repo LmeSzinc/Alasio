@@ -45,7 +45,8 @@ backend = [
     "hypercorn>=0.17.3",
     # 0.27.0 is the last version that support python3.8
     "trio>=0.27.0",
-    # 0.44.0 is the last version that support python3.8
+    # 0.44.0 is the last version that support python3.8, the py38deps backport provides 1.6.0
+    # the backend and tests support both
     "starlette>=0.44.0",
     # 2.9.0 is the last version that support python3.8
     "PyJWT>=2.9.0",

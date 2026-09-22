@@ -210,16 +210,29 @@ class DeploymentGateMiddleware:
         Build the https/wss url that mirrors the current plaintext
         request, keeping the host header (with port), path and query.
 
+        starlette builds the url from the scope: a host header that
+        passes its host syntax check is kept as is, a missing or
+        malformed one is dropped and the server address is used
+        instead (1.0.1+). 0.44.0 keeps the raw header value, which
+        makes such a request unbuildable (see Returns).
+
         Args:
             scope (Scope):
 
         Returns:
-            str | None: The redirect target, or None when the host
-                cannot be determined (missing or malformed host header
-                and no usable server address)
+            str | None: The redirect target, or None when no usable
+                target can be built: a url without a hostname (no host
+                header and no server address, or a server address that
+                yields none, e.g. a bare ipv6 address) or a url
+                starlette cannot parse
         """
         try:
             url = URL(scope=scope)
+            # the guard covers the host header starlette dropped and the
+            # host it never had: without a hostname the url is relative
+            # or carries an unusable authority (a bare ipv6 address)
+            if not url.hostname:
+                return None
             return str(url.replace(scheme=_REDIRECT_SCHEMES[url.scheme]))
         except (KeyError, ValueError):
             return None

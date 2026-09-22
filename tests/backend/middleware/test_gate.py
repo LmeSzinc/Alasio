@@ -8,6 +8,7 @@ login layer (JWT cookie) run inside one middleware in a fixed order
 """
 
 import pytest
+from starlette.datastructures import URL
 
 from alasio.backend.auth.auth import JWT_MANAGER
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
@@ -26,7 +27,8 @@ class CaptureApp:
         await send({'type': 'http.response.body', 'body': b''})
 
 
-def make_scope(scope_type, path='/api/test', host='127.0.0.1', headers=None, scheme='http', query_string=b''):
+def make_scope(scope_type, path='/api/test', host='127.0.0.1', headers=None, scheme='http', query_string=b'',
+               server=('127.0.0.1', 22267)):
     """
     Build a minimal ASGI scope.
 
@@ -37,6 +39,7 @@ def make_scope(scope_type, path='/api/test', host='127.0.0.1', headers=None, sch
         headers (list): Raw header pairs
         scheme (str): 'http', 'https', 'ws' or 'wss'
         query_string (bytes):
+        server (tuple | None): The ASGI server address
 
     Returns:
         Scope:
@@ -49,7 +52,7 @@ def make_scope(scope_type, path='/api/test', host='127.0.0.1', headers=None, sch
         'client': (host, 12345),
         'query_string': query_string,
         'scheme': scheme,
-        'server': ('127.0.0.1', 22267),
+        'server': server,
     }
 
 
@@ -321,6 +324,36 @@ class TestLoginLayer:
         assert app.called
 
 
+def _host_header_is_sanitized():
+    """
+    Check whether starlette drops a host header that fails its host
+    syntax check (1.0.1+) and builds the url from the server address.
+
+    Returns:
+        bool: True when a malformed host header still builds a valid url
+    """
+    scope = {
+        'type': 'http',
+        'scheme': 'http',
+        'path': '/api/test',
+        'query_string': b'',
+        'headers': [(b'host', b'[bad')],
+        'server': ('127.0.0.1', 22267),
+    }
+    try:
+        URL(scope=scope).hostname
+    except ValueError:
+        # the raw header value was used as the url host and it is not
+        # a host, so the url cannot be built at all
+        return False
+    return True
+
+
+# 0.44.0 (the last upstream version with python 3.8 support) keeps the
+# raw host header, 1.6.0 (the py38deps backport) sanitizes it
+HOST_HEADER_SANITIZED = _host_header_is_sanitized()
+
+
 class TestRuleC:
     """Rule C (SSL enforcement): public mode never serves plaintext."""
 
@@ -357,13 +390,61 @@ class TestRuleC:
         assert headers[b'location'] == b'https://example.com:22267/api/test?x=1&y=2'
         assert not app.called
 
+    @pytest.mark.skipif(HOST_HEADER_SANITIZED, reason='starlette 1.0.1+ sanitizes the host header')
     @pytest.mark.trio
     async def test_redirect_refused_when_host_malformed(self, gate):
-        # a malformed host header cannot build a redirect target: 400
+        # 0.44.0 keeps the raw host header value: a malformed one cannot
+        # build a redirect target, the request is refused with 400
         mw, app = gate(ssl=True)
         sent = await call_gate(mw, make_http_scope(
             scheme='http',
             headers=[(b'host', b'[bad')],
+        ))
+        assert status_of(sent) == 400
+        assert not app.called
+
+    @pytest.mark.skipif(not HOST_HEADER_SANITIZED, reason='starlette < 1.0.1 keeps the raw host header')
+    @pytest.mark.parametrize('host_header', [
+        # a malformed host header, an unclosed ipv6 bracket
+        b'[bad',
+        # a host header http cannot carry: the host is the punycode of
+        # the idn (0.44.0 echoes the raw utf-8 form into the url)
+        '例子.测试'.encode('utf-8'),
+    ])
+    @pytest.mark.trio
+    async def test_redirect_ignores_invalid_host(self, gate, host_header):
+        # 1.0.1+ drops a host header that fails its host syntax check and
+        # builds the url from the server address: the connection is still
+        # upgraded, the header value never reaches the redirect target
+        mw, app = gate(ssl=True)
+        sent = await call_gate(mw, make_http_scope(
+            scheme='http',
+            headers=[(b'host', host_header)],
+        ))
+        status_code, headers = redirect_of(sent)
+        assert status_code == 308
+        assert headers[b'location'] == b'https://127.0.0.1:22267/api/test'
+        assert not app.called
+
+    @pytest.mark.trio
+    async def test_redirect_refused_without_server_address(self, gate):
+        # neither a host header nor a server address: there is nothing
+        # to redirect to, the plaintext connection is refused with 400
+        mw, app = gate(ssl=True)
+        sent = await call_gate(mw, make_http_scope(scheme='http', server=None))
+        assert status_of(sent) == 400
+        assert not app.called
+
+    @pytest.mark.trio
+    async def test_redirect_refused_when_server_address_is_bare_ipv6(self, gate):
+        # a bare ipv6 server address yields no hostname (an url
+        # authority needs the brackets), the url would be unusable:
+        # 400 instead of a redirect target the browser cannot resolve
+        mw, app = gate(ssl=True)
+        sent = await call_gate(mw, make_http_scope(
+            scheme='http',
+            headers=[(b'host', b'[bad')],
+            server=('::1', 22267),
         ))
         assert status_of(sent) == 400
         assert not app.called
