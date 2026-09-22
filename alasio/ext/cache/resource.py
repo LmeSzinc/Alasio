@@ -1,5 +1,5 @@
+import time
 from threading import Lock
-from time import time
 from typing import Generic, TypeVar
 
 T = TypeVar('T')
@@ -27,7 +27,7 @@ class ResourceCacheTTL(Generic[T]):
         # fast path, return directly
         try:
             value = self._cache[file]
-            self._last_use[file] = time()
+            self._last_use[file] = time.monotonic()
             return value
         except KeyError:
             pass
@@ -56,7 +56,7 @@ class ResourceCacheTTL(Generic[T]):
                     # race condition
                     pass
                 else:
-                    self._last_use[file] = time()
+                    self._last_use[file] = time.monotonic()
                     # remove pre-resource lock to reduce memory
                     try:
                         del self._lock[file]
@@ -65,14 +65,19 @@ class ResourceCacheTTL(Generic[T]):
                     return value
 
             # load
-            value = self.load_resource(file, **kwargs)
-            self._cache[file] = value
-            self._last_use[file] = time()
-            # remove pre-resource lock to reduce memory
             try:
-                del self._lock[file]
-            except KeyError:
-                pass
+                value = self.load_resource(file, **kwargs)
+                # record the last use before the entry becomes visible, so that a concurrent gc()
+                # can't see a cache entry without last use and release it right away
+                self._last_use[file] = time.monotonic()
+                self._cache[file] = value
+            finally:
+                # remove pre-resource lock to reduce memory
+                # also on exception, otherwise the lock table keeps one entry per file that failed once
+                try:
+                    del self._lock[file]
+                except KeyError:
+                    pass
             return value
 
     def gc(self, idle=60):
@@ -87,7 +92,9 @@ class ResourceCacheTTL(Generic[T]):
             # let the next gc call to do the job
             return False
 
-        outdated = time() - idle
+        # measure on a monotonic clock, a wall clock jump (NTP correction, system time changed by the user)
+        # must neither release the resources that are in use nor keep the idle ones forever
+        outdated = time.monotonic() - idle
         last_use = self._last_use
         for file in files:
             try:
@@ -165,13 +172,16 @@ class ResourceCache(Generic[T]):
                     return value
 
             # load
-            value = self.load_resource(file, **kwargs)
-            self._cache[file] = value
-            # remove pre-resource lock to reduce memory
             try:
-                del self._lock[file]
-            except KeyError:
-                pass
+                value = self.load_resource(file, **kwargs)
+                self._cache[file] = value
+            finally:
+                # remove pre-resource lock to reduce memory
+                # also on exception, otherwise the lock table keeps one entry per file that failed once
+                try:
+                    del self._lock[file]
+                except KeyError:
+                    pass
             return value
 
     def gc(self):
