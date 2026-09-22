@@ -274,10 +274,14 @@ class FrontendSite:
             for event in self.wanted.values():
                 event.set()
         if summary:
-            logger.info(
-                f'Frontend warmed up: {summary} files, '
-                f'{len(self.mismatched)} mismatched, {len(self.unreadable)} unreadable'
-            )
+            # the diagnostics are only reported when there is something to
+            # report: a clean warmup logs one line about its files only
+            message = f'Frontend warmed up: {summary} files'
+            if self.mismatched:
+                message += f', {len(self.mismatched)} mismatched'
+            if self.unreadable:
+                message += f', {len(self.unreadable)} unreadable'
+            logger.info(message)
 
     def _warm_all(self, token):
         """
@@ -612,7 +616,7 @@ def _read_manifest(root, manifest):
         return {}
     if INDEX_HTML not in records:
         logger.warning(f'Frontend build "{FRONTEND_FOLDER}" has no {INDEX_HTML}, routes cannot be served')
-    logger.info(f'Frontend loaded: {len(records)} files from "{FRONTEND_FOLDER}"')
+    # logger.info(f'Frontend loaded: {len(records)} files from "{FRONTEND_FOLDER}"')
     return records
 
 

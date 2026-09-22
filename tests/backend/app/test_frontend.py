@@ -313,6 +313,9 @@ class TestWarmUp:
         with logger.mock_capture_writer() as capture:
             await site.warm_up()
         assert capture.fd.any_contains(f'Frontend warmed up: {len(FILES)} files')
+        # a clean warmup does not report a diagnostics counter at zero
+        assert not capture.fd.any_contains('mismatched')
+        assert not capture.fd.any_contains('unreadable')
         assert sorted(site.bodies) == sorted(FILES)
 
         for path in FILES:
@@ -348,6 +351,7 @@ class TestWarmUp:
             await site.warm_up()
         assert capture.fd.any_contains('Failed to read the frontend file')
         assert capture.fd.any_contains('1 unreadable')
+        assert not capture.fd.any_contains('mismatched')
         assert site.unreadable == {'favicon.png'}
         # the failure is published: no second read, no second warning
         assert site.bodies['favicon.png'] is frontend._FAILED
@@ -366,6 +370,7 @@ class TestWarmUp:
         assert capture.fd.any_contains('favicon.png')
         assert capture.fd.any_contains(sha1(FILES['favicon.png']).hexdigest())
         assert capture.fd.any_contains('1 mismatched')
+        assert not capture.fd.any_contains('unreadable')
         assert site.mismatched == {'favicon.png'}
         resp = await get(site, '/favicon.png')
         assert resp.body == b'the content on disk does not match the manifest'
