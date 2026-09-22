@@ -355,18 +355,16 @@ class TestExtractFixtures:
         with pytest.raises(FileNotFoundError):
             extract('/unpack.asar', '/out')
 
-    @pytest.mark.skipif(os.name == 'nt', reason='symbolic links need elevation on Windows')
-    def test_links(self, fs):
-        """Links are created as symbolic links on POSIX."""
+    def test_links(self, fs, posix_links):
+        """Links are created as symbolic links, see the ``posix_links`` fixture."""
         fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
         entries = extract('/links.asar', '/out')
-        assert paths_of(entries, KIND_LINK) == ['Current', 'real.txt']
+        assert paths_of(entries, KIND_LINK) == ['A/reverse-symlink.txt', 'Current', 'real.txt']
         assert os.readlink('/out/Current') == 'A'
-        assert os.readlink('/out/real.txt') == 'Current/real.txt'
+        assert os.readlink('/out/real.txt') == os.path.join('Current', 'real.txt')
 
-    @pytest.mark.skipif(os.name != 'nt', reason='the fallback is Windows only')
-    def test_links_on_windows(self, fs):
-        """A link to a file is materialized as a copy on Windows."""
+    def test_links_without_symlink_support(self, fs, windows_links):
+        """A link to a file is materialized as a copy where no link can be created."""
         header = {
             'files': {
                 'real.txt': entry(5, 0, b'hello'),
@@ -385,9 +383,8 @@ class TestExtractFixtures:
         assert file_read_bytes('/out/l.txt') == b'hello'
         assert file_read_bytes('/out/deep/up.txt') == b'hi'
 
-    @pytest.mark.skipif(os.name != 'nt', reason='the fallback is Windows only')
-    def test_links_on_windows_directory(self, fs):
-        """A link to a directory can not be extracted on Windows."""
+    def test_links_without_symlink_support_directory(self, fs, windows_links):
+        """A link to a directory can not be extracted where no link can be created."""
         content = fixture.make_archive({'files': {'dir': {'files': {}}, 'link': {'link': 'dir'}}})
         fs.create_file('/broken.asar', contents=content)
         with pytest.raises(AsarUnsupportedError) as e:
@@ -483,12 +480,21 @@ class TestExtractSafety:
             f'exceeds the data area of {len(DATA) - 10} bytes'
         )
 
-    @pytest.mark.skipif(os.name == 'nt', reason='Windows has no executable bit')
-    def test_executable(self, fs):
-        """An executable entry is extracted with its bit set."""
-        header = {'files': {'run.sh': {'size': 2, 'offset': '0', 'executable': True}}}
+    def test_executable(self, fs, posix_executable):
+        """An executable entry is extracted with its bit set, see ``posix_executable``."""
+        header = {
+            'files': {
+                'run.sh': {
+                    'size': 2,
+                    'offset': '0',
+                    'executable': True,
+                    'integrity': integrity(b'hi'),
+                },
+            },
+        }
         fs.create_file('/exec.asar', contents=fixture.make_archive(header, b'hi'))
         extract('/exec.asar', '/out')
+        assert file_read_bytes('/out/run.sh') == b'hi'
         assert os.stat('/out/run.sh').st_mode & 0o777 == 0o755
 
 
@@ -561,23 +567,6 @@ class TestMixedTable:
             archive.add_file('/local.txt', 'local.txt')
             archive.extract_file('local.txt', '/deep/local.txt')
         assert file_read_bytes('/deep/local.txt') == b'local content'
-
-
-@pytest.fixture
-def posix_links(monkeypatch):
-    """
-    Run the symbolic link branch of ``create_link()`` on every platform.
-
-    Creating a symbolic link needs elevation on Windows, so the branch that
-    writes the links of an archive is only exercised where the platform allows
-    it (the tests that use the real os.symlink() are skipped here). The
-    in-memory filesystem implements symlink() and resolves the links it holds,
-    so the branch and the tree it builds are checked on every platform this way.
-
-    Args:
-        monkeypatch (MonkeyPatch): Patch helper of pytest
-    """
-    monkeypatch.setattr(archive_module, 'CAN_SYMLINK', True)
 
 
 class TestRelativeLinkTarget:

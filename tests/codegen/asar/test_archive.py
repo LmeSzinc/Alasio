@@ -806,16 +806,17 @@ class TestExtractAll:
             archive.extract_file('hello.txt', '/deep/nested/hello.txt')
         assert file_read_bytes('/deep/nested/hello.txt') == b'hello world'
 
-    @pytest.mark.skipif(os.name == 'nt', reason='symbolic links need elevation on Windows')
-    def test_extract_all_links(self, fs):
-        """A link is created as a relative symbolic link on POSIX."""
+    def test_extract_all_links(self, fs, posix_links):
+        """A link is created as a relative symbolic link, see the ``posix_links`` fixture."""
         fs.create_file('/links.asar', contents=fixture.packthis_symlink_430())
         with AsarArchive('/links.asar') as archive:
-            assert paths_of(archive, KIND_LINK) == ['Current', 'real.txt']
+            assert paths_of(archive, KIND_LINK) == ['A/reverse-symlink.txt', 'Current', 'real.txt']
             archive.extract_all('/out')
         assert os.path.islink('/out/Current')
         assert os.readlink('/out/Current') == 'A'
-        assert os.readlink('/out/real.txt') == 'Current/real.txt'
+        # The text of a link is a path of the platform the archive is extracted
+        # on, the target is rebased with os.path (see relative_link_target)
+        assert os.readlink('/out/real.txt') == os.path.join('Current', 'real.txt')
 
 
 # An app bundle as a packer of the desktop client lays it out: the entries are

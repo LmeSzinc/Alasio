@@ -48,6 +48,12 @@ from .source import LocalFileSource, MemorySource, RangeSource
 # Whether the file system can hold a symbolic link: Windows needs elevation to
 # create one, so the extraction materializes a link as a copy of its target there
 CAN_SYMLINK = os.name != 'nt'
+# Whether the file system stores the executable bit of a file: Windows has none,
+# so the extraction keeps the default mode of an executable entry there. The two
+# constants are what the module reads where it depends on the platform, and not
+# ``os.name`` at the call site, so that a test can run either branch on any
+# platform, see ``tests/codegen/asar/conftest.py``
+CAN_EXECUTABLE = os.name != 'nt'
 
 # Default limit of an archive that is read from a file: 512 MiB. It is far above
 # the size of a real app bundle (tens of MiB) while a file that comes from the
@@ -136,10 +142,11 @@ def entry_mode(info):
         info (AsarFileInfo): Entry
 
     Returns:
-        int: 0o755 for an executable entry, None to keep the default mode,
-            always None on Windows, which has no executable bit
+        int: 0o755 for an executable entry, None to keep the default mode, and
+            always None where the file system has no executable bit (Windows,
+            see ``CAN_EXECUTABLE``)
     """
-    if info.executable and os.name != 'nt':
+    if info.executable and CAN_EXECUTABLE:
         return 0o755
     return None
 

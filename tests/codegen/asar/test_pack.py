@@ -380,6 +380,38 @@ class TestAddFolder:
             assert entry_paths(reader) == ['中文.txt']
             assert bytes(reader.read_file('中文.txt')) == b'text'
 
+    def test_add_folder_executable(self, fs):
+        """The executable bit of a source file is stored in the header.
+
+        The mode of a file is what says it, so the flag is the same wherever the
+        tests run: a file system without an executable bit reports a mode that
+        has none.
+        """
+        fs.create_dir('/tree')
+        fs.create_file('/tree/run.sh', contents=b'echo hi', st_mode=0o100755)
+        fs.create_file('/tree/plain.txt', contents=b'text', st_mode=0o100644)
+        archive = AsarArchive()
+        archive.add_folder('/tree')
+        archive.write('/out.asar')
+        header = stored_header('/out.asar')
+        assert header['files']['run.sh']['executable'] is True
+        assert 'executable' not in header['files']['plain.txt']
+        with AsarArchive('/out.asar') as reader:
+            assert reader.entry('run.sh').executable is True
+            assert reader.entry('plain.txt').executable is False
+
+    def test_add_folder_executable_unpacked(self, fs):
+        """The content of an executable entry that is unpacked carries its mode."""
+        fs.create_dir('/tree')
+        fs.create_file('/tree/run.sh', contents=b'echo hi', st_mode=0o100755)
+        fs.create_file('/tree/plain.txt', contents=b'text', st_mode=0o100644)
+        archive = AsarArchive()
+        archive.add_folder('/tree', unpack=True)
+        archive.write('/out.asar')
+        assert file_read_bytes('/out.asar.unpacked/run.sh') == b'echo hi'
+        assert os.stat('/out.asar.unpacked/run.sh').st_mode & 0o777 == 0o755
+        assert os.stat('/out.asar.unpacked/plain.txt').st_mode & 0o777 != 0o755
+
 
 class TestUnpackedInheritance:
     def test_a_new_entry_follows_its_directory(self, fs):
@@ -1185,10 +1217,8 @@ class TestHelpers:
         assert not os.path.exists('/deep/a.txt')
         assert [name for name in fs._files if name.endswith('.tmp')] == []
 
-    def test_write_content_mode(self, fs):
-        """The mode of an entry is set on the file that is written."""
-        if os.name == 'nt':
-            pytest.skip('Windows has no executable bit')
+    def test_write_content_mode(self, fs, posix_executable):
+        """The mode of an entry is set on the file that is written, see ``posix_executable``."""
         info = AsarFileInfo(kind=KIND_FILE, size=2, executable=True)
         from alasio.codegen.asar.archive import entry_mode
         assert entry_mode(info) == 0o755

@@ -462,9 +462,10 @@ def pack_archive(files, dest, integrity=True, fd=None, release=None):
         )
         info.size = size
         info.integrity = content_integrity
-        if source.mode is not None and os.name != 'nt':
-            # Only POSIX has an executable bit, and only a file of its own
-            # knows it, an entry read from an archive keeps what the header says
+        if source.mode is not None:
+            # Only a file of its own knows whether it is executable: an entry
+            # that was read from an archive keeps the flag of the header, and a
+            # file system without an executable bit reports a mode without one
             info.executable = bool(source.mode & 0o100)
         if buffer is not None and len(buffer) <= cache_budget:
             cache[id(info)] = buffer
@@ -503,7 +504,9 @@ def pack_archive(files, dest, integrity=True, fd=None, release=None):
                     os.path.join(unpacked_dir, *keys),
                     iter_entry_content(keys, info, fd),
                     verifier=verifier,
-                    mode=0o755 if info.executable and os.name != 'nt' else None,
+                    # A file system without an executable bit ignores the bits it
+                    # does not have, so the mode is set the same way everywhere
+                    mode=0o755 if info.executable else None,
                 )
 
     # Pass 2: the content, recomputed and checked against pass 1
