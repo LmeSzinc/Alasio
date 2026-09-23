@@ -29,9 +29,9 @@
          -> shrinks when space tight, image object-contain for letterboxing
        - Progress: height: 80px, flex-shrink: 0
          -> fixed height, never shrinks
-       - Dashboard: flex: 1 0 0%, min-height: 128px
+       - Dashboard: flex: 1 0 0%, min-height: 140px
          -> fills remaining height; never shorter than two whole dashboard
-            items (item 42px + row gap 12px + padding 32px), so a squeezed
+            items (item 54px + row gap 8px + padding 24px), so a squeezed
             window shows whole items instead of a sliver at the card edge;
             when min-height is hit, left-col shrinks -> Preview squeezed
 
@@ -74,7 +74,7 @@
         Landscape: flex:1 0 0% (fills remaining height in column, won't shrink below min-height)
         Portrait:  flex:1 (equal half width in row)
       -->
-      <div class={cn("min-h-0 min-w-0", isLandscape ? "min-h-[128px] shrink-0 grow basis-0" : "flex-1")}>
+      <div class={cn("min-h-0 min-w-0", isLandscape ? "min-h-[140px] shrink-0 grow basis-0" : "flex-1")}>
         <Dashboard class="h-full w-full" />
       </div>
     </div>

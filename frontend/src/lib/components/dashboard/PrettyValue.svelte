@@ -5,10 +5,17 @@
   let {
     data,
     variant = "default",
+    mutedClass = "text-muted-foreground",
     class: className,
   }: {
     data: Record<string, ArgData>;
     variant?: "default" | "primary";
+    /**
+     * Color of the secondary half of the value line (`/ total`, `> eta`). The
+     * dashboard item turns it into the flash foreground color while the item
+     * is highlighted; on its own the value line keeps the muted text color.
+     */
+    mutedClass?: string;
     class?: string;
   } = $props();
 
@@ -36,7 +43,9 @@
     "…". "12.. / ..." must never show up: both halves would carry no
     information while either of them alone still would.
   -->
-  <span class="text-muted-foreground max-w-max min-w-0 grow basis-[2.5em] truncate text-[0.8em]">
+  <span
+    class={cn("max-w-max min-w-0 grow basis-[2.5em] truncate text-[0.8em] transition-colors duration-200", mutedClass)}
+  >
     / {denom ?? "NaN"}
   </span>
 {/snippet}
@@ -73,8 +82,11 @@
     <span class={cn("max-w-full shrink-0 truncate font-medium", variant === "primary" && "font-bold")}>
       {formattedProgress(data.Progress?.value)}%
     </span>
-    <span class={cn("text-muted-foreground max-w-max min-w-0 grow basis-[2.5em] truncate text-[0.8em]")}
-      >&gt;{data.Eta?.value ?? "NaN"}</span
+    <span
+      class={cn(
+        "max-w-max min-w-0 grow basis-[2.5em] truncate text-[0.8em] transition-colors duration-200",
+        mutedClass,
+      )}>&gt;{data.Eta?.value ?? "NaN"}</span
     >
   {/if}
 </div>
