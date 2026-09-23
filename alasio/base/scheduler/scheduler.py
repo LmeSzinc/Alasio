@@ -9,6 +9,7 @@ from alasio.base.exception import (
     GameTooManyClickError, RequestHumanTakeover, ScriptError, TaskStop
 )
 from alasio.base.scheduler.configwatcher import ConfigWatcher
+from alasio.base.scheduler.scheduler_task import SchedulerTask
 from alasio.base.scheduler.task_record import TaskRecord, TaskTooManyExecutionsError, TaskTooManyFailuresError
 from alasio.base.state import TaskState
 from alasio.base.timer import getnow
@@ -58,7 +59,7 @@ def interruptable_sleep(second):
             return True
 
 
-class AlasioScheduler:
+class AlasioScheduler(SchedulerTask):
     def __init__(self, config_name):
         self.config_name = config_name
         # Skip first restart
@@ -95,21 +96,6 @@ class AlasioScheduler:
         except Exception as e:
             logger.exception(e)
             raise SchedulerError
-
-    def restart_device(self):
-        raise NotImplementedError
-
-    def restart_game(self):
-        raise NotImplementedError
-
-    def stop_game(self):
-        raise NotImplementedError
-
-    def stop_device(self):
-        raise NotImplementedError
-
-    def goto_main(self):
-        raise NotImplementedError
 
     def _run_task(self, task):
         """
@@ -248,17 +234,17 @@ class AlasioScheduler:
         run = False
         if method == 'stop_game':
             logger.info('Stop game during wait')
-            self._run_task('stop_game')
+            self._run_task('StopGame')
             self._on_game_stop()
             run = True
         elif method == 'stop_device':
             logger.info('Stop device during wait')
-            self._run_task('stop_device')
+            self._run_task('StopDevice')
             self._on_game_stop()
             run = True
         elif method == 'goto_main':
             logger.info('Goto main page during wait')
-            self._run_task('goto_main')
+            self._run_task('GotoMain')
             run = True
         elif method == 'stay_there':
             logger.info('Stay there during wait')

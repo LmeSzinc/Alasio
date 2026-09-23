@@ -5,6 +5,7 @@ from alasio.config_dev.gen.gen_task_entry import GenTaskEntry
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext.concurrent.threadpool import Job
 from alasio.ext.path.atomic import atomic_read_text
+from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
 
@@ -53,42 +54,20 @@ class Reward:
         ...
 """
 
-# expected content of the generated task_entry.py with entries
-EXPECTED_WITH_ENTRIES = (
-    'from alasio.base.scheduler.scheduler import AlasioScheduler\n'
-    '\n'
-    '\n'
-    '# This file was auto-generated, do not modify it manually. To generate:\n'
-    '# ``` python -m module.config.gen ```\n'
-    '\n'
-    'class TaskEntryGenerated(AlasioScheduler):\n'
-    '    """\n'
-    '    Task entry functions, generated from @alasio_task() markers\n'
-    '    """\n'
-    '\n'
-    '    def Reward(self):\n'
-    '        from module.reward.reward import Reward\n'
-    '        Reward(config=self.config, device=self.device).run()\n'
-    '\n'
-    '    def Shop(self):\n'
-    '        from tasks.shop import Shop\n'
-    '        Shop(config=self.config, device=self.device).run()\n'
-)
+# a MOD that overrides the scheduler tasks
+CODE_RESTART = """
+from alasio.base.scheduler.task_entry import alasio_task
 
-# expected content of the generated task_entry.py with no entries
-EXPECTED_EMPTY = (
-    'from alasio.base.scheduler.scheduler import AlasioScheduler\n'
-    '\n'
-    '\n'
-    '# This file was auto-generated, do not modify it manually. To generate:\n'
-    '# ``` python -m module.config.gen ```\n'
-    '\n'
-    'class TaskEntryGenerated(AlasioScheduler):\n'
-    '    """\n'
-    '    Task entry functions, generated from @alasio_task() markers\n'
-    '    """\n'
-    '    pass\n'
-)
+
+class Restart:
+    @alasio_task('RestartDevice')
+    def restart_device(self):
+        ...
+
+    @alasio_task('RestartGame')
+    def restart_game(self):
+        ...
+"""
 
 
 class TestIterTaskEntryFiles:
@@ -236,7 +215,27 @@ class Shop:
         gen.start_task_entry_scan()
         gen.generate_task_entry_file()
         content = atomic_read_text(gen.task_entry_file)
-        assert content == EXPECTED_WITH_ENTRIES
+        # no scheduler task is overridden, so there is no divider for normal tasks
+        assert content == '''\
+from alasio.base.scheduler.scheduler import AlasioScheduler
+
+
+# This file was auto-generated, do not modify it manually. To generate:
+# ``` python -m module.config.gen ```
+
+class TaskEntryGenerated(AlasioScheduler):
+    """
+    Task entry functions, generated from @alasio_task() markers
+    """
+
+    def Reward(self):
+        from module.reward.reward import Reward
+        Reward(config=self.config, device=self.device).run()
+
+    def Shop(self):
+        from tasks.shop import Shop
+        Shop(config=self.config, device=self.device).run()
+'''
 
     def test_generate_multiple_decorators(self, fs):
         """Multiple decorators on one method generate one entry method per task."""
@@ -251,26 +250,26 @@ class Reward:
         gen.start_task_entry_scan()
         gen.generate_task_entry_file()
         content = atomic_read_text(gen.task_entry_file)
-        assert content == (
-            'from alasio.base.scheduler.scheduler import AlasioScheduler\n'
-            '\n'
-            '\n'
-            '# This file was auto-generated, do not modify it manually. To generate:\n'
-            '# ``` python -m module.config.gen ```\n'
-            '\n'
-            'class TaskEntryGenerated(AlasioScheduler):\n'
-            '    """\n'
-            '    Task entry functions, generated from @alasio_task() markers\n'
-            '    """\n'
-            '\n'
-            '    def Reward(self):\n'
-            '        from module.reward import Reward\n'
-            '        Reward(config=self.config, device=self.device).run()\n'
-            '\n'
-            '    def Shop(self):\n'
-            '        from module.reward import Reward\n'
-            '        Reward(config=self.config, device=self.device).run()\n'
-        )
+        assert content == '''\
+from alasio.base.scheduler.scheduler import AlasioScheduler
+
+
+# This file was auto-generated, do not modify it manually. To generate:
+# ``` python -m module.config.gen ```
+
+class TaskEntryGenerated(AlasioScheduler):
+    """
+    Task entry functions, generated from @alasio_task() markers
+    """
+
+    def Reward(self):
+        from module.reward import Reward
+        Reward(config=self.config, device=self.device).run()
+
+    def Shop(self):
+        from module.reward import Reward
+        Reward(config=self.config, device=self.device).run()
+'''
 
     def test_generate_alasio_comment(self, fs):
         """alasio itself is generated with the gen_alasio codegen entry comment."""
@@ -279,19 +278,19 @@ class Reward:
         gen.start_task_entry_scan()
         gen.generate_task_entry_file()
         content = atomic_read_text(gen.task_entry_file)
-        assert content == (
-            'from alasio.base.scheduler.scheduler import AlasioScheduler\n'
-            '\n'
-            '\n'
-            '# This file was auto-generated, do not modify it manually. To generate:\n'
-            '# ``` python -m alasio.config_dev.gen_alasio ```\n'
-            '\n'
-            'class TaskEntryGenerated(AlasioScheduler):\n'
-            '    """\n'
-            '    Task entry functions, generated from @alasio_task() markers\n'
-            '    """\n'
-            '    pass\n'
-        )
+        assert content == '''\
+from alasio.base.scheduler.scheduler import AlasioScheduler
+
+
+# This file was auto-generated, do not modify it manually. To generate:
+# ``` python -m alasio.config_dev.gen_alasio ```
+
+class TaskEntryGenerated(AlasioScheduler):
+    """
+    Task entry functions, generated from @alasio_task() markers
+    """
+    pass
+'''
 
     def test_generate_empty(self, fs):
         """The file is still generated with an empty class when nothing is found."""
@@ -304,4 +303,149 @@ class Plain:
         gen.start_task_entry_scan()
         gen.generate_task_entry_file()
         content = atomic_read_text(gen.task_entry_file)
-        assert content == EXPECTED_EMPTY
+        assert content == '''\
+from alasio.base.scheduler.scheduler import AlasioScheduler
+
+
+# This file was auto-generated, do not modify it manually. To generate:
+# ``` python -m module.config.gen ```
+
+class TaskEntryGenerated(AlasioScheduler):
+    """
+    Task entry functions, generated from @alasio_task() markers
+    """
+    pass
+'''
+
+    def test_generate_scheduler_task_first(self, fs):
+        """Scheduler tasks are generated first and sorted on their own."""
+        write_code(fs, 'module/restart.py', CODE_RESTART)
+        write_code(fs, 'module/reward.py', CODE_REWARD)
+        gen = make_gen(fs)
+        gen.start_task_entry_scan()
+        gen.generate_task_entry_file()
+        content = atomic_read_text(gen.task_entry_file)
+        assert content == '''\
+from alasio.base.scheduler.scheduler import AlasioScheduler
+
+
+# This file was auto-generated, do not modify it manually. To generate:
+# ``` python -m module.config.gen ```
+
+class TaskEntryGenerated(AlasioScheduler):
+    """
+    Task entry functions, generated from @alasio_task() markers
+    """
+
+    def RestartDevice(self):
+        from module.restart import Restart
+        Restart(config=self.config, device=self.device).restart_device()
+
+    def RestartGame(self):
+        from module.restart import Restart
+        Restart(config=self.config, device=self.device).restart_game()
+
+    """
+    ========== normal tasks ==========
+    """
+
+    def Reward(self):
+        from module.reward import Reward
+        Reward(config=self.config, device=self.device).run()
+'''
+
+    def test_generate_scheduler_task_only(self, fs):
+        """No divider when the MOD does not have normal tasks."""
+        write_code(fs, 'module/restart.py', CODE_RESTART)
+        gen = make_gen(fs)
+        gen.start_task_entry_scan()
+        gen.generate_task_entry_file()
+        content = atomic_read_text(gen.task_entry_file)
+        assert content == '''\
+from alasio.base.scheduler.scheduler import AlasioScheduler
+
+
+# This file was auto-generated, do not modify it manually. To generate:
+# ``` python -m module.config.gen ```
+
+class TaskEntryGenerated(AlasioScheduler):
+    """
+    Task entry functions, generated from @alasio_task() markers
+    """
+
+    def RestartDevice(self):
+        from module.restart import Restart
+        Restart(config=self.config, device=self.device).restart_device()
+
+    def RestartGame(self):
+        from module.restart import Restart
+        Restart(config=self.config, device=self.device).restart_game()
+'''
+
+
+class TestSchedulerTaskNames:
+    """Tests for scheduler_task_names."""
+
+    def test_scheduler_task_names(self, fs):
+        """Scheduler task names come from SchedulerTask, sorted."""
+        gen = make_gen(fs)
+        assert gen.scheduler_task_names == [
+            'GotoMain',
+            'RestartDevice',
+            'RestartGame',
+            'StopDevice',
+            'StopGame',
+        ]
+
+
+class TestCheckSchedulerTask:
+    """Tests for check_scheduler_task()."""
+
+    def test_warn_missing_scheduler_task(self, fs):
+        """A warning is printed for every scheduler task that is not overridden."""
+        write_code(fs, 'module/reward.py', CODE_REWARD)
+        gen = make_gen(fs)
+        data = gen.scan_task_entry()
+        with logger.mock_capture_writer() as capture:
+            gen.check_scheduler_task(data)
+        assert capture.fd.any_contains(
+            'Scheduler task not overridden by task entry: GotoMain, RestartDevice, RestartGame, StopDevice, StopGame'
+        )
+        assert capture.fd.any_contains('NotImplementedError')
+
+    def test_warn_partial_override(self, fs):
+        """Only the scheduler tasks that are not overridden are warned."""
+        write_code(fs, 'module/restart.py', CODE_RESTART)
+        gen = make_gen(fs)
+        data = gen.scan_task_entry()
+        with logger.mock_capture_writer() as capture:
+            gen.check_scheduler_task(data)
+        assert capture.fd.any_contains(
+            'Scheduler task not overridden by task entry: GotoMain, StopDevice, StopGame'
+        )
+
+    def test_no_warn_when_all_overridden(self, fs):
+        """No warning when the MOD overrides all scheduler tasks."""
+        write_code(fs, 'module/restart.py', CODE_RESTART)
+        write_code(fs, 'module/main.py', """
+class Main:
+    @alasio_task('GotoMain')
+    @alasio_task('StopDevice')
+    @alasio_task('StopGame')
+    def run(self):
+        ...
+""")
+        gen = make_gen(fs)
+        data = gen.scan_task_entry()
+        with logger.mock_capture_writer() as capture:
+            gen.check_scheduler_task(data)
+        assert len(capture.fd.logs) == 0
+
+    def test_no_warn_for_alasio(self, fs):
+        """alasio has no MOD scheduler, so it does not override any scheduler task."""
+        entry = ModEntryInfo.alasio()
+        gen = GenTaskEntry(entry)
+        gen.start_task_entry_scan()
+        with logger.mock_capture_writer() as capture:
+            gen.generate_task_entry_file()
+        assert not capture.fd.any_contains('Scheduler task not overridden')

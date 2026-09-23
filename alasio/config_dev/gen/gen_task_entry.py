@@ -1,3 +1,4 @@
+from alasio.base.scheduler.scheduler_task import SchedulerTask
 from alasio.codegen.python import CodeGen
 from alasio.config_dev.gen.gen_cross import CrossNavGenerator
 from alasio.config_dev.parse.base import DefinitionError
@@ -15,6 +16,20 @@ class GenTaskEntry(CrossNavGenerator):
     @cached_property
     def task_entry_file(self):
         return self.path_config.joinpath('_index/task_entry.py')
+
+    @cached_property
+    def scheduler_task_names(self):
+        """
+        Task names of the scheduler tasks, which must be overridden by the MOD.
+        A scheduler task is a public method of SchedulerTask, such as "RestartGame".
+
+        Returns:
+            list[str]: Sorted task names
+        """
+        return sorted(
+            name for name, value in vars(SchedulerTask).items()
+            if not name.startswith('_') and callable(value)
+        )
 
     def start_task_entry_scan(self):
         """
@@ -76,6 +91,25 @@ class GenTaskEntry(CrossNavGenerator):
         """
         return self._task_entry_job.get()
 
+    def check_scheduler_task(self, data):
+        """
+        Check whether all scheduler tasks are overridden by task entries.
+        A scheduler task that is not overridden raises NotImplementedError
+        when the scheduler runs the task, so warn the MOD developer here.
+
+        Args:
+            data (dict[str, TaskEntryInfo]): Task entries, key is task name
+        """
+        missing = [name for name in self.scheduler_task_names if name not in data]
+        if not missing:
+            return
+        logger.warning(
+            f'Scheduler task not overridden by task entry: {", ".join(missing)}\n'
+            'Scheduler task must be overridden by the MOD, either by an @alasio_task() entry, '
+            'or by a method with the task name, otherwise the scheduler raises '
+            'NotImplementedError when running the task'
+        )
+
     def generate_task_entry_file(self, gitadd=None):
         """
         Generate {path_config}/_index/task_entry.py
@@ -84,6 +118,9 @@ class GenTaskEntry(CrossNavGenerator):
         so that `from ... import TaskEntryGenerated` never fails.
         """
         data = self.task_entry_data
+        # only the MOD overrides the scheduler tasks, check whether it forgets some of them
+        if self.alasio:
+            self.check_scheduler_task(data)
         gen = CodeGen()
         gen.FromImport('alasio.base.scheduler.scheduler').Import('AlasioScheduler')
         # comment the codegen entry to regenerate this file
@@ -96,7 +133,19 @@ class GenTaskEntry(CrossNavGenerator):
             gen.MultilineComment('Task entry functions, generated from @alasio_task() markers')
             if not data:
                 gen.Pass()
-            for info in sorted(data.values(), key=lambda x: x.task):
+            # scheduler tasks are generated first and sorted on their own
+            scheduler_task = [data[name] for name in self.scheduler_task_names if name in data]
+            # the rest are normal tasks, sorted by task name
+            scheduler_names = set(self.scheduler_task_names)
+            normal_task = [info for name, info in sorted(data.items()) if name not in scheduler_names]
+            for info in scheduler_task:
+                with gen.Def(info.task).set_args('self'):
+                    gen.FromImport(to_python_import(info.file)).Import(info.cls)
+                    gen.Raw(f'{info.cls}(config=self.config, device=self.device).{info.func}()')
+            if scheduler_task and normal_task:
+                gen.Empty()
+                gen.MultilineComment('========== normal tasks ==========')
+            for info in normal_task:
                 with gen.Def(info.task).set_args('self'):
                     gen.FromImport(to_python_import(info.file)).Import(info.cls)
                     gen.Raw(f'{info.cls}(config=self.config, device=self.device).{info.func}()')

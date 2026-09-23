@@ -654,7 +654,7 @@ class TestAlasioSchedulerWaitFuture:
                             result = scheduler._wait_future("Main", future)
 
         assert result is False
-        mock_run.assert_any_call("stop_game")
+        mock_run.assert_any_call("StopGame")
         mock_stop.assert_called_once()
         config.release.assert_called_once()
 
@@ -679,7 +679,7 @@ class TestAlasioSchedulerWaitFuture:
                         result = scheduler._wait_future("Main", future)
 
         assert result is False
-        mock_run.assert_any_call("stop_device")
+        mock_run.assert_any_call("StopDevice")
         mock_stop.assert_called_once()
 
     def test_wait_goto_main(self, scheduler):
@@ -702,7 +702,7 @@ class TestAlasioSchedulerWaitFuture:
                     result = scheduler._wait_future("Main", future)
 
         assert result is False
-        mock_run.assert_any_call("goto_main")
+        mock_run.assert_any_call("GotoMain")
 
     def test_wait_stay_there(self, scheduler):
         """When WhenTaskQueueEmpty is 'stay_there', no extra action is taken."""
