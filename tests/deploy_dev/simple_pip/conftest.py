@@ -20,6 +20,7 @@ import pytest
 
 from alasio.deploy_dev.simple_pip import DistInfo
 from alasio.ext.path.iter import iter_files, iter_folders
+from alasio.logger.writer import LogWriter
 
 
 def sha256_record(content):
@@ -194,6 +195,26 @@ def list_folders(root):
     """
     root = root.rstrip('/')
     return sorted(path[len(root) + 1:] for path in iter_folders(root, recursive=True))
+
+
+@pytest.fixture(autouse=True)
+def mute_log_file():
+    """
+    Keep the tests from opening log files in the project log directory.
+
+    Every log line of the test process (pytest's module name is "__main__")
+    would create log/{date}__main__.txt in the repository. The in-memory
+    filesystem fixture redirects the writes already, this also covers the
+    tests that do not use it.
+
+    The log assertions keep working: the tests capture with
+    logger.mock_capture_writer(), which swaps the writer in front of the
+    (muted) file target.
+    """
+    LogWriter().mute(fd=True)
+    yield
+    # Drop whatever fd the test left cached (real or fake) before unmuting
+    LogWriter().close_fd()
 
 
 @pytest.fixture

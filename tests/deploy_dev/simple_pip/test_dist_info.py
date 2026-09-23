@@ -4,6 +4,7 @@ import pytest
 from conftest import abs_path, create_dist, list_files, list_folders, sha256_record, site_packages
 
 from alasio.deploy_dev.simple_pip import DistInfo
+from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
 
@@ -206,14 +207,16 @@ class TestRecordOrder:
             ('demo-1.0.dist-info/RECORD', '', ''),
         ]
         dist = create_dist(fs, self.FILES, record=rows)
-        assert dist.uninstall() is True
+        # The uninstallation removes the same files whatever the order is, the
+        # shared directory of the tool is not empty after the removal
+        assert dist.uninstall() == (7, 4)
         assert list_files(abs_path(fs, '/env')) == []
         assert list_folders(abs_path(fs, '/env')) == ['Lib', 'Lib/site-packages']
 
 
 class TestUninstall:
-    def test_uninstall(self, fs, capsys):
-        """Every recorded file is removed, inside and outside of site-packages."""
+    def test_uninstall(self, fs):
+        """Every recorded file is removed, the number of files and folders removed is returned."""
         site = site_packages(fs)
         dist = create_dist(fs, {
             'demo/__init__.py': b'a = 1\n',
@@ -221,21 +224,7 @@ class TestUninstall:
             '../../Scripts/demo-tool': b'#!python\n',
             '../../share/demo/data.txt': b'demo data\n',
         })
-        assert dist.uninstall() is True
-        assert capsys.readouterr().out == (
-            f'Delete file: {site}/demo/__init__.py\n'
-            f'Delete file: {site}/demo/sub/core.py\n'
-            f'Delete file: {abs_path(fs, "/env/Scripts/demo-tool")}\n'
-            f'Delete file: {abs_path(fs, "/env/share/demo/data.txt")}\n'
-            f'Delete file: {site}/demo-1.0.dist-info/METADATA\n'
-            f'Delete file: {site}/demo-1.0.dist-info/RECORD\n'
-            f'Delete folder: {site}/demo-1.0.dist-info\n'
-            f'Delete folder: {site}/demo/sub\n'
-            f'Delete folder: {site}/demo\n'
-            f'Delete folder: {abs_path(fs, "/env/share/demo")}\n'
-            f'Delete folder: {abs_path(fs, "/env/Scripts")}\n'
-            f'Delete folder: {abs_path(fs, "/env/share")}\n'
-        )
+        assert dist.uninstall() == (6, 6)
         assert list_files(abs_path(fs, '/env')) == []
         assert list_folders(site) == []
         # site-packages and the directories above it are kept
@@ -246,13 +235,13 @@ class TestUninstall:
         site = site_packages(fs)
         dist = create_dist(fs, {'shared/demo.py': b'a = 1\n'}, name='nsa')
         create_dist(fs, {'shared/other.py': b'a = 2\n'}, name='nsb')
-        assert dist.uninstall() is True
+        # The shared directory is not empty, os.rmdir() leaves it
+        assert dist.uninstall() == (3, 1)
         assert list_files(site) == [
             'nsb-1.0.dist-info/METADATA',
             'nsb-1.0.dist-info/RECORD',
             'shared/other.py',
         ]
-        # The shared directory is not empty, os.rmdir() leaves it
         assert list_folders(site) == ['nsb-1.0.dist-info', 'shared']
 
     def test_uninstall_keeps_unrecorded_file(self, fs):
@@ -260,7 +249,7 @@ class TestUninstall:
         site = site_packages(fs)
         dist = create_dist(fs, {'demo/__init__.py': b'a = 1\n'})
         fs.create_file(f'{site}/demo/stale.cpython-39.pyc', contents=b'')
-        assert dist.uninstall() is True
+        assert dist.uninstall() == (3, 1)
         assert list_files(site) == ['demo/stale.cpython-39.pyc']
         assert list_folders(site) == ['demo']
 
@@ -269,7 +258,7 @@ class TestUninstall:
         site = site_packages(fs)
         dist = create_dist(fs, {'demo/__init__.py': b'', 'demo/core.py': b''})
         os.remove(f'{site}/demo/core.py')
-        assert dist.uninstall() is True
+        assert dist.uninstall() == (3, 2)
         assert list_files(site) == []
 
     def test_uninstall_directory_entry(self, fs):
@@ -281,23 +270,27 @@ class TestUninstall:
             ('demo-1.0.dist-info/METADATA', sha256_record(b''), '0'),
             ('demo-1.0.dist-info/RECORD', '', ''),
         ])
-        assert dist.uninstall() is True
+        assert dist.uninstall() == (3, 3)
         assert list_files(site) == []
 
-    def test_uninstall_without_record(self, fs, capsys):
+    def test_uninstall_without_record(self, fs):
         """A distribution without RECORD is kept, pip refuses to uninstall it as well."""
         site = site_packages(fs)
         dist = create_dist(fs, {'demo/__init__.py': b''}, record=False)
-        assert dist.uninstall() is False
+        with logger.mock_capture_writer() as capture:
+            assert dist.uninstall() is None
+        assert [(log['l'], log['m']) for log in capture.backend.logs] == [
+            ('WARNING', 'Cannot uninstall demo: no RECORD file, unknown files of the package')]
+        assert capture.fd.any_contains('no RECORD file, unknown files of the package')
         assert list_files(site) == ['demo-1.0.dist-info/METADATA', 'demo/__init__.py']
-        assert capsys.readouterr().out == (
-            'Cannot uninstall demo-1.0.dist-info: no RECORD file, unknown files of the package\n')
 
-    def test_uninstall_with_empty_record(self, fs, capsys):
+    def test_uninstall_with_empty_record(self, fs):
         """A RECORD without any row removes nothing, like pip reports."""
         site = site_packages(fs)
         dist = create_dist(fs, {'demo/__init__.py': b''}, record=[])
-        assert dist.uninstall() is False
+        with logger.mock_capture_writer() as capture:
+            assert dist.uninstall() is None
+        assert [(log['l'], log['m']) for log in capture.backend.logs] == [
+            ('WARNING', 'Cannot uninstall demo: the RECORD lists no file')]
         assert list_files(site) == [
             'demo-1.0.dist-info/METADATA', 'demo-1.0.dist-info/RECORD', 'demo/__init__.py']
-        assert capsys.readouterr().out == 'Cannot uninstall demo-1.0.dist-info: the RECORD lists no file\n'

@@ -12,6 +12,7 @@ from alasio.ext.concurrent.cmd import CmdlineError, run_cmd
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import to_posix
+from alasio.logger import logger
 
 # Categories of the .data directory of a wheel, PEP 427 maps the files of a
 # wheel to the keys of the install scheme of the environment. Same keys as pip.
@@ -429,6 +430,19 @@ class DistInfo:
         # The longest path is the deepest directory, it has to be removed first
         return sorted(out, key=len, reverse=True)
 
+    @property
+    def name(self):
+        """
+        Name of the distribution of the .dist-info directory.
+
+        "demo-1.0.dist-info" gives "demo", PEP 427 replaces the hyphens of
+        a name with underscores in the directory name.
+
+        Returns:
+            str: Name of the distribution
+        """
+        return removesuffix(self.dist_info.name, '.dist-info').rpartition('-')[0]
+
     def uninstall(self):
         """
         Remove the files of the distribution recorded in the RECORD.
@@ -439,29 +453,31 @@ class DistInfo:
         sharing a directory are never removed.
 
         Returns:
-            bool: True if the distribution was removed, False if the
-                distribution has no RECORD listing its files, pip refuses
-                to uninstall such a distribution as well ("no RECORD file
-                was found")
+            tuple[int, int] | None: Number of files and directories removed,
+                None if the distribution has no RECORD of its files, pip
+                refuses to uninstall such a distribution as well ("no RECORD
+                file was found")
         """
         if not self.record_list:
             if (self.dist_info / 'RECORD').exists():
-                print(f'Cannot uninstall {self.dist_info.name}: the RECORD lists no file')
+                logger.warning(f'Cannot uninstall {self.name}: the RECORD lists no file')
             else:
-                print(f'Cannot uninstall {self.dist_info.name}: no RECORD file, unknown files of the package')
-            return False
+                logger.warning(f'Cannot uninstall {self.name}: no RECORD file, unknown files of the package')
+            return None
 
+        files = 0
         for path in self.record_paths.values():
-            print(f'Delete file: {path}')
             try:
-                path.file_remove()
+                if path.file_remove():
+                    files += 1
             except OSError:
                 # A file that can not be removed is left, the removal is best effort
                 continue
+        folders = 0
         for folder in self.folder_to_delete:
-            print(f'Delete folder: {folder}')
-            folder.folder_rmtree_empty()
-        return True
+            if folder.folder_rmtree_empty():
+                folders += 1
+        return files, folders
 
 
 class SimplePip:
@@ -627,11 +643,15 @@ class SimplePip:
         """
         folder = self.get_dist_info(name)
         if folder is None:
-            print(f'Package not exist: {name}')
+            logger.debug(f'Package not exist: {name}')
             return False
 
-        print(f'Uninstalling {name}')
-        return DistInfo(folder, prefix=self.prefix).uninstall()
+        result = DistInfo(folder, prefix=self.prefix).uninstall()
+        if result is None:
+            return False
+        files, folders = result
+        logger.info(f'Uninstalled {name}: {files} files, {folders} folders removed')
+        return True
 
     def install(self, wheel):
         """
@@ -672,7 +692,7 @@ class SimplePip:
                 self._warn_entry_points(zf, dist_info_folder)
 
                 # 5. Extract files
-                print(f'Installing {package_name} to {self.site_packages}')
+                logger.info(f'Installing {package_name} to {self.site_packages}')
                 record = RecordManager()
                 for member in zf.infolist():
                     if member.is_dir():
@@ -698,7 +718,7 @@ class SimplePip:
 
         # 6. Compile .py files
         files = list(record.iter_py_files())
-        print(f'Compiling {len(files)} py files')
+        logger.info(f'Compiling {len(files)} py files')
         with THREAD_POOL.wait_jobs() as pool:
             for entry in files:
                 pool.start_thread_soon(self._create_pyc, record, entry.path)
@@ -712,7 +732,7 @@ class SimplePip:
         record.add_content(f'{dist_info_folder}/RECORD', None)
         record_file = self.site_packages / dist_info_folder / 'RECORD'
         record_file.file_write(record.dump_bytes())
-        print(f'Successfully installed {package_name}')
+        logger.info(f'Successfully installed {package_name}')
 
     @staticmethod
     def _find_dist_info(wheel, zf):
@@ -764,7 +784,7 @@ class SimplePip:
         text = content.decode('utf-8')
         groups = [group for group in ('console_scripts', 'gui_scripts') if f'[{group}]' in text]
         if groups:
-            print(f'Warning: {"/".join(groups)} of the wheel are not generated by SimplePip')
+            logger.warning(f'{"/".join(groups)} of the wheel are not generated by SimplePip')
 
     def _member_target(self, rel_path, data_folder, package_name, wheel):
         """
@@ -834,7 +854,7 @@ class SimplePip:
             py_compile.compile(py_file, cfile=pyc_file, dfile=path)
         except Exception as e:
             # Some .py files might not be compilable (e.g. templates, incomplete scripts)
-            print(f'Failed to compile {path}: {e}')
+            logger.warning(f'Failed to compile {path}: {e}')
             return
 
         # Add .pyc to record
