@@ -105,18 +105,18 @@
     "es-ES": "Detener elegantemente en el próximo punto de control"
   },
   "KillKeepResume": {
-    "en-US": "Force stop, keep resume",
-    "zh-CN": "急停（重启后仍恢复）",
-    "ja-JP": "強制停止（再開維持）",
-    "zh-TW": "急停（重啟後仍恢復）",
-    "es-ES": "Forzar parada, mantener reanudación"
+    "en-US": "Stop now",
+    "zh-CN": "立即停止",
+    "ja-JP": "今すぐ停止",
+    "zh-TW": "立即停止",
+    "es-ES": "Detener ahora"
   },
   "KillNoResume": {
-    "en-US": "Stop, no resume",
-    "zh-CN": "停止（不再恢复）",
-    "ja-JP": "停止（再開しない）",
-    "zh-TW": "停止（不再恢復）",
-    "es-ES": "Parar sin reanudar"
+    "en-US": "Stop now (no resume after restart)",
+    "zh-CN": "立即停止（重启后不再恢复）",
+    "ja-JP": "今すぐ停止（再起動後に再開しない）",
+    "zh-TW": "立即停止（重啟後不再恢復）",
+    "es-ES": "Detener ahora (sin reanudar tras el reinicio)"
   },
   "SchedulerContinue": {
     "en-US": "Continue running",

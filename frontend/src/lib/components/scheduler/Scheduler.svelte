@@ -13,13 +13,18 @@
   import ActionStart from "./ActionStart.svelte";
   import ConfigName from "./ConfigName.svelte";
   import NextRun from "./NextRun.svelte";
-  import type { TaskItem } from "./types";
+  import type { RestartPhase, TaskItem } from "./types";
 
   type $props = {
     config_name: string;
     workerState?: WORKER_STATE;
     taskRunning?: string;
     taskNext?: TaskItem[];
+    /**
+     * Restart phase override, e.g. for the dev page. Undefined reads the
+     * Restart topic (`null` = no restart in progress).
+     */
+    restartPhase?: RestartPhase | null;
     onOverviewClick?: () => void;
     class?: string;
   };
@@ -28,6 +33,7 @@
     workerState = "idle",
     taskRunning,
     taskNext,
+    restartPhase: restartPhaseOverride,
     onOverviewClick,
     class: className,
   }: $props = $props();
@@ -38,11 +44,14 @@
   // Restart topic: a non-empty phase means a graceful backend restart is in
   // progress ('done' is pushed right before the topic is cleared)
   const restartClient = useTopic<RestartTopicLike>("Restart");
-  const isBackendRestarting = $derived(!!restartClient.data?.phase && restartClient.data?.phase !== "done");
+  const restartPhase = $derived(
+    restartPhaseOverride === undefined ? (restartClient.data?.phase ?? null) : restartPhaseOverride,
+  );
+  const isBackendRestarting = $derived(restartPhase !== null && restartPhase !== "done");
   // 'shutting-down' = the resume list is frozen and the backend is about to
   // exit: a config recorded for the resume cannot cancel it any more (the
   // backend refuses, the config resumes after the restart)
-  const isResumeFrozen = $derived(restartClient.data?.phase === "shutting-down");
+  const isResumeFrozen = $derived(restartPhase === "shutting-down");
 
   // Show 3 tasks, or 2 if a task is running
   let nextTasksToShow = $derived.by(() => {
@@ -199,9 +208,11 @@
       <ActionSchedulerStop onclick={handleSchedulerStop} title={t.Scheduler.SchedulerStop()} />
     {:else if displayState.value === "scheduler-stopping"}
       {#if isBackendRestarting}
-        <!-- backend graceful restart: force-stop (resume kept) or stop (cancel resume) -->
+        <!-- backend graceful restart: the wide button force-stops and keeps the
+             auto-resume, the round X stops without resuming (the default kill
+             cancels the pending resume) -->
         <ActionKill onclick={handleKillKeepResume} title={t.Scheduler.KillKeepResume()} class="flex-1" />
-        <ActionKill onclick={handleKill} title={t.Scheduler.KillNoResume()} class="flex-1" />
+        <ActionCancelResume onclick={handleKill} title={t.Scheduler.KillNoResume()} />
       {:else}
         <!-- scheduler-stopping: kill (flex-1) + scheduler continue (right) -->
         <ActionKill disabled={isStoppingDebouncing} onclick={handleKill} title={t.Scheduler.Kill()} class="flex-1" />
