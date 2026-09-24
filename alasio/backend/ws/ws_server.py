@@ -138,8 +138,16 @@ class WebsocketTopicServer:
         # read the close code; accept-then-close delivers the real 4001.
         # A valid electron token passes without JWT (Electron exemption,
         # aligned with the http /api/auth/renew exemption).
+        #
+        # The reason is a stable, machine-readable token (not prose): the
+        # frontend leaves for the login page exactly when it reads it, and
+        # treats every other refused handshake (the backend restarting, an
+        # old process shutting down, an admission rule) as a refusal of that
+        # one connection instead of an ended session. Keep it in sync with
+        # the frontend ws client and with tests/ws_fixtures/messages.json
+        # (asserted on both sides).
         if not await self._check_login():
-            await self.close(4001, 'Login required')
+            await self.close(4001, 'alasio:auth-failed')
             return
 
         # Read the electron token from the handshake headers (ws.headers

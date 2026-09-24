@@ -32,5 +32,12 @@
       { "t": "ConnState", "o": "set", "k": ["nav", "name"], "v": "overview" },
       { "t": "ConnState", "o": "full", "k": [], "v": { "lang": "en-US" } }
     ]
+  },
+  "close": {
+    "auth_failed": {
+      "code": 4001,
+      "reason": "alasio:auth-failed",
+      "meaning": "The login layer refused the handshake: the credentials are not accepted, the session must log in again. This exact reason is the only refusal the frontend ends the session on; every other refused handshake (backend restarting, old process shutting down, admission rule) keeps the page and reconnects."
+    }
   }
 }

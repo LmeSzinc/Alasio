@@ -1,11 +1,15 @@
 """
 Electron-layer ws auth tests:
 
-- Login layer: no/invalid JWT cookie handshake → close(4001) after accept
+- Login layer: no/invalid JWT cookie handshake → close(4001, 'alasio:auth-failed')
+  after accept (the only refusal signal the frontend ends a session on)
 - Electron layer: restricted topic subscribe rejected (connection kept),
   restricted rpc rejected with ElectronOnlyError response carrying rpc_id
 - Valid electron token → everything works
 """
+
+import json
+from pathlib import Path
 
 import msgspec
 import pytest
@@ -134,22 +138,39 @@ def event_dicts(fake_ws):
     return events
 
 
+class TestAuthFailedCloseContract:
+    """
+    The auth-failure close signal (code + reason) is the only refusal the
+    frontend ends a session on. The wire values are written at the close site
+    in ws_server.py; the shared fixture (tests/ws_fixtures/messages.json) is
+    what the frontend pins itself to, so this test keeps the two together: a
+    change on one side fails here instead of silently parting them.
+    """
+
+    def test_close_signal_matches_fixture(self):
+        fixtures = json.loads(
+            (Path(__file__).parents[2] / 'ws_fixtures' / 'messages.json').read_text(encoding='utf-8'))
+        assert fixtures['close']['auth_failed']['code'] == 4001
+        assert fixtures['close']['auth_failed']['reason'] == 'alasio:auth-failed'
+
+
 class TestLoginLayer:
     @pytest.mark.trio
     async def test_no_cookie_no_token_closes_4001(self):
-        """No JWT cookie and no electron token → close(4001) after accept."""
+        """No JWT cookie and no electron token → the auth-failed close after accept."""
         harness = AuthHarness()
         await harness.server.serve()
-        assert (4001, 'Login required') in harness.fake_ws.closed
+        assert (4001, 'alasio:auth-failed') in harness.fake_ws.closed
         # accepted first, then closed: the browser can read the close code
+        # *and* the reason (the frontend acts on the reason, not on the code)
         assert harness.fake_ws.application_state == WebSocketState.DISCONNECTED
 
     @pytest.mark.trio
     async def test_invalid_cookie_closes_4001(self):
-        """A malformed JWT cookie → close(4001)."""
+        """A malformed JWT cookie → the auth-failed close."""
         harness = AuthHarness(cookies={'alasio_token': 'not-a-jwt'})
         await harness.server.serve()
-        assert (4001, 'Login required') in harness.fake_ws.closed
+        assert (4001, 'alasio:auth-failed') in harness.fake_ws.closed
 
     @pytest.mark.trio
     async def test_valid_jwt_connects(self):

@@ -789,19 +789,143 @@ describe("TestReconnect", () => {
     expect(client.topics.Restart).toEqual({ phase: "resuming" });
   });
 
-  it("redirects to login and clears data on close code 4001", () => {
+  it("redirects to login and clears data when the session really ended (probe 401)", async () => {
     const client = new WebsocketManager();
     client.connect();
     FakeWebSocket.last!.serverOpen();
     FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "ConnState", o: "full", v: { lang: "en-US" } }));
 
     FakeWebSocket.last!.serverClose(4001);
+    await vi.advanceTimersByTimeAsync(0);
     expect(goto).toHaveBeenCalledWith("/auth");
     expect(client.topics).toEqual({});
     expect(client.topicReady).toEqual({});
   });
 
-  it("does not open a new connection after an auth failure", () => {
+  it("leaves for the login page at once on the explicit auth-failure signal", async () => {
+    // The backend closes with WS_CLOSE_AUTH_FAILED + WS_CLOSE_AUTH_FAILED_REASON
+    // when it refuses the credentials. That message is a verdict, not a hint:
+    // no probe, no retry, the session goes to the login page right away.
+    const client = new WebsocketManager();
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+    FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "ConnState", o: "full", v: { lang: "en-US" } }));
+
+    FakeWebSocket.last!.serverClose(4001, "alasio:auth-failed");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(goto).toHaveBeenCalledWith("/auth");
+    expect(routeState.public).toBe(true);
+    expect(client.topics).toEqual({});
+    // The backend already said why: nothing was asked over HTTP.
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+  });
+
+  it("probes the session when the refusal carries another reason", async () => {
+    // An older backend (or any intermediary that drops the close reason)
+    // keeps working: a refusal without the explicit signal only ends the
+    // session when the login layer confirms it over HTTP.
+    probeStatus = 401;
+    const client = new WebsocketManager();
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+
+    FakeWebSocket.last!.serverClose(4001, "Login required");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalled();
+    expect(goto).toHaveBeenCalledWith("/auth");
+  });
+
+  it("keeps the page and reconnects when the session is still valid (probe 200)", async () => {
+    // A refused handshake is not a verdict on the session: the login layer
+    // is asked over HTTP, and a 200 means the refusal was transient (the
+    // backend was still starting after a restart, an old process refused
+    // the connection while it was shutting down...). The page must survive
+    // it: route, topic data and queued messages all stay.
+    probeStatus = 200;
+    const client = new WebsocketManager();
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+    client.sub("ConfigScan");
+    FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "ConfigScan", o: "full", v: { a: 1 } }));
+
+    const created = FakeWebSocket.instances.length;
+    FakeWebSocket.last!.serverClose(4001);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(goto).not.toHaveBeenCalled();
+    expect(routeState.public).toBe(false);
+    // The session's data is kept (the next open replaces it, as on any
+    // dropped connection).
+    expect(client.topics.ConfigScan).toEqual({ a: 1 });
+
+    // The connection is taken back with the regular backoff, and the
+    // subscription is re-established on the new connection.
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances).toHaveLength(created + 1);
+    FakeWebSocket.last!.serverOpen();
+    expect(client.connectionState).toBe("open");
+    expect(lastSent(FakeWebSocket.last!)).toEqual({ t: "ConfigScan" });
+    client.disconnect();
+  });
+
+  it("keeps the page while the backend cannot be reached, then reconnects", async () => {
+    // The restart window: the probe cannot reach a backend at all
+    // (inconclusive), so nothing is thrown away and the question is asked
+    // again later. The first conclusive answer takes the connection back —
+    // however long the outage lasted.
+    probeStatus = 0;
+    const client = new WebsocketManager();
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+
+    const created = FakeWebSocket.instances.length;
+    FakeWebSocket.last!.serverClose(4001);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(goto).not.toHaveBeenCalled();
+    expect(routeState.public).toBe(false);
+    expect(FakeWebSocket.instances).toHaveLength(created);
+
+    // The probe retries with a backoff...
+    const probes = vi.mocked(globalThis.fetch).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(probes);
+    expect(goto).not.toHaveBeenCalled();
+
+    // ... and a valid session reconnects the client.
+    probeStatus = 200;
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(goto).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances.length).toBeGreaterThan(created);
+    expect(routeState.public).toBe(false);
+    client.disconnect();
+  });
+
+  it("abandons a handshake that never answers and retries", () => {
+    // A backend restart can leave a connection stranded in the backlog of
+    // the process that is exiting: the browser never times a handshake out
+    // on its own, so the client would wait in "connecting" forever and
+    // never schedule a retry.
+    const client = new WebsocketManager();
+    client.connect();
+    const stuck = FakeWebSocket.last!;
+    expect(client.connectionState).toBe("connecting");
+
+    vi.advanceTimersByTime(15_000);
+    expect(stuck.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(client.connectionState).toBe("closed");
+
+    // The regular retry path takes over.
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    FakeWebSocket.last!.serverOpen();
+    expect(client.connectionState).toBe("open");
+    client.disconnect();
+  });
+
+  it("does not open a new connection after an auth failure", async () => {
     // The session was rejected (4001): reconnecting with the same invalid
     // credentials can only be rejected again, and a page that keeps
     // replaying its rpcs would revive the connection on every open (the
@@ -815,6 +939,7 @@ describe("TestReconnect", () => {
     client.registerRpcCall("rpc-1", { onSuccess: vi.fn(), onError: vi.fn() });
 
     FakeWebSocket.last!.serverClose(4001);
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(goto).toHaveBeenCalledWith("/auth");
     // The session is rejected: the client refuses to connect until the
@@ -927,6 +1052,11 @@ describe("TestMessageQueue", () => {
   });
 });
 
+// Answer of the default session probe (it asks 'GET /api/auth/renew') for
+// the tests below: refused unless a test says otherwise, so no test ever
+// reaches the network.
+let probeStatus = 401;
+
 beforeEach(() => {
   vi.useFakeTimers();
   // Route the animation-frame flush of scroll topics through a fake
@@ -935,6 +1065,17 @@ beforeEach(() => {
     setTimeout(() => cb(0), 0);
     return 0;
   });
+  probeStatus = 401;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      if (probeStatus === 0) {
+        // Unreachable backend (the restart window).
+        throw new TypeError("Failed to fetch");
+      }
+      return new Response(null, { status: probeStatus });
+    }),
+  );
   FakeWebSocket.reset();
   vi.clearAllMocks();
   // Most tests drive the connection machinery directly; default to a

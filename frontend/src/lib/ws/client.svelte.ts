@@ -14,11 +14,82 @@ interface WebsocketManagerOptions {
   defaultSubscriptions?: string[];
   /** Define topics that should be handled as capped, scrollable arrays. Key is topic name, value is max length. */
   scrollTopics?: Record<string, number>;
+  /**
+   * Verify the login session over HTTP: the status of 'GET /api/auth/renew'
+   * (200 = still logged in, 401/403 = refused), or 0 when the request could
+   * not reach a backend at all (inconclusive). Injected by tests; the
+   * production default is the real endpoint.
+   */
+  sessionProbe?: () => Promise<number>;
 }
 
 // --- Base configurations ---
 const BASE_DEFAULT_SUBSCRIPTIONS = ["ConnState"];
 const BASE_SCROLL_TOPICS = { Log: 500 };
+
+// A browser never abandons a websocket handshake on its own: a connection
+// that neither opens nor fails (e.g. one stranded in the backlog of a backend
+// that is exiting, while its replacement binds the same port) would leave the
+// client waiting in "connecting" forever, with no reconnect ever scheduled.
+// The watchdog drops such an attempt so the regular retry path takes over.
+const CONNECT_TIMEOUT = 15_000;
+
+// Backoff of the session probe while the backend cannot be reached (a restart
+// in progress): the last value is repeated, so the probe resolves the question
+// as soon as the new process answers, whatever the outage lasted.
+const SESSION_PROBE_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000];
+
+/**
+ * The login layer's refusal, as an explicit signal: close code + reason of a
+ * handshake whose credentials are not accepted (see
+ * alasio/backend/ws/ws_server.py, pinned by tests/ws_fixtures/messages.json).
+ *
+ * Only this reason ends the session — every other refused handshake, the code
+ * 4001 included, is a refusal of that one connection: the backend may have
+ * been restarting, an old process may have refused the connection while it was
+ * shutting down, or an admission rule may have applied. Those keep the page
+ * and reconnect (the login state is confirmed over HTTP in that case).
+ */
+export const WS_CLOSE_AUTH_FAILED = 4001;
+export const WS_CLOSE_AUTH_FAILED_REASON = "alasio:auth-failed";
+
+/**
+ * In-flight session probe, shared by every ws client of the page (the preview
+ * client inherits the same auth-failure handler): the login state is a
+ * property of the session, not of a connection, so one request answers for
+ * both instead of two clients asking the same question.
+ */
+let sessionProbeInFlight: Promise<number> | undefined;
+
+function probeSession(probe: () => Promise<number>): Promise<number> {
+  if (sessionProbeInFlight === undefined) {
+    sessionProbeInFlight = probe().finally(() => {
+      sessionProbeInFlight = undefined;
+    });
+  }
+  return sessionProbeInFlight;
+}
+
+/**
+ * Default session probe: 'GET /api/auth/renew' is the login layer's own check
+ * (it validates the JWT cookie and refreshes it), so its status is the
+ * authoritative answer to "is this session still logged in?".
+ *
+ * Returns:
+ *     Promise<number>: The HTTP status, or 0 when no backend could be
+ *         reached (unreachable, aborted): inconclusive, not a refusal.
+ */
+async function defaultSessionProbe(): Promise<number> {
+  if (typeof fetch !== "function") return 0;
+  try {
+    const response = await fetch("/api/auth/renew", { credentials: "same-origin" });
+    return response.status;
+  } catch (e) {
+    // The backend is not answering (restarting, down): unknown, not refused.
+    console.warn("Session probe could not reach the backend, retrying...");
+    return 0;
+  }
+}
 
 export class WebsocketManager {
   // --- State Management (Svelte 5 Runes) ---
@@ -48,13 +119,16 @@ export class WebsocketManager {
   #messageQueue: RequestEvent[] = [];
   #reconnectAttempts = 0;
   #reconnectTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
+  #connectTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
+  #probeTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
+  #probeAttempt = 0;
   #encoder = new TextEncoder();
   #decoder = new TextDecoder();
   #options: Required<WebsocketManagerOptions>;
 
   constructor(options: WebsocketManagerOptions = {}) {
     if (!browser) {
-      this.#options = { defaultSubscriptions: [], scrollTopics: {} };
+      this.#options = { defaultSubscriptions: [], scrollTopics: {}, sessionProbe: defaultSessionProbe };
       return;
     }
 
@@ -62,6 +136,7 @@ export class WebsocketManager {
     this.#options = {
       defaultSubscriptions: [...BASE_DEFAULT_SUBSCRIPTIONS, ...(options.defaultSubscriptions || [])],
       scrollTopics: { ...BASE_SCROLL_TOPICS, ...(options.scrollTopics || {}) },
+      sessionProbe: options.sessionProbe || defaultSessionProbe,
     };
 
     // Initialize cache for default subscriptions.
@@ -114,21 +189,27 @@ export class WebsocketManager {
     }
     this.connectionState = this.#reconnectAttempts > 0 ? "reconnecting" : "connecting";
 
+    let ws: WebSocket;
     try {
-      this.#ws = new WebSocket(this.getWsUrl());
-      this.#ws.binaryType = "arraybuffer";
+      ws = new WebSocket(this.getWsUrl());
+      ws.binaryType = "arraybuffer";
     } catch (e) {
       console.error("Failed to create WebSocket:", e);
       this.connectionState = "closed";
       this.#scheduleReconnect();
       return;
     }
+    this.#ws = ws;
+    this.#armConnectTimeout(ws);
 
-    this.#ws.onopen = () => {
+    ws.onopen = () => {
       this.connectionState = "open";
       this.connectionGeneration++;
       this.#reconnectAttempts = 0;
       clearTimeout(this.#reconnectTimeout);
+      // A live connection answers the session question by itself.
+      this.#clearConnectTimeout();
+      this.#clearProbeRetry();
 
       // Drop the topic data of the previous connection: a reconnect may land
       // on a NEW backend session (a graceful restart / crash recovery rebuilds
@@ -160,18 +241,29 @@ export class WebsocketManager {
       }
     };
 
-    this.#ws.onmessage = (event: MessageEvent<ArrayBuffer>) => this.onMessage(event);
+    ws.onmessage = (event: MessageEvent<ArrayBuffer>) => this.onMessage(event);
 
-    this.#ws.onclose = (event: CloseEvent) => {
+    ws.onclose = (event: CloseEvent) => {
       console.warn(`WebSocket closed: code=${event.code}, reason=${event.reason}`);
       this.connectionState = "closed";
       this.#ws = null;
+      this.#clearConnectTimeout();
 
       // Decide action based on the close code.
-      if (event.code === 4001) {
-        // Custom code for Authentication failure
-        console.error("Authentication failed: the session must log in again.");
-        this.#handleAuthFailure();
+      if (event.code === WS_CLOSE_AUTH_FAILED) {
+        if (event.reason === WS_CLOSE_AUTH_FAILED_REASON) {
+          // The backend said it explicitly: the credentials are not accepted,
+          // the session has to log in again. No probing, no retrying — the
+          // login page is the only place left for this session.
+          console.error("Authentication failed: the credentials were refused, returning to the login page.");
+          this.#endSession();
+          return;
+        }
+        // A refused handshake without that signal is not a verdict on the
+        // session (see #handleAuthFailure): the login layer is asked over HTTP
+        // before anything is thrown away.
+        console.error("Authentication failed: the handshake was refused, checking the session...");
+        void this.#handleAuthFailure();
         return;
       }
       if (event.code === 4002) {
@@ -202,7 +294,7 @@ export class WebsocketManager {
       this.#scheduleReconnect();
     };
 
-    this.#ws.onerror = (error) => {
+    ws.onerror = (error) => {
       console.error("WebSocket error:", error);
     };
   }
@@ -215,11 +307,14 @@ export class WebsocketManager {
    * next private session.
    */
   disconnect() {
-    // Cancel any pending reconnect and reset the retry budget.
+    // Cancel any pending reconnect, handshake watchdog and session probe,
+    // and reset the retry budget.
     if (this.#reconnectTimeout !== undefined) {
       clearTimeout(this.#reconnectTimeout);
       this.#reconnectTimeout = undefined;
     }
+    this.#clearConnectTimeout();
+    this.#clearProbeRetry();
     this.#reconnectAttempts = 0;
 
     // Close the live connection without triggering the onclose reconnect
@@ -229,10 +324,7 @@ export class WebsocketManager {
     const ws = this.#ws;
     this.#ws = null;
     if (ws) {
-      ws.onopen = null;
-      ws.onmessage = null;
-      ws.onerror = null;
-      ws.onclose = null;
+      this.#detachSocket(ws);
       try {
         ws.close();
       } catch (e) {
@@ -467,29 +559,79 @@ export class WebsocketManager {
   }
 
   /**
-   * Handles a session the server rejected with close 4001 (invalid
-   * credentials or login required).
+   * Handles a refused handshake that did not carry the explicit auth-failure
+   * signal (WS_CLOSE_AUTH_FAILED_REASON).
    *
-   * The session is over: every further attempt over the same credentials
-   * can only be refused again, so this client stops connecting until the
-   * login page takes over. Everything the dead session holds is dropped
-   * right here instead of waiting for that navigation to finish — the
-   * page would otherwise keep its pending rpcs (each one toasting a
-   * timeout over the login page) and replay them on every open (the
-   * default subscription is marked ready the moment a connection opens,
-   * which is exactly the signal resilient rpcs wait for), reviving the
-   * connection forever — connect -> 4001 -> goto -> replay -> connect —
-   * and cancelling the navigation over and over, so the emptied private
-   * view would never give way to the login page.
+   * A refusal without that signal is not a verdict on the session: it can be
+   * transient (the backend may still be starting after a graceful restart, an
+   * old process may have refused the connection while it was shutting down,
+   * the electron token of the host may not have been re-announced yet).
+   * Navigating away on every refusal threw the page away (route, topic data,
+   * unsent input) for a rejection the next second would not have repeated.
    *
-   * routeState.public stops every ws client (the preview client inherits
-   * this handler and is never disconnected by the (public) layout's
-   * load), and the navigation is left to the first client that sees the
-   * rejection: a second goto would cancel the first one.
+   * The session's own authority is the HTTP login layer, so it is asked:
+   * '/api/auth/renew' answers 200 while the session is valid, 401 when the
+   * credentials are no longer accepted and 403 when this client is not
+   * admitted at all. Only the latter two end the session. The third outcome —
+   * the request reaching no backend at all (the restart window) — is
+   * inconclusive: the page is left alone and the probe retries with a
+   * backoff, so an outage never ends the session by itself. A 200 reconnects,
+   * so the page keeps everything it had and the refused ticket is simply
+   * presented to the new connection.
+   *
+   * Every ws client of the page inherits this handler (the preview client
+   * included) and they share one probe; the navigation is left to the first
+   * client that learns the session is over (a second goto would cancel the
+   * first one).
    */
-  #handleAuthFailure() {
+  async #handleAuthFailure() {
+    // The refused connection will never deliver anything: drop the
+    // readiness state so the re-subscriptions of the next connection refill
+    // every topic and the resilient rpcs notice the new generation. The topic
+    // data itself is kept (as on every dropped connection): the page shows its
+    // state instead of flashing empty, and the next open replaces it.
+    this.#clearTopicReady();
+    this.connectionState = "reconnecting";
+
+    const status = await probeSession(this.#options.sessionProbe);
+
+    if (status === 200) {
+      // The session is alive: the refusal was transient. Everything the page
+      // holds stays, the connection is taken back.
+      console.warn("The session is still valid, reconnecting...");
+      this.#clearProbeRetry();
+      this.#reconnectAttempts = 0;
+      this.#scheduleReconnect();
+      return;
+    }
+
+    if (status === 401 || status === 403) {
+      // The login layer refused this client: the session is over.
+      console.error("The session is over, returning to the login page.");
+      this.#endSession();
+      return;
+    }
+
+    // Inconclusive (the backend could not be reached: it is probably
+    // restarting). Keep the page and ask again later.
+    const delay = SESSION_PROBE_DELAYS[Math.min(this.#probeAttempt, SESSION_PROBE_DELAYS.length - 1)];
+    this.#probeAttempt++;
+    this.#cancelProbeTimer();
+    this.#probeTimeout = setTimeout(() => void this.#handleAuthFailure(), delay);
+  }
+
+  /**
+   * Ends the session: the login layer refused this client (401/403 over
+   * HTTP, not just a refused handshake). Everything the dead session holds is
+   * dropped, every ws client of the page is stopped (the login page is the
+   * only place left for such a session) and the page is left to the login
+   * page.
+   */
+  #endSession() {
     const navigate = !routeState.public;
     routeState.public = true;
+    this.#clearProbeRetry();
+    this.connectionState = "closed";
     // A session that can never come back must not burn the retry budget
     // into invalidateAll().
     if (this.#reconnectTimeout !== undefined) {
@@ -509,6 +651,65 @@ export class WebsocketManager {
     this.#rpcCallbacks.clear();
     this.#cancelScrollFlush();
     if (navigate) goto("/auth");
+  }
+
+  /**
+   * Arms the handshake watchdog (see CONNECT_TIMEOUT): a socket that neither
+   * opens nor fails is abandoned so the retry path takes over instead of
+   * leaving the client in "connecting" forever.
+   */
+  #armConnectTimeout(ws: WebSocket) {
+    this.#clearConnectTimeout();
+    this.#connectTimeout = setTimeout(() => {
+      this.#connectTimeout = undefined;
+      // Only the attempt this timer was armed for may be abandoned, and only
+      // while it is still handshaking (an open/closed socket is handled by its
+      // own events).
+      if (this.#ws !== ws || ws.readyState !== WebSocket.CONNECTING) return;
+      console.warn("WebSocket handshake timed out, retrying...");
+      // Detach before closing: the abandoned socket must not run the close
+      // path on top of the retry scheduled here.
+      this.#detachSocket(ws);
+      try {
+        ws.close();
+      } catch (e) {
+        // already gone
+      }
+      this.#ws = null;
+      this.connectionState = "closed";
+      this.#clearTopicReady();
+      this.#scheduleReconnect();
+    }, CONNECT_TIMEOUT);
+  }
+
+  #clearConnectTimeout() {
+    if (this.#connectTimeout !== undefined) {
+      clearTimeout(this.#connectTimeout);
+      this.#connectTimeout = undefined;
+    }
+  }
+
+  #clearProbeRetry() {
+    this.#cancelProbeTimer();
+    this.#probeAttempt = 0;
+  }
+
+  #cancelProbeTimer() {
+    if (this.#probeTimeout !== undefined) {
+      clearTimeout(this.#probeTimeout);
+      this.#probeTimeout = undefined;
+    }
+  }
+
+  /**
+   * Detaches every handler of a socket, so a later event of an abandoned or
+   * intentionally closed connection cannot run any of the client's paths.
+   */
+  #detachSocket(ws: WebSocket) {
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
   }
 
   /**

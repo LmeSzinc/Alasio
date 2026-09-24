@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeWebSocket } from "$lib/test-utils/fake-websocket";
-import { WebsocketManager } from "./client.svelte";
+import { WS_CLOSE_AUTH_FAILED, WS_CLOSE_AUTH_FAILED_REASON, WebsocketManager } from "./client.svelte";
 import type { RequestEvent, ResponseEvent } from "./event";
 import { routeState } from "./route-state.svelte";
 
@@ -22,6 +22,7 @@ vi.stubGlobal("WebSocket", FakeWebSocket);
 const fixtures = JSON.parse(readFileSync((import.meta.env as Record<string, string>).WS_FIXTURES_PATH, "utf8")) as {
   request: { omit_defaults: RequestEvent[]; full: RequestEvent[] };
   response: { omit_defaults: ResponseEvent[]; full: ResponseEvent[] };
+  close: { auth_failed: { code: number; reason: string; meaning: string } };
 };
 
 beforeEach(() => {
@@ -142,6 +143,18 @@ describe("TestResponseEventContract", () => {
     client.registerRpcCall("rpc-002", { onSuccess, onError });
     FakeWebSocket.last!.serverMessage(JSON.stringify(fixtures.response.omit_defaults[4]));
     expect(onError).toHaveBeenCalledWith('No such config: "foo"');
+  });
+});
+
+describe("TestCloseContract", () => {
+  it("the auth-failure close signal matches the fixture", () => {
+    // The one refusal the client ends a session on is the pair the backend
+    // sends when the credentials are not accepted. It is pinned in the shared
+    // fixture (asserted here and by the backend test suite), so renaming it on
+    // either side breaks the other side's test instead of silently turning a
+    // refused handshake into a navigation to the login page.
+    expect(fixtures.close.auth_failed.code).toBe(WS_CLOSE_AUTH_FAILED);
+    expect(fixtures.close.auth_failed.reason).toBe(WS_CLOSE_AUTH_FAILED_REASON);
   });
 });
 

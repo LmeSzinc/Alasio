@@ -352,6 +352,13 @@ describe("TestCreateResilientRpc", () => {
       delete websocketClient.topics[key];
     }
     vi.clearAllMocks();
+    // The singleton's session probe ('GET /api/auth/renew' via fetch) is
+    // answered locally: a refused session, so a 4001 still ends the session
+    // in the test that covers it, and no test ever reaches the network.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
     // The singleton ws client connects through the public-route guard.
     routeState.public = false;
   });
@@ -454,6 +461,7 @@ describe("TestCreateResilientRpc", () => {
     rpc.call("set_lang", { lang: "en-US" });
 
     ws0.serverClose(4001);
+    await vi.advanceTimersByTimeAsync(0);
     await flushEffects();
 
     expect(goto).toHaveBeenCalledWith("/auth");
