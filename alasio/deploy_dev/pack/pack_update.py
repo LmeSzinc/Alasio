@@ -18,7 +18,7 @@ other file, and verifies the local index against the refinfo, so a
 self-consistent but wrong local index (e.g. a tampered one) is
 detected and the index is downloaded from the server.
 
-The file changes are computed by PackDiff (see pack_diff.py): a git
+The file changes are computed by RepoDiff (see repo_diff.py): a git
 diff-like comparison with zstd dictionary based rename detection.
 refinfo order follows the old pack decode order (old.idx_info), a
 convention shared with the client's local old index.
@@ -28,8 +28,8 @@ from hashlib import sha1
 
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
-from alasio.deploy_dev.pack.pack_diff import PackDiff, UpdateInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key
+from alasio.deploy_dev.pack.repo_diff import RepoDiff, UpdateInfo
 from alasio.ext.cache import cached_property
 
 
@@ -80,7 +80,7 @@ class PackUpdate(PackEncodeBase):
         self.new = new
         self.latest_commit = new.version
         self.zstd_level = zstd_level
-        self._diff = PackDiff(
+        self._diff = RepoDiff(
             old,
             new,
             min_similarity=min_similarity,
@@ -98,7 +98,7 @@ class PackUpdate(PackEncodeBase):
         """
         File changes from the old version to the new version.
 
-        See PackDiff.diff_info for the record semantics. The record of
+        See RepoDiff.diff_info for the record semantics. The record of
         .pack/index.pack is built on top of the diff and inserted at
         its DFS path position (after the root files, before the folder
         files).
@@ -150,7 +150,7 @@ class PackUpdate(PackEncodeBase):
         """
         Old file records referenced by the update pack.
 
-        See PackDiff.refinfo for the record semantics. The old index
+        See RepoDiff.refinfo for the record semantics. The old index
         pack is appended when the index changes and its record uses
         the zstd patch: the client verifies its local .pack/index.pack
         against the refinfo, a self-consistent but wrong local index

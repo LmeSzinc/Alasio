@@ -9,9 +9,9 @@ is missing from refinfo and fileinfo must be rejected.
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
-from alasio.deploy_dev.pack.pack_diff import UpdateInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
+from alasio.deploy_dev.pack.repo_diff import UpdateInfo
 from alasio.git.mock.mock_repo import MockGitRepo
 
 
@@ -40,7 +40,7 @@ NEW = _make_pack({'old.txt': b'old', 'new.txt': b'new'}, 'new')
 
 class _FakeDiff:
     """
-    Stub of PackDiff with fixed diff_info / refinfo.
+    Stub of RepoDiff with fixed diff_info / refinfo.
     """
 
     def __init__(self, diff_info, refinfo):

@@ -308,7 +308,7 @@ def damage_lines(lines, ratio, seed=0):
 #  full upgrade scenario
 # ════════════════════════════════════════════════════════════════════════════
 
-# A real upgrade between two full packs, shared by TestPackDiffFullScenario
+# A real upgrade between two full packs, shared by TestRepoDiffFullScenario
 # (the diff side) and test_unpack_update (the update job side). Covers every
 # diff type: M (patch / plain / eol-only / mode-only), A, C (from an
 # unchanged old file, from an earlier new file, cross eol / mode, copy

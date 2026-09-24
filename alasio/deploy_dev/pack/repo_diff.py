@@ -49,7 +49,7 @@ class UpdateInfo(FileInfo):
     source_path: str = ''
 
 
-class PackDiff:
+class RepoDiff:
     """
     Compare the decoders of two versions, expose the diff records.
 

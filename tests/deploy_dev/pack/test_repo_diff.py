@@ -1,5 +1,5 @@
 """
-Tests for PackDiff: compare the decoders of two versions, produce the diff records.
+Tests for RepoDiff: compare the decoders of two versions, produce the diff records.
 
 The tests build the versions with MockDecodeBase.from_data, without the
 pack machinery, so the diff logic (unchanged / modified / added /
@@ -12,24 +12,24 @@ from conftest import (
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import RefInfo
-from alasio.deploy_dev.pack.pack_diff import PackDiff, UpdateInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.repo_diff import RepoDiff, UpdateInfo
 from alasio.git.mock.mock_repo import MockGitRepo
 
 
 def make_diff(old, new, **kwargs):
     """
-    Build a PackDiff from {path: content} dicts with mock decoders.
+    Build a RepoDiff from {path: content} dicts with mock decoders.
 
     Args:
         old (dict[str, bytes]): Old files
         new (dict[str, bytes]): New files
-        **kwargs: Arguments passed to PackDiff
+        **kwargs: Arguments passed to RepoDiff
 
     Returns:
-        PackDiff:
+        RepoDiff:
     """
-    return PackDiff(
+    return RepoDiff(
         MockDecodeBase.from_data(old),
         MockDecodeBase.from_data(new),
         **kwargs,
@@ -42,34 +42,34 @@ def make_diff(old, new, **kwargs):
 
 
 class TestSimilarity:
-    """Tests for PackDiff.similarity."""
+    """Tests for RepoDiff.similarity."""
 
     def test_identical_content(self):
         """Identical contents score ~1."""
         content = b'line one\nline two\n' * 100
-        sim = PackDiff.similarity(content, content)
+        sim = RepoDiff.similarity(content, content)
         assert sim > 0.9
 
     def test_small_modification(self):
         """A small modification keeps a high score."""
         old = b'def func(x):\n    return x * 2\n' * 100
         new = damage(old, 0.05, seed=1)
-        sim = PackDiff.similarity(old, new)
+        sim = RepoDiff.similarity(old, new)
         assert sim > 0.5
 
     def test_unrelated_content(self):
         """Unrelated contents score ~0."""
         old = random_bytes(4096, 'old')
         new = random_bytes(4096, 'new')
-        sim = PackDiff.similarity(old, new)
+        sim = RepoDiff.similarity(old, new)
         assert sim < 0.5
 
     def test_levels_agree(self):
         """A fast level scores close to the slow level."""
         old = b'def func(x):\n    return x * 2\n' * 100
         new = damage(old, 0.1, seed=2)
-        sim_fast = PackDiff.similarity(old, new, level=3)
-        sim_slow = PackDiff.similarity(old, new, level=22)
+        sim_fast = RepoDiff.similarity(old, new, level=3)
+        sim_slow = RepoDiff.similarity(old, new, level=22)
         assert abs(sim_fast - sim_slow) < 0.05
 
 
@@ -78,7 +78,7 @@ class TestSimilarity:
 # ════════════════════════════════════════════════════════════════════════════
 
 
-class TestPackDiffBasic:
+class TestRepoDiffBasic:
     """Basic diff types: unchanged, added, deleted, modified."""
 
     def test_unchanged_absent(self):
@@ -137,7 +137,7 @@ class TestPackDiffBasic:
         """D records in the input are not real files."""
         files = {'a.txt': b'hello', 'pkg/__init__.py': b''}
         edits = {'pkg/__init__.py': 2}
-        diff = PackDiff(
+        diff = RepoDiff(
             MockDecodeBase.from_data(files, edits=edits),
             MockDecodeBase.from_data(files, edits=edits),
         )
@@ -145,7 +145,7 @@ class TestPackDiffBasic:
 
     def test_mode_change_only(self):
         """A mode change with identical content is an M record with the new mode."""
-        diff = PackDiff(
+        diff = RepoDiff(
             MockDecodeBase.from_data({'run.sh': b'#!/bin/sh\n'}, modes={'run.sh': 1}),
             MockDecodeBase.from_data({'run.sh': b'#!/bin/sh\n'}, modes={'run.sh': 0}),
         )
@@ -159,7 +159,7 @@ class TestPackDiffBasic:
 # ════════════════════════════════════════════════════════════════════════════
 
 
-class TestPackDiffRename:
+class TestRepoDiffRename:
     """Rename detection: R (pure) and RM (renamed + modified)."""
 
     def test_pure_rename(self):
@@ -246,7 +246,7 @@ class TestPackDiffRename:
 # ════════════════════════════════════════════════════════════════════════════
 
 
-class TestPackDiffCopied:
+class TestRepoDiffCopied:
     """Content dedup: C records reference the source instead of carrying data."""
 
     def test_copy_from_unchanged_old_file(self):
@@ -275,7 +275,7 @@ class TestPackDiffCopied:
         """A CRLF old file can be a copy source, the copy keeps its own eol."""
         files = {'keep.txt': b'copy me\n', 'copy.txt': b'copy me\n'}
         eols = {'keep.txt': 1, 'copy.txt': 1}
-        diff = PackDiff(
+        diff = RepoDiff(
             MockDecodeBase.from_data({'keep.txt': b'copy me\n'}, eols=eols),
             MockDecodeBase.from_data(files, eols=eols),
         )
@@ -290,7 +290,7 @@ class TestPackDiffCopied:
         """A 755 old file can be a copy source, the copy keeps its own mode."""
         files = {'keep.sh': b'#!/bin/sh\n', 'copy.sh': b'#!/bin/sh\n'}
         modes = {'keep.sh': 1, 'copy.sh': 1}
-        diff = PackDiff(
+        diff = RepoDiff(
             MockDecodeBase.from_data({'keep.sh': b'#!/bin/sh\n'}, modes=modes),
             MockDecodeBase.from_data(files, modes=modes),
         )
@@ -368,7 +368,7 @@ class TestPackDiffCopied:
 # ════════════════════════════════════════════════════════════════════════════
 
 
-class TestPackDiffRefinfo:
+class TestRepoDiffRefinfo:
     """refinfo reports the old file records referenced by the diff."""
 
     def test_modified_patch_source(self):
@@ -423,19 +423,19 @@ class TestPackDiffRefinfo:
 # ════════════════════════════════════════════════════════════════════════════
 
 
-class TestPackDiffValidation:
-    """Input validation of PackDiff."""
+class TestRepoDiffValidation:
+    """Input validation of RepoDiff."""
 
     def test_invalid_parameters(self):
         """Out of range parameters are rejected."""
         old = MockDecodeBase.from_data({})
         new = MockDecodeBase.from_data({})
         with pytest.raises(ValueError, match='min_similarity'):
-            PackDiff(old, new, min_similarity=1.0)
+            RepoDiff(old, new, min_similarity=1.0)
         with pytest.raises(ValueError, match='min_similarity'):
-            PackDiff(old, new, min_similarity=-0.1)
+            RepoDiff(old, new, min_similarity=-0.1)
         with pytest.raises(ValueError, match='max_size_ratio'):
-            PackDiff(old, new, max_size_ratio=0.5)
+            RepoDiff(old, new, max_size_ratio=0.5)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -464,7 +464,7 @@ def _no_data(info):
     )
 
 
-class TestPackDiffFullScenario:
+class TestRepoDiffFullScenario:
     """A real upgrade between two full packs, every diff type at once.
 
     The versions are the shared FULL_SCENARIO_OLD / FULL_SCENARIO_NEW
@@ -483,10 +483,10 @@ class TestPackDiffFullScenario:
 
     def _diff(self):
         """
-        Build the PackDiff of the scenario, like the server pipeline.
+        Build the RepoDiff of the scenario, like the server pipeline.
 
         Returns:
-            PackDiff:
+            RepoDiff:
         """
 
         def make_pack(files, commit):
@@ -512,7 +512,7 @@ class TestPackDiffFullScenario:
 
         old = PackDecodeBase(make_pack(self.OLD, 'old'))
         new = PackDecodeBase(make_pack(self.NEW, 'new'))
-        return PackDiff(old, new)
+        return RepoDiff(old, new)
 
     def test_diff_info_records(self):
         """Every diff record is exact: path order, edit, meta, data and source."""

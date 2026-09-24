@@ -4,7 +4,7 @@ with source repair from the server like ResetJob.
 
 The update pack is built with PackUpdate from the shared
 FULL_SCENARIO_OLD / FULL_SCENARIO_NEW of conftest (the same versions
-as TestPackDiffFullScenario on the diff side), the old pack is
+as TestRepoDiffFullScenario on the diff side), the old pack is
 unpacked into the fake filesystem with UnpackJob, then the update is
 applied with UpdateJob and the result is compared to the new version
 (round-trip). The server is an in-memory MockServerFile serving the
