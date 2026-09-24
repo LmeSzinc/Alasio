@@ -15,8 +15,8 @@
     /**
      * Pin the flash state of the item: `true` keeps it highlighted, `false`
      * keeps it plain, whatever its values do. Left undefined, the item flashes
-     * on its own when one of its values changes. The debug page pins items to
-     * show both states without waiting for an update.
+     * on its own when one of its values is updated. The debug page pins items
+     * to show both states without waiting for an update.
      */
     overrideFlash?: boolean;
     class?: string;
@@ -49,9 +49,28 @@
   // item that appears with the first snapshot of the dashboard flashes only
   // once a later update changes one of its values.
   let lastValueKey = untrack(() => valueKey);
+  // The record those values were read from (see the effect below).
+  let lastData = untrack(() => data);
 
   $effect(() => {
+    const record = data;
     const key = valueKey;
+    // Switching to another config re-delivers the dashboard: the backend sends
+    // the view of the new config and the websocket client puts it in place of
+    // the view it held, so every record of the new view is a new object. An
+    // update of the running config does the opposite, it patches one value of
+    // the record in place (`set`) and leaves the record the very object it
+    // was. A record that is not the object the item showed is therefore a view
+    // delivered anew: its values were not updated under the item, they replace
+    // what it displayed, which makes them a starting point like the values of
+    // a mount, never a flash. A highlight that is still running belongs to the
+    // values that just left the screen, so it ends with them.
+    if (record !== lastData) {
+      lastData = record;
+      lastValueKey = key;
+      valueFlash = false;
+      return;
+    }
     if (key === lastValueKey) {
       return;
     }

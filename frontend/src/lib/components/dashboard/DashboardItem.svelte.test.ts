@@ -3,9 +3,14 @@
  *
  * The item highlights for one second when one of the values it displays
  * changes; an update that lands during that window restarts it, so the
- * highlight always ends one second after the last update. `overrideFlash`
- * pins the state for a caller that wants it fixed (the debug page uses it
- * to show the highlight).
+ * highlight always ends one second after the last update. Only an update of
+ * the record the item already shows does that: a record that is replaced by
+ * another one (a view delivered anew, e.g. switching config) is a starting
+ * point. That case needs the item re-rendered with the new record, so it is
+ * covered by the overview's Dashboard.svelte.test.ts, which drives the whole
+ * pipeline from the websocket message to the item. `overrideFlash` pins the
+ * state for a caller that wants it fixed (the debug page uses it to show the
+ * highlight).
  *
  * Props of a mounted component cannot be reassigned from the outside, so
  * the tests mount the item over a `$state` object and mutate that object:
