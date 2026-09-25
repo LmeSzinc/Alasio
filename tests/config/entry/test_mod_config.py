@@ -1,8 +1,11 @@
 import datetime as d
 
 import pytest
+from msgspec import ValidationError
 from msgspec.msgpack import decode, encode
 
+from alasio.base import timer
+from alasio.config.alasio import group_export
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.model import ConfigSetEvent
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
@@ -234,6 +237,102 @@ class TestConfigSet(ModConfigTestBase):
         data = decode(row.value)
         assert 'Enable' in data
         assert data['Enable'] is True
+
+
+class TestConfigSetPostEdit(ModConfigTestBase):
+    """
+    Tests for config_set(post_edit=True), the path of a frontend edit
+
+    post_edit runs on the model before it is written and may:
+    - correct the value that is being edited: the corrected value is the one stored,
+      so it is returned as a second event for the caller to broadcast;
+    - change other args of the group: every changed arg is returned as well;
+    - reject the edit: nothing is written and the caller gets the value on disk back,
+      to restore the UI.
+    """
+
+    # the moment the post_edit callbacks see as "now"
+    FIXED_NOW = d.datetime(2026, 9, 25, 12, 0, 0, tzinfo=d.timezone(d.timedelta(hours=8)))
+
+    @pytest.fixture
+    def frozen_now(self, monkeypatch):
+        """Freeze the clock of the post_edit callbacks"""
+        def getnow(tz=True, ms=False):
+            return self.FIXED_NOW
+
+        # Scheduler.post_edit imports getnow locally, EmotionRecord.update uses a.getnow()
+        monkeypatch.setattr(timer, 'getnow', getnow)
+        monkeypatch.setattr(group_export, 'getnow', getnow)
+        return self.FIXED_NOW
+
+    def test_post_edit_corrected_value(self, example_mod, task_index_data, frozen_now):
+        """
+        post_edit correcting the edited arg: the corrected value is stored and returned
+        (Scheduler.post_edit pulls a NextRun more than a day in the future back to now)
+        """
+        written = frozen_now + d.timedelta(days=2)
+        event = ConfigSetEvent(task='Main', group='Scheduler', arg='NextRun', value=written)
+
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, event, post_edit=True)
+
+        assert success is True
+        assert responses == [
+            ConfigSetEvent(task='Main', group='Scheduler', arg='NextRun', value=written),
+            ConfigSetEvent(task='Main', group='Scheduler', arg='NextRun', value=frozen_now),
+        ]
+
+        config = example_mod.config_read(self.TEST_CONFIG_NAME, task_index_data['Main'].config)
+        assert config['Main']['Scheduler']['NextRun'] == frozen_now
+
+    def test_post_edit_side_effect(self, example_mod, task_index_data, frozen_now):
+        """
+        post_edit changing another arg of the group: the edited arg and every arg post_edit
+        changed are returned
+        (EmotionRecord.post_edit -> update() recomputes Time and Value)
+        """
+        event = ConfigSetEvent(task='Main', group='Emotion1', arg='Recover',
+                              value='dormitory_floor_1')
+
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, event, post_edit=True)
+
+        assert success is True
+        assert responses == [
+            ConfigSetEvent(task='Main', group='Emotion1', arg='Recover',
+                           value='dormitory_floor_1'),
+            ConfigSetEvent(task='Main', group='Emotion1', arg='Time', value=frozen_now),
+            ConfigSetEvent(task='Main', group='Emotion1', arg='Value', value=150),
+        ]
+
+        config = example_mod.config_read(self.TEST_CONFIG_NAME, task_index_data['Main'].config)
+        assert config['Main']['Emotion1']['Recover'] == 'dormitory_floor_1'
+        assert config['Main']['Emotion1']['Time'] == frozen_now
+        assert config['Main']['Emotion1']['Value'] == 150
+
+    def test_post_edit_rejected(self, example_mod, task_index_data):
+        """
+        post_edit rejecting the edit: nothing is written and the caller gets the value on
+        disk back, so it can restore the UI
+        """
+        # RecoverLocation="Docks" (the default) and EmotionControl="Keep Happy Bonus"
+        # can not be used together, EmotionRecord.post_edit rejects it
+        event = ConfigSetEvent(task='Main', group='Emotion1', arg='Control', value='keep_exp_bonus')
+
+        success, responses = example_mod.config_set(self.TEST_CONFIG_NAME, event, post_edit=True)
+
+        assert success is False
+        assert len(responses) == 1
+        rollback = responses[0]
+        assert rollback.task == 'Main'
+        assert rollback.group == 'Emotion1'
+        assert rollback.arg == 'Control'
+        assert rollback.value == 'prevent_yellow_face'
+        assert isinstance(rollback.error, ValidationError)
+        assert 'can not be used together' in str(rollback.error)
+
+        # nothing was written
+        config = example_mod.config_read(self.TEST_CONFIG_NAME, task_index_data['Main'].config)
+        assert config['Main']['Emotion1']['Control'] == 'prevent_yellow_face'
+        assert config['Main']['Emotion1']['Recover'] == 'not_in_dormitory'
 
 
 class TestConfigReset(ModConfigTestBase):

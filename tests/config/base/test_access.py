@@ -4,8 +4,10 @@ import threading
 import pytest
 
 from alasio.config.alasio.group_proxy import GroupProxy
-from alasio.config.base import AlasioConfigBase
+from alasio.config.base import AlasioConfigBase, config_access
 from alasio.config.const import DataInconsistent
+from alasio.config.entry.model import ConfigSetEvent
+from alasio.logger import logger
 
 
 class TestAlasioConfigBase:
@@ -510,3 +512,147 @@ class TestConfigEdgeCases:
         # After all cycles, should still work
         config.init_task()
         assert config.Scheduler.Enable is True
+
+
+class MockBackendBridge:
+    """
+    Stand-in of BackendBridge that captures the events broadcast by the worker
+    """
+
+    def __init__(self):
+        self.inited = True
+        self.sent = []
+
+    def send(self, event):
+        self.sent.append(event)
+
+
+def broadcast_payload(bridge):
+    """
+    Unwrap the broadcast events into an assertable list
+
+    Args:
+        bridge (MockBackendBridge):
+
+    Returns:
+        list[tuple[str, str, str, Any, Any]]:
+            (task, group, arg, value, error) of every event
+    """
+    return [(e.v.task, e.v.group, e.v.arg, e.v.value, e.v.error) for e in bridge.sent]
+
+
+class TestSaveBroadcast:
+    """
+    Test suite for the broadcast payload of save()
+
+    The listener displays config values, so save() broadcasts the result of the write
+    (the validated value of every written arg) and never the event as it was written.
+    A failed save has written nothing, so it broadcasts nothing.
+    """
+
+    TEST_CONFIG_NAME = ':memory:'
+
+    @pytest.fixture
+    def bridge(self, monkeypatch):
+        """Capture what save() broadcasts to the backend"""
+        bridge = MockBackendBridge()
+        monkeypatch.setattr(config_access, 'BackendBridge', lambda: bridge)
+        return bridge
+
+    @pytest.fixture
+    def config(self, example_mod):
+        """Create test config instance"""
+
+        class MyConfig(AlasioConfigBase):
+            entry = example_mod.entry
+            Campaign: "main.Campaign"
+            HpControl: "main.HpControl"
+
+        return MyConfig(self.TEST_CONFIG_NAME, task='Main')
+
+    def test_success_broadcasts_validated_value(self, config, bridge):
+        """A save broadcasts the validated value, not the value that was written"""
+        # int is accepted for a float arg and stored as float
+        config.HpControl.HpBalanceThreshold = 1
+
+        assert [e.t for e in bridge.sent] == ['ConfigArg']
+        assert broadcast_payload(bridge) == [
+            ('Main', 'HpControl', 'HpBalanceThreshold', 1.0, None),
+        ]
+        # the broadcast value has the type of the model, not the type of the written value
+        assert isinstance(bridge.sent[0].v.value, float)
+
+    def test_success_batch_broadcasts_every_written_arg(self, config, bridge):
+        """A batch save broadcasts one event per written arg"""
+        with config.batch_set():
+            config.Campaign.Name = '13-4'
+            config.Campaign.Mode = 'hard'
+            config.HpControl.HpBalanceThreshold = 1
+
+        assert broadcast_payload(bridge) == [
+            ('Main', 'Campaign', 'Name', '13-4', None),
+            ('Main', 'Campaign', 'Mode', 'hard', None),
+            ('Main', 'HpControl', 'HpBalanceThreshold', 1.0, None),
+        ]
+        assert isinstance(bridge.sent[2].v.value, float)
+
+    def test_success_broadcasts_none_value(self, config, bridge, monkeypatch):
+        """
+        Every response of a successful save is broadcast as it is: the broadcast is not
+        filtered by value, an arg whose stored value is None is broadcast as None
+        """
+        responses = [
+            ConfigSetEvent(task='Main', group='Campaign', arg='Name', value=None),
+            ConfigSetEvent(task='Main', group='Campaign', arg='Mode', value='hard'),
+        ]
+        monkeypatch.setattr(
+            config.mod, 'config_set',
+            lambda config_name, event, post_edit=False: (True, responses))
+
+        config.Campaign.Name = '13-4'
+
+        assert broadcast_payload(bridge) == [
+            ('Main', 'Campaign', 'Name', None, None),
+            ('Main', 'Campaign', 'Mode', 'hard', None),
+        ]
+
+    def test_rejected_write_broadcasts_nothing(self, config, bridge):
+        """A rejected write has written nothing, so the rejected value is not broadcast"""
+        config.Campaign.Name = '13-4'
+        bridge.sent.clear()
+
+        with logger.mock_capture_writer() as capture:
+            config.Campaign.Name = 'not_a_map'
+
+            assert bridge.sent == []
+            assert capture.fd.any_contains('Failed to save config')
+
+        # the value on disk (and so the one the frontend displays) is unchanged
+        config.release()
+        config.init_task()
+        assert config.Campaign.Name == '13-4'
+
+    def test_rejected_batch_broadcasts_nothing(self, config, bridge):
+        """A batch is atomic: a failed batch broadcasts nothing at all"""
+        config.Campaign.Mode = 'hard'
+        bridge.sent.clear()
+
+        with config.batch_set():
+            config.Campaign.Name = '13-4'
+            config.Campaign.Mode = 'not_a_mode'
+
+        assert bridge.sent == []
+
+        # nothing was written
+        config.release()
+        config.init_task()
+        assert config.Campaign.Name == '12-4'
+        assert config.Campaign.Mode == 'hard'
+
+    def test_write_to_unknown_group_broadcasts_nothing(self, config, bridge):
+        """An arg that cannot be written at all has no value to broadcast"""
+        with logger.mock_capture_writer() as capture:
+            config.register_modify('Main', 'NoSuchGroup', 'Arg', 1)
+
+            assert bridge.sent == []
+            assert capture.fd.any_contains('Failed to save config')

@@ -519,18 +519,25 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
         # messages = ', '.join(messages)
         # logger.info(f'Save config "{self.config_name}": {messages}')
         if len(events) == 1:
-            _, responses = self.mod.config_set(self.config_name, events[0])
+            success, responses = self.mod.config_set(self.config_name, events[0])
         else:
-            _, responses = self.mod.config_batch_set(self.config_name, events)
+            success, responses = self.mod.config_batch_set(self.config_name, events)
         for r in responses:
             if r.error:
                 logger.info(f'Failed to save config "{self.config_name}", '
                             f'key={r.task}.{r.group}.{r.arg}, error={r.error}')
         # broadcast to backend
-        backend = BackendBridge()
-        if backend.inited:
-            for event in events:
-                backend.send(ConfigEvent(t='ConfigArg', v=event))
+        # What gets broadcast is the result of the write (responses), not the event that was
+        # written: the listener displays config values, and the stored value is the validated
+        # one, which might differ from the input.
+        # A failed save has written nothing at all (the write of a batch is atomic), so there
+        # is no value to broadcast: the rejected value never reaches the frontend. The
+        # responses of a failed save are rollback values for the caller, not view updates.
+        if success:
+            backend = BackendBridge()
+            if backend.inited:
+                for response in responses:
+                    backend.send(ConfigEvent(t='ConfigArg', v=response))
 
     def batch_set(self) -> BatchSetContext:
         """
