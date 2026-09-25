@@ -61,7 +61,7 @@ def _make_branch(repo, sha1, branch='master'):
 
 
 def _make_config(max_commit_count=0, max_commit_day=0, max_tag_count=0, max_tag_day=0, additional=None,
-                 lookback_branch=None):
+                 lookback_branch=None, parent=None):
     """
     Build a pack config, every lookback restriction is 0 (no limit) by default.
 
@@ -72,6 +72,7 @@ def _make_config(max_commit_count=0, max_commit_day=0, max_tag_count=0, max_tag_
         max_tag_day (int): LookbackConfig.MaxTagDay
         additional: LookbackConfig.AdditionalCommit
         lookback_branch: LookbackConfig.LookbackBranch
+        parent (str): LookbackConfig.Parent, default to the default of the model
 
     Returns:
         PackRepoModel: Config
@@ -82,6 +83,7 @@ def _make_config(max_commit_count=0, max_commit_day=0, max_tag_count=0, max_tag_
         MaxTagCount=max_tag_count,
         MaxTagDay=max_tag_day,
         LookbackBranch=lookback_branch if lookback_branch is not None else [],
+        Parent=parent if parent is not None else LookbackConfig().Parent,
         AdditionalCommit=additional if additional is not None else [],
     ))
 
@@ -508,6 +510,69 @@ class TestTagChain:
             lookback = PackRepoLookback(repo, _make_config(max_commit_count=1))
             assert lookback.lookback_commit == []
         assert capture.fd.any_contains('tag chain is too long')
+
+
+class TestParentRule:
+    """The parent lookup rule of the lookback config, LookbackConfig.Parent."""
+
+    def test_default_is_parent_all(self):
+        """The default rule walks every parent, the merged branch is included."""
+        now = int(time.time())
+        repo = MockGitRepo()
+        repo.register_commit('m1', author_time=now - 5 * DAY)
+        repo.register_commit('m2', parents=['m1'], author_time=now - 2 * DAY)
+        repo.register_commit('f1', parents=['m1'], author_time=now - 4 * DAY)
+        repo.register_commit('merge', parents=['m2', 'f1'], author_time=now - DAY)
+        _make_branch(repo, 'merge')
+        lookback = PackRepoLookback(repo, _make_config())
+        assert lookback.lookback_commit == ['m2', 'f1', 'm1']
+
+    def test_parent_all(self):
+        """The 'parent-all' rule is the same as the default."""
+        now = int(time.time())
+        repo = MockGitRepo()
+        repo.register_commit('m1', author_time=now - 5 * DAY)
+        repo.register_commit('m2', parents=['m1'], author_time=now - 2 * DAY)
+        repo.register_commit('f1', parents=['m1'], author_time=now - 4 * DAY)
+        repo.register_commit('merge', parents=['m2', 'f1'], author_time=now - DAY)
+        _make_branch(repo, 'merge')
+        lookback = PackRepoLookback(repo, _make_config(parent='parent-all'))
+        assert lookback.lookback_commit == ['m2', 'f1', 'm1']
+
+    def test_parent_0(self):
+        """The 'parent-0' rule walks the mainline only, the merged branch is left out."""
+        now = int(time.time())
+        repo = MockGitRepo()
+        repo.register_commit('m1', author_time=now - 5 * DAY)
+        repo.register_commit('m2', parents=['m1'], author_time=now - 2 * DAY)
+        repo.register_commit('f1', parents=['m1'], author_time=now - 4 * DAY)
+        repo.register_commit('merge', parents=['m2', 'f1'], author_time=now - DAY)
+        _make_branch(repo, 'merge')
+        lookback = PackRepoLookback(repo, _make_config(parent='parent-0'))
+        assert lookback.lookback_commit == ['m2', 'm1']
+
+    def test_parent_0_of_the_lookback_branch(self):
+        """The rule applies to every branch to lookback, the branch of the config too."""
+        now = int(time.time())
+        repo = _make_feature_merge_repo({
+            'm1': now - 10 * DAY, 'd1': now - 8 * DAY, 'f1': now - 7 * DAY, 'f2': now - 6 * DAY,
+            'm2': now - 5 * DAY, 'fm': now - 4 * DAY, 'dev_merge': now - 2 * DAY,
+            'master_merge': now - 1 * DAY,
+        })
+        config = _make_config(lookback_branch=['master'], parent='parent-0')
+        config.Repo.Branch = 'dev'
+        lookback = PackRepoLookback(repo, config)
+        # the mainline of dev, then the mainline of master, the feature branch is out
+        assert lookback.lookback_commit == ['master_merge', 'm2', 'd1', 'm1']
+
+    def test_parent_0_other_sources(self):
+        """The tag and the additional commit sources do not depend on the rule."""
+        now = int(time.time())
+        repo = _make_chain([now - 300 * DAY, now])
+        repo.register_tag('v1.0', 'c0')
+        config = _make_config(max_commit_count=1, parent='parent-0', additional=['c0'])
+        lookback = PackRepoLookback(repo, config)
+        assert lookback.lookback_commit == ['c0']
 
 
 class TestAdditionalCommit:

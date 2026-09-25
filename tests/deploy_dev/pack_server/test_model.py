@@ -77,6 +77,7 @@ class TestLookbackConfig:
         assert lookback.MaxCommitDay == 90
         assert lookback.MaxTagCount == 0
         assert lookback.MaxTagDay == 365
+        assert lookback.Parent == 'parent-all'
         assert lookback.LookbackBranch == []
         assert lookback.AdditionalCommit == []
 
@@ -135,6 +136,9 @@ Lookback:
   MaxCommitDay: 0
   MaxTagCount: 1
   MaxTagDay: 30
+  LookbackBranch:
+    - master
+  Parent: parent-0
   AdditionalCommit:
     - 4f3a8b2c1d5e6f708192a3b4c5d6e7f8091a2b3c
 """)
@@ -148,7 +152,19 @@ Lookback:
         assert config.data.Lookback.MaxCommitDay == 0
         assert config.data.Lookback.MaxTagCount == 1
         assert config.data.Lookback.MaxTagDay == 30
+        assert config.data.Lookback.LookbackBranch == ['master']
+        assert config.data.Lookback.Parent == 'parent-0'
         assert config.data.Lookback.AdditionalCommit == ['4f3a8b2c1d5e6f708192a3b4c5d6e7f8091a2b3c']
+
+    def test_read_invalid_parent_rule(self, fs, run_dir):
+        """A parent rule that is not one of the model values falls back to the default."""
+        fs.create_file(config_file(run_dir), contents='Lookback:\n  Parent: parent-1\n')
+        with logger.mock_capture_writer() as capture:
+            config = PackRepoConfig(FILE)
+        assert capture.fd.any_contains('Invalid pack config value')
+        assert capture.fd.any_contains('Invalid enum value \'parent-1\'')
+        assert len(config.errors) == 1
+        assert config.data.Lookback.Parent == 'parent-all'
 
     def test_read_valid_file_keeps_content(self, fs, run_dir):
         """A valid file is not written back, the comments are added only when needed."""

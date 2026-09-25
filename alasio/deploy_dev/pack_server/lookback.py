@@ -46,7 +46,9 @@ class PackRepoLookback:
        reachable from a branch head is walked (every parent of every commit),
        so the commits of a branch that was merged into the branch are
        included: a client could have run them. Note that feature branches of
-       a pull request are included too, see the note below.
+       a pull request are included too, and that the walk can be restricted
+       to the mainline with the 'parent-0' rule of LookbackConfig.Parent, see
+       the notes below.
     2. Commits pointed to by tags, limited by MaxTagCount and MaxTagDay, the
        stricter restriction wins. Tags are counted from the newest tag.
     3. Commits in AdditionalCommit, all restrictions are ignored.
@@ -58,11 +60,12 @@ class PackRepoLookback:
 
     Note that the repo objects are read lazily when the repo was not read yet.
 
-    Note that every parent of a commit is walked, so the commits of a feature
-    branch of a pull request are lookback commits too, though a client never
-    runs them. Which parent to follow is a known open issue, the plan is to
-    read it from the merge message, see
-    doc/2026-09-25_lookback-parent-and-merge-message.md
+    Note that the 'parent-all' rule of LookbackConfig.Parent walks every parent
+    of a commit, so the commits of a feature branch of a pull request are
+    lookback commits too, though a client never runs them. Which parent to
+    follow is a known open issue, the plan is to read it from the merge
+    message, see doc/2026-09-25_lookback-parent-and-merge-message.md ; the
+    'parent-0' rule is the rough way to get rid of them on a main branch.
     """
 
     def __init__(self, repo, config):
@@ -156,11 +159,13 @@ class PackRepoLookback:
         """
         Iter the commits of a branch, from its head backwards
 
-        Every commit reachable from the branch head is walked: the commits
-        are popped from a max heap in the order of the commit time, and all
-        parents of every popped commit are queued, so the two sides of a
-        merge are walked together. A commit reachable through several paths
-        is yielded once.
+        The commits are popped from a max heap in the order of the commit
+        time, and the parents of every popped commit are queued, so the two
+        sides of a merge are walked together by default. With the 'parent-0'
+        rule of LookbackConfig.Parent only the first parent is queued, the
+        walk follows the mainline of the branch and the commits of a merged
+        branch are left out. A commit reachable through several paths is
+        yielded once.
 
         The walk stops at the first restriction reached: the count of
         commits, or the day of a commit. Note that the commit the walk starts
@@ -177,6 +182,7 @@ class PackRepoLookback:
         config = self.config.Lookback
         max_count = config.MaxCommitCount
         max_day = config.MaxCommitDay
+        rule = config.Parent
         min_time = now - max_day * SECONDS_PER_DAY if max_day else 0
 
         commit = self._get_commit(head)
@@ -204,7 +210,7 @@ class PackRepoLookback:
             yield sha1, commit
             count += 1
 
-            for parent in self._iter_parent(commit):
+            for parent in self._iter_parent(commit, rule):
                 if parent in seen:
                     continue
                 seen.add(parent)
@@ -214,12 +220,16 @@ class PackRepoLookback:
                 heapq.heappush(queue, (-parent_commit.committer_time, parent))
 
     @staticmethod
-    def _iter_parent(commit):
+    def _iter_parent(commit, rule):
         """
-        Iter the parents of a commit, a merge commit has several parents
+        Iter the parents of a commit to walk, by the rule of LookbackConfig.Parent
 
         Args:
             commit (CommitObj):
+            rule (str): 'parent-all' to walk every parent, so the commits of a
+                branch that was merged are walked too, 'parent-0' to walk the
+                first parent of a merge commit only, which is the mainline of
+                the branch
 
         Yields:
             str: Parent commit sha1
@@ -229,7 +239,11 @@ class PackRepoLookback:
         if parent_type is str:
             yield parent
         elif parent_type is list:
-            yield from parent
+            if rule == 'parent-0':
+                # the mainline only, the merged branches are not walked
+                yield from parent[:1]
+            else:
+                yield from parent
 
     def _iter_tag_commit(self, now):
         """

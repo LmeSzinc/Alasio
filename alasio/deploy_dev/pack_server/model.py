@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Literal
 
 from msgspec import Meta, Struct, field
 from typing_extensions import Annotated
@@ -46,6 +46,16 @@ class LookbackConfig(Struct):
     MaxTagDay: Annotated[int, Meta(extra={"help": [
         "Lookback tags before X days at maximum, 0 for no limit, example: 365",
     ]})] = 365
+    Parent: Annotated[Literal['parent-0', 'parent-all'], Meta(extra={"help": [
+        "Rule of the parent lookup of the commits to lookback",
+        "[parent-all] Walk every parent of every commit, the versions of a branch",
+        "merged into the branch are lookback versions too, use it for a branch",
+        "that receives the merges of the released branches, e.g. dev",
+        "[parent-0] Walk the first parent of every commit only, the versions of the",
+        "merged branches are not lookback versions, use it for a main branch that",
+        "only receives the merges of the feature branches, e.g. master",
+        "[In most cases] parent-all",
+    ]})] = 'parent-all'
     LookbackBranch: Annotated[List[str], Meta(extra={"help": [
         "Branches to lookback, in addition to the branch of RepoConfig",
         "The head of RepoConfig.Branch is the latest version, the only latest one.",
@@ -67,7 +77,7 @@ class PackRepoModel(Struct):
     only latest commit will have update packs that updates from lookback commits
     3. existing update pack from lookback commit folder will be preserved
     4. folders that does not match the latest commit or any lookback commit, will be removed
-    5. generate latest info to: pack/{Author}_{Repo}/latest
+    5. generate latest info to: pack/{Author}_{Repo}/latest_{Branch}
     content is {new} version and the sha1 checksum of latest full pack
     """
     Repo: RepoConfig = field(default_factory=RepoConfig)
