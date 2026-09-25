@@ -2,9 +2,9 @@
 Test DELETE operations: delete, delete_row
 """
 import pytest
-from conftest import User
 
 from alasio.db.table import AlasioTableError
+from tests.db.table.conftest import User
 
 
 def test_delete_by_kwargs(user_table, sample_users):

@@ -10,11 +10,10 @@ hammer it from several threads and check the result of such a run.
 import os
 import threading
 
-from conftest import join
-
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.testing.filesystem.conftest import join
 
 
 def write_atomically(path, content):

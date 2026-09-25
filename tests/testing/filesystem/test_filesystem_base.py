@@ -8,11 +8,11 @@ import stat as statmod
 
 import msgspec
 import pytest
-from conftest import join
 
 from alasio.ext.path import PathStr
 from alasio.testing.filesystem import FakeDir, FakeFile, FakeSymlink, fs  # noqa: F401
 from alasio.testing.filesystem.base import IS_WINDOWS, _normpath
+from tests.testing.filesystem.conftest import join
 
 
 class TestNormpath:

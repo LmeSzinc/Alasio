@@ -2,9 +2,9 @@
 Test UPSERT operations: insert or update on conflict
 """
 import pytest
-from conftest import Product, User
 
 from alasio.db.table import AlasioTableError
+from tests.db.table.conftest import Product, User
 
 
 def test_upsert_insert_new_row(user_table):

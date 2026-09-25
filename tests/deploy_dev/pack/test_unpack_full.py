@@ -10,7 +10,6 @@ import os
 from hashlib import sha1
 
 import pytest
-from conftest import COMMIT, FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job import DeployJob
@@ -23,6 +22,9 @@ from alasio.ext.path.atomic import file_read_bytes
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.pack.conftest import (
+    COMMIT, FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK
+)
 
 
 def make_pack(files, commit='c1'):

@@ -15,11 +15,10 @@ Chain under test:
         -> pack (blob content + eol rule from the builtin gitattributes)
         -> PackDecodeBase.catfile() -> working tree content
 """
-from conftest import COMMIT
-
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
+from tests.deploy_dev.pack.conftest import COMMIT
 
 # {path: working tree content as registered}
 # no custom .gitattributes: everything follows the builtin default rules

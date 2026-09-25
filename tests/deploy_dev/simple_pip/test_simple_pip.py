@@ -7,9 +7,6 @@ import zipfile
 from importlib.util import cache_from_source
 
 import pytest
-from conftest import (  # noqa: F401
-    abs_path, build_wheel, create_dist, list_files, list_folders, pyc_compile, sha256_record, site_packages
-)
 
 from alasio.deploy_dev.simple_pip import DistInfo, SimplePip
 from alasio.deploy_dev.simple_pip.simple_pip import Scheme, probe_python
@@ -18,6 +15,9 @@ from alasio.ext.path import PathStr
 from alasio.ext.path.calc import to_posix
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.simple_pip.conftest import (  # noqa: F401
+    abs_path, build_wheel, create_dist, list_files, list_folders, pyc_compile, sha256_record, site_packages
+)
 
 
 def pyc_path(path):

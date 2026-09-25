@@ -8,8 +8,6 @@ filesystem.
 """
 import os
 
-from conftest import WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_SERVER
-
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_rebuild import RebuildJob
@@ -19,6 +17,7 @@ from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.pack.conftest import WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_SERVER
 
 
 class TestDeployJob:

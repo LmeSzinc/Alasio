@@ -10,12 +10,12 @@ import os
 import sys
 
 import pytest
-from conftest import WEBSITE_FILES, WEBSITE_FULL_PACK
 
 from alasio.deploy.unpack import main
 from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.pack.conftest import WEBSITE_FILES, WEBSITE_FULL_PACK
 
 
 class TestUnpackCli:

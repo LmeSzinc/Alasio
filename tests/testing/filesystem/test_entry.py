@@ -7,9 +7,9 @@ import os
 import stat as statmod
 
 import pytest
-from conftest import join
 
 from alasio.testing.filesystem import FakeDirEntry, FakeScandirIterator, fs  # noqa: F401
+from tests.testing.filesystem.conftest import join
 
 
 def make_stat(st_mode, size=0):

@@ -11,11 +11,11 @@ PackDecodeError tests live in test_decode_error.py.
 from hashlib import sha1
 
 import pytest
-from conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_REPO
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull
+from tests.deploy_dev.pack.conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_REPO
 
 
 class TestPackDecodeBasic:

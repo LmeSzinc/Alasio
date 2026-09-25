@@ -2,7 +2,8 @@
 Test INSERT operations: insert_row with single and multiple rows
 """
 import pytest
-from conftest import Product, User, UserTable
+
+from tests.db.table.conftest import Product, User, UserTable
 
 
 def test_insert_single_row(user_table):

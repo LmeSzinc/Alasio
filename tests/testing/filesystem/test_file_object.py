@@ -8,9 +8,9 @@ import os
 import stat as statmod
 
 import pytest
-from conftest import join
 
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.testing.filesystem.conftest import join
 
 
 class TestFileObject:

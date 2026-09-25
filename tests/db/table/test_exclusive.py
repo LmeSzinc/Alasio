@@ -1,7 +1,7 @@
 """
 Test ExclusiveTransaction: EXCLUSIVE transaction support
 """
-from conftest import User
+from tests.db.table.conftest import User
 
 
 def test_exclusive_transaction_creation(user_table):

@@ -18,7 +18,6 @@ import os
 
 import httpx2
 import pytest
-from conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job import DeployJob
@@ -32,6 +31,7 @@ from alasio.ext.path.atomic import file_read_bytes
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.pack.conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile
 
 # ════════════════════════════════════════════════════════════════════════════
 #  shared versions

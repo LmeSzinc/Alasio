@@ -7,10 +7,10 @@ correctly, but any data access (validate_data, catdata, catfile) must
 raise PackDecodeError.
 """
 import pytest
-from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.ext.algorithm.vint import decode_vint
+from tests.deploy_dev.pack.conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK
 
 
 class TestPackDecodeIndex:

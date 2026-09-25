@@ -6,11 +6,11 @@ website) and verifies that every failure path raises PackDecodeError with
 a message naming the failing section.
 """
 import pytest
-from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_REPO
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.ext.algorithm.vint import decode_vint
+from tests.deploy_dev.pack.conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_REPO
 
 
 class TestPackDecodeStructureError:

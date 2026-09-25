@@ -6,15 +6,15 @@ pack machinery, so the diff logic (unchanged / modified / added /
 deleted / renamed / copied) can be exercised in isolation.
 """
 import pytest
-from conftest import (
-    FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockDecodeBase, code_lines, damage, damage_lines, random_bytes
-)
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import RefInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.deploy_dev.pack.repo_diff import RepoDiff, UpdateInfo
 from alasio.git.mock.mock_repo import MockGitRepo
+from tests.deploy_dev.pack.conftest import (
+    FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockDecodeBase, code_lines, damage, damage_lines, random_bytes
+)
 
 
 def make_diff(old, new, **kwargs):

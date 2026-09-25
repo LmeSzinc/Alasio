@@ -2,9 +2,9 @@
 Test UPDATE operations: update_row with various configurations
 """
 import pytest
-from conftest import Product, User
 
 from alasio.db.table import AlasioTableError
+from tests.db.table.conftest import Product, User
 
 
 def test_update_single_row(user_table, sample_users):

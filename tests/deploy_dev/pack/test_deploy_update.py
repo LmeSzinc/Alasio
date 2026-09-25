@@ -13,8 +13,6 @@ which the fake filesystem does not provide.
 """
 import os
 
-from conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile
-
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_rebuild import RebuildJob
@@ -26,6 +24,7 @@ from alasio.ext.path.atomic import file_read_bytes
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.pack.conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile
 
 
 def make_pack(files, commit='c1'):

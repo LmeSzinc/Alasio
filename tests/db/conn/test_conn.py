@@ -9,9 +9,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
-from conftest import TEST_DATA_DIR
 
 from alasio.db.conn import SQLITE_POOL, ConnectionPool, SqlitePool
+from tests.db.conn.conftest import TEST_DATA_DIR
 
 # ============================================================================
 # Test ConnectionPool.new_conn and set_conn_pragma

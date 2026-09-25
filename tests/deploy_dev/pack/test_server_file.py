@@ -7,10 +7,10 @@ ServerFile without a real server.
 """
 import httpx2
 import pytest
-from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.server_file import LatestInfo, ServerFile
+from tests.deploy_dev.pack.conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER
 
 
 def range_handler(requests, data):

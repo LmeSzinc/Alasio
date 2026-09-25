@@ -9,7 +9,7 @@ explicitly, the fixture is never registered in a conftest.py:
 Wheels and distributions are built on the (fake) filesystem, the functions
 here are imported by the tests the way tests/deploy_dev/pack does it:
 
-    from conftest import build_wheel, create_dist, site_packages
+    from tests.deploy_dev.simple_pip.conftest import build_wheel, create_dist, site_packages
 """
 import base64
 import hashlib

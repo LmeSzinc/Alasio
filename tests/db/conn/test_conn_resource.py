@@ -6,7 +6,7 @@ import os
 import time
 from threading import Barrier, Thread
 
-from conftest import TEST_DATA_DIR
+from tests.db.conn.conftest import TEST_DATA_DIR
 
 # ============================================================================
 # Test Resource Management

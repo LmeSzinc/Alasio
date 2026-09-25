@@ -1,11 +1,13 @@
 import os
 
 import pytest
-from conftest import abs_path, create_dist, list_files, list_folders, sha256_record, site_packages
 
 from alasio.deploy_dev.simple_pip import DistInfo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.simple_pip.conftest import (
+    abs_path, create_dist, list_files, list_folders, sha256_record, site_packages
+)
 
 
 class TestTopLevelList:

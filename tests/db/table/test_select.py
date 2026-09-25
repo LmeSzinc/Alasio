@@ -1,7 +1,7 @@
 """
 Test SELECT operations: select, select_one, select_by_sql, select_one_by_sql
 """
-from conftest import User
+from tests.db.table.conftest import User
 
 
 def test_select_all(user_table, sample_users):

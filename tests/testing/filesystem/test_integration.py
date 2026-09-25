@@ -7,8 +7,6 @@ filesystem without changes.
 """
 import os
 
-from conftest import join
-
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import (
     atomic_copy, atomic_open, atomic_read_bytes, atomic_read_bytes_into, atomic_read_bytes_stream, atomic_read_text,
@@ -19,6 +17,7 @@ from alasio.ext.path.atomic import (
 )
 from alasio.ext.path.makedir import batch_makedirs
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.testing.filesystem.conftest import join
 
 
 class TestAtomicPath:

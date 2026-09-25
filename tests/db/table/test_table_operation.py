@@ -2,9 +2,8 @@
 Test basic table operations: create_table, drop_table, field_names, etc.
 """
 
-from conftest import User, UserTable
-
 from alasio.db.table import AlasioTable, row_has_pk
+from tests.db.table.conftest import User, UserTable
 
 
 def test_create_table(user_table, temp_db):
