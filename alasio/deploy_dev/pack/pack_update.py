@@ -4,6 +4,9 @@ Generate update packs from an old full pack to a new full pack.
 An update pack lets a client upgrade its local working tree from the
 old version to the new version incrementally:
 
+- the version part records both the new version (current version) and
+  the old version, a non-empty old version is what makes the pack an
+  update pack, see PackEncodeBase
 - refinfo records the old files that the update reads (rename / copy
   sources and zstd patch dictionaries), carrying their size and sha1 so
   the client can verify them before use
@@ -37,9 +40,11 @@ class PackUpdate(PackEncodeBase):
     """
     Generate an update pack that upgrades the old pack to the new pack.
 
-    The old and new packs must be full packs (refinfo empty, data
+    The old and new packs must be full packs (old version empty, data
     section present), the typical input of the server pipeline that
-    publishes a new release.
+    publishes a new release. The update pack records the version of the
+    new pack as its current version and the version of the old pack as
+    its old version, which is how the clients recognize an update pack.
     """
 
     def __init__(
@@ -74,11 +79,14 @@ class PackUpdate(PackEncodeBase):
         super().__init__()
         if not old._has_data or not new._has_data:
             raise ValueError('PackUpdate requires full packs with a data section, got a pack without one')
-        if old.refinfo or new.refinfo:
-            raise ValueError('PackUpdate requires full packs, got a pack with refinfo (update pack)')
+        if old.old_version or new.old_version:
+            raise ValueError(
+                'PackUpdate requires full packs, got a pack with an old version (update pack)')
         self.old = old
         self.new = new
-        self.latest_commit = new.version
+        # the update pack updates from the old version to the current one
+        self.current_version = new.current_version
+        self.old_version = old.current_version
         self.zstd_level = zstd_level
         self._diff = RepoDiff(
             old,

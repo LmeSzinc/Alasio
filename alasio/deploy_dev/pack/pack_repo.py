@@ -39,15 +39,16 @@ class PackFull(PackEncodeBase):
         """
         Args:
             repo (GitRepo): GitRepo object
-            commit (str): commit sha1 in str
+            commit (str): commit sha1 in str, the version of the pack
         """
         super().__init__()
         self.repo = repo
+        # the version of a full pack is the commit being packed
         if commit:
-            self.latest_commit = commit
-        if not self.latest_commit:
-            self.latest_commit = repo.head_get()
-        if not self.latest_commit:
+            self.current_version = commit
+        if not self.current_version:
+            self.current_version = repo.head_get()
+        if not self.current_version:
             raise ValueError(f'Empty latest commit at repo {repo}')
 
     @staticmethod
@@ -169,7 +170,7 @@ class PackFull(PackEncodeBase):
         """
         {filepath: FileEntry}
         """
-        return self.repo.list_files(self.latest_commit)
+        return self.repo.list_files(self.current_version)
 
     @cached_property
     def gitattributes(self):
@@ -322,7 +323,7 @@ class PackFull(PackEncodeBase):
         Returns:
             bytes: msgpack encoded history data
         """
-        commits = self.repo.list_commit_have(self.latest_commit, have_lookback=20)
+        commits = self.repo.list_commit_have(self.current_version, have_lookback=20)
         return encode_commit_history(commits)
 
     def _populate_history(self, dict_fileinfo: "dict[str, FileInfo]"):

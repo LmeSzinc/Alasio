@@ -20,7 +20,9 @@ class TestPackDecodeIndex:
         """Index pack decodes the header with an empty data section."""
         decoder = PackDecodeBase(WEBSITE_INDEX_PACK)
         assert decoder.pack_version == b'\x00'
-        assert decoder.version == COMMIT
+        assert decoder.current_version == COMMIT
+        # an index pack is the front part of a full pack, no old version
+        assert decoder.old_version == ''
         assert isinstance(decoder.data_section, memoryview)
         assert len(decoder.data_section) == 0
 

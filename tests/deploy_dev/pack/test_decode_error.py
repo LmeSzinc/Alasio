@@ -10,6 +10,7 @@ from conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_REPO
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.ext.algorithm.vint import decode_vint
 
 
 class TestPackDecodeStructureError:
@@ -24,6 +25,61 @@ class TestPackDecodeStructureError:
         """Truncated pack must raise PackDecodeError with the section name."""
         with pytest.raises(PackDecodeError, match='index section'):
             PackDecodeBase(WEBSITE_FULL_PACK[:100])
+
+
+class TestPackDecodeVersionPart:
+    """The version part holds the current version and the old version."""
+
+    @staticmethod
+    def _version_offset(pack):
+        """
+        Offset of the version part in a pack.
+
+        The version part is the first part of the index section, right
+        behind the index section length vint.
+
+        Args:
+            pack (bytes): Pack data
+
+        Returns:
+            int: Offset of the current version length
+        """
+        section = PackDecodeBase(pack).index_section
+        # skip the index section length vint
+        _, read = decode_vint(section)
+        return 5 + read
+
+    def test_layout(self):
+        """The part is the current version, then the old version: each
+        one a length and the string behind it, as two headers."""
+        data = WEBSITE_FULL_PACK
+        offset = self._version_offset(data)
+        # current version: length then the string
+        assert data[offset] == len(COMMIT)
+        assert bytes(data[offset + 1:offset + 1 + len(COMMIT)]) == COMMIT.encode()
+        # old version: length 0 and no string, the pack is a full pack
+        assert data[offset + 1 + len(COMMIT)] == 0
+
+    def test_decode_versions(self):
+        """Both versions are decoded from an offset, the old one may be
+        empty."""
+        decode = PackDecodeBase._decode_versions
+        assert decode(b'\x03old\x00', 0) == (['old', ''], 5)
+        assert decode(b'\x03old\x03new', 0) == (['old', 'new'], 8)
+        # the versions are read at the offset, not at the beginning
+        assert decode(b'\xff\x03old\x03new', 1) == (['old', 'new'], 9)
+
+    @pytest.mark.parametrize('data, offset', [
+        (b'', 0),               # no current version length
+        (b'\x03old', 0),        # the old version length is cut off
+        (b'\x03old\x03ne', 0),  # the old version string is cut off
+        (b'\x03old', 2),        # the current version length is cut off
+    ])
+    def test_truncated_versions_raise(self, data, offset):
+        """A cut off version must raise ValueError, the decoder wraps it
+        into PackDecodeError."""
+        with pytest.raises(ValueError):
+            PackDecodeBase._decode_versions(data, offset)
 
 
 class TestPackDecodeChecksumFail:
@@ -56,20 +112,19 @@ class TestPackDecodeErrorType:
 
     def test_index_data_length_mismatch(self):
         """A wrong value count must raise with the section name."""
-        from alasio.ext.algorithm.vint import decode_vint
-
         data = bytearray(WEBSITE_FULL_PACK)
         decoder = PackDecodeBase(data)
 
         # locate index_data inside the pack: skip index length vint,
-        # the version part and the data length part, then the index
-        # part length vint
+        # the version part (the current version, then the old version)
+        # and the data length part, then the index part length vint
         sec = decoder.index_section
         offset = 0
         _, read = decode_vint(sec[offset:])
         offset += read
-        ver_len, read = decode_vint(sec[offset:])
-        offset += read + ver_len
+        for _ in range(2):
+            ver_len, read = decode_vint(sec[offset:])
+            offset += read + ver_len
         data_len, read = decode_vint(sec[offset:])
         offset += read + data_len
         _, read = decode_vint(sec[offset:])
@@ -183,7 +238,7 @@ class TestPackDecodeTruncate:
 
     Full and index packs are tested separately because an index pack has
     no data section: validate_data and catfile raise on it by design.
-    Both packs are small (1859 / 705 bytes), brute forcing every truncation
+    Both packs are small (1935 / 752 bytes), brute forcing every truncation
     point takes milliseconds, so no sampling is needed.
     """
 

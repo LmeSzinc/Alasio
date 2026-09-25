@@ -25,12 +25,17 @@ class PackEncodeBase:
     - 全量包 (full pack)
       data section 中记录的是完整文件
       index section 中记录的是 data section 的信息，也就是当前版本所有文件的信息
-      refinfo 为空
+      refinfo 为空，old version 为空
     - 增量包 (update pack)
       data section 是 zstd 增量更新数据，增量更新数据必须输入旧文件才能解压，无法独立解压
       index section 中记录的是 data section 的信息，也就是所有增量数据的信息
       refinfo 记录旧版本文件，.pack/index.pack 作为普通文件记录在 refinfo / fileinfo 中
+      old version 记录旧版本号
     - 全量包的前面部分就是索引包，去除 data section 之后的部分
+
+    全量包和增量包由 version part 的 old version 区分：
+    old version 为空则是全量包，非空则是增量包，不再由 refinfo 是否为空来判断
+    （refinfo 只记录解压需要参照的旧文件，是增量包的实现细节）
 
     # header
     - b'PACK'
@@ -40,7 +45,10 @@ class PackEncodeBase:
     - length (including checksum of index section)
         # version part
         - length
-            - latest commit sha1 in string
+            - current version in string
+        - length
+            - old version in string, empty in full pack
+            (a non-empty old version makes the pack an update pack)
         # data length part
         - length
             - data_section_length_vint
@@ -67,9 +75,10 @@ class PackEncodeBase:
       申请到锁的进程需要先检查 job.pack 是否有未完成的任务，需要先完成未完成的任务
     - 在全量包中解压索引块写入 .pack/index.pack，就是全量包的前面部分
       在增量包中 .pack/index.pack 是普通文件记录，像其他文件一样更新
-    - 索引块可解码出 refinfo 和 fileinfo
+    - 索引块可解码出 current version / old version / refinfo / fileinfo
       fileinfo 是当前包拥有的数据的索引
-      refinfo 是解压数据需要参照的旧文件的索引，refinfo非空就是增量包，为空则是全量包
+      refinfo 是解压数据需要参照的旧文件的索引
+      old version非空就是增量包，为空则是全量包
     - 根据索引块尝试读取目标文件，如果目标文件存在且size+sha1校验通过则跳过
     - 将文件解压到临时文件 .pack/workspace/{size}_{sha1}_{index}.tmp
       如果临时文件存在且size+sha1校验通过则跳过
@@ -104,7 +113,11 @@ class PackEncodeBase:
         - 释放 .pack/index.pack 的锁
     """
     def __init__(self):
-        self.latest_commit: str = ''
+        # version of this pack, e.g. the commit sha1 of the packed version
+        self.current_version: str = ''
+        # version this pack updates from, empty in a full pack, a
+        # non-empty value makes the pack an update pack
+        self.old_version: str = ''
         self.pack_version = b'\x00'
 
     @cached_property
@@ -243,9 +256,12 @@ class PackEncodeBase:
 
         def iter_index():
             # version
-            latest_commit = self.latest_commit.encode('utf-8')
-            yield encode_vint(len(latest_commit))
-            yield latest_commit
+            # the current version, then the old version to update from
+            # (empty in a full pack), each one with its own length as header
+            for value in (self.current_version, self.old_version):
+                encoded = value.encode('utf-8')
+                yield encode_vint(len(encoded))
+                yield encoded
 
             # data length
             # the length vint of the data section, so the data section

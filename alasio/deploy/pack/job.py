@@ -30,10 +30,10 @@ class DeployJob:
 
         The job type is decided by the job file content: the REST
         marker is a validation job (ResetJob), the RBIL marker is a
-        rebuild job (RebuildJob), a pack with refinfo is an update
-        pack (UpdateJob), a pack without it is a full pack
-        (UnpackJob). A corrupted job file is cleaned up with a
-        warning.
+        rebuild job (RebuildJob), a pack with a non-empty old version
+        is an update pack (UpdateJob), a pack without one (empty old
+        version) is a full pack (UnpackJob). A corrupted job file is
+        cleaned up with a warning.
 
         Args:
             server (ServerFile, optional): Server to download the
@@ -61,13 +61,9 @@ class DeployJob:
             logger.warning(f'Failed to read the unfinished job: {e}')
             atomic_rmtree(workspace)
             return None
-        try:
-            is_update = bool(decoder.refinfo)
-        except PackDecodeError:
-            # the index data is malformed, the unpack job fails on
-            # validation and cleans up
-            is_update = False
-        if is_update:
+        # the version part tells the job type: a non-empty old version
+        # means an update pack, an empty one a full pack
+        if decoder.old_version:
             # an update pack, resume the update job
             return UpdateJob(data, server=server, resume=True)
         return UnpackJob(data, resume=True)
@@ -109,7 +105,7 @@ class DeployJob:
                 atomic_read_bytes(env.PROJECT_ROOT.joinpath(JobBase.INDEX_PACK)))
         except (FileNotFoundError, PackDecodeError):
             return ''
-        return decoder.version
+        return decoder.current_version
 
     @classmethod
     def update(cls, server):

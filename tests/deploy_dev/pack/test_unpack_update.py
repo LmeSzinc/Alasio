@@ -120,6 +120,10 @@ NEW_PACK = make_pack(NEW, commit='new')
 OLD_DECODER = PackDecodeBase(OLD_PACK)
 NEW_DECODER = PackDecodeBase(NEW_PACK)
 UPDATE = b''.join(PackUpdate(OLD_DECODER, NEW_DECODER).iter_pack_data())
+# the update pack records both versions: the new one as the current
+# version and the old one as the old version, which is what tells an
+# update pack from a full pack
+UPDATE_DECODER = PackDecodeBase(UPDATE)
 SERVER = MockServerFile()
 SERVER.register_version('old', OLD_PACK, bytes(OLD_DECODER.extract_index_pack()))
 SERVER.register_version('new', NEW_PACK, bytes(NEW_DECODER.extract_index_pack()))
@@ -174,6 +178,27 @@ def setup_app(pack=OLD_PACK):
         pack (bytes): Full pack of the version
     """
     UnpackJob(pack).run()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  version part
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestUpdatePackVersions:
+    """The version part of the update pack records both versions."""
+
+    def test_update_pack_has_both_versions(self):
+        """An update pack carries the new version and the old version,
+        the non-empty old version is what tells it from a full pack."""
+        assert UPDATE_DECODER.current_version == 'new'
+        assert UPDATE_DECODER.old_version == 'old'
+
+    def test_full_pack_has_current_version_only(self):
+        """A full pack carries the current version, its old version is
+        empty."""
+        assert OLD_DECODER.current_version == 'old'
+        assert OLD_DECODER.old_version == ''
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -232,7 +257,8 @@ class TestUnpack:
         # the tmp file is a valid index pack of the new version
         index_decoder = PackDecodeBase(data)
         index_decoder.validate_index()
-        assert index_decoder.version == 'new'
+        assert index_decoder.current_version == 'new'
+        assert index_decoder.old_version == ''
 
     def test_index_pack_written_after_run(self, app_folder):
         """After run() the local index pack is the new index pack."""
@@ -243,7 +269,7 @@ class TestUnpack:
         # it must be a valid index pack of the new version
         decoder = PackDecodeBase(data)
         decoder.validate_index()
-        assert decoder.version == 'new'
+        assert decoder.current_version == 'new'
 
     def test_pending_records(self, app_folder):
         """unpack() fills self.pending with PendingFile records."""
@@ -814,7 +840,7 @@ class TestFailure:
             UpdateJob(b'not a pack file').unpack()
 
     def test_full_pack_rejected(self, app_folder):
-        """A full pack without refinfo is rejected."""
+        """A full pack without an old version is rejected."""
         with pytest.raises(ValueError, match='update pack'):
             UpdateJob(OLD_PACK).unpack()
 

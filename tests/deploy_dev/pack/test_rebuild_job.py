@@ -157,8 +157,8 @@ def server_of(old_pack, new_pack):
         MockServerFile: Server serving both versions, no update pack
     """
     server = MockServerFile()
-    old_version = PackDecodeBase(old_pack).version
-    new_version = PackDecodeBase(new_pack).version
+    old_version = PackDecodeBase(old_pack).current_version
+    new_version = PackDecodeBase(new_pack).current_version
     server.register_version(
         old_version, old_pack, bytes(PackDecodeBase(old_pack).extract_index_pack()))
     server.register_version(

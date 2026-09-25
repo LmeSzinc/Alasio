@@ -142,7 +142,7 @@ class TestUnpack:
         # it must be a valid index pack
         decoder = PackDecodeBase(data)
         decoder.validate_index()
-        assert decoder.version == COMMIT
+        assert decoder.current_version == COMMIT
         # the real index pack is not touched until replace()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/index.pack')
         job.replace()

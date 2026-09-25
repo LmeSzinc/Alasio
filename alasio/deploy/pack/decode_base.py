@@ -64,7 +64,10 @@ class PackDecodeBase:
     Attributes:
         data (memoryview): Raw pack bytes.
         pack_version (bytes): PACK format version byte.
-        version (str): Latest commit sha1 recorded in the pack.
+        current_version (str): Version of the pack, e.g. the commit sha1
+            of the packed version.
+        old_version (str): Version the pack updates from, empty in a full
+            pack, a non-empty value makes the pack an update pack.
         index_section (memoryview): Index section, from the length vint to the
             end of its checksum digest (excluding the header).
         index_checksum (str): Checksum of the index section, the trailing
@@ -110,8 +113,8 @@ class PackDecodeBase:
         self.index_checksum = bytes(self.index_section[-20:]).hex()
 
         # index parts
-        part, offset = _decode('index section: version part', self._read_part, data, offset)
-        self.version = bytes(part).decode('utf-8', errors='replace')
+        (self.current_version, self.old_version), offset = _decode(
+            'index section: version part', self._decode_versions, data, offset)
         self._data_length, offset = _decode(
             'index section: data length part', self._read_part, data, offset)
         self._index_part, offset = _decode(
@@ -165,6 +168,33 @@ class PackDecodeBase:
         if end > len(data):
             raise ValueError(f'Part out of range: offset={offset} length={length}')
         return data[offset:end], end
+
+    @staticmethod
+    def _decode_versions(data, offset):
+        """
+        Decode the version part: the current version, then the old version.
+
+        Each version is a length and the string behind it, the old version
+        is empty in a full pack and non-empty in an update pack.
+
+        Args:
+            data (memoryview): Raw pack bytes
+            offset (int): Offset of the current version length
+
+        Returns:
+            tuple[list[str], int]: ([current version, old version], new
+                offset)
+
+        Raises:
+            ValueError: If a version is out of range, or its length is
+                truncated
+        """
+        current, offset = PackDecodeBase._read_part(data, offset)
+        old, offset = PackDecodeBase._read_part(data, offset)
+        return [
+            bytes(current).decode('utf-8', errors='replace'),
+            bytes(old).decode('utf-8', errors='replace'),
+        ], offset
 
     def validate(self):
         """

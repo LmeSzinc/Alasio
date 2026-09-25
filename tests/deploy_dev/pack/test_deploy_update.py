@@ -111,7 +111,7 @@ class TestDeployUpdate:
         assert read_tree() == NEW_TREE
         # the local index pack is the new one
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
-        assert decoder.version == 'new'
+        assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_up_to_date(self, app_folder):
@@ -130,7 +130,7 @@ class TestDeployUpdate:
         assert capture.backend.any_contains('Failed to read the local version')
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
-        assert decoder.version == 'new'
+        assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_update_pack_missing_falls_back(self, app_folder):
@@ -142,7 +142,7 @@ class TestDeployUpdate:
         assert capture.backend.any_contains('Failed to get the update pack')
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
-        assert decoder.version == 'new'
+        assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_update_pack_corrupt_falls_back(self, app_folder):
@@ -154,7 +154,7 @@ class TestDeployUpdate:
         assert capture.backend.any_contains('Failed to apply the update pack')
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
-        assert decoder.version == 'new'
+        assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_unfinished_rebuild_finished_first(self, app_folder):

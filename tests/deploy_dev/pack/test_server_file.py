@@ -55,7 +55,7 @@ class TestMockServerFile:
         # it must be a valid index pack
         decoder = PackDecodeBase(index_pack)
         decoder.validate_index()
-        assert decoder.version == COMMIT
+        assert decoder.current_version == COMMIT
 
 
 class TestServerFile:
@@ -122,7 +122,7 @@ class TestServerFile:
         # itself with PackDecodeBase
         decoder = PackDecodeBase(index_pack)
         decoder.validate_index()
-        assert decoder.version == COMMIT
+        assert decoder.current_version == COMMIT
         # first request: the header and the index section length
         assert requests[0].headers['Range'] == f'bytes=0-{ServerFile.HEADER_REQUEST_SIZE - 1}'
         # second request: the exact range of the index pack

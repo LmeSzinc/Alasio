@@ -403,7 +403,7 @@ class ResetJob(JobBase):
             return tmp
         # data_start is an offset into the full pack file, range requests
         # use it directly
-        data = server.get_file_content(decoder.version, info.data_start, info.data_size)
+        data = server.get_file_content(decoder.current_version, info.data_start, info.data_size)
         content = decoder.decode_content(info, data)
         file_write(tmp, content)
         return tmp

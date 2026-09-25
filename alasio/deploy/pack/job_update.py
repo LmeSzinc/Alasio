@@ -164,9 +164,9 @@ class UpdateJob(JobBase):
         """
         decoder = PackDecodeBase(self._data)
         decoder.validate()
-        if not decoder.refinfo:
+        if not decoder.old_version:
             raise ValueError('UpdateJob requires an update pack, got a full pack')
-        self._version = decoder.version
+        self._version = decoder.current_version
         self._file_index = {path: index for index, path in enumerate(decoder.fileinfo)}
         self.error = []
 
@@ -333,7 +333,7 @@ class UpdateJob(JobBase):
                 # data_start is an offset into the new full pack file,
                 # range requests use it directly
                 data = server.get_file_content(
-                    new_index.version, new_info.data_start, new_info.data_size)
+                    new_index.current_version, new_info.data_start, new_info.data_size)
                 content = new_index.decode_content(new_info, data)
             except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
