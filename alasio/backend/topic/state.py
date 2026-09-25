@@ -90,6 +90,28 @@ class ConnState(BaseTopic):
         GLOBAL_CONTEXT.global_nursery.start_soon(run_graceful_restart)
 
     @rpc
+    async def cancel_restart(self):
+        """
+        Cancel the graceful restart waiting for the workers to stop
+
+        Only the wait is cancellable: once every worker stopped, the resume
+        list is frozen and the backend restarts whatever happens. Nothing is
+        resumed after a cancel -- the backend keeps running, the configs it
+        stopped stay stopped (start them again manually) and a config still
+        finishing its task only loses the restart mark (the scheduler can
+        continue it).
+        """
+        # local import (see restart above)
+        from alasio.backend.app.restart import GRACEFUL_RESTART, cancel_graceful_restart
+
+        # running is the flag of the restart of this backend: the auto-resume
+        # queue of the new backend (the other entry point of the cancel) is not
+        # a restart in progress and must not be dropped by this rpc
+        if not GRACEFUL_RESTART.running:
+            raise RpcValueError('No restart in progress')
+        await cancel_graceful_restart('user cancel')
+
+    @rpc
     async def force_restart(self):
         """
         Restart the entire backend immediately

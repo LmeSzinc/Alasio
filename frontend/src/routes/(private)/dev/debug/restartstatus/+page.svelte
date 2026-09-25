@@ -143,7 +143,9 @@
           <p class="text-muted-foreground text-xs">{testCase.note}</p>
         </div>
         <ArgGroupCard title="System Tool" class="max-w-180">
-          <RestartBackendTool />
+          <!-- the phase override drives the tool row too: the cancel button of a
+               restart still waiting for the configs to stop -->
+          <RestartBackendTool phase={testCase.phase} />
           <RestartStatus phase={testCase.phase} workers={testCase.workers} />
         </ArgGroupCard>
         <pre

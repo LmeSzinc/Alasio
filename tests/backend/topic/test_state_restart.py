@@ -1,5 +1,6 @@
 """
-Tests for the restart / force_restart RPC entry (alasio/backend/topic/state.py)
+Tests for the restart / cancel_restart / force_restart RPC entry
+(alasio/backend/topic/state.py)
 
 The rpc only validates and schedules the orchestration: the orchestration
 itself is covered by tests/backend/app/test_restart_resume.py.
@@ -7,6 +8,7 @@ itself is covered by tests/backend/app/test_restart_resume.py.
 import builtins
 
 import pytest
+import trio
 
 from alasio.backend.app import restart
 from alasio.backend.reactive.event import RpcValueError
@@ -65,6 +67,43 @@ class TestRestartRpc:
             await state.restart()
         # the rejection must not leave the re-entry flag set
         assert restart.GRACEFUL_RESTART.running is False
+
+
+class TestCancelRestartRpc:
+    @pytest.mark.trio
+    async def test_cancel_restart_cancels_the_transaction(self, state, restart_state, monkeypatch):
+        calls = []
+
+        async def fake_cancel(reason=''):
+            calls.append(('cancel', reason))
+
+        monkeypatch.setattr(restart, 'cancel_graceful_restart', fake_cancel)
+        restart.GRACEFUL_RESTART.running = True
+
+        await state.cancel_restart()
+
+        assert calls == [('cancel', 'user cancel')]
+
+    @pytest.mark.trio
+    async def test_cancel_restart_rejected_without_restart(self, state):
+        # Nothing to cancel: an explicit error, not a silent success (the
+        # button only shows during the wait, a stale page gets told so)
+        with pytest.raises(RpcValueError, match='No restart in progress'):
+            await state.cancel_restart()
+
+    @pytest.mark.trio
+    async def test_cancel_restart_leaves_the_resume_queue_alone(self, state, monkeypatch):
+        # The auto-resume queue of the new backend shares the cancel entry
+        # point of the restart module, but it is not a restart: this rpc must
+        # not drop the queue
+        async def fake_cancel(reason=''):
+            raise AssertionError('cancel_graceful_restart must not be called')
+
+        monkeypatch.setattr(restart, 'cancel_graceful_restart', fake_cancel)
+        restart.GRACEFUL_RESTART.resume_scope = trio.CancelScope()
+
+        with pytest.raises(RpcValueError, match='No restart in progress'):
+            await state.cancel_restart()
 
 
 class TestForceRestartRpc:

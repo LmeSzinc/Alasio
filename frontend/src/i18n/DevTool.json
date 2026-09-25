@@ -90,6 +90,27 @@
     "zh-TW": "正在運行的設定會在當前任務結束後停止，並在重啟後自動恢復（最長等待 10 分鐘）。強制重啟會立即結束它們且不再恢復。",
     "es-ES": "Las configuraciones en ejecución se detienen al terminar la tarea actual y se reanudan automáticamente tras el reinicio (hasta 10 minutos). El reinicio forzado las termina de inmediato sin reanudarlas."
   },
+  "CancelRestartHelp": {
+    "en-US": "Abort the graceful restart while the backend is still waiting for the running configs to stop. The backend keeps running; the configs it stopped stay stopped and must be started again manually.",
+    "zh-CN": "在后端仍在等待运行中的配置停止时中止优雅重启。后端继续运行，已被停止的配置保持停止，需手动重新运行。",
+    "ja-JP": "バックエンドが実行中の設定の停止を待っている間に、優雅な再起動を中止します。バックエンドは稼働を続け、停止した設定は停止したままです（手動で再実行してください）。",
+    "zh-TW": "在後端仍在等待運行中的設定停止時中止優雅重啟。後端繼續運行，已停止的設定保持停止，需手動重新運行。",
+    "es-ES": "Cancela el reinicio elegante mientras el backend sigue esperando a que se detengan las configuraciones en ejecución. El backend sigue funcionando; las configuraciones que detuvo permanecen detenidas y hay que iniciarlas de nuevo manualmente."
+  },
+  "CancelRestart": {
+    "en-US": "Cancel Restart",
+    "zh-CN": "取消重启",
+    "ja-JP": "再起動をキャンセル",
+    "zh-TW": "取消重啟",
+    "es-ES": "Cancelar reinicio"
+  },
+  "CancelRestartTooLate": {
+    "en-US": "Too late to cancel: every config stopped and the backend is restarting. Nothing can stop it any more; the configs of this restart come back when the new backend is up.",
+    "zh-CN": "已经无法取消：所有配置已停止，后端正在重启，无法再中止。本次重启的配置会在新后端启动后自动恢复。",
+    "ja-JP": "すでにキャンセルできません：すべての設定が停止し、バックエンドは再起動中です。もう中止することはできません。この再起動の設定は、新しいバックエンドの起動後に自動的に再開されます。",
+    "zh-TW": "已經無法取消：所有設定已停止，後端正在重啟，無法再中止。本次重啟的設定會在新後端啟動後自動恢復。",
+    "es-ES": "Ya no se puede cancelar: todas las configuraciones se detuvieron y el backend se está reiniciando. Nada puede detenerlo; las configuraciones de este reinicio vuelven cuando el nuevo backend está en marcha."
+  },
   "ForceRestartBackendHelp": {
     "en-US": "All workers are force-killed immediately, nothing is resumed after the restart.",
     "zh-CN": "立即强杀所有 worker，重启后不会自动恢复。",
