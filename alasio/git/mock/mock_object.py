@@ -4,6 +4,7 @@ from alasio.ext.cache import cached_property
 from alasio.git.attr.attr import GitAttributes
 from alasio.git.mock.mock_base import MockGitRepoBase
 from alasio.git.obj.obj import GitLooseObject
+from alasio.git.obj.objtag import TagObject
 from alasio.git.stage.gitreset import FileEntry
 from alasio.git.stage.hashobj import blob_hash
 
@@ -27,8 +28,9 @@ class MockGitObject(MockGitRepoBase):
     In-memory mock of GitRepo for testing.
 
     Provides the same list_files(), get_file(), cat(), read_full(),
-    read_lazy(), cat_shallow() interface as GitObjectManager, without
-    requiring a real git repository on disk.
+    read_lazy(), cat_shallow() interface as GitObjectManager and the
+    same tags, tag_get() interface as GitTag, without requiring a real
+    git repository on disk.
     """
 
     def __init__(self, path=''):
@@ -39,6 +41,12 @@ class MockGitObject(MockGitRepoBase):
         self._objects: "dict[str, MockBlobEntry]" = {}
         # commit_sha1 -> commit object content in bytes
         self._commits: "dict[str, bytes]" = {}
+        # tag object sha1 -> tag object content in bytes
+        self._tag_objects: "dict[str, bytes]" = {}
+        # tag name -> sha1 of the commit (lightweight tag) or of the tag object (annotated tag)
+        self._tags: "dict[str, str]" = {}
+        # ref name -> sha1, e.g. {'refs/heads/master': 'c1'}
+        self._refs: "dict[str, str]" = {}
         # current head commit sha1
         self._head: str = ''
 
@@ -152,6 +160,49 @@ class MockGitObject(MockGitRepoBase):
         tz = abs(tz)
         return f'{sign}{tz // 60:02d}{tz % 60:02d}'
 
+    def register_tag(self, name, sha1):
+        """
+        Register a tag ref under a tag name.
+
+        A lightweight tag points to a commit sha1 directly, an annotated
+        tag points to the sha1 of a tag object registered with
+        register_tag_object().
+
+        Args:
+            name (str): Tag name, e.g. 'v2026.09.25'
+            sha1 (str): Commit sha1 (lightweight tag) or tag object sha1
+                (annotated tag)
+        """
+        self._tags[name] = sha1
+
+    def register_tag_object(self, sha1, object, tag='', tagger_name='', tagger_email='', tagger_time=0,
+                            tagger_tz=0, object_type='commit', message=''):
+        """
+        Register a tag object (annotated tag) under a sha1.
+
+        The sha1 is an identifier like in register_commit(), it does not
+        have to be a real git sha1, e.g. 'tag1'.
+
+        Args:
+            sha1 (str): Tag object sha1
+            object (str): sha1 of the tagged object, usually a commit
+            tag (str): Tag name
+            tagger_name (str): Tagger name
+            tagger_email (str): Tagger email
+            tagger_time (int): Tagger time, unix timestamp in seconds
+            tagger_tz (int): Tagger timezone offset in minutes
+            object_type (str): Type of the tagged object, usually 'commit'
+            message (str): Tag message
+        """
+        rows = [
+            f'object {object}',
+            f'type {object_type}',
+            f'tag {tag}',
+            f'tagger {tagger_name} <{tagger_email}> {tagger_time} {self._format_tz(tagger_tz)}',
+        ]
+        content = '\n'.join(rows).encode() + b'\n\n' + message.encode()
+        self._tag_objects[sha1] = content
+
     def register_head(self, sha1):
         """
         Set the repo head.
@@ -160,6 +211,80 @@ class MockGitObject(MockGitRepoBase):
             sha1 (str): Commit sha1
         """
         self._head = sha1
+
+    def register_branch(self, name, sha1):
+        """
+        Register a branch ref, see GitRef.ref_get.
+
+        Args:
+            name (str): Branch name, e.g. 'master'
+            sha1 (str): Commit sha1 of the branch head
+        """
+        self._refs[f'refs/heads/{name}'] = sha1
+
+    def ref_get(self, ref):
+        """
+        Get the sha1 of a ref, see GitRef.ref_get.
+
+        Args:
+            ref (str): E.g. 'refs/heads/master', 'HEAD'
+
+        Returns:
+            str: sha1, or empty string "" if the ref does not exist
+        """
+        if ref == 'HEAD':
+            return self._head
+        return self._refs.get(ref, '')
+
+    @property
+    def tags(self):
+        """
+        Get all tag names of the repo, see GitTag.tags.
+
+        Unlike GitTag.tags, the list is not cached, so tags registered
+        after the first access are visible.
+
+        Returns:
+            list[str]: Tag names
+        """
+        return list(self._tags)
+
+    def tag_get(self, name):
+        """
+        Get the TagObject of a tag, see GitTag.tag_get.
+
+        For a lightweight tag, the tagger info is built from the committer
+        attributes of the commit it points to.
+
+        Args:
+            name (str): Tag name
+
+        Returns:
+            TagObject | None: None if the tag does not exist, or the tag
+                points to a blob or a tree
+        """
+        sha1 = self._tags.get(name)
+        if not sha1:
+            return None
+        obj = self.cat(sha1)
+        if obj.type == 4:
+            # annotated tag
+            return obj.decoded
+        if obj.type == 1:
+            # lightweight tag, build tagger info from the commit
+            commit = obj.decoded
+            return TagObject(
+                object=sha1,
+                type='commit',
+                tag=name,
+                tagger_name=commit.committer_name,
+                tagger_email=commit.committer_email,
+                tagger_time=commit.committer_time,
+                tagger_tz=commit.committer_tz,
+                message='',
+            )
+        # tag points to a blob or a tree
+        return None
 
     def head_get(self, head=None):
         """
@@ -287,6 +412,11 @@ class MockGitObject(MockGitRepoBase):
             pass
         else:
             return GitLooseObject(type=1, size=len(content), data=content)
+
+        # tag object
+        content = self._tag_objects.get(sha1)
+        if content is not None:
+            return GitLooseObject(type=4, size=len(content), data=content)
 
         # blob
         blob_entry = self._objects.get(sha1)

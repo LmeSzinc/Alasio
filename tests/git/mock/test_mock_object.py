@@ -3,6 +3,7 @@ import pytest
 from alasio.git.mock.mock_base import MockGitRepoBase
 from alasio.git.mock.mock_object import MockBlobEntry, MockGitObject
 from alasio.git.obj.obj import GitLooseObject
+from alasio.git.obj.objtag import TagObject
 from alasio.git.stage.gitreset import FileEntry
 from alasio.git.stage.hashobj import blob_hash
 
@@ -451,6 +452,34 @@ class TestHead:
         assert m.head_get('HEAD') == 'c1'
 
 
+class TestBranches:
+    """Tests for MockGitObject branch support, mirroring GitRef."""
+
+    def test_ref_get_default_empty(self):
+        """No branch is registered by default."""
+        m = MockGitObject()
+        assert m.ref_get('refs/heads/master') == ''
+
+    def test_register_branch(self):
+        """register_branch registers a branch ref, ref_get reads it back."""
+        m = MockGitObject()
+        m.register_branch('master', 'c1')
+        m.register_branch('dev', 'c2')
+        assert m.ref_get('refs/heads/master') == 'c1'
+        assert m.ref_get('refs/heads/dev') == 'c2'
+
+    def test_ref_get_head(self):
+        """ref_get('HEAD') returns the head, like GitRef."""
+        m = MockGitObject()
+        m.register_head('c1')
+        assert m.ref_get('HEAD') == 'c1'
+
+    def test_ref_get_unknown(self):
+        """An unknown ref returns an empty string."""
+        m = MockGitObject()
+        assert m.ref_get('refs/tags/v1.0') == ''
+
+
 class TestReadFullAndLazy:
     """Tests for MockGitObject.read_full and read_lazy."""
 
@@ -569,6 +598,105 @@ class TestCompareCommit:
         assert len(modified) == 1
         assert len(deleted) == 0
         assert modified['f.txt'].mode == b'100755'
+
+
+class TestTags:
+    """Tests for MockGitObject tag support, mirroring GitTag."""
+
+    def test_tags_default_empty(self):
+        """No tag is registered by default."""
+        m = MockGitObject()
+        assert m.tags == []
+
+    def test_register_tag(self):
+        """register_tag registers a tag ref, tags lists the tag names."""
+        m = MockGitObject()
+        m.register_tag('v1.0', 'c1')
+        m.register_tag('v2.0', 'c2')
+        assert m.tags == ['v1.0', 'v2.0']
+
+    def test_tags_not_cached(self):
+        """tags is not cached, unlike GitTag.tags, tags registered later are visible."""
+        m = MockGitObject()
+        assert m.tags == []
+        m.register_tag('v1.0', 'c1')
+        assert m.tags == ['v1.0']
+
+    def test_tag_get_unknown(self):
+        """An unknown tag returns None."""
+        m = MockGitObject()
+        assert m.tag_get('v1.0') is None
+
+    def test_tag_get_lightweight(self):
+        """A lightweight tag builds the tagger info from the commit it points to."""
+        m = MockGitObject()
+        m.register_commit(
+            'c1', author_name='Author', author_email='author@example.com', author_time=1000
+        )
+        m.register_tag('v1.0', 'c1')
+        tag = m.tag_get('v1.0')
+        assert isinstance(tag, TagObject)
+        assert tag.object == 'c1'
+        assert tag.type == 'commit'
+        assert tag.tag == 'v1.0'
+        assert tag.tagger_name == 'Author'
+        assert tag.tagger_email == 'author@example.com'
+        assert tag.tagger_time == 1000
+        assert tag.tagger_tz == 0
+        assert tag.message == ''
+
+    def test_tag_get_annotated(self):
+        """An annotated tag returns the registered tag object."""
+        m = MockGitObject()
+        m.register_commit('c1', author_time=1000)
+        m.register_tag_object(
+            'tag1', object='c1', tag='v1.0', tagger_name='Tagger', tagger_email='tagger@example.com',
+            tagger_time=2000, tagger_tz=480, message='tag message'
+        )
+        m.register_tag('v1.0', 'tag1')
+        tag = m.tag_get('v1.0')
+        assert tag.object == 'c1'
+        assert tag.type == 'commit'
+        assert tag.tag == 'v1.0'
+        assert tag.tagger_name == 'Tagger'
+        assert tag.tagger_email == 'tagger@example.com'
+        # tagger time is normalized to UTC, like the commit attributes
+        assert tag.tagger_time == 2000 + 480 * 60
+        assert tag.tagger_tz == 480
+        assert tag.message == 'tag message'
+
+    def test_tag_object_in_object_database(self):
+        """A registered tag object is readable with cat(), type 4."""
+        m = MockGitObject()
+        m.register_tag_object('tag1', object='c1', tag='v1.0')
+        obj = m.cat('tag1')
+        assert obj.type == 4
+        assert obj.decoded.tag == 'v1.0'
+
+    def test_tag_get_nested_tag_object(self):
+        """A tag object can point to another tag object, like GitTag."""
+        m = MockGitObject()
+        m.register_commit('c1', author_time=1000)
+        m.register_tag_object('tag2', object='c1', tag='v1.0', tagger_time=1000)
+        m.register_tag_object('tag1', object='tag2', tag='v1.0', tagger_time=2000)
+        m.register_tag('v1.0', 'tag1')
+        tag = m.tag_get('v1.0')
+        assert tag.object == 'tag2'
+        assert tag.tagger_time == 2000
+
+    def test_tag_get_blob(self):
+        """A tag that points to a blob returns None."""
+        m = MockGitObject()
+        m.register_file('c1', 'a.txt', b'content')
+        m.register_tag('v1.0', blob_hash(b'content'))
+        assert m.tag_get('v1.0') is None
+
+    def test_tag_get_unknown_object(self):
+        """A tag that points to a missing object raises KeyError, like GitTag."""
+        m = MockGitObject()
+        m.register_tag('v1.0', 'gone')
+        with pytest.raises(KeyError):
+            m.tag_get('v1.0')
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────

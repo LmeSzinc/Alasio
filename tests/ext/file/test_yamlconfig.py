@@ -1,3 +1,5 @@
+from typing import List
+
 import msgspec
 import pytest
 import yaml
@@ -41,6 +43,12 @@ class MultiLineConfig(Struct):
     """Model with multiline string used in tests."""
 
     desc: str = "line1\nline2"
+
+
+class ListConfig(Struct):
+    """Model with a list of strings used in tests."""
+
+    items: Annotated[List[str], Meta(extra={"help": "list items"})] = msgspec.field(default_factory=list)
 
 
 class SecretPasswordConfig(Struct):
@@ -794,3 +802,62 @@ name: custom
             config.show()
         assert capture.fd.any_contains("  name = 'custom'")
         assert not capture.fd.any_contains('  password =')
+
+
+class TestYamlConfigList:
+    """Lists are read and written in the "- item" block style, not in the "[item]" flow style."""
+
+    def test_read_block_list(self, fs):
+        """A list written as "- item" is read."""
+        fs.create_file('/config.yaml', contents="""\
+items:
+  - a
+  - b
+""")
+        config = YamlConfig('/config.yaml', ListConfig)
+        assert config.errors == []
+        assert config.data == ListConfig(items=['a', 'b'])
+
+    def test_read_flow_list(self, fs):
+        """A list written as "[item]" is read too."""
+        fs.create_file('/config.yaml', contents='items: [a, b]\n')
+        config = YamlConfig('/config.yaml', ListConfig)
+        assert config.errors == []
+        assert config.data == ListConfig(items=['a', 'b'])
+
+    def test_write_block_list(self, fs):
+        """A list is written as "- item", with the help comment of the key."""
+        config = YamlConfig('/config.yaml', ListConfig)
+        config.data.items = ['a', 'b']
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# list items
+items:
+- a
+- b
+"""
+
+    def test_write_list_round_trip(self, fs):
+        """A written list is read back into the same list."""
+        config = YamlConfig('/config.yaml', ListConfig)
+        config.data.items = ['a', 'b']
+        config.write()
+        config2 = YamlConfig('/config.yaml', ListConfig)
+        assert config2.errors == []
+        assert config2.data.items == ['a', 'b']
+
+    def test_set_list(self, fs):
+        """set() accepts a list value, the written list keeps the "- item" style."""
+        config = YamlConfig('/config.yaml', ListConfig)
+        assert config.set(('items',), ['a', 'b']) is True
+        assert config.errors == []
+        assert config.data.items == ['a', 'b']
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# list items
+items:
+- a
+- b
+"""
