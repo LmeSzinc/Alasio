@@ -7,6 +7,7 @@ for a real on-disk git repository.
 
 from hashlib import sha1 as _sha1
 
+from alasio.deploy.history.decode_history import HistoryObj, decode_history
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.stage.gitreset import FileEntry
@@ -491,6 +492,74 @@ class TestFileinfoData:
         assert entry.data_size < entry.size, \
             'Compressed size should be less than original'
         assert entry.data != content, 'Data should be compressed, not raw'
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  fileinfo — extra data
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestExtraData:
+    """Tests for PackFull.extra_data, the synthetic files of a pack.
+
+    The commit history is packed as an extra file: it is not a file of
+    the repo tree, but the unpacked project still has it.
+    """
+
+    # msgpack of the history of the mock commit: [HistoryObj('c1', 'Author', 0, '', '')]
+    HISTORY_DATA = b'\x91\x95\xa2c1\xa6Author\x00\xa0\xa0'
+
+    def test_extra_data_packs_history(self):
+        """The commit history is packed as an extra file, keyed by filepath."""
+        mock = _make_repo()
+        mock.register_file('c1', 'a.txt', b'aaa')
+        pack = PackFull(mock, commit='c1')
+        extra = pack.extra_data
+        assert list(extra) == ['.pack/history.pack']
+        info = extra['.pack/history.pack']
+        assert info.path == '.pack/history.pack'
+        assert info.edit == 0  # A (added)
+        assert info.eol == 2  # binary
+        assert info.mode == 0
+        assert info.algo == 0  # raw, the history is too small to compress
+        assert info.data == self.HISTORY_DATA
+        assert info.size == 15
+        assert info.data_size == 15
+        assert info.source_lookback == 0
+        assert info.sha1 == _sha1(self.HISTORY_DATA).digest()
+        # the packed content decodes to the commit history
+        assert decode_history(info.data) == [
+            HistoryObj(version='c1', author='Author', time=0, title='', detail=''),
+        ]
+
+    def test_extra_data_cached(self):
+        """Extra files are built once, extra_data is a cached property."""
+        mock = _make_repo()
+        pack = PackFull(mock, commit='c1')
+        assert pack.extra_data is pack.extra_data
+
+    def test_fileinfo_packs_extra_data_last(self):
+        """fileinfo appends the extras after the version files."""
+        mock = _make_repo()
+        mock.register_file('c1', 'a.txt', b'aaa')
+        mock.register_file('c1', 'b.txt', b'bbb')
+        pack = PackFull(mock, commit='c1')
+        info = pack.fileinfo
+        # the version files keep their DFS path order, the extras come last
+        assert list(info) == ['a.txt', 'b.txt', '.pack/history.pack']
+        assert info['.pack/history.pack'].data == self.HISTORY_DATA
+
+    def test_extra_data_not_deduplicated(self):
+        """Extras carry their own data, they do not join the copy detection."""
+        mock = _make_repo()
+        # a version file with the same content as the history extra
+        mock.register_file('c1', 'history_copy.pack', self.HISTORY_DATA)
+        pack = PackFull(mock, commit='c1')
+        info = pack.fileinfo
+        assert info['history_copy.pack'].source_lookback == 0
+        assert info['history_copy.pack'].size == len(self.HISTORY_DATA)
+        assert info['.pack/history.pack'].source_lookback == 0
+        assert info['.pack/history.pack'].size == len(self.HISTORY_DATA)
 
 
 # ════════════════════════════════════════════════════════════════════════════

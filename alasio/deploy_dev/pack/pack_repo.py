@@ -32,9 +32,6 @@ def _dfs_path_key(path):
 
 
 class PackFull(PackEncodeBase):
-    # the history of the latest commits, packed as a normal file
-    HISTORY_FILE = '.pack/history.pack'
-
     def __init__(self, repo: Union[GitRepo, MockGitRepo], commit=''):
         """
         Args:
@@ -226,8 +223,8 @@ class PackFull(PackEncodeBase):
         self._populate_edit_copied(dict_fileinfo=out)
         # set data, algo, sha1, size, data_size
         self._populate_data(out)
-        # add the history of the latest commits
-        self._populate_history(out)
+        # add the extra files, e.g. the history of the latest commits
+        out.update(self.extra_data)
         return out
 
     def _populate_eol(self, dict_fileinfo: "dict[str, FileInfo]"):
@@ -313,27 +310,31 @@ class PackFull(PackEncodeBase):
             dict_sha1_to_index[sha] = index
 
     @cached_property
-    def history_data(self):
+    def extra_data(self) -> "dict[str, FileInfo]":
         """
-        Encode the history of the latest commits.
+        Extra files packed as normal files, keyed by filepath.
 
-        The history is stored in the pack as HISTORY_FILE, so the
+        Extras are synthetic files that are not files of the version
+        being packed, e.g. the history of the latest commits, so the
         unpacked project has the commit history of the packed version.
 
-        Returns:
-            bytes: msgpack encoded history data
-        """
-        commits = self.repo.list_commit_have(self.current_version, have_lookback=20)
-        return encode_commit_history(commits)
+        Extras carry their own data and are appended after the
+        version files, so they do not take part in the copy detection
+        of the version files.
 
-    def _populate_history(self, dict_fileinfo: "dict[str, FileInfo]"):
+        Returns:
+            dict[str, FileInfo]: {filepath: FileInfo}
         """
-        Add the history of the latest commits to the pack as a normal file
-        """
-        data = self.history_data
-        file = FileInfo(path=self.HISTORY_FILE, eol=2)
-        self._load_data(file, data, zstd=False)
-        dict_fileinfo[self.HISTORY_FILE] = file
+        extra = {}
+
+        # the history of the latest commits
+        path = '.pack/history.pack'
+        commits = self.repo.list_commit_have(self.current_version, have_lookback=20)
+        history = FileInfo(path=path, eol=2)
+        self._load_data(history, encode_commit_history(commits), zstd=False)
+        extra[path] = history
+
+        return extra
 
     def _populate_data(self, dict_fileinfo: "dict[str, FileInfo]"):
         """
