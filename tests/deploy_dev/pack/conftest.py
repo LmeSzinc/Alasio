@@ -17,7 +17,6 @@ import httpx2
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
-from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.deploy.pack.server_file import ServerFile
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.ext import env
@@ -217,6 +216,38 @@ WEBSITE_SERVER.register_version(COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK)
 # ════════════════════════════════════════════════════════════════════════════
 
 
+def make_repo(versions, message=None):
+    """
+    Build a MockGitRepo from {commit: {path: content | (content, mode)}}.
+
+    Every version also carries generated extra files (e.g. .pack/history.pack,
+    the history of the latest commits). Their content includes the commit sha1,
+    so it always differs between two commits: a diff of two versions gets an
+    extra record for it, tests that assert exact records filter it with
+    real_records().
+
+    Args:
+        versions (dict[str, dict]): Files of every version
+        message (str, optional): Commit message of every version. Defaults to
+            None, a per-commit message
+
+    Returns:
+        MockGitRepo:
+    """
+    repo = MockGitRepo()
+    for commit, files in versions.items():
+        for path, value in files.items():
+            if isinstance(value, tuple):
+                content, mode = value
+            else:
+                content, mode = value, 644
+            repo.register_file(commit, path, content, mode=mode)
+        repo.register_commit(
+            commit, author_name='Author',
+            message=message if message is not None else f'commit {commit}')
+    return repo
+
+
 def damage(content, ratio, seed=0):
     """
     Modify a ratio of the bytes of a content with a fixed random seed.
@@ -373,71 +404,6 @@ FULL_SCENARIO_NEW = {
 }
 
 # ════════════════════════════════════════════════════════════════════════════
-#  mock decoder
+#  mock decoder is gone: the diff reads the git repo, the tests build MockGitRepo
+#  versions (see make_repo above) instead of mocking a decoder
 # ════════════════════════════════════════════════════════════════════════════
-
-
-class MockDecodeBase:
-    """
-    Mock of PackDecodeBase for tests: idx_info records and catdata content.
-
-    The records are built from {path: content} test data with
-    from_data, catdata returns the content directly. Records are
-    stored raw (algo=0), the mock has no compressed data.
-    """
-
-    def __init__(self, idx_info, data):
-        """
-        Args:
-            idx_info (list[IdxInfo]): Records of the version
-            data (dict[str, bytes]): {path: content} of the version
-        """
-        self.idx_info = idx_info
-        self._data = data
-
-    def catdata(self, info):
-        """
-        Get the raw bytes of a file, the content in the mock.
-
-        Args:
-            info (IdxInfo): Record of the file
-
-        Returns:
-            bytes: File content
-        """
-        return self._data[info.path]
-
-    @classmethod
-    def from_data(cls, files, eols=None, modes=None, edits=None):
-        """
-        Build a mock decoder from {path: content} test data.
-
-        Args:
-            files (dict[str, bytes]): {path: blob content}
-            eols (dict[str, int], optional): Per-path eol values.
-                Defaults to None, all files are eol=0.
-            modes (dict[str, int], optional): Per-path mode values.
-                Defaults to None, all files are mode=0.
-            edits (dict[str, int], optional): Per-path edit values.
-                Defaults to None, all files are edit=0.
-
-        Returns:
-            MockDecodeBase:
-        """
-        eols = eols or {}
-        modes = modes or {}
-        edits = edits or {}
-        idx_info = []
-        data = {}
-        for path, content in files.items():
-            info = IdxInfo(
-                path=path,
-                size=len(content),
-                sha1=sha1(content).digest() if content else b'',
-                eol=eols.get(path, 0),
-                mode=modes.get(path, 0),
-                edit=edits.get(path, 0),
-            )
-            idx_info.append(info)
-            data[path] = content
-        return cls(idx_info=idx_info, data=data)

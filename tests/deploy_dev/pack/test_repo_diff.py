@@ -1,37 +1,55 @@
 """
-Tests for RepoDiff: compare the decoders of two versions, produce the diff records.
+Tests for RepoDiff: compare two versions of a git repo, produce the diff records.
 
-The tests build the versions with MockDecodeBase.from_data, without the
-pack machinery, so the diff logic (unchanged / modified / added /
-deleted / renamed / copied) can be exercised in isolation.
+The tests build the versions as MockGitRepo commits and read the contents from
+the repo like production does: no stored pack and no decoder is involved, the
+diff logic (unchanged / modified / added / deleted / renamed / copied) runs on
+the same records the pack server builds.
 """
 import pytest
 
-from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import RefInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.deploy_dev.pack.repo_diff import RepoDiff, UpdateInfo
-from alasio.git.mock.mock_repo import MockGitRepo
 from tests.deploy_dev.pack.conftest import (
-    FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockDecodeBase, code_lines, damage, damage_lines, random_bytes
+    FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, code_lines, damage, damage_lines, make_repo, random_bytes
 )
+
+
+def real_records(records):
+    """
+    Records of the files of the versions, without the generated extra files.
+
+    Every version carries generated extras as normal records (e.g.
+    .pack/history.pack, whose content includes the commit sha1 and therefore
+    always differs between two commits), the tests below are about the files of
+    the versions, so they filter the extras out.
+
+    Args:
+        records (dict): {path: record}
+
+    Returns:
+        dict: {path: record} without the extras
+    """
+    return {path: record for path, record in records.items() if not path.startswith('.pack/')}
 
 
 def make_diff(old, new, **kwargs):
     """
-    Build a RepoDiff from {path: content} dicts with mock decoders.
+    Build a RepoDiff of two versions from {path: content | (content, mode)} dicts.
 
     Args:
-        old (dict[str, bytes]): Old files
-        new (dict[str, bytes]): New files
+        old (dict[str, bytes | tuple[bytes, int]]): Old files
+        new (dict[str, bytes | tuple[bytes, int]]): New files
         **kwargs: Arguments passed to RepoDiff
 
     Returns:
         RepoDiff:
     """
+    repo = make_repo({'old': old, 'new': new}, message='')
     return RepoDiff(
-        MockDecodeBase.from_data(old),
-        MockDecodeBase.from_data(new),
+        PackFull(repo, commit='old'),
+        PackFull(repo, commit='new'),
         **kwargs,
     )
 
@@ -84,8 +102,8 @@ class TestRepoDiffBasic:
     def test_unchanged_absent(self):
         """Unchanged files are left out of the diff."""
         diff = make_diff({'a.txt': b'hello'}, {'a.txt': b'hello'})
-        assert diff.diff_info == {}
-        assert diff.refinfo == {}
+        assert real_records(diff.diff_info) == {}
+        assert real_records(diff.refinfo) == {}
 
     def test_added(self):
         """A new file becomes an A record with data."""
@@ -134,20 +152,17 @@ class TestRepoDiffBasic:
         assert info.algo == 0
 
     def test_deleted_markers_ignored(self):
-        """D records in the input are not real files."""
-        files = {'a.txt': b'hello', 'pkg/__init__.py': b''}
-        edits = {'pkg/__init__.py': 2}
-        diff = RepoDiff(
-            MockDecodeBase.from_data(files, edits=edits),
-            MockDecodeBase.from_data(files, edits=edits),
-        )
-        assert diff.diff_info == {}
+        """The synthetic D markers of a version are not diffed."""
+        # pkg/a.py without pkg/__init__.py makes the pack add a D marker for
+        # pkg/__init__.py, it is not a file of any version
+        diff = make_diff({'pkg/a.py': b'hello'}, {'pkg/a.py': b'hello'})
+        assert real_records(diff.diff_info) == {}
 
     def test_mode_change_only(self):
         """A mode change with identical content is an M record with the new mode."""
-        diff = RepoDiff(
-            MockDecodeBase.from_data({'run.sh': b'#!/bin/sh\n'}, modes={'run.sh': 1}),
-            MockDecodeBase.from_data({'run.sh': b'#!/bin/sh\n'}, modes={'run.sh': 0}),
+        diff = make_diff(
+            {'run.sh': (b'#!/bin/sh\n', 755)},
+            {'run.sh': (b'#!/bin/sh\n', 644)},
         )
         info = diff.diff_info['run.sh']
         assert info.edit == 1
@@ -273,12 +288,10 @@ class TestRepoDiffCopied:
 
     def test_crlf_source_copied(self):
         """A CRLF old file can be a copy source, the copy keeps its own eol."""
-        files = {'keep.txt': b'copy me\n', 'copy.txt': b'copy me\n'}
-        eols = {'keep.txt': 1, 'copy.txt': 1}
-        diff = RepoDiff(
-            MockDecodeBase.from_data({'keep.txt': b'copy me\n'}, eols=eols),
-            MockDecodeBase.from_data(files, eols=eols),
-        )
+        attributes = b'*.txt text eol=crlf\n'
+        old = {'.gitattributes': attributes, 'keep.txt': b'copy me\n'}
+        new = {'.gitattributes': attributes, 'keep.txt': b'copy me\n', 'copy.txt': b'copy me\n'}
+        diff = make_diff(old, new)
         info = diff.diff_info['copy.txt']
         assert info.edit == 0
         assert info.source_path == 'keep.txt'
@@ -288,11 +301,9 @@ class TestRepoDiffCopied:
 
     def test_755_source_copied(self):
         """A 755 old file can be a copy source, the copy keeps its own mode."""
-        files = {'keep.sh': b'#!/bin/sh\n', 'copy.sh': b'#!/bin/sh\n'}
-        modes = {'keep.sh': 1, 'copy.sh': 1}
-        diff = RepoDiff(
-            MockDecodeBase.from_data({'keep.sh': b'#!/bin/sh\n'}, modes=modes),
-            MockDecodeBase.from_data(files, modes=modes),
+        diff = make_diff(
+            {'keep.sh': (b'#!/bin/sh\n', 755)},
+            {'keep.sh': (b'#!/bin/sh\n', 755), 'copy.sh': (b'#!/bin/sh\n', 755)},
         )
         info = diff.diff_info['copy.sh']
         assert info.edit == 0
@@ -428,8 +439,9 @@ class TestRepoDiffValidation:
 
     def test_invalid_parameters(self):
         """Out of range parameters are rejected."""
-        old = MockDecodeBase.from_data({})
-        new = MockDecodeBase.from_data({})
+        repo = make_repo({'v': {'a.txt': b'a'}}, message='')
+        old = PackFull(repo, commit='v')
+        new = PackFull(repo, commit='v')
         with pytest.raises(ValueError, match='min_similarity'):
             RepoDiff(old, new, min_similarity=1.0)
         with pytest.raises(ValueError, match='min_similarity'):
@@ -488,31 +500,14 @@ class TestRepoDiffFullScenario:
         Returns:
             RepoDiff:
         """
-
-        def make_pack(files, commit):
-            """
-            Build a full pack of a version.
-
-            Args:
-                files (dict): {path: content} or {path: (content, mode)}
-                commit (str): Version of the pack
-
-            Returns:
-                bytes: Full pack data
-            """
-            repo = MockGitRepo()
-            repo.register_commit(commit, author_name='Author', message='')
-            for path, value in files.items():
-                if isinstance(value, tuple):
-                    content, mode = value
-                else:
-                    content, mode = value, 644
-                repo.register_file(commit, path, content, mode=mode)
-            return b''.join(PackFull(repo, commit=commit).iter_pack_data())
-
-        old = PackDecodeBase(make_pack(self.OLD, 'old'))
-        new = PackDecodeBase(make_pack(self.NEW, 'new'))
-        return RepoDiff(old, new)
+        # one message for both versions: the generated history (.pack/history.pack)
+        # is a record of the update pack too, identical here so that the records
+        # below are the files of the versions only
+        repo = make_repo({'old': self.OLD, 'new': self.NEW}, message='')
+        return RepoDiff(
+            PackFull(repo, commit='old'),
+            PackFull(repo, commit='new'),
+        )
 
     def test_diff_info_records(self):
         """Every diff record is exact: path order, edit, meta, data and source."""

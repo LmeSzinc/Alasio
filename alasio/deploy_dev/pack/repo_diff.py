@@ -22,12 +22,14 @@ record is compressed from the old blob to the new blob, and the client
 must normalize its working tree file to LF (by the old record's eol)
 before using it as the decompression dictionary.
 
-The blob content is read through the decoder's catdata and verified
-against the record, so the diff logic works on any decoder-like object:
-PackDecodeBase, or MockDecodeBase in tests.
+The blob content is read from the git repo the versions were built from,
+looked up by the blob sha1 of the version's file list: the diff never reads
+or decompresses a stored pack, it always works on the git blob form (LF
+normalized for text files), the form the packs store and the form a client
+has in its working tree.
 """
-from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
+from alasio.deploy_dev.pack.pack_cache import ContentCache, PatchCache
 from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_zstd import zstd_compress
@@ -51,12 +53,16 @@ class UpdateInfo(FileInfo):
 
 class RepoDiff:
     """
-    Compare the decoders of two versions, expose the diff records.
+    Compare two versions of a git repo, expose the diff records.
 
-    The input is the decoder of the old version and the decoder of the
-    new version (PackDecodeBase or MockDecodeBase, providing idx_info
-    and catdata), the output is diff_info ({path: UpdateInfo}) and
-    refinfo (the old file records referenced by the diff).
+    The versions are PackFull objects built from the same git repo (the pack
+    server path, no stored full pack is needed), the git repo comes from the
+    new version (PackFull.repo), the output is diff_info ({path: UpdateInfo})
+    and refinfo (the old file records referenced by the diff).
+
+    A PackCache can be passed to reuse the encodings across the versions of a
+    run: the A records are keyed by content, the M / RM patches by content
+    pair, see PackCache and doc/2026-09-27_update-pack-from-repo.md.
     """
 
     def __init__(
@@ -67,13 +73,12 @@ class RepoDiff:
             max_size_ratio=4.0,
             zstd_level=22,
             similarity_level=3,
+            cache=None,
     ):
         """
         Args:
-            old (PackDecodeBase | MockDecodeBase): Decoder of the old
-                version, full pack
-            new (PackDecodeBase | MockDecodeBase): Decoder of the new
-                version, full pack
+            old (PackFull): Old version, built from the git repo
+            new (PackFull): New version, built from the git repo
             min_similarity (float): Minimum similarity for rename
                 detection, 0~1. Defaults to 0.5, like git's default
                 50% rename threshold.
@@ -85,9 +90,12 @@ class RepoDiff:
             similarity_level (int): Zstd level for rename similarity
                 scoring, a fast level is enough for the score. Defaults
                 to 3.
+            cache (PackCache, optional): Cache shared by the versions of a
+                run, None to encode everything without cache. Defaults to None.
 
         Raises:
-            ValueError: If a parameter is out of range
+            ValueError: If a parameter is out of range, or the new version
+                carries no git repo
         """
         if not 0 <= min_similarity < 1:
             raise ValueError(f'min_similarity must be in [0, 1), got {min_similarity}')
@@ -99,9 +107,12 @@ class RepoDiff:
         self.max_size_ratio = max_size_ratio
         self.zstd_level = zstd_level
         self.similarity_level = similarity_level
-        # blob content caches (git blob form, LF normalized), keyed by path
-        self._old_blob_cache: "dict[str, bytes | memoryview]" = {}
-        self._new_blob_cache: "dict[str, bytes | memoryview]" = {}
+        self.cache = cache
+        # the versions are of the same git repo and the contents are read from
+        # it, the repo caches the objects it read so no extra cache is needed
+        self.repo = getattr(new, 'repo', None)
+        if self.repo is None:
+            raise ValueError('RepoDiff requires the git repo, use a PackFull as the new version')
         # files that exist, deleted markers (edit=2) are excluded
         self._real_old = {info.path: info for info in old.idx_info if info.edit != 2}
         self._real_new = {info.path: info for info in new.idx_info if info.edit != 2}
@@ -290,6 +301,11 @@ class RepoDiff:
         stored. The patch-from wins for similar contents, the expected
         case of M and RM records.
 
+        The encoding only depends on the content pair (old, new), so a version
+        that changes a file back and forth, or a version that shares the old
+        content with another one, takes the bytes from the cache instead of
+        compressing again. See PackCache.patch.
+
         Args:
             info (UpdateInfo): Record to load, edit must be M or RM
             old_info (IdxInfo): Old record, the patch source
@@ -299,8 +315,42 @@ class RepoDiff:
             bool: True if the zstd patch-from data was stored, the old
                 file is then referenced by the record
         """
+        if not old_info.sha1:
+            # an empty old file has no content to use as the zstd dictionary,
+            # the encoding is the one of an added file
+            self._load_added(info, new_info)
+            return False
+        cache = self.cache
+        key = (old_info.sha1, new_info.sha1)
+        cached = cache.patch.get(key) if cache is not None else None
+        if cached is not None:
+            info.algo, info.size, info.data_size, info.sha1, info.data = (
+                cached.info.algo, cached.info.size, cached.info.data_size,
+                cached.info.sha1, cached.info.data)
+            cache.mark('patch', hit=True)
+            return cached.patch_used
+        patch_used = self._load_modified_data(info, old_info, new_info)
+        if cache is not None:
+            cache.patch[key] = PatchCache(FileInfo(
+                path=info.path, algo=info.algo, size=info.size,
+                data_size=info.data_size, sha1=info.sha1, data=info.data), patch_used)
+            cache.mark('patch', hit=False)
+        return patch_used
+
+    def _load_modified_data(self, info, old_info, new_info):
+        """
+        Compress the data of a modified file, without the cache
+
+        Args:
+            info (UpdateInfo): Record to load, edit must be M or RM
+            old_info (IdxInfo): Old record, the patch source
+            new_info (IdxInfo): New record
+
+        Returns:
+            bool: True if the zstd patch-from data was stored
+        """
         new_blob = self._read_new_blob(new_info)
-        old_blob = self._read_old_blob(old_info) if old_info.sha1 else b''
+        old_blob = self._read_old_blob(old_info)
         algo_name = PackFull._load_data(info, new_blob, source=old_blob or None, level=self.zstd_level)
         return algo_name == 'zstd_patch'
 
@@ -308,73 +358,101 @@ class RepoDiff:
         """
         Load the data of an added file, the best of raw / lzma / zstd.
 
+        The same file is an added record of every version of the lookback
+        window that does not have it yet, so the encoding is cached by the git
+        blob sha1 of the file, the same key the version rebuilds use. See
+        PackCache.content.
+
         Args:
             info (UpdateInfo): Record to load, edit must be A
             new_info (IdxInfo): New record
         """
+        cache = self.cache
+        git_sha1 = None
+        entry = None
+        if cache is not None:
+            file_entry = self.new.filelist.get(new_info.path)
+            if file_entry is not None:
+                # the cache is keyed by the git blob sha1, like PackFull does
+                git_sha1 = bytes.fromhex(file_entry.sha1)
+                entry = cache.content.get(git_sha1)
+        cached = entry.update if entry is not None else None
+        if cached is not None:
+            info.algo, info.size, info.data_size, info.sha1, info.data = (
+                cached.algo, cached.size, cached.data_size, cached.sha1, cached.data)
+            cache.mark('content', hit=True)
+            return
         new_blob = self._read_new_blob(new_info)
         PackFull._load_data(info, new_blob, source=None, level=self.zstd_level)
+        if cache is not None and git_sha1 is not None:
+            if entry is None:
+                entry = cache.content[git_sha1] = ContentCache()
+            entry.update = FileInfo(
+                path=info.path, algo=info.algo, size=info.size,
+                data_size=info.data_size, sha1=info.sha1, data=info.data)
+            cache.mark('content', hit=False)
 
     def _read_old_blob(self, info):
         """
-        Read the git blob content of an old file, cached by path.
+        Read the git blob content of an old file.
 
         Args:
             info (IdxInfo): Record of the file
 
         Returns:
-            bytes | memoryview: Blob content, the cached memoryview is
-                a zero-copy slice of the pack data
+            bytes: Blob content
 
         Raises:
-            PackDecodeError: If the content fails to decode or verify
+            ValueError: If the version has no such file
         """
-        return self._read_blob(self._old_blob_cache, self.old, info)
+        return self._read_git_blob(self.old, info)
 
     def _read_new_blob(self, info):
         """
-        Read the git blob content of a new file, cached by path.
+        Read the git blob content of a new file.
 
         Args:
             info (IdxInfo): Record of the file
 
         Returns:
-            bytes | memoryview: Blob content, the cached memoryview is
-                a zero-copy slice of the pack data
+            bytes: Blob content
 
         Raises:
-            PackDecodeError: If the content fails to decode or verify
+            ValueError: If the version has no such file
         """
-        return self._read_blob(self._new_blob_cache, self.new, info)
+        return self._read_git_blob(self.new, info)
 
-    def _read_blob(self, cache, decoder, info):
+    def _read_git_blob(self, source, info):
         """
-        Read the git blob content of a file from a decoder, cached by path.
+        Read the git blob content of a file of a version.
 
-        The pack stores git blob content (LF normalized for text files),
-        the content is verified against the record's size and sha1.
-        See _read_old_blob / _read_new_blob for the public wrappers.
+        The content comes from the git repo the versions were built from, looked
+        up by the blob sha1 of the version's file list: no stored pack is read
+        and nothing is decompressed, the repo itself caches the objects it read.
+        The diff always works on the git blob form (LF normalized for text
+        files), which is the form the packs store and the form a client has in
+        its working tree.
 
         Args:
-            cache (dict[str, bytes | memoryview]): Blob cache of the decoder
-            decoder (PackDecodeBase | MockDecodeBase): Decoder to read from
+            source (PackFull): Version to read from
             info (IdxInfo): Record of the file
 
         Returns:
-            bytes | memoryview: Blob content, the cached memoryview is
-                a zero-copy slice of the pack data
+            bytes: Blob content
 
         Raises:
-            PackDecodeError: If the content fails to decode or verify
+            ValueError: If the version has no such file and the record is not
+                a generated extra file
         """
-        blob = cache.get(info.path)
+        entry = source.filelist.get(info.path)
+        if entry is not None:
+            return self.repo.cat(entry.sha1).decoded
+        # a generated extra file (e.g. .pack/history.pack) is not a file of the
+        # version, the pack holds the generated content
+        blob = source.extra_content.get(info.path)
         if blob is None:
-            data = decoder.catdata(info)
-            if info.algo:
-                data = PackDecodeBase._decompress(info, data)
-            PackDecodeBase._check_content(info, data)
-            blob = data
-            cache[info.path] = blob
+            raise ValueError(
+                f'Failed to read the content of {info.path}: not a file of the version')
         return blob
 
     def _find_renames(self, real_old, real_new):

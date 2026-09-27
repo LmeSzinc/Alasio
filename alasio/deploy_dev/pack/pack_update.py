@@ -40,26 +40,44 @@ class PackUpdate(PackEncodeBase):
     """
     Generate an update pack that upgrades the old pack to the new pack.
 
-    The old and new packs must be full packs (old version empty, data
-    section present), the typical input of the server pipeline that
-    publishes a new release. The update pack records the version of the
-    new pack as its current version and the version of the old pack as
-    its old version, which is how the clients recognize an update pack.
+    The new version is a PackFull built from the git repo. The old version is
+    identified by its commit and by the version its published pack records: the
+    old index pack and the old extra files are rebuilt from the git repo inside
+    PackUpdate, no stored full pack of an old version is needed. The rebuild is
+    byte-identical to the published pack as long as the version string and the
+    encoder match, so the old index the update pack patches is the index the
+    clients actually hold.
     """
+
+    # Encoder of the old side by pack format version. An update pack crosses a
+    # format change: the old version is rebuilt with the encoder of the format
+    # its pack was published with (that is what reproduces the bytes the clients
+    # hold), the new version and the update pack itself use the format of the
+    # new pack. A new format registers its encoder here.
+    OLD_ENCODERS = {PackEncodeBase.PACK_VERSION: PackFull}
 
     def __init__(
             self,
-            old,
             new,
+            old_commit,
+            old_pack_version=PackEncodeBase.PACK_VERSION,
             min_similarity=0.5,
             max_size_ratio=4.0,
             zstd_level=22,
             similarity_level=3,
+            cache=None,
     ):
         """
         Args:
-            old (PackDecodeBase): Full pack of the old version
-            new (PackDecodeBase): Full pack of the new version
+            new (PackFull): New version, a full pack built from the git repo,
+                it also provides the git repo of the versions
+            old_commit (str): Commit sha1 of the old version, the version that
+                a client updates from
+            old_pack_version (bytes): Pack format version of the already
+                published old pack, it selects the encoder that rebuilds the
+                old index pack and the old extra files, so the update pack can
+                cross a pack format change. Defaults to the current version of
+                PackEncodeBase, b'\\x00'
             min_similarity (float): Minimum similarity for rename
                 detection, 0~1. Defaults to 0.5, like git's default
                 50% rename threshold.
@@ -71,30 +89,45 @@ class PackUpdate(PackEncodeBase):
             similarity_level (int): Zstd level for rename similarity
                 scoring, a fast level is enough for the score. Defaults
                 to 3.
+            cache (PackCache, optional): Cache shared by the versions of a
+                run, it holds the encodings of the A records and of the
+                M / RM patches across versions. Defaults to None, the cache
+                of the new pack is used
 
         Raises:
-            ValueError: If old or new is not a full pack, or a parameter
-                is out of range
+            ValueError: If new is not a PackFull of a full version, or a
+                parameter is out of range
         """
         super().__init__()
-        if not old._has_data or not new._has_data:
-            raise ValueError('PackUpdate requires full packs with a data section, got a pack without one')
-        if old.old_version or new.old_version:
+        if not isinstance(new, PackFull):
             raise ValueError(
-                'PackUpdate requires full packs, got a pack with an old version (update pack)')
-        self.old = old
+                f'PackUpdate requires a PackFull of the new version, got {type(new).__name__}')
+        if getattr(new, 'old_version', ''):
+            raise ValueError(
+                'PackUpdate requires a full pack of the new version, got a pack with an old version '
+                '(update pack)'
+            )
         self.new = new
-        # the update pack updates from the old version to the current one
+        self.cache = cache if cache is not None else new.cache
+        # the old version is rebuilt from the git repo: its index pack is the
+        # index the clients hold and its extra files are the patch sources
+        encoder = self.OLD_ENCODERS.get(old_pack_version, PackFull)
+        self.old = encoder(
+            new.repo, old_commit, cache=self.cache, pack_version=old_pack_version)
+        # the update pack updates from the old version to the current one, and
+        # is encoded in the format of the new pack
+        self.pack_version = new.pack_version
         self.current_version = new.current_version
-        self.old_version = old.current_version
+        self.old_version = self.old.current_version
         self.zstd_level = zstd_level
         self._diff = RepoDiff(
-            old,
+            self.old,
             new,
             min_similarity=min_similarity,
             max_size_ratio=max_size_ratio,
             zstd_level=zstd_level,
             similarity_level=similarity_level,
+            cache=self.cache,
         )
 
     # ════════════════════════════════════════════════════════════════════════
@@ -138,8 +171,8 @@ class PackUpdate(PackEncodeBase):
             UpdateInfo | None: The M record of the index pack, or
                 None when the index pack did not change
         """
-        old_index = self.old.extract_index_pack()
-        new_index = self.new.extract_index_pack()
+        old_index = self.old.index_pack
+        new_index = self.new.index_pack
         if old_index == new_index:
             return None
         info = UpdateInfo(path='.pack/index.pack', edit=1, eol=2, mode=0)
@@ -171,7 +204,7 @@ class PackUpdate(PackEncodeBase):
         diff = self.diff_info
         index_info = diff.get('.pack/index.pack')
         if index_info is not None and index_info.source_path:
-            old_index = self.old.extract_index_pack()
+            old_index = self.old.index_pack
             ref = dict(ref)
             ref['.pack/index.pack'] = RefInfo(
                 path='.pack/index.pack', size=len(old_index), sha1=sha1(old_index).digest())

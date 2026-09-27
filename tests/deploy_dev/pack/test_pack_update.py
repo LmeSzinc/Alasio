@@ -8,34 +8,16 @@ is missing from refinfo and fileinfo must be rejected.
 """
 import pytest
 
-from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.deploy_dev.pack.repo_diff import UpdateInfo
-from alasio.git.mock.mock_repo import MockGitRepo
-
-
-def _make_pack(files, commit):
-    """
-    Build a full pack decoder of a version.
-
-    Args:
-        files (dict[str, bytes]): {path: content}
-        commit (str): Version of the pack
-
-    Returns:
-        PackDecodeBase: Decoder of the full pack
-    """
-    repo = MockGitRepo()
-    for path, content in files.items():
-        repo.register_file(commit, path, content)
-    repo.register_commit(commit, author_name='Author', message='')
-    return PackDecodeBase(b''.join(PackFull(repo, commit=commit).iter_pack_data()))
-
+from tests.deploy_dev.pack.conftest import make_repo
 
 # module level singletons, built before the fake filesystem is active
-OLD = _make_pack({'old.txt': b'old'}, 'old')
-NEW = _make_pack({'old.txt': b'old', 'new.txt': b'new'}, 'new')
+REPO = make_repo({
+    'old': {'old.txt': b'old'},
+    'new': {'old.txt': b'old', 'new.txt': b'new'},
+})
 
 
 class _FakeDiff:
@@ -68,7 +50,7 @@ class TestPackUpdateFileinfoDefensive:
         Returns:
             PackUpdate:
         """
-        update = PackUpdate(OLD, NEW)
+        update = PackUpdate(PackFull(REPO, commit='new'), 'old')
         update._diff = _FakeDiff(diff_info=diff_info, refinfo=refinfo)
         return update
 

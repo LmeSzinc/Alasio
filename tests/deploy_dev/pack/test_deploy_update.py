@@ -24,7 +24,7 @@ from alasio.ext.path.atomic import file_read_bytes
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.deploy_dev.pack.conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile
+from tests.deploy_dev.pack.conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile, make_repo
 
 
 def make_pack(files, commit='c1'):
@@ -72,13 +72,17 @@ def read_tree():
 
 
 # module level singletons, built before the fake filesystem is active
-OLD_PACK = make_pack(FULL_SCENARIO_OLD, commit='old')
-NEW_PACK = make_pack(FULL_SCENARIO_NEW, commit='new')
+SCENARIO_REPO = make_repo({'old': FULL_SCENARIO_OLD, 'new': FULL_SCENARIO_NEW})
+OLD_PACK = b''.join(PackFull(SCENARIO_REPO, commit='old').iter_pack_data())
+NEW_PACK = b''.join(PackFull(SCENARIO_REPO, commit='new').iter_pack_data())
 OLD_DECODER = PackDecodeBase(OLD_PACK)
 NEW_DECODER = PackDecodeBase(NEW_PACK)
 OLD_INDEX = bytes(OLD_DECODER.extract_index_pack())
 NEW_INDEX = bytes(NEW_DECODER.extract_index_pack())
-UPDATE = b''.join(PackUpdate(OLD_DECODER, NEW_DECODER).iter_pack_data())
+# the update pack is generated from the repo: the new version is a PackFull,
+# the old version is its commit
+UPDATE = b''.join(PackUpdate(
+    PackFull(SCENARIO_REPO, commit='new'), 'old').iter_pack_data())
 NEW_TREE = {
     path: bytes(NEW_DECODER.catfile(info))
     for path, info in NEW_DECODER.fileinfo.items()

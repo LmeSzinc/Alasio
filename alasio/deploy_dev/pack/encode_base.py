@@ -11,6 +11,14 @@ from alasio.ext.algorithm.vlenint import encode_vlenint
 from alasio.ext.cache import cached_property
 from alasio.ext.path.validate import validate_filepath
 
+# Paths that already passed validate_filepath while packing. Only the pack
+# encoder keeps this cache: it validates every path of every version it packs,
+# and a pack server only packs the file list of a repo, so the set is bounded by
+# the paths of the repo while it turns the per version walk into a set lookup.
+# The validator itself stays uncached, the backend runs it on untrusted user
+# input where a cache would grow without bound.
+_VALID_PACK_PATH = set()
+
 
 class PackEncodeBase:
     """
@@ -112,13 +120,18 @@ class PackEncodeBase:
         - 清空 .pack/workspace 文件夹
         - 释放 .pack/index.pack 的锁
     """
+    # pack format version of the encoded bytes: a published pack must be
+    # rebuilt with the format version it was encoded with, see PackUpdate
+    PACK_VERSION = b'\x00'
+
     def __init__(self):
         # version of this pack, e.g. the commit sha1 of the packed version
         self.current_version: str = ''
         # version this pack updates from, empty in a full pack, a
         # non-empty value makes the pack an update pack
         self.old_version: str = ''
-        self.pack_version = b'\x00'
+        # pack format version of this pack, see PACK_VERSION
+        self.pack_version = self.PACK_VERSION
 
     @cached_property
     def refinfo(self) -> "Dict[str, RefInfo]":
@@ -159,7 +172,10 @@ class PackEncodeBase:
         # on some platform
         files = list(self._iterfile(iter_ref=True, iter_file=True))
         for file in files:
+            if file.path in _VALID_PACK_PATH:
+                continue
             validate_filepath(file.path)
+            _VALID_PACK_PATH.add(file.path)
 
         # filepath
         list_path: "deque[bytes]" = deque()

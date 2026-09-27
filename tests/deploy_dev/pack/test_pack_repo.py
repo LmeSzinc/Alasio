@@ -7,6 +7,8 @@ for a real on-disk git repository.
 
 from hashlib import sha1 as _sha1
 
+import pytest
+
 from alasio.deploy.history.decode_history import HistoryObj, decode_history
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
@@ -28,6 +30,62 @@ def _make_repo():
     mock = MockGitRepo()
     mock.register_commit(COMMIT, author_name='Author', message='')
     return mock
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  path validation
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _make_counting_validate(monkeypatch):
+    """
+    Count the validate_filepath calls of the pack encoder.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Monkeypatch fixture
+
+    Returns:
+        list[str]: Paths validated so far
+    """
+    from alasio.deploy_dev.pack import encode_base
+
+    checked = []
+    original = encode_base.validate_filepath
+
+    def counting(path):
+        checked.append(path)
+        return original(path)
+
+    monkeypatch.setattr(encode_base, 'validate_filepath', counting)
+    return checked
+
+
+class TestPackPathValidateCache:
+    """The pack encoder validates a path once across the versions it packs."""
+
+    def test_path_validated_once(self, monkeypatch):
+        """Only the paths the earlier versions did not have are validated again."""
+        checked = _make_counting_validate(monkeypatch)
+        mock = _make_repo()
+        mock.register_file(COMMIT, 'cache_case/a.txt', b'a')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', 'cache_case/a.txt', b'a')
+        mock.register_file('c2', 'cache_case/b.txt', b'b')
+        b''.join(PackFull(mock, commit=COMMIT).iter_packidx_data())
+        assert 'cache_case/a.txt' in checked
+        checked.clear()
+        b''.join(PackFull(mock, commit='c2').iter_packidx_data())
+        # c2 shares a.txt with the version packed before, only b.txt is new
+        assert checked == ['cache_case/b.txt']
+
+    def test_invalid_path_still_rejected(self, monkeypatch):
+        """An invalid path keeps failing, it never enters the cache."""
+        _make_counting_validate(monkeypatch)
+        mock = _make_repo()
+        mock.register_file(COMMIT, 'cache_case/..', b'x')
+        for _ in range(2):
+            with pytest.raises(ValueError, match='directory pointer'):
+                b''.join(PackFull(mock, commit=COMMIT).iter_packidx_data())
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -364,10 +422,15 @@ class TestFileinfoEditCopied:
         assert info['b.py'].source_lookback == 1, \
             f'source_lookback should be 1 (look back to a.py), got {info["b.py"].source_lookback}'
         assert info['b.py'].edit == 0
-        # Copied files have their metadata reset
-        assert info['b.py'].size == 0
+        # A copied file carries no data of its own: data / algo / data_size are
+        # the values a decoder restores from the source record. sha1 and size
+        # keep the content of the source, so that the records can be compared
+        # as a diff source, see PackFull.idx_info.
         assert info['b.py'].data == b''
         assert info['b.py'].algo == 0
+        assert info['b.py'].data_size == 0
+        assert info['b.py'].size == len(content_a)
+        assert info['b.py'].sha1 == info['a.py'].sha1
 
     def test_empty_file_not_copied(self):
         """Empty files (size=0) are not considered as copies."""
@@ -404,11 +467,14 @@ class TestFileinfoEditCopied:
 
         # c.txt: copy of b.txt (lookback 1)
         assert info['c.txt'].source_lookback == 1
-        assert info['c.txt'].size == 0
+        # a copy carries no own data, its size / sha1 keep the source content
+        # so that the records can be compared as a diff source
+        assert info['c.txt'].size == len(content)
+        assert info['c.txt'].sha1 == info['b.txt'].sha1
 
         # d.txt: copy of c.txt (lookback 1, the nearest source)
         assert info['d.txt'].source_lookback == 1
-        assert info['d.txt'].size == 0
+        assert info['d.txt'].size == len(content)
 
         # e.txt: unique after all copies
         assert info['e.txt'].source_lookback == 0
@@ -464,7 +530,9 @@ class TestFileinfoData:
         assert info['alpha.txt'].source_lookback == 0
         # beta.txt sorts second → it is the copy
         assert info['beta.txt'].source_lookback == 1
-        assert info['beta.txt'].size == 0
+        # no own data loaded, but the source content is known from the source
+        assert info['beta.txt'].size == len(content)
+        assert info['beta.txt'].sha1 == info['alpha.txt'].sha1
         assert info['beta.txt'].data == b''
         assert info['beta.txt'].data_size == 0
 
@@ -500,21 +568,23 @@ class TestFileinfoData:
 
 
 class TestExtraData:
-    """Tests for PackFull.extra_data, the synthetic files of a pack.
+    """Tests for PackFull.extra_content / extra_fileinfo, the synthetic files.
 
     The commit history is packed as an extra file: it is not a file of
-    the repo tree, but the unpacked project still has it.
+    the repo tree, but the unpacked project still has it. extra_content
+    holds the generated bytes, extra_fileinfo encodes them into records.
     """
 
     # msgpack of the history of the mock commit: [HistoryObj('c1', 'Author', 0, '', '')]
     HISTORY_DATA = b'\x91\x95\xa2c1\xa6Author\x00\xa0\xa0'
 
-    def test_extra_data_packs_history(self):
+    def test_extra_fileinfo_packs_history(self):
         """The commit history is packed as an extra file, keyed by filepath."""
         mock = _make_repo()
         mock.register_file('c1', 'a.txt', b'aaa')
         pack = PackFull(mock, commit='c1')
-        extra = pack.extra_data
+        assert pack.extra_content == {'.pack/history.pack': self.HISTORY_DATA}
+        extra = pack.extra_fileinfo
         assert list(extra) == ['.pack/history.pack']
         info = extra['.pack/history.pack']
         assert info.path == '.pack/history.pack'
@@ -532,13 +602,14 @@ class TestExtraData:
             HistoryObj(version='c1', author='Author', time=0, title='', detail=''),
         ]
 
-    def test_extra_data_cached(self):
-        """Extra files are built once, extra_data is a cached property."""
+    def test_extra_fileinfo_cached(self):
+        """The generated content and its records are built once."""
         mock = _make_repo()
         pack = PackFull(mock, commit='c1')
-        assert pack.extra_data is pack.extra_data
+        assert pack.extra_content is pack.extra_content
+        assert pack.extra_fileinfo is pack.extra_fileinfo
 
-    def test_fileinfo_packs_extra_data_last(self):
+    def test_fileinfo_packs_extra_fileinfo_last(self):
         """fileinfo appends the extras after the version files."""
         mock = _make_repo()
         mock.register_file('c1', 'a.txt', b'aaa')
@@ -549,7 +620,7 @@ class TestExtraData:
         assert list(info) == ['a.txt', 'b.txt', '.pack/history.pack']
         assert info['.pack/history.pack'].data == self.HISTORY_DATA
 
-    def test_extra_data_not_deduplicated(self):
+    def test_extra_fileinfo_not_deduplicated(self):
         """Extras carry their own data, they do not join the copy detection."""
         mock = _make_repo()
         # a version file with the same content as the history extra
@@ -636,9 +707,14 @@ class TestFileinfoIntegration:
         assert info['pkg/b2.py'].source_lookback == 1  # from b1
         assert info['pkg/a3.py'].source_lookback == 1  # from a2 (nearest)
 
-        # Copied files have no own data
-        for name in ('pkg/a2.py', 'pkg/b2.py', 'pkg/a3.py'):
-            assert info[name].size == 0
+        # Copied files have no own data, their size / sha1 follow the source
+        for name, source in (
+                ('pkg/a2.py', 'pkg/a1.py'),
+                ('pkg/b2.py', 'pkg/b1.py'),
+                ('pkg/a3.py', 'pkg/a1.py')):
+            assert info[name].data == b''
+            assert info[name].size == info[source].size
+            assert info[name].sha1 == info[source].sha1
             assert info[name].data == b''
 
         # Source files have correct caches updated

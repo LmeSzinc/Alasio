@@ -31,7 +31,7 @@ from alasio.ext.path.atomic import file_read_bytes
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.deploy_dev.pack.conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile
+from tests.deploy_dev.pack.conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile, make_repo
 
 # ════════════════════════════════════════════════════════════════════════════
 #  shared versions
@@ -115,11 +115,16 @@ def read_tree():
 #  module level singletons, built before the fake filesystem is active
 # ════════════════════════════════════════════════════════════════════════════
 
-OLD_PACK = make_pack(OLD, commit='old')
-NEW_PACK = make_pack(NEW, commit='new')
+# a repo with both versions of the scenario: the update pack is generated from
+# the repo, the new version is a PackFull, the old version is its commit and the
+# version its published pack records
+SCENARIO_REPO = make_repo({'old': OLD, 'new': NEW})
+OLD_PACK = b''.join(PackFull(SCENARIO_REPO, commit='old').iter_pack_data())
+NEW_PACK = b''.join(PackFull(SCENARIO_REPO, commit='new').iter_pack_data())
 OLD_DECODER = PackDecodeBase(OLD_PACK)
 NEW_DECODER = PackDecodeBase(NEW_PACK)
-UPDATE = b''.join(PackUpdate(OLD_DECODER, NEW_DECODER).iter_pack_data())
+UPDATE = b''.join(PackUpdate(
+    PackFull(SCENARIO_REPO, commit='new'), 'old').iter_pack_data())
 # the update pack records both versions: the new one as the current
 # version and the old one as the old version, which is what tells an
 # update pack from a full pack
@@ -132,10 +137,14 @@ NEW_TREE = unpack_tree(NEW_DECODER)
 
 # an update without any source-dependent record, so a missing or
 # corrupt local index does not fail the records
-_simple_old_pack = make_pack({'keep.txt': b'keep\n'}, commit='old')
-_simple_new_pack = make_pack({'keep.txt': b'keep\n', 'add.txt': b'hello\n'}, commit='new')
+_simple_repo = make_repo({
+    'old': {'keep.txt': b'keep\n'},
+    'new': {'keep.txt': b'keep\n', 'add.txt': b'hello\n'},
+})
+_simple_old_pack = b''.join(PackFull(_simple_repo, commit='old').iter_pack_data())
+_simple_new_pack = b''.join(PackFull(_simple_repo, commit='new').iter_pack_data())
 SIMPLE_UPDATE = b''.join(PackUpdate(
-    PackDecodeBase(_simple_old_pack), PackDecodeBase(_simple_new_pack)).iter_pack_data())
+    PackFull(_simple_repo, commit='new'), 'old').iter_pack_data())
 SIMPLE_SERVER = MockServerFile()
 SIMPLE_SERVER.register_version(
     'old', _simple_old_pack, bytes(PackDecodeBase(_simple_old_pack).extract_index_pack()))
