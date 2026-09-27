@@ -43,11 +43,28 @@ class GitObject(msgspec.Struct, dict=True):
 
     @cached_property
     def decoded(self):
+        """
+        Decoded value of this object, its type depends on the object type
+
+        A blob returns its content as ``bytes``, always: the plain (zlib) path
+        and the delta path (see apply_delta_from_source) both return bytes, so
+        a caller can scan (``b'\\x00' in content``), decode or compress the
+        content with no conversion. A tree / commit / tag returns its parse
+        result, a not yet resolved delta returns its delta instructions.
+
+        ``data`` stays a ``memoryview``: it is the buffer the delta chains
+        slice in GitObjectManager.cat().
+
+        Returns:
+            bytes | TreeObj | CommitObj | TagObj | OfsDeltaObj | RefDeltaObj
+        """
         objtype = self.type
         # sorted by object proportion
         # delete self.data to release reference to original file data
         if objtype == 3:
-            # blob
+            # blob, always bytes, never a memoryview: the content is scanned
+            # and decoded by the callers, doing that on a memoryview is ~600x
+            # slower or impossible
             try:
                 data = decompress(self.data)
             except zlib_error as e:
@@ -106,6 +123,9 @@ class GitObject(msgspec.Struct, dict=True):
 
         This object must be a DELTA object and source must not be a DELTA object
 
+        The result follows GitObject.decoded: bytes for a blob, a parse result
+        for a tree / commit / tag.
+
         Args:
             source:
         """
@@ -119,8 +139,10 @@ class GitObject(msgspec.Struct, dict=True):
         objtype = source.type
         self.type = objtype
         if objtype == 3:
-            decoded = memoryview(data)
-            self.data = decoded
+            # blob, the content is always bytes, same as the plain path of
+            # decoded(), `data` of a blob is never sliced by a delta chain
+            decoded = data
+            self.data = memoryview(data)
         elif objtype == 2:
             decoded = parse_tree(data)
             self.data = memoryview(data)
@@ -365,10 +387,20 @@ class GitLooseObject(msgspec.Struct, dict=True):
 
     @cached_property
     def decoded(self):
+        """
+        Decoded value of this object, see GitObject.decoded
+
+        A blob returns its content as ``bytes``, a tree / commit / tag returns
+        its parse result. A loose object is never a delta.
+
+        Returns:
+            bytes | TreeObj | CommitObj | TagObj
+        """
         objtype = self.type
         # sorted by object proportion
         # delete self.data to release reference to original file data
         if objtype == 3:
+            # blob, always bytes, see GitObject.decoded
             return self.data
         if objtype == 2:
             result = parse_tree(self.data)
