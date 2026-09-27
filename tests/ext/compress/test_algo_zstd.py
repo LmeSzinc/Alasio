@@ -75,21 +75,67 @@ class TestZstdCompress:
     def test_with_explicit_level(self, level):
         """Should be usable with different compression levels."""
         data = b"A" * 10000
-        from zstandard import ZstdCompressionParameters, ZstdCompressor
+        compressed = zstd_compress(data, level=level)
+        assert zstd_decompress(compressed) == data
 
-        params = ZstdCompressionParameters(
-            format=zstd.FORMAT_ZSTD1_MAGICLESS,
-            write_checksum=False,
-            write_content_size=True,
-            write_dict_id=False,
+
+class TestZstdLevel:
+    """The level argument has to reach zstd, it used to be ignored.
+
+    zstd_compress() passes a ZstdCompressionParameters object, and
+    ZstdCompressor(level=...) is ignored as soon as compression_params is
+    given, so every caller silently ran at the default level.
+    """
+
+    # a sample where the levels actually differ, plain repeated text compresses
+    # to the same handful of bytes on every level
+    SAMPLE = b''.join(
+        b'def func_%d(x):\n    """docstring of the function"""\n    return x * %d + %d\n' % (i, i * 2, i + 1)
+        for i in range(300)
+    )
+
+    def test_level_changes_the_output(self):
+        """A higher level has to produce a different, smaller output."""
+        fast = zstd_compress(self.SAMPLE, level=1)
+        slow = zstd_compress(self.SAMPLE, level=22)
+        assert len(slow) < len(fast), (
+            f'level 22 gave {len(slow)}B and level 1 gave {len(fast)}B, '
+            'the level is not reaching zstd'
         )
-        compressor = ZstdCompressor(
-            level=level,
-            compression_params=params,
-        )
-        compressed = compressor.compress(data)
-        decompressed = zstd_decompress(compressed)
-        assert decompressed == data
+        assert zstd_decompress(slow) == self.SAMPLE
+        assert zstd_decompress(fast) == self.SAMPLE
+
+    @pytest.mark.parametrize('level', [1, 3, 10, 22])
+    def test_level_of_dict_compression_changes_the_output(self, level):
+        """The level has to reach the patch-from compression as well."""
+        source = b''.join(b'original line %d of the old file\n' % i for i in range(30000))
+        data = source[:1000] + b'changed line\n' + source[2000:]
+        patch = zstd_compress(data, source=source, level=level)
+        assert zstd_decompress(patch, source=source) == data
+        assert len(patch) < len(data) // 10
+        if level == 22:
+            assert len(patch) < len(zstd_compress(data, source=source, level=1))
+
+    def test_window_covers_the_input_for_the_frame_header(self):
+        """Large inputs keep a content size in the frame, whatever the level.
+
+        zstd writes the content size into the frame header only for single
+        segment frames, which needs a window covering the whole input, and
+        zstd_decompress() reads that content size. Without the window being
+        raised, big inputs at a low level cannot be decompressed.
+        """
+        data = b'line of text to compress\n' * 300000   # ~7.2MB, level 1 window is 512KB
+        for level in (1, 3, 22):
+            compressed = zstd_compress(data, level=level)
+            assert zstd_decompress(compressed) == data
+
+    def test_window_covers_the_dictionary(self):
+        """A dictionary larger than the window of the level still decompresses."""
+        source = b'original line of the old file\n' * 300000   # ~8.7MB
+        data = source[:2000] + b'new line\n' + source[3000:]
+        for level in (1, 3, 22):
+            compressed = zstd_compress(data, source=source, level=level)
+            assert zstd_decompress(compressed, source=source) == data
 
 
 class TestZstdDecompress:

@@ -619,9 +619,10 @@ class TestRepoDiffFullScenario:
             size=52, data_size=52,
             sha1=bytes.fromhex('c797b6c4c27f268e5e6c2181ba7ce52f0a7327d0'), source_path='frontend/App.svelte')
         # RM: renamed + modified, patched from the old file
+        # (the best of the level and the small input level 3 wins, here 18 < 22)
         assert _no_data(diff_info['scripts/new_tool.py']) == UpdateInfo(
             path='scripts/new_tool.py', edit=3, eol=0, mode=0, algo=2,
-            size=750, data_size=22,
+            size=750, data_size=18,
             sha1=bytes.fromhex('74d902ad26e3c957239cf22ab92efab8f67c95f5'), source_path='scripts/old_tool.py')
         # M: eol-only change, CRLF (v1) to LF (v2), same content
         assert _no_data(diff_info['scripts/run.bat']) == UpdateInfo(
