@@ -61,9 +61,6 @@ class PackUpdate(PackEncodeBase):
             new,
             old_commit,
             old_pack_version=PackEncodeBase.PACK_VERSION,
-            min_similarity=0.5,
-            max_size_ratio=4.0,
-            similarity_level=3,
             cache=None,
     ):
         """
@@ -77,23 +74,13 @@ class PackUpdate(PackEncodeBase):
                 old index pack and the old extra files, so the update pack can
                 cross a pack format change. Defaults to the current version of
                 PackEncodeBase, b'\\x00'
-            min_similarity (float): Minimum similarity for rename
-                detection, 0~1. Defaults to 0.5, like git's default
-                50% rename threshold.
-            max_size_ratio (float): Maximum size ratio of rename
-                candidates, pairs outside [1/ratio, ratio] are never
-                matched. Defaults to 4.0.
-            similarity_level (int): Zstd level for rename similarity
-                scoring, a fast level is enough for the score. Defaults
-                to 3.
             cache (PackCache, optional): Cache shared by the versions of a
                 run, it holds the encodings of the A records and of the
                 M / RM patches across versions. Defaults to None, the cache
                 of the new pack is used
 
         Raises:
-            ValueError: If new is not a PackFull of a full version, or a
-                parameter is out of range
+            ValueError: If new is not a PackFull of a full version
         """
         super().__init__()
         if not isinstance(new, PackFull):
@@ -119,9 +106,6 @@ class PackUpdate(PackEncodeBase):
         self._diff = RepoDiff(
             self.old,
             new,
-            min_similarity=min_similarity,
-            max_size_ratio=max_size_ratio,
-            similarity_level=similarity_level,
             cache=self.cache,
         )
 

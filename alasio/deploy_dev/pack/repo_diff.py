@@ -65,44 +65,34 @@ class RepoDiff:
     pair, see PackCache and doc/2026-09-27_update-pack-from-repo.md.
     """
 
-    def __init__(
-            self,
-            old,
-            new,
-            min_similarity=0.5,
-            max_size_ratio=4.0,
-            similarity_level=3,
-            cache=None,
-    ):
+    # Rename detection policy of the pack format, like PackFull.ZSTD_LEVEL: it
+    # follows the version of the encoder, not the call, a changed value changes
+    # the produced records and has to come with a PACK_VERSION bump.
+
+    # Minimum similarity of a rename pair, 0~1, like git's default 50%
+    # rename threshold.
+    MIN_SIMILARITY = 0.5
+
+    # Maximum size ratio of rename candidates, pairs outside
+    # [1 / ratio, ratio] are never matched.
+    MAX_SIZE_RATIO = 4.0
+
+    # Zstd level of the rename similarity score, a fast level is enough.
+    SIMILARITY_LEVEL = 3
+
+    def __init__(self, old, new, cache=None):
         """
         Args:
             old (PackFull): Old version, built from the git repo
             new (PackFull): New version, built from the git repo
-            min_similarity (float): Minimum similarity for rename
-                detection, 0~1. Defaults to 0.5, like git's default
-                50% rename threshold.
-            max_size_ratio (float): Maximum size ratio of rename
-                candidates, pairs outside [1/ratio, ratio] are never
-                matched. Defaults to 4.0.
-            similarity_level (int): Zstd level for rename similarity
-                scoring, a fast level is enough for the score. Defaults
-                to 3.
             cache (PackCache, optional): Cache shared by the versions of a
                 run, None to encode everything without cache. Defaults to None.
 
         Raises:
-            ValueError: If a parameter is out of range, or the new version
-                carries no git repo
+            ValueError: If the new version carries no git repo
         """
-        if not 0 <= min_similarity < 1:
-            raise ValueError(f'min_similarity must be in [0, 1), got {min_similarity}')
-        if max_size_ratio < 1:
-            raise ValueError(f'max_size_ratio must be >= 1, got {max_size_ratio}')
         self.old = old
         self.new = new
-        self.min_similarity = min_similarity
-        self.max_size_ratio = max_size_ratio
-        self.similarity_level = similarity_level
         self.cache = cache
         # the versions are of the same git repo and the contents are read from
         # it, the repo caches the objects it read so no extra cache is needed
@@ -497,7 +487,7 @@ class RepoDiff:
         Pairs with the same blob sha1 are exact renames, their
         similarity is 1. Other pairs are filtered by size ratio and
         scored by zstd dictionary compression (see similarity).
-        Candidates above min_similarity are matched greedily one-to-one
+        Candidates above the RepoDiff.MIN_SIMILARITY bar are matched greedily one-to-one
         by descending similarity: every old file is the source of at
         most one rename, because an R / RM record moves the old file.
 
@@ -523,13 +513,13 @@ class RepoDiff:
                 else:
                     # size pre-filter before compressing the pair
                     ratio = new_info.size / old_info.size
-                    if not (1 / self.max_size_ratio <= ratio <= self.max_size_ratio):
+                    if not (1 / RepoDiff.MAX_SIZE_RATIO <= ratio <= RepoDiff.MAX_SIZE_RATIO):
                         continue
                     if new_blob is None:
                         new_blob = self._read_new_blob(new_info)
                     old_blob = self._read_old_blob(old_info)
-                    sim = self.similarity(old_blob, new_blob, level=self.similarity_level)
-                if sim >= self.min_similarity:
+                    sim = self.similarity(old_blob, new_blob)
+                if sim >= RepoDiff.MIN_SIMILARITY:
                     candidates.append((sim, new_path, old_path))
 
         # greedy one-to-one matching by descending similarity
@@ -544,7 +534,7 @@ class RepoDiff:
         return renames
 
     @staticmethod
-    def similarity(old_content, new_content, level=3):
+    def similarity(old_content, new_content, level=SIMILARITY_LEVEL):
         """
         Estimate the similarity of two file contents with zstd dict compression.
 
@@ -560,7 +550,7 @@ class RepoDiff:
             old_content (bytes): Old file content, as the zstd dictionary
             new_content (bytes): New file content, must not be empty
             level (int): Zstd compression level for the score. Defaults
-                to 3, a fast level is enough for a score.
+                to SIMILARITY_LEVEL (3), a fast level is enough for a score.
 
         Returns:
             float: Similarity in [0, 1], higher is more similar

@@ -215,8 +215,8 @@ class TestRepoDiffRename:
         assert diff.diff_info['b.txt'].edit == 0
         assert diff.refinfo == {}
 
-    def test_min_similarity(self):
-        """min_similarity controls whether a pair is matched as a rename."""
+    def test_min_similarity(self, monkeypatch):
+        """MIN_SIMILARITY controls whether a pair is matched as a rename."""
         old = {'a.txt': b'def func(x):\n    return x * 2\n' * 60}
         new = {'b.txt': damage(b'def func(x):\n    return x * 2\n' * 60, 0.1, seed=4)}
         # default threshold: matched as RM
@@ -224,7 +224,8 @@ class TestRepoDiffRename:
         assert diff.diff_info['b.txt'].edit == 3
         assert diff.diff_info['b.txt'].source_path == 'a.txt'
         # high threshold: not matched, D + A instead
-        diff = make_diff(old, new, min_similarity=0.9)
+        monkeypatch.setattr(RepoDiff, 'MIN_SIMILARITY', 0.9)
+        diff = make_diff(old, new)
         assert diff.diff_info['a.txt'].edit == 2
         assert diff.diff_info['b.txt'].edit == 0
 
@@ -437,17 +438,19 @@ class TestRepoDiffRefinfo:
 class TestRepoDiffValidation:
     """Input validation of RepoDiff."""
 
-    def test_invalid_parameters(self):
-        """Out of range parameters are rejected."""
+    def test_the_diff_policy_is_not_an_input(self):
+        """The rename policy follows the pack format, the call can not change it"""
+        assert (RepoDiff.MIN_SIMILARITY, RepoDiff.MAX_SIZE_RATIO, RepoDiff.SIMILARITY_LEVEL) == (
+            0.5, 4.0, 3)
         repo = make_repo({'v': {'a.txt': b'a'}}, message='')
         old = PackFull(repo, commit='v')
         new = PackFull(repo, commit='v')
-        with pytest.raises(ValueError, match='min_similarity'):
-            RepoDiff(old, new, min_similarity=1.0)
-        with pytest.raises(ValueError, match='min_similarity'):
-            RepoDiff(old, new, min_similarity=-0.1)
-        with pytest.raises(ValueError, match='max_size_ratio'):
-            RepoDiff(old, new, max_size_ratio=0.5)
+        with pytest.raises(TypeError):
+            RepoDiff(old, new, min_similarity=0.9)
+        with pytest.raises(TypeError):
+            RepoDiff(old, new, max_size_ratio=2.0)
+        with pytest.raises(TypeError):
+            RepoDiff(old, new, similarity_level=1)
 
 
 # ════════════════════════════════════════════════════════════════════════════
