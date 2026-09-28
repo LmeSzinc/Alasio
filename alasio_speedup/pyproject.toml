@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alasio_speedup"
+version = "0.1.0"
+description = "Optional C accelerators of alasio"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "LmeSzinc" }
+]
+dependencies = []
+
+[tool.setuptools]
+packages = ["alasio_speedup"]
+# the package is the directory of this file, install it with
+# python -m pip install ./alasio_speedup
+package-dir = { "alasio_speedup" = "." }
+
+[tool.setuptools.package-data]
+# the C source is compiled on first use, it is part of the package
+alasio_speedup = ["*.c"]

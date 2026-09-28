@@ -1,0 +1,8 @@
+# the shared libraries are built locally by build.py
+*.dll
+*.so
+*.dylib
+*.tmp
+
+# setuptools artifacts of `pip install ./alasio_speedup`
+build/
