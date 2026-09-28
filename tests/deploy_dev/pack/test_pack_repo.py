@@ -10,6 +10,7 @@ from hashlib import sha1 as _sha1
 import pytest
 
 from alasio.deploy.history.decode_history import HistoryObj, decode_history
+from alasio.deploy.pack.pack_model import FileInfo
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.stage.gitreset import FileEntry
@@ -720,3 +721,234 @@ class TestFileinfoIntegration:
         # Source files have correct caches updated
         assert info['pkg/a1.py'].edit == 0
         assert info['pkg/a1.py'].source_lookback == 0
+
+
+# ════════════════════════════════════════════════════════════════════════════
+
+# ════════════════════════════════════════════════════════════════════════════
+#  _load_data: cache info, candidate switches, plain zstd skip
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _count_compress_calls(monkeypatch, name):
+    """
+    Count the calls of a compression function of pack_repo
+
+    Args:
+        monkeypatch (MonkeyPatch): Pytest monkeypatch fixture
+        name (str): Function name in pack_repo, 'lzma_compress' / 'zstd_compress'
+
+    Returns:
+        list[bool]: One item per call, True when the call had a source
+    """
+    import alasio.deploy_dev.pack.pack_repo as pack_repo
+
+    calls = []
+    original = getattr(pack_repo, name)
+
+    def counting(*args, **kwargs):
+        calls.append(kwargs.get('source') is not None)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pack_repo, name, counting)
+    return calls
+
+
+def _content():
+    """
+    Compressible content, far above SKIP_PLAIN_ZSTD_MIN_SIZE
+
+    Returns:
+        bytes: Content
+    """
+    return b''.join(b'log line %d: something happened here\n' % index for index in range(600))
+
+
+def _unrelated(size=1500):
+    """
+    Content that shares nothing with _content(), a useless zstd dictionary
+
+    Args:
+        size (int): Number of lines
+
+    Returns:
+        bytes: Content
+    """
+    return b''.join(b'totally other text %d\n' % index for index in range(size))
+
+
+def _fake_zstd(monkeypatch, patch_size, plain_size):
+    """
+    Replace zstd_compress of pack_repo with a function of fixed sizes
+
+    Args:
+        monkeypatch (MonkeyPatch): Pytest monkeypatch fixture
+        patch_size (int): Size returned for a patch (a source is given)
+        plain_size (int): Size returned for plain zstd
+    """
+    import alasio.deploy_dev.pack.pack_repo as pack_repo
+
+    monkeypatch.setattr(
+        pack_repo, 'zstd_compress',
+        lambda data, source=None, level=22: b'x' * (patch_size if source is not None else plain_size))
+
+
+class TestLoadDataCacheInfo:
+    """
+    _load_data takes the cached raw / lzma encoding of the content as cache_info,
+    it stands for the plain candidates, see
+    doc/2026-09-27_update-pack-from-repo.md section 7.14-1
+    """
+
+    def test_cache_info_is_reused(self, monkeypatch):
+        """The cached encoding is used as is, the content is not compressed again"""
+        data = _content()
+        source = _unrelated(600)
+        cache_info = FileInfo(path='a')
+        assert PackFull._load_data(cache_info, data, zstd=False) in ('raw', 'lzma')
+        expected = FileInfo(path='a')
+        expected_algo = PackFull._load_data(expected, data, zstd_source=source)
+
+        calls = _count_compress_calls(monkeypatch, 'lzma_compress')
+        info = FileInfo(path='a')
+        algo = PackFull._load_data(info, data, cache_info=cache_info, zstd_source=source)
+
+        assert calls == []
+        assert algo == expected_algo
+        assert (info.algo, info.data, info.data_size, info.size, info.sha1) == (
+            expected.algo, expected.data, expected.data_size, expected.size, expected.sha1)
+
+    def test_cache_info_of_another_size_is_ignored(self, monkeypatch):
+        """A cache entry of another size is not the content, it is ignored"""
+        other = FileInfo(path='a')
+        PackFull._load_data(other, b'other content' * 50, zstd=False)
+        calls = _count_compress_calls(monkeypatch, 'lzma_compress')
+        info = FileInfo(path='a')
+        PackFull._load_data(info, _content(), cache_info=other, zstd=False)
+        assert len(calls) == 1
+
+    def test_cache_info_is_the_plain_best_of_the_comparison(self, monkeypatch):
+        """A candidate larger than the cached encoding does not replace it"""
+        data = b'z' * 5000
+        _fake_zstd(monkeypatch, patch_size=800, plain_size=700)
+
+        import alasio.deploy_dev.pack.pack_repo as pack_repo
+
+        monkeypatch.setattr(pack_repo, 'lzma_compress', lambda data: b'y' * 900)
+        cache_info = FileInfo(path='a')
+        cache_info.algo, cache_info.data, cache_info.data_size, cache_info.size = 1, b'w' * 400, 400, 5000
+        info = FileInfo(path='a')
+        algo = PackFull._load_data(info, data, cache_info=cache_info, zstd_source=b'old')
+        assert algo == 'lzma'
+        assert info.data_size == 400
+        assert info.data == b'w' * 400
+
+
+class TestLoadDataCandidates:
+    """The candidates of _load_data and the skip of the plain zstd one"""
+
+    def test_no_zstd_source_no_patch(self, monkeypatch):
+        """The patch is tried only when a zstd_source is given"""
+        calls = _count_compress_calls(monkeypatch, 'zstd_compress')
+        info = FileInfo(path='a')
+        PackFull._load_data(info, _content())
+        # the plain zstd candidate only
+        assert calls == [False]
+
+    def test_patch_only_with_zstd_off(self, monkeypatch):
+        """zstd off leaves the patch as the only zstd candidate"""
+        source = b''.join(b'line %d: some stable text with more words\n' % index for index in range(1500))
+        data = source + b'one more line\n'
+        calls = _count_compress_calls(monkeypatch, 'zstd_compress')
+        info = FileInfo(path='a')
+        algo = PackFull._load_data(info, data, zstd=False, zstd_source=source)
+        assert calls == [True]
+        assert algo == 'zstd_patch'
+
+    def test_a_far_smaller_patch_skips_plain_zstd(self, monkeypatch):
+        """A patch 5x smaller than the plain best can not be beaten by plain zstd"""
+        from alasio.ext.compress.algo_lzma import lzma_compress
+        from alasio.ext.compress.algo_zstd import zstd_compress
+
+        source = b''.join(b'line %d: some stable text with more words\n' % index for index in range(1500))
+        data = source + b'one more line\n'
+        # the precondition of the skip: the patch is far smaller than lzma
+        assert len(zstd_compress(data, source=source, level=22)) * 5 < len(lzma_compress(data))
+
+        calls = _count_compress_calls(monkeypatch, 'zstd_compress')
+        info = FileInfo(path='a')
+        algo = PackFull._load_data(info, data, zstd_source=source)
+        assert algo == 'zstd_patch'
+        # the patch only, the plain zstd candidate is skipped
+        assert calls == [True]
+
+    def test_a_small_content_tries_plain_zstd(self, monkeypatch):
+        """Contents below SKIP_PLAIN_ZSTD_MIN_SIZE keep the full candidate set"""
+        source = b'line %d: some stable text\n' * 8
+        data = source + b'more\n'
+        assert len(data) < PackFull.SKIP_PLAIN_ZSTD_MIN_SIZE
+        calls = _count_compress_calls(monkeypatch, 'zstd_compress')
+        info = FileInfo(path='a')
+        PackFull._load_data(info, data, zstd_source=source)
+        assert calls == [True, False]
+
+    def test_a_close_patch_tries_plain_zstd(self, monkeypatch):
+        """A patch close to the plain best does not skip plain zstd"""
+        from alasio.ext.compress.algo_lzma import lzma_compress
+        from alasio.ext.compress.algo_zstd import zstd_compress
+
+        source = bytes(range(256)) * 40
+        data = b''.join(b'log %d text\n' % index for index in range(400))
+        # the patch is close to the plain best, plain zstd may still win
+        assert len(zstd_compress(data, source=source, level=22)) * 5 >= len(lzma_compress(data))
+
+        calls = _count_compress_calls(monkeypatch, 'zstd_compress')
+        info = FileInfo(path='a')
+        PackFull._load_data(info, data, zstd_source=source)
+        assert calls == [True, False]
+
+
+class TestLoadDataPatchUsedReset:
+    """
+    When the plain zstd candidate beats the patch, the stored data does not need
+    the dictionary and the caller must not keep the old file as one
+    """
+
+    def test_plain_zstd_beating_the_patch_reports_zstd(self, monkeypatch):
+        """Plain zstd smaller than the patch wins, plain data needs no dictionary"""
+        import alasio.deploy_dev.pack.pack_repo as pack_repo
+
+        monkeypatch.setattr(pack_repo, 'lzma_compress', lambda data: b'y' * 900)
+        _fake_zstd(monkeypatch, patch_size=400, plain_size=300)
+        info = FileInfo(path='a')
+        algo = PackFull._load_data(info, b'z' * 5000, zstd_source=b'old')
+        assert algo == 'zstd'
+        assert info.algo == 2
+        assert info.data_size == 300
+        assert info.data == b'x' * 300
+
+    def test_plain_zstd_beating_the_patch_with_cache_info(self, monkeypatch):
+        """The cache_info path resets it as well, the patch does not win here"""
+        import alasio.deploy_dev.pack.pack_repo as pack_repo
+
+        monkeypatch.setattr(pack_repo, 'lzma_compress', lambda data: b'y' * 900)
+        _fake_zstd(monkeypatch, patch_size=400, plain_size=300)
+        cache_info = FileInfo(path='a')
+        cache_info.algo, cache_info.data, cache_info.data_size, cache_info.size = 1, b'w' * 500, 500, 5000
+        info = FileInfo(path='a')
+        algo = PackFull._load_data(info, b'z' * 5000, cache_info=cache_info, zstd_source=b'old')
+        assert algo == 'zstd'
+        assert info.data_size == 300
+
+    def test_a_patch_smaller_than_plain_zstd_reports_the_patch(self, monkeypatch):
+        """The patch wins, the dictionary has to be kept by the caller"""
+        import alasio.deploy_dev.pack.pack_repo as pack_repo
+
+        monkeypatch.setattr(pack_repo, 'lzma_compress', lambda data: b'y' * 900)
+        _fake_zstd(monkeypatch, patch_size=300, plain_size=400)
+        info = FileInfo(path='a')
+        algo = PackFull._load_data(info, b'z' * 5000, zstd_source=b'old')
+        assert algo == 'zstd_patch'
+        assert info.algo == 2
+        assert info.data_size == 300
+        assert info.data == b'x' * 300

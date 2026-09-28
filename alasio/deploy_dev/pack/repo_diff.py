@@ -71,7 +71,6 @@ class RepoDiff:
             new,
             min_similarity=0.5,
             max_size_ratio=4.0,
-            zstd_level=22,
             similarity_level=3,
             cache=None,
     ):
@@ -85,8 +84,6 @@ class RepoDiff:
             max_size_ratio (float): Maximum size ratio of rename
                 candidates, pairs outside [1/ratio, ratio] are never
                 matched. Defaults to 4.0.
-            zstd_level (int): Zstd level for data compression. Defaults
-                to 22.
             similarity_level (int): Zstd level for rename similarity
                 scoring, a fast level is enough for the score. Defaults
                 to 3.
@@ -105,7 +102,6 @@ class RepoDiff:
         self.new = new
         self.min_similarity = min_similarity
         self.max_size_ratio = max_size_ratio
-        self.zstd_level = zstd_level
         self.similarity_level = similarity_level
         self.cache = cache
         # the versions are of the same git repo and the contents are read from
@@ -351,7 +347,9 @@ class RepoDiff:
         """
         new_blob = self._read_new_blob(new_info)
         old_blob = self._read_old_blob(old_info)
-        algo_name = PackFull._load_data(info, new_blob, source=old_blob or None, level=self.zstd_level)
+        algo_name = PackFull._load_data(
+            info, new_blob, cache_info=self._cache_info(new_info, len(new_blob)),
+            zstd_source=old_blob or None)
         return algo_name == 'zstd_patch'
 
     def _load_added(self, info, new_info):
@@ -383,7 +381,8 @@ class RepoDiff:
             cache.mark('content', hit=True)
             return
         new_blob = self._read_new_blob(new_info)
-        PackFull._load_data(info, new_blob, source=None, level=self.zstd_level)
+        PackFull._load_data(
+            info, new_blob, cache_info=self._cache_info(new_info, len(new_blob)))
         if cache is not None and git_sha1 is not None:
             if entry is None:
                 entry = cache.content[git_sha1] = ContentCache()
@@ -391,6 +390,42 @@ class RepoDiff:
                 path=info.path, algo=info.algo, size=info.size,
                 data_size=info.data_size, sha1=info.sha1, data=info.data)
             cache.mark('content', hit=False)
+
+    def _cache_info(self, new_info, size):
+        """
+        Cached raw / lzma encoding of a content of the new version
+
+        Every version built with the shared cache stores the raw / lzma
+        encoding of each of its contents under the git blob sha1 of the file
+        (see PackFull._populate_data), so the encoding of the new content of a
+        record is reusable: _load_data takes it as the cache_info and skips the
+        lzma compression, and its size is the bar the patch is measured
+        against. The new side of every record is a file of the new version (the
+        update packs all update to the latest version), a generated extra file
+        has no git blob sha1 and gets None. See
+        doc/2026-09-27_update-pack-from-repo.md sections 7.14-1 and 7.17.
+
+        Args:
+            new_info (IdxInfo): Record of the content in the new version
+            size (int): Size of the content, an entry of another size is not
+                the content and is dropped
+
+        Returns:
+            FileInfo | None: Cached encoding, None when there is none
+        """
+        cache = self.cache
+        if cache is None:
+            return None
+        entry = self.new.filelist.get(new_info.path)
+        if entry is None:
+            return None
+        content = cache.content.get(bytes.fromhex(entry.sha1))
+        if content is None:
+            return None
+        cache_info = content.index
+        if cache_info is None or cache_info.size != size:
+            return None
+        return cache_info
 
     def _read_old_blob(self, info):
         """

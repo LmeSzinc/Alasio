@@ -63,7 +63,6 @@ class PackUpdate(PackEncodeBase):
             old_pack_version=PackEncodeBase.PACK_VERSION,
             min_similarity=0.5,
             max_size_ratio=4.0,
-            zstd_level=22,
             similarity_level=3,
             cache=None,
     ):
@@ -84,8 +83,6 @@ class PackUpdate(PackEncodeBase):
             max_size_ratio (float): Maximum size ratio of rename
                 candidates, pairs outside [1/ratio, ratio] are never
                 matched. Defaults to 4.0.
-            zstd_level (int): Zstd level for pack data compression.
-                Defaults to 22.
             similarity_level (int): Zstd level for rename similarity
                 scoring, a fast level is enough for the score. Defaults
                 to 3.
@@ -119,13 +116,11 @@ class PackUpdate(PackEncodeBase):
         self.pack_version = new.pack_version
         self.current_version = new.current_version
         self.old_version = self.old.current_version
-        self.zstd_level = zstd_level
         self._diff = RepoDiff(
             self.old,
             new,
             min_similarity=min_similarity,
             max_size_ratio=max_size_ratio,
-            zstd_level=zstd_level,
             similarity_level=similarity_level,
             cache=self.cache,
         )
@@ -176,7 +171,7 @@ class PackUpdate(PackEncodeBase):
         if old_index == new_index:
             return None
         info = UpdateInfo(path='.pack/index.pack', edit=1, eol=2, mode=0)
-        algo_name = PackFull._load_data(info, new_index, source=old_index, level=self.zstd_level)
+        algo_name = PackFull._load_data(info, new_index, zstd_source=old_index)
         if algo_name == 'zstd_patch':
             # the patch needs the old index as the dictionary
             info.source_path = '.pack/index.pack'

@@ -84,17 +84,48 @@ class PackFull(PackEncodeBase):
             logger.warning(f'FileInfo gets unknown git entry mode {mode}, file="{path}"')
             return 0
 
+    # A zstd patch at most 1/SKIP_PLAIN_ZSTD_RATIO of the plain best (the
+    # smaller of raw and lzma) can not be beaten by the plain zstd candidate:
+    # lzma and zstd-22 both approach the entropy of the content, their measured
+    # spread on a real repo is 1.19x at most, while beating such a patch needs
+    # plain zstd to be 5x smaller than lzma (measured 144/192 M / RM records
+    # skip it, 0 of them would have changed the winner). See
+    # doc/2026-09-27_update-pack-from-repo.md section 7.19.
+    SKIP_PLAIN_ZSTD_RATIO = 5
+
+    # Inputs below this size always try the plain zstd candidate: the absolute
+    # cost is negligible and the size ratio of small contents is noisy.
+    SKIP_PLAIN_ZSTD_MIN_SIZE = 1000
+
+    # Zstd level of the pack data candidates, the patch and the plain one. The
+    # level is a run wide policy, not a per call one: the pack cache is keyed by
+    # the content only, a changed level changes the produced bytes and has to
+    # come with a PACK_VERSION bump like any other encoding change.
+    ZSTD_LEVEL = 22
+
     @staticmethod
-    def _load_data(file, data, source=None, zstd=True, level=22):
+    def _load_data(file, data, cache_info=None, zstd=True, zstd_source=None):
         """
         Find the best compress algorithm to store data, and set fields on file_info
+
+        The candidates are the plain ones (raw / lzma), the zstd patch-from
+        (zstd_source is the dictionary) and the plain zstd of level ZSTD_LEVEL.
+        The smaller candidate wins, a tie keeps the earlier one, so the order
+        is raw, lzma, patch, plain zstd.
+
+        cache_info is the cached encoding of the content without a dictionary,
+        the raw / lzma rule the full pack uses (see PackCache): it stands for
+        the plain candidates and saves the lzma compression of the content.
 
         Args:
             file (FileInfo): FileInfo object to update
             data (bytes): File content
-            source (bytes | None): Optional old file content for zstd patch-from
-            zstd (bool): Whether to try zstd compression
-            level (int): Zstd level for zstd compression. Defaults to 22.
+            cache_info (FileInfo | None): Cached plain encoding of the content,
+                an entry of another size is not the content and is ignored.
+                Defaults to None, the plain candidates are compressed here.
+            zstd (bool): Whether to try the plain zstd candidate. Defaults to True.
+            zstd_source (bytes | None): Old file content as the zstd dictionary
+                of a patch-from candidate. Defaults to None, no patch is tried.
 
         Returns:
             str: algo name of the stored data, 'raw' / 'lzma' / 'zstd' /
@@ -111,42 +142,64 @@ class PackFull(PackEncodeBase):
             file.size = 0
             file.sha1 = b''
             return 'raw'
-        best_data = data
-        algo = 0
-        patch_used = False
 
-        # try lzma compression
-        compressed_data = lzma_compress(data)
-        compressed_length = len(compressed_data)
-        if compressed_length < best_length:
-            best_length = compressed_length
-            best_data = compressed_data
-            algo = 1
+        if cache_info is not None and cache_info.size == len(data):
+            # the content is already compressed with the raw / lzma rule
+            best_data = cache_info.data
+            best_length = cache_info.data_size
+            algo = cache_info.algo
         else:
-            del compressed_length
-            del compressed_data
+            best_data = data
+            algo = 0
 
-        if zstd:
-            # try zstd --patch-from
-            if source is not None:
-                compressed_data = zstd_compress(data, source=source, level=level)
-                compressed_length = len(compressed_data)
-                if compressed_length < best_length:
-                    best_length = compressed_length
-                    best_data = compressed_data
-                    algo = 2
-                    patch_used = True
-                else:
-                    del compressed_length
-                    del compressed_data
+            # try lzma compression
+            compressed_data = lzma_compress(data)
+            compressed_length = len(compressed_data)
+            if compressed_length < best_length:
+                best_length = compressed_length
+                best_data = compressed_data
+                algo = 1
+            else:
+                del compressed_length
+                del compressed_data
+        # the plain best, the bar every remaining candidate has to beat and the
+        # reference of the skip below
+        plain_length = best_length
 
-            # try plain zstd compression
-            compressed_data = zstd_compress(data, level=level)
+        patch_used = False
+        # try zstd --patch-from
+        if zstd_source is not None:
+            compressed_data = zstd_compress(
+                data, source=zstd_source, level=PackFull.ZSTD_LEVEL)
             compressed_length = len(compressed_data)
             if compressed_length < best_length:
                 best_length = compressed_length
                 best_data = compressed_data
                 algo = 2
+                patch_used = True
+            else:
+                del compressed_length
+                del compressed_data
+
+        # try plain zstd, skipped when a far smaller patch won: both plain
+        # compressors approach the entropy of the content (the measured spread
+        # is 1.19x at most), so plain zstd can not be 5x smaller than lzma and
+        # can not beat such a patch. Small contents keep the full candidate
+        # set, their size ratio is noisy.
+        if zstd and not (
+                patch_used
+                and len(data) >= PackFull.SKIP_PLAIN_ZSTD_MIN_SIZE
+                and plain_length > best_length * PackFull.SKIP_PLAIN_ZSTD_RATIO
+        ):
+            compressed_data = zstd_compress(data, level=PackFull.ZSTD_LEVEL)
+            compressed_length = len(compressed_data)
+            if compressed_length < best_length:
+                best_length = compressed_length
+                best_data = compressed_data
+                algo = 2
+                # the plain data does not need the dictionary: a caller that
+                # kept the old file as a patch source must drop it
+                patch_used = False
             else:
                 del compressed_length
                 del compressed_data
