@@ -37,18 +37,21 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
 
     ## 显示速度
     显示速度分两档，normal 和 realtime。
-    normal 是每两秒发送一张预览图片给前端。两秒是平均而言的，真实发送间隔可能在两秒上下浮动，取决于worker获取截图的时刻。
-    比如 worker 以 0.3s 的间隔截图，那么真实发送时刻是 0.0s, 2.1s, 4.2s, 6.0s, 8.1s, ...
-    如果 worker 的截图耗时超过两秒，发送间隔也将超过两秒。
+    normal 是每一秒发送一张预览图片给前端。一秒是平均而言的，真实发送间隔可能在一秒上下浮动，取决于worker获取截图的时刻。
+    比如 worker 以 0.3s 的间隔截图，那么真实发送时刻是 0.0s, 1.2s, 2.1s, 3.0s, 4.2s, ...
+    如果 worker 的截图耗时超过一秒，发送间隔也将超过一秒。
+    转发阈值是半个间隔（recurrence * 0.5）：只有距上一张发送不足半个间隔的帧才会被丢弃，
+    这样回答请求的图即使落在截图节拍上而提前到达也能发出。
+    代价是有 realtime 订阅者高速驱动 worker 时，normal 订阅者最快每半个间隔收到一张。
     realtime 是发送 worker 的实时截图。
     但 realtime 并不意味着可以在前端看到实时的游戏画面，只是 worker 会把它获得的每一张截图都发出。
 
     ## 开始订阅
     我们使用 self._subscribers 储存每个订阅者要求的显示速度，取其中最快的作为请求 worker 的速度，储存在 self._speed，
-    当有新的订阅者时，我们立刻请求一张新的截图，并把下一次发送安排在两秒后，这样可以同步所有正在查看这个worker的前端。
+    当有新的订阅者时，我们立刻请求一张新的截图，并把下一次发送安排在一秒后，这样可以同步所有正在查看这个worker的前端。
     如果有人订阅一个worker但是worker并不在运行，那么跳过请求截图，标记为 _trigger_on_running。
     当worker状态发生改变的时候，WorkerManager 会回调 on_worker_state()，如果worker处于 PREVIEW_AVAILABLE 并且有启动标记，
-    那么触发一次任务，后台任务会立刻请求一张新截图，然后每两秒再请求一次。
+    那么触发一次任务，后台任务会立刻请求一张新截图，然后每一秒再请求一次。
 
     ## 更改速度
     | 订阅者速度(旧) | worker速度(旧) | 订阅者速度(新) | worker速度(新) |
@@ -75,6 +78,13 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
 
     def __init__(self, config_name):
         super().__init__()
+        # normal speed interval: request a new preview from the worker every 1.0s
+        # and throttle normal subscribers by the same tick (see on_preview)
+        self.recurrence = 1.0
+        # the worker sends the frame answering a request on its own screenshot
+        # tick, so that frame can land a whole screenshot interval early: only a
+        # frame arriving less than this after the last forwarded one is dropped
+        self._normal_drop_interval = self.recurrence * 0.5
         self.config_name = config_name
         # Local import to break the circular dependency: topic._worker
         # imports topic.preview at module level (BACKEND_WORKER_MANAGER).
@@ -196,11 +206,12 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
         """
         _subscribers = self._subscribers
         _normal_lastsend = self._normal_lastsend
+        _normal_drop_interval = self._normal_drop_interval
         _speed = self._speed
 
         # broadcast
         now = current_time()
-        normal_outdated = (now - _normal_lastsend) >= self.recurrence
+        normal_outdated = (now - _normal_lastsend) >= _normal_drop_interval
         self._preview = preview
         header = preview[:16]
         self._last_realtime_header = header

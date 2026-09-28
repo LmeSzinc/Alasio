@@ -72,10 +72,49 @@ async def test_preview_task_subscribe_starts_task(preview_task, worker, autojump
     assert len(worker.commands) == 1
     assert worker.commands[0].c == 'preview'
 
-    # Wait for recurrence (default 2s)
+    # Wait for one normal interval
     await trio.sleep(preview_task.recurrence)
     await trio.testing.wait_all_tasks_blocked()
     assert len(worker.commands) == 2
+
+
+@pytest.mark.trio
+async def test_preview_task_normal_interval(preview_task):
+    """
+    Test the normal speed timing: the request tick and the normal send interval
+    are 1.0s, while a frame is dropped only when it arrives less than half of it
+    after the last forwarded frame (the answering frame can land early on the
+    worker's screenshot tick).
+    """
+    assert preview_task.recurrence == 1.0
+    assert preview_task._normal_drop_interval == 0.5
+
+
+@pytest.mark.trio
+async def test_preview_task_normal_drop_threshold(preview_task, worker, autojump_clock):
+    """
+    Test that a frame is dropped for normal subscribers only when it arrives
+    less than half an interval after the last forwarded frame.
+    """
+    topic = MockTopic()
+
+    preview_task.subscribe(topic, 'normal')
+    await trio.testing.wait_all_tasks_blocked()
+
+    preview_task.on_preview(b'frame_1')
+    topic.server.send_lossy.assert_called_once_with(b'frame_1')
+
+    # Under the drop threshold: dropped
+    topic.server.send_lossy.reset_mock()
+    await trio.sleep(preview_task.recurrence * 0.4)
+    preview_task.on_preview(b'frame_2')
+    topic.server.send_lossy.assert_not_called()
+
+    # Over the drop threshold: forwarded, so the frame answering a tick is not
+    # lost just because it arrived early
+    await trio.sleep(preview_task.recurrence * 0.2)
+    preview_task.on_preview(b'frame_3')
+    topic.server.send_lossy.assert_called_once_with(b'frame_3')
 
 
 @pytest.mark.trio
@@ -121,8 +160,8 @@ async def test_preview_task_on_preview_broadcast(preview_task, worker, autojump_
     topic_normal.server.send_lossy.reset_mock()
     topic_realtime.server.send_lossy.reset_mock()
 
-    # Second preview immediately (less than recurrence=2s)
-    await trio.sleep(0.5)
+    # Second preview too soon: less than half an interval, so normal drops it
+    await trio.sleep(preview_task.recurrence * 0.25)
     preview_task.on_preview(preview_data)
     topic_normal.server.send_lossy.assert_not_called()
     # Realtime should still receive it
@@ -268,8 +307,8 @@ async def test_preview_task_mixed_speeds(preview_task, worker, autojump_clock):
     topic_normal.server.send_lossy.reset_mock()
     topic_realtime.server.send_lossy.reset_mock()
 
-    # 2. Second preview after 1s (half of recurrence=2s): only realtime should receive
-    await trio.sleep(1)
+    # 2. Second preview after a quarter of the interval (under the drop threshold): only realtime should receive
+    await trio.sleep(preview_task.recurrence * 0.25)
     preview_task.on_preview(preview_data)
     topic_normal.server.send_lossy.assert_not_called()
     topic_realtime.server.send_lossy.assert_called_once_with(preview_data)
@@ -277,8 +316,8 @@ async def test_preview_task_mixed_speeds(preview_task, worker, autojump_clock):
     topic_normal.server.send_lossy.reset_mock()
     topic_realtime.server.send_lossy.reset_mock()
 
-    # 3. Third preview after 1.1s (total 2.1s > recurrence): both should receive
-    await trio.sleep(1.1)
+    # 3. Third preview after half of the interval (total 3/4 > half): both should receive
+    await trio.sleep(preview_task.recurrence * 0.5)
     preview_task.on_preview(preview_data)
     topic_normal.server.send_lossy.assert_called_once_with(preview_data)
     topic_realtime.server.send_lossy.assert_called_once_with(preview_data)
