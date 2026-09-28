@@ -10,7 +10,8 @@ import struct
 
 import pytest
 
-from alasio.ext.algorithm.bit2coding import decode_bit2_stream_iter, encode_bit2_stream_iter, encode_length_int
+from alasio.ext.algorithm.bit2coding.bit2coding_decode import decode_bit2_stream_iter
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_python import encode_bit2_stream_iter, encode_length_int
 
 # ==============================================================================
 # encode_bit2_stream_iter — literal opcodes
@@ -896,7 +897,8 @@ class TestFullPipeline:
     @pytest.mark.parametrize("data", PIPELINE_CASES)
     def test_full_pipeline(self, data):
         """Full encode → stream encode → stream decode → opcode decode."""
-        from alasio.ext.algorithm.bit2coding import decode_bit2_opcode, encode_bit2_opcode_iter
+        from alasio.ext.algorithm.bit2coding.bit2coding_decode import decode_bit2_opcode
+        from alasio.ext.algorithm.bit2coding.bit2coding_encode_python import encode_bit2_opcode_iter
 
         opcodes = list(encode_bit2_opcode_iter(data))
         stream_bytes = list(encode_bit2_stream_iter(opcodes))

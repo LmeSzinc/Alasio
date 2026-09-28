@@ -7,7 +7,7 @@ D + variable-length bytes. D (0-3) indicates D+1 bytes follow.
 
 import pytest
 
-from alasio.ext.algorithm.bit2coding import encode_length_int
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_python import encode_length_int
 from alasio.ext.algorithm.unpack import unpack_little_int
 
 

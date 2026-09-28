@@ -10,7 +10,7 @@ from collections import deque
 
 import pytest
 
-from alasio.ext.algorithm.bit2coding import _encode_value_check
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_python import _encode_value_check
 
 # ==============================================================================
 # Empty input — accepted without exception

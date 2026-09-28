@@ -14,7 +14,8 @@ import types
 import pytest
 
 from alasio import speedup
-from alasio.ext.algorithm.bit2coding import decode_bit2, encode_bit2
+from alasio.ext.algorithm.bit2coding.bit2coding_decode import decode_bit2
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
 from alasio.ext.algorithm.bit2coding.bit2coding_encode_python import encode_bit2 as encode_bit2_python
 
 speedup_module = pytest.importorskip('alasio_speedup')
@@ -234,13 +235,13 @@ class TestEncoderSwitch:
     """bit2coding picks the encoder of the environment it runs in."""
 
     def test_encode_bit2_is_the_encoder_of_the_environment(self):
-        """encode_bit2() is the C encoder exactly when the accelerator loaded."""
-        if speedup.accelerator('bit2') is not None:
-            from alasio.ext.algorithm.bit2coding import bit2coding_encode_c
+        """The encoder module falls back to Python exactly when the accelerator is missing."""
+        from alasio.ext.algorithm.bit2coding import bit2coding_encode_c
 
-            assert encode_bit2 is bit2coding_encode_c.encode_bit2
+        if speedup.accelerator('bit2') is not None:
+            assert bit2coding_encode_c.encode_bit2 is not encode_bit2_python
         else:
-            assert encode_bit2 is encode_bit2_python
+            assert bit2coding_encode_c.encode_bit2 is encode_bit2_python
 
     def test_both_encoders_agree_on_the_values(self):
         """The Python encoder is always usable and both decode back."""

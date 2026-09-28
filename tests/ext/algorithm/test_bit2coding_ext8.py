@@ -29,10 +29,9 @@ Notes on error behaviour:
 
 import pytest
 
-from alasio.ext.algorithm.bit2coding import (
-    decode_bit2, decode_bit2_opcode, decode_bit2_stream_iter, encode_bit2, encode_bit2_opcode_iter,
-    encode_bit2_stream_iter
-)
+from alasio.ext.algorithm.bit2coding.bit2coding_decode import decode_bit2, decode_bit2_opcode, decode_bit2_stream_iter
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_python import encode_bit2_opcode_iter, encode_bit2_stream_iter
 
 # ==============================================================================
 # encode_bit2_stream_iter — ext8 literal encoding

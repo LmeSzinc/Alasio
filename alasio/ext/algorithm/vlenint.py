@@ -1,6 +1,6 @@
 from collections import deque
 
-from alasio.ext.algorithm.bit2coding import decode_bit2, encode_bit2
+from alasio.ext.algorithm.bit2coding.bit2coding_decode import decode_bit2
 from alasio.ext.algorithm.const import MAX_UINT32
 from alasio.ext.algorithm.unpack import pack_little_int, unpack_little_int
 
@@ -47,6 +47,12 @@ def encode_vlenint(data):
     Returns:
         bytes: vlenint encoded data
     """
+    # imported here on purpose: a client that only reads packs imports this
+    # module for decode_vlenint and must not import an encoder, and the
+    # encoder is where the accelerator of alasio_speedup is looked for,
+    # see the module docstring of bit2coding_encode_c
+    from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
+
     data = list(data)
     vlenint_value_check(data)
     lengths = deque()

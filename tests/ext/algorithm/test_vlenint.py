@@ -16,7 +16,7 @@ coverage; this file tests the composition layer.
 
 import pytest
 
-from alasio.ext.algorithm.bit2coding import encode_bit2
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
 from alasio.ext.algorithm.vlenint import decode_vlenint, encode_vlenint, vlenint_value_check
 
 # ==============================================================================

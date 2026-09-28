@@ -3,7 +3,7 @@ from hashlib import sha1
 from typing import Dict, Iterator
 
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
-from alasio.ext.algorithm.bit2coding import encode_bit2
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
 from alasio.ext.algorithm.pathcomb import iter_path_comb
 from alasio.ext.algorithm.pathlen_coding import encode_prefix_comb, encode_suffix_comb
 from alasio.ext.algorithm.vint import encode_vint

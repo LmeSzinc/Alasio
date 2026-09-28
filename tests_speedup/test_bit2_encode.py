@@ -22,7 +22,9 @@ import random
 
 import pytest
 
-from alasio.ext.algorithm.bit2coding import decode_bit2, encode_bit2, encode_bit2_stream_iter
+from alasio.ext.algorithm.bit2coding.bit2coding_decode import decode_bit2
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_python import encode_bit2_stream_iter
 from alasio.ext.algorithm.vint import encode_vint
 from tests.ext.algorithm.test_bit2coding_encode import TestRoundtrip as TestRoundtripEncode
 from tests.ext.algorithm.test_bit2coding_ext8 import TestRoundtripExt8
