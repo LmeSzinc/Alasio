@@ -500,20 +500,20 @@ class PackFull(PackEncodeBase):
         """
         repo = self.repo
         cache = self.cache
-        # git blob sha1 -> (content sha1, size), used to fix up the C (copied)
-        # records, see the loop below
+        # git blob sha1 (hex) -> (content sha1, size), used to fix up the C
+        # (copied) records, see the loop below
         content_of_blob = {}
         for file in tqdm(dict_fileinfo.values()):
             # load new files only, A (added)
             if file.edit == 0 and file.source_lookback == 0:
-                # the git blob sha1, _load_data() replaces file.sha1 with the
-                # content sha1
-                git_sha1 = file.sha1
+                # the git blob sha1, as the hex str the git tree carries,
+                # _load_data() replaces file.sha1 with the content sha1
+                git_sha1 = file.sha1.hex()
                 entry = cache.content.get(git_sha1) if cache is not None else None
                 cached = entry.index if entry is not None else None
                 if cached is None:
                     # load data, full pack use lzma only to avoid producing complex list_algo
-                    data = repo.cat(git_sha1.hex()).decoded
+                    data = repo.cat(git_sha1).decoded
                     self._load_data(file, data, zstd=False)
                     if cache is not None:
                         if entry is None:
@@ -535,6 +535,6 @@ class PackFull(PackEncodeBase):
         # that copies compare equal to the file they duplicate.
         for file in dict_fileinfo.values():
             if file.edit == 0 and file.source_lookback:
-                source = content_of_blob.get(file.sha1)
+                source = content_of_blob.get(file.sha1.hex())
                 if source is not None:
                     file.sha1, file.size = source

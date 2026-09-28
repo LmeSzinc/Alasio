@@ -47,7 +47,7 @@ def content_sha1(content):
 
 def blob_sha1(repo, commit, path):
     """
-    Git blob sha1 of a file of a version, the key of the content table
+    Git blob sha1 hex of a file of a version, the key of the content table
 
     Args:
         repo (MockGitRepo): Repo of the versions
@@ -55,20 +55,20 @@ def blob_sha1(repo, commit, path):
         path (str): File path
 
     Returns:
-        bytes: 20 bytes digest
+        str: 40 chars hex digest
     """
-    return bytes.fromhex(repo.list_files(commit)[path].sha1)
+    return repo.list_files(commit)[path].sha1
 
 
 def cache_slots(cache):
     """
-    {git blob sha1: (index encoded, update encoded)} of the content table
+    {git blob sha1 hex: (index encoded, update encoded)} of the content table
 
     Args:
         cache (PackCache): Cache of the run
 
     Returns:
-        dict[bytes, tuple[bool, bool]]:
+        dict[str, tuple[bool, bool]]:
     """
     return {
         key: (entry.index is not None, entry.update is not None)

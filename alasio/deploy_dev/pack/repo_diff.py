@@ -361,8 +361,8 @@ class RepoDiff:
         if cache is not None:
             file_entry = self.new.filelist.get(new_info.path)
             if file_entry is not None:
-                # the cache is keyed by the git blob sha1, like PackFull does
-                git_sha1 = bytes.fromhex(file_entry.sha1)
+                # the cache is keyed by the git blob sha1 hex, like PackFull does
+                git_sha1 = file_entry.sha1
                 entry = cache.content.get(git_sha1)
         cached = entry.update if entry is not None else None
         if cached is not None:
@@ -411,7 +411,7 @@ class RepoDiff:
             # a generated extra file, it has no git blob sha1
             return PackFull._extra_cache_info(
                 cache, self.new.current_version, new_info.path, data)
-        content = cache.content.get(bytes.fromhex(entry.sha1))
+        content = cache.content.get(entry.sha1)
         if content is None:
             return None
         cache_info = content.index
@@ -506,7 +506,6 @@ class RepoDiff:
         candidates = []
         for new_path in added:
             new_info = real_new[new_path]
-            new_blob = None
             for old_path in deleted:
                 old_info = real_old[old_path]
                 if old_info.sha1 == new_info.sha1:
@@ -517,10 +516,7 @@ class RepoDiff:
                     ratio = new_info.size / old_info.size
                     if not (1 / RepoDiff.MAX_SIZE_RATIO <= ratio <= RepoDiff.MAX_SIZE_RATIO):
                         continue
-                    if new_blob is None:
-                        new_blob = self._read_new_blob(new_info)
-                    old_blob = self._read_old_blob(old_info)
-                    sim = self.similarity(old_blob, new_blob)
+                    sim = self._similarity(old_info, new_info)
                 if sim >= RepoDiff.MIN_SIMILARITY:
                     candidates.append((sim, new_path, old_path))
 
@@ -534,6 +530,40 @@ class RepoDiff:
             renames[new_path] = old_path
             matched_old.add(old_path)
         return renames
+
+    def _similarity(self, old_info, new_info):
+        """
+        Similarity of a rename candidate, cached by the content pair
+
+        The score is a pure function of the two revisions, so the zstd patch
+        length it is derived from is stored in the cache, keyed by the git blob
+        sha1 pair of the deleted and the added revision: every version of the
+        window that pairs the same two revisions takes the score instead of
+        compressing again, and a hit needs no blob read at all, the size of the
+        new content comes from the record. See PackCache.rename and
+        doc/2026-09-27_update-pack-from-repo.md section 7.21.
+
+        Args:
+            old_info (IdxInfo): Deleted file record, the patch dictionary
+            new_info (IdxInfo): Added file record
+
+        Returns:
+            float: Similarity in [0, 1], see similarity
+        """
+        cache = self.cache
+        if cache is None:
+            return self.similarity(self._read_old_blob(old_info), self._read_new_blob(new_info))
+        key = (self.old.filelist[old_info.path].sha1, self.new.filelist[new_info.path].sha1)
+        length = cache.rename.get(key)
+        if length is None:
+            length = len(zstd_compress(
+                self._read_new_blob(new_info), source=self._read_old_blob(old_info),
+                level=RepoDiff.SIMILARITY_LEVEL))
+            cache.rename[key] = length
+            cache.mark('rename', hit=False)
+        else:
+            cache.mark('rename', hit=True)
+        return 1 - length / new_info.size
 
     @staticmethod
     def similarity(old_content, new_content, level=SIMILARITY_LEVEL):

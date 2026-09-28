@@ -5,7 +5,8 @@ The pack server builds one full pack of the latest version and one update pack
 from every lookback version to the latest one. Both sides encode the same
 content again and again, the cache removes the repeated work:
 
-- a content is encoded once per rule set, keyed by the **git blob sha1** of the
+- a content is encoded once per rule set, keyed by the **git blob sha1** (the
+  hex str the git tree carries) of the
   file: rebuilding any version that shares the content skips the blob read and
   the compression. Two encodings of one content are kept apart because both
   must keep their exact bytes: the index encoding (raw / lzma, what the index
@@ -74,13 +75,16 @@ class PackCache:
     Shared cache of the encoded content and the encoded patches.
 
     Attributes:
-        content (dict[bytes, ContentCache]): {git blob sha1: ContentCache}
+        content (dict[str, ContentCache]): {git blob sha1 hex: ContentCache}
         patch (dict[tuple, PatchCache]): {(old content sha1, new content sha1):
             PatchCache}
         extra (dict[tuple, FileInfo]): {(version, filepath): FileInfo} of the
             generated extra files (the index pack, the commit history), they
             are not files of the repo and have no git blob sha1, their raw /
             lzma encoding is a pure function of (version, filepath)
+        rename (dict[tuple, int]): {(deleted git blob sha1 hex, added git blob
+            sha1 hex): zstd patch length} of the rename scores, the score is a
+            pure function of the two revisions see RepoDiff.similarity
         stat (dict[str, list[int]]): [hit, miss] of every table
 
     Usage:
@@ -91,12 +95,13 @@ class PackCache:
     """
 
     # names of the tables, the keys of stat
-    TABLES = ('content', 'patch', 'extra')
+    TABLES = ('content', 'patch', 'extra', 'rename')
 
     def __init__(self):
-        self.content: "dict[bytes, ContentCache]" = {}
+        self.content: "dict[str, ContentCache]" = {}
         self.patch: "dict[tuple, PatchCache]" = {}
         self.extra: "dict[tuple, FileInfo]" = {}
+        self.rename: "dict[tuple, int]" = {}
         # [hit, miss] of every table
         self.stat: "dict[str, list]" = {name: [0, 0] for name in self.TABLES}
 

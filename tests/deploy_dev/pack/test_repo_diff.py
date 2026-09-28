@@ -9,6 +9,7 @@ the same records the pack server builds.
 import pytest
 
 from alasio.deploy.pack.pack_model import RefInfo
+from alasio.deploy_dev.pack.pack_cache import PackCache
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.deploy_dev.pack.repo_diff import RepoDiff, UpdateInfo
 from tests.deploy_dev.pack.conftest import (
@@ -433,6 +434,56 @@ class TestRepoDiffRefinfo:
 # ════════════════════════════════════════════════════════════════════════════
 #  input validation
 # ════════════════════════════════════════════════════════════════════════════
+
+
+class TestRenameScoreCache:
+    """
+    The rename score of a content pair is cached by the git blob sha1 pair, see
+    doc/2026-09-27_update-pack-from-repo.md section 7.21
+    """
+
+    OLD = {'a.txt': b'def func(x):\n    return x * 2\n' * 60}
+
+    def _new(self):
+        """
+        A 10% damaged copy of OLD, a rename candidate
+
+        Returns:
+            dict[str, bytes]: Files of the new version
+        """
+        return {'b.txt': damage(b'def func(x):\n    return x * 2\n' * 60, 0.1, seed=4)}
+
+    def test_the_second_run_takes_the_cached_score(self, monkeypatch):
+        """The same pair is scored once, the next diff takes the entry"""
+        import alasio.deploy_dev.pack.repo_diff as repo_diff
+
+        cache = PackCache()
+        calls = []
+        original = repo_diff.zstd_compress
+
+        def counting(*args, **kwargs):
+            calls.append(kwargs.get('source') is not None)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(repo_diff, 'zstd_compress', counting)
+        first = make_diff(self.OLD, self._new(), cache=cache).diff_info
+        assert calls == [True]
+        second = make_diff(self.OLD, self._new(), cache=cache).diff_info
+        # no compression at all, the score comes from the cache
+        assert calls == [True]
+        assert real_records(first) == real_records(second)
+        assert cache.stat['rename'] == [1, 1]
+
+    def test_the_score_is_the_uncached_one(self, monkeypatch):
+        """The cached run produces the same records as the uncached run"""
+        cache = PackCache()
+        cached = real_records(make_diff(self.OLD, self._new(), cache=cache).diff_info)
+        plain = real_records(make_diff(self.OLD, self._new()).diff_info)
+        assert cached.keys() == plain.keys()
+        for path in cached:
+            assert cached[path].edit == plain[path].edit
+            assert cached[path].source_path == plain[path].source_path
+            assert cached[path].data == plain[path].data
 
 
 class TestRepoDiffValidation:

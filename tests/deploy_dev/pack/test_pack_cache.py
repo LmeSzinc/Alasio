@@ -228,7 +228,7 @@ class TestPackCacheHit:
         cache = PackCache()
         pack = PackFull(WINDOW_REPO, commit='new', cache=cache)
         pack.fileinfo
-        entry = cache.content[bytes.fromhex(pack.filelist['added.txt'].sha1)]
+        entry = cache.content[pack.filelist['added.txt'].sha1]
         assert entry.index is not None
         assert entry.update is None
         make_update(PackFull(WINDOW_REPO, commit='new', cache=cache), 'old1', cache=cache)
