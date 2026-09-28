@@ -35,15 +35,20 @@
  *      Wide bands are relaxed from the first position they improve, found
  *      by binary search (dp never decreases), which keeps long runs at
  *      O(n log n) instead of O(n^2).
- *   2. Hash chain dominance. The chain visits match candidates from the
- *      closest offset to the farthest, so the copy cost never gets
- *      cheaper along the chain. A candidate whose match is not longer
- *      than the best match already seen cannot improve any dp position
- *      and is skipped, comparing at most best + 1 bytes to decide it.
- *      The chain walk also stops once the longest possible match of the
- *      position is reached, and it skips the rest of the run of the
- *      position in one step: every match inside a run ends where the run
- *      ends, and the run opcode covers those lengths for one byte.
+ *   2. Record chains. The copy search only ever needs, for every length L,
+ *      the nearest earlier position whose match with the position is at
+ *      least L: a nearer candidate of the same match is never more
+ *      expensive, so a candidate whose match is not longer than the best
+ *      seen cannot improve any dp position. A candidate with a match of at
+ *      least L shares its L gram with the position, so the nearest one is
+ *      the head of the L gram chain and every record is in the chain of a
+ *      level at most L. The walk below follows the chains of a few gram
+ *      lengths, which hold only the positions that can still be a record:
+ *      on the index arrays of a real pack the plain 3 gram walk visits
+ *      621 candidates per value, the record walk about 6. The levels are a
+ *      speed knob, not a format one (any set that holds 3 emits the very
+ *      same records), a smaller set is used for an input whose chain table
+ *      would be too large.
  *
  * Tie updates (same cost, fewer literal values or ops) are only applied
  * in narrow bands. They pick between parses of the same size, so dropping
@@ -92,8 +97,6 @@ typedef struct {
 } Bit2Op;
 
 #define BIT2_INF 0x3fffffff
-/* 3 gram keys, 3 bits per value (ext8 allows 0~7) => 512 keys */
-#define BIT2_CHAIN_SLOTS 1024
 /* the smallest value count of a copy opcode */
 #define BIT2_COPY_MIN 3
 /* the largest packed batch of a literal op, 1 header byte + 9 data bytes */
@@ -129,8 +132,38 @@ typedef struct {
  * the prunings do not cost a single byte. Callers of production code use
  * the default, which is the value below.
  */
-#define BIT2_MAX_CHAIN 0        /* 0 = no limit, search every candidate */
 #define BIT2_LIT_TIEBREAK 0     /* off, the first best transition wins */
+
+/*
+ * The gram lengths of the record chains, see bit2_build_levels() and the
+ * copy section of bit2_encode_ops(). They mirror the match lengths a pack
+ * index shows: the chains get short fast (measured on the index arrays of
+ * a real pack: 622 candidates per value at 3 grams, 39 at 8, 1.9 at 16),
+ * and a smaller set is used when the table would be too large.
+ */
+#define BIT2_LEVEL_COUNT 16
+#define BIT2_LEVELS_FULL_MAX 262144
+#define BIT2_LEVELS_SMALL_COUNT 5
+static const int32_t BIT2_LEVELS[BIT2_LEVEL_COUNT] = {
+    3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 20, 24, 32, 48, 64,
+};
+static const int32_t BIT2_LEVELS_SMALL[BIT2_LEVELS_SMALL_COUNT] = {3, 8, 16, 32, 64};
+
+/* base of the rolling gram hash, any value works, it is a hash */
+#define BIT2_HASH_BASE 131u
+
+/* keys of the 3 gram chain, 3 bits per value (ext8 allows 0~7) => 512 keys */
+#define BIT2_CHAIN_SLOTS 512
+
+/*
+ * A position this far inside an equal value run is "in a run": its copies
+ * are covered by the run opcode of the position (or are no match at all),
+ * and the chains of the record walk are then full of run positions that
+ * only a run of the same remaining length in an earlier run can beat. The
+ * share of such positions decides which of the two walks runs, see the
+ * copy section of bit2_encode_ops(): both emit the very same opcodes.
+ */
+#define BIT2_RUN_DEPTH 4
 #define BIT2_LOSSLESS_PRUNE 1   /* on, the prunings never cost a byte */
 
 /*
@@ -471,6 +504,67 @@ static int64_t bit2_merge_literals(const uint8_t *data, Bit2Op *out, int64_t cou
 }
 
 /*
+ * Build the record chains of the levels: level_prev[k * count + i] is the
+ * nearest earlier position sharing the level gram of the position, -1 when
+ * there is none.
+ *
+ * The gram of a level is hashed with a rolling polynomial, one pass per
+ * level: the hash of a gram is a function of its bytes, so the positions
+ * of one gram are always chained together. A hash collision only adds a
+ * candidate whose bytes differ inside the gram, which the walk rejects
+ * (its match is shorter than the level, which is shorter than the length
+ * the walk is looking for).
+ *
+ * Args:
+ *   data (const uint8_t *): Values of the input
+ *   count (int32_t): Number of values
+ *   levels (const int32_t *): Gram length of every level, ascending
+ *   level_count (int32_t): Number of levels
+ *   level_prev (int32_t *): Out, level_count * count entries
+ *   head (int32_t *): Scratch head table, head_size entries
+ *   head_size (int32_t): Entries of the head table, a power of two
+ */
+static void bit2_build_levels(
+        const uint8_t *data, int32_t count, const int32_t *levels, int32_t level_count,
+        int32_t *level_prev, int32_t *head, int32_t head_size) {
+    int32_t k, i;
+
+    for (k = 0; k < level_count; k++) {
+        int32_t gram = levels[k];
+        int32_t *prev = level_prev + (size_t)k * count;
+        uint64_t power = 1;
+        uint64_t hash = 0;
+
+        for (i = 0; i < head_size; i++) {
+            head[i] = -1;
+        }
+        for (i = 1; i < gram; i++) {
+            power *= BIT2_HASH_BASE;
+        }
+        for (i = 0; i < count; i++) {
+            uint32_t slot;
+            if (i + gram > count) {
+                prev[i] = -1;
+                continue;
+            }
+            if (i == 0) {
+                int32_t g;
+                hash = 0;
+                for (g = 0; g < gram; g++) {
+                    hash = hash * BIT2_HASH_BASE + data[g];
+                }
+            } else {
+                hash = (hash - (uint64_t)data[i - 1] * power) * BIT2_HASH_BASE
+                        + data[i + gram - 1];
+            }
+            slot = (uint32_t)((hash >> 32) ^ hash) & (uint32_t)(head_size - 1);
+            prev[i] = head[slot];
+            head[slot] = i;
+        }
+    }
+}
+
+/*
  * Encode values into opcodes with the DP over the exact byte cost.
  *
  * Args:
@@ -478,13 +572,11 @@ static int64_t bit2_merge_literals(const uint8_t *data, Bit2Op *out, int64_t cou
  *   n (int64_t): number of values
  *   out (Bit2Op *): output opcodes in encoding order, needs n + 1 slots
  *   capacity (int64_t): slots available in out
- *   max_chain (int64_t): hash chain steps to try per position, the DP
- *       needs no limit and 0 or a negative value means no limit
  *   lit_tiebreak (int64_t): non zero to break equal cost ties towards the
  *       path with fewer literal values
- *   lossless_prune (int64_t): non zero to enable the band pre-check and
- *       the chain dominance skip, none of them changes the encoded size
- *       of the unpruned search
+ *   lossless_prune (int64_t): non zero to enable the lossless prunings,
+ *       the run band pre-check and the literal tie updates of the narrow
+ *       bands, none of them changes the encoded size of the plain search
  *
  * Returns:
  *   int64_t: number of opcodes written, -1 on invalid arguments or when
@@ -492,7 +584,7 @@ static int64_t bit2_merge_literals(const uint8_t *data, Bit2Op *out, int64_t cou
  */
 static int64_t bit2_encode_ops(
         const uint8_t *data, int64_t n,
-        Bit2Op *out, int64_t capacity, int64_t max_chain, int64_t lit_tiebreak,
+        Bit2Op *out, int64_t capacity, int64_t lit_tiebreak,
         int64_t lossless_prune) {
     if (n < 0 || capacity < 0 || (n > 0 && (data == NULL || out == NULL))) {
         return -1;
@@ -509,9 +601,18 @@ static int64_t bit2_encode_ops(
     int tiebreak = lit_tiebreak != 0;
     int prune = lossless_prune != 0;
 
-    /* one block for the tables: dp0, prev0, arg0, lit0, ops0, run_len, run_start,
-       chain, chain_out, head */
-    size_t words = (size_t)(5 * (count + 1) + 4 * count) + BIT2_CHAIN_SLOTS;
+    /* one block for the tables: dp0, prev0, arg0, lit0, ops0, run_len, the
+       record chains and the head table they are built with */
+    const int32_t *levels = count > BIT2_LEVELS_FULL_MAX ? BIT2_LEVELS_SMALL : BIT2_LEVELS;
+    int32_t level_count = count > BIT2_LEVELS_FULL_MAX
+            ? BIT2_LEVELS_SMALL_COUNT : BIT2_LEVEL_COUNT;
+    int32_t head_size = BIT2_CHAIN_SLOTS;
+    int32_t in_run = 0;
+    while (head_size < count) {
+        head_size <<= 1;
+    }
+    size_t words = (size_t)(5 * (count + 1) + 4 * count)
+            + (size_t)level_count * count + (size_t)head_size;
     int32_t *mem = (int32_t *)malloc(words * sizeof(int32_t));
     int8_t *op0 = (int8_t *)malloc((size_t)(count + 1) * sizeof(int8_t));
     if (mem == NULL || op0 == NULL) {
@@ -528,41 +629,61 @@ static int64_t bit2_encode_ops(
     int32_t *run_start = run_len + count;
     int32_t *chain = run_start + count;
     int32_t *chain_out = chain + count;
-    int32_t *head = chain_out + count;
+    int32_t *level_prev = chain_out + count;
+    int32_t *head = level_prev + (size_t)level_count * count;
 
     /* the packed batch state of the open literal op, double buffered */
     int32_t state_cost[2][BIT2_LIT_STATES];
     int32_t state_lit[2][BIT2_LIT_STATES];
     int32_t state_ops[2][BIT2_LIT_STATES];
 
-    int32_t i, j, s;
+    int32_t i, s;
 
     /* run lengths of every position (backward scan) and the start of the
-       maximal equal value run it belongs to (forward scan) */
+       maximal equal value run it belongs to (forward scan), and the share
+       of the positions that sit in a run, which decides the walk below */
     run_len[count - 1] = 1;
+    if (run_len[count - 1] >= BIT2_RUN_DEPTH) {
+        in_run++;
+    }
     for (i = count - 2; i >= 0; i--) {
         run_len[i] = data[i] == data[i + 1] ? run_len[i + 1] + 1 : 1;
+        if (run_len[i] >= BIT2_RUN_DEPTH) {
+            in_run++;
+        }
     }
     run_start[0] = 0;
     for (i = 1; i < count; i++) {
         run_start[i] = data[i - 1] == data[i] ? run_start[i - 1] : i;
     }
 
-    /* hash chains over 3 grams, forward scan, chain[i] is the previous
-       position with the same 3 gram (or -1), unlimited match distance.
-       chain_out[i] skips the rest of the run of i: the first chain entry
-       outside of it, every entry in between sits in the same run and
-       cannot match any longer than the run itself */
-    for (i = 0; i < BIT2_CHAIN_SLOTS; i++) {
-        head[i] = -1;
-    }
-    for (i = 0; i + 3 <= count; i++) {
-        uint32_t key = ((uint32_t)data[i] << 6)
-                | ((uint32_t)data[i + 1] << 3)
-                | (uint32_t)data[i + 2];
-        chain[i] = head[key];
-        head[key] = i;
-        chain_out[i] = chain[i] >= run_start[i] ? chain_out[chain[i]] : chain[i];
+    /* Two walks emit the very same opcodes, the record chains cost less
+       when the input is not dominated by runs and the 3 gram chain costs
+       less when it is (its run rule skips the run positions in one step),
+       so the share of the positions inside a run picks between them. The
+       record walk is a pruning of the plain search, so the reference mode
+       that turns the prunings off always runs the plain 3 gram walk. */
+    int use_records = prune && (int64_t)in_run * 2 <= (int64_t)count;
+    if (!use_records) {
+        /* hash chains over 3 grams, forward scan, chain[i] is the previous
+           position with the same 3 gram (or -1), unlimited match distance.
+           chain_out[i] skips the rest of the run of i: the first chain entry
+           outside of it, every entry in between sits in the same run and
+           cannot match any longer than the run itself */
+        for (i = 0; i < BIT2_CHAIN_SLOTS; i++) {
+            head[i] = -1;
+        }
+        for (i = 0; i + 3 <= count; i++) {
+            uint32_t key = ((uint32_t)data[i] << 6)
+                    | ((uint32_t)data[i + 1] << 3)
+                    | (uint32_t)data[i + 2];
+            chain[i] = head[key];
+            head[key] = i;
+            chain_out[i] = chain[i] >= run_start[i] ? chain_out[chain[i]] : chain[i];
+        }
+    } else {
+        /* the record chains of the copy search, see bit2_build_levels() */
+        bit2_build_levels(data, count, levels, level_count, level_prev, head, head_size);
     }
 
     for (i = 0; i <= count; i++) {
@@ -654,87 +775,156 @@ static int64_t bit2_encode_ops(
                 }
             }
 
-            /* --- C. copy transitions, every earlier 3 gram match --- */
+            /* --- C. copy transitions, the records of the gram chains of a
+                   plain input, or the 3 gram chain with its run rule of a
+                   run dominated one, the two emit the very same opcodes --- */
             if (i + 3 <= count) {
-                int64_t steps = 0;
+                int32_t match_max = count - i;
                 /* lengths the run opcode of this position covers for 1 byte */
                 int32_t run_cover = (value <= 3u && run_len[i] >= 3) ? run_len[i] : 0;
-                /* best match found outside of the run of i so far */
-                int32_t best_out = 0;
-                j = chain[i];
-                while (j >= 0 && (max_chain <= 0 || steps < max_chain)) {
-                    uint32_t offset = (uint32_t)(i - j);
-                    int32_t match_max = count - i;
-                    int32_t lcp;
+                if (!use_records) {
+                    int32_t best_out = 0;
+                    int32_t j = chain[i];
+                    while (j >= 0) {
+                        uint32_t offset = (uint32_t)(i - j);
+                        int32_t lcp;
 
-                    if (prune && run_cover > 0) {
-                        /* Every candidate that sits in an equal value run has a
-                           match of exactly min(remain_i, remain_j) bytes (both
-                           runs end where their value changes), and that never
-                           passes remain_i = run_cover, which the run opcode
-                           already covers for one byte. So of every equal value
-                           run only the candidate whose remaining run length is
-                           exactly run_cover can matter; the rest is skipped
-                           without comparing a single byte. */
-                        int32_t rj = run_len[j];
-                        if (rj != run_cover) {
-                            if (rj < run_cover) {
-                                int32_t skip = run_cover - rj;
-                                if (j - skip >= run_start[j]) {
-                                    /* the one candidate of this run that can escape */
-                                    j -= skip;
-                                    steps++;
-                                    continue;
+                        if (prune && run_cover > 0) {
+                            /* Every candidate that sits in an equal value run has a
+                               match of exactly min(remain_i, remain_j) bytes (both
+                               runs end where their value changes), and that never
+                               passes remain_i = run_cover, which the run opcode
+                               already covers for one byte. So of every equal value
+                               run only the candidate whose remaining run length is
+                               exactly run_cover can matter; the rest is skipped
+                               without comparing a single byte. */
+                            int32_t rj = run_len[j];
+                            if (rj != run_cover) {
+                                if (rj < run_cover) {
+                                    int32_t skip = run_cover - rj;
+                                    if (j - skip >= run_start[j]) {
+                                        /* the one candidate of this run that can escape */
+                                        j -= skip;
+                                        continue;
+                                    }
                                 }
+                                /* the rest of this run is dominated */
+                                j = chain_out[j];
+                                continue;
                             }
-                            /* the rest of this run is dominated */
-                            j = chain_out[j];
-                            steps++;
-                            continue;
                         }
-                    }
-                    if (prune) {
-                        /* a candidate in a run of the same value shares the
-                           whole shorter run with i, those bytes need no
-                           comparison; and a match no longer than the best
-                           one seen cannot improve any position */
-                        int32_t known = run_len[j] < run_len[i] ? run_len[j] : run_len[i];
-                        int32_t bound = best_out + 1;
-                        if (known < 3) {
-                            known = 3;
+                        if (prune) {
+                            /* a candidate in a run of the same value shares the
+                               whole shorter run with i, those bytes need no
+                               comparison; and a match no longer than the best
+                               one seen cannot improve any position */
+                            int32_t known = run_len[j] < run_len[i] ? run_len[j] : run_len[i];
+                            int32_t bound = best_out + 1;
+                            if (known < 3) {
+                                known = 3;
+                            }
+                            if (bound < known) {
+                                bound = known;
+                            }
+                            if (bound > match_max) {
+                                bound = match_max;
+                            }
+                            lcp = bit2_match_length(data + i, data + j, known, bound);
+                            if (lcp >= bound && bound < match_max) {
+                                /* longer than the best one, get the full length */
+                                lcp = bit2_match_length(data + i, data + j, lcp, match_max);
+                            }
+                            if (lcp <= best_out) {
+                                j = chain[j];
+                                continue;
+                            }
+                            best_out = lcp;
+                        } else {
+                            lcp = bit2_match_length(data + i, data + j, 3, match_max);
                         }
-                        if (bound < known) {
-                            bound = known;
-                        }
-                        if (bound > match_max) {
-                            bound = match_max;
-                        }
-                        lcp = bit2_match_length(data + i, data + j, known, bound);
-                        if (lcp >= bound && bound < match_max) {
-                            /* longer than the best one, get the full length */
-                            lcp = bit2_match_length(data + i, data + j, lcp, match_max);
-                        }
-                        if (lcp <= best_out) {
-                            j = chain[j];
-                            steps++;
-                            continue;
-                        }
-                        best_out = lcp;
-                    } else {
-                        lcp = bit2_match_length(data + i, data + j, 3, match_max);
-                    }
 
-                    bit2_relax_copy(
-                            dp0, prev0, op0, arg0, lit0, ops0, tiebreak, prune,
-                            i, lcp, offset, cur, cur_lit, cur_ops, run_cover);
+                        bit2_relax_copy(
+                                dp0, prev0, op0, arg0, lit0, ops0, tiebreak, prune,
+                                i, lcp, offset, cur, cur_lit, cur_ops, run_cover);
 
-                    if (prune && best_out >= match_max) {
-                        /* the longest match this position can have is reached,
-                           the remaining entries are not longer and not cheaper */
-                        break;
+                        if (prune && best_out >= match_max) {
+                            /* the longest match this position can have is reached,
+                               the remaining entries are not longer and not cheaper */
+                            break;
+                        }
+                        j = chain[j];
                     }
-                    j = chain[j];
-                    steps++;
+                } else {
+                    /* the length the next record has to reach, and the level of
+                       the chain holding every candidate of that length */
+                    int32_t next_len = 3;
+                    int32_t j_last = i;
+                    int32_t level = 0;
+                    int32_t best_out = 0;
+                    int32_t found = 1;
+
+                    while (found && next_len <= match_max && level < level_count) {
+                        const int32_t *prev;
+                        int32_t j;
+                        while (level + 1 < level_count && levels[level + 1] <= next_len) {
+                            level++;
+                        }
+                        prev = level_prev + (size_t)level * count;
+                        j = prev[i];
+                        if (run_cover > 0 && run_len[i] >= levels[level]) {
+                            /* The position sits in an equal value run whose
+                               opcode covers the run lengths for one byte, so
+                               every candidate of that run has a match of
+                               exactly run_cover bytes (both runs end where
+                               their value changes, one of them first) whose
+                               copy bands start above the run: the whole chain
+                               segment of the run is useless, and it is one
+                               chain of consecutive positions. */
+                            j = prev[run_start[i]];
+                        }
+                        /* everything at or after j_last is examined already */
+                        while (j >= j_last) {
+                            j = prev[j];
+                        }
+                        found = 0;
+                        while (j >= 0) {
+                            uint32_t offset = (uint32_t)(i - j);
+                            int32_t known = run_len[j] < run_len[i] ? run_len[j] : run_len[i];
+                            int32_t bound = best_out + 1;
+                            int32_t lcp;
+                            if (data[i] != data[j]) {
+                                /* only a hash collision of the level reaches here,
+                                   the bytes inside the gram differ */
+                                j = prev[j];
+                                continue;
+                            }
+                            if (bound < known) {
+                                bound = known;
+                            }
+                            if (bound > match_max) {
+                                bound = match_max;
+                            }
+                            lcp = bit2_match_length(data + i, data + j, known, bound);
+                            if (lcp >= bound && bound < match_max) {
+                                /* longer than the best one, get the full length */
+                                lcp = bit2_match_length(data + i, data + j, lcp, match_max);
+                            }
+                            if (lcp >= next_len) {
+                                /* a record: nearer than every candidate that
+                                   reaches the same length, and longer than
+                                   everything nearer than it */
+                                bit2_relax_copy(
+                                        dp0, prev0, op0, arg0, lit0, ops0, tiebreak, prune,
+                                        i, lcp, offset, cur, cur_lit, cur_ops, run_cover);
+                                best_out = lcp;
+                                j_last = j;
+                                next_len = lcp + 1;
+                                found = 1;
+                                break;
+                            }
+                            j = prev[j];
+                        }
+                    }
                 }
             }
         }
@@ -907,7 +1097,7 @@ BIT2_EXPORT int64_t abi_version(void) {
 BIT2_EXPORT int64_t bit2_encode_opcodes(
         const uint8_t *data, int64_t n, Bit2Op *out, int64_t capacity, int64_t lossless_prune) {
     return bit2_encode_ops(
-            data, n, out, capacity, BIT2_MAX_CHAIN, BIT2_LIT_TIEBREAK, lossless_prune != 0);
+            data, n, out, capacity, BIT2_LIT_TIEBREAK, lossless_prune != 0);
 }
 
 /*
@@ -1158,7 +1348,7 @@ BIT2_EXPORT int64_t bit2_encode_stream(
         return -1;
     }
     count = bit2_encode_ops(
-            data, n, ops, n + 1, BIT2_MAX_CHAIN, BIT2_LIT_TIEBREAK, lossless_prune != 0);
+            data, n, ops, n + 1, BIT2_LIT_TIEBREAK, lossless_prune != 0);
     if (count < 0) {
         free(ops);
         return -1;
