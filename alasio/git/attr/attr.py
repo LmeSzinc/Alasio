@@ -1,4 +1,4 @@
-from typing import Iterable
+from typing import Iterable, Union
 
 from alasio.ext import env
 from alasio.ext.cache import cached_property
@@ -9,15 +9,22 @@ from alasio.git.attr.attrline import parse_gitattributes_line
 
 class GitAttributes:
     def __init__(self):
+        # {root: content} of the .gitattributes files that are not parsed yet,
+        # the content is str or bytes, the entry is dropped by _load_rules
+        self._registered_files: "dict[str, Union[str, bytes]]" = {}
+        # rules of the builtin .gitattributes and of the parsed files, in the
+        # parse order, see _load_rules
         self.patterns: "list[PatternBase]" = []
 
     def _load_content(self, root, content, is_builtin=False):
         """
         Args:
             root (str):
-            content (str):
+            content (str | bytes):
             is_builtin:
         """
+        if isinstance(content, bytes):
+            content = content.decode()
         for row in content.splitlines():
             row = row.strip()
             if not row or row.startswith('#'):
@@ -44,17 +51,37 @@ class GitAttributes:
         self._load_content(root='', content=content, is_builtin=True)
         return None
 
-    def load(self, root, content):
+    def register(self, root, content):
         """
+        Register the content of a .gitattributes file, without parsing it
+
+        The rules are parsed when they are first needed, see _load_rules, the
+        registered file is dropped then: a pack that resolves every path of a
+        version from its cache never parses nor keeps them, see
+        PackFull._populate_eol.
+
         Args:
             root (str): folder of .gitattributes file
                 "" for /.gitattributes, "src/" for /src/.gitattributes
-            content (str): File content
+            content (str | bytes): File content, an upstream does not have to
+                decode the blob it holds
+        """
+        self._registered_files[root] = content
+
+    def _load_rules(self):
+        """
+        Parse the rules that are not parsed yet
+
+        The builtin .gitattributes is parsed first, a registered file overrides
+        it by being parsed after. The registered files are dropped once parsed,
+        they are not needed anymore.
         """
         # cache builtin first
         _ = self._load_builtin
-        # load
-        self._load_content(root=root, content=content)
+        # parse the pending files and drop them
+        files, self._registered_files = self._registered_files, {}
+        for root, content in files.items():
+            self._load_content(root=root, content=content)
 
     def apply_files(self, list_filepath: "Iterable[str]") -> "list[FileAttrs]":
         """
@@ -62,8 +89,8 @@ class GitAttributes:
             list_filepath: List of filepath, path sep can only be "/" in git
                 The input list_filepath needs to be deduplicated first
         """
-        # cache builtin first
-        _ = self._load_builtin
+        # parse the builtin and the registered rules that are not parsed yet
+        self._load_rules()
 
         files = [FileAttrs(file) for file in list_filepath]
 

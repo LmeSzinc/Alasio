@@ -13,6 +13,7 @@ from alasio.deploy.history.decode_history import HistoryObj, decode_history
 from alasio.deploy.pack.pack_model import FileInfo
 from alasio.deploy_dev.pack.pack_cache import PackCache
 from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.ext.path.pathstr import PathStr
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.stage.gitreset import FileEntry
 
@@ -169,11 +170,75 @@ class TestGitattributes:
         mock.register_file('c1', 'sub/.gitattributes', b'*.bar binary')
         mock.register_file('c1', 'sub/a.bar', b'\x00')
         pack = PackFull(mock, commit='c1')
-        attrs = pack.gitattributes
-        patterns = attrs.patterns
+        # the registered rules are parsed when the pack resolves a path
+        assert pack.fileinfo['sub/a.bar'].eol == 2
+        patterns = pack.gitattributes.patterns
         # At least one pattern from sub/.gitattributes
         repo_patterns = [p for p in patterns if p.root == 'sub/']
         assert len(repo_patterns) > 0
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  gitattributes fingerprint
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestGitattributesFingerprint:
+    """The fingerprint identifies the .gitattributes state of a version."""
+
+    def test_the_other_files_do_not_matter(self):
+        """Two versions in the same .gitattributes state share the fingerprint."""
+        mock = _make_repo()
+        mock.register_file('c1', '.gitattributes', b'*.foo text')
+        mock.register_file('c1', 'a.txt', b'a')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', '.gitattributes', b'*.foo text')
+        mock.register_file('c2', 'a.txt', b'a')
+        mock.register_file('c2', 'b/c.txt', b'c')
+        assert PackFull(mock, commit='c1').gitattributes_fingerprint == \
+            PackFull(mock, commit='c2').gitattributes_fingerprint
+
+    def test_a_changed_gitattributes_changes_the_fingerprint(self):
+        """Another .gitattributes content gives another fingerprint."""
+        mock = _make_repo()
+        mock.register_file('c1', '.gitattributes', b'*.foo text')
+        mock.register_file('c1', 'a.foo', b'a')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', '.gitattributes', b'*.foo -text')
+        mock.register_file('c2', 'a.foo', b'a')
+        assert PackFull(mock, commit='c1').gitattributes_fingerprint != \
+            PackFull(mock, commit='c2').gitattributes_fingerprint
+
+    def test_an_added_subdir_gitattributes_changes_the_fingerprint(self):
+        """A new .gitattributes in a subfolder gives another fingerprint."""
+        mock = _make_repo()
+        mock.register_file('c1', '.gitattributes', b'*.foo text')
+        mock.register_file('c1', 'sub/a.foo', b'a')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', '.gitattributes', b'*.foo text')
+        mock.register_file('c2', 'sub/.gitattributes', b'*.foo -text')
+        mock.register_file('c2', 'sub/a.foo', b'a')
+        assert PackFull(mock, commit='c1').gitattributes_fingerprint != \
+            PackFull(mock, commit='c2').gitattributes_fingerprint
+
+    def test_versions_without_gitattributes_share_one_table(self):
+        """No .gitattributes gives the same fingerprint for every version."""
+        mock = _make_repo()
+        mock.register_file('c1', 'a.txt', b'a')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', 'a.txt', b'a')
+        mock.register_file('c2', 'b.txt', b'b')
+        assert PackFull(mock, commit='c1').gitattributes_fingerprint == \
+            PackFull(mock, commit='c2').gitattributes_fingerprint
+
+    def test_the_pack_format_version_belongs_to_the_fingerprint(self):
+        """Another pack format resolves in a table of its own."""
+        mock = _make_repo()
+        mock.register_file('c1', '.gitattributes', b'*.foo text')
+        mock.register_file('c1', 'a.foo', b'a')
+        current = PackFull(mock, commit='c1')
+        other = PackFull(mock, commit='c1', pack_version=b'\x01')
+        assert current.gitattributes_fingerprint != other.gitattributes_fingerprint
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -396,6 +461,226 @@ class TestFileinfoEol:
         assert info['root.foo'].eol == 1
         # sub/nested.foo matches sub .gitattributes → eol=lf → 0
         assert info['sub/nested.foo'].eol == 0
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  fileinfo — EOL resolution cache
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _count_apply_files(monkeypatch):
+    """
+    Count the paths the .gitattributes rule engine resolves.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Monkeypatch fixture
+
+    Returns:
+        list[list[str]]: The paths of every PackFull._populate_eol call
+    """
+    from alasio.git.attr.attr import GitAttributes
+
+    calls = []
+    original = GitAttributes.apply_files
+
+    def counting(self, list_filepath):
+        paths = list(list_filepath)
+        calls.append(paths)
+        return original(self, paths)
+
+    monkeypatch.setattr(GitAttributes, 'apply_files', counting)
+    return calls
+
+
+def _eol_records(repo, commit, cache=None):
+    """
+    Resolve the eol of the files of a version, without the data encoding.
+
+    Args:
+        repo (MockGitRepo): Repo to read
+        commit (str): Version to resolve
+        cache (PackCache, optional): Cache shared by the versions
+
+    Returns:
+        tuple[PackFull, dict[str, FileInfo]]: The pack and its records, the
+            records carry the resolved eol
+    """
+    pack = PackFull(repo, commit=commit, cache=cache)
+    records = {
+        path: FileInfo(path=PathStr(path), sha1=bytes.fromhex(entry.sha1))
+        for path, entry in pack.filelist.items()
+    }
+    pack._populate_eol(records)
+    return pack, records
+
+
+class TestEolCache:
+    """The versions of one .gitattributes state share the eol resolutions."""
+
+    def test_paths_resolved_once(self, monkeypatch):
+        """A version resolves the paths the earlier versions did not have."""
+        mock = _make_repo()
+        mock.register_file('c1', '.gitattributes', b'*.foo eol=crlf')
+        mock.register_file('c1', 'a.foo', b'a')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', '.gitattributes', b'*.foo eol=crlf')
+        mock.register_file('c2', 'a.foo', b'a')
+        mock.register_file('c2', 'b.foo', b'b')
+        cache = PackCache()
+        first = PackFull(mock, commit='c1', cache=cache)
+        second = PackFull(mock, commit='c2', cache=cache)
+        calls = _count_apply_files(monkeypatch)
+        assert [info.eol for info in first.fileinfo.values() if info.path.endswith('.foo')] == [1]
+        assert [info.eol for info in second.fileinfo.values() if info.path.endswith('.foo')] == [1, 1]
+        # the second version only resolves the path the first one did not have
+        assert calls == [['.gitattributes', 'a.foo'], ['b.foo']]
+        # a.foo is text="auto" (only eol=crlf is given), its content is looked
+        # up as well: 2 attribute + 1 content lookup per version, the second
+        # version hits the attributes and the content of a.foo
+        assert cache.stat['eol'] == [3, 5]
+
+    def test_a_changed_gitattributes_switches_the_table(self, monkeypatch):
+        """Another .gitattributes state resolves the paths again."""
+        mock = _make_repo()
+        mock.register_file('c1', '.gitattributes', b'*.foo eol=lf')
+        mock.register_file('c1', 'a.foo', b'a')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', '.gitattributes', b'*.foo eol=crlf')
+        mock.register_file('c2', 'a.foo', b'a')
+        cache = PackCache()
+        first = PackFull(mock, commit='c1', cache=cache)
+        second = PackFull(mock, commit='c2', cache=cache)
+        calls = _count_apply_files(monkeypatch)
+        assert first.fileinfo['a.foo'].eol == 0
+        assert second.fileinfo['a.foo'].eol == 1
+        # both versions resolve, the second one under another .gitattributes state
+        assert calls == [['.gitattributes', 'a.foo'], ['.gitattributes', 'a.foo']]
+        # one table per .gitattributes state, every version resolves its paths
+        # and the content of the text="auto" a.foo
+        assert len(cache.eol) == 2
+        assert cache.stat['eol'] == [0, 6]
+
+    def test_an_auto_path_follows_the_content(self, monkeypatch):
+        """The table keeps the attributes, not the eol they decide."""
+        mock = _make_repo()
+        mock.register_file('c1', 'a.xxx', b'hello world')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', 'a.xxx', b'hello\x00world')
+        cache = PackCache()
+        first = PackFull(mock, commit='c1', cache=cache)
+        second = PackFull(mock, commit='c2', cache=cache)
+        calls = _count_apply_files(monkeypatch)
+        assert first.fileinfo['a.xxx'].eol == 0
+        # the attributes are cached, the content decides every version
+        assert second.fileinfo['a.xxx'].eol == 2
+        assert calls == [['a.xxx']]
+        # the attributes hit, the content is another one, so it misses
+        assert cache.stat['eol'] == [1, 3]
+
+    def test_the_table_holds_both_kinds_of_keys(self):
+        """The attributes are keyed by the path, the auto eol by path + sha1."""
+        mock = _make_repo()
+        mock.register_file('c1', '.gitattributes', b'*.foo eol=crlf')
+        mock.register_file('c1', 'a.foo', b'a')
+        mock.register_file('c1', 'b.xxx', b'hello')
+        cache = PackCache()
+        pack, records = _eol_records(mock, 'c1', cache)
+        assert records['a.foo'].eol == 1
+        assert records['b.xxx'].eol == 0
+        table = cache.eol[pack.gitattributes_fingerprint]
+        # one attribute entry per path
+        assert table['a.foo'] == {'text': 'auto', 'eol': 'crlf'}
+        assert table['b.xxx'] == {'text': 'auto', 'eol': 'lf'}
+        # the eol of a text="auto" path is an entry of its own, the tuple key
+        # can not clash with the paths
+        sha1 = bytes.fromhex(pack.filelist['a.foo'].sha1)
+        assert table[('a.foo', sha1)] == 1
+        sha1 = bytes.fromhex(pack.filelist['b.xxx'].sha1)
+        assert table[('b.xxx', sha1)] == 0
+        assert len(table) == 5
+
+    def test_a_warm_version_does_not_parse_the_rules(self):
+        """A version that resolves every path from the cache parses no rule."""
+        mock = _make_repo()
+        mock.register_file('c1', '.gitattributes', b'*.foo eol=crlf')
+        mock.register_file('c1', 'a.foo', b'a')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', '.gitattributes', b'*.foo eol=crlf')
+        mock.register_file('c2', 'a.foo', b'a')
+        cache = PackCache()
+        first = PackFull(mock, commit='c1', cache=cache)
+        second = PackFull(mock, commit='c2', cache=cache)
+        assert first.fileinfo['a.foo'].eol == 1
+        assert second.fileinfo['a.foo'].eol == 1
+        # the first version resolved its paths with the rule engine
+        assert first.gitattributes.patterns != []
+        # the second one found every path in the cache: the .gitattributes file
+        # is registered (as the bytes git holds) but its rules are never parsed
+        assert second.gitattributes._registered_files == {'': b'*.foo eol=crlf'}
+        assert second.gitattributes.patterns == []
+
+    def test_the_cache_does_not_change_the_records(self):
+        """A cached run resolves the eol of every record like a plain one."""
+        mock = _make_repo()
+        mock.register_file('c1', '.gitattributes', b'*.foo eol=crlf\n*.bar -text\n')
+        mock.register_file('c1', 'sub/.gitattributes', b'*.foo eol=lf\n')
+        mock.register_file('c1', 'a.foo', b'a')
+        mock.register_file('c1', 'sub/b.foo', b'b')
+        mock.register_file('c1', 'c.bar', b'\x00bar')
+        mock.register_file('c1', 'd.xxx', b'text')
+        mock.register_file('c1', 'e.xxx', b'\x00binary')
+        mock.register_file('c1', 'pkg/f.py', b'pass\n')
+        cache = PackCache()
+        cached = PackFull(mock, commit='c1', cache=cache).fileinfo
+        assert cache.stat['eol'][0] == 0
+        plain = PackFull(mock, commit='c1').fileinfo
+        assert {path: info.eol for path, info in cached.items()} == \
+            {path: info.eol for path, info in plain.items()}
+        assert cached['a.foo'].eol == 1
+        assert cached['sub/b.foo'].eol == 0
+        assert cached['c.bar'].eol == 2
+        assert cached['d.xxx'].eol == 0
+        assert cached['e.xxx'].eol == 2
+        assert cached['pkg/f.py'].eol == 0
+        # the generated D marker of pkg/ keeps the default eol
+        assert cached['pkg/__init__.py'].edit == 2
+        assert cached['pkg/__init__.py'].eol == 0
+
+    def test_an_unchanged_auto_content_is_not_read_again(self, monkeypatch):
+        """The eol of a text="auto" path is reused while the content is."""
+        mock = _make_repo()
+        mock.register_file('c1', 'a.xxx', b'hello world')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', 'a.xxx', b'hello world')
+        cache = PackCache()
+        _, first = _eol_records(mock, 'c1', cache)
+        assert first['a.xxx'].eol == 0
+        reads = []
+        original = mock.cat
+        monkeypatch.setattr(mock, 'cat', lambda sha1: reads.append(sha1) or original(sha1))
+        _, second = _eol_records(mock, 'c2', cache)
+        assert second['a.xxx'].eol == 0
+        # the content did not change, it is not read and not sniffed again
+        assert reads == []
+        assert cache.stat['eol'] == [2, 2]
+
+    def test_a_changed_auto_content_is_resolved_again(self, monkeypatch):
+        """Another content of a text="auto" path is sniffed and kept."""
+        mock = _make_repo()
+        mock.register_file('c1', 'a.xxx', b'hello world')
+        mock.register_commit('c2', author_name='Author', message='')
+        mock.register_file('c2', 'a.xxx', b'hello\x00world')
+        cache = PackCache()
+        _, first = _eol_records(mock, 'c1', cache)
+        assert first['a.xxx'].eol == 0
+        new_sha1 = PackFull(mock, commit='c2').filelist['a.xxx'].sha1
+        reads = []
+        original = mock.cat
+        monkeypatch.setattr(mock, 'cat', lambda sha1: reads.append(sha1) or original(sha1))
+        _, second = _eol_records(mock, 'c2', cache)
+        # the content changed, it is read once and resolves to binary
+        assert second['a.xxx'].eol == 2
+        assert reads == [new_sha1]
 
 
 # ════════════════════════════════════════════════════════════════════════════

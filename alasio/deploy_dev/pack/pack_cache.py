@@ -23,6 +23,13 @@ and passes it to every PackFull / PackUpdate, so the tables live across the
 versions. It is not persisted, every entry is a pure function of the repo
 content, a later run recomputes what it needs.
 
+- the resolved .gitattributes attributes of a path (what the eol of its record
+  is decided from) are kept per .gitattributes state, and the eol of a
+  text="auto" path is kept per (path, content): the .gitattributes files of a
+  repo rarely change and a content rarely changes twice, so the versions of a
+  run share the resolutions and a version resolves only the paths and the
+  contents its predecessors did not see, see PackFull._populate_eol
+
 Measured on AzurLaneAutoScript (see doc/2026-09-27_update-pack-from-repo.md):
 200 lookback versions need 1,522 unique A record encodings and 1,842 unique
 patches against 222,218 and 32.9 times that many record occurrences, the cache
@@ -85,6 +92,22 @@ class PackCache:
         rename (dict[tuple, int]): {(deleted git blob sha1 hex, added git blob
             sha1 hex): zstd patch length} of the rename scores, the score is a
             pure function of the two revisions see RepoDiff.similarity
+        eol (dict[str, dict]): {gitattributes fingerprint: table} of the version
+            files, one table for every .gitattributes state of the repo. A table
+            has two kinds of keys:
+
+            - {filepath: attrs_dict}: the resolved .gitattributes attributes of
+              the path, the very dict that FileAttrs.attrs_dict builds, so
+              PackFull._populate_eol decides the eol from the cached attributes
+              without running the rule engine
+            - {(filepath, git blob sha1): eol}: the eol of a text="auto" path,
+              where the content decides text or binary. A tuple key can not
+              clash with the path keys, an unchanged content is reused as is,
+              a changed content (another blob sha1) is resolved and cached as
+              another entry
+
+            The attributes of a path change only when the .gitattributes files
+            change, so the versions of a run share the tables
         stat (dict[str, list[int]]): [hit, miss] of every table
 
     Usage:
@@ -95,13 +118,14 @@ class PackCache:
     """
 
     # names of the tables, the keys of stat
-    TABLES = ('content', 'patch', 'extra', 'rename')
+    TABLES = ('content', 'patch', 'extra', 'rename', 'eol')
 
     def __init__(self):
         self.content: "dict[str, ContentCache]" = {}
         self.patch: "dict[tuple, PatchCache]" = {}
         self.extra: "dict[tuple, FileInfo]" = {}
         self.rename: "dict[tuple, int]" = {}
+        self.eol: "dict[str, dict]" = {}
         # [hit, miss] of every table
         self.stat: "dict[str, list]" = {name: [0, 0] for name in self.TABLES}
 
@@ -115,6 +139,22 @@ class PackCache:
         """
         stat = self.stat[name]
         stat[0 if hit else 1] += 1
+
+    def mark_many(self, name, hit, miss):
+        """
+        Count a batch of lookups of a table
+
+        The tables looked up once per file are counted in one go, see
+        PackFull._populate_eol.
+
+        Args:
+            name (str): Table name, one of TABLES
+            hit (int): Lookups that hit
+            miss (int): Lookups that missed
+        """
+        stat = self.stat[name]
+        stat[0] += hit
+        stat[1] += miss
 
     def file_size(self):
         """

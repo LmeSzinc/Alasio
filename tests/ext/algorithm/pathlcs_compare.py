@@ -50,12 +50,12 @@ class FileList:
             if path == '.gitattributes':
                 obj = repo.cat(entry.sha1)
                 content = obj.decoded.decode()
-                attr.load(root='', content=content)
+                attr.register(root='', content=content)
             if path.endswith('/.gitattributes'):
                 root = removesuffix(path, '.gitattributes')
                 obj = repo.cat(entry.sha1)
                 content = obj.decoded.decode()
-                attr.load(root=root, content=content)
+                attr.register(root=root, content=content)
         return attr
 
     @cached_property

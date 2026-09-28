@@ -272,19 +272,63 @@ class PackFull(PackEncodeBase):
 
     @cached_property
     def gitattributes(self):
+        """
+        Rule engine of the version, built from its .gitattributes files
+
+        The contents are registered, not parsed (see GitAttributes.register),
+        and their digest is taken in the same pass: the registered files are
+        dropped once the rules are parsed, gitattributes_fingerprint is taken
+        here.
+
+        Returns:
+            GitAttributes:
+        """
         attr = GitAttributes()
         repo = self.repo
+        digest = sha1()
+        digest.update(self.pack_version)
         for path, entry in self.filelist.items():
             if path == '.gitattributes':
-                obj = repo.cat(entry.sha1)
-                content = bytes(obj.decoded).decode()
-                attr.load(root='', content=content)
-            if path.endswith('/.gitattributes'):
+                root = ''
+            elif path.endswith('/.gitattributes'):
                 root = removesuffix(path, '.gitattributes')
-                obj = repo.cat(entry.sha1)
-                content = bytes(obj.decoded).decode()
-                attr.load(root=root, content=content)
+            else:
+                continue
+            attr.register(root=root, content=repo.cat(entry.sha1).decoded)
+            # git already hashed the content: the blob sha1 is the identity of
+            # the file, the digest does not hash the bytes again
+            digest.update(root.encode())
+            digest.update(b'\x00')
+            digest.update(entry.sha1.encode())
+            digest.update(b'\x00')
+        self._gitattributes_digest = digest.hexdigest()
         return attr
+
+    @cached_property
+    def gitattributes_fingerprint(self):
+        """
+        Identity of the .gitattributes files of the version.
+
+        The attributes of a path (what its eol is decided from) only depend on
+        the .gitattributes files of the version, so the versions that carry the
+        same files share the table of PackCache.eol. The fingerprint is the
+        digest that gitattributes took while it registered the files: the pack
+        format version (the resolution belongs to the format, another format
+        resolves in a table of its own) followed by the (root, git blob sha1) of
+        every file of the version in the order of the filelist (git hashed the
+        content already, the digest does not hash the bytes again; the order of
+        two files of one depth can not apply to the same path, so it does not
+        matter, a changed order only costs another table). A change of any file
+        gives another digest and another table, whatever the other files of the
+        version are. See PackFull._populate_eol.
+
+        Returns:
+            str: Hex sha1 digest of the .gitattributes files
+        """
+        # taken by gitattributes: the registered files are dropped once the
+        # rules are parsed, the digest has to be taken while they are all known
+        _ = self.gitattributes
+        return self._gitattributes_digest
 
     @cached_property
     def fileinfo(self) -> "dict[str, FileInfo]":
@@ -332,23 +376,55 @@ class PackFull(PackEncodeBase):
         """
         Apply .gitattributes onto files
         Attributes apply to FileInfo object, so no returns
+
+        Resolving the attributes of a path (the rule engine) is the expensive
+        part, the eol is then decided by the attributes and, when text is
+        "auto", by the content. Both change rarely, so they are cached by
+        PackFull.gitattributes_fingerprint in PackCache.eol: a version resolves
+        the paths the earlier versions did not have and sniffs the contents they
+        did not see, every other record is a dict lookup.
         """
-        fileattrs = self.gitattributes.apply_files(dict_fileinfo)
+        cache = self.cache
+        if cache is None:
+            # no cache, resolve in a table of this version
+            dict_eol = {}
+        else:
+            dict_eol = cache.eol.setdefault(self.gitattributes_fingerprint, {})
+        # a D (deleted) record is not a file of the version, it keeps the
+        # default eol of FileInfo
+        files = [file for file in dict_fileinfo.values() if file.edit != 2]
+        missing = [file.path for file in files if file.path not in dict_eol]
+        if missing:
+            # only the paths unknown to the .gitattributes state of the version
+            # need the rule engine
+            for attr in self.gitattributes.apply_files(missing):
+                dict_eol[attr.path] = attr.attrs_dict
+        hit = len(files) - len(missing)
+        miss = len(missing)
         repo = self.repo
-        for attr in fileattrs:
+        for file in files:
             # there should be no KeyError
-            file = dict_fileinfo[attr.path]
-            # skip D (deleted)
-            if file.edit == 2:
-                continue
+            attrs_dict = dict_eol[file.path]
             # mode -> text/binary
-            mode = attr.attrs_dict.get('text', 'auto')
+            mode = attrs_dict.get('text', 'auto')
+            # set when the content decides, the eol is then cached under it
+            key = None
             if mode == 'set':
                 text = True
             elif mode == 'unset':
                 text = False
             else:
-                # text="auto", decide by content
+                # text="auto", decide by content. The eol of a content is
+                # cached under (filepath, git blob sha1): an unchanged content
+                # skips the read and the sniff, a changed content is resolved
+                # and cached as another entry. The tuple key can not clash
+                # with the path keys of the attributes
+                key = (file.path, file.sha1)
+                eol = dict_eol.get(key)
+                if eol is not None:
+                    file.eol = eol
+                    hit += 1
+                    continue
                 content = repo.cat(file.sha1.hex()).decoded
                 if b'\x00' in content:
                     text = False
@@ -356,13 +432,19 @@ class PackFull(PackEncodeBase):
                     text = True
             # set to mode
             if text:
-                eol = attr.attrs_dict.get('eol', 'auto')
+                eol = attrs_dict.get('eol', 'auto')
                 if eol == 'crlf':
                     file.eol = 1
                 else:
                     file.eol = 0
             else:
                 file.eol = 2
+            if key is not None:
+                # remember the eol of this content, see the lookup above
+                dict_eol[key] = file.eol
+                miss += 1
+        if cache is not None:
+            cache.mark_many('eol', hit, miss)
 
     def _populate_edit_copied(
             self,

@@ -581,3 +581,70 @@ src/*        eol=crlf
         assert files[0].filename == "Dockerfile"
         assert files[1].filename == "Makefile"
         assert files[2].filename == "Dockerfile"
+
+
+# ==========================================
+# 3. GitAttributes.register tests
+# ==========================================
+class TestGitAttributesRegister:
+    def test_the_content_is_kept_unparsed(self):
+        """register stores the content, the rules wait for the first use"""
+        ga = _new_ga()
+        ga.register(root="", content="*.py text diff=python")
+        assert ga._registered_files == {"": "*.py text diff=python"}
+        assert ga.patterns == []
+        ga.apply_files(["main.py"])
+        assert len(ga.patterns) == 1
+        assert ga.patterns[0].root == ""
+
+    def test_the_content_can_be_bytes(self):
+        """An upstream does not have to decode the blob it holds"""
+        ga = _new_ga()
+        ga.register(root="", content=b"*.py text\n*.ts -text\n")
+        assert ga.patterns == []
+        files = ga.apply_files(["main.py", "app.ts"])
+        assert files[0].attrs_dict == {"text": "set"}
+        assert files[1].attrs_dict == {"text": "unset"}
+
+    def test_the_rules_are_parsed_once(self):
+        """The next apply_files calls do not parse the same file again"""
+        ga = _new_ga()
+        ga.register(root="", content="*.py text")
+        ga.apply_files(["main.py"])
+        ga.apply_files(["main.py"])
+        assert len(ga.patterns) == 1
+
+    def test_a_parsed_file_is_dropped(self):
+        """The content is not kept after the rules are parsed"""
+        ga = _new_ga()
+        ga.register(root="", content="*.py text")
+        ga.apply_files(["main.py"])
+        assert ga._registered_files == {}
+
+    def test_a_later_registration_is_parsed_too(self):
+        """A file registered after a use is parsed on the next use"""
+        ga = _new_ga()
+        ga.register(root="", content="*.py text")
+        ga.apply_files(["main.py"])
+        ga.register(root="src/", content="*.ts text")
+        files = ga.apply_files(["src/app.ts"])
+        assert len(ga.patterns) == 2
+        assert files[0].pending_pattern[0].root == "src/"
+
+    def test_a_deeper_registration_overrides(self):
+        """The rules of a deeper .gitattributes win, like the fileload order"""
+        ga = _new_ga()
+        ga.register(root="", content="*.py text")
+        ga.register(root="src/", content="*.py -text")
+        files = ga.apply_files(["src/main.py", "main.py"])
+        assert files[0].attrs_dict == {"text": "unset"}
+        assert files[1].attrs_dict == {"text": "set"}
+
+    def test_a_root_registered_twice_keeps_the_last_content(self):
+        """A root can not have two .gitattributes files, the last one wins"""
+        ga = _new_ga()
+        ga.register(root="", content="*.py text")
+        ga.register(root="", content="*.py -text")
+        files = ga.apply_files(["main.py"])
+        assert len(ga.patterns) == 1
+        assert files[0].attrs_dict == {"text": "unset"}
