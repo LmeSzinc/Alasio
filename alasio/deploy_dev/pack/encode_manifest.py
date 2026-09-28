@@ -1,10 +1,8 @@
 import hashlib
-from collections import deque
 
 from alasio.deploy.pack.pack_model import RefInfo
 from alasio.ext.algorithm.bit2coding.vlenint_encode_c import encode_vlenint
-from alasio.ext.algorithm.pathcomb import iter_path_comb
-from alasio.ext.algorithm.pathlen_coding import encode_prefix_comb, encode_suffix_comb
+from alasio.ext.algorithm.pathcomb.pathcomb_encode_c import encode_path_comb
 from alasio.ext.path.validate import validate_filepath
 
 
@@ -46,26 +44,11 @@ class PackEncodeManifest:
         # version
         yield self.manifest_version
 
-        # filepath
-        list_path: "deque[bytes]" = deque()
-        list_prefix_reuse = deque()
-        list_suffix_lookback = deque()
-        list_suffix_reuse = deque()
-        for prefix_reuse, path, suffix_reuse, suffix_lookback in iter_path_comb(self.files):
-            list_prefix_reuse.append(prefix_reuse)
-            list_suffix_lookback.append(suffix_lookback)
-            list_suffix_reuse.append(suffix_reuse)
-            # remaining path, empty when fully reused by prefix + suffix
-            list_path.append(path.encode())
-
-        # remaining path byte lengths, 0 for fully reused paths
-        list_path_length = [len(path) for path in list_path]
-
-        list_prefix_comb = encode_prefix_comb(list_prefix_reuse, list_path_length)
+        # filepath, the resulting sections are written one after another
+        list_prefix_comb, list_suffix_comb, path_data = encode_path_comb(self.files)
         yield encode_vlenint(list_prefix_comb)
-        list_suffix_comb = encode_suffix_comb(list_suffix_reuse, list_suffix_lookback)
         yield encode_vlenint(list_suffix_comb)
-        yield b''.join(list_path)
+        yield path_data
 
         # size
         list_size = [file.size for file in self.files.values()]

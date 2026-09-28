@@ -1,5 +1,5 @@
 """
-Tests for ``alasio.ext.algorithm.pathcomb.iter_path_comb``.
+Tests for ``alasio.ext.algorithm.pathcomb.pathcomb_encode_python.iter_path_comb``.
 
 The function encodes an ordered path list into
 ``(prefix_reuse, remaining_path, suffix_reuse, suffix_lookback)`` tuples,
@@ -7,8 +7,7 @@ replayed by the decoder as ``prev[:prefix_reuse] + path + lookback[-suffix_reuse
 """
 import pytest
 
-from alasio.ext.algorithm.pathcomb import iter_path_comb
-from alasio.ext.algorithm.pathlen_coding import MAX_PREFIX_REUSE
+from alasio.ext.algorithm.pathcomb.pathcomb_encode_python import MAX_PREFIX_REUSE, iter_path_comb
 
 
 class TestIterPathCombBasic:

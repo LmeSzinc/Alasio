@@ -1,12 +1,13 @@
 """
-Tests for pathlen_coding: encode_prefix_comb / decode_prefix_comb.
+Tests for the combined encodings of the filepath section of a pack index:
+encode_prefix_comb / decode_prefix_comb and their suffix counterparts.
 """
 import pytest
 
 from alasio.ext.algorithm.bit2coding.vlenint_encode_c import encode_vlenint
-from alasio.ext.algorithm.pathlen_coding import (
-    decode_prefix_comb, decode_suffix_comb, encode_prefix_comb, encode_suffix_comb, prefix_comb_value_check,
-    suffix_comb_value_check
+from alasio.ext.algorithm.pathcomb.pathcomb_decode import decode_prefix_comb, decode_suffix_comb
+from alasio.ext.algorithm.pathcomb.pathcomb_encode_python import (
+    encode_prefix_comb, encode_suffix_comb, prefix_comb_value_check, suffix_comb_value_check
 )
 
 

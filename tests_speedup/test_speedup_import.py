@@ -27,6 +27,8 @@ ENCODER_MODULES = {
     'alasio.ext.algorithm.bit2coding.bit2coding_encode_c',
     'alasio.ext.algorithm.bit2coding.vlenint_encode_python',
     'alasio.ext.algorithm.bit2coding.vlenint_encode_c',
+    'alasio.ext.algorithm.pathcomb.pathcomb_encode_c',
+    'alasio.ext.algorithm.pathcomb.pathcomb_encode_python',
 }
 
 

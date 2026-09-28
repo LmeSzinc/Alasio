@@ -3,7 +3,7 @@ from hashlib import sha1
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError, _check_length, _decode
 from alasio.deploy.pack.pack_model import RefInfo
 from alasio.ext.algorithm.bit2coding.vlenint_decode import decode_vlenint
-from alasio.ext.algorithm.pathlen_coding import decode_prefix_comb, decode_suffix_comb
+from alasio.ext.algorithm.pathcomb.pathcomb_decode import decode_prefix_comb, decode_suffix_comb
 from alasio.ext.cache import cached_property
 
 # header: b'MANI' and the manifest version byte

@@ -6,6 +6,7 @@ Every accelerator is one module of the package, named after the area it
 speeds up, with its C source next to it:
 
     bit2.py + bit2_encode.c     the encoder of the bit2 format
+    pathcomb.py + pathcomb.c    the encoder of the filepath section of an index
 
 Adding an accelerator is adding the pair and the name below:
 
@@ -25,4 +26,4 @@ The module is optional, nothing here may import alasio.
 """
 
 # The accelerators of the package, one module and one shared library each.
-ACCELERATORS = ('bit2',)
+ACCELERATORS = ('bit2', 'pathcomb')

@@ -21,10 +21,8 @@ from alasio.deploy.pack.pack_model import RefInfo
 from alasio.deploy_dev.pack.encode_manifest import PackEncodeManifest
 from alasio.ext.algorithm.bit2coding.vlenint_decode import decode_vlenint
 from alasio.ext.algorithm.bit2coding.vlenint_encode_c import encode_vlenint
-from alasio.ext.algorithm.pathcomb import iter_path_comb
-from alasio.ext.algorithm.pathlen_coding import (
-    decode_prefix_comb, decode_suffix_comb, encode_prefix_comb, encode_suffix_comb
-)
+from alasio.ext.algorithm.pathcomb.pathcomb_decode import decode_prefix_comb, decode_suffix_comb
+from alasio.ext.algorithm.pathcomb.pathcomb_encode_python import encode_prefix_comb, encode_suffix_comb, iter_path_comb
 
 # ════════════════════════════════════════════════════════════════════════════
 #  test data
