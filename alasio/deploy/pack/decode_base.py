@@ -3,9 +3,9 @@ from hashlib import sha1
 
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext.algorithm.bit2coding.bit2coding_decode import decode_bit2
+from alasio.ext.algorithm.bit2coding.vlenint_decode import decode_vlenint
 from alasio.ext.algorithm.pathlen_coding import decode_prefix_comb, decode_suffix_comb
 from alasio.ext.algorithm.vint import decode_vint
-from alasio.ext.algorithm.vlenint import decode_vlenint
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_lzma import lzma_decompress
 from alasio.ext.compress.algo_zstd import zstd_decompress

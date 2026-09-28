@@ -25,6 +25,8 @@ ENCODER_MODULES = {
     'alasio_speedup',
     'alasio.ext.algorithm.bit2coding.bit2coding_encode_python',
     'alasio.ext.algorithm.bit2coding.bit2coding_encode_c',
+    'alasio.ext.algorithm.bit2coding.vlenint_encode_python',
+    'alasio.ext.algorithm.bit2coding.vlenint_encode_c',
 }
 
 

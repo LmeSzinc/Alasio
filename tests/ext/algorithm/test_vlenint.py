@@ -1,5 +1,6 @@
 """
-Tests for ``alasio.ext.algorithm.vlenint``.
+Tests for the vlenint format, see
+``alasio/ext/algorithm/bit2coding/vlenint_encode_python.py``.
 
 ``encode_vlenint`` encodes a list of integers (0 … 2³²-1) into a compact
 variable-length binary format: per-value byte-lengths compressed with
@@ -17,7 +18,9 @@ coverage; this file tests the composition layer.
 import pytest
 
 from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
-from alasio.ext.algorithm.vlenint import decode_vlenint, encode_vlenint, vlenint_value_check
+from alasio.ext.algorithm.bit2coding.vlenint_decode import decode_vlenint
+from alasio.ext.algorithm.bit2coding.vlenint_encode_c import encode_vlenint
+from alasio.ext.algorithm.bit2coding.vlenint_encode_python import vlenint_value_check
 
 # ==============================================================================
 # vlenint_value_check — input validation

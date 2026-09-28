@@ -6,6 +6,8 @@ Public API:
 - ``encode_bit2_stream(data, ext8=False)``: the bit2 encoder, values in,
   the stream bytes of ``encode_bit2()`` out, without its VINT count prefix
 - ``encode_bit2_opcode(data)``: the search alone, for tests and benchmarks
+- ``encode_vlenint(data)``: the vlenint encoder, the bit2 encoding of the
+  byte lengths of the values plus the values themselves
 - ``check()``: load the shared library, build it on first use
 - ``LIBRARY``: the library of the encoder, see _library.py
 
@@ -17,6 +19,7 @@ suite compares the plain search against the pruned one. See the module
 comment of bit2_encode.c for the configuration and for the alternatives
 that were measured before it was frozen.
 """
+import array
 import ctypes
 
 from alasio_speedup._library import AcceleratorLibrary
@@ -24,7 +27,7 @@ from alasio_speedup._library import AcceleratorLibrary
 # interface version this module speaks, must match BIT2_ABI_VERSION of
 # bit2_encode.c, a library of another version is refused instead of being
 # called with the wrong signature
-ABI_VERSION = 2
+ABI_VERSION = 3
 
 # the shared library of the encoder, built on first use
 LIBRARY = AcceleratorLibrary('bit2_encode', ABI_VERSION)
@@ -83,6 +86,11 @@ def _bind(lib):
     lib.bit2_encode_stream.argtypes = [
         ctypes.c_char_p, ctypes.c_int64, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int64,
         ctypes.c_int64, ctypes.c_int64,
+    ]
+    lib.bit2_encode_vlenint.restype = ctypes.c_int64
+    lib.bit2_encode_vlenint.argtypes = [
+        ctypes.POINTER(ctypes.c_uint32), ctypes.c_int64, ctypes.POINTER(ctypes.c_uint8),
+        ctypes.c_int64,
     ]
 
 
@@ -149,6 +157,39 @@ def encode_bit2_stream(data, ext8=False, lossless_prune=True):
     # the buffer format of a ctypes array is not a native one, read the
     # stream back by address instead of slicing the memoryview
     return list(ctypes.string_at(ctypes.addressof(out), written))
+
+
+def encode_vlenint(data):
+    """
+    Encode numbers into the vlenint format: the byte lengths of the values
+    packed with the bit2 format of this module (with ext8, a length is 0~4),
+    then the values in little endian, see bit2_encode.c. The result is read
+    back by ``decode_vlenint()`` of the bit2coding package.
+
+    Args:
+        data (Iterable[int]): Data to encode, 0 ~ 2^32 - 1
+
+    Returns:
+        bytes: Encoded data
+
+    Raises:
+        ValueError: If a value is out of range, or the encoder rejects the input
+    """
+    # 'I' is the unsigned int of C, 4 bytes on every platform the project
+    # runs on, the size the C side reads
+    values = array.array('I', data)
+    n = len(values)
+
+    lib = library()
+    # the sizes of bit2_encode_vlenint(): the count prefix, the bit2 stream
+    # of the lengths, n + 1 bytes at worst, plus 4 bytes per value
+    capacity = n * 5 + 64
+    out = (ctypes.c_uint8 * capacity)()
+    buffer = (ctypes.c_uint32 * n).from_buffer(values) if n else None
+    written = lib.bit2_encode_vlenint(buffer, n, out, capacity)
+    if written < 0:
+        raise ValueError(f'[alasio_speedup.bit2] Encoding failed, n={n}, capacity={capacity}')
+    return ctypes.string_at(ctypes.addressof(out), written)
 
 
 def encode_bit2_opcode(data, lossless_prune=True):

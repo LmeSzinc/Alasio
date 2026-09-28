@@ -1,8 +1,12 @@
+"""
+The pure Python encoder of the vlenint format, the reference of the C
+encoder of vlenint_encode_c.py.
+"""
 from collections import deque
 
-from alasio.ext.algorithm.bit2coding.bit2coding_decode import decode_bit2
+from alasio.ext.algorithm.bit2coding.bit2coding_encode_python import encode_bit2
 from alasio.ext.algorithm.const import MAX_UINT32
-from alasio.ext.algorithm.unpack import pack_little_int, unpack_little_int
+from alasio.ext.algorithm.unpack import pack_little_int
 
 
 def vlenint_value_check(data):
@@ -47,12 +51,6 @@ def encode_vlenint(data):
     Returns:
         bytes: vlenint encoded data
     """
-    # imported here on purpose: a client that only reads packs imports this
-    # module for decode_vlenint and must not import an encoder, and the
-    # encoder is where the accelerator of alasio_speedup is looked for,
-    # see the module docstring of bit2coding_encode_c
-    from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
-
     data = list(data)
     vlenint_value_check(data)
     lengths = deque()
@@ -68,34 +66,3 @@ def encode_vlenint(data):
     section_lengths = encode_bit2(lengths, ext8=True)
     section_values = b''.join(value_bytes)
     return b''.join([section_lengths, section_values])
-
-
-def decode_vlenint(data):
-    """
-    Decode vlenint encoded data to a list of integers.
-    The number of values is read from the vint count prefix of the bit2
-    section (see decode_bit2), the caller does not need to pass it in.
-
-    Args:
-        data (memoryview | bytes): vlenint encoded data
-
-    Returns:
-        tuple[list[int], int]: (decoded integers, bytes consumed)
-
-    Raises:
-        ValueError: If data is truncated or contains invalid opcodes
-    """
-    if isinstance(data, bytes):
-        data = memoryview(data)
-    byte_lengths, read = decode_bit2(data, ext8=True)
-    values = []
-    values_append = values.append
-    for length in byte_lengths:
-        if length == 0:
-            values_append(0)
-        else:
-            # raises ValueError if the values section is truncated
-            value = unpack_little_int(data, read, length)
-            values_append(value)
-            read += length
-    return values, read

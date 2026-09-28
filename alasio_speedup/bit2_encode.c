@@ -139,7 +139,7 @@ typedef struct {
  * library of another version instead of calling it with the wrong
  * signature, and an old library does not export bit2_abi_version at all.
  */
-#define BIT2_ABI_VERSION 2
+#define BIT2_ABI_VERSION 3
 
 /*
  * Extra bytes of a little endian length, the D of encode_length_int().
@@ -1167,4 +1167,147 @@ BIT2_EXPORT int64_t bit2_encode_stream(
     written = bit2_emit_stream(data, ops, count, out, capacity, ext8 != 0);
     free(ops);
     return written;
+}
+
+/*
+ * Bytes a value takes in the values section of the vlenint format: its
+ * little endian length, a zero value takes no byte at all.
+ *
+ * Args:
+ *   value (uint32_t): Value to measure
+ *
+ * Returns:
+ *   uint8_t: Bytes of the value, 0~4
+ */
+static uint8_t bit2_value_length(uint32_t value) {
+    if (value == 0) {
+        return 0;
+    }
+    if (value <= 0xffu) {
+        return 1;
+    }
+    if (value <= 0xffffu) {
+        return 2;
+    }
+    if (value <= 0xffffffu) {
+        return 3;
+    }
+    return 4;
+}
+
+/*
+ * Append the vint count prefix of a payload, the bijective base 128 of
+ * encode_vint() of the Python reference of alasio/ext/algorithm/vint.py:
+ * the high digits come first, every high byte has its most significant bit
+ * set, the last byte holds the low 7 bits.
+ *
+ * Args:
+ *   out (uint8_t *): Output buffer, at least 10 bytes
+ *   value (int64_t): Non negative value to encode
+ *
+ * Returns:
+ *   int64_t: Number of bytes written
+ */
+static int64_t bit2_put_vint(uint8_t *out, int64_t value) {
+    uint8_t digits[10];
+    int32_t count = 0;
+    int32_t i;
+
+    digits[count++] = (uint8_t)(value % 128);
+    while (value > 127) {
+        value /= 128;
+        value -= 1;
+        digits[count++] = (uint8_t)(128 + value % 128);
+    }
+    /* the digits hold the least significant one first, the stream wants
+       the most significant one first */
+    for (i = 0; i < count; i++) {
+        out[i] = digits[count - 1 - i];
+    }
+    return count;
+}
+
+/*
+ * Encode values into the vlenint format: the vint count prefix, the byte
+ * lengths of the values packed with the bit2 format of this module (ext8, a
+ * length is 0~4), then the values themselves in little endian, one after
+ * another. It is the format of encode_vlenint() of the Python reference,
+ * read back by decode_vlenint(), which lives in the same package as the
+ * decoder of bit2.
+ *
+ * The vlenint encoding is the bit2 encoding of one more section, which is
+ * why it belongs to this library: the lengths are built here and their
+ * stream is written by bit2_encode_stream() itself.
+ *
+ * Args:
+ *   values (const uint32_t *): Values, 0 ~ 2^32 - 1, NULL when n is 0
+ *   n (int64_t): Number of values
+ *   out (uint8_t *): Output buffer
+ *   capacity (int64_t): Bytes available in out. 5 * n + 11 always hold the
+ *       payload: the count prefix needs at most 10 bytes, the bit2 stream
+ *       of the lengths never needs more than n + 1 bytes and the values
+ *       never more than 4 bytes each
+ *
+ * Returns:
+ *   int64_t: Number of bytes written, -1 on invalid arguments or when the
+ *       output does not fit in capacity
+ */
+BIT2_EXPORT int64_t bit2_encode_vlenint(
+        const uint32_t *values, int64_t n, uint8_t *out, int64_t capacity) {
+    uint8_t *lengths;
+    uint8_t *cursor;
+    int64_t prefix;
+    int64_t stream;
+    int64_t total;
+    int64_t i;
+
+    if (n < 0 || capacity < 0 || out == NULL || (n > 0 && values == NULL)) {
+        return -1;
+    }
+
+    /* one byte length per value, a zero value stays a zero of no bytes */
+    lengths = NULL;
+    total = 0;
+    if (n > 0) {
+        lengths = (uint8_t *)malloc((size_t)n);
+        if (lengths == NULL) {
+            return -1;
+        }
+        for (i = 0; i < n; i++) {
+            uint8_t length = bit2_value_length(values[i]);
+            lengths[i] = length;
+            total += length;
+        }
+    }
+
+    /* section 1: the count prefix, then the byte lengths packed by the bit2
+       encoder of this module with ext8 on, a length is 0~4 */
+    prefix = bit2_put_vint(out, n);
+    if (prefix + 1 > capacity) {
+        free(lengths);
+        return -1;
+    }
+    stream = bit2_encode_stream(
+            lengths, n, out + prefix, capacity - prefix, 1, BIT2_LOSSLESS_PRUNE);
+    free(lengths);
+    if (stream < 0) {
+        return -1;
+    }
+    if (prefix + stream + total > capacity) {
+        return -1;
+    }
+
+    /* section 2: the values in little endian, one after another */
+    cursor = out + prefix + stream;
+    for (i = 0; i < n; i++) {
+        uint32_t value = values[i];
+        uint8_t length = bit2_value_length(value);
+        uint8_t k;
+        for (k = 0; k < length; k++) {
+            *cursor++ = (uint8_t)(value & 0xffu);
+            value >>= 8;
+        }
+    }
+
+    return prefix + stream + total;
 }

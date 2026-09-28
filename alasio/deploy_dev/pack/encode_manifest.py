@@ -2,9 +2,9 @@ import hashlib
 from collections import deque
 
 from alasio.deploy.pack.pack_model import RefInfo
+from alasio.ext.algorithm.bit2coding.vlenint_encode_c import encode_vlenint
 from alasio.ext.algorithm.pathcomb import iter_path_comb
 from alasio.ext.algorithm.pathlen_coding import encode_prefix_comb, encode_suffix_comb
-from alasio.ext.algorithm.vlenint import encode_vlenint
 from alasio.ext.path.validate import validate_filepath
 
 
