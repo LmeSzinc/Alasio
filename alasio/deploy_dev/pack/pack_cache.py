@@ -77,6 +77,10 @@ class PackCache:
         content (dict[bytes, ContentCache]): {git blob sha1: ContentCache}
         patch (dict[tuple, PatchCache]): {(old content sha1, new content sha1):
             PatchCache}
+        extra (dict[tuple, FileInfo]): {(version, filepath): FileInfo} of the
+            generated extra files (the index pack, the commit history), they
+            are not files of the repo and have no git blob sha1, their raw /
+            lzma encoding is a pure function of (version, filepath)
         stat (dict[str, list[int]]): [hit, miss] of every table
 
     Usage:
@@ -87,11 +91,12 @@ class PackCache:
     """
 
     # names of the tables, the keys of stat
-    TABLES = ('content', 'patch')
+    TABLES = ('content', 'patch', 'extra')
 
     def __init__(self):
         self.content: "dict[bytes, ContentCache]" = {}
         self.patch: "dict[tuple, PatchCache]" = {}
+        self.extra: "dict[tuple, FileInfo]" = {}
         # [hit, miss] of every table
         self.stat: "dict[str, list]" = {name: [0, 0] for name in self.TABLES}
 
@@ -118,7 +123,8 @@ class PackCache:
             for info in (entry.index, entry.update):
                 if info is not None:
                     size += len(info.data)
-        return size + sum(len(entry.info.data) for entry in self.patch.values())
+        size += sum(len(entry.info.data) for entry in self.patch.values())
+        return size + sum(len(info.data) for info in self.extra.values())
 
     def report(self):
         """
@@ -136,6 +142,6 @@ class PackCache:
         ]
         return (
             f'PackCache: {", ".join(rows)}, '
-            f'entries={len(self.content)}/{len(self.patch)}, '
+            f'entries={len(self.content)}/{len(self.patch)}/{len(self.extra)}, '
             f'data={self.file_size() / 1048576:.1f}MB'
         )

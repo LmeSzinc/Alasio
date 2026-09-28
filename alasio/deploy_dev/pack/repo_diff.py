@@ -338,7 +338,7 @@ class RepoDiff:
         new_blob = self._read_new_blob(new_info)
         old_blob = self._read_old_blob(old_info)
         algo_name = PackFull._load_data(
-            info, new_blob, cache_info=self._cache_info(new_info, len(new_blob)),
+            info, new_blob, cache_info=self._cache_info(new_info, new_blob),
             zstd_source=old_blob or None)
         return algo_name == 'zstd_patch'
 
@@ -372,7 +372,7 @@ class RepoDiff:
             return
         new_blob = self._read_new_blob(new_info)
         PackFull._load_data(
-            info, new_blob, cache_info=self._cache_info(new_info, len(new_blob)))
+            info, new_blob, cache_info=self._cache_info(new_info, new_blob))
         if cache is not None and git_sha1 is not None:
             if entry is None:
                 entry = cache.content[git_sha1] = ContentCache()
@@ -381,24 +381,24 @@ class RepoDiff:
                 data_size=info.data_size, sha1=info.sha1, data=info.data)
             cache.mark('content', hit=False)
 
-    def _cache_info(self, new_info, size):
+    def _cache_info(self, new_info, data):
         """
-        Cached raw / lzma encoding of a content of the new version
+        Cached raw / lzma encoding of the new content of a record
 
-        Every version built with the shared cache stores the raw / lzma
-        encoding of each of its contents under the git blob sha1 of the file
-        (see PackFull._populate_data), so the encoding of the new content of a
-        record is reusable: _load_data takes it as the cache_info and skips the
-        lzma compression, and its size is the bar the patch is measured
-        against. The new side of every record is a file of the new version (the
-        update packs all update to the latest version), a generated extra file
-        has no git blob sha1 and gets None. See
-        doc/2026-09-27_update-pack-from-repo.md sections 7.14-1 and 7.17.
+        A file of the new version is keyed by its git blob sha1: every version
+        built with the shared cache stores the raw / lzma encoding of each of
+        its contents (see PackFull._populate_data), so the encoding of the new
+        content of a record is reusable — _load_data takes it as the cache_info
+        and skips the lzma compression, and its size is the bar the patch is
+        measured against. A generated extra file (the index pack, the commit
+        history) is not a file of the repo, it is keyed by (version, filepath)
+        instead, see PackFull._extra_cache_info. The new side of every record is
+        relative to the new version (the update packs all update to the latest
+        version). See doc/2026-09-27_update-pack-from-repo.md 7.14-1 and 7.17.
 
         Args:
             new_info (IdxInfo): Record of the content in the new version
-            size (int): Size of the content, an entry of another size is not
-                the content and is dropped
+            data (bytes): New content, a mismatch of the size drops the entry
 
         Returns:
             FileInfo | None: Cached encoding, None when there is none
@@ -408,12 +408,14 @@ class RepoDiff:
             return None
         entry = self.new.filelist.get(new_info.path)
         if entry is None:
-            return None
+            # a generated extra file, it has no git blob sha1
+            return PackFull._extra_cache_info(
+                cache, self.new.current_version, new_info.path, data)
         content = cache.content.get(bytes.fromhex(entry.sha1))
         if content is None:
             return None
         cache_info = content.index
-        if cache_info is None or cache_info.size != size:
+        if cache_info is None or cache_info.size != len(data):
             return None
         return cache_info
 

@@ -155,7 +155,10 @@ class PackUpdate(PackEncodeBase):
         if old_index == new_index:
             return None
         info = UpdateInfo(path='.pack/index.pack', edit=1, eol=2, mode=0)
-        algo_name = PackFull._load_data(info, new_index, zstd_source=old_index)
+        cache_info = PackFull._extra_cache_info(
+            self.cache, self.new.current_version, info.path, new_index)
+        algo_name = PackFull._load_data(
+            info, new_index, cache_info=cache_info, zstd_source=old_index)
         if algo_name == 'zstd_patch':
             # the patch needs the old index as the dictionary
             info.source_path = '.pack/index.pack'

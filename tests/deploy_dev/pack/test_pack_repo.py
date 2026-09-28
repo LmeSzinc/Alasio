@@ -11,6 +11,7 @@ import pytest
 
 from alasio.deploy.history.decode_history import HistoryObj, decode_history
 from alasio.deploy.pack.pack_model import FileInfo
+from alasio.deploy_dev.pack.pack_cache import PackCache
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.stage.gitreset import FileEntry
@@ -906,6 +907,50 @@ class TestLoadDataCandidates:
         info = FileInfo(path='a')
         PackFull._load_data(info, data, zstd_source=source)
         assert calls == [True, False]
+
+
+class TestExtraCacheInfo:
+    """
+    The generated extra files are keyed by (version, filepath) in the pack
+    cache: they are not files of the repo and have no git blob sha1, see
+    doc/2026-09-27_update-pack-from-repo.md section 7.21
+    """
+
+    def test_without_a_cache_it_returns_none(self):
+        """No cache, no entry, the caller compresses the content itself"""
+        assert PackFull._extra_cache_info(None, 'v', '.pack/history.pack', b'data') is None
+
+    def test_the_entry_is_stored_and_reused(self, monkeypatch):
+        """The first lookup compresses, the next ones take the entry"""
+        cache = PackCache()
+        content = b''.join(b'commit %d\n' % index for index in range(300))
+        calls = _count_compress_calls(monkeypatch, 'lzma_compress')
+        first = PackFull._extra_cache_info(cache, 'v', '.pack/history.pack', content)
+        assert len(calls) == 1
+        assert first.size == len(content)
+        second = PackFull._extra_cache_info(cache, 'v', '.pack/history.pack', content)
+        assert len(calls) == 1
+        assert second is first
+        # another version is another entry
+        PackFull._extra_cache_info(cache, 'v2', '.pack/history.pack', content)
+        assert len(calls) == 2
+        assert cache.stat['extra'] == [1, 2]
+
+    def test_extra_fileinfo_reuses_the_entry(self, monkeypatch):
+        """Two builds of the same commit share the extra encoding"""
+        from alasio.git.mock.mock_repo import MockGitRepo
+
+        repo = MockGitRepo()
+        repo.register_commit('c1', author_name='Author', message='')
+        cache = PackCache()
+        calls = _count_compress_calls(monkeypatch, 'lzma_compress')
+        first = PackFull(repo, 'c1', cache=cache).extra_fileinfo
+        count = len(calls)
+        assert count >= 1
+        second = PackFull(repo, 'c1', cache=cache).extra_fileinfo
+        assert len(calls) == count
+        assert set(first) == set(second)
+        assert all(first[path].data == second[path].data for path in first)
 
 
 class TestLoadDataPatchUsedReset:
