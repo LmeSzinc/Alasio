@@ -37,28 +37,34 @@ class GitReset(GitObjectManager):
         # it is reached through, and a tree shared by several directories is
         # visited once per directory, like git lists it. The root tree, or the
         # tree passed in, has no directory path.
+        cat = self.cat
         queue = deque([(sha1, '')])
 
-        # list of (filepath, EntryObject) for file entries
-        # Using a list instead of dict to correctly handle multiple files with the same sha1
-        # (e.g. multiple empty __init__.py files share the same sha1)
-        list_file = []
+        # key: file path, value: FileEntry
+        # The path of a file is unique and the records are needed in walk order,
+        # so the dict is built on the fly: the walk collects no intermediate
+        # list (an earlier version appended (path, entry) tuples and built the
+        # records in a second pass, which cost more than the walk itself). The
+        # key is the path, not the sha1, so the files that share a blob (e.g.
+        # the many empty __init__.py) keep one record each.
+        dict_entry = {}
 
         while 1:
             new_queue = deque()
+            append_dir = new_queue.append
             # iter tree objects
             for sha, prefix in queue:
-                obj = self.cat(sha)
+                obj = cat(sha)
                 typ = obj.type
                 # tree
                 if typ == 2:
-                    tree = obj.decoded
-                    for entry in tree:
+                    # hoisted out of the entry loop, one join per directory
+                    prefix_join = prefix + '/' if prefix else ''
+                    for entry in obj.decoded:
                         mode = entry.mode
-                        file_path = f'{prefix}/{entry.name}' if prefix else entry.name
                         # directory
                         if mode == b'40000':
-                            new_queue.append((entry.sha1, file_path))
+                            append_dir((entry.sha1, prefix_join + entry.name))
                         # submodule
                         elif mode == b'160000':
                             # a gitlink is a commit of another repo, it can't be
@@ -66,8 +72,10 @@ class GitReset(GitObjectManager):
                             continue
                         # file
                         else:
-                            # Record (filepath, entry) so each file is unique by position
-                            list_file.append((file_path, entry))
+                            file_path = prefix_join + entry.name
+                            # positional: the fields are sha1 / mode / path, this
+                            # is the hot loop of the walk
+                            dict_entry[file_path] = FileEntry(entry.sha1, mode, file_path)
                     continue
                 # commit
                 if typ == 1:
@@ -86,12 +94,6 @@ class GitReset(GitObjectManager):
             queue = new_queue
             if not queue:
                 break
-
-        # build FileEntry
-        # key: file path, value: FileEntry
-        dict_entry = {}
-        for file_path, entry in list_file:
-            dict_entry[file_path] = FileEntry(sha1=entry.sha1, mode=entry.mode, path=file_path)
 
         return dict_entry
 
