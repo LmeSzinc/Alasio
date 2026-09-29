@@ -43,6 +43,47 @@ def _busy_loop():
         raise
 
 
+def _echo(value):
+    """Return *value*, a job small enough to let the test control the timing."""
+    return value
+
+
+class _NotifySpy:
+    """Wraps ``ThreadPool.notify_pool`` to record how the callers of a full pool wait.
+
+    A caller that waits blocks in ``acquire(timeout=...)``: getting the lock
+    means a worker that finished a job offered its free slot. The timeout is
+    ignored on purpose -- a caller that the pool does not wake stays blocked,
+    so a pool that loses its wakeups leaves its callers behind and the test
+    fails on the join, instead of passing by accident because the 10ms poll of
+    the pool happened to serve them. ``queued`` is released once per call, so a
+    test can wait until its callers are inside the wait path.
+
+    Attributes:
+        acquires (list): One entry per blocking acquire of the wait path
+    """
+
+    def __init__(self, lock, queued):
+        self.lock = lock
+        self.queued = queued
+        self.acquires = []
+
+    def acquire(self, blocking=True, timeout=-1):
+        """Acquire the wrapped lock, counting the wait of the pool."""
+        if blocking:
+            self.acquires.append(None)
+            self.queued.release()
+        return self.lock.acquire(blocking)
+
+    def release(self):
+        """Release the wrapped lock."""
+        self.lock.release()
+
+    def locked(self):
+        """Whether the wrapped lock is held, a free slot is on offer when it is not."""
+        return self.lock.locked()
+
+
 # ===================================================================
 # remove_tb_frames
 # ===================================================================
@@ -623,24 +664,113 @@ class TestThreadPoolSizeAndIdle:
 
 
 class TestThreadPoolReleaseFullLock:
-    """Tests for the release_full_lock race-condition handling."""
+    """Tests for the offer a finished job makes to a caller that waits."""
 
-    def test_release_full_lock_double_release(self):
-        """release_full_lock handles the RuntimeError from double-release gracefully.
-
-        Both ``notify_worker`` and ``notify_pool`` start in the *locked* state
-        after ``ThreadPool.__init__``.  To exercise the RuntimeError catch we
-        unlock both first so that ``release_full_lock`` can acquire
-        ``notify_worker`` but then fails to release ``notify_pool`` because it
-        is already unlocked.
-        """
+    def test_release_offers_a_slot(self):
+        """A finished job leaves one slot on offer for a caller that waits."""
         pool = ThreadPool(pool_size=4)
-        # Unlock both so we can trigger the race-condition path
-        pool.notify_worker.release()
+        # notify_pool starts held: no slot is on offer
+        assert pool.notify_pool.locked()
+        pool.release_full_lock()
+        # the caller that waits next takes the slot and gets the lock
+        assert not pool.notify_pool.locked()
+        assert pool.notify_pool.acquire(blocking=False)
+        assert pool.notify_pool.locked()
+
+    def test_release_when_a_slot_is_on_offer(self):
+        """release_full_lock is free when the slot is still on offer, no raise."""
+        pool = ThreadPool(pool_size=4)
         pool.notify_pool.release()
-        # notify_worker is unlocked → acquire(blocking=False) succeeds
-        # notify_pool is unlocked → release() raises RuntimeError → caught
+        # notify_pool is unlocked -> a slot is on offer -> nothing to add
         pool.release_full_lock()  # should not raise
+        assert not pool.notify_pool.locked()
+        # one slot is on offer, not two
+        assert pool.notify_pool.acquire(blocking=False)
+        assert pool.notify_pool.locked()
+
+    def test_release_of_an_exiting_worker_offers_a_slot(self):
+        """A worker that exits the idle pool leaves a slot for a waiting caller."""
+        pool = ThreadPool(pool_size=4)
+        original_timeout = pool.IDLE_TIMEOUT
+        pool.IDLE_TIMEOUT = 0.05
+        try:
+            job = pool.start_thread_soon(_echo, 1)
+            assert job.get() == 1
+            # the finished job left a slot on offer, take it: none is on offer now
+            assert pool.notify_pool.acquire(blocking=False)
+            assert pool.notify_pool.locked()
+            # the idle worker exits, it must offer the slot it leaves behind
+            deadline = time.time() + 5
+            while pool.notify_pool.locked() and time.time() < deadline:
+                time.sleep(0.01)
+            assert not pool.notify_pool.locked(), 'the exiting worker did not offer its slot'
+        finally:
+            pool.IDLE_TIMEOUT = original_timeout
+
+
+class TestThreadPoolWaiterWakesUp:
+    """A caller that queued on a full pool is woken by a finished job."""
+
+    # Small enough that the pool is held by the blockers of the test
+    POOL_SIZE = 2
+
+    # More callers than workers: the pool hands its slots over one by one
+    WAITERS = 4
+
+    def test_queued_waiters_are_woken_not_polled(self):
+        """Every waiter is served by a freed worker, not by the 10ms poll.
+
+        The pool is held by blockers while the waiters queue, and the spy of
+        the test blocks a caller that nothing wakes, so every waiter has to be
+        woken by the job that frees its worker. The falling version of the
+        pool handed a slot over to its first waiter only, the rest of the
+        waiters were served by the 10ms poll of the pool and are left behind
+        here.
+        """
+        pool = ThreadPool(pool_size=self.POOL_SIZE)
+        spy = _NotifySpy(pool.notify_pool, threading.Semaphore(0))
+        pool.notify_pool = spy
+
+        started = threading.Semaphore(0)
+        release = threading.Event()
+
+        def blocker():
+            started.release()
+            release.wait()
+            return 'blocker'
+
+        blockers = [pool.start_thread_soon(blocker) for _ in range(self.POOL_SIZE)]
+        for _ in range(self.POOL_SIZE):
+            assert started.acquire(timeout=5), 'the blocker did not start'
+        assert not pool.idle_workers, 'the pool is not full'
+
+        results = []
+
+        def waiter(index):
+            results.append(pool.start_thread_soon(_echo, index).get())
+
+        clients = [
+            threading.Thread(target=waiter, args=(index,), daemon=True)
+            for index in range(self.WAITERS)
+        ]
+        for thread in clients:
+            thread.start()
+        # every waiter is inside the wait path, none of them is served yet
+        for _ in range(self.WAITERS):
+            assert spy.queued.acquire(timeout=5), 'a waiter never reached the pool'
+        assert not results, 'a waiter was served while the pool was held'
+
+        # the blockers finish, every free slot must wake one of the waiters
+        release.set()
+        for thread in clients:
+            thread.join(timeout=10)
+            assert not thread.is_alive(), (
+                f'a waiter was left behind: the job that freed its worker did not wake it'
+                f' ({len(results)} of {self.WAITERS} waiters were served)')
+        for job in blockers:
+            job.get()
+
+        assert sorted(results) == list(range(self.WAITERS))
 
 
 # ===================================================================
