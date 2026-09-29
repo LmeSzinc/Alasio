@@ -18,6 +18,8 @@ import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.server_file import ServerFile
+from alasio.deploy_dev.pack import pack_cache
+from alasio.deploy_dev.pack.pack_cache import PackCache
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.ext import env
 from alasio.ext.path import PathStr
@@ -47,6 +49,23 @@ def _posix_exec_bits(monkeypatch):
     env.POSIX.
     """
     monkeypatch.setattr(env, 'POSIX', True)
+
+
+@pytest.fixture
+def cache(monkeypatch):
+    """
+    Fresh pack cache for one test
+
+    The pack modules share the process wide pack_cache.PACK_CACHE, a test that
+    reads the counters, wants cold tables or starts a new run swaps it for a
+    cache of its own, see pack_cache.
+
+    Returns:
+        PackCache: Cache of this test
+    """
+    fresh = PackCache()
+    monkeypatch.setattr(pack_cache, 'PACK_CACHE', fresh)
+    return fresh
 
 
 # {path: (content, mode)}

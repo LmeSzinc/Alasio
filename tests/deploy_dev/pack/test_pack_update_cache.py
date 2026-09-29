@@ -2,11 +2,11 @@
 Tests for the update pack cache across the versions of a lookback window.
 
 The pack server packs one lookback version after another, from the newest to the
-oldest, all sharing one PackCache: a version is packed against the latest one,
-and the cache holds the latest version plus every newer version that was packed
-before it. The scenarios below are written by hand (small git repos built in
-this file, no pack of a real repository and no external library is involved) and
-pin the cases of the caching behavior:
+oldest, all through the shared PACK_CACHE: a version is packed against the latest
+one, and the cache holds the latest version plus every newer version that was
+packed before it. The scenarios below are written by hand (small git repos built
+in this file, no pack of a real repository and no external library is involved)
+and pin the cases of the caching behavior:
 
 1. a file added in the latest version is an A record of every lookback version:
    the newest lookback version encodes it once, the older versions reuse it
@@ -26,7 +26,6 @@ freshly filled slots and name them by their keys.
 """
 from hashlib import sha1
 
-from alasio.deploy_dev.pack.pack_cache import PackCache
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from tests.deploy_dev.pack.conftest import make_repo
@@ -62,7 +61,7 @@ def blob_sha1(repo, commit, path):
 
 def cache_slots(cache):
     """
-    {git blob sha1 hex: (index encoded, update encoded)} of the content table
+    {git blob sha1 hex: (index encoded, update encoded)} of the content tables
 
     Args:
         cache (PackCache): Cache of the run
@@ -71,41 +70,42 @@ def cache_slots(cache):
         dict[str, tuple[bool, bool]]:
     """
     return {
-        key: (entry.index is not None, entry.update is not None)
-        for key, entry in cache.content.items()
+        key: (key in cache.content_index, key in cache.content_update)
+        for key in sorted(set(cache.content_index) | set(cache.content_update))
     }
 
 
-def pack_window(versions):
+def pack_window(versions, cache):
     """
     Pack every lookback version of the repo to the latest one
 
     The versions are packed from the newest to the oldest, the order of the pack
-    server, and share one cache. The latest version is packed first, it fills
-    the cache the way the published full pack does.
+    server, they all read and fill the process wide PACK_CACHE (the cache
+    fixture of the test, fresh for it). The latest version is packed first, it
+    fills the cache the way the published full pack does.
 
     Args:
         versions (dict[str, dict[str, bytes]]): {commit: {path: content}} in
             time order, the oldest commit first, the last commit is the latest
             version
+        cache (PackCache): Cache of the run, the one the pack modules read
 
     Returns:
-        tuple: (repo, cache, list of row), the rows are in packing order (the
-            newest lookback version first), every row has the commit, the
-            misses of the version (the encodings it had to do) and the records
-            of its update pack
+        tuple: (repo, list of row), the rows are in packing order (the newest
+            lookback version first), every row has the commit, the misses of the
+            version (the encodings it had to do) and the records of its update
+            pack
     """
     commits = list(versions)
     repo = make_repo(versions)
-    cache = PackCache()
-    new_pack = PackFull(repo, commits[-1], cache=cache)
+    new_pack = PackFull(repo, commits[-1])
     new_pack.fileinfo
     new_pack.index_pack
     rows = []
     for commit in reversed(commits[:-1]):
         slots = cache_slots(cache)
         patch_keys = set(cache.patch)
-        update = PackUpdate(new_pack, commit, cache=cache)
+        update = PackUpdate(new_pack, commit)
         update.diff_info
         update.refinfo
         data = b''.join(update.iter_pack_data())
@@ -126,7 +126,7 @@ def pack_window(versions):
             'records': len(update.fileinfo),
             'data': data,
         })
-    return repo, cache, rows
+    return repo, rows
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -145,9 +145,9 @@ ADDED_VERSIONS = {
 class TestPackUpdateCacheAddedFile:
     """A file of the latest version is an A record of every lookback version."""
 
-    def test_added_file_encoded_once(self):
+    def test_added_file_encoded_once(self, cache):
         """The newest lookback version encodes the file, the older one reuses it."""
-        repo, cache, rows = pack_window(ADDED_VERSIONS)
+        repo, rows = pack_window(ADDED_VERSIONS, cache)
         newest, older = rows
         assert newest['commit'] == 'newest'
         # the A record of added.txt needs the update encoding, the files of the
@@ -160,15 +160,14 @@ class TestPackUpdateCacheAddedFile:
         assert older['content_miss'] == 0
         assert older['patch_miss'] == 1
 
-    def test_added_file_data_is_identical(self):
+    def test_added_file_data_is_identical(self, cache):
         """Both update packs carry the same encoded data of the added file."""
-        repo, _, _ = pack_window(ADDED_VERSIONS)
-        cache = PackCache()
-        new_pack = PackFull(repo, 'latest', cache=cache)
+        repo, _ = pack_window(ADDED_VERSIONS, cache)
+        new_pack = PackFull(repo, 'latest')
         new_pack.fileinfo
         records = []
         for commit in ('newest', 'older'):
-            update = PackUpdate(new_pack, commit, cache=cache)
+            update = PackUpdate(new_pack, commit)
             records.append(update.fileinfo['added.txt'])
         first, second = records
         assert first.edit == 0
@@ -200,9 +199,9 @@ AB_VERSIONS = {
 class TestPackUpdateCacheSharedRevision:
     """A content shared with the newer version reuses its encoding."""
 
-    def test_newest_version_encodes_a(self):
+    def test_newest_version_encodes_a(self, cache):
         """The newest version holds A's old revision only, it encodes it."""
-        repo, cache, rows = pack_window(AB_VERSIONS)
+        repo, rows = pack_window(AB_VERSIONS, cache)
         newest = rows[0]
         # the index pack of the version needs A1 (the latest holds A2) and B2 is
         # the content of the latest version itself
@@ -210,9 +209,9 @@ class TestPackUpdateCacheSharedRevision:
         assert newest['content_update'] == set()
         assert (content_sha1(A1), content_sha1(A2)) in cache.patch
 
-    def test_older_version_reuses_a_and_encodes_b(self):
+    def test_older_version_reuses_a_and_encodes_b(self, cache):
         """A's patch is served by the cache, only B needs a new one."""
-        repo, cache, rows = pack_window(AB_VERSIONS)
+        repo, rows = pack_window(AB_VERSIONS, cache)
         older = rows[1]
         pair_a = (content_sha1(A1), content_sha1(A2))
         pair_b = (content_sha1(B1), content_sha1(B2))
@@ -241,9 +240,9 @@ AB_TOGETHER_VERSIONS = {
 class TestPackUpdateCacheChangedTogether:
     """Files changed by the newer version are encoded again."""
 
-    def test_both_files_encoded_again(self):
+    def test_both_files_encoded_again(self, cache):
         """A and B both differ from the newer version, both miss the cache."""
-        repo, cache, rows = pack_window(AB_TOGETHER_VERSIONS)
+        repo, rows = pack_window(AB_TOGETHER_VERSIONS, cache)
         newest, older = rows
         pair_a = (content_sha1(A1), content_sha1(A2))
         pair_b = (content_sha1(B1), content_sha1(B2))
@@ -284,9 +283,9 @@ WINDOW_VERSIONS = {
 class TestPackUpdateCacheMissSize:
     """The misses of a version are the size of a single commit."""
 
-    def test_miss_stays_constant(self):
+    def test_miss_stays_constant(self, cache):
         """Every version misses one content and two patches, whatever the distance."""
-        repo, cache, rows = pack_window(WINDOW_VERSIONS)
+        repo, rows = pack_window(WINDOW_VERSIONS, cache)
         # every commit changed one file: the revision the version kept of it
         # (the index pack of the version needs it) and the patch to the latest
         # one, plus the generated history patch
@@ -299,9 +298,9 @@ class TestPackUpdateCacheMissSize:
             blob_sha1(repo, newest['commit'], f'f{WINDOW_COUNT}.txt')}
         assert newest['content_update'] == set()
 
-    def test_records_grow_with_distance(self):
+    def test_records_grow_with_distance(self, cache):
         """The update pack records do grow, the misses do not follow them."""
-        repo, cache, rows = pack_window(WINDOW_VERSIONS)
+        repo, rows = pack_window(WINDOW_VERSIONS, cache)
         records = [row['records'] for row in rows]
         # the newest lookback version differs from the latest by one file, the
         # oldest one by every file

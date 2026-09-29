@@ -13,17 +13,24 @@ tests pin the invariants of the change:
   of the whole flow is covered by test_unpack_update.py
 - the shared PackCache hits across the versions of a run: a content keeps its
   index encoding and its update encoding apart, both keyed by the git blob sha1
-  (PackCache.content), and an M / RM patch is keyed by the content pair
-  (PackCache.patch), see doc/2026-09-27_update-pack-from-repo.md
+  (PackCache.content_index / content_update), and an M / RM patch is keyed by the
+  content pair (PackCache.patch), see doc/2026-09-27_update-pack-from-repo.md
+- the entries are computed once per key even when two builds need them at the
+  same time: the computation runs under the per key lock of PackCache, see
+  PackCache._compute_entry
 """
+import threading
+
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
+from alasio.deploy.pack.pack_model import FileInfo
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
-from alasio.deploy_dev.pack.pack_cache import PackCache
+from alasio.deploy_dev.pack.pack_cache import PackCache, PatchCache
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.deploy_dev.pack.repo_diff import RepoDiff
+from alasio.ext.concurrent.threadpool import ThreadPool
 from tests.deploy_dev.pack.conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, make_repo
 
 
@@ -197,52 +204,36 @@ class TestPackFromRepo:
 #  cache hits
 # ════════════════════════════════════════════════════════════════════════════
 
-def make_cached_scenario_update():
-    """
-    Build the scenario update pack with a shared cache.
-
-    Returns:
-        bytes: Update pack data
-    """
-    cache = PackCache()
-    return make_update(
-        PackFull(SCENARIO_REPO, commit='new', cache=cache), 'old', cache=cache)
-
-
 class TestPackCacheHit:
     """The tables of the cache must be hit when the same data comes back."""
 
-    def test_content_index_hit(self):
+    def test_content_index_hit(self, cache):
         """The index encoding of a content is reused by the next version."""
-        cache = PackCache()
-        PackFull(WINDOW_REPO, commit='new', cache=cache).fileinfo
+        PackFull(WINDOW_REPO, commit='new').fileinfo
         hit, miss = cache.stat['content']
         assert miss > 0
         assert hit == 0
-        PackFull(WINDOW_REPO, commit='new', cache=cache).fileinfo
+        PackFull(WINDOW_REPO, commit='new').fileinfo
         assert cache.stat['content'][0] == miss
         assert cache.stat['content'][1] == miss
 
-    def test_content_keeps_two_encodings(self):
+    def test_content_keeps_two_encodings(self, cache):
         """One content keeps the index encoding and the update encoding apart."""
-        cache = PackCache()
-        pack = PackFull(WINDOW_REPO, commit='new', cache=cache)
+        pack = PackFull(WINDOW_REPO, commit='new')
         pack.fileinfo
-        entry = cache.content[pack.filelist['added.txt'].sha1]
-        assert entry.index is not None
-        assert entry.update is None
-        make_update(PackFull(WINDOW_REPO, commit='new', cache=cache), 'old1', cache=cache)
-        assert entry.update is not None
+        key = pack.filelist['added.txt'].sha1
+        index = cache.content_index[key]
+        assert cache.content_update.get(key) is None
+        make_update(PackFull(WINDOW_REPO, commit='new'), 'old1')
+        update = cache.content_update[key]
         # both encode the same content, the rules may pick another algorithm
-        assert entry.index.sha1 == entry.update.sha1
-        assert entry.index.size == entry.update.size
+        assert index.sha1 == update.sha1
+        assert index.size == update.size
 
-    def test_update_pack_hit(self):
+    def test_update_pack_hit(self, cache):
         """The second update pack of a run reuses the encodings of the first."""
-        cache = PackCache()
         for commit in ('old1', 'old2'):
-            update = make_update(
-                PackFull(WINDOW_REPO, commit='new', cache=cache), commit, cache=cache)
+            update = make_update(PackFull(WINDOW_REPO, commit='new'), commit)
             assert update == WINDOW_UPDATE[commit]
         # the added file of the latest version is an A record of both updates,
         # its update encoding is stored next to the index encoding of the file
@@ -250,23 +241,206 @@ class TestPackCacheHit:
         # the modified file has the same content pair in both updates
         assert cache.stat['patch'][0] > 0
 
-    def test_cache_does_not_change_update_pack(self):
-        """A cached run produces the same bytes as an uncached one."""
-        assert make_update(
-            PackFull(SCENARIO_REPO, commit='new'), 'old'
-        ) == make_cached_scenario_update()
+    def test_a_warm_cache_does_not_change_the_update_pack(self, cache):
+        """A build that takes the entries of the previous one gives the same bytes."""
+        cold = make_update(PackFull(SCENARIO_REPO, commit='new'), 'old')
+        warm = make_update(PackFull(SCENARIO_REPO, commit='new'), 'old')
+        assert cold == warm
 
-    def test_cache_does_not_change_index_pack(self):
+    def test_cache_does_not_change_index_pack(self, cache):
         """The index pack bytes do not depend on the cache."""
-        cache = PackCache()
-        pack = PackFull(SCENARIO_REPO, commit='new', cache=cache)
+        pack = PackFull(SCENARIO_REPO, commit='new')
         assert pack.index_pack == bytes(PackDecodeBase(SCENARIO_NEW_PACK).extract_index_pack())
 
-    def test_report(self):
+    def test_report(self, cache):
         """The cache renders its usage as one log line."""
-        cache = PackCache()
-        PackFull(WINDOW_REPO, commit='new', cache=cache).fileinfo
+        PackFull(WINDOW_REPO, commit='new').fileinfo
         report = cache.report()
         assert report.startswith('PackCache: content=0/')
         assert 'patch=0/0' in report
         assert 'data=' in report
+        # every computation is over, the lock table is empty again
+        assert 'locks=0' in report
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  the per key locks of the cache
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _count_lzma_calls(monkeypatch):
+    """
+    Count the lzma compressions of the pack encoder, from every thread
+
+    Args:
+        monkeypatch (MonkeyPatch): Pytest monkeypatch fixture
+
+    Returns:
+        list[str]: The contents compressed so far
+    """
+    import alasio.deploy_dev.pack.pack_repo as pack_repo
+
+    calls = []
+    original = pack_repo.lzma_compress
+
+    def counting(data):
+        calls.append(data)
+        return original(data)
+
+    monkeypatch.setattr(pack_repo, 'lzma_compress', counting)
+    return calls
+
+
+class TestPackCacheEntry:
+    """
+    The two entry methods of the cache: get reads an entry of a table without a
+    lock (None when the table has none), submit computes it in a task of
+    PACK_POOL under the lock of the key, once (see PackCache._compute_entry).
+    """
+
+    def test_get_reads_an_entry_and_counts_the_hit(self):
+        """get reads the table and counts a hit, a miss counts nothing"""
+        cache = PackCache()
+        assert cache.get(cache.content_index, 'k') is None
+        assert cache.stat['content'] == [0, 0]
+        assert 'locks=0' in cache.report()
+        value = FileInfo(path='a.txt', size=3)
+        cache.content_index['k'] = value
+        assert cache.get(cache.content_index, 'k') is value
+        assert cache.stat['content'] == [1, 0]
+        # the other encoding of the content is another table
+        assert cache.get(cache.content_update, 'k') is None
+        assert cache.stat['content'] == [1, 0]
+
+    def test_the_entry_is_computed_once(self):
+        """The threads that wait for the lock take the computed entry"""
+        cache = PackCache()
+        computed = []
+        start = threading.Barrier(4)
+        value = FileInfo(path='a.txt', size=3)
+        entries = []
+
+        def compute(entry):
+            # the callback runs for every task (it fills the record), only the
+            # task that found no stored entry computes
+            if entry is None:
+                computed.append(1)
+            return value
+
+        def worker(_):
+            start.wait(timeout=10)
+            entries.append(cache.submit(cache.content_index, 'k', compute).get())
+
+        # the threads are the builders (they submit, a worker of PACK_POOL
+        # computes), a task must not submit another one, see submit
+        threads = [threading.Thread(target=worker, args=(index,)) for index in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+            assert not thread.is_alive()
+        assert len(computed) == 1
+        assert all(entry is entries[0] for entry in entries)
+        assert cache.stat['content'] == [3, 1]
+
+    def test_the_callback_reuses_the_stored_entry(self):
+        """A task that waited for the lock hands the stored entry to the callback"""
+        cache = PackCache()
+        value = FileInfo(path='a.txt', size=3)
+        cache.content_index['k'] = value
+        seen = []
+
+        def compute(entry):
+            seen.append(entry)
+            return entry
+
+        assert cache.submit(cache.content_index, 'k', compute).get() is value
+        assert seen == [value]
+        # the entry came from the cache, nothing was computed
+        assert cache.stat['content'] == [1, 0]
+
+    def test_a_failed_computation_leaves_no_lock(self):
+        """A task that raised does not keep the lock of the key"""
+        cache = PackCache()
+
+        def broken(entry):
+            raise RuntimeError('computation failed')
+
+        with pytest.raises(RuntimeError, match='computation failed'):
+            cache.submit(cache.content_index, 'k', broken).get()
+        assert 'locks=0' in cache.report()
+        value = FileInfo(path='a.txt', size=3)
+        assert cache.submit(cache.content_index, 'k', lambda entry: value).get() is value
+        assert 'locks=0' in cache.report()
+        assert cache.stat['content'] == [0, 1]
+
+    def test_the_counters_of_the_threads_are_not_lost(self):
+        """Every lookup is counted, the counters are updated under a lock"""
+        cache = PackCache()
+        cache.content_index['k'] = FileInfo(path='a.txt', size=3)
+
+        def count(_):
+            for _ in range(250):
+                cache.get(cache.content_index, 'k')
+
+        ThreadPool(pool_size=4).thread_map(count, range(4))
+        assert cache.stat['content'] == [1000, 0]
+
+    def test_every_table_serves_its_entry(self):
+        """Every table of the cache is read with get and computed with submit"""
+        cache = PackCache()
+        assert cache.get(cache.rename, 'pair') is None
+        assert cache.submit(cache.rename, 'pair', lambda entry: 7).get() == 7
+        assert cache.rename['pair'] == 7
+        assert cache.get(cache.rename, 'pair') == 7
+        assert cache.stat['rename'] == [1, 1]
+        patch = PatchCache(FileInfo(path='a.txt'), True)
+        assert cache.submit(cache.patch, 'pair', lambda entry: patch).get() is patch
+        assert cache.get(cache.patch, 'pair') is patch
+        assert cache.stat['patch'] == [1, 1]
+        extra = cache.submit(cache.extra, ('v', 'f'), lambda entry: FileInfo(path='f')).get()
+        assert extra.path == 'f'
+        assert cache.get(cache.extra, ('v', 'f')) is extra
+        # the two encodings of a content are separate tables
+        update = cache.submit(cache.content_update, 'c', lambda entry: FileInfo(path='a.txt')).get()
+        assert cache.get(cache.content_update, 'c') is update
+        assert cache.get(cache.content_index, 'c') is None
+        index = cache.submit(cache.content_index, 'c', lambda entry: FileInfo(path='b.txt')).get()
+        assert index.path == 'b.txt'
+        assert cache.stat['content'] == [1, 2]
+        # the .gitattributes state tables are filled under the lock of the table
+        with cache.eol.lock:
+            cache.eol.setdefault('state', {})['a.txt'] = {'text': 'auto'}
+        assert cache.get(cache.eol, 'state') == {'a.txt': {'text': 'auto'}}
+
+
+class TestPackCacheConcurrency:
+    """Two versions built at the same time share the computations of the cache"""
+
+    @staticmethod
+    def _make_repo(count=6):
+        """
+        Repo of distinct contents, every file compresses with lzma
+
+        Args:
+            count (int): Number of files. Defaults to 6.
+
+        Returns:
+            MockGitRepo:
+        """
+        return make_repo({'c1': {
+            f'data/file_{index}.txt': b'line %d of the file\n' % index * 20
+            for index in range(count)
+        }})
+
+    def test_two_builds_compress_a_content_once(self, monkeypatch, cache):
+        """The two builds of a version compress every content once"""
+        repo = self._make_repo()
+        calls = _count_lzma_calls(monkeypatch)
+        records = ThreadPool(pool_size=2).thread_map(
+            lambda _: PackFull(repo, commit='c1').fileinfo, range(2))
+        # one encoding of every content plus one of the generated history file:
+        # the second build takes the entries the first one stored
+        assert len(calls) == 7
+        assert records[0] == records[1]
+        assert 'locks=0' in cache.report()

@@ -1,3 +1,4 @@
+from functools import partial
 from hashlib import sha1
 from typing import Union
 
@@ -6,8 +7,9 @@ from tqdm import tqdm
 from alasio.backport import removesuffix
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.history.encode_history import encode_commit_history
+from alasio.deploy_dev.pack import pack_cache
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
-from alasio.deploy_dev.pack.pack_cache import ContentCache
+from alasio.deploy_dev.pack.pack_pool import PACK_POOL
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_lzma import lzma_compress
 from alasio.ext.compress.algo_zstd import zstd_compress
@@ -40,14 +42,24 @@ def _dfs_path_key(path):
     return folder.replace('/', '\x00'), name
 
 
+def apply_encoding(info, cached):
+    """
+    Fill the encoding fields of a record from a cached encoding
+
+    Args:
+        info (FileInfo): Record to fill
+        cached (FileInfo): Cached encoding of the same content
+    """
+    info.algo, info.size, info.data_size, info.sha1, info.data = (
+        cached.algo, cached.size, cached.data_size, cached.sha1, cached.data)
+
+
 class PackFull(PackEncodeBase):
-    def __init__(self, repo: Union[GitRepo, MockGitRepo], commit='', cache=None, pack_version=None):
+    def __init__(self, repo: Union[GitRepo, MockGitRepo], commit='', pack_version=None):
         """
         Args:
             repo (GitRepo): GitRepo object
             commit (str): commit sha1 in str, the version of the pack
-            cache (PackCache, optional): Cache shared by the versions of a run,
-                None to encode everything without cache. Defaults to None.
             pack_version (bytes, optional): Pack format version to encode with.
                 Defaults to None, the current version of PackEncodeBase; an
                 already published pack must be rebuilt with the format version
@@ -55,7 +67,6 @@ class PackFull(PackEncodeBase):
         """
         super().__init__()
         self.repo = repo
-        self.cache = cache
         if pack_version is not None:
             self.pack_version = pack_version
         # the version of a full pack is the commit being packed
@@ -389,13 +400,26 @@ class PackFull(PackEncodeBase):
         PackFull.gitattributes_fingerprint in PackCache.eol: a version resolves
         the paths the earlier versions did not have and sniffs the contents they
         did not see, every other record is a dict lookup.
+
+        The resolution runs under the lock of the .gitattributes state
+        (PackCache.eol): two versions that share the state -- the lookback
+        versions of a run, almost always -- resolve the paths the first one of
+        them sees, the second one finds them in the table instead of running the
+        rule engine again.
         """
-        cache = self.cache
-        if cache is None:
-            # no cache, resolve in a table of this version
-            dict_eol = {}
-        else:
-            dict_eol = cache.eol.setdefault(self.gitattributes_fingerprint, {})
+        cache = pack_cache.PACK_CACHE
+        with cache.eol.lock:
+            self._resolve_eol(dict_fileinfo, cache.eol.setdefault(self.gitattributes_fingerprint, {}))
+
+    def _resolve_eol(self, dict_fileinfo, dict_eol):
+        """
+        Resolve the eol of the records that the table of the state does not cover
+
+        Args:
+            dict_fileinfo (dict[str, FileInfo]): Records to apply the eol to
+            dict_eol (dict): Table of the .gitattributes state, see _populate_eol
+        """
+        cache = pack_cache.PACK_CACHE
         # a D (deleted) record is not a file of the version, it keeps the
         # default eol of FileInfo
         files = [file for file in dict_fileinfo.values() if file.edit != 2]
@@ -449,8 +473,11 @@ class PackFull(PackEncodeBase):
                 # remember the eol of this content, see the lookup above
                 dict_eol[key] = file.eol
                 miss += 1
-        if cache is not None:
-            cache.mark_many('eol', hit, miss)
+        # the two counters are updated under the lock of the eol table only,
+        # the resolution of a state runs under it, see _populate_eol
+        cache.eol.hit += hit
+        cache.eol.miss += miss
+        return hit, miss
 
     def _populate_edit_copied(
             self,
@@ -538,14 +565,13 @@ class PackFull(PackEncodeBase):
         extra = {}
         for path, content in self.extra_content.items():
             info = FileInfo(path=path, eol=2)
-            cache_info = PackFull._extra_cache_info(
-                self.cache, self.current_version, path, content)
+            cache_info = PackFull._extra_cache_info(self.current_version, path, content)
             self._load_data(info, content, cache_info=cache_info, zstd=False)
             extra[path] = info
         return extra
 
     @staticmethod
-    def _extra_cache_info(cache, version, path, data):
+    def _extra_cache_info(version, path, data):
         """
         Cached raw / lzma encoding of a generated extra file
 
@@ -557,26 +583,71 @@ class PackFull(PackEncodeBase):
         the same version. See doc/2026-09-27_update-pack-from-repo.md 7.21.
 
         Args:
-            cache (PackCache | None): Cache of the run, None to skip it
             version (str): Version the extra file is generated for
             path (str): Filepath of the extra file
             data (bytes): Generated content, compressed on a cache miss
 
         Returns:
-            FileInfo | None: Cached raw / lzma encoding, None without a cache
+            FileInfo: Cached raw / lzma encoding of the file
         """
-        if cache is None:
-            return None
+        cache = pack_cache.PACK_CACHE
         key = (version, path)
-        entry = cache.extra.get(key)
+        entry = cache.get(cache.extra, key)
         if entry is None:
-            entry = FileInfo(path=path)
-            PackFull._load_data(entry, data, zstd=False)
-            cache.extra[key] = entry
-            cache.mark('extra', hit=False)
-        else:
-            cache.mark('extra', hit=True)
+            entry = cache._compute_entry(
+                cache.extra, key, partial(PackFull._encode_extra, path=path, data=data))
         return entry
+
+    @staticmethod
+    def _encode_extra(cache, path, data):
+        """
+        Encode a generated extra file with the raw / lzma rule of the cache
+
+        Args:
+            cache (FileInfo | None): Stored encoding of the file, None when the
+                cache has none
+            path (str): Filepath of the generated file
+            data (bytes): Generated content
+
+        Returns:
+            FileInfo: Encoding to keep
+        """
+        if cache is not None:
+            return cache
+        cache = FileInfo(path=path)
+        PackFull._load_data(cache, data, zstd=False)
+        return cache
+
+    @staticmethod
+    def _encode_index(cache, file, data):
+        """
+        Encode one content with the rules of the full pack, the entry of the cache
+
+        The callback of PackCache._compute_entry: cache is the stored encoding of
+        the content, None when the cache has none. It fills the record either
+        way and returns the encoding to keep.
+
+        The rules of the full pack are raw / lzma (load data, full pack use lzma
+        only to avoid producing complex list_algo), they are the same for every
+        version, so the encoding of a content is stored in the cache once and
+        every version that shares the content takes it.
+
+        Args:
+            cache (FileInfo | None): Stored encoding of the content, None when
+                the cache has none
+            file (FileInfo): Record to fill
+            data (bytes): Content to compress
+
+        Returns:
+            FileInfo: Encoding to keep
+        """
+        if cache is not None:
+            apply_encoding(file, cache)
+            return cache
+        PackFull._load_data(file, data, zstd=False)
+        return FileInfo(
+            path=file.path, algo=file.algo, size=file.size,
+            data_size=file.data_size, sha1=file.sha1, data=file.data)
 
     def _populate_data(self, dict_fileinfo: "dict[str, FileInfo]"):
         """
@@ -585,36 +656,40 @@ class PackFull(PackEncodeBase):
         The encoded data of a content is taken from the cache when the version
         being packed shares it with an already packed version, the git blob
         sha1 is the key so a hit costs no blob read at all. See PackCache.
+
+        The contents the cache does not hold are computed by tasks of PACK_POOL,
+        one for each (see _encode_index), all waited together with wait_jobs:
+        the blobs are read here, the git repo is not thread safe; a task fills
+        its own record and stores the encoding in the cache, so two builds that
+        need the very same content at the same time compress it once and a
+        version produces the very same pack as a single thread would. The pool
+        blocks this thread while every worker of it is busy, which is what
+        bounds the tasks in flight. See
+        doc/2026-09-27_update-pack-from-repo.md section 7.29.
         """
         repo = self.repo
-        cache = self.cache
-        # git blob sha1 (hex) -> (content sha1, size), used to fix up the C
-        # (copied) records, see the loop below
-        content_of_blob = {}
-        for file in tqdm(dict_fileinfo.values()):
-            # load new files only, A (added)
-            if file.edit == 0 and file.source_lookback == 0:
-                # the git blob sha1, as the hex str the git tree carries,
-                # _load_data() replaces file.sha1 with the content sha1
-                git_sha1 = file.sha1.hex()
-                entry = cache.content.get(git_sha1) if cache is not None else None
-                cached = entry.index if entry is not None else None
-                if cached is None:
-                    # load data, full pack use lzma only to avoid producing complex list_algo
-                    data = repo.cat(git_sha1).decoded
-                    self._load_data(file, data, zstd=False)
-                    if cache is not None:
-                        if entry is None:
-                            entry = cache.content[git_sha1] = ContentCache()
-                        entry.index = FileInfo(
-                            path=file.path, algo=file.algo, size=file.size,
-                            data_size=file.data_size, sha1=file.sha1, data=file.data)
-                        cache.mark('content', hit=False)
-                else:
-                    file.algo, file.size, file.data_size, file.sha1, file.data = (
-                        cached.algo, cached.size, cached.data_size, cached.sha1, cached.data)
-                    cache.mark('content', hit=True)
-                content_of_blob[git_sha1] = (file.sha1, file.size)
+        cache = pack_cache.PACK_CACHE
+        # git blob sha1 (hex) -> record holding the same content, used to fix up
+        # the C (copied) records: their size / sha1 are read back from it once
+        # every task is done, see the loop below
+        source_of_blob = {}
+        with PACK_POOL.wait_jobs() as pool:
+            for file in tqdm(dict_fileinfo.values()):
+                # load new files only, A (added)
+                if file.edit == 0 and file.source_lookback == 0:
+                    # the git blob sha1, as the hex str the git tree carries,
+                    # _load_data() replaces file.sha1 with the content sha1
+                    git_sha1 = file.sha1.hex()
+                    cached = cache.get(cache.content_index, git_sha1)
+                    if cached is not None:
+                        apply_encoding(file, cached)
+                    else:
+                        # the blob is read here, the task only compresses the bytes
+                        data = repo.cat(git_sha1).decoded
+                        pool.start_thread_soon(
+                            cache._compute_entry, cache.content_index, git_sha1,
+                            partial(PackFull._encode_index, file=file, data=data))
+                    source_of_blob[git_sha1] = file
 
         # A C (copied) record carries the info of its source when decoding and
         # no data at all, so the encoder never needed its own values. A PackFull
@@ -623,6 +698,6 @@ class PackFull(PackEncodeBase):
         # that copies compare equal to the file they duplicate.
         for file in dict_fileinfo.values():
             if file.edit == 0 and file.source_lookback:
-                source = content_of_blob.get(file.sha1.hex())
+                source = source_of_blob.get(file.sha1.hex())
                 if source is not None:
-                    file.sha1, file.size = source
+                    file.sha1, file.size = source.sha1, source.size

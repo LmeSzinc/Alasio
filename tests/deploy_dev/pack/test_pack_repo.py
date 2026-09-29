@@ -6,6 +6,7 @@ for a real on-disk git repository.
 """
 
 import random
+import threading
 from hashlib import sha1 as _sha1
 
 import pytest
@@ -577,20 +578,20 @@ def _count_apply_files(monkeypatch):
     return calls
 
 
-def _eol_records(repo, commit, cache=None):
+def _eol_records(repo, commit, cache):
     """
     Resolve the eol of the files of a version, without the data encoding.
 
     Args:
         repo (MockGitRepo): Repo to read
         commit (str): Version to resolve
-        cache (PackCache, optional): Cache shared by the versions
+        cache (PackCache): Cache of the test, the one the pack modules read
 
     Returns:
         tuple[PackFull, dict[str, FileInfo]]: The pack and its records, the
             records carry the resolved eol
     """
-    pack = PackFull(repo, commit=commit, cache=cache)
+    pack = PackFull(repo, commit=commit)
     records = {
         path: FileInfo(path=PathStr(path), sha1=bytes.fromhex(entry.sha1))
         for path, entry in pack.filelist.items()
@@ -602,7 +603,7 @@ def _eol_records(repo, commit, cache=None):
 class TestEolCache:
     """The versions of one .gitattributes state share the eol resolutions."""
 
-    def test_paths_resolved_once(self, monkeypatch):
+    def test_paths_resolved_once(self, monkeypatch, cache):
         """A version resolves the paths the earlier versions did not have."""
         mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo eol=crlf')
@@ -611,9 +612,8 @@ class TestEolCache:
         mock.register_file('c2', '.gitattributes', b'*.foo eol=crlf')
         mock.register_file('c2', 'a.foo', b'a')
         mock.register_file('c2', 'b.foo', b'b')
-        cache = PackCache()
-        first = PackFull(mock, commit='c1', cache=cache)
-        second = PackFull(mock, commit='c2', cache=cache)
+        first = PackFull(mock, commit='c1')
+        second = PackFull(mock, commit='c2')
         calls = _count_apply_files(monkeypatch)
         assert [info.eol for info in first.fileinfo.values() if info.path.endswith('.foo')] == [1]
         assert [info.eol for info in second.fileinfo.values() if info.path.endswith('.foo')] == [1, 1]
@@ -624,7 +624,7 @@ class TestEolCache:
         # version hits the attributes and the content of a.foo
         assert cache.stat['eol'] == [3, 5]
 
-    def test_a_changed_gitattributes_switches_the_table(self, monkeypatch):
+    def test_a_changed_gitattributes_switches_the_table(self, monkeypatch, cache):
         """Another .gitattributes state resolves the paths again."""
         mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo eol=lf')
@@ -632,9 +632,8 @@ class TestEolCache:
         mock.register_commit('c2', author_name='Author', message='')
         mock.register_file('c2', '.gitattributes', b'*.foo eol=crlf')
         mock.register_file('c2', 'a.foo', b'a')
-        cache = PackCache()
-        first = PackFull(mock, commit='c1', cache=cache)
-        second = PackFull(mock, commit='c2', cache=cache)
+        first = PackFull(mock, commit='c1')
+        second = PackFull(mock, commit='c2')
         calls = _count_apply_files(monkeypatch)
         assert first.fileinfo['a.foo'].eol == 0
         assert second.fileinfo['a.foo'].eol == 1
@@ -645,15 +644,14 @@ class TestEolCache:
         assert len(cache.eol) == 2
         assert cache.stat['eol'] == [0, 6]
 
-    def test_an_auto_path_follows_the_content(self, monkeypatch):
+    def test_an_auto_path_follows_the_content(self, monkeypatch, cache):
         """The table keeps the attributes, not the eol they decide."""
         mock = _make_repo()
         mock.register_file('c1', 'a.xxx', b'hello world')
         mock.register_commit('c2', author_name='Author', message='')
         mock.register_file('c2', 'a.xxx', b'hello\x00world')
-        cache = PackCache()
-        first = PackFull(mock, commit='c1', cache=cache)
-        second = PackFull(mock, commit='c2', cache=cache)
+        first = PackFull(mock, commit='c1')
+        second = PackFull(mock, commit='c2')
         calls = _count_apply_files(monkeypatch)
         assert first.fileinfo['a.xxx'].eol == 0
         # the attributes are cached, the content decides every version
@@ -662,13 +660,12 @@ class TestEolCache:
         # the attributes hit, the content is another one, so it misses
         assert cache.stat['eol'] == [1, 3]
 
-    def test_the_table_holds_both_kinds_of_keys(self):
+    def test_the_table_holds_both_kinds_of_keys(self, cache):
         """The attributes are keyed by the path, the auto eol by path + sha1."""
         mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo eol=crlf')
         mock.register_file('c1', 'a.foo', b'a')
         mock.register_file('c1', 'b.xxx', b'hello')
-        cache = PackCache()
         pack, records = _eol_records(mock, 'c1', cache)
         assert records['a.foo'].eol == 1
         assert records['b.xxx'].eol == 0
@@ -684,7 +681,7 @@ class TestEolCache:
         assert table[('b.xxx', sha1)] == 0
         assert len(table) == 5
 
-    def test_a_warm_version_does_not_parse_the_rules(self):
+    def test_a_warm_version_does_not_parse_the_rules(self, cache):
         """A version that resolves every path from the cache parses no rule."""
         mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo eol=crlf')
@@ -692,9 +689,8 @@ class TestEolCache:
         mock.register_commit('c2', author_name='Author', message='')
         mock.register_file('c2', '.gitattributes', b'*.foo eol=crlf')
         mock.register_file('c2', 'a.foo', b'a')
-        cache = PackCache()
-        first = PackFull(mock, commit='c1', cache=cache)
-        second = PackFull(mock, commit='c2', cache=cache)
+        first = PackFull(mock, commit='c1')
+        second = PackFull(mock, commit='c2')
         assert first.fileinfo['a.foo'].eol == 1
         assert second.fileinfo['a.foo'].eol == 1
         # the first version resolved its paths with the rule engine
@@ -704,8 +700,8 @@ class TestEolCache:
         assert second.gitattributes._registered_files == {'': b'*.foo eol=crlf'}
         assert second.gitattributes.patterns == []
 
-    def test_the_cache_does_not_change_the_records(self):
-        """A cached run resolves the eol of every record like a plain one."""
+    def test_a_warm_cache_does_not_change_the_records(self, cache):
+        """A build that resolves from the cache gives the same records."""
         mock = _make_repo()
         mock.register_file('c1', '.gitattributes', b'*.foo eol=crlf\n*.bar -text\n')
         mock.register_file('c1', 'sub/.gitattributes', b'*.foo eol=lf\n')
@@ -715,29 +711,27 @@ class TestEolCache:
         mock.register_file('c1', 'd.xxx', b'text')
         mock.register_file('c1', 'e.xxx', b'\x00binary')
         mock.register_file('c1', 'pkg/f.py', b'pass\n')
-        cache = PackCache()
-        cached = PackFull(mock, commit='c1', cache=cache).fileinfo
+        cold = PackFull(mock, commit='c1').fileinfo
         assert cache.stat['eol'][0] == 0
-        plain = PackFull(mock, commit='c1').fileinfo
-        assert {path: info.eol for path, info in cached.items()} == \
-            {path: info.eol for path, info in plain.items()}
-        assert cached['a.foo'].eol == 1
-        assert cached['sub/b.foo'].eol == 0
-        assert cached['c.bar'].eol == 2
-        assert cached['d.xxx'].eol == 0
-        assert cached['e.xxx'].eol == 2
-        assert cached['pkg/f.py'].eol == 0
+        warm = PackFull(mock, commit='c1').fileinfo
+        assert {path: info.eol for path, info in cold.items()} == \
+            {path: info.eol for path, info in warm.items()}
+        assert warm['a.foo'].eol == 1
+        assert warm['sub/b.foo'].eol == 0
+        assert warm['c.bar'].eol == 2
+        assert warm['d.xxx'].eol == 0
+        assert warm['e.xxx'].eol == 2
+        assert warm['pkg/f.py'].eol == 0
         # the generated D marker of pkg/ keeps the default eol
-        assert cached['pkg/__init__.py'].edit == 2
-        assert cached['pkg/__init__.py'].eol == 0
+        assert warm['pkg/__init__.py'].edit == 2
+        assert warm['pkg/__init__.py'].eol == 0
 
-    def test_an_unchanged_auto_content_is_not_read_again(self, monkeypatch):
+    def test_an_unchanged_auto_content_is_not_read_again(self, monkeypatch, cache):
         """The eol of a text="auto" path is reused while the content is."""
         mock = _make_repo()
         mock.register_file('c1', 'a.xxx', b'hello world')
         mock.register_commit('c2', author_name='Author', message='')
         mock.register_file('c2', 'a.xxx', b'hello world')
-        cache = PackCache()
         _, first = _eol_records(mock, 'c1', cache)
         assert first['a.xxx'].eol == 0
         reads = []
@@ -749,13 +743,12 @@ class TestEolCache:
         assert reads == []
         assert cache.stat['eol'] == [2, 2]
 
-    def test_a_changed_auto_content_is_resolved_again(self, monkeypatch):
+    def test_a_changed_auto_content_is_resolved_again(self, monkeypatch, cache):
         """Another content of a text="auto" path is sniffed and kept."""
         mock = _make_repo()
         mock.register_file('c1', 'a.xxx', b'hello world')
         mock.register_commit('c2', author_name='Author', message='')
         mock.register_file('c2', 'a.xxx', b'hello\x00world')
-        cache = PackCache()
         _, first = _eol_records(mock, 'c1', cache)
         assert first['a.xxx'].eol == 0
         new_sha1 = PackFull(mock, commit='c2').filelist['a.xxx'].sha1
@@ -1286,38 +1279,32 @@ class TestExtraCacheInfo:
     doc/2026-09-27_update-pack-from-repo.md section 7.21
     """
 
-    def test_without_a_cache_it_returns_none(self):
-        """No cache, no entry, the caller compresses the content itself"""
-        assert PackFull._extra_cache_info(None, 'v', '.pack/history.pack', b'data') is None
-
-    def test_the_entry_is_stored_and_reused(self, monkeypatch):
+    def test_the_entry_is_stored_and_reused(self, monkeypatch, cache):
         """The first lookup compresses, the next ones take the entry"""
-        cache = PackCache()
         content = b''.join(b'commit %d\n' % index for index in range(300))
         calls = _count_compress_calls(monkeypatch, 'lzma_compress')
-        first = PackFull._extra_cache_info(cache, 'v', '.pack/history.pack', content)
+        first = PackFull._extra_cache_info('v', '.pack/history.pack', content)
         assert len(calls) == 1
         assert first.size == len(content)
-        second = PackFull._extra_cache_info(cache, 'v', '.pack/history.pack', content)
+        second = PackFull._extra_cache_info('v', '.pack/history.pack', content)
         assert len(calls) == 1
         assert second is first
         # another version is another entry
-        PackFull._extra_cache_info(cache, 'v2', '.pack/history.pack', content)
+        PackFull._extra_cache_info('v2', '.pack/history.pack', content)
         assert len(calls) == 2
         assert cache.stat['extra'] == [1, 2]
 
-    def test_extra_fileinfo_reuses_the_entry(self, monkeypatch):
+    def test_extra_fileinfo_reuses_the_entry(self, monkeypatch, cache):
         """Two builds of the same commit share the extra encoding"""
         from alasio.git.mock.mock_repo import MockGitRepo
 
         repo = MockGitRepo()
         repo.register_commit('c1', author_name='Author', message='')
-        cache = PackCache()
         calls = _count_compress_calls(monkeypatch, 'lzma_compress')
-        first = PackFull(repo, 'c1', cache=cache).extra_fileinfo
+        first = PackFull(repo, 'c1').extra_fileinfo
         count = len(calls)
         assert count >= 1
-        second = PackFull(repo, 'c1', cache=cache).extra_fileinfo
+        second = PackFull(repo, 'c1').extra_fileinfo
         assert len(calls) == count
         assert set(first) == set(second)
         assert all(first[path].data == second[path].data for path in first)
@@ -1367,3 +1354,172 @@ class TestLoadDataPatchUsedReset:
         assert info.algo == 2
         assert info.data_size == 300
         assert info.data == b'x' * 300
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  _populate_data: the data batch of a version runs on PACK_POOL
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class _CountingPool:
+    """
+    A thread pool that counts the tasks submitted to it, for the tests
+
+    Only the API that PackFull._populate_data uses is provided, every task runs
+    on the pool that is wrapped.
+
+    Args:
+        pool (ThreadPool): Pool the tasks run on
+    """
+
+    def __init__(self, pool):
+        self.pool = pool
+        self.jobs = 0
+
+    def start_thread_soon(self, func, *args, **kwargs):
+        """
+        Count a task, then hand it to the wrapped pool
+
+        Returns:
+            Job: The task of the wrapped pool
+        """
+        self.jobs += 1
+        return self.pool.start_thread_soon(func, *args, **kwargs)
+
+    def wait_jobs(self):
+        """
+        See ThreadPool.wait_jobs
+
+        Returns:
+            WaitJobsWrapper: Wrapper of the wrapped pool
+        """
+        wrapper = self.pool.wait_jobs()
+        wrapper.pool = self
+        return wrapper
+
+
+class TestPopulateDataPool:
+    """
+    The contents the cache does not hold are compressed on the pack thread
+    pool, one job for each; the job stores the encoding under the per content
+    lock of the cache, so two builds that need the same content compress it
+    once, see doc/2026-09-27_update-pack-from-repo.md 7.29 and 7.32
+    """
+
+    @staticmethod
+    def _make_multi_file_repo(count=24):
+        """
+        Repo of compressible files, a batch wide enough for the pool
+
+        Args:
+            count (int): Number of files. Defaults to 24.
+
+        Returns:
+            MockGitRepo:
+        """
+        mock = _make_repo()
+        for index in range(count):
+            content = b''.join(
+                b'def handler_%d_%d():\n    return %d\n' % (index, line, line)
+                for line in range(20 + index)
+            )
+            mock.register_file(COMMIT, f'data/file_{index:02d}.py', content)
+        return mock
+
+    def test_the_compression_runs_on_the_pool(self, monkeypatch, cache):
+        """The contents of the version are compressed on the pool"""
+        import alasio.deploy_dev.pack.pack_repo as pack_repo
+
+        repo = self._make_multi_file_repo()
+        count = len(repo.list_files(COMMIT))
+        threads = []
+        original = pack_repo.lzma_compress
+
+        def counting(data):
+            threads.append(threading.current_thread())
+            return original(data)
+
+        monkeypatch.setattr(pack_repo, 'lzma_compress', counting)
+        PackFull(repo, commit=COMMIT).fileinfo
+        caller = threading.current_thread()
+        # one job for each file of the version, the generated extra file of the
+        # pack (.pack/history.pack) is encoded by the calling thread
+        assert len([t for t in threads if t is not caller]) == count
+        assert len([t for t in threads if t is caller]) == 1
+
+    def test_a_warm_cache_runs_no_job(self, monkeypatch, cache):
+        """A version the cache covers is built without a single task"""
+        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        from alasio.ext.concurrent.threadpool import ThreadPool
+
+        repo = self._make_multi_file_repo()
+        pool = _CountingPool(ThreadPool(pool_size=2))
+        monkeypatch.setattr(pack_repo, 'PACK_POOL', pool)
+        PackFull(repo, commit=COMMIT).fileinfo
+        assert pool.jobs > 0
+        jobs = pool.jobs
+        PackFull(repo, commit=COMMIT).fileinfo
+        assert pool.jobs == jobs
+
+    def test_the_pool_size_does_not_change_the_pack(self, monkeypatch):
+        """One worker or many, the records and the pack bytes are the same"""
+        import alasio.deploy_dev.pack.pack_cache as pack_cache
+        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        from alasio.ext.concurrent.threadpool import ThreadPool
+
+        repo = self._make_multi_file_repo()
+
+        def build():
+            # every build starts from a cold cache of its own: the jobs of the
+            # second one run with another pool width
+            monkeypatch.setattr(pack_cache, 'PACK_CACHE', PackCache())
+            pack = PackFull(repo, commit=COMMIT)
+            return b''.join(pack.iter_pack_data()), pack.idx_info
+
+        wide_pack, wide_records = build()
+        pool = ThreadPool(pool_size=1)
+        monkeypatch.setattr(pack_repo, 'PACK_POOL', pool)
+        monkeypatch.setattr(pack_cache, 'PACK_POOL', pool)
+        narrow_pack, narrow_records = build()
+        assert narrow_pack == wide_pack
+        assert narrow_records == wide_records
+
+    def test_a_compression_error_fails_the_build(self, monkeypatch, cache):
+        """An error of a job is raised by the pack build that submitted it"""
+        import alasio.deploy_dev.pack.pack_repo as pack_repo
+
+        def broken(data):
+            raise RuntimeError('compression failed')
+
+        monkeypatch.setattr(pack_repo, 'lzma_compress', broken)
+        with pytest.raises(RuntimeError, match='compression failed'):
+            PackFull(self._make_multi_file_repo(), commit=COMMIT).fileinfo
+
+    def test_the_empty_content_is_written_back_once(self, cache):
+        """Two empty files share one cache entry, the second one is a hit"""
+        mock = _make_repo()
+        mock.register_file(COMMIT, 'a/empty.txt', b'')
+        mock.register_file(COMMIT, 'b/empty.txt', b'')
+        records = PackFull(mock, commit=COMMIT).fileinfo
+        for path in ('a/empty.txt', 'b/empty.txt'):
+            assert records[path].size == 0
+            assert records[path].sha1 == b''
+        # the first record wrote the entry back, the record that follows takes
+        # it like a serial build does: the only contents that repeat inside one
+        # version are the empty files, _populate_edit_copied makes the others C
+        # (copied) records
+        assert cache.stat['content'] == [1, 1]
+
+    def test_two_builds_resolve_the_eol_once(self, monkeypatch, cache):
+        """The versions that share the .gitattributes state run the rule engine once"""
+        from alasio.ext.concurrent.threadpool import ThreadPool
+
+        repo = self._make_multi_file_repo()
+        calls = _count_apply_files(monkeypatch)
+        records = ThreadPool(pool_size=2).thread_map(
+            lambda _: PackFull(repo, commit=COMMIT).fileinfo, range(2))
+        # the second build finds every path in the table of the state, the
+        # resolution runs under the lock of the state, see _populate_eol
+        assert len(calls) == 1
+        assert records[0] == records[1]
+        assert 'locks=0' in cache.report()

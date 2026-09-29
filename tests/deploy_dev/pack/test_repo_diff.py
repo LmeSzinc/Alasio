@@ -9,7 +9,6 @@ the same records the pack server builds.
 import pytest
 
 from alasio.deploy.pack.pack_model import RefInfo
-from alasio.deploy_dev.pack.pack_cache import PackCache
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.deploy_dev.pack.repo_diff import RepoDiff, UpdateInfo
 from tests.deploy_dev.pack.conftest import (
@@ -453,11 +452,10 @@ class TestRenameScoreCache:
         """
         return {'b.txt': damage(b'def func(x):\n    return x * 2\n' * 60, 0.1, seed=4)}
 
-    def test_the_second_run_takes_the_cached_score(self, monkeypatch):
+    def test_the_second_run_takes_the_cached_score(self, monkeypatch, cache):
         """The same pair is scored once, the next diff takes the entry"""
         import alasio.deploy_dev.pack.repo_diff as repo_diff
 
-        cache = PackCache()
         calls = []
         original = repo_diff.zstd_compress
 
@@ -466,24 +464,23 @@ class TestRenameScoreCache:
             return original(*args, **kwargs)
 
         monkeypatch.setattr(repo_diff, 'zstd_compress', counting)
-        first = make_diff(self.OLD, self._new(), cache=cache).diff_info
+        first = make_diff(self.OLD, self._new()).diff_info
         assert calls == [True]
-        second = make_diff(self.OLD, self._new(), cache=cache).diff_info
+        second = make_diff(self.OLD, self._new()).diff_info
         # no compression at all, the score comes from the cache
         assert calls == [True]
         assert real_records(first) == real_records(second)
         assert cache.stat['rename'] == [1, 1]
 
-    def test_the_score_is_the_uncached_one(self, monkeypatch):
-        """The cached run produces the same records as the uncached run"""
-        cache = PackCache()
-        cached = real_records(make_diff(self.OLD, self._new(), cache=cache).diff_info)
-        plain = real_records(make_diff(self.OLD, self._new()).diff_info)
-        assert cached.keys() == plain.keys()
-        for path in cached:
-            assert cached[path].edit == plain[path].edit
-            assert cached[path].source_path == plain[path].source_path
-            assert cached[path].data == plain[path].data
+    def test_a_warm_run_gives_the_same_records(self, cache):
+        """The run that takes the cached score gives the same records"""
+        cold = real_records(make_diff(self.OLD, self._new()).diff_info)
+        warm = real_records(make_diff(self.OLD, self._new()).diff_info)
+        assert warm.keys() == cold.keys()
+        for path in warm:
+            assert warm[path].edit == cold[path].edit
+            assert warm[path].source_path == cold[path].source_path
+            assert warm[path].data == cold[path].data
 
 
 class TestRepoDiffValidation:

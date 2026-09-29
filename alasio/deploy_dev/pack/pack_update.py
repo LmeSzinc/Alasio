@@ -61,7 +61,6 @@ class PackUpdate(PackEncodeBase):
             new,
             old_commit,
             old_pack_version=PackEncodeBase.PACK_VERSION,
-            cache=None,
     ):
         """
         Args:
@@ -74,10 +73,6 @@ class PackUpdate(PackEncodeBase):
                 old index pack and the old extra files, so the update pack can
                 cross a pack format change. Defaults to the current version of
                 PackEncodeBase, b'\\x00'
-            cache (PackCache, optional): Cache shared by the versions of a
-                run, it holds the encodings of the A records and of the
-                M / RM patches across versions. Defaults to None, the cache
-                of the new pack is used
 
         Raises:
             ValueError: If new is not a PackFull of a full version
@@ -92,22 +87,16 @@ class PackUpdate(PackEncodeBase):
                 '(update pack)'
             )
         self.new = new
-        self.cache = cache if cache is not None else new.cache
         # the old version is rebuilt from the git repo: its index pack is the
         # index the clients hold and its extra files are the patch sources
         encoder = self.OLD_ENCODERS.get(old_pack_version, PackFull)
-        self.old = encoder(
-            new.repo, old_commit, cache=self.cache, pack_version=old_pack_version)
+        self.old = encoder(new.repo, old_commit, pack_version=old_pack_version)
         # the update pack updates from the old version to the current one, and
         # is encoded in the format of the new pack
         self.pack_version = new.pack_version
         self.current_version = new.current_version
         self.old_version = self.old.current_version
-        self._diff = RepoDiff(
-            self.old,
-            new,
-            cache=self.cache,
-        )
+        self._diff = RepoDiff(self.old, new)
 
     # ════════════════════════════════════════════════════════════════════════
     #  diff
@@ -156,7 +145,7 @@ class PackUpdate(PackEncodeBase):
             return None
         info = UpdateInfo(path='.pack/index.pack', edit=1, eol=2, mode=0)
         cache_info = PackFull._extra_cache_info(
-            self.cache, self.new.current_version, info.path, new_index)
+            self.new.current_version, info.path, new_index)
         algo_name = PackFull._load_data(
             info, new_index, cache_info=cache_info, zstd_source=old_index)
         if algo_name == 'zstd_patch':

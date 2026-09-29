@@ -29,8 +29,9 @@ normalized for text files), the form the packs store and the form a client
 has in its working tree.
 """
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
-from alasio.deploy_dev.pack.pack_cache import ContentCache, PatchCache
-from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key
+from alasio.deploy_dev.pack import pack_cache
+from alasio.deploy_dev.pack.pack_cache import PatchCache
+from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key, apply_encoding
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_zstd import zstd_compress
 
@@ -60,9 +61,10 @@ class RepoDiff:
     new version (PackFull.repo), the output is diff_info ({path: UpdateInfo})
     and refinfo (the old file records referenced by the diff).
 
-    A PackCache can be passed to reuse the encodings across the versions of a
-    run: the A records are keyed by content, the M / RM patches by content
-    pair, see PackCache and doc/2026-09-27_update-pack-from-repo.md.
+    The encodings are reused across the versions of a run through the module
+    level cache, PACK_CACHE: the A records are keyed by content, the M / RM
+    patches by content pair, see PackCache and
+    doc/2026-09-27_update-pack-from-repo.md.
     """
 
     # Rename detection policy of the pack format, like PackFull.ZSTD_LEVEL: it
@@ -80,20 +82,17 @@ class RepoDiff:
     # Zstd level of the rename similarity score, a fast level is enough.
     SIMILARITY_LEVEL = 3
 
-    def __init__(self, old, new, cache=None):
+    def __init__(self, old, new):
         """
         Args:
             old (PackFull): Old version, built from the git repo
             new (PackFull): New version, built from the git repo
-            cache (PackCache, optional): Cache shared by the versions of a
-                run, None to encode everything without cache. Defaults to None.
 
         Raises:
             ValueError: If the new version carries no git repo
         """
         self.old = old
         self.new = new
-        self.cache = cache
         # the versions are of the same git repo and the contents are read from
         # it, the repo caches the objects it read so no extra cache is needed
         self.repo = getattr(new, 'repo', None)
@@ -306,21 +305,17 @@ class RepoDiff:
             # the encoding is the one of an added file
             self._load_added(info, new_info)
             return False
-        cache = self.cache
+        cache = pack_cache.PACK_CACHE
         key = (old_info.sha1, new_info.sha1)
-        cached = cache.patch.get(key) if cache is not None else None
+        cached = cache.get(cache.patch, key)
         if cached is not None:
-            info.algo, info.size, info.data_size, info.sha1, info.data = (
-                cached.info.algo, cached.info.size, cached.info.data_size,
-                cached.info.sha1, cached.info.data)
-            cache.mark('patch', hit=True)
+            apply_encoding(info, cached.info)
             return cached.patch_used
         patch_used = self._load_modified_data(info, old_info, new_info)
-        if cache is not None:
-            cache.patch[key] = PatchCache(FileInfo(
-                path=info.path, algo=info.algo, size=info.size,
-                data_size=info.data_size, sha1=info.sha1, data=info.data), patch_used)
-            cache.mark('patch', hit=False)
+        cache.patch[key] = PatchCache(FileInfo(
+            path=info.path, algo=info.algo, size=info.size,
+            data_size=info.data_size, sha1=info.sha1, data=info.data), patch_used)
+        cache.patch.miss += 1
         return patch_used
 
     def _load_modified_data(self, info, old_info, new_info):
@@ -349,37 +344,31 @@ class RepoDiff:
         The same file is an added record of every version of the lookback
         window that does not have it yet, so the encoding is cached by the git
         blob sha1 of the file, the same key the version rebuilds use. See
-        PackCache.content.
+        PackCache.content_update.
 
         Args:
             info (UpdateInfo): Record to load, edit must be A
             new_info (IdxInfo): New record
         """
-        cache = self.cache
+        cache = pack_cache.PACK_CACHE
         git_sha1 = None
-        entry = None
-        if cache is not None:
-            file_entry = self.new.filelist.get(new_info.path)
-            if file_entry is not None:
-                # the cache is keyed by the git blob sha1 hex, like PackFull does
-                git_sha1 = file_entry.sha1
-                entry = cache.content.get(git_sha1)
-        cached = entry.update if entry is not None else None
+        cached = None
+        file_entry = self.new.filelist.get(new_info.path)
+        if file_entry is not None:
+            # the cache is keyed by the git blob sha1 hex, like PackFull does
+            git_sha1 = file_entry.sha1
+            cached = cache.get(cache.content_update, git_sha1)
         if cached is not None:
-            info.algo, info.size, info.data_size, info.sha1, info.data = (
-                cached.algo, cached.size, cached.data_size, cached.sha1, cached.data)
-            cache.mark('content', hit=True)
+            apply_encoding(info, cached)
             return
         new_blob = self._read_new_blob(new_info)
         PackFull._load_data(
             info, new_blob, cache_info=self._cache_info(new_info, new_blob))
-        if cache is not None and git_sha1 is not None:
-            if entry is None:
-                entry = cache.content[git_sha1] = ContentCache()
-            entry.update = FileInfo(
+        if git_sha1 is not None:
+            cache.content_update[git_sha1] = FileInfo(
                 path=info.path, algo=info.algo, size=info.size,
                 data_size=info.data_size, sha1=info.sha1, data=info.data)
-            cache.mark('content', hit=False)
+            cache.content_update.miss += 1
 
     def _cache_info(self, new_info, data):
         """
@@ -403,18 +392,13 @@ class RepoDiff:
         Returns:
             FileInfo | None: Cached encoding, None when there is none
         """
-        cache = self.cache
-        if cache is None:
-            return None
+        cache = pack_cache.PACK_CACHE
         entry = self.new.filelist.get(new_info.path)
         if entry is None:
             # a generated extra file, it has no git blob sha1
             return PackFull._extra_cache_info(
-                cache, self.new.current_version, new_info.path, data)
-        content = cache.content.get(entry.sha1)
-        if content is None:
-            return None
-        cache_info = content.index
+                self.new.current_version, new_info.path, data)
+        cache_info = cache.get(cache.content_index, entry.sha1)
         if cache_info is None or cache_info.size != len(data):
             return None
         return cache_info
@@ -550,19 +534,15 @@ class RepoDiff:
         Returns:
             float: Similarity in [0, 1], see similarity
         """
-        cache = self.cache
-        if cache is None:
-            return self.similarity(self._read_old_blob(old_info), self._read_new_blob(new_info))
+        cache = pack_cache.PACK_CACHE
         key = (self.old.filelist[old_info.path].sha1, self.new.filelist[new_info.path].sha1)
-        length = cache.rename.get(key)
+        length = cache.get(cache.rename, key)
         if length is None:
             length = len(zstd_compress(
                 self._read_new_blob(new_info), source=self._read_old_blob(old_info),
                 level=RepoDiff.SIMILARITY_LEVEL))
             cache.rename[key] = length
-            cache.mark('rename', hit=False)
-        else:
-            cache.mark('rename', hit=True)
+            cache.rename.miss += 1
         return 1 - length / new_info.size
 
     @staticmethod
