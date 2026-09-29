@@ -100,7 +100,22 @@ class GitRef(GitRepoBase):
 
     @cached_property
     def ref_all(self):
-        out = self._packed_refs
+        """
+        Get all refs of the repository, the packed refs merged with the loose
+        refs
+
+        A loose ref overrides the packed ref of the same name, a symbolic ref is
+        solved to the sha1 it points to, an unsolved one is dropped with an
+        error log.
+
+        Returns:
+            dict[str, str]: ref, sha1
+                for tags, sha1 can be commit sha1 or tag sha1
+        """
+        # a copy: the loose refs are merged into the result, the cache of
+        # _packed_refs must keep packed refs only (ref_get falls back to it),
+        # and a caller gets a dict it can modify without changing that cache
+        out = dict(self._packed_refs)
         root = joinnormpath(self.path, '.git')
 
         # iter loose refs

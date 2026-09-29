@@ -426,6 +426,36 @@ class TestRefAll:
             'refs/heads/dev': SHA_DEV,
         }
 
+    def test_packed_refs_cache_keeps_packed_refs_only(self, git_repo, fs):
+        """
+        The loose refs are merged into a new dict: the cache of _packed_refs
+        keeps the packed refs only, ref_get falls back to it.
+        """
+        fs.create_file(f'{git_repo}/.git/packed-refs', contents=f'{SHA_MASTER} refs/heads/master\n')
+        fs.create_file(f'{git_repo}/.git/refs/heads/dev', contents=SHA_DEV)
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_all == {
+            'refs/heads/master': SHA_MASTER,
+            'refs/heads/dev': SHA_DEV,
+        }
+        assert gitref._packed_refs == {'refs/heads/master': SHA_MASTER}
+
+    def test_result_is_a_new_dict(self, git_repo, fs):
+        """
+        The result of ref_all is not the cache of _packed_refs: a caller may
+        modify it, the packed refs cache and ref_get are not changed.
+        """
+        fs.create_file(f'{git_repo}/.git/packed-refs', contents=f'{SHA_MASTER} refs/heads/master\n')
+        fs.create_file(f'{git_repo}/.git/refs/heads/dev', contents=SHA_DEV)
+
+        gitref = GitRef(git_repo)
+        assert gitref.ref_all is not gitref._packed_refs
+
+        gitref.ref_all['refs/heads/master'] = SHA_DEV
+        assert gitref._packed_refs == {'refs/heads/master': SHA_MASTER}
+        assert gitref.ref_get('refs/heads/master') == SHA_MASTER
+
     def test_loose_overrides_packed(self, git_repo, fs):
         """A loose ref overrides the same ref in packed-refs."""
         fs.create_file(f'{git_repo}/.git/packed-refs', contents=f'{SHA_MASTER} refs/heads/master\n')
