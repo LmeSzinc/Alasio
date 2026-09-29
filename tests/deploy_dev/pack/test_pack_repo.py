@@ -5,6 +5,7 @@ Uses MockGitRepo to provide in-memory git data, avoiding the need
 for a real on-disk git repository.
 """
 
+import random
 from hashlib import sha1 as _sha1
 
 import pytest
@@ -12,8 +13,9 @@ import pytest
 from alasio.deploy.history.decode_history import HistoryObj, decode_history
 from alasio.deploy.pack.pack_model import FileInfo
 from alasio.deploy_dev.pack.pack_cache import PackCache
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key
 from alasio.ext.path.pathstr import PathStr
+from alasio.ext.path.validate import validate_filepath
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.stage.gitreset import FileEntry
 
@@ -319,6 +321,89 @@ class TestFileinfoBasic:
         assert entry.path == 'script.sh'
         assert entry.size > 0
         assert entry.edit == 0
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  _dfs_path_key
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _fuzz_paths(count=500, seed=20260929):
+    """
+    Random paths out of components that stress the component boundaries
+
+    Args:
+        count (int): Paths to build
+        seed (int): Random seed, the list is deterministic
+
+    Returns:
+        list[str]: Paths
+    """
+    rng = random.Random(seed)
+    components = ['a', 'ab', 'a-b', 'a.b', 'b', 'b.py', 'bc', 'A', 'a_2', 'z' * 30, 'ünïcode', '__init__.py']
+    return ['/'.join(rng.choice(components) for _ in range(rng.randint(1, 5))) for _ in range(count)]
+
+
+class TestDfsPathKey:
+    """
+    The DFS sort key must order like the tuple key it replaced
+
+    The old key was ``(parts[:-1], len(parts), parts)`` of ``path.split('/')``:
+    the folder of the path is compared component wise, then (inside one folder)
+    the name. The new key keeps the folder as one string with its '/' replaced
+    by NUL, which orders the same way because NUL is below every character a
+    pack path can carry (validate_filepath rejects control characters).
+    """
+
+    TRICKY_PATHS = [
+        'a',
+        'a.py',
+        'a/b',
+        'a/b.py',
+        'a/bc',
+        'a/bc.py',
+        'a/b/c',
+        'a/b/c.py',
+        'a/bc/d.py',
+        'a/b/c/d.py',
+        'a-b/c.py',
+        'a.b/c.py',
+        'ab/c.py',
+        '__init__.py',
+        'a/__init__.py',
+        'a/b/__init__.py',
+        'z.py',
+        'a/b/c/d/e/f.py',
+    ]
+
+    @staticmethod
+    def _tuple_key(path):
+        """
+        The sort key _dfs_path_key replaced
+
+        Args:
+            path (str): File path
+
+        Returns:
+            tuple: Sort key
+        """
+        parts = tuple(path.split('/'))
+        return (parts[:-1], len(parts), parts)
+
+    @pytest.mark.parametrize('paths', [TRICKY_PATHS, _fuzz_paths()])
+    def test_same_order_as_the_tuple_key(self, paths):
+        """The cheap key orders every path exactly like the tuple key."""
+        assert sorted(paths, key=_dfs_path_key) == sorted(paths, key=self._tuple_key)
+
+    def test_files_of_a_folder_come_before_its_subfolders(self):
+        """The order is the DFS order of the folders, not the plain path order."""
+        paths = ['a/b/c.py', 'a/b.py', 'a/b/c/d.py', 'a.txt']
+        assert sorted(paths, key=_dfs_path_key) == ['a.txt', 'a/b.py', 'a/b/c.py', 'a/b/c/d.py']
+
+    def test_path_with_a_control_character_is_not_a_pack_path(self):
+        """NUL can not appear in a validated path, so the separator is free."""
+        with pytest.raises(ValueError):
+            validate_filepath('a\x00b/c.py')
 
 
 # ════════════════════════════════════════════════════════════════════════════

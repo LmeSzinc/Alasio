@@ -11,7 +11,6 @@ from alasio.deploy_dev.pack.pack_cache import ContentCache
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_lzma import lzma_compress
 from alasio.ext.compress.algo_zstd import zstd_compress
-from alasio.ext.path import PathStr
 from alasio.git.attr.attr import GitAttributes
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.repo import GitRepo
@@ -22,14 +21,23 @@ def _dfs_path_key(path):
     """
     DFS path sort key, files of a folder come before its subfolders.
 
+    The folder is compared component wise and the name decides inside one
+    folder, which is what sorting by ``path.split('/')`` gives (plus the length
+    and the parts as a tie break that can never apply). Splitting every path
+    into a tuple to compare the folders costs ~6ms more per version on a 9.4k
+    file repo, the key below compares the folder as one string instead: its
+    '/' is replaced by NUL, a character below every character a pack path can
+    carry (validate_filepath rejects control characters), so the plain string
+    order of the folder is its component wise order.
+
     Args:
         path (str): File path
 
     Returns:
         tuple: Sort key
     """
-    parts = tuple(path.split('/'))
-    return (parts[:-1], len(parts), parts)
+    folder, _, name = path.rpartition('/')
+    return folder.replace('/', '\x00'), name
 
 
 class PackFull(PackEncodeBase):
@@ -340,28 +348,26 @@ class PackFull(PackEncodeBase):
         repo = self.repo
         for path, entry in self.filelist.items():
             obj = repo.cat(entry.sha1)
-            path = PathStr(path)
             # use git sha1 temporarily
             info = FileInfo(path=path, sha1=bytes.fromhex(entry.sha1), size=len(obj.decoded))
             info.mode = self._load_git_mode(entry.mode, path=path)
-            out[tuple(path.split('/'))] = info
+            out[path] = info
 
             # if folder does not have __init__.py, add __init__.py and mark as deleted
             # this prevent running unknown code, because python will auto import __init__.py
             if path.endswith('.py'):
-                parent = path
-                while True:
-                    parent = parent.uppath()
-                    if not parent:
-                        break
-                    init = parent.joinpath('__init__.py')
-                    key = tuple(init.split('/'))
-                    if key not in out:
-                        out[key] = self._new_deleted(init)
+                # the path is normalized and a name can not carry a '/'
+                # (list_files joins the names itself), so rpartition is uppath()
+                folder, sep, _ = path.rpartition('/')
+                while sep:
+                    init = f'{folder}/__init__.py'
+                    if init not in out:
+                        out[init] = self._new_deleted(init)
+                    folder, sep, _ = folder.rpartition('/')
 
         # sort by path, but deeper path goes behind
         # which is like DFS file iterating of parent path
-        out = {v.path: v for k, v in sorted(out.items(), key=lambda x: _dfs_path_key(x[1].path))}
+        out = {path: out[path] for path in sorted(out, key=_dfs_path_key)}
         # update EOL
         self._populate_eol(out)
         # convert edit to C (copied)
