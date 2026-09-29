@@ -1,5 +1,6 @@
 import os
-from collections import defaultdict, deque
+from collections import defaultdict
+from threading import Lock
 
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path.calc import joinnormpath
@@ -11,6 +12,17 @@ from alasio.git.stage.base import GitRepoBase
 
 
 class GitObjectManager(GitRepoBase):
+    def __init__(self, path):
+        """
+        Args:
+            path (str): Absolute path to repo, repo should contain .git folder
+        """
+        super().__init__(path)
+        # one lock per sha1 that is being built, created on demand and removed
+        # when the build is done, see cat_shallow()
+        self.cat_create_lock = Lock()
+        self.cat_locks: "dict[str, Lock]" = {}
+
     # key: filepath to pack file, value: PackFile object
     dict_pack: "dict[os.DirEntry, PackFile]" = {}
     # LoosePath object to manage loose files
@@ -165,9 +177,33 @@ class GitObjectManager(GitRepoBase):
         self._manager_clear_sub()
         return self
 
+    def _cat_publish(self, sha1, obj):
+        """
+        Finish an object and publish it into the object dict.
+
+        The object dict is shared by every thread that calls cat(), so an
+        object is decoded before it is published: a thread that finds an object
+        in the dict sees a complete one (type, data and decoded agree), and a
+        published object is never modified afterwards. Without that, a second
+        thread catches an object in the middle of its lazy decode and reads the
+        delta instructions as if they were the object content.
+
+        Args:
+            sha1 (str):
+            obj (GitObject | GitLooseObject):
+        """
+        # decoded() turns data from packed bytes into plain ones for a basic
+        # object, and parses the delta header of a delta object, see cat()
+        obj.decoded
+        self.dict_object[sha1] = obj
+
     def cat_shallow(self, sha1):
         """
         Get object from given sha1.
+
+        A finished object is found without any lock. A missing object is built
+        under the lock of its own sha1, so two threads that build different
+        objects never wait for each other and one object is built once.
 
         Args:
             sha1 (str):
@@ -180,18 +216,71 @@ class GitObjectManager(GitRepoBase):
             PackBroken:
             ObjectBroken:
         """
-        # existing object
-        dict_object = self.dict_object
-        obj = dict_object.get(sha1)
+        # fast path, a built object is returned without any lock
+        obj = self.dict_object.get(sha1)
         if obj is not None:
             return obj
 
+        # create pre-object lock
+        with self.cat_create_lock:
+            if sha1 in self.cat_locks:
+                try:
+                    lock = self.cat_locks[sha1]
+                except KeyError:
+                    # race condition
+                    lock = Lock()
+                    self.cat_locks[sha1] = lock
+            else:
+                lock = Lock()
+                self.cat_locks[sha1] = lock
+
+        with lock:
+            # double-checked locking
+            # check if the object was built before the lock was acquired
+            obj = self.dict_object.get(sha1)
+            if obj is not None:
+                # remove pre-object lock to reduce memory
+                try:
+                    del self.cat_locks[sha1]
+                except KeyError:
+                    pass
+                return obj
+
+            # build
+            try:
+                obj = self._cat_build(sha1)
+            finally:
+                # remove pre-object lock to reduce memory
+                # also on exception, otherwise the lock table keeps one entry per sha1 that failed once
+                try:
+                    del self.cat_locks[sha1]
+                except KeyError:
+                    pass
+            return obj
+
+    def _cat_build(self, sha1):
+        """
+        Build one object of a sha1 that is in no object dict, and publish it.
+
+        Internal: the caller holds the lock of the sha1, see cat_shallow()
+
+        Args:
+            sha1 (str):
+
+        Returns:
+            GitObject | GitLooseObject:
+
+        Raises:
+            KeyError: If sha1 not exists
+            PackBroken:
+            ObjectBroken:
+        """
         # data -> obj
         dict_object_data = self.dict_object_data
         data = dict_object_data.get(sha1)
         if data is not None:
             obj = parse_objdata(data)
-            dict_object[sha1] = obj
+            self._cat_publish(sha1, obj)
             try:
                 del dict_object_data[sha1]
             except KeyError:
@@ -200,27 +289,37 @@ class GitObjectManager(GitRepoBase):
             return obj
 
         # read file -> data -> obj
-        dict_object_unread = self.dict_object_unread
         try:
-            file = dict_object_unread[sha1]
+            file = self.dict_object_unread[sha1]
         except KeyError:
-            # this shouldn't happen
+            # the object may be built and its two sources consumed by another
+            # thread between the lookups above, a stale cache miss
+            obj = self.dict_object.get(sha1)
+            if obj is not None:
+                return obj
+            # Not found
+            raise KeyError(f'No such object sha1={sha1}')
+        obj = file.addread(sha1)
+        self._cat_publish(sha1, obj)
+        try:
+            del self.dict_object_unread[sha1]
+        except KeyError:
+            # may be deleted by another thread
             pass
-        else:
-            obj = file.addread(sha1)
-            dict_object[sha1] = obj
-            try:
-                del dict_object_unread[sha1]
-            except KeyError:
-                # may be deleted by another thread
-                pass
-            return obj
-        # Not found
-        raise KeyError(f'No such object sha1={sha1}')
+        return obj
 
     def cat(self, sha1):
         """
         Get object from given sha1, and recursively solve delta objects
+
+        cat() is thread safe: read_lazy() or read_full() replaces the object
+        dicts and must have finished, then any number of threads can call
+        cat(). The object dict only holds finished objects and a finished
+        object is never modified: a delta chain is solved into new objects, and
+        every solved object is published when it is done, so two threads that
+        solve the same chain both get a complete object. A chain that two
+        threads solve at the same time is solved twice, which costs them one
+        cache miss each.
 
         Args:
             sha1 (str):
@@ -238,12 +337,13 @@ class GitObjectManager(GitRepoBase):
             return obj
 
         # lookup delta
-        dict_object_from = self.dict_object_from
-        result_obj = obj
         # notes:
         # don't use recursion to handle delta objects
         # because delta reference can up to depth of 4096 and python can only have recursion depth < 1000
-        queue = deque([obj])
+        # chain is (sha1, object) of every object of the chain, the requested
+        # object first and its base object last, all of them read only
+        dict_object_from = self.dict_object_from
+        chain = [(sha1, obj)]
         while 1:
             typ = obj.type
             if typ == 6:
@@ -269,24 +369,26 @@ class GitObjectManager(GitRepoBase):
                     # this should not happen
                     raise PackBroken(f'Failed to solve ofs_delta object {sha1}: '
                                      f'offset {offset} does not point to any object in {pack.pack_file}')
-                obj = self.cat_shallow(sha1)
-                queue.appendleft(obj)
             elif typ == 7:
                 # sha1 -> ref sha1
                 sha1 = obj.decoded.ref
-                obj = self.cat_shallow(sha1)
-                queue.appendleft(obj)
             else:
                 # non-delta object
                 break
+            obj = self.cat_shallow(sha1)
+            chain.append((sha1, obj))
 
         # apply delta
-        # queue is (source, delta, delta, ...)
-        source = queue.popleft()
-        _ = source.decoded
-        for delta in queue:
-            delta.apply_delta_from_source(source)
-            source = delta
+        # chain is (source, delta, delta, ...)
+        # the base object is the last of the chain, every step builds a new
+        # object out of the delta and the object it is based on, the delta
+        # objects of the chain are left untouched
+        source = chain[-1][1]
+        for delta_sha1, delta in reversed(chain[:-1]):
+            source = delta.resolved_from(source)
+            # publish the solved object of the delta, the whole chain is
+            # solved and its objects are warmed like before
+            self._cat_publish(delta_sha1, source)
 
-        # result_obj is the last object of queue and obj.decoded should have be set
-        return result_obj
+        # the requested object is the first of the chain, the last one solved
+        return source

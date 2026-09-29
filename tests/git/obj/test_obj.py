@@ -72,10 +72,11 @@ class TestGitObjectDecodedBlob:
             + bytes([2]) + b'!\n'
         )
         source = make_plain_blob(source_content)
-        # GitObjectManager.cat() decodes the source before applying a delta
+        # GitObjectManager.cat() publishes a decoded source, resolved_from()
+        # reads its data plain
         _ = source.decoded
-        obj = make_ofs_delta(source_content, result_content, instructions)
-        obj.apply_delta_from_source(source)
+        delta = make_ofs_delta(source_content, result_content, instructions)
+        obj = delta.resolved_from(source)
         assert obj.type == 3
         decoded = obj.decoded
         assert isinstance(decoded, bytes)

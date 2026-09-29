@@ -47,7 +47,7 @@ class GitObject(msgspec.Struct, dict=True):
         Decoded value of this object, its type depends on the object type
 
         A blob returns its content as ``bytes``, always: the plain (zlib) path
-        and the delta path (see apply_delta_from_source) both return bytes, so
+        and the delta path (see resolved_from) both return bytes, so
         a caller can scan (``b'\\x00' in content``), decode or compress the
         content with no conversion. A tree / commit / tag returns its parse
         result, a not yet resolved delta returns its delta instructions.
@@ -81,8 +81,9 @@ class GitObject(msgspec.Struct, dict=True):
             # OFS_DELTA
             result = parse_ofs_delta(self.data)
             self.size = result.result_size
-            # keep data, data will be set in `GitObjectManager.cat()`
-            # self.data = b''
+            # keep data, the delta instructions stay packed until
+            # GitObject.resolved_from() applies them, `data` of a delta is
+            # never sliced by a delta chain
             return result
         if objtype == 2:
             # tree
@@ -117,9 +118,14 @@ class GitObject(msgspec.Struct, dict=True):
         raise ObjectBroken(
             f'Unknown object type {objtype}', self.data)
 
-    def apply_delta_from_source(self, source: "GitObject"):
+    def resolved_from(self, source: "GitObject"):
         """
-        Apply delta to source, and set result to self.
+        Apply the delta of this object to source, and return the result as a new
+        object.
+
+        Neither this object nor source is modified, so the object dict of
+        GitObjectManager.cat() can solve one delta chain on several threads at
+        the same time, every thread builds its own result.
 
         This object must be a DELTA object and source must not be a DELTA object
 
@@ -127,34 +133,35 @@ class GitObject(msgspec.Struct, dict=True):
         for a tree / commit / tag.
 
         Args:
-            source:
+            source (GitObject): Object the delta is applied on
+
+        Returns:
+            GitObject:
         """
-        data = source.data
-        data = apply_delta(data, self.decoded)
+        data = apply_delta(source.data, self.decoded)
         # no need to check because apply_delta() already checked
         # if len(data) != self.size:
         #     raise ObjectBroken(f'Unexpected data length after apply_data, size={self.size}, actual={len(data)}')
 
-        # set
         objtype = source.type
-        self.type = objtype
         if objtype == 3:
             # blob, the content is always bytes, same as the plain path of
             # decoded(), `data` of a blob is never sliced by a delta chain
             decoded = data
-            self.data = memoryview(data)
         elif objtype == 2:
             decoded = parse_tree(data)
-            self.data = memoryview(data)
         elif objtype == 1:
             decoded = parse_commit(data)
-            self.data = memoryview(data)
         elif objtype == 4:
             decoded = parse_tag(data)
-            self.data = memoryview(data)
         else:
             raise ObjectBroken(f'Unexpected source type: {objtype}, source={source}')
-        cached_property.set(self, 'decoded', decoded)
+
+        # the object is built finished: decoded is cached and data is set to
+        # the plain bytes before the object can be seen
+        obj = GitObject(type=objtype, size=self.size, data=memoryview(data))
+        cached_property.set(obj, 'decoded', decoded)
+        return obj
 
     def sha1(self):
         """

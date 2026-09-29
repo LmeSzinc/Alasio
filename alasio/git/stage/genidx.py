@@ -200,7 +200,7 @@ class GenIdx(GitObjectManager):
                 # apply REF_DELTA
                 ref = obj.decoded.ref
                 source = self.cat(ref)  # may raise KeyError
-                obj.apply_delta_from_source(source)
+                obj = obj.resolved_from(source)
             elif objtype == 6:
                 # apply OFS_DELTA
                 offset = index - obj.decoded.offset
@@ -210,7 +210,7 @@ class GenIdx(GitObjectManager):
                     # this shouldn't happen
                     raise PackBroken(f'No corresponding pack object at offset={offset}. '
                                      f'index={index}, ofs_delta={obj.decoded.offset}')
-                obj.apply_delta_from_source(source)
+                obj = obj.resolved_from(source)
 
             dict_offset_to_object[index] = obj
             # prepare info

@@ -86,7 +86,8 @@ class GitCommit(GitObjectManager):
             for sha1, data in self.dict_object_data.items():
                 try:
                     obj = parse_objdata(data)
-                    dict_object[sha1] = obj
+                    # publish finished objects only, see GitObjectManager.cat()
+                    self._cat_publish(sha1, obj)
                 except Exception as e:
                     logger.warning(f'dict_objtype: obj parse failed, sha1={sha1}, {e}')
             dict_object_data.clear()
