@@ -1,8 +1,11 @@
+from types import SimpleNamespace
+
 import pytest
 
 from alasio.ext import env
+from alasio.git.obj.objtree import EntryObject
 from alasio.git.repo import GitRepo
-from alasio.git.stage.gitreset import FileEntry
+from alasio.git.stage.gitreset import FileEntry, GitReset
 
 # ── Test data: commit sha1s from the alasio repository itself ────────────
 
@@ -112,6 +115,181 @@ class TestListFiles:
         """list_files should raise KeyError for an unknown sha1."""
         with pytest.raises(KeyError):
             repo.list_files('0' * 40)
+
+    def test_list_files_shared_subtree_is_listed_for_every_directory(self, repo):
+        """
+        Identical sub directories share one tree object, and every directory
+        that reaches it is listed: the same tree under two names gives two
+        paths carrying the same file sha1.
+
+        a9bdf408: frontend/src/lib/components/ui/button and
+        webapp/renderer/src/lib/components/ui/button hold the same tree
+        (button.svelte, index.ts, byte identical).
+        """
+        files = repo.list_files(HEAD_SHA)
+        frontend = files['frontend/src/lib/components/ui/button/button.svelte']
+        webapp = files['webapp/renderer/src/lib/components/ui/button/button.svelte']
+        assert frontend.sha1 == webapp.sha1
+        assert frontend.path == 'frontend/src/lib/components/ui/button/button.svelte'
+        assert webapp.path == 'webapp/renderer/src/lib/components/ui/button/button.svelte'
+        assert 'frontend/src/lib/components/ui/button/index.ts' in files
+        assert 'webapp/renderer/src/lib/components/ui/button/index.ts' in files
+
+
+class FakeObject:
+    """An object with the type / decoded pair list_files reads."""
+
+    def __init__(self, type, decoded):
+        self.type = type
+        self.decoded = decoded
+
+
+class FakeRepo(GitReset):
+    """
+    GitReset with an in-memory object store.
+
+    list_files reads objects through cat() only, so the tree walk can be driven
+    with structures built by hand: no git repo and no real git objects needed.
+    """
+
+    def __init__(self, objects):
+        """
+        Args:
+            objects (dict[str, FakeObject]): {sha1: object}
+        """
+        super().__init__('')
+        self.objects = objects
+
+    def cat(self, sha1):
+        return self.objects[sha1]
+
+
+class TestListFilesTreeWalk:
+    """
+    Tests for the tree walk of list_files on hand built trees.
+
+    A tree object is the content of a directory: two directories with the same
+    entries are the very same object, and the walk visits it once per directory,
+    so its files are listed under every branch that reaches it. A gitlink
+    (submodule) is not a file and is never looked into.
+    """
+
+    ROOT = '1' * 40
+    SHARED = '2' * 40
+    NESTED = '3' * 40
+    # a gitlink points to a commit of another repo, the store has no such object
+    GITLINK = 'f' * 40
+
+    @classmethod
+    def _tree(cls, *entries):
+        """
+        Build a tree object out of entries
+
+        Args:
+            *entries (tuple[bytes, str, str]): (mode, sha1, name) of every entry
+
+        Returns:
+            FakeObject: Object of git type 2
+        """
+        return FakeObject(2, [EntryObject(mode=mode, sha1=sha1, name=name) for mode, sha1, name in entries])
+
+    @classmethod
+    def _store(cls):
+        """
+        Objects of a root tree that holds one shared tree under two names
+
+        ROOT: root.txt + the SHARED tree as a and b + the GITLINK as a submodule
+        SHARED: same.txt + the NESTED tree as sub
+        NESTED: deep.txt
+
+        Returns:
+            dict[str, FakeObject]:
+        """
+        return {
+            cls.ROOT: cls._tree(
+                (b'100644', 'a' * 40, 'root.txt'),
+                (b'40000', cls.SHARED, 'a'),
+                (b'40000', cls.SHARED, 'b'),
+                (b'160000', cls.GITLINK, 'mod'),
+            ),
+            cls.SHARED: cls._tree(
+                (b'100644', 'b' * 40, 'same.txt'),
+                (b'40000', cls.NESTED, 'sub'),
+            ),
+            cls.NESTED: cls._tree((b'100644', 'c' * 40, 'deep.txt')),
+        }
+
+    def test_shared_tree_is_listed_for_every_directory(self):
+        """Files of a tree shared by two directories are listed under both."""
+        files = FakeRepo(self._store()).list_files(self.ROOT)
+
+        assert files == {
+            'root.txt': FileEntry(sha1='a' * 40, mode=b'100644', path='root.txt'),
+            'a/same.txt': FileEntry(sha1='b' * 40, mode=b'100644', path='a/same.txt'),
+            'a/sub/deep.txt': FileEntry(sha1='c' * 40, mode=b'100644', path='a/sub/deep.txt'),
+            'b/same.txt': FileEntry(sha1='b' * 40, mode=b'100644', path='b/same.txt'),
+            'b/sub/deep.txt': FileEntry(sha1='c' * 40, mode=b'100644', path='b/sub/deep.txt'),
+        }
+
+    def test_shared_tree_of_the_same_name_in_two_directories(self):
+        """
+        Two branches holding a directory of the same name list their own paths:
+        the path of a file comes from the branch, not from the tree.
+        """
+        # x and y hold the very same entries, so they are the same object
+        branch = self._tree((b'40000', self.SHARED, 'inner'))
+        store = dict(self._store())
+        store[self.ROOT] = self._tree(
+            (b'40000', 'd' * 40, 'x'),
+            (b'40000', 'd' * 40, 'y'),
+        )
+        store['d' * 40] = branch
+
+        files = FakeRepo(store).list_files(self.ROOT)
+
+        assert files == {
+            'x/inner/same.txt': FileEntry(sha1='b' * 40, mode=b'100644', path='x/inner/same.txt'),
+            'x/inner/sub/deep.txt': FileEntry(sha1='c' * 40, mode=b'100644', path='x/inner/sub/deep.txt'),
+            'y/inner/same.txt': FileEntry(sha1='b' * 40, mode=b'100644', path='y/inner/same.txt'),
+            'y/inner/sub/deep.txt': FileEntry(sha1='c' * 40, mode=b'100644', path='y/inner/sub/deep.txt'),
+        }
+
+    def test_submodule_is_not_a_file_and_is_not_read(self):
+        """The gitlink of the store has no object, reading it would raise."""
+        files = FakeRepo(self._store()).list_files(self.ROOT)
+
+        assert 'mod' not in files
+        assert not any(path.startswith('mod/') for path in files)
+
+    def test_tree_sha1_input_is_relative_to_the_tree(self):
+        """
+        list_files() also takes a tree sha1: the tree itself is not a directory
+        of any parent, the paths start at its entries.
+        """
+        files = FakeRepo(self._store()).list_files(self.SHARED)
+
+        assert files == {
+            'same.txt': FileEntry(sha1='b' * 40, mode=b'100644', path='same.txt'),
+            'sub/deep.txt': FileEntry(sha1='c' * 40, mode=b'100644', path='sub/deep.txt'),
+        }
+
+    def test_commit_and_tag_are_resolved_to_their_tree(self):
+        """A commit or tag sha1 is resolved before the walk, the paths start at its tree."""
+        commit_sha, tag_sha = '4' * 40, '5' * 40
+        store = dict(self._store())
+        store[commit_sha] = FakeObject(1, SimpleNamespace(tree=self.ROOT))
+        store[tag_sha] = FakeObject(4, SimpleNamespace(object=commit_sha))
+
+        repo = FakeRepo(store)
+        files = repo.list_files(tag_sha)
+
+        assert files == repo.list_files(self.ROOT)
+        assert 'a/same.txt' in files
+
+    def test_blob_input_raises(self):
+        """A file object can not be iterated for files."""
+        with pytest.raises(ValueError, match='cannot iter files'):
+            FakeRepo({self.ROOT: FakeObject(3, b'content')}).list_files(self.ROOT)
 
 
 # ── Tests for compare_commit ─────────────────────────────────────────────

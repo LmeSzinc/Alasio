@@ -19,31 +19,35 @@ class GitReset(GitObjectManager):
         """
         List all files under the tree of given sha1
 
+        Two directories with the same content share one tree object: a file is
+        listed under every directory that reaches its tree (its path is the
+        branch it is reached through). Submodules are skipped, they hold files
+        of another repo.
+
         Args:
             sha1 (str): commit sha1, or tree sha1, or tag sha1
 
         Returns:
             dict[str, FileEntry]:
         """
-        queue = deque([sha1])
+        # list of (tree sha1, directory path) to iterate
+        # A tree object is the content of a directory: two directories that hold
+        # the same entries are the very same tree object, so a tree carries no
+        # directory path of its own. The path of a tree is the one of the branch
+        # it is reached through, and a tree shared by several directories is
+        # visited once per directory, like git lists it. The root tree, or the
+        # tree passed in, has no directory path.
+        queue = deque([(sha1, '')])
 
-        # list of (parent_tree_sha1, EntryObject) for file entries
+        # list of (filepath, EntryObject) for file entries
         # Using a list instead of dict to correctly handle multiple files with the same sha1
         # (e.g. multiple empty __init__.py files share the same sha1)
         list_file = []
-        # key: tree sha1, value: parent tree sha1
-        dict_parent: "dict[str, str]" = {}
-        # key: tree sha1, value: directory name
-        dict_path: "dict[str, str]" = {}
-        # all collected submodule sha1, we can't look into submodules
-        set_submodule_sha1 = set()
 
         while 1:
             new_queue = deque()
             # iter tree objects
-            for sha in queue:
-                if sha in set_submodule_sha1:
-                    continue
+            for sha, prefix in queue:
                 obj = self.cat(sha)
                 typ = obj.type
                 # tree
@@ -51,31 +55,29 @@ class GitReset(GitObjectManager):
                     tree = obj.decoded
                     for entry in tree:
                         mode = entry.mode
+                        file_path = f'{prefix}/{entry.name}' if prefix else entry.name
                         # directory
                         if mode == b'40000':
-                            dict_parent[entry.sha1] = sha
-                            new_queue.append(entry.sha1)
-                            dict_path[entry.sha1] = entry.name
+                            new_queue.append((entry.sha1, file_path))
                         # submodule
                         elif mode == b'160000':
-                            dict_parent[entry.sha1] = sha
-                            new_queue.append(entry.sha1)
-                            dict_path[entry.sha1] = entry.name
-                            set_submodule_sha1.add(entry.sha1)
+                            # a gitlink is a commit of another repo, it can't be
+                            # looked into and is not a file of this repo
+                            continue
                         # file
                         else:
-                            # Record (parent_tree_sha1, entry) so each file is unique by position
-                            list_file.append((sha, entry))
+                            # Record (filepath, entry) so each file is unique by position
+                            list_file.append((file_path, entry))
                     continue
                 # commit
                 if typ == 1:
                     commit = obj.decoded
-                    new_queue.append(commit.tree)
+                    new_queue.append((commit.tree, prefix))
                     continue
                 # tag
                 if typ == 4:
                     tag = obj.decoded
-                    new_queue.append(tag.object)
+                    new_queue.append((tag.object, prefix))
                     continue
                 # file
                 if typ == 3:
@@ -85,22 +87,11 @@ class GitReset(GitObjectManager):
             if not queue:
                 break
 
-        # build filepath
+        # build FileEntry
         # key: file path, value: FileEntry
         dict_entry = {}
-        for parent_sha, entry in list_file:
-            paths = deque([entry.name])
-            tree_sha = parent_sha
-            while True:
-                name = dict_path.get(tree_sha)
-                if name:
-                    paths.appendleft(name)
-                tree_sha = dict_parent.get(tree_sha)
-                if tree_sha is None:
-                    break
-            file_path = '/'.join(paths)
-            file = FileEntry(sha1=entry.sha1, mode=entry.mode, path=file_path)
-            dict_entry[file_path] = file
+        for file_path, entry in list_file:
+            dict_entry[file_path] = FileEntry(sha1=entry.sha1, mode=entry.mode, path=file_path)
 
         return dict_entry
 
