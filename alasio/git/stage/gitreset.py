@@ -303,15 +303,16 @@ class GitReset(GitObjectManager):
         """
         count = 0
         dict_task = {}
-        for sha1, file in dict_file.items():
-            dict_task[sha1] = file
+        for path, file in dict_file.items():
+            dict_task[path] = file
             count += 1
             if count >= 50:
                 yield dict_task
                 dict_task = {}
-                count = 1
+                count = 0
 
-        yield dict_task
+        if dict_task:
+            yield dict_task
 
     def _reset_task_validate_files(self, dict_file):
         """
@@ -319,27 +320,31 @@ class GitReset(GitObjectManager):
             dict_file (dict[str, FileEntry]): files that need validate
 
         Returns:
-            dict[str, FileEntry]: files that reset
+            dict[str, FileEntry]: files that reset, keyed by file path
         """
         root = self.path
         # validate files
+        # need_reset is keyed by the file path: one blob can be the content of
+        # several paths (the empty __init__.py of every folder for example),
+        # every path needs its own write, so the sha1 is not a key
         need_reset = {}
-        for sha1, file in dict_file.items():
+        for path, file in dict_file.items():
             filepath = f'{root}/{file.path}'
             try:
                 sha1 = git_file_hash(filepath)
             except FileNotFoundError:
                 # need to write new file
-                need_reset[sha1] = file
+                need_reset[path] = file
                 continue
             if file.sha1 != sha1:
                 # need to reset file
-                need_reset[sha1] = file
+                need_reset[path] = file
 
         # write files
-        for sha1, file in need_reset.items():
+        for path, file in need_reset.items():
             filepath = f'{root}/{file.path}'
-            obj = self.cat(sha1)
+            # the content of the target version, not of the local file
+            obj = self.cat(file.sha1)
             if obj.type != 3:
                 # This shouldn't happen
                 continue

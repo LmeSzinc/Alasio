@@ -6,6 +6,8 @@ from alasio.ext import env
 from alasio.git.obj.objtree import EntryObject
 from alasio.git.repo import GitRepo
 from alasio.git.stage.gitreset import FileEntry, GitReset
+from alasio.git.stage.hashobj import blob_hash
+from alasio.testing.filesystem import fs  # noqa: F401
 
 # ── Test data: commit sha1s from the alasio repository itself ────────────
 
@@ -433,3 +435,178 @@ class TestCompareCommit:
         # Deleted file — old sha1 is valid
         del_entry = deleted['alasio/config/alasio/alasio.tasks.yaml']
         assert len(del_entry.sha1) == 40
+
+
+# ── Tests for _reset_task_iter ──────────────────────────────────────────────
+
+
+class TestResetTaskIter:
+    """Tests for GitReset._reset_task_iter."""
+
+    @staticmethod
+    def _dict_file(count):
+        """
+        Args:
+            count (int): Amount of files, only the keys of dict_file are read
+
+        Returns:
+            dict[str, None]:
+        """
+        return {f'folder/f{index}.txt': None for index in range(count)}
+
+    @pytest.mark.parametrize('count, expected', [
+        (0, []),
+        (1, [1]),
+        (49, [49]),
+        (50, [50]),
+        (51, [50, 1]),
+        (100, [50, 50]),
+        (120, [50, 50, 20]),
+    ])
+    def test_batches_are_fifty(self, count, expected):
+        """
+        dict_file is split by every 50 files, and no empty task is yielded at
+        the end (a task of 50 files must not be followed by a task of 0).
+        """
+        tasks = list(GitReset._reset_task_iter(self._dict_file(count)))
+        assert [len(task) for task in tasks] == expected
+
+
+# ── Tests for _reset_task_validate_files ────────────────────────────────────
+
+
+class TestResetValidateFiles:
+    """
+    Tests for GitReset._reset_task_validate_files / reset_validate_files.
+
+    dict_file is keyed by the file path (list_files()), while the content to
+    write is looked up by the sha1 of the target version: the task must keep
+    the two apart, one blob can be the content of several paths.
+    """
+
+    ROOT = '/repo'
+
+    @classmethod
+    def _make_repo(cls, objects):
+        """
+        Args:
+            objects (dict[str, bytes]): sha1 -> blob content
+
+        Returns:
+            FakeRepo: Repo rooted at ROOT, its object store holds the contents
+        """
+        repo = FakeRepo({sha1: FakeObject(3, content) for sha1, content in objects.items()})
+        repo.path = cls.ROOT
+        return repo
+
+    @staticmethod
+    def _file(path, sha1, mode=b'100644'):
+        """
+        Args:
+            path (str):
+            sha1 (str):
+            mode (bytes):
+
+        Returns:
+            FileEntry:
+        """
+        return FileEntry(sha1=sha1, mode=mode, path=path)
+
+    def test_missing_file_is_written(self, fs):
+        """A file that does not exist yet is written with the target content."""
+        content = b'new content\n'
+        sha1 = blob_hash(content)
+        repo = self._make_repo({sha1: content})
+        dict_file = {'a.txt': self._file('a.txt', sha1)}
+
+        need_reset = repo._reset_task_validate_files(dict_file)
+
+        assert need_reset == dict_file
+        with open(f'{self.ROOT}/a.txt', 'rb') as f:
+            assert f.read() == content
+
+    def test_modified_file_is_restored(self, fs):
+        """A file whose content differs is written with the target content."""
+        content = b'target content\n'
+        sha1 = blob_hash(content)
+        repo = self._make_repo({sha1: content})
+        fs.create_file(f'{self.ROOT}/a.txt', contents=b'local change\n')
+        dict_file = {'a.txt': self._file('a.txt', sha1)}
+
+        need_reset = repo._reset_task_validate_files(dict_file)
+
+        assert set(need_reset) == {'a.txt'}
+        with open(f'{self.ROOT}/a.txt', 'rb') as f:
+            assert f.read() == content
+
+    def test_unchanged_file_is_not_written(self, fs):
+        """A file that already holds the target content is left as it is."""
+        content = b'same content\n'
+        sha1 = blob_hash(content)
+        repo = self._make_repo({sha1: content})
+        fs.create_file(f'{self.ROOT}/a.txt', contents=content)
+        dict_file = {'a.txt': self._file('a.txt', sha1)}
+
+        need_reset = repo._reset_task_validate_files(dict_file)
+
+        assert need_reset == {}
+
+    def test_missing_paths_sharing_one_blob_are_all_written(self, fs):
+        """
+        One blob can be the content of several paths (the empty __init__.py of
+        every folder for example): every missing path is written, the sha1 is
+        not a key of need_reset.
+        """
+        content = b'\n'
+        sha1 = blob_hash(content)
+        repo = self._make_repo({sha1: content})
+        dict_file = {
+            'a/__init__.py': self._file('a/__init__.py', sha1),
+            'b/__init__.py': self._file('b/__init__.py', sha1),
+        }
+
+        need_reset = repo._reset_task_validate_files(dict_file)
+
+        assert set(need_reset) == set(dict_file)
+        for path in dict_file:
+            with open(f'{self.ROOT}/{path}', 'rb') as f:
+                assert f.read() == content
+
+    def test_stale_paths_sharing_one_blob_are_all_written(self, fs):
+        """
+        Two paths holding the same stale content are both written: keying
+        need_reset by the sha1 of the local file would collapse the two entries
+        and write one path only.
+        """
+        content = b'target content\n'
+        sha1 = blob_hash(content)
+        repo = self._make_repo({sha1: content})
+        fs.create_file(f'{self.ROOT}/a.txt', contents=b'stale content\n')
+        fs.create_file(f'{self.ROOT}/b.txt', contents=b'stale content\n')
+        dict_file = {
+            'a.txt': self._file('a.txt', sha1),
+            'b.txt': self._file('b.txt', sha1),
+        }
+
+        need_reset = repo._reset_task_validate_files(dict_file)
+
+        assert set(need_reset) == {'a.txt', 'b.txt'}
+        for path in dict_file:
+            with open(f'{self.ROOT}/{path}', 'rb') as f:
+                assert f.read() == content
+
+    def test_reset_validate_files_writes_every_file(self, fs):
+        """More than 50 files are validated on the thread pool, all written."""
+        content = b'content\n'
+        sha1 = blob_hash(content)
+        repo = self._make_repo({sha1: content})
+        dict_file = {
+            f'folder/f{index}.txt': self._file(f'folder/f{index}.txt', sha1)
+            for index in range(120)
+        }
+
+        repo.reset_validate_files(dict_file)
+
+        for path in dict_file:
+            with open(f'{self.ROOT}/{path}', 'rb') as f:
+                assert f.read() == content
