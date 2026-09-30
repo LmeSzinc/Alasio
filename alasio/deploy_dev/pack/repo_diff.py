@@ -30,7 +30,7 @@ has in its working tree.
 """
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.pack import pack_cache
-from alasio.deploy_dev.pack.pack_cache import PatchCache
+from alasio.deploy_dev.pack.pack_cache import PatchCache, PlainCache
 from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key, apply_encoding
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_zstd import zstd_compress
@@ -372,25 +372,30 @@ class RepoDiff:
 
     def _cache_info(self, new_info, data):
         """
-        Cached raw / lzma encoding of the new content of a record
+        The cache entry of the new content of a record, its plain encodings
 
-        A file of the new version is keyed by its git blob sha1: every version
-        built with the shared cache stores the raw / lzma encoding of each of
-        its contents (see PackFull._populate_data), so the encoding of the new
-        content of a record is reusable — _load_data takes it as the cache_info
-        and skips the lzma compression, and its size is the bar the patch is
-        measured against. A generated extra file (the index pack, the commit
+        Both plain inputs of the encoding live on the entry (see PlainCache):
+        the entry is keyed by the identity of the content — a file of the new
+        version by its git blob sha1, every version built with the shared cache
+        stores the raw / lzma encoding of each of its contents (see
+        PackFull._populate_data), so _load_data takes the info slot and skips
+        the lzma compression, and its size is the bar the patch is measured
+        against — and a generated extra file (the index pack, the commit
         history) is not a file of the repo, it is keyed by (version, filepath)
-        instead, see PackFull._extra_cache_info. The new side of every record is
-        relative to the new version (the update packs all update to the latest
-        version). See doc/2026-09-27_update-pack-from-repo.md 7.14-1 and 7.17.
+        instead, see PackFull._extra_cache_info. The plain zstd candidate is
+        left on the same entry by the first record that compares it, so the
+        records of the versions that come after it find it there. The new side
+        of every record belongs to the new version (the update packs all update
+        to the latest version). See doc/2026-09-27_update-pack-from-repo.md
+        7.14-1, 7.17 and 7.35.
 
         Args:
             new_info (IdxInfo): Record of the content in the new version
             data (bytes): New content, a mismatch of the size drops the entry
 
         Returns:
-            FileInfo | None: Cached encoding, None when there is none
+            PlainCache: The cache entry of the content, a fresh one without
+                encodings when the cache has no entry to serve the record
         """
         cache = pack_cache.PACK_CACHE
         entry = self.new.filelist.get(new_info.path)
@@ -398,10 +403,10 @@ class RepoDiff:
             # a generated extra file, it has no git blob sha1
             return PackFull._extra_cache_info(
                 self.new.current_version, new_info.path, data)
-        cache_info = cache.get(cache.content_index, entry.sha1)
-        if cache_info is None or cache_info.size != len(data):
-            return None
-        return cache_info
+        cached = cache.get(cache.content_index, entry.sha1)
+        if cached is None or cached.info is None or cached.info.size != len(data):
+            return PlainCache()
+        return cached
 
     def _read_old_blob(self, info):
         """

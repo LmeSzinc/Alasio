@@ -308,3 +308,57 @@ class TestPackUpdateCacheMissSize:
         assert records[0] < records[-1]
         assert rows[0]['content_miss'] + rows[0]['patch_miss'] == (
             rows[-1]['content_miss'] + rows[-1]['patch_miss'])
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  5. the plain zstd candidate of a content is shared by the versions
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestPackUpdateZstdCandidate:
+    """
+    _load_data compares the patch of a record against the plain zstd candidate
+    of its content, and the content is the new side of a record in every version
+    of a run: the candidate is compressed once per content and shared, see
+    PackFull._load_data and doc/2026-09-27_update-pack-from-repo.md 7.34
+    """
+
+    def test_the_history_candidate_is_compressed_once(self, monkeypatch, cache):
+        """Every update pack carries the history of the latest version, one candidate"""
+        import alasio.deploy_dev.pack.pack_repo as pack_repo
+
+        repo = make_repo(ADDED_VERSIONS)
+        new_pack = PackFull(repo, 'latest')
+        new_pack.fileinfo
+        history = new_pack.extra_content['.pack/history.pack']
+        calls = []
+        original = pack_repo.zstd_compress
+
+        def counting(data, *args, **kwargs):
+            if kwargs.get('source') is None and data == history:
+                calls.append(1)
+            return original(data, *args, **kwargs)
+
+        monkeypatch.setattr(pack_repo, 'zstd_compress', counting)
+        for commit in ('newest', 'older'):
+            update = PackUpdate(new_pack, commit)
+            update.diff_info
+            b''.join(update.iter_pack_data())
+        # one candidate for both of the versions
+        assert len(calls) == 1
+
+    def test_the_candidate_does_not_change_the_pack(self, monkeypatch):
+        """The pack of a run that shares the cache equals the pack of a cold run"""
+        from alasio.deploy_dev.pack import pack_cache
+
+        repo = make_repo(ADDED_VERSIONS)
+        monkeypatch.setattr(pack_cache, 'PACK_CACHE', pack_cache.PackCache())
+        cold_pack = PackFull(repo, 'latest')
+        cold_pack.fileinfo
+        cold = b''.join(PackUpdate(cold_pack, 'newest').iter_pack_data())
+        # the second run finds every encoding of the first one, the candidate
+        # of the extra files included
+        warm_pack = PackFull(repo, 'latest')
+        warm_pack.fileinfo
+        warm = b''.join(PackUpdate(warm_pack, 'newest').iter_pack_data())
+        assert cold == warm

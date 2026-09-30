@@ -9,6 +9,7 @@ from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.history.encode_history import encode_commit_history
 from alasio.deploy_dev.pack import pack_cache
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
+from alasio.deploy_dev.pack.pack_cache import PlainCache
 from alasio.deploy_dev.pack.pack_pool import PACK_POOL
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_lzma import lzma_compress
@@ -132,16 +133,21 @@ class PackFull(PackEncodeBase):
         The smaller candidate wins, a tie keeps the earlier one, so the order
         is raw, lzma, patch, plain zstd.
 
-        cache_info is the cached encoding of the content without a dictionary,
-        the raw / lzma rule the full pack uses (see PackCache): it stands for
-        the plain candidates and saves the lzma compression of the content.
+        cache_info is the cache entry of the content (see PlainCache): the info
+        slot is the cached raw / lzma encoding, it stands for the plain
+        candidates and saves the lzma compression, the zstd slot is the cached
+        plain zstd candidate, it saves the zstd one. A content is the new side
+        of a record in every version of a run, so the versions share the entry:
+        this call fills the zstd slot when it is the first record that compares
+        the candidate, the records of the versions that come after it find the
+        bytes there.
 
         Args:
             file (FileInfo): FileInfo object to update
             data (bytes): File content
-            cache_info (FileInfo | None): Cached plain encoding of the content,
-                an entry of another size is not the content and is ignored.
-                Defaults to None, the plain candidates are compressed here.
+            cache_info (PlainCache | None): Cached plain candidates of the
+                content, an entry of another size is not the content and is
+                ignored. Defaults to None, every candidate is compressed here.
             zstd (bool): Whether to try the plain zstd candidate. Defaults to True.
             zstd_source (bytes | None): Old file content as the zstd dictionary
                 of a patch-from candidate. Defaults to None, no patch is tried.
@@ -162,14 +168,15 @@ class PackFull(PackEncodeBase):
             file.sha1 = b''
             return 'raw'
 
-        if cache_info is not None and cache_info.size == len(data):
+        cache_entry = cache_info.info if cache_info is not None else None
+        if cache_entry is not None and cache_entry.size == len(data):
             # the content is already compressed with the raw / lzma rule, its
             # sha1 is the content sha1 of this very content: no need to hash
             # or compress it again
-            best_data = cache_info.data
-            best_length = cache_info.data_size
-            algo = cache_info.algo
-            content_sha1 = cache_info.sha1
+            best_data = cache_entry.data
+            best_length = cache_entry.data_size
+            algo = cache_entry.algo
+            content_sha1 = cache_entry.sha1
         else:
             best_data = data
             algo = 0
@@ -214,8 +221,22 @@ class PackFull(PackEncodeBase):
                 and len(data) >= PackFull.SKIP_PLAIN_ZSTD_MIN_SIZE
                 and plain_length > best_length * PackFull.SKIP_PLAIN_ZSTD_RATIO
         ):
-            compressed_data = zstd_compress(data, level=PackFull.ZSTD_LEVEL)
-            compressed_length = len(compressed_data)
+            candidate = cache_info.zstd if cache_info is not None else None
+            if candidate is not None and candidate.size == len(data):
+                compressed_data = candidate.data
+                compressed_length = candidate.data_size
+            else:
+                # the plain zstd candidate of a content is compressed once and
+                # left on the cache_info, the cache entry of the content (see
+                # PlainCache): every record that carries the content after this
+                # one finds it here, without a lookup. An entry of another size
+                # is not the content and is replaced
+                compressed_data = zstd_compress(data, level=PackFull.ZSTD_LEVEL)
+                compressed_length = len(compressed_data)
+                if cache_info is not None:
+                    cache_info.zstd = FileInfo(
+                        path=file.path, algo=2, size=len(data),
+                        data_size=compressed_length, data=compressed_data)
             if compressed_length < best_length:
                 best_length = compressed_length
                 best_data = compressed_data
@@ -565,6 +586,8 @@ class PackFull(PackEncodeBase):
         extra = {}
         for path, content in self.extra_content.items():
             info = FileInfo(path=path, eol=2)
+            # the entry of the file, the info slot is used, the candidate is
+            # not (the rule of the index pack is raw / lzma only)
             cache_info = PackFull._extra_cache_info(self.current_version, path, content)
             self._load_data(info, content, cache_info=cache_info, zstd=False)
             extra[path] = info
@@ -573,14 +596,17 @@ class PackFull(PackEncodeBase):
     @staticmethod
     def _extra_cache_info(version, path, data):
         """
-        Cached raw / lzma encoding of a generated extra file
+        The cache entry of a generated extra file: its plain encodings
 
         The extra files of a version (the index pack, the commit history) are
         generated bytes, not files of the repo, so they have no git blob sha1
-        to key a content entry by. Their plain encoding is a pure function of
-        (version, filepath) and is keyed by that instead: it is stored once
-        and reused by every update pack of the run, whose new side is always
-        the same version. See doc/2026-09-27_update-pack-from-repo.md 7.21.
+        to key a content entry by. Their plain encodings are pure functions of
+        (version, filepath) and are keyed by that instead: the raw / lzma
+        encoding is stored once and reused by every update pack of the run,
+        whose new side is always the same version, and the plain zstd
+        candidate is left on the same entry by the first record that compares
+        it, see PlainCache. See doc/2026-09-27_update-pack-from-repo.md 7.21
+        and 7.35.
 
         Args:
             version (str): Version the extra file is generated for
@@ -588,7 +614,7 @@ class PackFull(PackEncodeBase):
             data (bytes): Generated content, compressed on a cache miss
 
         Returns:
-            FileInfo: Cached raw / lzma encoding of the file
+            PlainCache: The cache entry of the file
         """
         cache = pack_cache.PACK_CACHE
         key = (version, path)
@@ -597,35 +623,41 @@ class PackFull(PackEncodeBase):
             entry = cache._compute_entry(
                 cache.extra, key, partial(PackFull._encode_extra, path=path, data=data))
         return entry
+        return entry
 
     @staticmethod
     def _encode_extra(cache, path, data):
         """
         Encode a generated extra file with the raw / lzma rule of the cache
 
+        The callback of PackCache._compute_entry: cache is the stored entry of
+        the file (see _extra_cache_info), None when the cache has none. It
+        fills the info slot of the entry, the plain zstd candidate is left to
+        the record that compares it, see PlainCache.
+
         Args:
-            cache (FileInfo | None): Stored encoding of the file, None when the
+            cache (PlainCache | None): Stored entry of the file, None when the
                 cache has none
             path (str): Filepath of the generated file
             data (bytes): Generated content
 
         Returns:
-            FileInfo: Encoding to keep
+            PlainCache: The entry to keep
         """
         if cache is not None:
             return cache
-        cache = FileInfo(path=path)
-        PackFull._load_data(cache, data, zstd=False)
-        return cache
+        info = FileInfo(path=path)
+        PackFull._load_data(info, data, zstd=False)
+        return PlainCache(info=info)
 
     @staticmethod
     def _encode_index(cache, file, data):
         """
         Encode one content with the rules of the full pack, the entry of the cache
 
-        The callback of PackCache._compute_entry: cache is the stored encoding of
-        the content, None when the cache has none. It fills the record either
-        way and returns the encoding to keep.
+        The callback of PackCache._compute_entry: cache is the stored entry of
+        the content (see PlainCache), None when the cache has none. It fills the
+        record either way and returns the entry to keep.
 
         The rules of the full pack are raw / lzma (load data, full pack use lzma
         only to avoid producing complex list_algo), they are the same for every
@@ -633,21 +665,21 @@ class PackFull(PackEncodeBase):
         every version that shares the content takes it.
 
         Args:
-            cache (FileInfo | None): Stored encoding of the content, None when
+            cache (PlainCache | None): Stored entry of the content, None when
                 the cache has none
             file (FileInfo): Record to fill
             data (bytes): Content to compress
 
         Returns:
-            FileInfo: Encoding to keep
+            PlainCache: The entry to keep
         """
         if cache is not None:
-            apply_encoding(file, cache)
+            apply_encoding(file, cache.info)
             return cache
         PackFull._load_data(file, data, zstd=False)
-        return FileInfo(
+        return PlainCache(info=FileInfo(
             path=file.path, algo=file.algo, size=file.size,
-            data_size=file.data_size, sha1=file.sha1, data=file.data)
+            data_size=file.data_size, sha1=file.sha1, data=file.data))
 
     def _populate_data(self, dict_fileinfo: "dict[str, FileInfo]"):
         """
@@ -682,7 +714,7 @@ class PackFull(PackEncodeBase):
                     git_sha1 = file.sha1.hex()
                     cached = cache.get(cache.content_index, git_sha1)
                     if cached is not None:
-                        apply_encoding(file, cached)
+                        apply_encoding(file, cached.info)
                     else:
                         # the blob is read here, the task only compresses the bytes
                         data = repo.cat(git_sha1).decoded

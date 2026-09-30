@@ -16,6 +16,14 @@ content again and again, the cache removes the repeated work:
   patch: a patch depends on the old content as the zstd dictionary and on
   nothing else, so versions that share the pair share the patch, renames
   included
+- the plain zstd candidate of a content (what _load_data compares a patch
+  against) lives on the entry of the content (see PlainCache): a content is the
+  new side of a record in every version of a run, so the first record that
+  really tries the candidate compresses it and every other record takes the
+  bytes from the entry. The candidate is expensive (56ms for the 230KB index
+  pack) and it is compressed on demand, the skip of _load_data (a patch far
+  smaller than the plain best) keeps a version that does not need it from
+  paying for it
 
 The cache is the module level PACK_CACHE: every PackFull / PackUpdate of the
 process shares it, so the tables live across the versions of a run. It is not
@@ -41,7 +49,11 @@ when two builds need it at the same time, the task takes the per key lock of the
 entry and reuses the entry another build stored.
 """
 from threading import Lock
+from typing import Optional
 
+from msgspec import Struct
+
+from alasio.deploy.pack.pack_model import FileInfo
 from alasio.deploy_dev.pack.pack_pool import PACK_POOL
 
 
@@ -72,7 +84,7 @@ class Table(dict):
         self.lock = Lock()
 
 
-class PatchCache:
+class PatchCache(Struct):
     """
     The M / RM encoding of one content pair.
 
@@ -84,11 +96,44 @@ class PatchCache:
             decompresses with it
     """
 
-    __slots__ = ('info', 'patch_used')
+    info: FileInfo
+    patch_used: bool
 
-    def __init__(self, info, patch_used):
-        self.info = info
-        self.patch_used = patch_used
+
+class PlainCache(Struct):
+    """
+    The plain encodings of a content: the cache entry of a version file, of a
+    generated extra file, and the cache_info of _load_data.
+
+    _load_data builds the stored data of a record out of the plain encodings of
+    the content (raw / lzma / zstd) and, when the record has an old file, out of
+    the zstd patch from it. Both plain inputs of that comparison live on the
+    entry of the content (see PackCache.content_index and PackCache.extra), so a
+    version that shares the content with an earlier one compresses nothing:
+
+        cache_info = entry                       # the cache entry of the content
+        PackFull._load_data(info, data, cache_info=cache_info, zstd_source=old)
+
+    The info slot is filled by the lookup that builds the entry, the zstd slot
+    by _load_data: a record that needs the candidate compresses it and leaves it
+    here, every next record of the content takes it from the entry, no lookup.
+    The candidate is compressed in the thread of that record, and only when the
+    comparison needs it (see PackFull._load_data): the update side builds the
+    lookback versions of a run concurrently, a build that submitted the
+    compression to PACK_POOL would wait for a worker that is busy with another
+    build of the same run, see doc/2026-09-27_update-pack-from-repo.md 7.29.1
+    and 7.35.
+
+    Attributes:
+        info (FileInfo | None): Cached raw / lzma encoding of the content, the
+            bar the patch is measured against, None when the cache has none
+        zstd (FileInfo | None): Plain zstd candidate of the content, None until
+            a record compares it (and while the cache has none). An entry of
+            another size is not the content and is replaced
+    """
+
+    info: Optional[FileInfo] = None
+    zstd: Optional[FileInfo] = None
 
 
 class PackCache:
@@ -101,7 +146,7 @@ class PackCache:
     below.
 
     Attributes:
-        content_index (Table): {git blob sha1 hex: FileInfo} encoding of a
+        content_index (Table): {git blob sha1 hex: PlainCache} encoding of a
             content with the rules of the index of the full pack (raw / lzma),
             see PackFull._populate_data
         content_update (Table): {git blob sha1 hex: FileInfo} encoding of a
@@ -109,7 +154,7 @@ class PackCache:
             (raw / lzma / zstd), see RepoDiff._load_added
         patch (Table): {(old content sha1, new content sha1): PatchCache}, see
             RepoDiff._load_modified
-        extra (Table): {(version, filepath): FileInfo} of the generated extra
+        extra (Table): {(version, filepath): PlainCache} of the generated extra
             files (the index pack, the commit history), they are not files of
             the repo and have no git blob sha1, see PackFull._extra_cache_info
         rename (Table): {(deleted git blob sha1 hex, added git blob sha1 hex):
@@ -262,8 +307,13 @@ class PackCache:
             int: Bytes of the data, without the overhead of the records
         """
         size = 0
-        for table in (self.content_index, self.content_update, self.extra):
-            size += sum(len(entry.data) for entry in table.values())
+        size += sum(len(entry.data) for entry in self.content_update.values())
+        for table in (self.content_index, self.extra):
+            for entry in table.values():
+                if entry.info is not None:
+                    size += len(entry.info.data)
+                if entry.zstd is not None:
+                    size += len(entry.zstd.data)
         size += sum(len(entry.info.data) for entry in self.patch.values())
         return size
 

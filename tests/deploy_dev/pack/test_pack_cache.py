@@ -26,7 +26,7 @@ import pytest
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import FileInfo
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
-from alasio.deploy_dev.pack.pack_cache import PackCache, PatchCache
+from alasio.deploy_dev.pack.pack_cache import PackCache, PatchCache, PlainCache
 from alasio.deploy_dev.pack.pack_repo import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.deploy_dev.pack.repo_diff import RepoDiff
@@ -227,8 +227,8 @@ class TestPackCacheHit:
         make_update(PackFull(WINDOW_REPO, commit='new'), 'old1')
         update = cache.content_update[key]
         # both encode the same content, the rules may pick another algorithm
-        assert index.sha1 == update.sha1
-        assert index.size == update.size
+        assert index.info.sha1 == update.sha1
+        assert index.info.size == update.size
 
     def test_update_pack_hit(self, cache):
         """The second update pack of a run reuses the encodings of the first."""
@@ -304,7 +304,7 @@ class TestPackCacheEntry:
         assert cache.get(cache.content_index, 'k') is None
         assert cache.stat['content'] == [0, 0]
         assert 'locks=0' in cache.report()
-        value = FileInfo(path='a.txt', size=3)
+        value = PlainCache(info=FileInfo(path='a.txt', size=3))
         cache.content_index['k'] = value
         assert cache.get(cache.content_index, 'k') is value
         assert cache.stat['content'] == [1, 0]
@@ -317,7 +317,7 @@ class TestPackCacheEntry:
         cache = PackCache()
         computed = []
         start = threading.Barrier(4)
-        value = FileInfo(path='a.txt', size=3)
+        value = PlainCache(info=FileInfo(path='a.txt', size=3))
         entries = []
 
         def compute(entry):
@@ -346,7 +346,7 @@ class TestPackCacheEntry:
     def test_the_callback_reuses_the_stored_entry(self):
         """A task that waited for the lock hands the stored entry to the callback"""
         cache = PackCache()
-        value = FileInfo(path='a.txt', size=3)
+        value = PlainCache(info=FileInfo(path='a.txt', size=3))
         cache.content_index['k'] = value
         seen = []
 
@@ -369,7 +369,7 @@ class TestPackCacheEntry:
         with pytest.raises(RuntimeError, match='computation failed'):
             cache.submit(cache.content_index, 'k', broken).get()
         assert 'locks=0' in cache.report()
-        value = FileInfo(path='a.txt', size=3)
+        value = PlainCache(info=FileInfo(path='a.txt', size=3))
         assert cache.submit(cache.content_index, 'k', lambda entry: value).get() is value
         assert 'locks=0' in cache.report()
         assert cache.stat['content'] == [0, 1]
@@ -377,7 +377,7 @@ class TestPackCacheEntry:
     def test_the_counters_of_the_threads_are_not_lost(self):
         """Every lookup is counted, the counters are updated under a lock"""
         cache = PackCache()
-        cache.content_index['k'] = FileInfo(path='a.txt', size=3)
+        cache.content_index['k'] = PlainCache(info=FileInfo(path='a.txt', size=3))
 
         def count(_):
             for _ in range(250):
@@ -398,15 +398,16 @@ class TestPackCacheEntry:
         assert cache.submit(cache.patch, 'pair', lambda entry: patch).get() is patch
         assert cache.get(cache.patch, 'pair') is patch
         assert cache.stat['patch'] == [1, 1]
-        extra = cache.submit(cache.extra, ('v', 'f'), lambda entry: FileInfo(path='f')).get()
-        assert extra.path == 'f'
+        extra = cache.submit(cache.extra, ('v', 'f'), lambda entry: PlainCache(info=FileInfo(path='f'))).get()
+        assert extra.info.path == 'f'
         assert cache.get(cache.extra, ('v', 'f')) is extra
         # the two encodings of a content are separate tables
         update = cache.submit(cache.content_update, 'c', lambda entry: FileInfo(path='a.txt')).get()
         assert cache.get(cache.content_update, 'c') is update
         assert cache.get(cache.content_index, 'c') is None
-        index = cache.submit(cache.content_index, 'c', lambda entry: FileInfo(path='b.txt')).get()
-        assert index.path == 'b.txt'
+        index = cache.submit(
+            cache.content_index, 'c', lambda entry: PlainCache(info=FileInfo(path='b.txt'))).get()
+        assert index.info.path == 'b.txt'
         assert cache.stat['content'] == [1, 2]
         # the .gitattributes state tables are filled under the lock of the table
         with cache.eol.lock:
