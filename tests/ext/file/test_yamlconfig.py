@@ -1,4 +1,4 @@
-from typing import List
+from typing import Dict, List
 
 import msgspec
 import pytest
@@ -49,6 +49,12 @@ class ListConfig(Struct):
     """Model with a list of strings used in tests."""
 
     items: Annotated[List[str], Meta(extra={"help": "list items"})] = msgspec.field(default_factory=list)
+
+
+class DictConfig(Struct):
+    """Model with a dict of ints used in tests."""
+
+    mapping: Annotated[Dict[str, int], Meta(extra={"help": "mapping"})] = msgspec.field(default_factory=dict)
 
 
 class SecretPasswordConfig(Struct):
@@ -860,4 +866,275 @@ items:
 items:
 - a
 - b
+"""
+
+    def test_write_empty_list(self, fs):
+        """An empty list is written as "[]"."""
+        config = YamlConfig('/config.yaml', ListConfig)
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# list items
+items: []
+"""
+
+    def test_write_list_of_structs(self, fs):
+        """A list of structs is written one item per line, the fields of an item are aligned."""
+
+        class Item(Struct):
+            Port: int = 8080
+            Name: str = 'x'
+
+        class StructListConfig(Struct):
+            structs: List[Item] = msgspec.field(default_factory=list)
+
+        config = YamlConfig('/config.yaml', StructListConfig)
+        config.data.structs = [Item(Port=1, Name='a'), Item(Port=2)]
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+structs:
+- Port: 1
+  Name: a
+- Port: 2
+  Name: x
+"""
+
+    def test_write_nested_list(self, fs):
+        """A list of lists keeps the block style of the inner lists too."""
+
+        class MatrixConfig(Struct):
+            matrix: List[List[str]] = msgspec.field(default_factory=list)
+
+        config = YamlConfig('/config.yaml', MatrixConfig)
+        config.data.matrix = [['a', 'b'], ['c']]
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+matrix:
+- - a
+  - b
+- - c
+"""
+
+    def test_write_items_needing_quotes(self, fs):
+        """Items that would change meaning as plain scalars are quoted, still one per line."""
+        config = YamlConfig('/config.yaml', ListConfig)
+        config.data.items = ['a: b', '123', 'yes', '- x']
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# list items
+items:
+- 'a: b'
+- '123'
+- 'yes'
+- '- x'
+"""
+        config2 = YamlConfig('/config.yaml', ListConfig)
+        assert config2.errors == []
+        assert config2.data.items == ['a: b', '123', 'yes', '- x']
+
+    def test_write_unicode_item(self, fs):
+        """A non-ascii item is written literally, not escaped."""
+        config = YamlConfig('/config.yaml', ListConfig)
+        config.data.items = ['碧蓝航线']
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# list items
+items:
+- 碧蓝航线
+"""
+
+    def test_read_invalid_item_dropped(self, fs):
+        """An item that fails the validation is dropped, the other items and the other fields are kept."""
+
+        class MixedListConfig(Struct):
+            port: int = 8080
+            items: List[str] = msgspec.field(default_factory=list)
+
+        fs.create_file('/config.yaml', contents="""\
+port: 9090
+items:
+- a
+- 5
+- b
+""")
+        config = YamlConfig('/config.yaml', MixedListConfig)
+        assert config.errors
+        assert config.data.port == 9090
+        assert config.data.items == ['a', 'b']
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+port: 9090
+items:
+- a
+- b
+"""
+
+    def test_read_invalid_items_dropped(self, fs):
+        """Every invalid item is dropped, the valid items keep their order."""
+        fs.create_file('/config.yaml', contents="""\
+items:
+- a
+- 5
+- b
+- 6
+""")
+        config = YamlConfig('/config.yaml', ListConfig)
+        assert config.errors
+        assert config.data.items == ['a', 'b']
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# list items
+items:
+- a
+- b
+"""
+
+
+class TestYamlConfigDict:
+    """Dicts are read and written in the "key: value" block style, one pair per line."""
+
+    def test_read_block_dict(self, fs):
+        """A dict written as "key: value" lines is read, the order of the keys is kept."""
+        fs.create_file('/config.yaml', contents="""\
+mapping:
+  b: 2
+  a: 1
+""")
+        config = YamlConfig('/config.yaml', DictConfig)
+        assert config.errors == []
+        assert config.data.mapping == {'b': 2, 'a': 1}
+        # the keys are not sorted, the order of the file is kept
+        assert list(config.data.mapping) == ['b', 'a']
+
+    def test_read_flow_dict(self, fs):
+        """A dict written as "{key: value}" is read too, and written back in the block style."""
+        fs.create_file('/config.yaml', contents='mapping: {b: 2, a: 1}\n')
+        config = YamlConfig('/config.yaml', DictConfig)
+        assert config.errors == []
+        assert config.data.mapping == {'b': 2, 'a': 1}
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# mapping
+mapping:
+  b: 2
+  a: 1
+"""
+
+    def test_write_block_dict(self, fs):
+        """A dict is written as "key: value" lines, one pair per line, with the help comment of the key."""
+        config = YamlConfig('/config.yaml', DictConfig)
+        config.data.mapping = {'b': 2, 'a': 1}
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# mapping
+mapping:
+  b: 2
+  a: 1
+"""
+
+    def test_write_empty_dict(self, fs):
+        """An empty dict is written as "{}"."""
+        config = YamlConfig('/config.yaml', DictConfig)
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# mapping
+mapping: {}
+"""
+
+    def test_write_quoted_keys(self, fs):
+        """Keys that would change meaning as plain scalars are quoted, still one pair per line."""
+        config = YamlConfig('/config.yaml', DictConfig)
+        config.data.mapping = {'on': 1, 'key: x': 2}
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# mapping
+mapping:
+  'on': 1
+  'key: x': 2
+"""
+        config2 = YamlConfig('/config.yaml', DictConfig)
+        assert config2.errors == []
+        assert config2.data.mapping == {'on': 1, 'key: x': 2}
+
+    def test_write_dict_round_trip(self, fs):
+        """A written dict is read back into the same dict, the second write is skipped."""
+        config = YamlConfig('/config.yaml', DictConfig)
+        config.data.mapping = {'b': 2, 'a': 1}
+        config.write()
+        config2 = YamlConfig('/config.yaml', DictConfig)
+        assert config2.errors == []
+        assert config2.data.mapping == {'b': 2, 'a': 1}
+        assert config2.write() is False
+
+    def test_write_dict_of_lists(self, fs):
+        """A dict of lists keeps the block style of the inner lists too."""
+
+        class DictListConfig(Struct):
+            mapping: Dict[str, List[str]] = msgspec.field(default_factory=dict)
+
+        config = YamlConfig('/config.yaml', DictListConfig)
+        config.data.mapping = {'b': ['x', 'y'], 'a': ['z']}
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+mapping:
+  b:
+  - x
+  - y
+  a:
+  - z
+"""
+        config2 = YamlConfig('/config.yaml', DictListConfig)
+        assert config2.errors == []
+        assert config2.data.mapping == {'b': ['x', 'y'], 'a': ['z']}
+
+    def test_read_invalid_value_drops_entry(self, fs):
+        """An entry whose value fails the validation is dropped, the other entries and fields are kept."""
+
+        class MixedDictConfig(Struct):
+            port: int = 8080
+            mapping: Dict[str, int] = msgspec.field(default_factory=dict)
+
+        fs.create_file('/config.yaml', contents="""\
+port: 9090
+mapping:
+  keep: 1
+  bad: abc
+  keep2: 2
+""")
+        config = YamlConfig('/config.yaml', MixedDictConfig)
+        assert config.errors
+        assert config.data.port == 9090
+        assert config.data.mapping == {'keep': 1, 'keep2': 2}
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+port: 9090
+mapping:
+  keep: 1
+  keep2: 2
+"""
+
+    def test_read_invalid_key_drops_entry(self, fs):
+        """An entry whose key fails the validation is dropped too."""
+        fs.create_file('/config.yaml', contents="""\
+mapping:
+  keep: 1
+  yes: 2
+""")
+        config = YamlConfig('/config.yaml', DictConfig)
+        assert config.errors
+        assert config.data.mapping == {'keep': 1}
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# mapping
+mapping:
+  keep: 1
 """
