@@ -8,6 +8,10 @@
     active?: boolean;
     class?: string;
     boldClass?: string;
+    // Weight of the label while it is not active. A row of the nav passes the
+    // weight of its own row style, so an inactive row reads like the group
+    // titles around it instead of the plain default.
+    normalClass?: string;
     containerClass?: string;
   }
 
@@ -16,6 +20,7 @@
     active = false,
     class: baseClass = "",
     boldClass = "font-bold",
+    normalClass = "font-normal",
     containerClass = "",
   }: Props = $props();
 
@@ -96,7 +101,7 @@
     - 每一个 line 都是一个块级 div，确保强制换行。
     - 即使是不加粗状态，也会被这里的 div 强行切断。
   -->
-  <div class={cn(baseClass, active ? boldClass : "font-normal")}>
+  <div class={cn(baseClass, active ? boldClass : normalClass)}>
     {#if lines.length > 0}
       {#each lines as line}
         <div class="flex flex-wrap">

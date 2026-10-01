@@ -1,5 +1,6 @@
 <script lang="ts">
   import SafeBold from "$lib/components/aside/SafeBold.svelte";
+  import { SidebarRowIndicator, sidebarRowClass } from "$lib/components/sidebar-accordion";
   import { Button } from "$lib/components/ui/button";
   import { cn } from "$lib/utils.js";
 
@@ -7,7 +8,6 @@
     name,
     active,
     scheduler,
-    variant = "accordin",
     class: className,
     ...restprops
   }: {
@@ -21,7 +21,6 @@
     scheduler?: boolean | undefined;
     onclick?: () => void;
     ondblclick?: () => void;
-    variant?: "root" | "accordin";
     class?: string;
   } = $props();
 </script>
@@ -29,24 +28,30 @@
 <Button
   variant="ghost"
   class={cn(
-    "hover:text-primary relative h-auto min-h-8 w-full justify-start px-3 py-1 text-left text-sm",
+    // The box of a row of the sidebar accordion family: the metrics of the
+    // family plus the state colors of a row of the nav. The label uses the
+    // same metrics, so a card lines up with the entries and the groups above
+    // it (see sidebar-accordion/row.ts). No w-full: the row is stretched by
+    // the list it sits in, so the margins of the metrics inset it.
+    "hover:text-primary h-auto justify-start text-left",
+    sidebarRowClass,
     active
       ? "text-primary hover:bg-card dark:hover:bg-card font-semibold"
       : "text-foreground/80 hover:bg-card/80 dark:hover:bg-card font-medium",
-    variant === "root" && cn("text-md hover:bg-accent dark:hover:bg-accent hover:underline"),
     className,
   )}
   {...restprops}
 >
-  {#if active}
-    <div class="bg-primary absolute top-0.5 bottom-0.5 left-0 w-1 rounded-r-full"></div>
-  {/if}
+  <SidebarRowIndicator {active} />
   <SafeBold {active} text={name}></SafeBold>
   {#if scheduler !== undefined}
     <!--
-      Align the circle center with the accordion trigger chevron above:
-      chevron (size-4) sits at trigger right padding px-3, rows are inset px-3,
-      so place the circle at right-1 to share the chevron's horizontal center.
+      The scheduler state of the card, a dot at the right end of the row. This
+      row and the trigger of the group above it share the metrics of
+      sidebar-accordion/row.ts: the chevron (size-4) of the trigger ends at the
+      right padding of a row, the dot (size-2.5) is laid out in the row and
+      held mr-[3px] (half a chevron minus half a dot) off the content edge, so
+      the two share a horizontal center whatever padding the metrics carry.
       Enabled state is three layers: inner dot (theme color), gap, gray ring.
       The inner dot is painted by the background of this same box, a child
       element of this size has its own box on fractional device pixels
@@ -55,9 +60,9 @@
     -->
     <span
       class={cn(
-        "border-muted-foreground/60 absolute top-1/2 right-1 h-2.5 w-2.5 -translate-y-1/2 rounded-full border",
+        "border-muted-foreground/60 mr-[3px] h-2.5 w-2.5 shrink-0 rounded-full border",
         // filled disc of 2px radius, the remaining 1px inside the border is the gap
-        scheduler && "bg-[radial-gradient(circle,var(--primary)_0_2.5px,transparent_2.5px)] border-primary",
+        scheduler && "border-primary bg-[radial-gradient(circle,var(--primary)_0_2.5px,transparent_2.5px)]",
       )}
       aria-hidden="true"
     ></span>

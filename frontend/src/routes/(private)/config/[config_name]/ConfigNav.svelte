@@ -1,7 +1,14 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import type { CardData } from "$lib/components/arg/utils.svelte";
-  import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "$lib/components/ui/accordion";
+  import SafeBold from "$lib/components/aside/SafeBold.svelte";
+  import {
+    SidebarAccordion,
+    SidebarAccordionContent,
+    SidebarAccordionItem,
+    SidebarAccordionRow,
+    SidebarAccordionTrigger,
+  } from "$lib/components/sidebar-accordion";
   import { t } from "$lib/i18n";
   import { HeaderContext } from "$lib/slotcontext.svelte";
   import { cn } from "$lib/utils.js";
@@ -170,18 +177,20 @@
 {/snippet}
 
 <nav class={cn("w-full", className)} aria-label="Configuration Navigation">
-  <div class="flex flex-col px-3">
+  <div class="flex flex-col">
     <!-- 
-      Overview and Device buttons has the same style as the accordion items, 
-      and active indicator like nav items.
-      Keep height h-10
+      Overview and Device are the entries of the nav at its root: rows of the
+      sidebar accordion family that open a page instead of a group, so they
+      carry the metrics of the group triggers below and the active indicator.
+      The metrics (sidebar-accordion/row.ts) own the whole box of a row, so the
+      entries here and the group triggers below line up by construction.
     -->
-    <div class="py-1">
-      <NavButton name="Overview" active={ui.isOverview} onclick={onOverviewClick} variant="root" />
-    </div>
-    <div class="py-1">
-      <NavButton name="Device" active={ui.isDevice} onclick={onDeviceClick} variant="root" />
-    </div>
+    <SidebarAccordionRow active={ui.isOverview} onclick={onOverviewClick}>
+      <SafeBold active={ui.isOverview} text="Overview" normalClass="font-medium" />
+    </SidebarAccordionRow>
+    <SidebarAccordionRow active={ui.isDevice} onclick={onDeviceClick}>
+      <SafeBold active={ui.isDevice} text="Device" normalClass="font-medium" />
+    </SidebarAccordionRow>
   </div>
 
   {#if navItems.length}
@@ -189,15 +198,15 @@
           Accordion's value is bound to our internal `nav_name` state.
           When a user clicks a trigger, `nav_name` is updated.
         -->
-    <Accordion type="single" class="w-full" bind:value={ui.opened_nav}>
+    <SidebarAccordion type="single" bind:value={ui.opened_nav}>
       {#each navItems as nav (nav.key)}
         <div bind:this={itemElements[nav.key]}>
-          <AccordionItem class="border-none" value={nav.key}>
-            <AccordionTrigger class={cn("text-md px-3 py-2 pl-6")}>
+          <SidebarAccordionItem value={nav.key}>
+            <SidebarAccordionTrigger>
               {nav.name}
-            </AccordionTrigger>
-            <AccordionContent class="bg-accent border-y py-2">
-              <div class="flex flex-col space-y-1 px-3">
+            </SidebarAccordionTrigger>
+            <SidebarAccordionContent class="bg-accent border-y">
+              <div class="flex flex-col">
                 {#each nav.cards as card (card.key)}
                   {@const active = card.key === ui.card_indicate && nav.key === ui.nav_name}
                   <NavButton
@@ -209,11 +218,11 @@
                   />
                 {/each}
               </div>
-            </AccordionContent>
-          </AccordionItem>
+            </SidebarAccordionContent>
+          </SidebarAccordionItem>
         </div>
       {/each}
-    </Accordion>
+    </SidebarAccordion>
   {:else}
     <p>No data</p>
   {/if}
