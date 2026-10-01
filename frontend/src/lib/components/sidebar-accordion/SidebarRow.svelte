@@ -4,8 +4,11 @@
   import SidebarRowIndicator from "./SidebarRowIndicator.svelte";
   import { sidebarRowClass } from "./row";
 
-  // A row of the sidebar accordion family that does not collapse: an entry of
-  // the nav that opens a page instead of a group (Overview, Device, ...).
+  // A row of a sidebar: an entry that opens a page instead of a group
+  // (Overview, Device, Config Manager, ...). It sits in the list of a sidebar
+  // (see SidebarContent) or under the trigger of a group (see
+  // SidebarAccordionContent); both stretch it and inset it through the margins
+  // of the metrics.
   //
   // It is laid out like every row of the family: the metrics, the select
   // indicator (painted while the row is the current one) and the label. The

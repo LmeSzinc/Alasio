@@ -2,7 +2,8 @@
   import { dev } from "$app/environment";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { Button } from "$lib/components/ui/button";
+  import SafeBold from "$lib/components/aside/SafeBold.svelte";
+  import { SidebarContent, SidebarHeader, SidebarRow, SidebarTitle } from "$lib/components/sidebar-accordion";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { t } from "$lib/i18n";
   import { HeaderContext } from "$lib/slotcontext.svelte";
@@ -76,28 +77,30 @@
   <h1 class="w-full flex-1 text-center text-lg">{displayHeader}</h1>
 {/snippet}
 
-{#snippet navSection(title: string, items: typeof devNavItems)}
+{#snippet navSection(title: string, items: typeof devNavItems, header = false)}
   <!-- This section's border-t aligns with AppHeader bottom:
-       aside-item pt-1 (4px) + aside p-4 (16px) + h2 line-height (28px) = 48px = h-12 -->
-  <div class="flex flex-col space-y-1">
-    <h2 class="px-3 text-lg font-semibold">{title}</h2>
-    <div class="border-border border-t"></div>
-    {#each items as item (item.path)}
-      {@const isActive = matchPath(item.path)}
-      <Button
-        variant={isActive ? "default" : "ghost"}
-        class="h-9 w-full justify-start px-3"
-        onclick={() => handleNavClick(item.path)}
-      >
-        {item.name}
-      </Button>
-    {/each}
+       aside pt-2 (8px) + header (line-height 28px + py-1.5 12px = 40px) = 48px = h-12 -->
+  <div class="flex flex-col">
+    {#if header}
+      <SidebarHeader>{title}</SidebarHeader>
+    {:else}
+      <SidebarTitle>{title}</SidebarTitle>
+    {/if}
+    <div class="border-border mx-1 border-t"></div>
+    <SidebarContent>
+      {#each items as item (item.path)}
+        {@const isActive = matchPath(item.path)}
+        <SidebarRow active={isActive} onclick={() => handleNavClick(item.path)}>
+          <SafeBold active={isActive} text={item.name} normalClass="font-medium" />
+        </SidebarRow>
+      {/each}
+    </SidebarContent>
   </div>
 {/snippet}
 
 <ScrollArea class="h-full w-full">
-  <aside class={cn("w-full space-y-4 p-4", className)} role="navigation" aria-label="Main navigation">
-    {@render navSection(t.DevTool.AlasioTool(), alasioNavItems)}
+  <aside class={cn("w-full pt-2 pb-4", className)} role="navigation" aria-label="Main navigation">
+    {@render navSection(t.DevTool.AlasioTool(), alasioNavItems, true)}
     {@render navSection(t.DevTool.DevTool(), devNavItems)}
     {#if dev}
       {@render navSection(t.DevTool.DebugTool(), debugNavItems)}

@@ -6,8 +6,8 @@
     SidebarAccordion,
     SidebarAccordionContent,
     SidebarAccordionItem,
-    SidebarAccordionRow,
     SidebarAccordionTrigger,
+    SidebarRow,
   } from "$lib/components/sidebar-accordion";
   import { t } from "$lib/i18n";
   import { HeaderContext } from "$lib/slotcontext.svelte";
@@ -185,12 +185,12 @@
       The metrics (sidebar-accordion/row.ts) own the whole box of a row, so the
       entries here and the group triggers below line up by construction.
     -->
-    <SidebarAccordionRow active={ui.isOverview} onclick={onOverviewClick}>
+    <SidebarRow active={ui.isOverview} onclick={onOverviewClick}>
       <SafeBold active={ui.isOverview} text="Overview" normalClass="font-medium" />
-    </SidebarAccordionRow>
-    <SidebarAccordionRow active={ui.isDevice} onclick={onDeviceClick}>
+    </SidebarRow>
+    <SidebarRow active={ui.isDevice} onclick={onDeviceClick}>
       <SafeBold active={ui.isDevice} text="Device" normalClass="font-medium" />
-    </SidebarAccordionRow>
+    </SidebarRow>
   </div>
 
   {#if navItems.length}
