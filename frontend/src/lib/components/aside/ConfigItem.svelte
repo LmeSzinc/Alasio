@@ -38,7 +38,13 @@
   title={config.name}
 >
   {#if active}
-    <div class="bg-primary absolute top-2 bottom-2 left-0 w-1 rounded-r-full"></div>
+    <!--
+      The select indicator sits in the gutter left of the item box (the padding
+      of the holder), so it never runs under the name: the name is centered on
+      the whole box, an indicator inside the box would overlap the text, and
+      the box is too narrow to inset the name away from it.
+    -->
+    <div class="bg-primary absolute top-2 bottom-2 -left-1 w-1 rounded-full"></div>
   {/if}
   <div class="relative">
     <ModIcon mod={config.mod} afspin={spin} />

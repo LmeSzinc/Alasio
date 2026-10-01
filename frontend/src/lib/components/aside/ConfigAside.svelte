@@ -131,7 +131,8 @@
       title={t.DevTool.Settings()}
     >
       {#if isSettingsActive}
-        <div class="bg-primary absolute top-2 bottom-2 left-0 w-1 rounded-r-full"></div>
+        <!-- Same indicator as ConfigItem: in the gutter left of the item box -->
+        <div class="bg-primary absolute top-2 bottom-2 -left-1 w-1 rounded-full"></div>
       {/if}
       <div class="relative flex h-8 items-center justify-center">
         <Settings class="h-6 w-6" strokeWidth="1.5" aria-hidden="true" />
