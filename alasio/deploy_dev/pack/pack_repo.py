@@ -8,7 +8,7 @@ from alasio.backport import removesuffix
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.history.encode_history import encode_commit_history
 from alasio.deploy_dev.pack import pack_cache
-from alasio.deploy_dev.pack.encode_base import PackEncodeBase
+from alasio.deploy_dev.pack.encode_base import PackEncodeBase, encode_pack_version
 from alasio.deploy_dev.pack.pack_cache import PlainCache
 from alasio.deploy_dev.pack.pack_pool import PACK_POOL
 from alasio.ext.cache import cached_property
@@ -61,10 +61,10 @@ class PackFull(PackEncodeBase):
         Args:
             repo (GitRepo): GitRepo object
             commit (str): commit sha1 in str, the version of the pack
-            pack_version (bytes, optional): Pack format version to encode with.
-                Defaults to None, the current version of PackEncodeBase; an
-                already published pack must be rebuilt with the format version
-                it was encoded with, see PackUpdate
+            pack_version (int, optional): Pack format version to encode with,
+                0~255. Defaults to None, the current version of PackEncodeBase;
+                an already published pack must be rebuilt with the format
+                version it was encoded with, see PackUpdate
         """
         super().__init__()
         self.repo = repo
@@ -326,7 +326,7 @@ class PackFull(PackEncodeBase):
         attr = GitAttributes()
         repo = self.repo
         digest = sha1()
-        digest.update(self.pack_version)
+        digest.update(encode_pack_version(self.pack_version))
         for path, entry in self.filelist.items():
             if path == '.gitattributes':
                 root = ''

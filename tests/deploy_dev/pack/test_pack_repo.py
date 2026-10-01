@@ -12,6 +12,7 @@ from hashlib import sha1 as _sha1
 import pytest
 
 from alasio.deploy.history.decode_history import HistoryObj, decode_history
+from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import FileInfo
 from alasio.deploy_dev.pack.pack_cache import PackCache, PlainCache
 from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key
@@ -92,6 +93,57 @@ class TestPackPathValidateCache:
         for _ in range(2):
             with pytest.raises(ValueError, match='directory pointer'):
                 b''.join(PackFull(mock, commit=COMMIT).iter_packidx_data())
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  pack version
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestPackVersion:
+    """The pack format version is an int in Python, one byte in the pack file."""
+
+    def test_default_version(self):
+        """The default version is the int 0, written as the b'\\x00' byte."""
+        mock = _make_repo()
+        mock.register_file(COMMIT, 'a.txt', b'a')
+        pack = PackFull(mock, commit=COMMIT)
+        assert pack.pack_version == 0
+        assert isinstance(pack.pack_version, int)
+        data = b''.join(pack.iter_packidx_data())
+        assert data[:4] == b'PACK'
+        # one byte behind b'PACK', the b'\x00' the format always carried
+        assert data[4:5] == b'\x00'
+        decoder = PackDecodeBase(data)
+        assert decoder.pack_version == 0
+        assert isinstance(decoder.pack_version, int)
+
+    @pytest.mark.parametrize('pack_version', [0, 1, 0x7F, 0xFF])
+    def test_version_round_trips(self, pack_version):
+        """A version is written as its byte and decoded back to the int."""
+        mock = _make_repo()
+        mock.register_file(COMMIT, 'a.txt', b'a')
+        data = b''.join(PackFull(
+            mock, commit=COMMIT, pack_version=pack_version).iter_packidx_data())
+        assert data[4:5] == bytes((pack_version,))
+        assert PackDecodeBase(data).pack_version == pack_version
+
+    @pytest.mark.parametrize('pack_version', [-1, 256, 0x100, b'\x00', '0', 1.0, (0,)])
+    def test_version_out_of_range(self, pack_version):
+        """A version that is not an int in 0~255 is rejected at construction."""
+        mock = _make_repo()
+        mock.register_file(COMMIT, 'a.txt', b'a')
+        with pytest.raises(ValueError, match='must be an int in 0~255'):
+            PackFull(mock, commit=COMMIT, pack_version=pack_version)
+
+    def test_version_assignment_is_checked(self):
+        """An out of range version is rejected whatever assigns it."""
+        mock = _make_repo()
+        mock.register_file(COMMIT, 'a.txt', b'a')
+        pack = PackFull(mock, commit=COMMIT)
+        with pytest.raises(ValueError, match='must be an int in 0~255'):
+            pack.pack_version = 256
+        assert pack.pack_version == 0
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -240,7 +292,7 @@ class TestGitattributesFingerprint:
         mock.register_file('c1', '.gitattributes', b'*.foo text')
         mock.register_file('c1', 'a.foo', b'a')
         current = PackFull(mock, commit='c1')
-        other = PackFull(mock, commit='c1', pack_version=b'\x01')
+        other = PackFull(mock, commit='c1', pack_version=1)
         assert current.gitattributes_fingerprint != other.gitattributes_fingerprint
 
 

@@ -37,7 +37,8 @@ class PackDecodeManifest:
 
     Attributes:
         data (memoryview): Raw manifest bytes.
-        manifest_version (bytes): MANIFEST format version byte.
+        manifest_version (int): MANIFEST format version, 0~255, the single
+            header byte behind b'MANI'.
         checksum (str): Checksum of the manifest, the trailing 20 bytes
             digest in hex, the same value validate() verifies.
         files (dict[str, RefInfo]): {filepath: RefInfo} records, the sha1
@@ -65,7 +66,8 @@ class PackDecodeManifest:
             raise PackDecodeError(
                 f'Failed to decode header: not a manifest file: {bytes(data[:4])!r}'
             )
-        self.manifest_version = bytes(data[4:5])
+        # the version is one byte in the manifest file, an int on the Python side
+        self.manifest_version = data[4]
 
         # the data section is everything between the header and the
         # trailing checksum

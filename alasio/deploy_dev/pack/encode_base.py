@@ -19,6 +19,28 @@ from alasio.ext.path.validate import validate_filepath
 _VALID_PACK_PATH = set()
 
 
+def encode_pack_version(pack_version):
+    """
+    Encode a pack format version into the single byte of the pack header.
+
+    The version is an int in Python (see PackEncodeBase.PACK_VERSION) and one
+    byte in a pack file, the byte behind b'PACK', so 0~255 is the whole range
+    the format carries and a version bump stays a one byte change on disk.
+
+    Args:
+        pack_version (int): Pack format version, 0~255
+
+    Returns:
+        bytes: The single byte of the version
+
+    Raises:
+        ValueError: If pack_version is not an int in 0~255
+    """
+    if not isinstance(pack_version, int) or not 0 <= pack_version <= 0xFF:
+        raise ValueError(f'Pack version must be an int in 0~255, got {pack_version!r}')
+    return bytes((pack_version,))
+
+
 class PackEncodeBase:
     """
     Alasio 更新模块
@@ -46,7 +68,7 @@ class PackEncodeBase:
 
     # header
     - b'PACK'
-    - PACK version
+    - PACK version, one byte, an int in 0~255 on the Python side
 
     # index section
     - length (including checksum of index section)
@@ -119,9 +141,10 @@ class PackEncodeBase:
         - 清空 .pack/workspace 文件夹
         - 释放 .pack/index.pack 的锁
     """
-    # pack format version of the encoded bytes: a published pack must be
+    # pack format version of the encoded bytes: an int in 0~255, the pack file
+    # carries it as the single byte behind b'PACK'. A published pack must be
     # rebuilt with the format version it was encoded with, see PackUpdate
-    PACK_VERSION = b'\x00'
+    PACK_VERSION = 0
 
     def __init__(self):
         # version of this pack, e.g. the commit sha1 of the packed version
@@ -131,6 +154,23 @@ class PackEncodeBase:
         self.old_version: str = ''
         # pack format version of this pack, see PACK_VERSION
         self.pack_version = self.PACK_VERSION
+
+    @property
+    def pack_version(self):
+        """
+        Pack format version of this pack, an int in 0~255
+
+        Returns:
+            int: Pack format version, see PACK_VERSION
+        """
+        return self._pack_version
+
+    @pack_version.setter
+    def pack_version(self, pack_version):
+        # the encode of the header byte, run here as the check: an out of range
+        # version fails at construction, not at the assembly of the pack
+        encode_pack_version(pack_version)
+        self._pack_version = pack_version
 
     @cached_property
     def refinfo(self) -> "Dict[str, RefInfo]":
@@ -252,7 +292,7 @@ class PackEncodeBase:
     def iter_packidx_data(self):
         def iter_header():
             yield b'PACK'
-            yield self.pack_version
+            yield encode_pack_version(self.pack_version)
 
         def iter_index():
             # version

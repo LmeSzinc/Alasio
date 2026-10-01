@@ -19,7 +19,7 @@ class TestPackDecodeIndex:
     def test_structure(self):
         """Index pack decodes the header with an empty data section."""
         decoder = PackDecodeBase(WEBSITE_INDEX_PACK)
-        assert decoder.pack_version == b'\x00'
+        assert decoder.pack_version == 0
         assert decoder.current_version == COMMIT
         # an index pack is the front part of a full pack, no old version
         assert decoder.old_version == ''

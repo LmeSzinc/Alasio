@@ -56,7 +56,8 @@ def make_update(new_pack, old_commit, old_pack_version=PackEncodeBase.PACK_VERSI
     Args:
         new_pack (PackFull): New version
         old_commit (str): Commit sha1 of the old version
-        old_pack_version (bytes): Pack format version of the published old pack
+        old_pack_version (int): Pack format version of the published old pack,
+            0~255
         **kwargs: Arguments passed to PackUpdate
 
     Returns:
@@ -174,12 +175,19 @@ class TestPackFromRepo:
 
     def test_update_pack_crosses_pack_version(self):
         """The old side is rebuilt with the format version of the old pack."""
-        pack = PackUpdate(PackFull(WINDOW_REPO, commit='new'), 'old1', b'\x01')
-        assert pack.old.pack_version == b'\x01'
-        # the pack format version is the header byte behind b'PACK'
+        pack = PackUpdate(PackFull(WINDOW_REPO, commit='new'), 'old1', 1)
+        assert pack.old.pack_version == 1
+        # the pack file carries the version as one byte behind b'PACK'
         assert pack.old.index_pack[4:5] == b'\x01'
         # the update pack itself is encoded in the format of the new pack
         assert pack.pack_version == PackEncodeBase.PACK_VERSION
+
+    @pytest.mark.parametrize('old_pack_version', [-1, 256, b'\x00'])
+    def test_update_pack_rejects_version_out_of_range(self, old_pack_version):
+        """The format version of the old pack is an int in 0~255 too."""
+        with pytest.raises(ValueError, match='must be an int in 0~255'):
+            PackUpdate(
+                PackFull(WINDOW_REPO, commit='new'), 'old1', old_pack_version)
 
     def test_copied_file_is_unchanged(self):
         """A copy that stays in the new version is not a diff record."""
@@ -196,7 +204,7 @@ class TestPackFromRepo:
     def test_update_pack_rejects_decoder(self):
         """The new version must be a PackFull, not a decoder of a stored pack."""
         with pytest.raises(ValueError) as e:
-            PackUpdate(PackDecodeBase(SCENARIO_NEW_PACK), 'old', b'old')
+            PackUpdate(PackDecodeBase(SCENARIO_NEW_PACK), 'old', 1)
         assert 'requires a PackFull of the new version' in str(e.value)
 
 

@@ -80,8 +80,8 @@ def encode_manifest(files, version=None):
 
     Args:
         files (dict[str, bytes]): {path: content}
-        version (bytes, optional): Manifest version to write to the
-            header. Defaults to None, the encoder default version.
+        version (int, optional): Manifest version to write to the header,
+            0~255. Defaults to None, the encoder default version.
 
     Returns:
         bytes: Manifest bytes
@@ -236,7 +236,10 @@ class TestManifestDecodeBasic:
     def test_header(self):
         """Header magic and manifest version must be decoded."""
         decoder = PackDecodeManifest(MANIFEST_DATA)
-        assert decoder.manifest_version == b'\x00'
+        assert decoder.manifest_version == 0
+        assert isinstance(decoder.manifest_version, int)
+        # the manifest file carries the version as one byte behind b'MANI'
+        assert MANIFEST_DATA[4:5] == b'\x00'
 
     def test_data_is_memoryview(self):
         """The data must be exposed as a memoryview of the input."""
@@ -472,20 +475,44 @@ class TestManifestValidate:
     def test_custom_manifest_version(self):
         """The encoder writes self.manifest_version, a version the decoder
         does not know is handed out as-is, only the caller decides on it."""
-        data = encode_manifest(FRONTEND_FILES, version=b'\x02')
+        data = encode_manifest(FRONTEND_FILES, version=2)
         assert data[:5] == b'MANI\x02'
 
         decoder = PackDecodeManifest(data)
-        assert decoder.manifest_version == b'\x02'
+        assert decoder.manifest_version == 2
         # an unknown version must not break the checksum or the records
         decoder.validate()
         assert list(decoder.files) == list(FRONTEND_FILES)
 
     def test_default_manifest_version(self):
-        """A manifest written without a version override is b'\\x00'."""
+        """A manifest written without a version override is 0, the b'\\x00' byte."""
         data = encode_manifest({'a.txt': b'x'})
         assert data[:5] == b'MANI\x00'
-        assert PackDecodeManifest(data).manifest_version == b'\x00'
+        assert PackDecodeManifest(data).manifest_version == 0
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  manifest version
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestManifestVersion:
+    """The manifest version is an int in Python, one byte in the file."""
+
+    @pytest.mark.parametrize('manifest_version', [0, 1, 0x7F, 0xFF])
+    def test_version_round_trips(self, manifest_version):
+        """A version is written as its byte and decoded back to the int."""
+        data = encode_manifest({'a.txt': b'x'}, version=manifest_version)
+        assert data[:5] == b'MANI' + bytes((manifest_version,))
+        assert PackDecodeManifest(data).manifest_version == manifest_version
+
+    @pytest.mark.parametrize('manifest_version', [-1, 256, 0x100, b'\x00', '0', 1.0, (0,)])
+    def test_version_out_of_range(self, manifest_version):
+        """A version that is not an int in 0~255 is rejected at the assignment."""
+        manifest = PackEncodeManifest()
+        with pytest.raises(ValueError, match='must be an int in 0~255'):
+            manifest.manifest_version = manifest_version
+        assert manifest.manifest_version == 0
 
 
 # ════════════════════════════════════════════════════════════════════════════

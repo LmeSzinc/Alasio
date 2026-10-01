@@ -29,7 +29,9 @@ class TestPackDecodeBasic:
     def test_header(self):
         """Header magic and pack version must be decoded."""
         decoder = PackDecodeBase(WEBSITE_FULL_PACK)
-        assert decoder.pack_version == b'\x00'
+        assert decoder.pack_version == 0
+        # the pack file carries the version as one byte behind b'PACK'
+        assert WEBSITE_FULL_PACK[4:5] == b'\x00'
         assert decoder.current_version == COMMIT
         # a full pack has no old version
         assert decoder.old_version == ''

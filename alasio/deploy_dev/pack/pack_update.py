@@ -68,11 +68,11 @@ class PackUpdate(PackEncodeBase):
                 it also provides the git repo of the versions
             old_commit (str): Commit sha1 of the old version, the version that
                 a client updates from
-            old_pack_version (bytes): Pack format version of the already
-                published old pack, it selects the encoder that rebuilds the
-                old index pack and the old extra files, so the update pack can
-                cross a pack format change. Defaults to the current version of
-                PackEncodeBase, b'\\x00'
+            old_pack_version (int): Pack format version of the already
+                published old pack, 0~255, it selects the encoder that rebuilds
+                the old index pack and the old extra files, so the update pack
+                can cross a pack format change. Defaults to the current version
+                of PackEncodeBase, 0
 
         Raises:
             ValueError: If new is not a PackFull of a full version

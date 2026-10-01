@@ -63,7 +63,8 @@ class PackDecodeBase:
 
     Attributes:
         data (memoryview): Raw pack bytes.
-        pack_version (bytes): PACK format version byte.
+        pack_version (int): PACK format version, 0~255, the single header
+            byte behind b'PACK'.
         current_version (str): Version of the pack, e.g. the commit sha1
             of the packed version.
         old_version (str): Version the pack updates from, empty in a full
@@ -97,7 +98,8 @@ class PackDecodeBase:
         # header
         if len(data) < 5 or data[:4] != b'PACK':
             raise PackDecodeError(f'Failed to decode header: not a pack file: {bytes(data[:4])!r}')
-        self.pack_version = bytes(data[4:5])
+        # the version is one byte in the pack file, an int on the Python side
+        self.pack_version = data[4]
 
         # index section
         offset = 5
