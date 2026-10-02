@@ -491,6 +491,15 @@ export class WebsocketManager {
             if (topicData !== undefined && topicData !== null && typeof topicData === "object") {
               deepDel(topicData, keys);
             }
+          } else {
+            // del at the data root: the server states the topic has no
+            // data. The cached view is dropped here, i.e. the client
+            // returns to its state before the first full event. The
+            // backend sends it when a rebind yields no snapshot (e.g. a
+            // config switched to a mod without navigation data): the
+            // previous source's data must not stay on screen, and nothing
+            // else would replace it until the next rebind.
+            delete this.topics[topic];
           }
           break;
       }
@@ -529,6 +538,11 @@ export class WebsocketManager {
           changed = true;
         } else if (op === "add") {
           logArray.push(value);
+          changed = true;
+        } else if (op === "del" && (event.k === undefined || event.k.length === 0)) {
+          // del at the data root of a scroll topic: the server states the
+          // topic has no data; an empty array displays the same state
+          logArray = [];
           changed = true;
         }
       }

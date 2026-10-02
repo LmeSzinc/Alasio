@@ -44,6 +44,14 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         self._busy = False   # a resubscribe round (incl. the catch-up loop) is running
         self._dirty = False  # a trigger arrived while busy -> catch up with the newest state
         self._closed = False  # op_unsub executed -> the running round must abort
+        # True while the client of this connection may hold data of this
+        # topic (a full snapshot or an increment was delivered / sent and
+        # no clear followed): a rebind that yields no snapshot must then
+        # state the empty data explicitly (see _clear_client_data) -- the
+        # client would otherwise keep the previous source's data forever,
+        # because subscribe stays silent on empty data and a cache source
+        # pushes no increments that could ever correct it.
+        self._client_has_data = False
         # Reliable send backlog of the current source (see deliver). All
         # fields are only touched on the Trio thread. The deque maxlen
         # bounds the backlog: appending to a full outbox silently drops
@@ -98,7 +106,13 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         the outbox is dropped whenever the topic unbinds its source
         (_drop_outbox), so a full event is never followed by stale
         increments of a previous source.
+
+        The delivery marks the client as holding data: an increment may be
+        the first payload a client receives (the initial snapshot was
+        empty and subscribe stayed silent), and a later rebind that yields
+        no snapshot must clear it (see _clear_client_data).
         """
+        self._client_has_data = True
         if self._sending:
             # A drain task is running (it may be suspended on a full send
             # buffer while the outbox is empty): always queue, never
@@ -202,7 +216,11 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         """
         Side-effect carrier of the source-model subscription: unsubscribe
         the old source, resolve the new subscription (get_source), register
-        the new source and send the full event.
+        the new source and send the full event. When the new state yields
+        no snapshot (no source / empty source), the client's view of the
+        old source is cleared instead (see _clear_client_data): subscribe
+        stays silent on empty data, so nothing else would ever replace the
+        previous source's data on screen.
 
         Latest-wins merging (see doc/2026-09-03_topic-source-subscribe-v2.md):
 
@@ -249,8 +267,11 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
                     # round (no build) and catch up with the newest state
                     continue
                 if source is None:
-                    # no source right now: silent; the next dependency
-                    # change re-runs this flow
+                    # no source right now: the topic has no data to show. A
+                    # client that still holds the previous source's view
+                    # must be told (see _clear_client_data); the next
+                    # dependency change re-runs this flow either way
+                    await self._clear_client_data()
                     break
                 self._src = source
                 snapshot = await source.subscribe(self)
@@ -264,7 +285,13 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
                     # stale result: drop it (the next round unregisters)
                     # and catch up with the newest state
                     continue
-                if snapshot is not None:
+                if snapshot is None:
+                    # the new source's snapshot is empty: subscribe stays
+                    # silent on empty data, so the client view of the
+                    # previous source must be cleared explicitly
+                    await self._clear_client_data()
+                else:
+                    self._client_has_data = True
                     # Ordering contract: right after registration, without
                     # any await, send the full event so it precedes every
                     # later increment.
@@ -281,6 +308,35 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
                 break
         finally:
             self._busy = False
+
+    async def _clear_client_data(self):
+        """
+        [Trio] Drop the client's view of this topic (a `del` at the data
+        root: the client forgets the topic data, the state before its
+        first full).
+
+        Needed when a rebind yields no snapshot (no source right now, or
+        an empty one): a client that already holds the previous source's
+        data would otherwise display it forever, because subscribe stays
+        silent on empty data and nothing pushes a correction (a cache
+        source has no increments at all). A fresh subscription sends
+        nothing: no client holds a view to replace.
+
+        The event is ordered like the full event of a rebind (sent with
+        send_nowait right after the round resolved, increments of the new
+        source follow it), so a clear is never seen after newer data.
+        """
+        if not self._client_has_data:
+            # the client holds nothing: nothing to replace
+            return
+        self._client_has_data = False
+        event = ResponseEvent(t=self.TOPIC_NAME, o='del')
+        try:
+            self.server.send_nowait(event)
+        except trio.WouldBlock:
+            # rare fallback, same window as the full event of a rebind
+            # (slow connection, dropped by heartbeat)
+            await self.server.send(event)
 
     async def op_sub(self):
         """

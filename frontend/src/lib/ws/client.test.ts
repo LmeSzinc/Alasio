@@ -558,6 +558,24 @@ describe("TestTopicDataEvents", () => {
     expect(client.topics.ConnState).toEqual({ lang: "ja-JP" });
   });
 
+  it("drops the topic data on a root del", () => {
+    // The server states the topic has no data: a rebind that yields no
+    // snapshot (e.g. a config switched to a mod without navigation data)
+    // must not leave the previous source's view on screen, and nothing
+    // else would replace it until the next rebind. The client returns to
+    // its state before the first full event.
+    const client = new WebsocketManager();
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+    client.sub("ConfigNav");
+
+    FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "ConfigNav", o: "full", v: { main: { card: {} } } }));
+    expect(client.topics.ConfigNav).toEqual({ main: { card: {} } });
+
+    FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "ConfigNav", o: "del" }));
+    expect(client.topics.ConfigNav).toBeUndefined();
+  });
+
   it("discards events for topics the client is not subscribed to", () => {
     const client = new WebsocketManager();
     client.connect();
@@ -692,6 +710,27 @@ describe("TestScrollTopic", () => {
     FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "Log", o: "full", v: null }));
     vi.advanceTimersByTime(0);
     expect(client.topics.Log).toEqual([]);
+  });
+
+  it("clears the log on a root del", () => {
+    const client = new WebsocketManager();
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+    client.sub("Log");
+    FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "Log", o: "add", v: { line: 1 } }));
+    vi.advanceTimersByTime(0);
+    expect(client.topics.Log).toHaveLength(1);
+
+    FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "Log", o: "del" }));
+    vi.advanceTimersByTime(0);
+    expect(client.topics.Log).toEqual([]);
+
+    // A keyed del is not a clear: it must not touch the buffered log
+    FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "Log", o: "add", v: { line: 2 } }));
+    vi.advanceTimersByTime(0);
+    FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "Log", o: "del", k: ["line"] }));
+    vi.advanceTimersByTime(0);
+    expect(client.topics.Log).toEqual([{ line: 2 }]);
   });
 });
 

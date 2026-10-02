@@ -88,6 +88,19 @@ class FakeViewportSource(NoCachePush):
         return ResponseEvent(t=self.TOPIC_NAME, o='set', k=(*key, 'value'), v=value)
 
 
+class FakeEmptySource(FakeSource):
+    """
+    A cache source whose data starts empty: subscribe registers the
+    subscriber without a snapshot (empty-data semantics), events still
+    apply and broadcast (an increment can be the first payload a client
+    receives).
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.data = {}
+
+
 class Server:
     """
     Records send_nowait / send calls; the scaffold's ordering contract is
@@ -183,11 +196,81 @@ class GatedTopic(ReactiveTopic):
         return self.sources[config]
 
 
+class RebindingTopic(BaseTopic):
+    """
+    A topic whose per-config source holds data (A), is empty (B) or is
+    absent -- get_source returns None (C): the three outcomes a rebind
+    can yield.
+    """
+    TOPIC_NAME = 'rebinding_topic'
+
+    def __init__(self, conn_id, server):
+        super().__init__(conn_id, server)
+        self._raw = {'config': 'A'}
+        self.sources = {'A': FakeSource(1), 'B': FakeEmptySource(), 'C': None}
+
+    @async_reactive_source
+    async def raw(self):
+        return self._raw
+
+    @async_reactive
+    async def selected(self):
+        raw = await self.raw
+        return raw['config']
+
+    async def get_source(self):
+        config = await self.selected
+        return self.sources[config]
+
+    async def switch(self, config):
+        """Switch the selected config and let the resubscribe round run"""
+        self._raw['config'] = config
+        await self.raw.mutate()
+        await trio.testing.wait_all_tasks_blocked()
+
+
+class RebindingViewportTopic(BaseTopic):
+    """
+    A viewport topic whose view is non-empty for config A and empty for
+    config B (the empty-view rebind of NoCachePush sources).
+    """
+    TOPIC_NAME = 'viewport_topic'
+
+    def __init__(self, conn_id, server):
+        super().__init__(conn_id, server)
+        self._raw = {'config': 'A'}
+        self.sources = {
+            'A': FakeViewportSource('config_a', {'view': 1}),
+            'B': FakeViewportSource('config_b', {}),
+        }
+
+    @async_reactive_source
+    async def raw(self):
+        return self._raw
+
+    @async_reactive
+    async def selected(self):
+        raw = await self.raw
+        return raw['config']
+
+    async def get_source(self):
+        return self.sources[await self.selected]
+
+    async def switch(self, config):
+        """Switch the selected config and let the resubscribe round run"""
+        self._raw['config'] = config
+        await self.raw.mutate()
+        await trio.testing.wait_all_tasks_blocked()
+
+
 @pytest.fixture(autouse=True)
 def cleanup():
     """Clear local topic singletons after each test"""
     yield
-    for cls in (CacheSourceTopic, ViewportTopic, ReactiveTopic, GatedTopic):
+    for cls in (
+        CacheSourceTopic, ViewportTopic, ReactiveTopic, GatedTopic,
+        RebindingTopic, RebindingViewportTopic,
+    ):
         cls.singleton_clear()
 
 
@@ -443,3 +526,110 @@ class TestLatestWinsMerging:
         assert topic._src is None
         assert server.sent == []
         assert source._subscribers == set()
+
+
+class TestEmptyRebindClear:
+    """
+    A rebind that yields no snapshot (no source right now / empty source)
+    must clear the client view of the previous source: subscribe stays
+    silent on empty data, so nothing else would ever replace it.
+    """
+
+    @pytest.mark.trio
+    async def test_rebind_to_empty_source_clears_client_data(self):
+        """Switching to an empty source sends a root del instead of a full"""
+        server = Server()
+        topic = RebindingTopic('conn-1', server)
+        await topic.op_sub()
+        assert decode(server.sent[-1]).v == {'x': 1}
+
+        await topic.switch('B')
+
+        assert topic._src is topic.sources['B']
+        assert len(server.sent) == 2
+        event = decode(server.sent[-1])
+        assert event.t == 'rebinding_topic'
+        assert event.o == 'del'
+        assert event.k == ()
+        assert event.v is None
+
+    @pytest.mark.trio
+    async def test_rebind_to_no_source_clears_client_data(self):
+        """get_source returning None after a bound source clears the view"""
+        server = Server()
+        topic = RebindingTopic('conn-1', server)
+        await topic.op_sub()
+
+        await topic.switch('C')
+
+        assert topic._src is None
+        assert len(server.sent) == 2
+        assert decode(server.sent[-1]).o == 'del'
+
+    @pytest.mark.trio
+    async def test_first_subscribe_to_empty_source_silent(self):
+        """A fresh subscription to an empty source sends nothing"""
+        server = Server()
+        topic = RebindingTopic('conn-1', server)
+        topic._raw['config'] = 'B'
+        await topic.op_sub()
+        assert topic._src is topic.sources['B']
+        assert server.sent == []
+
+    @pytest.mark.trio
+    async def test_clear_sent_once(self):
+        """
+        The clear replaces the client view: another empty rebind sends
+        nothing, a data rebind replaces the empty state with a full.
+        """
+        server = Server()
+        topic = RebindingTopic('conn-1', server)
+        await topic.op_sub()
+        await topic.switch('B')
+        assert [decode(p).o for p in server.sent] == ['full', 'del']
+
+        await topic.switch('C')
+        assert [decode(p).o for p in server.sent] == ['full', 'del']
+
+        await topic.switch('A')
+        assert [decode(p).o for p in server.sent] == ['full', 'del', 'full']
+        assert decode(server.sent[-1]).v == {'x': 1}
+
+        await topic.switch('B')
+        assert [decode(p).o for p in server.sent] == ['full', 'del', 'full', 'del']
+
+    @pytest.mark.trio
+    async def test_increment_after_silent_subscribe_is_cleared(self):
+        """
+        An increment may be the first payload a client receives (the
+        initial snapshot was empty): a later rebind to an empty source
+        still clears the view.
+        """
+        server = Server()
+        topic = RebindingTopic('conn-1', server)
+        topic._raw['config'] = 'B'
+        await topic.op_sub()
+        assert server.sent == []
+
+        topic.sources['B'].on_event(('x', 7))
+        await trio.testing.wait_all_tasks_blocked()
+        assert decode(server.sent[-1]).v == 7
+
+        await topic.switch('C')
+
+        assert decode(server.sent[-1]).o == 'del'
+
+    @pytest.mark.trio
+    async def test_viewport_empty_rebind_clears_client_data(self):
+        """A viewport source whose empty view yields no full is also cleared"""
+        server = Server()
+        topic = RebindingViewportTopic('conn-1', server)
+        await topic.op_sub()
+        assert decode(server.sent[-1]).v == {'view': 1}
+
+        await topic.switch('B')
+
+        assert topic._src is topic.sources['B']
+        assert topic.sources['B'].builds == 1
+        assert len(server.sent) == 2
+        assert decode(server.sent[-1]).o == 'del'
