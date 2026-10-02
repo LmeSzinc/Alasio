@@ -161,7 +161,7 @@ class TestPackFromRepo:
         """The old pack version defaults to the commit sha1 of the old version."""
         pack = PackUpdate(PackFull(WINDOW_REPO, commit='new'), 'old1')
         assert pack.old_version == 'old1'
-        assert pack.old.commit == 'old1'
+        assert pack.old.current_version == 'old1'
         assert pack.current_version == 'new'
 
     def test_update_pack_builds_with_old_pack_version(self):

@@ -120,11 +120,11 @@ class PackEncodeBase:
     - 释放 .pack/index.pack 的锁
 
     文件校验流程：
-    - 从http获取 latest.dat，包含最新版本sha1 和 对应索引包的sha1 checksum
+    - 从http获取 latest.pack，包含最新版本sha1 和 对应索引包的sha1 checksum
       与本地索引包的版本进行比对
       - 如果不一致则下载增量包 /{new_version}/from_{old_version}.pack ，进入增量更新流程
       - 如果一致则继续文件校验流程
-    - 校验本地索引包 .pack/index.pack 的sha1 checksum，与latest.dat的sha1 checksum比对
+    - 校验本地索引包 .pack/index.pack 的sha1 checksum，与latest.pack的sha1 checksum比对
       - 如果不一致则使用 http range 请求从 /{new_version}/full_{new_version}.pack 下载索引块
         - 请求大约 range=0~9 将包含 header + 索引块长度
         - 请求 range = 0 ~ len(header)+len(index_section)

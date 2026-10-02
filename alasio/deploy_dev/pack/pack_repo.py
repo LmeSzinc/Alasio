@@ -77,8 +77,6 @@ class PackFull(PackEncodeBase):
             self.current_version = repo.head_get()
         if not self.current_version:
             raise ValueError(f'Empty latest commit at repo {repo}')
-        # the commit every file is read from, current_version records it
-        self.commit = self.current_version
 
     @staticmethod
     def _load_git_mode(mode, path=''):
@@ -279,7 +277,7 @@ class PackFull(PackEncodeBase):
         """
         {filepath: FileEntry}
         """
-        return self.repo.list_files(self.commit)
+        return self.repo.list_files(self.current_version)
 
     @cached_property
     def idx_info(self) -> "list[FileInfo]":
@@ -563,7 +561,7 @@ class PackFull(PackEncodeBase):
         """
         return {
             '.pack/history.pack': encode_commit_history(
-                self.repo.list_commit_have(self.commit, have_lookback=20)),
+                self.repo.list_commit_have(self.current_version, have_lookback=20)),
         }
 
     @cached_property
@@ -622,7 +620,6 @@ class PackFull(PackEncodeBase):
         if entry is None:
             entry = cache._compute_entry(
                 cache.extra, key, partial(PackFull._encode_extra, path=path, data=data))
-        return entry
         return entry
 
     @staticmethod
