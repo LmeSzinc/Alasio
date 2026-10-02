@@ -84,13 +84,18 @@ export function createSlotContext(name: string) {
    *                If the snippet becomes undefined, it will be cleaned from the context.
    */
   function use(snippet: GenericSnippet | undefined) {
+    // Capture the context during component initialisation: the effect
+    // teardown runs while the component is destroyed, where getContext is no
+    // longer allowed (the context map is being torn down) and would throw
+    // lifecycle_outside_component, aborting the destroy path of the subtree.
+    const context = getContextValue();
     $effect(() => {
-      if (snippet) {
+      if (snippet && context) {
         untrack(() => {
-          set(snippet);
+          context.entries = [...context.entries, snippet];
         });
         return () => {
-          clean(snippet);
+          context.entries = context.entries.filter((e) => e !== snippet);
         };
       }
     });
