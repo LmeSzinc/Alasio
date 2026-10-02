@@ -9,11 +9,46 @@ class LatestInfo(Struct):
     """
     Latest version and the checksum of its index pack, read from
     latest.pack.
+
+    The checksum is the trailing digest of the pack format, not a checksum
+    of the whole pack file: the index checksum of the version, the trailing
+    20 bytes of the index section of its index pack (the front part of its
+    full pack), the same digest the client compares its local
+    .pack/index.pack against, see ServerFile.
     """
     # latest version, e.g. the commit sha1 string
     version: str
     # sha1 checksum of the index pack of that version, hex string
     checksum: str
+
+    @classmethod
+    def parse(cls, data):
+        """
+        Parse the content of a latest.pack file.
+
+        The content is the version in bytes, followed by the 20 bytes sha1
+        checksum of the pack. It is the layout ServerFile.get_latest_info()
+        requests and the reverse of PackEncodeBase.latest_pack().
+
+        Args:
+            data (bytes): Content of latest.pack
+
+        Returns:
+            LatestInfo: The parsed version and checksum
+
+        Raises:
+            PackDecodeError: If the content is not longer than the 20 bytes
+                checksum
+        """
+        if len(data) <= 20:
+            raise PackDecodeError(
+                f'Failed to read latest.pack: {len(data)} bytes, expected version + 20 bytes checksum'
+            )
+        # the version in bytes, then the 20 bytes checksum of the pack
+        return cls(
+            version=data[:-20].decode('utf-8', errors='replace'),
+            checksum=data[-20:].hex(),
+        )
 
 
 class ServerFile:
@@ -62,16 +97,7 @@ class ServerFile:
             httpx2.HTTPStatusError: If the request fails
         """
         response = self._http_get(f'{self.base_url}/latest.pack')
-        data = response.content
-        if len(data) <= 20:
-            raise PackDecodeError(
-                f'Failed to read latest.pack: {len(data)} bytes, expected version + 20 bytes checksum'
-            )
-        # version in bytes + 20 bytes checksum of the index pack
-        return LatestInfo(
-            version=data[:-20].decode('utf-8', errors='replace'),
-            checksum=data[-20:].hex(),
-        )
+        return LatestInfo.parse(response.content)
 
     def get_file_content(self, version, offset, size):
         """

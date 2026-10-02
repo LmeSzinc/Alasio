@@ -154,6 +154,15 @@ class PackEncodeBase:
         self.old_version: str = ''
         # pack format version of this pack, see PACK_VERSION
         self.pack_version = self.PACK_VERSION
+        # checksum of the full pack bytes, the trailing 20 bytes digest of the
+        # data section, the same digest the decoder's validate_data() verifies.
+        # Cached by iter_pack_data() while the pack is emitted, None until then
+        self.full_pack_checksum: "bytes | None" = None
+        # checksum of the index section, the trailing 20 bytes of the index
+        # pack, the digest the client compares its local .pack/index.pack
+        # against, see latest_pack(). Cached by iter_packidx_data() while the
+        # index is emitted, None until then
+        self.index_pack_checksum: "bytes | None" = None
 
     @property
     def pack_version(self):
@@ -340,7 +349,10 @@ class PackEncodeBase:
             yield row
             checksum.update(row)
         # checksum (checksum of above, including header and length)
-        yield checksum.digest()
+        # cached before it is yielded: latest_pack() builds the payload of the
+        # version from it
+        self.index_pack_checksum = checksum.digest()
+        yield self.index_pack_checksum
 
     def iter_pack_data(self):
         """
@@ -351,8 +363,15 @@ class PackEncodeBase:
         - length (including checksum of file data)
             - file_data
             - checksum (checksum of above, including all)
+
+        The trailing checksum is cached on full_pack_checksum while it is
+        emitted, so the assembled full pack can be described without
+        assembling it again.
         """
         # header and index section
+        # the index rows are hashed once more here on purpose: this checksum
+        # covers the whole index section, the index checksum computed in
+        # iter_packidx_data() is another digest, see PackDecodeBase.validate
         checksum = sha1()
         for row in self.iter_packidx_data():
             yield row
@@ -369,4 +388,34 @@ class PackEncodeBase:
             yield row
             checksum.update(row)
         # checksum (checksum of above, including all)
-        yield checksum.digest()
+        # cached before it is yielded: the consumer that reads the last row of
+        # the pack finds the checksum of the assembled pack on the instance
+        self.full_pack_checksum = checksum.digest()
+        yield self.full_pack_checksum
+
+    def latest_pack(self):
+        """
+        Payload of the latest.pack file: current version + index pack checksum
+
+        The version is written in utf-8, followed by the 20 bytes checksum of
+        the index pack: the trailing 20 bytes of the index section of the pack
+        (see PackDecodeBase.index_checksum), the digest the client compares
+        its local .pack/index.pack against (ResetJob.validate_latest) and
+        validates a downloaded index pack with (ResetJob.download_index). It
+        is the layout ServerFile.get_latest_info() reads back. The checksum is
+        cached by iter_packidx_data() (and by iter_pack_data(), which emits
+        the index section first), consume one of them (e.g. write the pack to
+        disk) before calling this method.
+
+        Returns:
+            bytes: Current version in utf-8 bytes + 20 bytes index pack checksum
+
+        Raises:
+            ValueError: If the index pack has not been emitted yet
+        """
+        if self.index_pack_checksum is None:
+            raise ValueError(
+                'Failed to build latest.pack: index pack checksum unknown, '
+                'consume iter_packidx_data() first'
+            )
+        return self.current_version.encode('utf-8') + self.index_pack_checksum

@@ -14,7 +14,9 @@ import pytest
 from alasio.deploy.history.decode_history import HistoryObj, decode_history
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import FileInfo
+from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack._pack_cache import PackCache, PlainCache
+from alasio.deploy_dev.pack.encode_base import PackEncodeBase
 from alasio.deploy_dev.pack.pack_full import PackFull, _dfs_path_key
 from alasio.ext.path.pathstr import PathStr
 from alasio.ext.path.validate import validate_filepath
@@ -1707,3 +1709,90 @@ class TestPopulateDataPool:
         assert len(calls) == 1
         assert records[0] == records[1]
         assert 'locks=0' in cache.report()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  latest.pack: the current version and the index pack checksum
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestLatestPack:
+    """
+    iter_packidx_data() caches the checksum of the index section it emits,
+    latest_pack() assembles the latest.pack payload (version + checksum) from
+    the cache, the checksum the client compares its local index against. The
+    full pack checksum is cached separately while the pack is emitted.
+    """
+
+    @staticmethod
+    def _make_pack():
+        """
+        A full pack of a small repo, with a compressible file
+
+        Returns:
+            PackFull: The pack, not assembled yet
+        """
+        mock = _make_repo()
+        mock.register_file(COMMIT, 'a.txt', b'a')
+        mock.register_file(COMMIT, 'big.txt', b'compress me ' * 1000)
+        return PackFull(mock, commit=COMMIT)
+
+    def test_checksum_unknown_until_the_index_is_emitted(self):
+        """The cache is empty before the index is emitted, latest_pack() raises"""
+        pack = self._make_pack()
+        assert pack.index_pack_checksum is None
+        with pytest.raises(ValueError, match='consume iter_packidx_data'):
+            pack.latest_pack()
+
+    def test_checksum_is_the_trailing_digest_of_the_full_pack(self):
+        """The full pack checksum cache is the data section digest, the same the decoder verifies"""
+        pack = self._make_pack()
+        assert pack.full_pack_checksum is None
+        data = b''.join(pack.iter_pack_data())
+        checksum = pack.full_pack_checksum
+        assert isinstance(checksum, bytes)
+        assert len(checksum) == 20
+        # the trailing 20 bytes of the pack, the digest of every byte before
+        # them: the decoder recomputes it in validate_data()
+        assert checksum == data[-20:]
+        assert checksum == _sha1(data[:-20]).digest()
+        decoder = PackDecodeBase(data)
+        assert checksum == bytes(decoder.data_section[-20:])
+        decoder.validate()
+
+    def test_latest_pack_payload(self):
+        """latest_pack() is the version + the index pack checksum, the digest the client compares"""
+        pack = self._make_pack()
+        index_pack = b''.join(pack.iter_packidx_data())
+        latest = pack.latest_pack()
+        assert latest == COMMIT.encode('utf-8') + index_pack[-20:]
+        # the latest.pack content ServerFile.get_latest_info() reads back,
+        # parsed and compared against the local .pack/index.pack like the
+        # client does in ResetJob.validate_latest
+        info = LatestInfo.parse(latest)
+        assert info.version == COMMIT
+        assert info.checksum == PackDecodeBase(index_pack).index_checksum
+        # not the trailing checksum of the full pack data section
+        full = b''.join(pack.iter_pack_data())
+        assert info.checksum != bytes(PackDecodeBase(full).data_section[-20:]).hex()
+
+    def test_latest_pack_needs_no_full_pack(self):
+        """latest_pack() takes the checksum of the emitted index, the full pack is not assembled"""
+        pack = self._make_pack()
+        assert pack.full_pack_checksum is None
+        b''.join(pack.iter_packidx_data())
+        info = LatestInfo.parse(pack.latest_pack())
+        assert info.version == COMMIT
+        # the index emission did not assemble the full pack
+        assert pack.full_pack_checksum is None
+
+    def test_latest_pack_uses_the_cached_checksum(self, monkeypatch):
+        """latest_pack() reads the cached checksum, the index is not emitted again"""
+        pack = self._make_pack()
+        b''.join(pack.iter_packidx_data())
+
+        def emit_again(self):
+            raise AssertionError('the index pack must not be emitted again')
+
+        monkeypatch.setattr(PackEncodeBase, 'iter_packidx_data', emit_again)
+        assert pack.latest_pack() == COMMIT.encode('utf-8') + pack.index_pack_checksum
