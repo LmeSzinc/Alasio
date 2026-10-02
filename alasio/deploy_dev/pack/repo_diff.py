@@ -9,7 +9,7 @@ The diff records are built step by step:
    records with a zstd patch otherwise; an RM whose patch is not
    worthwhile becomes A + D instead
 2. the records of the new version (renamed, added, modified) follow
-   the DFS path order of the new pack (same as pack_repo), the added
+   the DFS path order of the new pack (same as pack_full), the added
    and modified records are converted to C (copied) records when
    their content already exists in an unchanged old file or an
    earlier record
@@ -29,9 +29,9 @@ normalized for text files), the form the packs store and the form a client
 has in its working tree.
 """
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
-from alasio.deploy_dev.pack import pack_cache
-from alasio.deploy_dev.pack.pack_cache import PatchCache, PlainCache
-from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key, apply_encoding
+from alasio.deploy_dev.pack import _pack_cache
+from alasio.deploy_dev.pack._pack_cache import PatchCache, PlainCache
+from alasio.deploy_dev.pack.pack_full import PackFull, _dfs_path_key, apply_encoding
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_zstd import zstd_compress
 
@@ -109,7 +109,7 @@ class RepoDiff:
 
         The records are built step by step: the records of the new
         version (rename R / RM, copied A / C, edit M / C) follow the
-        DFS path order of the new pack (same as pack_repo), then the
+        DFS path order of the new pack (same as pack_full), then the
         deleted (D) records come last. The copy detection runs while
         the records are built, so a file modified to match an existing
         file is recognized as a copy instead of carrying patch data.
@@ -153,7 +153,7 @@ class RepoDiff:
 
         # 2. records of the new version: renamed (R / RM), added (A / C)
         # and modified (M / C) records follow the DFS path order of the
-        # new pack (same as pack_repo), so a copied record always finds
+        # new pack (same as pack_full), so a copied record always finds
         # its source in an earlier record
         added = real_new.keys() - real_old.keys() - renames.keys()
         modified = (real_old.keys() & real_new.keys()) - unchanged
@@ -224,7 +224,7 @@ class RepoDiff:
         files. A copied record whose source is a new file (an earlier
         record of the new version) is not a ref record.
 
-        The order follows the DFS path sort of pack_repo (old.idx_info
+        The order follows the DFS path sort of pack_full (old.idx_info
         in production), a convention shared with the client's local
         old index.
 
@@ -305,7 +305,7 @@ class RepoDiff:
             # the encoding is the one of an added file
             self._load_added(info, new_info)
             return False
-        cache = pack_cache.PACK_CACHE
+        cache = _pack_cache.PACK_CACHE
         key = (old_info.sha1, new_info.sha1)
         cached = cache.get(cache.patch, key)
         if cached is not None:
@@ -350,7 +350,7 @@ class RepoDiff:
             info (UpdateInfo): Record to load, edit must be A
             new_info (IdxInfo): New record
         """
-        cache = pack_cache.PACK_CACHE
+        cache = _pack_cache.PACK_CACHE
         git_sha1 = None
         cached = None
         file_entry = self.new.filelist.get(new_info.path)
@@ -397,7 +397,7 @@ class RepoDiff:
             PlainCache: The cache entry of the content, a fresh one without
                 encodings when the cache has no entry to serve the record
         """
-        cache = pack_cache.PACK_CACHE
+        cache = _pack_cache.PACK_CACHE
         entry = self.new.filelist.get(new_info.path)
         if entry is None:
             # a generated extra file, it has no git blob sha1
@@ -539,7 +539,7 @@ class RepoDiff:
         Returns:
             float: Similarity in [0, 1], see similarity
         """
-        cache = pack_cache.PACK_CACHE
+        cache = _pack_cache.PACK_CACHE
         key = (self.old.filelist[old_info.path].sha1, self.new.filelist[new_info.path].sha1)
         length = cache.get(cache.rename, key)
         if length is None:

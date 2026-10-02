@@ -3,10 +3,10 @@ Tests for the thread pool the pack module compresses on.
 
 The pool is dedicated to the pack module -- the shared THREAD_POOL runs the
 blocking calls of the whole process, a pack build would starve them -- and it is
-as wide as the physical cores of the machine, see pack_pool.py and
+as wide as the physical cores of the machine, see _pack_cache.py and
 doc/2026-09-27_update-pack-from-repo.md section 7.29.
 """
-from alasio.deploy_dev.pack.pack_pool import PACK_POOL
+from alasio.deploy_dev.pack._pack_cache import PACK_POOL
 from alasio.ext.concurrent.processpool import get_max_worker
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 

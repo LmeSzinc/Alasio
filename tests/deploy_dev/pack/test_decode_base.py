@@ -14,7 +14,7 @@ import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.pack_model import IdxInfo
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_full import PackFull
 from tests.deploy_dev.pack.conftest import COMMIT, WEBSITE_FILES, WEBSITE_FULL_PACK, WEBSITE_REPO
 
 

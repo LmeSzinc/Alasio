@@ -1,5 +1,5 @@
 """
-Tests for the PACK's pack_repo logic.
+Tests for the PACK's pack_full logic.
 
 Uses MockGitRepo to provide in-memory git data, avoiding the need
 for a real on-disk git repository.
@@ -14,8 +14,8 @@ import pytest
 from alasio.deploy.history.decode_history import HistoryObj, decode_history
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import FileInfo
-from alasio.deploy_dev.pack.pack_cache import PackCache, PlainCache
-from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key
+from alasio.deploy_dev.pack._pack_cache import PackCache, PlainCache
+from alasio.deploy_dev.pack.pack_full import PackFull, _dfs_path_key
 from alasio.ext.path.pathstr import PathStr
 from alasio.ext.path.validate import validate_filepath
 from alasio.git.mock.mock_repo import MockGitRepo
@@ -1148,25 +1148,25 @@ class TestFileinfoIntegration:
 
 def _count_compress_calls(monkeypatch, name):
     """
-    Count the calls of a compression function of pack_repo
+    Count the calls of a compression function of pack_full
 
     Args:
         monkeypatch (MonkeyPatch): Pytest monkeypatch fixture
-        name (str): Function name in pack_repo, 'lzma_compress' / 'zstd_compress'
+        name (str): Function name in pack_full, 'lzma_compress' / 'zstd_compress'
 
     Returns:
         list[bool]: One item per call, True when the call had a source
     """
-    import alasio.deploy_dev.pack.pack_repo as pack_repo
+    import alasio.deploy_dev.pack.pack_full as pack_full
 
     calls = []
-    original = getattr(pack_repo, name)
+    original = getattr(pack_full, name)
 
     def counting(*args, **kwargs):
         calls.append(kwargs.get('source') is not None)
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(pack_repo, name, counting)
+    monkeypatch.setattr(pack_full, name, counting)
     return calls
 
 
@@ -1195,17 +1195,17 @@ def _unrelated(size=1500):
 
 def _fake_zstd(monkeypatch, patch_size, plain_size):
     """
-    Replace zstd_compress of pack_repo with a function of fixed sizes
+    Replace zstd_compress of pack_full with a function of fixed sizes
 
     Args:
         monkeypatch (MonkeyPatch): Pytest monkeypatch fixture
         patch_size (int): Size returned for a patch (a source is given)
         plain_size (int): Size returned for plain zstd
     """
-    import alasio.deploy_dev.pack.pack_repo as pack_repo
+    import alasio.deploy_dev.pack.pack_full as pack_full
 
     monkeypatch.setattr(
-        pack_repo, 'zstd_compress',
+        pack_full, 'zstd_compress',
         lambda data, source=None, level=22: b'x' * (patch_size if source is not None else plain_size))
 
 
@@ -1250,9 +1250,9 @@ class TestLoadDataCacheInfo:
         data = b'z' * 5000
         _fake_zstd(monkeypatch, patch_size=800, plain_size=700)
 
-        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        import alasio.deploy_dev.pack.pack_full as pack_full
 
-        monkeypatch.setattr(pack_repo, 'lzma_compress', lambda data: b'y' * 900)
+        monkeypatch.setattr(pack_full, 'lzma_compress', lambda data: b'y' * 900)
         cache_info = FileInfo(path='a')
         cache_info.algo, cache_info.data, cache_info.data_size, cache_info.size = 1, b'w' * 400, 400, 5000
         info = FileInfo(path='a')
@@ -1415,11 +1415,11 @@ class TestLoadDataZstdInfo:
 
     def test_the_candidate_of_the_entry_is_used(self, monkeypatch, cache):
         """An entry that already carries the candidate compresses no plain candidate"""
-        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        import alasio.deploy_dev.pack.pack_full as pack_full
 
         data = b'z' * 5000
         # the plain compressors lose against the stored candidate
-        monkeypatch.setattr(pack_repo, 'lzma_compress', lambda data: b'y' * 900)
+        monkeypatch.setattr(pack_full, 'lzma_compress', lambda data: b'y' * 900)
         entry = PlainCache(
             info=FileInfo(path='a'),
             zstd=FileInfo(path='a', algo=2, size=len(data), data_size=300, data=b'x' * 300))
@@ -1501,9 +1501,9 @@ class TestLoadDataPatchUsedReset:
 
     def test_plain_zstd_beating_the_patch_reports_zstd(self, monkeypatch):
         """Plain zstd smaller than the patch wins, plain data needs no dictionary"""
-        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        import alasio.deploy_dev.pack.pack_full as pack_full
 
-        monkeypatch.setattr(pack_repo, 'lzma_compress', lambda data: b'y' * 900)
+        monkeypatch.setattr(pack_full, 'lzma_compress', lambda data: b'y' * 900)
         _fake_zstd(monkeypatch, patch_size=400, plain_size=300)
         info = FileInfo(path='a')
         algo = PackFull._load_data(info, b'z' * 5000, zstd_source=b'old')
@@ -1514,9 +1514,9 @@ class TestLoadDataPatchUsedReset:
 
     def test_plain_zstd_beating_the_patch_with_cache_info(self, monkeypatch):
         """The cache_info path resets it as well, the patch does not win here"""
-        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        import alasio.deploy_dev.pack.pack_full as pack_full
 
-        monkeypatch.setattr(pack_repo, 'lzma_compress', lambda data: b'y' * 900)
+        monkeypatch.setattr(pack_full, 'lzma_compress', lambda data: b'y' * 900)
         _fake_zstd(monkeypatch, patch_size=400, plain_size=300)
         cache_info = FileInfo(path='a')
         cache_info.algo, cache_info.data, cache_info.data_size, cache_info.size = 1, b'w' * 500, 500, 5000
@@ -1528,9 +1528,9 @@ class TestLoadDataPatchUsedReset:
 
     def test_a_patch_smaller_than_plain_zstd_reports_the_patch(self, monkeypatch):
         """The patch wins, the dictionary has to be kept by the caller"""
-        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        import alasio.deploy_dev.pack.pack_full as pack_full
 
-        monkeypatch.setattr(pack_repo, 'lzma_compress', lambda data: b'y' * 900)
+        monkeypatch.setattr(pack_full, 'lzma_compress', lambda data: b'y' * 900)
         _fake_zstd(monkeypatch, patch_size=300, plain_size=400)
         info = FileInfo(path='a')
         algo = PackFull._load_data(info, b'z' * 5000, zstd_source=b'old')
@@ -1612,18 +1612,18 @@ class TestPopulateDataPool:
 
     def test_the_compression_runs_on_the_pool(self, monkeypatch, cache):
         """The contents of the version are compressed on the pool"""
-        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        import alasio.deploy_dev.pack.pack_full as pack_full
 
         repo = self._make_multi_file_repo()
         count = len(repo.list_files(COMMIT))
         threads = []
-        original = pack_repo.lzma_compress
+        original = pack_full.lzma_compress
 
         def counting(data):
             threads.append(threading.current_thread())
             return original(data)
 
-        monkeypatch.setattr(pack_repo, 'lzma_compress', counting)
+        monkeypatch.setattr(pack_full, 'lzma_compress', counting)
         PackFull(repo, commit=COMMIT).fileinfo
         caller = threading.current_thread()
         # one job for each file of the version, the generated extra file of the
@@ -1633,12 +1633,12 @@ class TestPopulateDataPool:
 
     def test_a_warm_cache_runs_no_job(self, monkeypatch, cache):
         """A version the cache covers is built without a single task"""
-        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        import alasio.deploy_dev.pack.pack_full as pack_full
         from alasio.ext.concurrent.threadpool import ThreadPool
 
         repo = self._make_multi_file_repo()
         pool = _CountingPool(ThreadPool(pool_size=2))
-        monkeypatch.setattr(pack_repo, 'PACK_POOL', pool)
+        monkeypatch.setattr(pack_full, 'PACK_POOL', pool)
         PackFull(repo, commit=COMMIT).fileinfo
         assert pool.jobs > 0
         jobs = pool.jobs
@@ -1647,8 +1647,8 @@ class TestPopulateDataPool:
 
     def test_the_pool_size_does_not_change_the_pack(self, monkeypatch):
         """One worker or many, the records and the pack bytes are the same"""
-        import alasio.deploy_dev.pack.pack_cache as pack_cache
-        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        import alasio.deploy_dev.pack._pack_cache as _pack_cache
+        import alasio.deploy_dev.pack.pack_full as pack_full
         from alasio.ext.concurrent.threadpool import ThreadPool
 
         repo = self._make_multi_file_repo()
@@ -1656,26 +1656,26 @@ class TestPopulateDataPool:
         def build():
             # every build starts from a cold cache of its own: the jobs of the
             # second one run with another pool width
-            monkeypatch.setattr(pack_cache, 'PACK_CACHE', PackCache())
+            monkeypatch.setattr(_pack_cache, 'PACK_CACHE', PackCache())
             pack = PackFull(repo, commit=COMMIT)
             return b''.join(pack.iter_pack_data()), pack.idx_info
 
         wide_pack, wide_records = build()
         pool = ThreadPool(pool_size=1)
-        monkeypatch.setattr(pack_repo, 'PACK_POOL', pool)
-        monkeypatch.setattr(pack_cache, 'PACK_POOL', pool)
+        monkeypatch.setattr(pack_full, 'PACK_POOL', pool)
+        monkeypatch.setattr(_pack_cache, 'PACK_POOL', pool)
         narrow_pack, narrow_records = build()
         assert narrow_pack == wide_pack
         assert narrow_records == wide_records
 
     def test_a_compression_error_fails_the_build(self, monkeypatch, cache):
         """An error of a job is raised by the pack build that submitted it"""
-        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        import alasio.deploy_dev.pack.pack_full as pack_full
 
         def broken(data):
             raise RuntimeError('compression failed')
 
-        monkeypatch.setattr(pack_repo, 'lzma_compress', broken)
+        monkeypatch.setattr(pack_full, 'lzma_compress', broken)
         with pytest.raises(RuntimeError, match='compression failed'):
             PackFull(self._make_multi_file_repo(), commit=COMMIT).fileinfo
 

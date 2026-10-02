@@ -16,7 +16,7 @@ from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_base import CurrentFile, JobBase, MatchResult
 from alasio.deploy.pack.job_unpack import PendingFile, UnpackJob
 from alasio.deploy.pack.pack_model import IdxInfo
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.git.mock.mock_repo import MockGitRepo

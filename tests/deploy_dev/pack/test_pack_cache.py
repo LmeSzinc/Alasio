@@ -25,9 +25,9 @@ import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import FileInfo
+from alasio.deploy_dev.pack._pack_cache import PackCache, PatchCache, PlainCache
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
-from alasio.deploy_dev.pack.pack_cache import PackCache, PatchCache, PlainCache
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.deploy_dev.pack.repo_diff import RepoDiff
 from alasio.ext.concurrent.threadpool import ThreadPool
@@ -286,16 +286,16 @@ def _count_lzma_calls(monkeypatch):
     Returns:
         list[str]: The contents compressed so far
     """
-    import alasio.deploy_dev.pack.pack_repo as pack_repo
+    import alasio.deploy_dev.pack.pack_full as pack_full
 
     calls = []
-    original = pack_repo.lzma_compress
+    original = pack_full.lzma_compress
 
     def counting(data):
         calls.append(data)
         return original(data)
 
-    monkeypatch.setattr(pack_repo, 'lzma_compress', counting)
+    monkeypatch.setattr(pack_full, 'lzma_compress', counting)
     return calls
 
 

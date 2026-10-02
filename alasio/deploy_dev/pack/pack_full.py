@@ -7,10 +7,9 @@ from tqdm import tqdm
 from alasio.backport import removesuffix
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.history.encode_history import encode_commit_history
-from alasio.deploy_dev.pack import pack_cache
+from alasio.deploy_dev.pack import _pack_cache
+from alasio.deploy_dev.pack._pack_cache import PACK_POOL, PlainCache
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase, encode_pack_version
-from alasio.deploy_dev.pack.pack_cache import PlainCache
-from alasio.deploy_dev.pack.pack_pool import PACK_POOL
 from alasio.ext.cache import cached_property
 from alasio.ext.compress.algo_lzma import lzma_compress
 from alasio.ext.compress.algo_zstd import zstd_compress
@@ -426,7 +425,7 @@ class PackFull(PackEncodeBase):
         them sees, the second one finds them in the table instead of running the
         rule engine again.
         """
-        cache = pack_cache.PACK_CACHE
+        cache = _pack_cache.PACK_CACHE
         with cache.eol.lock:
             self._resolve_eol(dict_fileinfo, cache.eol.setdefault(self.gitattributes_fingerprint, {}))
 
@@ -438,7 +437,7 @@ class PackFull(PackEncodeBase):
             dict_fileinfo (dict[str, FileInfo]): Records to apply the eol to
             dict_eol (dict): Table of the .gitattributes state, see _populate_eol
         """
-        cache = pack_cache.PACK_CACHE
+        cache = _pack_cache.PACK_CACHE
         # a D (deleted) record is not a file of the version, it keeps the
         # default eol of FileInfo
         files = [file for file in dict_fileinfo.values() if file.edit != 2]
@@ -614,7 +613,7 @@ class PackFull(PackEncodeBase):
         Returns:
             PlainCache: The cache entry of the file
         """
-        cache = pack_cache.PACK_CACHE
+        cache = _pack_cache.PACK_CACHE
         key = (version, path)
         entry = cache.get(cache.extra, key)
         if entry is None:
@@ -697,7 +696,7 @@ class PackFull(PackEncodeBase):
         doc/2026-09-27_update-pack-from-repo.md section 7.29.
         """
         repo = self.repo
-        cache = pack_cache.PACK_CACHE
+        cache = _pack_cache.PACK_CACHE
         # git blob sha1 (hex) -> record holding the same content, used to fix up
         # the C (copied) records: their size / sha1 are read back from it once
         # every task is done, see the loop below

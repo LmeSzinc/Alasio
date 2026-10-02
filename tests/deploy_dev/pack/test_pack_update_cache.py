@@ -26,7 +26,7 @@ freshly filled slots and name them by their keys.
 """
 from hashlib import sha1
 
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from tests.deploy_dev.pack.conftest import make_repo
 
@@ -325,21 +325,21 @@ class TestPackUpdateZstdCandidate:
 
     def test_the_history_candidate_is_compressed_once(self, monkeypatch, cache):
         """Every update pack carries the history of the latest version, one candidate"""
-        import alasio.deploy_dev.pack.pack_repo as pack_repo
+        import alasio.deploy_dev.pack.pack_full as pack_full
 
         repo = make_repo(ADDED_VERSIONS)
         new_pack = PackFull(repo, 'latest')
         new_pack.fileinfo
         history = new_pack.extra_content['.pack/history.pack']
         calls = []
-        original = pack_repo.zstd_compress
+        original = pack_full.zstd_compress
 
         def counting(data, *args, **kwargs):
             if kwargs.get('source') is None and data == history:
                 calls.append(1)
             return original(data, *args, **kwargs)
 
-        monkeypatch.setattr(pack_repo, 'zstd_compress', counting)
+        monkeypatch.setattr(pack_full, 'zstd_compress', counting)
         for commit in ('newest', 'older'):
             update = PackUpdate(new_pack, commit)
             update.diff_info
@@ -349,10 +349,10 @@ class TestPackUpdateZstdCandidate:
 
     def test_the_candidate_does_not_change_the_pack(self, monkeypatch):
         """The pack of a run that shares the cache equals the pack of a cold run"""
-        from alasio.deploy_dev.pack import pack_cache
+        from alasio.deploy_dev.pack import _pack_cache
 
         repo = make_repo(ADDED_VERSIONS)
-        monkeypatch.setattr(pack_cache, 'PACK_CACHE', pack_cache.PackCache())
+        monkeypatch.setattr(_pack_cache, 'PACK_CACHE', _pack_cache.PackCache())
         cold_pack = PackFull(repo, 'latest')
         cold_pack.fileinfo
         cold = b''.join(PackUpdate(cold_pack, 'newest').iter_pack_data())

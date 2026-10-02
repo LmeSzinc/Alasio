@@ -31,7 +31,7 @@ from hashlib import sha1
 
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
-from alasio.deploy_dev.pack.pack_repo import PackFull, _dfs_path_key
+from alasio.deploy_dev.pack.pack_full import PackFull, _dfs_path_key
 from alasio.deploy_dev.pack.repo_diff import RepoDiff, UpdateInfo
 from alasio.ext.cache import cached_property
 

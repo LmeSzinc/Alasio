@@ -9,7 +9,7 @@ the same records the pack server builds.
 import pytest
 
 from alasio.deploy.pack.pack_model import RefInfo
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.repo_diff import RepoDiff, UpdateInfo
 from tests.deploy_dev.pack.conftest import (
     FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, code_lines, damage, damage_lines, make_repo, random_bytes

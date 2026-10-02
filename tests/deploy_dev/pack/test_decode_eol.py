@@ -16,7 +16,7 @@ Chain under test:
         -> PackDecodeBase.catfile() -> working tree content
 """
 from alasio.deploy.pack.decode_base import PackDecodeBase
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
 from tests.deploy_dev.pack.conftest import COMMIT
 

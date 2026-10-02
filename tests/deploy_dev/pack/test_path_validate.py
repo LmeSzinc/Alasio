@@ -10,7 +10,7 @@ platform. Both sides use validate_filepath.
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.git.mock.mock_repo import MockGitRepo
 
 # unsafe paths: traversal, absolute, reserved system names, illegal

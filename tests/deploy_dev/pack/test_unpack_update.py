@@ -24,7 +24,7 @@ from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
 from alasio.deploy.pack.pack_model import IdxInfo
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes

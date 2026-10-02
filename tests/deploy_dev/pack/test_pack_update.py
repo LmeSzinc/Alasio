@@ -8,7 +8,7 @@ is missing from refinfo and fileinfo must be rejected.
 """
 import pytest
 
-from alasio.deploy_dev.pack.pack_repo import PackFull
+from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.deploy_dev.pack.repo_diff import UpdateInfo
 from tests.deploy_dev.pack.conftest import make_repo
