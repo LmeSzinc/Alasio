@@ -14,6 +14,7 @@
  */
 import { mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sidebarRowClass, sidebarRowIndicatorClass } from "$lib/components/sidebar-accordion";
 import { FakeWebSocket } from "$lib/test-utils/fake-websocket";
 import { flushEffects } from "$lib/test-utils/flush-effects";
 import { websocketClient } from "$lib/ws";
@@ -42,6 +43,16 @@ function deliverNav(group: string) {
       v: { [group]: { _info: { i18n: group }, task1: { i18n: "Task 1" } } },
     }),
   );
+}
+
+/**
+ * The empty-state placeholder of the nav, or null when the nav has data. It is
+ * laid out as a row of the sidebar family (the row metrics, the space of the
+ * select indicator) and carries the style of the empty log panel
+ * (LogDisplay.svelte): muted, small and italic.
+ */
+function emptyPlaceholder(target: HTMLElement): HTMLElement | null {
+  return target.querySelector<HTMLElement>("span.italic");
 }
 
 // mount() is generic over the component's props/exports, so its return type
@@ -95,7 +106,19 @@ describe("TestConfigNavEmptyConfig", () => {
     FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "ConfigNav", o: "del" }));
     await flushEffects();
     expect(target.textContent).not.toContain("main");
-    expect(target.textContent).toContain("No data");
+
+    // ... the placeholder replaces it, in the style of the empty log panel
+    const placeholder = emptyPlaceholder(target);
+    expect(placeholder?.textContent).toBe("No navigation data");
+    expect(placeholder?.className).toBe("text-muted-foreground text-sm italic");
+
+    // ... laid out as a row of the sidebar family: the metrics of a row and
+    // the space of the select indicator before the label, so the placeholder
+    // lines up with the entries above instead of being a paragraph of its own
+    const row = placeholder?.parentElement;
+    expect(row?.className).toContain(sidebarRowClass);
+    const indicator = row?.querySelector<HTMLElement>('div[aria-hidden="true"]');
+    expect(indicator?.className).toContain(sidebarRowIndicatorClass);
   });
 
   it("displays the navigation of the config opened after an empty one", async () => {
@@ -105,12 +128,12 @@ describe("TestConfigNavEmptyConfig", () => {
     await flushEffects();
     FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "ConfigNav", o: "del" }));
     await flushEffects();
-    expect(target.textContent).toContain("No data");
+    expect(emptyPlaceholder(target)).not.toBeNull();
 
-    // The next config has navigation data: its groups replace the empty state
+    // The next config has navigation data: its groups replace the placeholder
     deliverNav("opsi");
     await flushEffects();
     expect(target.textContent).toContain("opsi");
-    expect(target.textContent).not.toContain("No data");
+    expect(emptyPlaceholder(target)).toBeNull();
   });
 });

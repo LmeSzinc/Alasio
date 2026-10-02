@@ -8,6 +8,8 @@
     SidebarAccordionItem,
     SidebarAccordionTrigger,
     SidebarRow,
+    SidebarRowIndicator,
+    sidebarRowClass,
   } from "$lib/components/sidebar-accordion";
   import { t } from "$lib/i18n";
   import { HeaderContext } from "$lib/slotcontext.svelte";
@@ -224,6 +226,19 @@
       {/each}
     </SidebarAccordion>
   {:else}
-    <p>No data</p>
+    <!--
+      Empty navigation: the config's mod has no navigation data (or the
+      previous config's data was just cleared by the backend). The
+      placeholder is a row of the same family as the entries above -- the
+      metrics of a row and the space of the select indicator, so its text
+      sits exactly where the labels of the other rows sit -- but it is not
+      an entry: it stays a plain box, nothing opens from it. The text keeps
+      the style of the empty log panel (LogDisplay), muted / small /
+      italic, so an empty nav reads as a state instead of a row.
+    -->
+    <div class={cn(sidebarRowClass, "flex items-center")}>
+      <SidebarRowIndicator />
+      <span class="text-muted-foreground text-sm italic">{t.Overview.NavEmpty()}</span>
+    </div>
   {/if}
 </nav>

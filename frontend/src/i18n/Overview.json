@@ -6,6 +6,13 @@
     "zh-TW": "總覽",
     "es-ES": "Resumen"
   },
+  "NavEmpty": {
+    "en-US": "No navigation data",
+    "zh-CN": "暂无导航数据",
+    "ja-JP": "ナビゲーションデータがありません",
+    "zh-TW": "暫無導航數據",
+    "es-ES": "Sin datos de navegación"
+  },
   "LogEmpty": {
     "en-US": "No logs yet",
     "zh-CN": "暂无日志",
