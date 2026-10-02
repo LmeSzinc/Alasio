@@ -19,9 +19,10 @@ from typing import Optional
 
 from msgspec import Meta, Struct, field
 from typing_extensions import Annotated
-from alasio.ext.file.yamlconfig import YamlConfig
+
 from alasio.ext import env
 from alasio.ext.cache import cached_property
+from alasio.ext.file.yamlconfig import YamlConfig
 from alasio.ext.singleton import Singleton
 
 
@@ -124,6 +125,14 @@ class OcrConfig(Struct):
     ]})] = "127.0.0.1:22268"
 
 
+# Pattern of AutoRestartTime: "HH:MM" in 24-hour local time, e.g. "03:50".
+# The pattern is the input gate of the config file: a value that fails it is
+# reported by YamlConfig (which falls back to the field default), so a typo
+# can never reach the scheduler. Keep in sync with parse_restart_time
+# (alasio/backend/app/schedule.py), which parses the accepted value.
+AUTO_RESTART_TIME_PATTERN = r'^(?:[01]?[0-9]|2[0-3]):[0-5][0-9]$'
+
+
 class UpdateConfig(Struct):
     AutoUpdate: Annotated[bool, Meta(extra={"help": [
         "Update Alas at startup",
@@ -134,13 +143,17 @@ class UpdateConfig(Struct):
         "[Disable] 0",
         "[Default] 5",
     ]})] = 5
-    AutoRestartTime: Annotated[str, Meta(extra={"help": [
-        "Scheduled restart time",
-        "If there are updates, Alas will automatically restart and update at this time every day",
-        "and run all alas instances that running before restarted",
-        "[Disable] null",
-        "[Default] 03:50",
-    ]})] = "03:50"
+    AutoRestartTime: Annotated[
+        Optional[Annotated[str, Meta(pattern=AUTO_RESTART_TIME_PATTERN)]],
+        Meta(extra={"help": [
+            "Scheduled restart time",
+            "Restart Alas at this time every day, in the host local timezone",
+            "All alas instances running before the restart are stopped gracefully and resumed after the restart",
+            "[Format] HH:MM, e.g. 03:50",
+            "[Disable] null",
+            "[Default] 03:50",
+        ]}),
+    ] = "03:50"
 
 
 class MiscConfig(Struct):

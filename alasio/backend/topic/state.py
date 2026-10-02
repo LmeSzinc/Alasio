@@ -2,12 +2,10 @@ from msgspec import Struct
 
 from alasio.backend.app.lifespan import lifespan_restart
 from alasio.backend.locale.accept_language import negotiate_accept_language
-from alasio.backend.mpipe.mpipe_backend import mpipe_backend
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.reactive.rx_trio import async_reactive, async_reactive_source
 from alasio.backend.topic.scan import ConfigScanSource
-from alasio.backend.ws.context import GLOBAL_CONTEXT
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
 from alasio.config.table.scan import validate_config_name
@@ -78,16 +76,13 @@ class ConnState(BaseTopic):
         # local import: topic.log imports ConnState from this module, a module
         # level import of restart (-> topic._worker -> topic.log) would be
         # circular
-        from alasio.backend.app.restart import GRACEFUL_RESTART, run_graceful_restart
+        from alasio.backend.app import restart
 
-        if not mpipe_backend:
-            raise PermissionError('Cannot restart backend running without supervisor')
-        if GRACEFUL_RESTART.running:
-            raise RpcValueError('Restart already in progress')
-        # set the flag synchronously (no await in between): two concurrent
-        # clicks cannot start two orchestrations
-        GRACEFUL_RESTART.running = True
-        GLOBAL_CONTEXT.global_nursery.start_soon(run_graceful_restart)
+        try:
+            await restart.request_graceful_restart('user request')
+        except restart.RestartInProgress:
+            # keep the historical user-facing wording of this rpc
+            raise RpcValueError('Restart already in progress') from None
 
     @rpc
     async def cancel_restart(self):
@@ -102,14 +97,14 @@ class ConnState(BaseTopic):
         continue it).
         """
         # local import (see restart above)
-        from alasio.backend.app.restart import GRACEFUL_RESTART, cancel_graceful_restart
+        from alasio.backend.app import restart
 
         # running is the flag of the restart of this backend: the auto-resume
         # queue of the new backend (the other entry point of the cancel) is not
         # a restart in progress and must not be dropped by this rpc
-        if not GRACEFUL_RESTART.running:
+        if not restart.GRACEFUL_RESTART.running:
             raise RpcValueError('No restart in progress')
-        await cancel_graceful_restart('user cancel')
+        await restart.cancel_graceful_restart('user cancel')
 
     @rpc
     async def force_restart(self):
@@ -120,11 +115,11 @@ class ConnState(BaseTopic):
         is ended right away and nothing is resumed after the backend restarted.
         """
         # local import (see restart above)
-        from alasio.backend.app.restart import cancel_graceful_restart
+        from alasio.backend.app import restart
 
         # a graceful restart in progress (or a resume queue of the previous
         # one) is cancelled first: no worker of it may be resumed
-        await cancel_graceful_restart('force restart')
+        await restart.cancel_graceful_restart('force restart')
         await lifespan_restart()
 
     @rpc

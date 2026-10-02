@@ -7,6 +7,7 @@ from starlette.routing import Route, WebSocketRoute
 
 from alasio.backend.app.frontend import SITE
 from alasio.backend.app.restart import resume_after_restart
+from alasio.backend.app.schedule import task_daily_restart
 from alasio.backend.auth import auth
 from alasio.backend.dev.assets import ImageStaticFiles
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
@@ -197,6 +198,11 @@ async def lifespan(app):
         # no-op without the one-shot credential (normal cold start). The stale
         # resume file cleanup is part of this task: it must run after the read
         nursery.start_soon(resume_after_restart)
+        # daily scheduled restart (Deploy.Update.AutoRestartTime): a no-op
+        # when the config disables it. It goes through the same graceful
+        # restart as the settings page, so the running configs are resumed by
+        # the new backend and the frontend merely reconnects over them
+        nursery.start_soon(task_daily_restart)
 
         # actual backend runs here
         yield

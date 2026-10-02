@@ -61,6 +61,7 @@ from alasio.backend.mpipe.mpipe_backend import mpipe_backend
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.restart import RestartSource
 from alasio.backend.topic.scan import ConfigScanSource
+from alasio.backend.ws.context import GLOBAL_CONTEXT
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
@@ -87,6 +88,19 @@ RESUME_FILE_SUFFIX = '.json'
 # update flow writes 'update' (its file lifetime belongs to the update
 # transaction, the restart cancel path must not delete it)
 OWNER_RESTART = 'restart'
+
+
+class RestartInProgress(RuntimeError):
+    """
+    Raised when a graceful restart is requested while one already owns the
+    backend (the process-wide gate of GRACEFUL_RESTART.running). The refusal
+    is a plain outcome of request_graceful_restart() for the scheduler; the
+    rpc handler translates it into the user-facing RpcValueError
+    ('Restart already in progress').
+    """
+
+    def __init__(self):
+        super().__init__('Graceful restart already in progress')
 
 
 class ResumeRecord(msgspec.Struct):
@@ -685,6 +699,44 @@ def run_resume_actions(actions):
 # =============================================================================
 # Orchestration (old backend)
 # =============================================================================
+
+async def request_graceful_restart(reason='', nursery=None):
+    """
+    Request a graceful restart of the backend (entry point of every trigger)
+
+    The single entry point of the graceful restart: the settings page rpc
+    (ConnState.restart) and the daily scheduled restart
+    (alasio.backend.app.schedule) both go through it, so the preconditions
+    and the re-entry guard exist once.
+
+    The request only starts the orchestration task and returns immediately:
+    the graceful stop can last up to GRACEFUL_STOP_TIMEOUT and the progress
+    flows through the Restart and Worker topics while the rpc / scheduler
+    task stays responsive.
+
+    Args:
+        reason (str): Who requests the restart, for the log
+        nursery (trio.Nursery): Nursery to schedule the orchestration in.
+            Defaults to the lifespan global nursery, injectable for tests
+
+    Raises:
+        PermissionError: When the backend runs without a supervisor (the
+            restart could never come back)
+        RestartInProgress: When a restart already owns the backend
+    """
+    if not mpipe_backend:
+        raise PermissionError('Cannot restart backend running without supervisor')
+    if GRACEFUL_RESTART.running:
+        raise RestartInProgress()
+    if nursery is None:
+        nursery = GLOBAL_CONTEXT.global_nursery
+    logger.info(f'[Restart] Graceful restart requested, reason: {reason or "unspecified"}')
+    # set the flag synchronously (no await in between): two concurrent
+    # requests (a click and the daily schedule, or two clicks) cannot start
+    # two orchestrations
+    GRACEFUL_RESTART.running = True
+    nursery.start_soon(run_graceful_restart)
+
 
 async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=None):
     """
