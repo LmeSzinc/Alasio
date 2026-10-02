@@ -71,14 +71,13 @@ class LookbackConfig(Struct):
 
 class PackRepoModel(Struct):
     """
-    1. Generate full packs to: pack/{Author}_{Repo}/{commit}/full_{commit}.pack
-    both latest and lookback commits will have full pack
-    2. Generate update packs to: pack/{Author}_{Repo}/{new}/update_{old}.pack
-    only latest commit will have update packs that updates from lookback commits
-    3. existing update pack from lookback commit folder will be preserved
-    4. folders that does not match the latest commit or any lookback commit, will be removed
-    5. generate latest info to: pack/{Author}_{Repo}/latest_{Branch}
+    1. Generate full packs to: pack/{Author}_{Repo}_{Branch}/{commit}/full_{commit}.pack
+    only latest commit will have full pack
+    2. Generate update packs to: pack/{Author}_{Repo}_{Branch}/{commit}/update_{old}.pack
+    update packs will update from lookback commit to latest commit
+    3. generate latest info to: pack/{Author}_{Repo}_{Branch}/latest.pack
     content is {new} version and the sha1 checksum of latest full pack
+    4. folders that does not match the latest commit will be removed
     """
     Repo: RepoConfig = field(default_factory=RepoConfig)
     Lookback: LookbackConfig = field(default_factory=LookbackConfig)
@@ -102,7 +101,7 @@ class PackRepoConfig(YamlConfig):
             'LmeSzinc_AzurLaneAutoScript.yaml'
 
     Usage:
-        config = PackRepoConfig('LmeSzinc_AzurLaneAutoScript.yaml')
+        config = PackRepoConfig('LmeSzinc_AzurLaneAutoScript_master.yaml')
         config.data.Repo.Remote
         config.data.Lookback.MaxCommitDay
     """
