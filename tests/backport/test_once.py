@@ -68,6 +68,14 @@ class TestRunOnce:
         assert count == 1
         assert decorated.has_run is True
 
+    def test_run_once_return_value(self):
+        def get_value():
+            return 42
+
+        decorated = run_once(get_value)
+        assert decorated() == 42
+        assert decorated() == 42
+
     def test_run_once_reset(self):
         count = 0
 
