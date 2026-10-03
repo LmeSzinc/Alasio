@@ -252,23 +252,12 @@ def expected_tree(full):
 
 
 class TestConfigAndFolders:
-    """Config validation and the run directory paths."""
+    """The run directory paths of the generator.
 
-    def test_missing_author(self, fs, run_dir):
-        """A config without an Author is refused, the folder would mix with the other repos."""
-        with pytest.raises(ValueError, match='Author'):
-            PackRepoGen(make_repo(VERSIONS), PackRepoModel(Repo=RepoConfig(Repo='Repo', Branch='master')))
-
-    def test_missing_repo_name(self, fs, run_dir):
-        """A config without a Repo name is refused, the folder would mix with the other repos."""
-        with pytest.raises(ValueError, match='Repo name'):
-            PackRepoGen(make_repo(VERSIONS), PackRepoModel(Repo=RepoConfig(Author='Author', Branch='master')))
-
-    def test_missing_branch(self, fs, run_dir):
-        """A config without a Branch is refused, there is no version to pack."""
-        with pytest.raises(ValueError, match='Branch'):
-            PackRepoGen(
-                make_repo(VERSIONS), PackRepoModel(Repo=RepoConfig(Author='Author', Repo='Repo', Branch='')))
+    The empty Author / Repo / Branch of a config are checked by the config
+    reader, see TestPackRepoConfig in test_model.py, the generator does not
+    check them again.
+    """
 
     def test_branch_with_path_separator(self, fs, run_dir):
         """A Branch that would nest the pack folder inside another config is refused."""

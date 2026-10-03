@@ -72,22 +72,17 @@ class PackRepoGen:
         Args:
             repo (GitRepo | MockGitRepo): Git repo to pack, every version is
                 read from it, the generation does not write to it
-            config (PackRepoModel): Config of the repo
+            config (PackRepoModel): Config of the repo, read from a
+                PackRepoConfig: the config reader checks that Author, Repo
+                and Branch are not empty
 
         Raises:
-            ValueError: If the config has no Author, Repo or Branch, or makes
-                a folder name that is not a single safe path component (see
-                pack_folder), the output folder of such a config would mix
-                with the other repos
+            ValueError: If the config makes a folder name that is not a
+                single safe path component (see pack_folder), the output
+                folder of such a config would mix with the other repos
         """
         self.repo = repo
         self.config = config
-        if not config.Repo.Author:
-            raise ValueError('Empty Author in the pack config, cannot name the folder of the packs')
-        if not config.Repo.Repo:
-            raise ValueError('Empty Repo name in the pack config, cannot name the folder of the packs')
-        if not config.Repo.Branch:
-            raise ValueError('Empty Branch in the pack config, cannot know what to pack')
         # the folder name is checked before anything is written, see pack_folder
         _ = self.pack_folder
         self.lookback = PackRepoLookback(repo, config)

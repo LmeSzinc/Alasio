@@ -3,7 +3,9 @@ Tests for the pack server config models, see PackRepoModel.
 
 PackRepoConfig reads the config of a repo from the config folder of the run
 directory, the file is created from the model with the help comments when it
-does not exist, and invalid values fall back to their defaults.
+does not exist, and invalid values fall back to their defaults. Author, Repo,
+Remote and Branch must not be empty: every user of the config needs them, so
+the reader refuses an empty one and the users do not check them again.
 """
 import msgspec
 import pytest
@@ -102,26 +104,56 @@ class TestPackRepoConfig:
     """Reading the config of a repo from the config folder of the run directory."""
 
     def test_read_missing_file(self, fs, run_dir):
-        """A file that does not exist is created in the config folder, with the help comments."""
+        """A file that does not exist is created from the model, then the empty config is refused."""
         with logger.mock_capture_writer() as capture:
-            config = PackRepoConfig(FILE)
+            with pytest.raises(ValueError, match='Empty Author'):
+                PackRepoConfig(FILE)
         assert capture.fd.any_contains('Invalid pack config value')
         assert capture.fd.any_contains(FILE)
-        assert len(config.errors) == 1
-        assert isinstance(config.errors[0], FileNotFoundError)
-        assert config.file == config_file(run_dir)
-        # the created file holds the default config
-        assert config.data == PackRepoModel()
-        assert read_config(config.file) == msgspec.to_builtins(PackRepoModel())
+        # the created file holds the default config, the operator fills it
+        assert read_config(config_file(run_dir)) == msgspec.to_builtins(PackRepoModel())
         # and the help comments of every field of the model, the comment text
         # is taken from the model so that a change of the help texts does not
         # need a change of this test
-        with open(config.file, encoding='utf-8') as f:
+        with open(config_file(run_dir), encoding='utf-8') as f:
             text = f.read()
         help_lines = list(iter_help_line())
         assert help_lines
         for line in help_lines:
             assert f'# {line}' in text
+
+    @pytest.mark.parametrize('empty, contents', [
+        ('Empty Author', """\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Repo: AzurLaneAutoScript
+  Branch: master
+"""),
+        ('Empty Repo name', """\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Branch: master
+"""),
+        ('Empty Remote', """\
+Repo:
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
+"""),
+        ('Empty Branch', """\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: ''
+"""),
+    ])
+    def test_empty_repo_value(self, fs, run_dir, empty, contents):
+        """An empty Author / Repo / Remote / Branch is refused, every user of the config needs them."""
+        fs.create_file(config_file(run_dir), contents=contents)
+        with pytest.raises(ValueError, match=f'{empty}.*{FILE}'):
+            PackRepoConfig(FILE)
 
     def test_read_values(self, fs, run_dir):
         """The values of the file in the config folder are read into the model."""
@@ -158,7 +190,15 @@ Lookback:
 
     def test_read_invalid_parent_rule(self, fs, run_dir):
         """A parent rule that is not one of the model values falls back to the default."""
-        fs.create_file(config_file(run_dir), contents='Lookback:\n  Parent: parent-1\n')
+        fs.create_file(config_file(run_dir), contents="""\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
+Lookback:
+  Parent: parent-1
+""")
         with logger.mock_capture_writer() as capture:
             config = PackRepoConfig(FILE)
         assert capture.fd.any_contains('Invalid pack config value')
@@ -168,7 +208,13 @@ Lookback:
 
     def test_read_valid_file_keeps_content(self, fs, run_dir):
         """A valid file is not written back, the comments are added only when needed."""
-        content = 'Repo:\n  Author: LmeSzinc\n'
+        content = """\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
+"""
         fs.create_file(config_file(run_dir), contents=content)
         config = PackRepoConfig(FILE)
         assert config.errors == []
@@ -179,6 +225,11 @@ Lookback:
     def test_write_list_style(self, fs, run_dir):
         """A list is written back as "- item", not as "[item]"."""
         fs.create_file(config_file(run_dir), contents="""\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
 Lookback:
   MaxCommitDay: abc
   AdditionalCommit:
@@ -200,7 +251,15 @@ Lookback:
 
     def test_invalid_value_falls_back(self, fs, run_dir):
         """A value that fails the validation falls back to the default and is written back."""
-        fs.create_file(config_file(run_dir), contents='Lookback:\n  MaxCommitDay: abc\n')
+        fs.create_file(config_file(run_dir), contents="""\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
+Lookback:
+  MaxCommitDay: abc
+""")
         with logger.mock_capture_writer() as capture:
             config = PackRepoConfig(FILE)
         # the error is logged with the file name, the file is named by the caller
@@ -209,23 +268,37 @@ Lookback:
         assert len(config.errors) == 1
         assert config.data.Lookback.MaxCommitDay == 90
         # the file is written back with the default value
-        assert read_config(config.file) == msgspec.to_builtins(PackRepoModel())
+        expected = PackRepoModel(Repo=RepoConfig(
+            Remote='https://github.com/LmeSzinc/AzurLaneAutoScript',
+            Author='LmeSzinc', Repo='AzurLaneAutoScript', Branch='master'))
+        assert read_config(config.file) == msgspec.to_builtins(expected)
 
     def test_invalid_yaml_is_repaired(self, fs, run_dir):
-        """A file that is not valid yaml is replaced by the model defaults."""
+        """A file that is not valid yaml is replaced by the model defaults, then the empty config is refused."""
         fs.create_file(config_file(run_dir), contents='Lookback: [unclosed\n')
         with logger.mock_capture_writer() as capture:
-            config = PackRepoConfig(FILE)
+            with pytest.raises(ValueError, match='Empty Author'):
+                PackRepoConfig(FILE)
         assert capture.fd.any_contains('Invalid pack config value')
-        assert len(config.errors) == 1
-        assert config.data == PackRepoModel()
-        assert read_config(config.file) == msgspec.to_builtins(PackRepoModel())
+        assert read_config(config_file(run_dir)) == msgspec.to_builtins(PackRepoModel())
 
     def test_config_of_each_file(self, fs, run_dir):
         """Every file has its own config, the reader is not bound to a single file."""
         other = 'LmeSzinc_StarRailCopilot.yaml'
-        fs.create_file(config_file(run_dir), contents='Repo:\n  Author: LmeSzinc\n  Repo: AzurLaneAutoScript\n')
-        fs.create_file(config_file(run_dir, other), contents='Repo:\n  Author: LmeSzinc\n  Repo: StarRailCopilot\n')
+        fs.create_file(config_file(run_dir), contents="""\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
+""")
+        fs.create_file(config_file(run_dir, other), contents="""\
+Repo:
+  Remote: https://github.com/LmeSzinc/StarRailCopilot
+  Author: LmeSzinc
+  Repo: StarRailCopilot
+  Branch: master
+""")
         first = PackRepoConfig(FILE)
         second = PackRepoConfig(other)
         assert first.file == config_file(run_dir)

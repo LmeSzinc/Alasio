@@ -12,7 +12,7 @@ from alasio.logger import logger
 
 class RepoConfig(Struct):
     """
-    Clone repo to workspace/{Author}_{Repo}
+    Clone repo to repo/{Author}_{Repo}
     set git remote "origin" to {Remote}
     """
     Remote: Annotated[str, Meta(extra={"help": [
@@ -96,6 +96,11 @@ class PackRepoConfig(YamlConfig):
     file that does not exist is created from the model with the help comments,
     an invalid file is written back with them, see YamlConfig.
 
+    Author, Repo, Remote and Branch must not be empty: every user of the
+    config needs them, so the check lives here and the users do not check
+    them again. A config with an empty one raises ValueError, the created or
+    repaired file stays on the disk for the operator to fill.
+
     Args:
         file (str): Name of the yaml file in the config folder, e.g.
             'LmeSzinc_AzurLaneAutoScript.yaml'
@@ -114,6 +119,31 @@ class PackRepoConfig(YamlConfig):
         folder = env.PROJECT_ROOT.joinpath(self.CONFIG_FOLDER)
         file = validate_resolve_filepath(folder, file)
         super().__init__(file, model=PackRepoModel)
+        self._check_repo()
+
+    def _check_repo(self):
+        """
+        Check the fields of the repo that every user of the config needs
+
+        An empty one cannot be worked around: the folder of the repo cannot
+        be named, the remote cannot be cloned, the branch cannot be fetched.
+        The yaml file is the only source of an empty value, so the check
+        lives in the reader and the users of the config do not check again.
+
+        Raises:
+            ValueError: If Author, Repo, Remote or Branch is empty
+        """
+        repo = self.data.Repo
+        if not repo.Author:
+            raise ValueError(
+                f'Empty Author in the pack config, cannot name the folder of the repo, file="{self.file}"')
+        if not repo.Repo:
+            raise ValueError(
+                f'Empty Repo name in the pack config, cannot name the folder of the repo, file="{self.file}"')
+        if not repo.Remote:
+            raise ValueError(f'Empty Remote in the pack config, cannot clone the repo, file="{self.file}"')
+        if not repo.Branch:
+            raise ValueError(f'Empty Branch in the pack config, cannot know what to fetch, file="{self.file}"')
 
     def _log_errors(self, errors):
         """
