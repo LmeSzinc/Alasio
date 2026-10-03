@@ -346,3 +346,72 @@ def foo():
         gen.sort_import()
         code2 = gen.generate_str()
         assert code1 == code2
+
+
+class TestSortImportAutoGenBanner:
+    """The auto generated banner is a file header, always followed by 2 blank lines."""
+
+    def test_banner_then_class(self):
+        gen = CodeGen()
+        gen.Import('os')
+        gen.CommentCodeGen('module.config.gen')
+        with gen.Class('Foo'):
+            gen.Var('x', 1)
+        gen.sort_import()
+        code = gen.generate_str()
+        expected = """\
+import os
+
+
+# This file was auto-generated, do not modify it manually. To generate:
+# ``` python -m module.config.gen ```
+
+class Foo:
+    x = 1
+"""
+        assert code == expected
+
+    def test_banner_then_var(self):
+        gen = CodeGen()
+        gen.Import('os')
+        gen.CommentCodeGen('module.config.gen')
+        gen.Var('x', 1)
+        gen.sort_import()
+        code = gen.generate_str()
+        expected = """\
+import os
+
+
+# This file was auto-generated, do not modify it manually. To generate:
+# ``` python -m module.config.gen ```
+
+x = 1
+"""
+        assert code == expected
+
+    def test_banner_without_import(self):
+        """A banner of a file without imports stays at the top, followed by 2 blank lines."""
+        gen = CodeGen()
+        gen.CommentCodeGen('module.config.gen')
+        gen.Var('x', 1)
+        gen.sort_import()
+        code = gen.generate_str()
+        expected = """\
+# This file was auto-generated, do not modify it manually. To generate:
+# ``` python -m module.config.gen ```
+
+x = 1
+"""
+        assert code == expected
+
+    def test_banner_idempotent(self):
+        """Second sort is no-op for the banner layout."""
+        gen = CodeGen()
+        gen.Import('os')
+        gen.CommentCodeGen('module.config.gen')
+        gen.Var('x', 1)
+        gen.sort_import()
+        code1 = gen.generate_str()
+        gen.sort_import()
+        code2 = gen.generate_str()
+        assert code1 == code2

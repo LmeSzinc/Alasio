@@ -64,6 +64,17 @@ class Comment(CodeObject):
         yield f'{self.indent_str}# {self.text}'
 
 
+class AutoGenComment(Comment):
+    """
+    Define the auto generated file banner comment
+
+    The banner is the file header, not a comment of the following definition:
+    CodeGenBase.sort_import() keeps it right after the import block and always
+    gives it 2 blank lines, so the header layout does not depend on whether a
+    Class/Def or a variable block comes next.
+    """
+
+
 class MultilineComment(CodeObject):
     """
     Define a multiline comment using triple quotes

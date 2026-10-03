@@ -199,6 +199,15 @@ class CodeGen(CodeGenBase):
         self._add_item(item)
         return item
 
+    def AutoGenComment(self, text):
+        """
+        Define the auto generated file banner comment
+        # {text}
+        """
+        item = AutoGenComment(self, text)
+        self._add_item(item)
+        return item
+
     def MultilineComment(self, text):
         """
         Define a multiline comment
@@ -215,8 +224,8 @@ class CodeGen(CodeGenBase):
         Args:
             file (str): Path to code generator, such as "dev_tools.button_extract"
         """
-        self.Comment('This file was auto-generated, do not modify it manually. To generate:')
-        self.Comment(f'``` python -m {file} ```')
+        self.AutoGenComment('This file was auto-generated, do not modify it manually. To generate:')
+        self.AutoGenComment(f'``` python -m {file} ```')
 
     def Class(self, name):
         """

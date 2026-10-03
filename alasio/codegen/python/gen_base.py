@@ -56,9 +56,26 @@ class CodeGenBase(AutoBlankLineMixin, ClosureObject):
         header_items = self.items[:header_end]
         remaining_items = self.items[header_end:]
 
+        # The auto generated banner is the file header: it is always separated from
+        # the import block by 2 blank lines and followed by 1 blank line, whatever
+        # comes next, so the header layout is fixed and a second sort is a no-op.
+        # A banner at the end of the file (nothing follows it) is left as emitted.
+        banner_end = 0
+        while banner_end < len(remaining_items) and isinstance(
+            remaining_items[banner_end], (Empty, AutoGenComment)
+        ):
+            banner_end += 1
+        banner_items = [item for item in remaining_items[:banner_end] if isinstance(item, AutoGenComment)]
+        if banner_items and banner_end < len(remaining_items):
+            remaining_items = remaining_items[banner_end:]
+        else:
+            banner_items = []
+
         # If no imports found, return early — header items (comments etc.) stay as-is
         real_imports = [item for item in header_items if isinstance(item, (Import, FromImport))]
         if not real_imports:
+            if banner_items:
+                self.items = banner_items + [Empty(self, 1)] + remaining_items
             return self
 
         # Classify imports
@@ -127,6 +144,13 @@ class CodeGenBase(AutoBlankLineMixin, ClosureObject):
         # Strip leading Empty items from remaining so auto blank lines can work.
         while remaining_items and isinstance(remaining_items[0], Empty):
             remaining_items.pop(0)
+
+        # Put the banner after the import block: 2 blank lines before it, 1 blank
+        # line after it (see above)
+        if banner_items:
+            new_items.append(Empty(self, 2))
+            new_items.extend(banner_items)
+            new_items.append(Empty(self, 1))
 
         # Detect Comment(s) + [Empty*] + Class/Def at the start of remaining:
         # the 2 PEP8 blanks go before the first comment (associated with the definition),
