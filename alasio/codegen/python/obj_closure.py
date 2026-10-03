@@ -275,6 +275,7 @@ class Literal(ClosureWithName):
     """
     Define a variable with a Literal type annotation.
     A default value is only emitted when explicitly set via .Var().
+    With .set_assign(), a module level variable assignment is emitted instead.
 
     Examples:
         with gen.Literal('fruit'):
@@ -293,6 +294,11 @@ class Literal(ClosureWithName):
 
         gen.Literal('mode').wrap('expand')
         # mode: Literal['a', 'b']
+
+        with gen.Literal('LITERAL_Group_Arg').set_assign().set_literal('t.Literal'):
+            gen.Item('option-A')
+            gen.Item('option-B')
+        # LITERAL_Group_Arg = t.Literal['option-A', 'option-B']
     """
 
     closure_start = '['
@@ -303,6 +309,8 @@ class Literal(ClosureWithName):
         super().__init__(gen, name)
         self._literal_module = 'Literal'
         self.value = None
+        # False to emit a type annotation, True to emit a variable assignment
+        self._assign = False
         # Literal type annotations are typically inline, even in with blocks
         self._wrap_explicit = True
 
@@ -319,14 +327,35 @@ class Literal(ClosureWithName):
         self._literal_module = module
         return self
 
+    def set_assign(self):
+        """
+        Emit an assignment of a module level literal variable, instead of a type annotation.
+        A default value set with .Var() is ignored in this mode.
+
+        Examples:
+            with gen.Literal('LITERAL_Group_Arg').set_assign().set_literal('t.Literal'):
+                gen.Item('option-A')
+                gen.Item('option-B')
+            # LITERAL_Group_Arg = t.Literal['option-A', 'option-B']
+
+        Returns:
+            Literal: self for chaining
+        """
+        self._assign = True
+        return self
+
     def _get_prefix(self):
-        """Literal prefix: name: module  or just module."""
+        """Literal prefix: name: module, name = module, or just module."""
+        if self._assign:
+            return f'{self.name} = {self._literal_module}'
         if self.name:
             return f'{self.name}: {self._literal_module}'
         return self._literal_module
 
     def _get_suffix(self):
-        """Optional default value suffix."""
+        """Optional default value suffix, empty in assign mode."""
+        if self._assign:
+            return ''
         default_val = self._get_default_value()
         if default_val is not None:
             return f'{self.between_kv}{default_val}'
@@ -349,12 +378,14 @@ class Literal(ClosureWithName):
         ending = self.line_ending
         items_str = self._build_items_str()
 
-        if self.name:
+        if self._assign:
+            value = f'{self.name} = {self._literal_module}[{items_str}]'
+        elif self.name:
             value = f'{self.name}: {self._literal_module}[{items_str}]'
         else:
             value = f'{self._literal_module}[{items_str}]'
 
         default_val = self._get_default_value()
-        if default_val is not None:
+        if not self._assign and default_val is not None:
             value += f' = {default_val}'
         return f'{value}{ending}'

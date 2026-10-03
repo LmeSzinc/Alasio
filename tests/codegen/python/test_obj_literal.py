@@ -211,3 +211,68 @@ class Config:
         code = gen.generate_str()
         expected = "color: Literal[\n    'red', 'green',\n] = 'red'\n"
         assert code == expected
+
+
+class TestLiteralAssign:
+    """set_assign() emits a module level literal variable instead of a type annotation."""
+
+    def test_assign_inline(self):
+        gen = CodeGen()
+        with gen.Literal('LITERAL_Group_Arg').set_assign().set_literal('t.Literal').wrap('auto'):
+            gen.Item('option-A')
+            gen.Item('option-B')
+        code = gen.generate_str()
+        expected = "LITERAL_Group_Arg = t.Literal['option-A', 'option-B']\n"
+        assert code == expected
+
+    def test_assign_default_module(self):
+        gen = CodeGen()
+        with gen.Literal('LITERAL_Mode').set_assign():
+            gen.Item('normal')
+            gen.Item('hard')
+        code = gen.generate_str()
+        expected = "LITERAL_Mode = Literal['normal', 'hard']\n"
+        assert code == expected
+
+    def test_assign_wrap_newline(self):
+        gen = CodeGen()
+        with gen.Literal('LITERAL_Fleet').set_assign().set_literal('t.Literal').wrap('newline'):
+            gen.Item('Fleet-1')
+            gen.Item('Fleet-2')
+        code = gen.generate_str()
+        expected = """\
+LITERAL_Fleet = t.Literal[
+    'Fleet-1',
+    'Fleet-2',
+]
+"""
+        assert code == expected
+
+    def test_assign_wrap_auto_expand_with_linebreak(self):
+        """A long option list is packed into rows, Linebreak groups are kept."""
+        gen = CodeGen()
+        with gen.Literal('LITERAL_Campaign_Name').set_assign().set_literal('t.Literal').wrap('auto'):
+            for chapter in range(1, 5):
+                for stage in range(1, 5):
+                    gen.Item(f'{chapter}-{stage}')
+                if chapter < 4:
+                    gen.Linebreak()
+        code = gen.generate_str()
+        expected = """\
+LITERAL_Campaign_Name = t.Literal[
+    '1-1', '1-2', '1-3', '1-4',
+    '2-1', '2-2', '2-3', '2-4',
+    '3-1', '3-2', '3-3', '3-4',
+    '4-1', '4-2', '4-3', '4-4',
+]
+"""
+        assert code == expected
+
+    def test_assign_ignores_default(self):
+        gen = CodeGen()
+        with gen.Literal('LITERAL_Mode').set_assign().set_literal('t.Literal').Var('normal'):
+            gen.Item('normal')
+            gen.Item('hard')
+        code = gen.generate_str()
+        expected = "LITERAL_Mode = t.Literal['normal', 'hard']\n"
+        assert code == expected
