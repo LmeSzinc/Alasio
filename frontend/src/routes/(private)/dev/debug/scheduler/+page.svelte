@@ -4,7 +4,7 @@
   import type { ArgData } from "$lib/components/arg/utils.svelte";
   import type { WORKER_STATE } from "$lib/components/aside/types";
   import Scheduler from "$lib/components/scheduler/Scheduler.svelte";
-  import type { RestartPhase } from "$lib/components/scheduler/types";
+  import type { RestartPhase, TaskItem } from "$lib/components/scheduler/types";
   import * as Card from "$lib/components/ui/card";
 
   // All available state options
@@ -36,6 +36,42 @@
   // Worker states whose buttons depend on the restart phase
   const RESTART_STATES: WORKER_STATE[] = ["scheduler-stopping", "restarting", "resuming"];
 
+  /**
+   * Preview queue of the scheduler: `pending` due tasks (the first one takes
+   * the `running` name when given) and `waiting` tasks scheduled later. The
+   * queue lists are the only source of the task rows and of the summary
+   * counts, so a preview can never show counts that disagree with its rows.
+   */
+  function makeQueue(
+    pending: number,
+    waiting: number,
+    running?: string,
+  ): {
+    taskPending: TaskItem[];
+    taskWaiting: TaskItem[];
+  } {
+    const base = Math.floor(Date.now() / 1000);
+    return {
+      taskPending: Array.from({ length: pending }, (_, i) => ({
+        TaskName: i === 0 && running ? running : `PendingTask${i + 1}`,
+        NextRun: base,
+      })),
+      taskWaiting: Array.from({ length: waiting }, (_, i) => ({
+        TaskName: `WaitingTask${i + 1}`,
+        NextRun: base + 3600 * (i + 1),
+      })),
+    };
+  }
+
+  // Queue combinations of the summary row: both sides, each zero side (the
+  // zero side is dropped there) and the empty queue
+  const QUEUE_CASES: { label: string; pending: number; waiting: number; running: boolean }[] = [
+    { label: "pending=24 waiting=3", pending: 24, waiting: 3, running: true },
+    { label: "pending=0 waiting=3", pending: 0, waiting: 3, running: false },
+    { label: "pending=24 waiting=0", pending: 24, waiting: 0, running: true },
+    { label: "pending=0 waiting=0", pending: 0, waiting: 0, running: false },
+  ];
+
   // What the phase changes for each of them
   const RESTART_STATE_NOTES: Record<string, string> = {
     "scheduler-stopping":
@@ -66,14 +102,14 @@
     option: ALL_STATES,
   });
 
-  let taskListInput = $state<ArgData>({
+  let queueInput = $state<ArgData>({
     task: "",
     group: "",
-    arg: "task_list",
+    arg: "queue",
     dt: "select",
-    value: "empty",
-    name: "Task List",
-    option: ["empty", "running-only", "next-only", "running-and-next", "long-names"],
+    value: "both",
+    name: "Queue",
+    option: ["both", "pending-only", "waiting-only", "empty", "running-only", "long-names"],
   });
 
   let restartPhaseInput = $state<ArgData>({
@@ -89,42 +125,30 @@
   // Restart phase of the selected preview, "none" = no restart in progress
   const restartPhase = $derived(RESTART_PHASES.find(({ label }) => label === restartPhaseInput.value)?.phase ?? null);
 
-  // Generate task list based on input
-  const taskRunning = $derived.by(() => {
-    if (taskListInput.value === "running-only" || taskListInput.value === "running-and-next") {
-      return "CurrentTask";
+  // Queue of the selected preview, driven by the Queue select
+  const previewQueue = $derived.by(() => {
+    const base = Math.floor(Date.now() / 1000);
+    switch (queueInput.value) {
+      case "pending-only":
+        return { taskRunning: "CurrentTask", ...makeQueue(24, 0, "CurrentTask") };
+      case "waiting-only":
+        return { taskRunning: undefined, ...makeQueue(0, 3) };
+      case "empty":
+        return { taskRunning: undefined, taskPending: [], taskWaiting: [] };
+      case "running-only":
+        return { taskRunning: "CurrentTask", ...makeQueue(1, 0, "CurrentTask") };
+      case "long-names":
+        return {
+          taskRunning: "VeryLongTaskNameThatShouldBeTruncatedInTheUI",
+          taskPending: [{ TaskName: "VeryLongTaskNameThatShouldBeTruncatedInTheUI", NextRun: base }],
+          taskWaiting: [
+            { TaskName: "AnotherVeryLongTaskNameThatWillDefinitelyBeTruncated", NextRun: base + 1800 },
+            { TaskName: "ShortTask", NextRun: base + 3600 },
+          ],
+        };
+      default:
+        return { taskRunning: "CurrentTask", ...makeQueue(24, 3, "CurrentTask") };
     }
-    if (taskListInput.value === "long-names") {
-      return "VeryLongTaskNameThatShouldBeTruncatedInTheUI";
-    }
-    return undefined;
-  });
-
-  const taskNext = $derived.by(() => {
-    if (taskListInput.value === "next-only" || taskListInput.value === "running-and-next") {
-      const next = [
-        { TaskName: "Task1", NextRun: Math.floor(Date.now() / 1000) + 3600 },
-        { TaskName: "Task2", NextRun: Math.floor(Date.now() / 1000) + 7200 },
-        { TaskName: "Task3", NextRun: Math.floor(Date.now() / 1000) + 100000 },
-      ];
-      if (taskListInput.value === "running-and-next") {
-        return [{ TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) }, ...next];
-      }
-      return next;
-    }
-    if (taskListInput.value === "long-names") {
-      return [
-        {
-          TaskName: "AnotherVeryLongTaskNameThatWillDefinitelyBeTruncated",
-          NextRun: Math.floor(Date.now() / 1000) + 1800,
-        },
-        {
-          TaskName: "ShortTask",
-          NextRun: Math.floor(Date.now() / 1000) + 3600,
-        },
-      ];
-    }
-    return [];
   });
 </script>
 
@@ -144,8 +168,7 @@
               config_name={configNameInput.value as string}
               workerState={stateInput.value as WORKER_STATE}
               {restartPhase}
-              {taskRunning}
-              {taskNext}
+              {...previewQueue}
               onOverviewClick={() => console.log("Overview clicked")}
             />
           </div>
@@ -163,7 +186,7 @@
           <Arg bind:data={configNameInput} />
           <Arg bind:data={stateInput} />
           <Arg bind:data={restartPhaseInput} />
-          <Arg bind:data={taskListInput} />
+          <Arg bind:data={queueInput} />
         </div>
       </Card.Content>
     </Card.Root>
@@ -186,14 +209,30 @@
               {workerState}
               restartPhase={null}
               taskRunning="CurrentTask"
-              taskNext={[
-                { TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) },
-                { TaskName: "NextTask1", NextRun: Math.floor(Date.now() / 1000) + 3600 },
-                { TaskName: "NextTask2", NextRun: Math.floor(Date.now() / 1000) + 7200 },
-                { TaskName: "NextTask3", NextRun: Math.floor(Date.now() / 1000) + 10800 },
-              ]}
+              {...makeQueue(24, 3, "CurrentTask")}
             />
           {/each}
+        </div>
+
+        <!-- Summary row: both sides, each zero side and the empty queue -->
+        <div class="mt-6 flex flex-col gap-2">
+          <div class="text-muted-foreground text-xs">
+            Queue: pending + waiting, each zero side (it drops out of the summary) and the empty queue
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {#each QUEUE_CASES as counts (counts.label)}
+              <div class="flex flex-col gap-1">
+                <div class="text-muted-foreground font-mono text-xs">{counts.label}</div>
+                <Scheduler
+                  config_name="CountConfig"
+                  workerState={counts.running ? "running" : "idle"}
+                  restartPhase={null}
+                  taskRunning={counts.running ? "CurrentTask" : undefined}
+                  {...makeQueue(counts.pending, counts.waiting, counts.running ? "CurrentTask" : undefined)}
+                />
+              </div>
+            {/each}
+          </div>
         </div>
       </Card.Content>
     </Card.Root>
@@ -206,7 +245,7 @@
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
           {#each ALL_STATES as workerState}
-            <Scheduler config_name="EmptyScheduler" {workerState} restartPhase={null} taskNext={[]} />
+            <Scheduler config_name="EmptyScheduler" {workerState} restartPhase={null} />
           {/each}
         </div>
       </Card.Content>
@@ -225,11 +264,10 @@
               {workerState}
               restartPhase={null}
               taskRunning="VeryLongTaskNameThatWillBeTruncated"
-              taskNext={[
-                {
-                  TaskName: "VeryLongTaskNameThatWillBeTruncated",
-                  NextRun: Math.floor(Date.now() / 1000),
-                },
+              taskPending={[
+                { TaskName: "VeryLongTaskNameThatWillBeTruncated", NextRun: Math.floor(Date.now() / 1000) },
+              ]}
+              taskWaiting={[
                 {
                   TaskName: "AnotherVeryLongTaskNameForTesting",
                   NextRun: Math.floor(Date.now() / 1000) + 1800,
@@ -253,7 +291,7 @@
               config_name="NextOnly"
               {workerState}
               restartPhase={null}
-              taskNext={[
+              taskWaiting={[
                 { TaskName: "Future1", NextRun: Math.floor(Date.now() / 1000) + 600 },
                 { TaskName: "Future2", NextRun: Math.floor(Date.now() / 1000) + 3600 },
                 { TaskName: "Future3", NextRun: Math.floor(Date.now() / 1000) + 100000 },
@@ -294,11 +332,7 @@
                       {workerState}
                       restartPhase={phase.phase}
                       taskRunning="CurrentTask"
-                      taskNext={[
-                        { TaskName: "CurrentTask", NextRun: Math.floor(Date.now() / 1000) },
-                        { TaskName: "NextTask1", NextRun: Math.floor(Date.now() / 1000) + 3600 },
-                        { TaskName: "NextTask2", NextRun: Math.floor(Date.now() / 1000) + 7200 },
-                      ]}
+                      {...makeQueue(24, 3, "CurrentTask")}
                     />
                   </div>
                 {/each}

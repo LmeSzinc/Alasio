@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import Play from "@lucide/svelte/icons/play";
+  import CirclePlay from "@lucide/svelte/icons/circle-play";
   import * as Tooltip from "$lib/components/ui/tooltip";
   import { cn } from "$lib/utils";
 
@@ -27,9 +27,8 @@
           <button
             {...props}
             class={cn(
-              "h-7 w-7 cursor-pointer rounded-full",
-              "text-primary border-primary/60 flex items-center justify-center border-2",
-              disabled ? "cursor-not-allowed opacity-50" : "hover:border-primary",
+              "text-primary flex h-7 w-7 cursor-pointer items-center justify-center",
+              disabled ? "cursor-not-allowed opacity-50" : "group",
             )}
             {onclick}
             {disabled}
@@ -37,7 +36,11 @@
             {#if children}
               {@render children()}
             {:else}
-              <Play class="h-3.5 w-3.5" />
+              <!-- The circle of the icon is the button itself, no frame of its own;
+                   stroke 1 (not 2): at 28px the default would be a 2.3px ring -->
+              <!-- h-7 button and svg box; scale-[1.2] grows the lucide circle
+                   (20/24 of the box) to the same 28px as the outlined pill -->
+              <CirclePlay class="h-7 w-7 shrink-0 scale-[1.2] group-hover:[stroke-width:1.5]" strokeWidth="1" />
             {/if}
           </button>
         {/snippet}

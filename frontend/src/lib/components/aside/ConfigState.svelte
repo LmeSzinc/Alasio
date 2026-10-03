@@ -4,9 +4,9 @@
   import CircleDotDashed from "@lucide/svelte/icons/circle-dot-dashed";
   import CirclePlay from "@lucide/svelte/icons/circle-play";
   import Ghost from "@lucide/svelte/icons/ghost";
-  import Hourglass from "@lucide/svelte/icons/hourglass";
   import Loader from "@lucide/svelte/icons/loader";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import SquarePause from "@lucide/svelte/icons/square-pause";
   import X from "@lucide/svelte/icons/x";
   import { cn } from "$lib/utils";
   import type { WORKER_STATE } from "./types";
@@ -23,10 +23,7 @@
 
   const strokeWidth = $derived(mode.current === "dark" ? "3" : "2");
   const spin = $derived(
-    workerState === "running" ||
-      workerState === "scheduler-waiting" ||
-      workerState === "scheduler-stopping" ||
-      workerState === "restarting"
+    workerState === "running" || workerState === "scheduler-waiting" || workerState === "restarting"
       ? "animate-spin"
       : "",
   );
@@ -51,8 +48,8 @@
     <!-- Error: red X -->
     <X class={cn("text-destructive h-3 w-3", iconClass)} {strokeWidth} aria-label="Error" />
   {:else if workerState === "scheduler-stopping"}
-    <!-- Scheduler stopping: hourglass icon -->
-    <Hourglass class={cn("h-2.5 w-2.5", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Stopping" />
+    <!-- Scheduler stopping: pause in a square -->
+    <SquarePause class={cn("h-2.5 w-2.5", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Stopping" />
   {:else if workerState === "starting"}
     <!-- Starting: hollow circle with muted color -->
     <CirclePlay class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Starting" />

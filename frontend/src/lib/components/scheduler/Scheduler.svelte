@@ -1,5 +1,6 @@
 <script lang="ts">
   import CircleDotDashed from "@lucide/svelte/icons/circle-dot-dashed";
+  import Hourglass from "@lucide/svelte/icons/hourglass";
   import ConfigState from "$lib/components/aside/ConfigState.svelte";
   import { useWorkerState } from "$lib/components/aside/state.svelte";
   import type { RestartTopicLike, WORKER_STATE } from "$lib/components/aside/types";
@@ -19,7 +20,10 @@
     config_name: string;
     workerState?: WORKER_STATE;
     taskRunning?: string;
-    taskNext?: TaskItem[];
+    /** Due tasks of the queue (NextRun reached), the running task included */
+    taskPending?: TaskItem[];
+    /** Tasks scheduled later (NextRun in the future) */
+    taskWaiting?: TaskItem[];
     /**
      * Restart phase override, e.g. for the dev page. Undefined reads the
      * Restart topic (`null` = no restart in progress).
@@ -32,7 +36,8 @@
     config_name,
     workerState = "idle",
     taskRunning,
-    taskNext,
+    taskPending = [],
+    taskWaiting = [],
     restartPhase: restartPhaseOverride,
     onOverviewClick,
     class: className,
@@ -40,6 +45,9 @@
 
   const displayState = useWorkerState(() => workerState);
   const isRunning = $derived(taskRunning && displayState.value !== "idle");
+  // The circle icon of the task rows spins while a task runs; the pending half
+  // of the summary row follows the same rule (its waiting half never spins)
+  const spinTaskIcon = $derived(isRunning && displayState.value !== "error");
 
   // Restart topic: a non-empty phase means a graceful backend restart is in
   // progress ('done' is pushed right before the topic is cleared)
@@ -53,15 +61,25 @@
   // backend refuses, the config resumes after the restart)
   const isResumeFrozen = $derived(restartPhase === "shutting-down");
 
-  // Show 3 tasks, or 2 if a task is running
+  // Show 3 tasks, or 2 if a task is running (the running task is filtered out
+  // of the queue lists, it is never shown as a next task). Each row keeps the
+  // list it came from: a due (pending) row spins its circle, a later (waiting)
+  // row shows the static hourglass.
   let nextTasksToShow = $derived.by(() => {
-    let tasks = taskNext || [];
+    let rows = [
+      ...taskPending.map((task) => ({ task, waiting: false })),
+      ...taskWaiting.map((task) => ({ task, waiting: true })),
+    ];
     if (isRunning) {
-      tasks = tasks.filter((task) => task.TaskName !== taskRunning);
+      rows = rows.filter((row) => row.task.TaskName !== taskRunning);
     }
     const limit = 3 - (isRunning ? 1 : 0);
-    return tasks.slice(0, limit);
+    return rows.slice(0, limit);
   });
+
+  // Summary of the whole task table: the task rows only show the head of the
+  // queue, the summary carries the totals of both lists (a zero side is dropped)
+  const hasTaskSummary = $derived(taskPending.length > 0 || taskWaiting.length > 0);
 
   let showNoTask = $state(false);
   $effect(() => {
@@ -162,8 +180,11 @@
 
   <hr class="mb-1" />
 
-  <!-- Task list -->
-  <div class="mb-3 flex h-12 flex-col gap-0.5 py-0.5 text-sm">
+  <!-- Task list: always 4 rows tall (up to 3 tasks + the summary row in the
+       last one), so the card height never follows the queue content. A row is
+       one text-xs line (1rem) and the empty rows of a short queue keep their
+       track. No bottom padding: the last row ends the block. -->
+  <div class="mb-1 grid grid-rows-[repeat(4,1rem)] gap-0.5 pt-0.5 text-sm">
     {#if taskRunning || nextTasksToShow.length > 0}
       <!-- Task running -->
       {#if isRunning}
@@ -173,21 +194,45 @@
           <span class="min-w-8 shrink-0 text-right text-xs">now</span>
         </div>
       {/if}
-      <!-- Task next -->
-      {#each nextTasksToShow as task}
+      <!-- Task next: the icon tells due (pending, circle) from later (waiting,
+           hourglass); a due row spins while a task runs, the waiting rows and
+           the hourglass never spin. The hourglass is a solid glyph (the circles
+           are dashed): /70 compensates its heavier look -->
+      {#each nextTasksToShow as row}
         <div class="text-muted-foreground flex items-center gap-1">
-          <CircleDotDashed
-            class={cn(
-              "text-muted-foreground h-3 w-3 shrink-0",
-              isRunning && displayState.value !== "error" ? "animate-spin" : "",
-            )}
-            strokeWidth="2"
-          />
-          <span class="flex-1 truncate text-xs">{task.TaskName}</span>
+          {#if row.waiting}
+            <Hourglass class="text-muted-foreground/70 h-3 w-3 shrink-0" strokeWidth="2" />
+          {:else}
+            <CircleDotDashed
+              class={cn("text-muted-foreground h-3 w-3 shrink-0", spinTaskIcon ? "animate-spin" : "")}
+              strokeWidth="2"
+            />
+          {/if}
+          <span class="flex-1 truncate text-xs">{row.task.TaskName}</span>
           <!-- now, hh:mm, >24h -->
-          <NextRun timestamp={task.NextRun} class="min-w-8 shrink-0 text-right text-xs" />
+          <NextRun timestamp={row.task.NextRun} class="min-w-8 shrink-0 text-right text-xs" />
         </div>
       {/each}
+      <!-- Summary row: pending (due) and waiting (scheduled) halves of the
+           whole task table, laid out in one line with a gap, left aligned. A
+           zero half is dropped and the other keeps its place; the pending
+           icon spins with the task rows, the hourglass never does. -->
+      {#if hasTaskSummary}
+        <div class="text-muted-foreground row-start-4 flex items-center gap-2">
+          {#if taskPending.length > 0}
+            <div class="flex min-w-0 items-center gap-1">
+              <CircleDotDashed class={cn("h-3 w-3 shrink-0", spinTaskIcon ? "animate-spin" : "")} strokeWidth="2" />
+              <span class="min-w-0 truncate text-xs">{t.Scheduler.PendingCount({ count: taskPending.length })}</span>
+            </div>
+          {/if}
+          {#if taskWaiting.length > 0}
+            <div class="flex min-w-0 items-center gap-1">
+              <Hourglass class="text-muted-foreground/70 h-3 w-3 shrink-0" strokeWidth="2" />
+              <span class="min-w-0 truncate text-xs">{t.Scheduler.WaitingCount({ count: taskWaiting.length })}</span>
+            </div>
+          {/if}
+        </div>
+      {/if}
     {:else if showNoTask}
       <div class="text-muted-foreground flex items-center justify-center gap-1">
         <span class="shrink-0 text-xs">{t.Scheduler.NoTask()}</span>
@@ -195,8 +240,10 @@
     {/if}
   </div>
 
-  <!-- Buttons -->
-  <div class="flex gap-1">
+  <!-- Buttons: fixed h-7 row so the card height does not follow the button
+       sizes (the filled pill is h-6, the outlined pill and the icon buttons
+       are h-7) -->
+  <div class="flex h-7 items-center gap-1">
     {#if displayState.value === "idle" || displayState.value === "error"}
       <!-- idle, show one start button-->
       <ActionStart onclick={handleStart} title={t.Scheduler.Start()} />

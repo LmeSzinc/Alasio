@@ -104,19 +104,19 @@
     return i18n[task] || task;
   }
   const taskRunning = $derived(getTaskName(taskRunningClient.data));
-  const taskNext = $derived(
-    [...(taskQueueClient.data?.pending || []), ...(taskQueueClient.data?.waiting || [])].map((task) => {
-      return {
-        ...task,
-        TaskName: getTaskName(task.TaskName),
-      };
-    }),
+  // The queue lists feed both the task rows and the summary counts of the
+  // scheduler, so the two can never disagree
+  const taskPending = $derived(
+    (taskQueueClient.data?.pending || []).map((task) => ({ ...task, TaskName: getTaskName(task.TaskName) })),
+  );
+  const taskWaiting = $derived(
+    (taskQueueClient.data?.waiting || []).map((task) => ({ ...task, TaskName: getTaskName(task.TaskName) })),
   );
 </script>
 
 {#snippet nav()}
   <div class="flex h-full flex-col gap-2 overflow-hidden">
-    <Scheduler class="pb-0" {config_name} {workerState} {taskRunning} {taskNext} {onOverviewClick} />
+    <Scheduler class="pb-0" {config_name} {workerState} {taskRunning} {taskPending} {taskWaiting} {onOverviewClick} />
     <div class="border-border mx-3 border-t"></div>
     <ScrollArea class="min-h-0 w-full flex-1" bind:viewportRef={navViewport}>
       <ConfigNav {onCardClick} {onOverviewClick} {onDeviceClick} viewport={navViewport} />

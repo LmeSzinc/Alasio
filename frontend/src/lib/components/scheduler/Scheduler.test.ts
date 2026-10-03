@@ -15,7 +15,7 @@ import { FakeWebSocket } from "$lib/test-utils/fake-websocket";
 import { flushEffects } from "$lib/test-utils/flush-effects";
 import { websocketClient } from "$lib/ws";
 import Scheduler from "./Scheduler.svelte";
-import type { RestartPhase } from "./types";
+import type { RestartPhase, TaskItem } from "./types";
 
 vi.stubGlobal("WebSocket", FakeWebSocket);
 
@@ -25,18 +25,44 @@ vi.stubGlobal("WebSocket", FakeWebSocket);
 let mounted: any[] = [];
 
 /**
- * Mounts the card; an undefined phase reads the Restart topic like production
+ * Mounts the card; an undefined phase reads the Restart topic like production.
+ * The queue lists are the only source of the task rows and of the summary
+ * counts, an empty queue renders the no-task placeholder instead.
  */
-async function mountScheduler(workerState: WORKER_STATE, restartPhase?: RestartPhase | null) {
+async function mountScheduler(
+  workerState: WORKER_STATE,
+  restartPhase?: RestartPhase | null,
+  queue?: { pending?: TaskItem[]; waiting?: TaskItem[] },
+  taskRunning?: string,
+) {
   const target = document.createElement("div");
   document.body.appendChild(target);
   const component = mount(Scheduler, {
     target,
-    props: { config_name: "TestConfig", workerState, restartPhase },
+    props: {
+      config_name: "TestConfig",
+      workerState,
+      restartPhase,
+      taskRunning,
+      taskPending: queue?.pending ?? [],
+      taskWaiting: queue?.waiting ?? [],
+    },
   });
   mounted.push(component);
   await flushEffects();
   return target;
+}
+
+/** `count` due tasks of a queue fixture */
+function pendingTasks(count: number): TaskItem[] {
+  const base = Math.floor(Date.now() / 1000);
+  return Array.from({ length: count }, (_, i) => ({ TaskName: `Pending${i + 1}`, NextRun: base }));
+}
+
+/** `count` tasks scheduled later of a queue fixture */
+function waitingTasks(count: number): TaskItem[] {
+  const base = Math.floor(Date.now() / 1000) + 3600;
+  return Array.from({ length: count }, (_, i) => ({ TaskName: `Waiting${i + 1}`, NextRun: base + 3600 * i }));
 }
 
 /** Buttons of the card in render order (an icon-only button has no text) */
@@ -52,6 +78,45 @@ function labels(target: HTMLElement) {
 /** True when the button renders the lucide icon of that name */
 function hasIcon(button: HTMLElement, name: string) {
   return button.querySelector(`svg.lucide-${name}`) !== null;
+}
+
+/**
+ * Task rows of the card in render order: the running row first, then the next
+ * rows (the no-task placeholder comes through as a row without an icon)
+ */
+function taskRows(target: HTMLElement) {
+  const list = [...target.querySelectorAll("div")].find((el) => el.classList.contains("grid-rows-[repeat(4,1rem)]"));
+  if (!list) return [];
+  return [...list.children]
+    .filter((row) => !row.classList.contains("row-start-4"))
+    .map((row) => {
+      const svg = row.querySelector("svg");
+      const icon = [...(svg?.classList ?? [])].find((name) => name.startsWith("lucide-") && name !== "lucide-icon");
+      // a wrapper (ConfigState) may carry the spin class instead of the svg
+      const spin =
+        (svg?.classList.contains("animate-spin") ?? false) ||
+        (svg?.parentElement?.classList.contains("animate-spin") ?? false);
+      return { text: row.querySelector("span")?.textContent?.trim() ?? "", icon: icon ?? "", spin };
+    });
+}
+
+/**
+ * Cells of the queue summary row in render order -- pending (left) then waiting
+ * (right); an empty array when the card renders no summary row
+ */
+function summaryCells(target: HTMLElement) {
+  const row = [...target.querySelectorAll("div")].find((el) => el.classList.contains("row-start-4"));
+  if (!row) return [];
+  return [...row.querySelectorAll(":scope > div")].map((cell) => {
+    const svg = cell.querySelector("svg");
+    // lucide renders "lucide-icon lucide lucide-<name> ...": skip the generic ones
+    const icon = [...(svg?.classList ?? [])].find((name) => name.startsWith("lucide-") && name !== "lucide-icon");
+    return {
+      text: cell.textContent?.trim() ?? "",
+      icon: icon ?? "",
+      spin: svg?.classList.contains("animate-spin") ?? false,
+    };
+  });
 }
 
 /**
@@ -93,11 +158,27 @@ afterEach(() => {
 });
 
 describe("TestSchedulerStopButtons", () => {
+  it("renders the graceful actions and the cancel as circle icons", async () => {
+    // The round buttons are the lucide circle-* icons themselves (no frame of
+    // their own); the cross is lucide's own circle-x, never a rotated plus
+    const running = await mountScheduler("running", null);
+    expect(hasIcon(buttons(running)[1], "circle-pause")).toBe(true);
+
+    const stopping = await mountScheduler("scheduler-stopping", null);
+    expect(hasIcon(buttons(stopping)[1], "circle-play")).toBe(true);
+
+    const parked = await mountScheduler("restarting", "stopping");
+    const cancel = buttons(parked)[1];
+    const cross = cancel.querySelector("svg.lucide-circle-x");
+    expect(cross).not.toBeNull();
+    expect(cross!.classList.contains("rotate-45")).toBe(false);
+  });
+
   it("keeps the plain scheduler stop without a restart", async () => {
     const target = await mountScheduler("scheduler-stopping", null);
     const [kill, continueRunning] = buttons(target);
     expect(labels(target)).toEqual([t.Scheduler.Kill(), ""]);
-    expect(hasIcon(continueRunning, "play")).toBe(true);
+    expect(hasIcon(continueRunning, "circle-play")).toBe(true);
 
     // Both buttons are debounced for a second after the worker entered the
     // state, so a double click cannot send a second command
@@ -119,7 +200,7 @@ describe("TestSchedulerStopButtons", () => {
       const target = await mountScheduler("scheduler-stopping", phase);
       const [keepResume, noResume] = buttons(target);
       expect(labels(target)).toEqual([t.Scheduler.KillKeepResume(), ""]);
-      expect(hasIcon(noResume, "x")).toBe(true);
+      expect(hasIcon(noResume, "circle-x")).toBe(true);
       // a stopping worker is not in the frozen resume list: both are live
       expect(keepResume.disabled).toBe(false);
       expect(noResume.disabled).toBe(false);
@@ -147,7 +228,7 @@ describe("TestSchedulerStopButtons", () => {
     // not count as a restart in progress
     const target = await mountScheduler("scheduler-stopping", "done");
     expect(labels(target)).toEqual([t.Scheduler.Kill(), ""]);
-    expect(hasIcon(buttons(target)[1], "play")).toBe(true);
+    expect(hasIcon(buttons(target)[1], "circle-play")).toBe(true);
   });
 });
 
@@ -157,7 +238,7 @@ describe("TestSchedulerCancelResume", () => {
     const [start, cancel] = buttons(target);
     expect(start.textContent?.trim()).toBe(t.Scheduler.Start());
     expect(start.disabled).toBe(true);
-    expect(hasIcon(cancel, "x")).toBe(true);
+    expect(hasIcon(cancel, "circle-x")).toBe(true);
     expect(cancel.disabled).toBe(false);
   });
 
@@ -167,7 +248,7 @@ describe("TestSchedulerCancelResume", () => {
     const target = await mountScheduler("restarting", "shutting-down");
     const [start, cancel] = buttons(target);
     expect(start.disabled).toBe(true);
-    expect(hasIcon(cancel, "x")).toBe(true);
+    expect(hasIcon(cancel, "circle-x")).toBe(true);
     expect(cancel.disabled).toBe(true);
   });
 
@@ -177,8 +258,85 @@ describe("TestSchedulerCancelResume", () => {
     const target = await mountScheduler("resuming", "shutting-down");
     const [start, cancel] = buttons(target);
     expect(start.disabled).toBe(true);
-    expect(hasIcon(cancel, "x")).toBe(true);
+    expect(hasIcon(cancel, "circle-x")).toBe(true);
     expect(cancel.disabled).toBe(false);
+  });
+});
+
+describe("TestSchedulerTaskSummary", () => {
+  it("shows the pending and waiting counts of the queue", async () => {
+    const target = await mountScheduler("running", null, { pending: pendingTasks(4), waiting: waitingTasks(3) });
+    expect(summaryCells(target)).toEqual([
+      { text: t.Scheduler.PendingCount({ count: 4 }), icon: "lucide-circle-dot-dashed", spin: false },
+      { text: t.Scheduler.WaitingCount({ count: 3 }), icon: "lucide-hourglass", spin: false },
+    ]);
+  });
+
+  it("drops a zero side of the summary", async () => {
+    const pendingOnly = await mountScheduler("running", null, { pending: pendingTasks(4) });
+    expect(summaryCells(pendingOnly)).toEqual([
+      { text: t.Scheduler.PendingCount({ count: 4 }), icon: "lucide-circle-dot-dashed", spin: false },
+    ]);
+
+    const waitingOnly = await mountScheduler("running", null, { waiting: waitingTasks(3) });
+    expect(summaryCells(waitingOnly)).toEqual([
+      { text: t.Scheduler.WaitingCount({ count: 3 }), icon: "lucide-hourglass", spin: false },
+    ]);
+  });
+
+  it("spins the pending icon with the task rows, never the hourglass", async () => {
+    const target = await mountScheduler(
+      "running",
+      null,
+      { pending: pendingTasks(4), waiting: waitingTasks(3) },
+      "Pending1",
+    );
+    const [pendingHalf, waitingHalf] = summaryCells(target);
+    expect(pendingHalf.spin).toBe(true);
+    expect(waitingHalf.spin).toBe(false);
+  });
+
+  it("renders no summary for an empty queue", async () => {
+    const target = await mountScheduler("running", null, undefined, "Pending1");
+    expect(summaryCells(target)).toEqual([]);
+  });
+
+  it("reserves the height of 4 rows, the summary in the last one", async () => {
+    // The block keeps its 4 row tracks (3 tasks + the summary row) whether the
+    // queue is full or short, so the card height never follows the content; the
+    // summary is pinned to the last track, so nothing renders below it.
+    const target = await mountScheduler("running", null, { pending: pendingTasks(4), waiting: waitingTasks(3) });
+    const list = [...target.querySelectorAll("div")].find((el) => el.classList.contains("grid-rows-[repeat(4,1rem)]"));
+    expect(list).toBeDefined();
+    const summaryRow = [...(list?.children ?? [])].find((el) => el.classList.contains("row-start-4"));
+    expect(summaryRow).toBeDefined();
+  });
+});
+
+describe("TestSchedulerTaskRowIcons", () => {
+  it("keeps the circle on due rows and the static hourglass on later rows", async () => {
+    // Running: the running row (ConfigState circle) plus at most 2 next rows,
+    // so the second due task and the first waiting task are listed
+    const target = await mountScheduler(
+      "running",
+      null,
+      { pending: pendingTasks(2), waiting: waitingTasks(2) },
+      "Pending1",
+    );
+    expect(taskRows(target)).toEqual([
+      { text: "Pending1", icon: "lucide-circle-play", spin: true },
+      { text: "Pending2", icon: "lucide-circle-dot-dashed", spin: true },
+      { text: "Waiting1", icon: "lucide-hourglass", spin: false },
+    ]);
+  });
+
+  it("never spins the later rows without a running task", async () => {
+    const target = await mountScheduler("idle", null, { pending: pendingTasks(1), waiting: waitingTasks(2) });
+    expect(taskRows(target)).toEqual([
+      { text: "Pending1", icon: "lucide-circle-dot-dashed", spin: false },
+      { text: "Waiting1", icon: "lucide-hourglass", spin: false },
+      { text: "Waiting2", icon: "lucide-hourglass", spin: false },
+    ]);
   });
 });
 
@@ -214,7 +372,7 @@ describe("TestSchedulerRestartTopic", () => {
     ws.serverMessage(JSON.stringify({ t: "Restart", o: "full", v: { phase: "stopping" } }));
     await flushEffects();
     expect(labels(target)).toEqual([t.Scheduler.KillKeepResume(), ""]);
-    expect(hasIcon(buttons(target)[1], "x")).toBe(true);
+    expect(hasIcon(buttons(target)[1], "circle-x")).toBe(true);
 
     // the queue was processed: the topic holds 'done' until it is cleared
     ws.serverMessage(JSON.stringify({ t: "Restart", o: "full", v: { phase: "done" } }));

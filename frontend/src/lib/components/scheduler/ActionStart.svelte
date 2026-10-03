@@ -26,7 +26,7 @@
   <button
     type="button"
     class={cn(
-      "h-7 w-full cursor-pointer rounded-full",
+      "h-6 w-full cursor-pointer rounded-full",
       "bg-primary text-primary-foreground text-sm font-semibold",
       disabled ? "cursor-not-allowed opacity-50" : "hover:opacity-80",
     )}

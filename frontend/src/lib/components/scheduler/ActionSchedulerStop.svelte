@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import Hourglass from "@lucide/svelte/icons/hourglass";
+  import CirclePause from "@lucide/svelte/icons/circle-pause";
   import * as Tooltip from "$lib/components/ui/tooltip";
   import { cn } from "$lib/utils";
 
@@ -27,9 +27,8 @@
           <button
             {...props}
             class={cn(
-              "h-7 w-7 cursor-pointer rounded-full",
-              "text-primary border-primary/60 flex items-center justify-center border-2",
-              disabled ? "cursor-not-allowed opacity-50" : "hover:border-primary",
+              "text-primary flex h-7 w-7 cursor-pointer items-center justify-center",
+              disabled ? "cursor-not-allowed opacity-50" : "group",
             )}
             {onclick}
             {disabled}
@@ -37,7 +36,13 @@
             {#if children}
               {@render children()}
             {:else}
-              <Hourglass class="h-3.5 w-3.5" />
+              <!-- The circle of the icon is the button itself, no frame of its own.
+                   The button is h-7 (28px) like the outlined pill; the svg box is
+                   h-7 too and scale-[1.2] grows the lucide circle (20/24 of the
+                   box) to the same 28px, so the ring matches the pill height.
+                   Hover thickens the stroke like the stop pill thickens its
+                   border (the group is on the button, a disabled one has none). -->
+              <CirclePause class="h-7 w-7 shrink-0 scale-[1.2] group-hover:[stroke-width:1.5]" strokeWidth="1" />
             {/if}
           </button>
         {/snippet}

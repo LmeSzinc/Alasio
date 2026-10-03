@@ -76,6 +76,20 @@
     "zh-TW": "等待恢復",
     "es-ES": "En espera de reanudación"
   },
+  "PendingCount": {
+    "en-US": "{count} pending",
+    "zh-CN": "{count} 个队列中",
+    "ja-JP": "{count} 件実行待ち",
+    "zh-TW": "{count} 個隊列中",
+    "es-ES": "{count} pendientes"
+  },
+  "WaitingCount": {
+    "en-US": "{count} waiting",
+    "zh-CN": "{count} 个等待中",
+    "ja-JP": "{count} 件待機中",
+    "zh-TW": "{count} 個等待中",
+    "es-ES": "{count} en espera"
+  },
   "NoTask": {
     "en-US": "No Task",
     "zh-CN": "无任务",
