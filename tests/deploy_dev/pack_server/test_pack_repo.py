@@ -14,7 +14,7 @@ from hashlib import sha1
 import pytest
 
 from alasio.deploy_dev.pack_server import pack_repo
-from alasio.deploy_dev.pack_server.gate import RunDirError
+from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
 from alasio.deploy_dev.pack_server.pack_repo import GIT_NETWORK_TIMEOUT, REPO_FOLDER, GitCmdline, PackRepo
 from alasio.ext import env
@@ -431,6 +431,9 @@ class TestConfigAndFolder:
         """The class refuses to run in a mod, like the config reader and the generator."""
         fake = patch_git(monkeypatch, fs)
         fs.create_file(join_path(run_dir, 'module', 'main.py'), contents='')
+        # check_run_dir runs once per process (init_once), the bare check runs
+        # the gate for the run directory of this test
+        monkeypatch.setattr(pack_repo, 'check_run_dir', check_run_dir.__wrapped__)
         with pytest.raises(RunDirError):
             PackRepo(CONFIG).run()
         assert fake.commands == []

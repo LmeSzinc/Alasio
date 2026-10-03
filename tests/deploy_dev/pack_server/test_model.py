@@ -10,7 +10,8 @@ the reader refuses an empty one and the users do not check them again.
 import msgspec
 import pytest
 
-from alasio.deploy_dev.pack_server.gate import RunDirError
+from alasio.deploy_dev.pack_server import model
+from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoConfig, PackRepoModel, RepoConfig
 from alasio.ext import env
 from alasio.ext.file.yamlconfig import build_help_map
@@ -312,8 +313,11 @@ Repo:
         with pytest.raises(ValueError):
             PackRepoConfig(f'../{FILE}')
 
-    def test_run_dir_is_a_mod(self, fs, run_dir):
+    def test_run_dir_is_a_mod(self, fs, run_dir, monkeypatch):
         """The pack server refuses to read the config of a mod directory."""
         fs.create_file(f'{run_dir}/module/main.py', contents='')
+        # check_run_dir runs once per process (init_once), the bare check runs
+        # the gate for the run directory of this test
+        monkeypatch.setattr(model, 'check_run_dir', check_run_dir.__wrapped__)
         with pytest.raises(RunDirError):
             PackRepoConfig(FILE)

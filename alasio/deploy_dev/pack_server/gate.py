@@ -14,16 +14,25 @@ to it:
 The pack server operates on several repos, so it needs a run directory of
 its own instead of the project root of a mod.
 
+The check runs once per process, see init_once: the run directory of the
+pack server does not change while it runs, while the guard is called for
+every config and every repo. Only the first call does the checks, a later
+call is a no-op whatever root it passes, and a check that fails keeps the
+next call checking again, see init_once. The undecorated check stays
+reachable as ``check_run_dir.__wrapped__`` for a caller that needs every
+scenario checked, e.g. the tests.
+
 Usage:
     from alasio.deploy_dev.pack_server.gate import check_run_dir
 
     check_run_dir()              # the default, env.PROJECT_ROOT
-    check_run_dir('D:/AlasPack') # an explicit run directory
+    check_run_dir('D:/AlasPack') # an explicit run directory, the first call wins
 """
 
 import os
 import stat
 
+from alasio.backport.once import init_once
 from alasio.ext import env
 from alasio.ext.path.calc import joinnormpath
 
@@ -83,9 +92,13 @@ def is_mod_dir(root):
     return ''
 
 
+@init_once
 def check_run_dir(root=''):
     """
     Check that the pack server runs in a run directory of its own
+
+    Only the first call of the process does the checks, see the module
+    docstring: a later call is a no-op, whatever root it passes.
 
     Args:
         root (str): Run directory, default to env.PROJECT_ROOT

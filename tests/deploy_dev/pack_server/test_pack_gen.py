@@ -26,7 +26,7 @@ from alasio.deploy.pack.job_update import UpdateJob
 from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack_server import pack_gen
-from alasio.deploy_dev.pack_server.gate import RunDirError
+from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
 from alasio.deploy_dev.pack_server.pack_gen import PackRepoGen
 from alasio.ext import env
@@ -271,9 +271,12 @@ class TestConfigAndFolders:
         assert gen.pack_folder == join_path(run_dir, 'pack', 'Author_Repo_master')
         assert gen.version_folder == join_path(run_dir, 'pack', 'Author_Repo_master', 'c3')
 
-    def test_run_dir_is_a_mod(self, fs, run_dir):
+    def test_run_dir_is_a_mod(self, fs, run_dir, monkeypatch):
         """The generator refuses to run in a mod, like the config reader."""
         fs.create_file(join_path(run_dir, 'module', 'main.py'), contents='')
+        # check_run_dir runs once per process (init_once), the bare check runs
+        # the gate for the run directory of this test
+        monkeypatch.setattr(pack_gen, 'check_run_dir', check_run_dir.__wrapped__)
         with pytest.raises(RunDirError):
             PackRepoGen(make_repo(VERSIONS), CONFIG).run()
 
