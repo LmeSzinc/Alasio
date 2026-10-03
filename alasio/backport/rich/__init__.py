@@ -1,9 +1,9 @@
 import sys
 
-from alasio.backport.once import patch_once
+from alasio.backport.once import init_once
 
 
-@patch_once
+@init_once
 def patch_rich_traceback_extract():
     """
     Patch rich.traceback Traceback.extract() to remove python version check on exceptiongroup
@@ -65,7 +65,7 @@ def parse_rich_traceback_header(line):
     return path, line_num, function_name
 
 
-@patch_once
+@init_once
 def patch_rich_traceback_links():
     """
     Patch rich.traceback to format header like python builtin traceback,

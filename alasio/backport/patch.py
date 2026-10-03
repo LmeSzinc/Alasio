@@ -3,10 +3,10 @@ import sys
 import threading
 
 from alasio.backport import process_cpu_count
-from alasio.backport.once import patch_once
+from alasio.backport.once import init_once
 
 
-@patch_once
+@init_once
 def patch_mimetype():
     """
     Patch mimetype db to use the builtin table instead of reading from environment.
@@ -29,7 +29,7 @@ def patch_mimetype():
     mimetypes.common_types = db.types_map[False]
 
 
-@patch_once
+@init_once
 def patch_std():
     """
     Force use utf-8 in stdin, stdout, stderr, ignoring any user env.
@@ -49,7 +49,7 @@ def patch_std():
         return False
 
 
-@patch_once
+@init_once
 def patch_environ():
     """
     Remove all python related environs, updated to python 3.15
@@ -138,7 +138,7 @@ def patch_environ():
     os.environ["PYTHONNOUSERSITE"] = "1"
 
 
-@patch_once
+@init_once
 def patch_threadpool_executor_maxworker():
     """
     Backport Python 3.13's default max_workers logic to older Python versions.
@@ -183,7 +183,7 @@ def patch_threadpool_executor_maxworker():
     ThreadPoolExecutor.__init__ = init_backport
 
 
-@patch_once
+@init_once
 def fix_py37_subprocess_communicate():
     """
     Monkey patch for subprocess.Popen._communicate on Windows Python 3.7

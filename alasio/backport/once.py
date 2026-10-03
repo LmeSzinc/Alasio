@@ -2,7 +2,7 @@ from functools import wraps
 from threading import Lock
 
 
-def patch_once(f):
+def init_once(f):
     """
     Run a function only once, no matter how many times it has been called.
     This decorator is thread-safe, see run_once for more info.
@@ -30,7 +30,7 @@ def run_once(f):
     """
     Run a function only once, no matter how many times it has been called.
     run_once() can be reset and return cached result on later calls.
-    patch_once() cannot be reset and have no return, usually to be used in initialization.
+    init_once() cannot be reset and have no return, usually to be used in initialization.
     This decorator is thread-safe.
 
     Examples:

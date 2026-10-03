@@ -1,25 +1,25 @@
 import threading
 import time
 
-from alasio.backport.once import patch_once, run_once
+from alasio.backport.once import init_once, run_once
 
 
-class TestPatchOnce:
-    def test_patch_once_basic(self):
+class TestInitOnce:
+    def test_init_once_basic(self):
         count = 0
 
         def increment():
             nonlocal count
             count += 1
 
-        patched = patch_once(increment)
+        patched = init_once(increment)
         patched()
         patched()
         patched()
 
         assert count == 1
 
-    def test_patch_once_thread_safe(self):
+    def test_init_once_thread_safe(self):
         count = 0
         lock = threading.Lock()
 
@@ -30,7 +30,7 @@ class TestPatchOnce:
             with lock:
                 count += 1
 
-        patched = patch_once(increment)
+        patched = init_once(increment)
 
         threads = [threading.Thread(target=patched) for _ in range(10)]
         for t in threads:
@@ -40,13 +40,13 @@ class TestPatchOnce:
 
         assert count == 1
 
-    def test_patch_once_arguments(self):
+    def test_init_once_arguments(self):
         results = []
 
         def append_val(val):
             results.append(val)
 
-        patched = patch_once(append_val)
+        patched = init_once(append_val)
         patched(1)
         patched(2)
 

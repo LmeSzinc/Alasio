@@ -55,7 +55,7 @@ class TestPatchRichTracebackExtract:
         This tests both the patch and the rich compatibility.
         """
         # patch_rich_traceback_extract() is already called in alasio.logger.logger
-        # but calling it again won't hurt due to @patch_once
+        # but calling it again won't hurt due to @init_once
         patch_rich_traceback_extract()
 
         try:
