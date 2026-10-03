@@ -168,6 +168,11 @@ class UpdateJob(JobBase):
             raise ValueError('UpdateJob requires an update pack, got a full pack')
         self._version = decoder.current_version
         self._file_index = {path: index for index, path in enumerate(decoder.fileinfo)}
+        # the update pack records the changed files of the new version
+        # only: a partial emptiness base of replace(), the new index
+        # decoded in _validate_remaining() replaces it with the full
+        # records when the server is available
+        self.new_fileinfo = decoder.fileinfo
         self.error = []
 
         pending = []
@@ -381,6 +386,12 @@ class UpdateJob(JobBase):
             except FileNotFoundError:
                 return
         new_index = PackDecodeBase(data)
+        # the new index records every file of the new version, the
+        # emptiness base of replace(). The dict is bound before the
+        # decoder cache is replaced with the filtered view below: the
+        # set() rebinds the cached attribute to another dict, the one
+        # bound here keeps the full records
+        self.new_fileinfo = new_index.fileinfo
         # the records of the update pack were verified in unpack(),
         # keep only the remaining files in the index view, so ResetJob
         # validates exactly them

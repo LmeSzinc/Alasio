@@ -94,6 +94,13 @@ OLD_ONLY = ['backend/legacy.py', 'scripts/old_tool.py', 'scripts/run.sh', 'data/
 PKG_NO_INIT = make_pack({'pkg/tool.py': b'x\n'}, commit='no-init')
 PKG_WITH_INIT = make_pack({'pkg/__init__.py': b'', 'pkg/tool.py': b'x\n'}, commit='with-init')
 PKG_NO_PKG = make_pack({'app.py': b'y\n'}, commit='no-pkg')
+# pkg/__init__.py only, no .py file under pkg/ so no deleted marker
+PKG_INIT = make_pack({'pkg/__init__.py': b''}, commit='init')
+# pkg/sub/tool.py only: pkg/__init__.py and pkg/sub/__init__.py are
+# auto deleted markers, pkg/ holds no file of its own
+PKG_SUB = make_pack({'pkg/sub/tool.py': b'x\n'}, commit='sub')
+# a deep folder chain, the parent folders are auto deleted markers
+PKG_DEEP = make_pack({'a/b/c/tool.py': b'x\n'}, commit='deep')
 
 
 def run_job(data=WEBSITE_FULL_PACK):
@@ -859,3 +866,60 @@ class TestUnpackRebuild:
         UnpackJob(PKG_NO_INIT).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+
+class TestEmptyFolderCleanup:
+    """The folders left empty by the deleted files are removed."""
+
+    def test_leftover_removes_empty_folder(self, app_folder):
+        """The folder of the last leftover file is removed."""
+        UnpackJob(PKG_WITH_INIT).run()
+        assert os.path.isdir(env.PROJECT_ROOT / 'pkg')
+        UnpackJob(PKG_NO_PKG).run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg')
+        assert file_read_bytes(env.PROJECT_ROOT / 'app.py') == b'y\n'
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_empty_folder_chain_removed(self, app_folder):
+        """A parent folder that becomes empty because its child folder
+        was removed is removed too."""
+        UnpackJob(PKG_DEEP).run()
+        assert os.path.isdir(env.PROJECT_ROOT / 'a/b/c')
+        UnpackJob(PKG_NO_PKG).run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'a')
+
+    def test_user_file_keeps_folder(self, app_folder):
+        """A folder that still holds a file the pack does not manage is
+        kept."""
+        UnpackJob(PKG_WITH_INIT).run()
+        user = env.PROJECT_ROOT / 'pkg/notes.txt'
+        with open(user, 'wb') as f:
+            f.write(b'my notes')
+        UnpackJob(PKG_NO_PKG).run()
+        # the managed files are gone, the folder is kept by the user file
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg/tool.py')
+        assert file_read_bytes(user) == b'my notes'
+
+    def test_recorded_file_keeps_folder(self, app_folder):
+        """A folder that still holds a file of the new version, at any
+        depth, is kept."""
+        UnpackJob(PKG_WITH_INIT).run()
+        # the new pack records pkg/tool.py and marks pkg/__init__.py as
+        # deleted: the folder is not empty
+        UnpackJob(PKG_NO_INIT).run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
+        assert os.path.isdir(env.PROJECT_ROOT / 'pkg')
+        assert file_read_bytes(env.PROJECT_ROOT / 'pkg/tool.py') == b'x\n'
+
+    def test_nested_record_keeps_folder(self, app_folder):
+        """A folder that holds no file of its own but a subfolder with a
+        file of the new version is kept."""
+        # pkg/ holds pkg/__init__.py only
+        UnpackJob(PKG_INIT).run()
+        # the new pack records pkg/sub/tool.py and marks pkg/__init__.py
+        # and pkg/sub/__init__.py as deleted
+        UnpackJob(PKG_SUB).run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
+        assert os.path.isdir(env.PROJECT_ROOT / 'pkg')
+        assert file_read_bytes(env.PROJECT_ROOT / 'pkg/sub/tool.py') == b'x\n'

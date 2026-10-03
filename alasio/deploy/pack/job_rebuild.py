@@ -74,6 +74,9 @@ class RebuildJob(ResetJob):
             self.download_index()
             self.validate_files()
             self.download()
+            # the new index records every file of the new version, the
+            # emptiness base of replace()
+            self.new_fileinfo = self._index_pack.fileinfo
             # the new index pack is replaced last: an interruption
             # during replace() leaves the old index pack in place, so
             # a resumed run still computes the leftover deletion list

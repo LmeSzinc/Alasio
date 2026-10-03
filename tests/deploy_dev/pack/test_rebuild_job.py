@@ -297,6 +297,26 @@ class TestLeftoverCleanup:
         assert tree['user/notes.txt'] == b'my notes'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
+    def test_leftover_removes_empty_folder(self, app_folder):
+        """The folder of the last leftover file is removed."""
+        UnpackJob(PKG_ADDED).run()
+        assert os.path.isdir(env.PROJECT_ROOT / 'pkg')
+        assert RebuildJob(server_of(PKG_ADDED, PKG_MISSING)).run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg')
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_user_file_keeps_folder(self, app_folder):
+        """A file of no index keeps its folder, the managed file of the
+        folder is still deleted."""
+        UnpackJob(PKG_ADDED).run()
+        user = env.PROJECT_ROOT / 'pkg/notes.txt'
+        with open(user, 'wb') as f:
+            f.write(b'my notes')
+        assert RebuildJob(server_of(PKG_ADDED, PKG_MISSING)).run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
+        assert file_read_bytes(user) == b'my notes'
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
     def test_old_index_missing_skips_cleanup(self, app_folder):
         """A missing old index skips the leftover cleanup with a
         warning, the rebuild still converges for the new files."""

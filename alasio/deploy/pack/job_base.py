@@ -7,7 +7,9 @@ from msgspec import Struct
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext import env
-from alasio.ext.path.atomic import atomic_open, atomic_read_bytes, atomic_remove, atomic_replace, atomic_rmtree
+from alasio.ext.path.atomic import (
+    atomic_open, atomic_read_bytes, atomic_remove, atomic_replace, atomic_rmtree, folder_rmtree_empty
+)
 from alasio.ext.path.makedir import batch_makedirs
 from alasio.logger import logger
 
@@ -86,7 +88,9 @@ class JobBase:
     env.PROJECT_ROOT.
 
     _read_current() and _matches() are shared by every job that
-    compares working tree files against the records of a pack.
+    compares working tree files against the records of a pack,
+    replace() and cleanup_empty_folders() by every job that applies
+    the changes to the real files.
     """
 
     # pack structure, relative to the app root folder (env.PROJECT_ROOT)
@@ -106,6 +110,15 @@ class JobBase:
         self._data = data
         self.workspace = env.PROJECT_ROOT.joinpath(self.WORKSPACE)
         self.pending: "list[PendingFile]" = []
+        # {path: IdxInfo} of the files the new version records, the
+        # emptiness base of cleanup_empty_folders(). Every job sets it
+        # to its best knowledge (UnpackJob: the full pack, UpdateJob:
+        # the update pack upgraded to the new index, ResetJob /
+        # RebuildJob: the new index), {} when unknown: a folder of no
+        # record is only removed when os.rmdir() confirms it is empty,
+        # so an unknown record set never removes a folder that is not
+        # empty
+        self.new_fileinfo: "dict[str, IdxInfo]" = {}
 
     def run(self):
         """
@@ -123,8 +136,10 @@ class JobBase:
         Every tmp file is moved to the target path atomically and the
         deleted markers are removed. The target is chmod-ed when
         pending.mode is set, the mode decision is made by the job that
-        prepared the pending list. The workspace is kept, the caller
-        (run()) cleans it up after all changes are applied.
+        prepared the pending list. The folders left empty by the
+        deletions are removed, see cleanup_empty_folders(). The
+        workspace is kept, the caller (run()) cleans it up after all
+        changes are applied.
         """
         # create the parent folders of all targets in one batch
         batch_makedirs([
@@ -143,6 +158,54 @@ class JobBase:
             atomic_replace(pending.tmp, target)
             if pending.mode is not None:
                 os.chmod(target, pending.mode)
+
+        self.cleanup_empty_folders()
+
+    def cleanup_empty_folders(self):
+        """
+        Remove the folders left empty by the deleted files.
+
+        The candidate folders are the parent folders of the deletions
+        (the deleted markers, the renamed sources and the leftover
+        files of the old version, all edit == 2 in pending). A
+        candidate is removed only when the new version records no file
+        at or below it (self.new_fileinfo, the deleted markers are not
+        files) and os.rmdir() confirms the folder is empty: a folder
+        that still holds a file the update does not manage, e.g. a
+        file the user placed by hand, fails the removal and is kept.
+        The removal walks up: a parent folder that becomes empty
+        because its child folder was removed is removed too, up to but
+        never including env.PROJECT_ROOT.
+        """
+        folders = {
+            pending.info.path.rpartition('/')[0]
+            for pending in self.pending
+            if pending.info.edit == 2
+        }
+        # a file at the root has no parent folder to clean up
+        folders.discard('')
+        if not folders:
+            return
+        # the folders of the new version that hold a file, e.g.
+        # "a/b/c.py" occupies "a/b" and "a". The deleted markers are
+        # skipped: they describe files that should not exist
+        occupied = set()
+        for path, info in self.new_fileinfo.items():
+            if info.edit == 2:
+                continue
+            folder = path.rpartition('/')[0]
+            while folder:
+                occupied.add(folder)
+                folder = folder.rpartition('/')[0]
+        # the deepest folders first, so the walk below converges in
+        # one pass
+        for folder in sorted(folders, key=lambda path: path.count('/'), reverse=True):
+            while folder and folder not in occupied:
+                # os.rmdir() only removes an empty folder: a folder
+                # that still holds a file of no record is kept
+                if not folder_rmtree_empty(env.PROJECT_ROOT.joinpath(folder)):
+                    break
+                folder = folder.rpartition('/')[0]
 
     def cleanup(self):
         """

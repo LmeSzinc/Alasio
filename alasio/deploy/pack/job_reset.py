@@ -90,6 +90,9 @@ class ResetJob(JobBase):
                 self.download_index()
             self.validate_files()
             self.download()
+            # the new index records every file of the new version, the
+            # emptiness base of replace()
+            self.new_fileinfo = self._index_pack.fileinfo
             self.replace()
         except Exception as e:
             # no real file was written, safe to clean up

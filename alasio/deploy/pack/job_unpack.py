@@ -130,6 +130,9 @@ class UnpackJob(JobBase):
         """
         decoder = PackDecodeBase(self._data)
         decoder.validate()
+        # the full pack records every file of the new version, the
+        # emptiness base of replace()
+        self.new_fileinfo = decoder.fileinfo
         # the old index is read before the new index pack replaces it
         old_fileinfo = self._old_fileinfo_from_index()
 

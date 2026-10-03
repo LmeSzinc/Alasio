@@ -157,6 +157,34 @@ SIMPLE_NEW_INDEX = bytes(PackDecodeBase(_simple_new_pack).extract_index_pack())
 OTHER_INDEX = bytes(
     PackDecodeBase(make_pack({'x.txt': b'x'}, commit='other')).extract_index_pack())
 
+# an update that deletes the last files of pkg/ and of the a/b/c/ chain,
+# keep/keep.txt is unchanged and keeps its folder
+FOLDER_REPO = make_repo({
+    'old': {
+        'app.py': b'y\n',
+        'pkg/__init__.py': b'',
+        'pkg/tool.py': b'x\n',
+        'a/b/c/tool.py': b'x\n',
+        'keep/keep.txt': b'keep\n',
+        'keep/gone.txt': b'gone\n',
+    },
+    'new': {
+        'app.py': b'y\n',
+        'keep/keep.txt': b'keep\n',
+    },
+})
+FOLDER_OLD_PACK = b''.join(PackFull(FOLDER_REPO, commit='old').iter_pack_data())
+FOLDER_NEW_PACK = b''.join(PackFull(FOLDER_REPO, commit='new').iter_pack_data())
+FOLDER_UPDATE = b''.join(PackUpdate(
+    PackFull(FOLDER_REPO, commit='new'), 'old').iter_pack_data())
+FOLDER_SERVER = MockServerFile()
+FOLDER_SERVER.register_version(
+    'old', FOLDER_OLD_PACK, bytes(PackDecodeBase(FOLDER_OLD_PACK).extract_index_pack()))
+FOLDER_SERVER.register_version(
+    'new', FOLDER_NEW_PACK, bytes(PackDecodeBase(FOLDER_NEW_PACK).extract_index_pack()))
+# the working tree of the new version, the pack structure excluded
+FOLDER_NEW_TREE = {'app.py': b'y\n', 'keep/keep.txt': b'keep\n'}
+
 
 def run_update(update=UPDATE, server=SERVER, tree=NEW_TREE):
     """
@@ -632,6 +660,24 @@ class TestValidateRemaining:
         # the damaged remaining file is left as-is, no server to repair it
         assert file_read_bytes(target) == b'corrupt content'
 
+    def test_new_fileinfo_keeps_full_records(self, app_folder):
+        """_validate_remaining() replaces the fileinfo cache of the new
+        index decoder with the filtered view of the remaining check, the
+        bound self.new_fileinfo keeps the full records of the new
+        version."""
+        setup_app()
+        job = UpdateJob(UPDATE, server=SERVER)
+        assert job.run()
+        assert job.error == []
+        # a file the update pack itself records is still part of the
+        # bound dict, the filtered view of the remaining check drops it
+        assert 'backend/a1.py' in job.new_fileinfo
+        # an unchanged file: no record of the update pack, only the new
+        # index records it
+        assert 'docs/readme.md' in job.new_fileinfo
+        # a path deleted by the update is no record of the new version
+        assert 'backend/legacy.py' not in job.new_fileinfo
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  download phase
@@ -888,3 +934,79 @@ class TestFailure:
             assert not job.run()
         assert capture.backend.any_contains('Failed to update:')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  empty folder cleanup
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestEmptyFolderCleanup:
+    """The folders left empty by the deleted files are removed."""
+
+    def test_deleted_folder_removed(self, app_folder):
+        """The update deletes the last files of a folder, the folder is
+        removed."""
+        setup_app(FOLDER_OLD_PACK)
+        assert os.path.isdir(env.PROJECT_ROOT / 'pkg')
+        job = UpdateJob(FOLDER_UPDATE, server=FOLDER_SERVER)
+        assert job.run()
+        assert job.error == []
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg')
+        assert read_tree() == FOLDER_NEW_TREE
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_empty_folder_chain_removed(self, app_folder):
+        """A folder chain that becomes empty is removed bottom-up."""
+        setup_app(FOLDER_OLD_PACK)
+        assert os.path.isdir(env.PROJECT_ROOT / 'a/b/c')
+        job = UpdateJob(FOLDER_UPDATE, server=FOLDER_SERVER)
+        assert job.run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'a')
+
+    def test_unchanged_file_keeps_folder(self, app_folder):
+        """A folder that still holds an unchanged file of the new version
+        is kept."""
+        setup_app(FOLDER_OLD_PACK)
+        job = UpdateJob(FOLDER_UPDATE, server=FOLDER_SERVER)
+        assert job.run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'keep/gone.txt')
+        assert file_read_bytes(env.PROJECT_ROOT / 'keep/keep.txt') == b'keep\n'
+
+    def test_user_file_keeps_folder(self, app_folder):
+        """A folder that still holds a file the update does not manage is
+        kept."""
+        setup_app(FOLDER_OLD_PACK)
+        user = env.PROJECT_ROOT / 'pkg/notes.txt'
+        with open(user, 'wb') as f:
+            f.write(b'my notes')
+        job = UpdateJob(FOLDER_UPDATE, server=FOLDER_SERVER)
+        assert job.run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg/tool.py')
+        assert file_read_bytes(user) == b'my notes'
+
+    def test_no_server_still_removes_folder(self, app_folder):
+        """No server: the new index is unavailable, the deleted markers
+        do not make the folder non-empty and os.rmdir() confirms it, the
+        folder is removed too. keep/ is kept by the unchanged file."""
+        setup_app(FOLDER_OLD_PACK)
+        job = UpdateJob(FOLDER_UPDATE)
+        assert job.run()
+        assert job.error == []
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg')
+        assert not os.path.exists(env.PROJECT_ROOT / 'a')
+        assert file_read_bytes(env.PROJECT_ROOT / 'keep/keep.txt') == b'keep\n'
+
+    def test_unknown_new_fileinfo_keeps_folder(self, app_folder):
+        """Without the records of the new version (new_fileinfo empty)
+        the emptiness is decided by os.rmdir() only: a folder holding a
+        file is kept, an empty one is removed."""
+        setup_app(FOLDER_OLD_PACK)
+        job = UpdateJob(FOLDER_UPDATE)
+        job.write()
+        job.unpack()
+        job.new_fileinfo = {}
+        job.replace()
+        assert not os.path.exists(env.PROJECT_ROOT / 'pkg')
+        assert not os.path.exists(env.PROJECT_ROOT / 'a')
+        assert file_read_bytes(env.PROJECT_ROOT / 'keep/keep.txt') == b'keep\n'
