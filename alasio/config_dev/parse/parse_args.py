@@ -1,4 +1,3 @@
-from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, Literal, Union
 
@@ -8,6 +7,7 @@ from msgspec import UNSET, Struct, UnsetType
 from alasio.backport import to_literal
 from alasio.codegen.python import ReprWrapper
 from alasio.config_dev.parse.base import DefinitionError
+from alasio.config_dev.parse.parse_arg_utils import validate_filter_order, validate_option
 from alasio.config_dev.parse.parse_range import parse_range
 
 """
@@ -62,7 +62,7 @@ TYPE_DT_TO_PYTHON = {
     # filter
     'filter': 't.Tuple[str, ...]',
     # filter-order is an ordered subset of "option", the frontend edits the order
-    # with a transfer-like dialog (see _validate_filter_order)
+    # with a transfer-like dialog (see parse_arg_utils.validate_filter_order)
     'filter-order': 't.Tuple[str, ...]',
 }
 # Define which "dt" is literal type
@@ -116,55 +116,6 @@ def populate_arg(value) -> dict:
             return value
 
     raise DefinitionError(f'Cannot predict "dt"')
-
-
-def _validate_option(option: list, value: Any) -> None:
-    if not option:
-        raise DefinitionError('"option" is empty')
-    if value not in option:
-        raise DefinitionError(f'Default value "{value}" is not in "option"')
-    counts = Counter(option)
-    for _option, _count in counts.items():
-        if _count > 1:
-            raise DefinitionError(f'"option" has duplicate value "{_option}"')
-
-
-def _validate_filter_order(option: list, value: Any) -> None:
-    """
-    Validate "option" and the default value of dt="filter-order"
-
-    "option" is the universe of items the frontend editor can add, the value
-    is an ordered subset of it: every item of the value must be defined in
-    "option", and neither "option" nor the value may repeat an item.
-    Items are str, the value is a "t.Tuple[str, ...]".
-
-    Args:
-        option (list): Option list of the arg
-        value (Any): Default value of the arg, a tuple of str
-
-    Raises:
-        DefinitionError:
-    """
-    if not isinstance(option, list):
-        raise DefinitionError('datatype "filter-order" option must be list')
-    if not option:
-        raise DefinitionError('"option" is empty')
-    for item in option:
-        if type(item) is not str:
-            raise DefinitionError(f'datatype "filter-order" option must be a list of str, got "{item}"')
-    counts = Counter(option)
-    for item, count in counts.items():
-        if count > 1:
-            raise DefinitionError(f'"option" has duplicate value "{item}"')
-    if type(value) not in (list, tuple):
-        raise DefinitionError(f'Value of "filter-order" datatype must be a list, got "{value}"')
-    for item in value:
-        if item not in counts:
-            raise DefinitionError(f'Default value "{item}" is not in "option"')
-    value_counts = Counter(value)
-    for item, count in value_counts.items():
-        if count > 1:
-            raise DefinitionError(f'Default value has duplicate value "{item}"')
 
 
 def populate_input(dt: str, value):
@@ -275,7 +226,7 @@ def preprocess_arg(arg: dict) -> dict:
                 option = []
                 for _group, _options in option_dict.items():
                     option.extend(_options)
-                _validate_option(option, value)
+                validate_option(option, value)
                 option = set(option)
                 for _group in option_dict:
                     if _group in option:
@@ -303,17 +254,15 @@ def preprocess_arg(arg: dict) -> dict:
             option = arg['option']
         except KeyError:
             raise DefinitionError('datatype "filter-order" must have "option" defined')
-        _validate_filter_order(option, value)
+        validate_filter_order(option, value)
     else:
         arg.pop('option_dict', None)
         # check option
         if dt != 'enable':
             if 'option' in arg:
                 option = arg['option']
-                _validate_option(option, value)
+                validate_option(option, value)
                 # options in literal datatype must be valid python literal items
-                if not isinstance(option, list):
-                    raise DefinitionError(f'datatype "{dt}" option must be list')
                 for item in option:
                     validate_literal_item(item)
 
