@@ -61,6 +61,8 @@ TYPE_DT_TO_PYTHON = {
     'datetime': 'e.Annotated[d.datetime, m.Meta(tz=True)]',
     # filter
     'filter': 't.Tuple[str, ...]',
+    # filter-order is an ordered subset of "option", the frontend edits the order
+    # with a transfer-like dialog (see _validate_filter_order)
     'filter-order': 't.Tuple[str, ...]',
 }
 # Define which "dt" is literal type
@@ -125,6 +127,44 @@ def _validate_option(option: list, value: Any) -> None:
     for _option, _count in counts.items():
         if _count > 1:
             raise DefinitionError(f'"option" has duplicate value "{_option}"')
+
+
+def _validate_filter_order(option: list, value: Any) -> None:
+    """
+    Validate "option" and the default value of dt="filter-order"
+
+    "option" is the universe of items the frontend editor can add, the value
+    is an ordered subset of it: every item of the value must be defined in
+    "option", and neither "option" nor the value may repeat an item.
+    Items are str, the value is a "t.Tuple[str, ...]".
+
+    Args:
+        option (list): Option list of the arg
+        value (Any): Default value of the arg, a tuple of str
+
+    Raises:
+        DefinitionError:
+    """
+    if not isinstance(option, list):
+        raise DefinitionError('datatype "filter-order" option must be list')
+    if not option:
+        raise DefinitionError('"option" is empty')
+    for item in option:
+        if type(item) is not str:
+            raise DefinitionError(f'datatype "filter-order" option must be a list of str, got "{item}"')
+    counts = Counter(option)
+    for item, count in counts.items():
+        if count > 1:
+            raise DefinitionError(f'"option" has duplicate value "{item}"')
+    if type(value) not in (list, tuple):
+        raise DefinitionError(f'Value of "filter-order" datatype must be a list, got "{value}"')
+    for item in value:
+        if item not in counts:
+            raise DefinitionError(f'Default value "{item}" is not in "option"')
+    value_counts = Counter(value)
+    for item, count in value_counts.items():
+        if count > 1:
+            raise DefinitionError(f'Default value has duplicate value "{item}"')
 
 
 def populate_input(dt: str, value):
@@ -247,6 +287,23 @@ def preprocess_arg(arg: dict) -> dict:
                 validate_literal_item(item)
         else:
             raise DefinitionError('dt="secondary-select" must have "option" or "option_dict" defined')
+    elif dt == 'filter-order':
+        arg.pop('option_dict', None)
+        # filter-order: "option" is required, it is the universe of items the
+        # frontend editor can add, the value is an ordered subset of it.
+        # The value is defined as "option-A > option-B" in yaml, or as a list,
+        # normalize it to a tuple before validating (filter and the multi-*
+        # datatypes keep the old split position, see below)
+        if type(value) is str:
+            value = tuple(s.strip() for s in value.split('>'))
+        elif type(value) is list:
+            value = tuple(value)
+        arg['value'] = value
+        try:
+            option = arg['option']
+        except KeyError:
+            raise DefinitionError('datatype "filter-order" must have "option" defined')
+        _validate_filter_order(option, value)
     else:
         arg.pop('option_dict', None)
         # check option
