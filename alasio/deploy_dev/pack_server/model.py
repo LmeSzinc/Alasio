@@ -96,6 +96,10 @@ class PackRepoConfig(YamlConfig):
     file that does not exist is created from the model with the help comments,
     an invalid file is written back with them, see YamlConfig.
 
+    config/template.yaml is the template of a config file, written on the
+    start of the pack server, see write_template. It is not a config itself
+    and is not run by the server.
+
     Author, Repo, Remote and Branch must not be empty: every user of the
     config needs them, so the check lives here and the users do not check
     them again. A config with an empty one raises ValueError, the created or
@@ -114,12 +118,34 @@ class PackRepoConfig(YamlConfig):
     # folder of the config files, relative to the run directory
     CONFIG_FOLDER = 'config'
 
+    # template of a config file, written on the start of the pack server
+    TEMPLATE_FILE = 'template.yaml'
+
     def __init__(self, file):
         check_run_dir()
         folder = env.PROJECT_ROOT.joinpath(self.CONFIG_FOLDER)
         file = validate_resolve_filepath(folder, file)
         super().__init__(file, model=PackRepoModel)
         self._check_repo()
+
+    @classmethod
+    def write_template(cls):
+        """
+        Ensure config/template.yaml, the config of an empty repo, is up to date
+
+        The template is built from PackRepoModel directly and written by
+        YamlConfig, the file on the disk is not read: a missing or edited
+        template is replaced with the generated text, an up to date one is
+        left alone, see YamlConfig.write. The operator copies the template
+        to a config file, e.g. LmeSzinc_AzurLaneAutoScript_master.yaml, and
+        fills the values; the template itself is not a config and is not run
+        by the pack server.
+
+        Returns:
+            bool: True if the file was written, False if it is up to date
+        """
+        file = env.PROJECT_ROOT.joinpath(cls.CONFIG_FOLDER).joinpath(cls.TEMPLATE_FILE)
+        return YamlConfig(file, model=PackRepoModel).write(template=True)
 
     def _check_repo(self):
         """

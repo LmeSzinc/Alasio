@@ -156,6 +156,35 @@ Repo:
         with pytest.raises(ValueError, match=f'{empty}.*{FILE}'):
             PackRepoConfig(FILE)
 
+    def test_write_template(self, fs, run_dir):
+        """The template of a config file is written, an up to date one is left alone."""
+        file = f'{run_dir}/config/{PackRepoConfig.TEMPLATE_FILE}'
+        with logger.mock_capture_writer() as capture:
+            assert PackRepoConfig.write_template() is True
+        assert capture.fd.any_contains('Write config')
+        # the template holds the default config and the help comments of the model
+        assert read_config(file) == msgspec.to_builtins(PackRepoModel())
+        with open(file, encoding='utf-8') as f:
+            text = f.read()
+        for line in iter_help_line():
+            assert f'# {line}' in text
+        # the second write finds the template up to date and leaves it alone
+        assert PackRepoConfig.write_template() is False
+
+    def test_write_template_updates(self, fs, run_dir):
+        """A template that is not up to date, e.g. an edit of the operator, is replaced."""
+        file = f'{run_dir}/config/{PackRepoConfig.TEMPLATE_FILE}'
+        fs.create_file(file, contents='Repo:\n  Author: LmeSzinc\n')
+        assert PackRepoConfig.write_template() is True
+        assert read_config(file) == msgspec.to_builtins(PackRepoModel())
+
+    def test_write_template_bad_encoding(self, fs, run_dir):
+        """A template that is not valid utf-8 is replaced, the file is generated again."""
+        file = f'{run_dir}/config/{PackRepoConfig.TEMPLATE_FILE}'
+        fs.create_file(file, contents=b'\xff\xff\xff\xff')
+        assert PackRepoConfig.write_template() is True
+        assert read_config(file) == msgspec.to_builtins(PackRepoModel())
+
     def test_read_values(self, fs, run_dir):
         """The values of the file in the config folder are read into the model."""
         fs.create_file(config_file(run_dir), contents="""\

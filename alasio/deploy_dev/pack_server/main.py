@@ -3,6 +3,9 @@ Generate the packs of every config in the run directory.
 
 The modules below do one step of the work each, this module chains them:
 
+0. PackRepoConfig.write_template() writes config/template.yaml from the
+   model: the operator copies it to a config file, e.g.
+   config/LmeSzinc_AzurLaneAutoScript_master.yaml, and fills the values
 1. PackRepoConfig reads config/{Author}_{Repo}_{Branch}.yaml from the run
    directory, the file is created from the model when it does not exist
 2. PackRepo clones or fetches the git repo of the config into
@@ -70,17 +73,23 @@ class PackServer:
 
         The config files are the *.yaml files of the config folder of the run
         directory, sorted by name so a run follows the same order every time.
-        A folder that does not exist has no config, see run(). A file that is
-        not a *.yaml file is not a config either, e.g. the tmp file of an
-        interrupted write (file.yaml.xxxxxxxx.tmp), an incomplete config is
-        never half read.
+        The template of a config file is skipped, it is the file the operator
+        copies and fills, see PackRepoConfig.write_template. A folder that
+        does not exist has no config, see run(). A file that is not a *.yaml
+        file is not a config either, e.g. the tmp file of an interrupted
+        write (file.yaml.xxxxxxxx.tmp), an incomplete config is never run.
 
         Yields:
             str: File name of a config in the config folder, e.g.
                 'LmeSzinc_AzurLaneAutoScript_master.yaml'
         """
         folder = env.PROJECT_ROOT.joinpath(PackRepoConfig.CONFIG_FOLDER)
-        yield from sorted(folder.iter_filenames(ext='.yaml'))
+        for name in sorted(folder.iter_filenames(ext='.yaml')):
+            if name == PackRepoConfig.TEMPLATE_FILE:
+                # the template is not a config: the operator copies it to a
+                # config file and fills the values
+                continue
+            yield name
 
     def run_config(self, file):
         """
@@ -115,17 +124,22 @@ class PackServer:
             PackRunError: If at least one config failed
         """
         check_run_dir()
+        # the template of a config file is written first, so the operator has
+        # a file to copy even on a run directory that has no config yet
+        PackRepoConfig.write_template()
         file_list = list(self.iter_config())
         if not file_list:
             folder = env.PROJECT_ROOT.joinpath(PackRepoConfig.CONFIG_FOLDER)
-            logger.warning(f'No config file in "{folder}", nothing to pack')
+            logger.warning(
+                f'No config file in "{folder}", '
+                f'copy "{PackRepoConfig.TEMPLATE_FILE}" to a config file and fill it')
             return
 
         plural = 's' if len(file_list) > 1 else ''
         logger.info(f'Running {len(file_list)} config{plural} of "{env.PROJECT_ROOT}"')
         errors = []
         for file in file_list:
-            logger.hr(f'Running config "{file}"')
+            logger.hr(f'Running config "{file}"', level=1)
             try:
                 self.run_config(file)
             except Exception as e:
@@ -150,6 +164,7 @@ def main():
     Raises:
         SystemExit: If the arguments are invalid
     """
+    logger.hr('Start', level=0)
     parser = argparse.ArgumentParser(
         description='Generate the packs of every config of the pack server',
     )

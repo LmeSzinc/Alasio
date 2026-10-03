@@ -120,7 +120,7 @@ class IndexGenerator(
         """
         file = env.PROJECT_ROOT.joinpath('config/deploy.template.yaml')
         config = YamlConfig(file, model=DeployModel)
-        op = config.write()
+        op = config.write(template=True)
         if op:
             if gitadd:
                 gitadd.stage_add(file)

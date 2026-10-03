@@ -263,7 +263,6 @@ class DeployConfig(metaclass=Singleton):
     @cached_property
     def config(self):
         file = env.PROJECT_ROOT.joinpath('config/deploy.yaml')
-        config = YamlConfigWithPassword(file, model=DeployModel)
-        if config.errors:
-            config.write()
-        return config
+        # a missing or invalid file is created / fixed with the model
+        # defaults on the first data access, see YamlConfig.data
+        return YamlConfigWithPassword(file, model=DeployModel)

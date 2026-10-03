@@ -13,6 +13,7 @@ import pytest
 
 from alasio.deploy_dev.pack_server import main
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
+from alasio.deploy_dev.pack_server.model import PackRepoConfig
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.logger import logger
@@ -179,6 +180,12 @@ class TestIterConfig:
         """A config folder that does not exist has no config, the operator has not set a repo."""
         assert list(main.PackServer().iter_config()) == []
 
+    def test_template_is_not_a_config(self, fs, run_dir):
+        """The template is not run as a config, the operator copies it to one and fills it."""
+        PackRepoConfig.write_template()
+        make_config(run_dir, FILE)
+        assert list(main.PackServer().iter_config()) == [FILE]
+
 
 class TestRunConfig:
     """The flow of one config."""
@@ -254,14 +261,33 @@ class TestPackServerRun:
         assert capture.fd.any_contains('Ran 3 configs: 1 done, 2 failed')
 
     def test_no_config(self, fs, run_dir, monkeypatch):
-        """A run directory without a config file does nothing, with a warning."""
+        """A run directory without a config file writes the template and runs nothing."""
         calls = []
         monkeypatch.setattr(main, 'PackRepo', fake_repo(calls))
         monkeypatch.setattr(main, 'PackRepoGen', fake_gen(calls))
         with logger.mock_capture_writer() as capture:
             main.PackServer().run()
         assert calls == []
+        assert capture.fd.any_contains('Write config')
         assert capture.fd.any_contains('No config file')
+        # the operator has the template to copy
+        assert join_path(run_dir, 'config', PackRepoConfig.TEMPLATE_FILE).isfile()
+
+    def test_template_on_every_run(self, fs, run_dir, monkeypatch):
+        """The template is written on the start of a run, a run that finds it up to date writes nothing."""
+        make_config(run_dir, FILE)
+        calls = []
+        monkeypatch.setattr(main, 'PackRepo', fake_repo(calls))
+        monkeypatch.setattr(main, 'PackRepoGen', fake_gen(calls))
+        with logger.mock_capture_writer() as capture:
+            main.PackServer().run()
+        assert capture.fd.any_contains('Write config')
+        assert join_path(run_dir, 'config', PackRepoConfig.TEMPLATE_FILE).isfile()
+        # the second run finds the template up to date
+        with logger.mock_capture_writer() as capture:
+            main.PackServer().run()
+        assert not capture.fd.any_contains('Write config')
+        assert [step for step, _, _ in calls] == ['repo', 'gen', 'repo', 'gen']
 
     def test_run_dir_is_a_mod(self, fs, run_dir, monkeypatch):
         """The run refuses a mod directory, like the modules it chains."""
