@@ -114,7 +114,6 @@ class TestOrphanPyc:
         assert run_cleanup(SITE) == (1, 0)
         assert not os.path.exists(f'{SITE}/{pyc}')
         assert not os.path.exists(f'{SITE}/demo/__pycache__')
-        assert os.path.exists(f'{SITE}/demo')
 
     def test_keeps_pyc_of_existing_source(self, fs):
         """A pyc file whose source exists is kept, removing it only recompiles it."""
@@ -223,6 +222,17 @@ class TestWindowsPaths:
         assert run_cleanup(SITE) == (0, 0)
         assert os.path.exists(f'{SITE}/demo/__pycache__/Core.cpython-38.pyc')
 
+    @pytest.mark.skipif(not IS_WINDOWS, reason='A Windows path is resolved on Windows only')
+    def test_root_with_drive(self, fs):
+        """A root with a drive letter is cleaned like a drive-less root."""
+        root = 'C:/env/Lib/site-packages'
+        fs.create_file(f'{root}/demo/__pycache__/core.cpython-38.pyc', contents=b'\x00' * 16)
+        cleaner = CleanupPyc(root)
+        cleaner.cleanup()
+        assert (cleaner.removed, cleaner.failed) == (1, 0)
+        assert not os.path.exists(f'{root}/demo')
+        assert os.path.isdir(root)
+
 
 class TestScope:
     def test_removes_recursively(self, fs):
@@ -261,7 +271,46 @@ class TestScope:
         assert not os.path.exists(f'{SITE}/demo/__pycache__')
 
 
-class TestOneListingPerFolder:
+class TestEmptyFolders:
+    def test_removes_the_folder_left_empty(self, fs):
+        """A folder that only held a __pycache__ folder is a residue after the cleanup."""
+        create_pyc(fs, pyc_path('demo/core.py'))
+        assert run_cleanup(SITE) == (1, 0)
+        assert not os.path.exists(f'{SITE}/demo')
+        # the root folder itself is never removed
+        assert os.path.isdir(SITE)
+
+    def test_removes_the_ancestors_left_empty(self, fs):
+        """The ancestors left empty by the removal of their last child are removed too."""
+        create_pyc(fs, pyc_path('demo/sub/deep/core.py'))
+        assert run_cleanup(SITE) == (1, 0)
+        assert not os.path.exists(f'{SITE}/demo')
+        assert os.path.isdir(SITE)
+
+    def test_removes_an_empty_folder(self, fs):
+        """A folder without any entry at all is a residue too."""
+        fs.create_dir(f'{SITE}/demo/empty')
+        assert run_cleanup(SITE) == (0, 0)
+        assert not os.path.exists(f'{SITE}/demo')
+        assert os.path.isdir(SITE)
+
+    def test_keeps_the_folder_of_a_valid_pyc(self, fs):
+        """A folder still holding a pyc file of a valid source is kept."""
+        create_source(fs, 'demo/core.py')
+        create_pyc(fs, pyc_path('demo/core.py'))
+        assert run_cleanup(SITE) == (0, 0)
+        assert os.path.exists(f'{SITE}/demo/__pycache__')
+
+    def test_keeps_the_folder_of_an_unmanaged_file(self, fs):
+        """A folder holding a file the cleanup does not manage is kept."""
+        create_pyc(fs, pyc_path('demo/gone.py'))
+        fs.create_file(f'{SITE}/demo/manual.txt', contents=b'keep me')
+        assert run_cleanup(SITE) == (1, 0)
+        assert os.path.exists(f'{SITE}/demo/manual.txt')
+        assert os.path.exists(f'{SITE}/demo')
+
+
+class TestMinimalIo:
     def test_reads_every_folder_once(self, fs, monkeypatch):
         """A folder is listed once: the sources of a __pycache__ come from the listing of its own folder."""
         create_source(fs, 'demo/core.py')
@@ -296,6 +345,22 @@ class TestOneListingPerFolder:
         monkeypatch.setattr(os.path, 'exists', exists_record)
         assert run_cleanup(SITE) == (1, 0)
         assert lookups == []
+
+    def test_no_removal_probe(self, fs, monkeypatch):
+        """A folder known to hold a file, a subfolder or a valid pyc is not probed with a removal."""
+        create_source(fs, 'demo/core.py')
+        create_pyc(fs, pyc_path('demo/core.py'))
+        create_source(fs, 'demo/sub/keep.py')
+        rmdir = os.rmdir
+        calls = []
+
+        def rmdir_record(path):
+            calls.append(path)
+            return rmdir(path)
+
+        monkeypatch.setattr(os, 'rmdir', rmdir_record)
+        assert run_cleanup(SITE) == (0, 0)
+        assert calls == []
 
 
 class TestSymlinks:

@@ -2,6 +2,7 @@ import os
 from stat import S_IWRITE
 
 from alasio.backport import removesuffix
+from alasio.deploy.simple_pip.cleanup_folder import CleanupFolder
 from alasio.ext.path.atomic import IS_WINDOWS, folder_rmtree_empty
 from alasio.ext.path.calc import joinpath, normpath
 from alasio.logger import logger
@@ -25,9 +26,11 @@ class CleanupPyc:
     only makes python compile the source again.
 
     Every folder is read once: the listing of a folder is the sources of
-    its own __pycache__ folder, so the source check runs on names
-    already read, no second listing and no stat call per pyc file is
-    needed.
+    its own __pycache__ folder, so the source check runs on names already
+    read, no second listing and no stat call per pyc file is needed. The
+    listings tell which folders are non-empty too: a folder holding a
+    file, a subfolder or a pyc file of a valid source is never probed
+    with a removal.
 
     Only the pyc files of the __pycache__ folders are checked, PEP 3147:
         - the legacy pyc files placed next to their source, e.g. a
@@ -35,10 +38,19 @@ class CleanupPyc:
           are importable there, they are not garbage
         - a __pycache__ folder is never removed as a whole, it may hold
           the pyc files of valid sources or of an other interpreter; a
-          __pycache__ folder without any file is removed, os.rmdir()
+          __pycache__ folder left without any entry is removed, os.rmdir()
           only removes an empty folder
         - a symbolic link is not followed, e.g. a pyc file linked from
           an other tree is left as is
+        - a folder left without any entry is removed too, e.g. a folder
+          that only held a __pycache__ folder, and so are the ancestors
+          left empty by the removal of their last child; the root itself
+          is never removed
+
+    The files and the folders read are registered to a CleanupFolder
+    collector: a file keeps its folders alive, the __pycache__ folder and
+    the removed pyc files are the removal candidates. The folders left
+    without any entry are removed after the walk, see cleanup().
 
     The removal is best effort and idempotent: a file that can not be
     removed is logged as a warning and counted in failed, the run goes
@@ -72,16 +84,20 @@ class CleanupPyc:
 
     def cleanup(self):
         """
-        Remove the orphan pyc files under the root folder.
+        Remove the orphan pyc files under the root folder, and the
+        folders left without any entry by the removal.
 
         The counters are reset, then the counts of this run are
         accumulated into them: removed and failed.
         """
         self.removed = 0
         self.failed = 0
-        folders = [self.root]
+        self.cleanup_folder = CleanupFolder()
+        folders = ['']
         while folders:
             folders += self._cleanup_pycache(folders.pop())
+        for folder in self.cleanup_folder.get_cleanup_folders():
+            folder_rmtree_empty(joinpath(self.root, folder))
 
     def _cleanup_pycache(self, folder):
         """
@@ -89,22 +105,23 @@ class CleanupPyc:
         to walk next.
 
         The source names come from the listing of the folder, the pyc
-        files from the listing of its __pycache__ folder. A folder
-        without a __pycache__ folder has no pyc file to check. The
-        __pycache__ folder is not returned: it holds no source, and it
-        is removed when it is left empty.
+        files from the listing of its __pycache__ folder. The files and
+        the folders of the folder are registered to the cleanup folder
+        collector: the files keep the folders alive, the __pycache__
+        folder and the removed pyc files are the removal candidates. The
+        __pycache__ folder is not returned: it holds no source.
 
         Args:
-            folder (str): Normalized absolute path of the folder
+            folder (str): Path of the folder, relative to the root
 
         Returns:
-            list[str]: Normalized paths of the subfolders to walk
+            list[str]: Relative paths of the subfolders to walk
         """
         subfolders = []
         sources = set()
         pycache = ''
         try:
-            entries = os.scandir(folder)
+            entries = os.scandir(joinpath(self.root, folder))
         except (FileNotFoundError, NotADirectoryError):
             return subfolders
         with entries:
@@ -113,28 +130,38 @@ class CleanupPyc:
                     is_dir = entry.is_dir(follow_symlinks=False)
                 except FileNotFoundError:
                     continue
+                name = entry.name
                 if not is_dir:
-                    sources.add(entry.name)
-                elif entry.name == PYCACHE:
-                    pycache = joinpath(folder, entry.name)
+                    sources.add(name)
+                elif name == PYCACHE:
+                    pycache = joinpath(folder, name)
                 else:
-                    subfolders.append(joinpath(folder, entry.name))
+                    subfolders.append(joinpath(folder, name))
+        self.cleanup_folder.register_file({joinpath(folder, name) for name in sources})
+        self.cleanup_folder.register_folder(subfolders)
         if not pycache:
             return subfolders
         if IS_WINDOWS:
             # The paths of Windows are not case sensitive: "Mod.py" is
             # the source of "mod.cpython-38.pyc" too
             sources = {name.lower() for name in sources}
+        self.cleanup_folder.register_folder(pycache)
         try:
-            entries = os.scandir(pycache)
+            entries = os.scandir(joinpath(self.root, pycache))
         except (FileNotFoundError, NotADirectoryError):
             return subfolders
         with entries:
             for entry in entries:
                 name = entry.name
+                path = joinpath(pycache, name)
                 if not name.endswith(PYC_SUFFIX):
+                    # A file that is not a pyc, e.g. one placed by hand,
+                    # keeps the __pycache__ folder
+                    self.cleanup_folder.register_file(path)
                     continue
                 if self._source_exists(name, sources):
+                    # The pyc file of a source that exists is kept
+                    self.cleanup_folder.register_file(path)
                     continue
                 try:
                     is_file = entry.is_file(follow_symlinks=False)
@@ -143,16 +170,14 @@ class CleanupPyc:
                 if not is_file:
                     # A symbolic link is not followed, a folder is not
                     # a pyc file
+                    self.cleanup_folder.register_file(path)
                     continue
-                if self._remove(joinpath(pycache, name)):
+                if self._remove(joinpath(self.root, path)):
                     self.removed += 1
+                    self.cleanup_folder.register_deleted(path)
                 else:
                     self.failed += 1
-        # A __pycache__ folder left without any file is a residue,
-        # remove it: os.rmdir() only removes an empty folder, the folder
-        # still holding a pyc file of a valid source, or any file of no
-        # pyc, is kept
-        folder_rmtree_empty(pycache)
+                    self.cleanup_folder.register_file(path)
         return subfolders
 
     @staticmethod

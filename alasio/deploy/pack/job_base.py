@@ -6,6 +6,7 @@ from msgspec import Struct
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.pack_model import IdxInfo
+from alasio.deploy.simple_pip.cleanup_folder import CleanupFolder
 from alasio.ext import env
 from alasio.ext.path.atomic import (
     atomic_open, atomic_read_bytes, atomic_remove, atomic_replace, atomic_rmtree, folder_rmtree_empty
@@ -165,47 +166,35 @@ class JobBase:
         """
         Remove the folders left empty by the deleted files.
 
-        The candidate folders are the parent folders of the deletions
-        (the deleted markers, the renamed sources and the leftover
-        files of the old version, all edit == 2 in pending). A
-        candidate is removed only when the new version records no file
-        at or below it (self.new_fileinfo, the deleted markers are not
-        files) and os.rmdir() confirms the folder is empty: a folder
-        that still holds a file the update does not manage, e.g. a
-        file the user placed by hand, fails the removal and is kept.
-        The removal walks up: a parent folder that becomes empty
-        because its child folder was removed is removed too, up to but
-        never including env.PROJECT_ROOT.
+        The deletion candidates are the parent folders of the deletions
+        (the deleted markers, the renamed sources and the leftover files
+        of the old version, all edit == 2 in pending) and the parent
+        folders a removal leaves empty, see CleanupFolder. A candidate
+        is removed only when the new version records no file at or below
+        it (self.new_fileinfo, the deleted markers are not files) and
+        os.rmdir() confirms the folder is empty: a folder that still
+        holds a file the update does not manage, e.g. a file the user
+        placed by hand, fails the removal and is kept. env.PROJECT_ROOT
+        is never removed.
         """
-        folders = {
-            pending.info.path.rpartition('/')[0]
+        cleaner = CleanupFolder()
+        cleaner.register_deleted({
+            pending.info.path
             for pending in self.pending
             if pending.info.edit == 2
-        }
-        # a file at the root has no parent folder to clean up
-        folders.discard('')
-        if not folders:
-            return
-        # the folders of the new version that hold a file, e.g.
+        })
+        # the files of the new version occupy their folder, e.g.
         # "a/b/c.py" occupies "a/b" and "a". The deleted markers are
         # skipped: they describe files that should not exist
-        occupied = set()
-        for path, info in self.new_fileinfo.items():
-            if info.edit == 2:
-                continue
-            folder = path.rpartition('/')[0]
-            while folder:
-                occupied.add(folder)
-                folder = folder.rpartition('/')[0]
-        # the deepest folders first, so the walk below converges in
-        # one pass
-        for folder in sorted(folders, key=lambda path: path.count('/'), reverse=True):
-            while folder and folder not in occupied:
-                # os.rmdir() only removes an empty folder: a folder
-                # that still holds a file of no record is kept
-                if not folder_rmtree_empty(env.PROJECT_ROOT.joinpath(folder)):
-                    break
-                folder = folder.rpartition('/')[0]
+        cleaner.register_file({
+            path
+            for path, info in self.new_fileinfo.items()
+            if info.edit != 2
+        })
+        for folder in cleaner.get_cleanup_folders():
+            # os.rmdir() only removes an empty folder: a folder that
+            # still holds a file of no record is kept
+            folder_rmtree_empty(env.PROJECT_ROOT.joinpath(folder))
 
     def cleanup(self):
         """
