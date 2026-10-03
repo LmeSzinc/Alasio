@@ -201,6 +201,12 @@ def preprocess_arg(arg: dict) -> dict:
     if dt == 'enable':
         arg['option'] = ['true', 'false']
 
+    # dt="filter" is a free-form filter, its value is parsed at runtime,
+    # a value limited to "option" is dt="filter-order" instead
+    if dt == 'filter' and 'option' in arg:
+        raise DefinitionError('datatype "filter" must not have "option" defined, '
+                              'use "filter-order" if the value is limited to "option"')
+
     # Check if literal args have option
     # dt="secondary-select" is checked in the block below, because its options
     # may be given as "option_dict"
