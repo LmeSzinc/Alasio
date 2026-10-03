@@ -23,7 +23,29 @@ option: [Fleet-1, Fleet-2, Fleet-3, Fleet-4, Submarine]
 """)
         assert arg.dt == 'filter-order'
         assert arg.value == ('Fleet-1', 'Fleet-2', 'Submarine')
-        assert arg.get_anno() == 'a.T_TUPLE_STR'
+        assert arg.get_anno() == "t.Tuple[t.Literal['Fleet-1', 'Fleet-2', 'Fleet-3', 'Fleet-4', 'Submarine'], ...]"
+
+    def test_literal(self):
+        """The value type is a tuple of the "option" literal."""
+        arg = parse_arg("""\
+dt: filter-order
+value: Fleet-1 > Fleet-2
+option: [Fleet-1, Fleet-2, Fleet-3]
+""")
+        assert arg.get_literal_groups() == [['Fleet-1', 'Fleet-2', 'Fleet-3']]
+        assert arg.get_literal() == "t.Literal['Fleet-1', 'Fleet-2', 'Fleet-3']"
+        assert arg.get_python_type() == "t.Tuple[t.Literal['Fleet-1', 'Fleet-2', 'Fleet-3'], ...]"
+
+    def test_literal_ref(self):
+        """The module level literal variable replaces the inline literal."""
+        arg = parse_arg("""\
+dt: filter-order
+value: Fleet-1
+option: [Fleet-1, Fleet-2]
+""")
+        assert arg.get_literal(literal_ref='LITERAL_Group_Arg') == 'LITERAL_Group_Arg'
+        assert arg.get_python_type(literal_ref='LITERAL_Group_Arg') == 't.Tuple[LITERAL_Group_Arg, ...]'
+        assert arg.get_anno(literal_ref='LITERAL_Group_Arg') == 't.Tuple[LITERAL_Group_Arg, ...]'
 
     def test_order_is_kept(self):
         """The value order is the priority order, keep it as defined."""

@@ -8,10 +8,13 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m alasio.config_dev.gen_alasio ```
 
+LITERAL_Scheduler_ServerUpdate = t.Literal['00:00']
+
+
 class Scheduler(a.GroupBase):
     Enable: bool = False
     NextRun: a.T_DATETIME = a.DEFAULT_TIME
-    ServerUpdate: t.Literal['00:00'] = '00:00'
+    ServerUpdate: LITERAL_Scheduler_ServerUpdate = '00:00'
 
     def post_edit(self, old: e.Self, edits):
         if 'NextRun' in edits:
@@ -26,8 +29,11 @@ class SchedulerU00(Scheduler):
     pass
 
 
+LITERAL_SchedulerStatic_Enable = t.Literal['enabled']
+
+
 class SchedulerStatic(Scheduler):
-    Enable: t.Literal['enabled'] = 'enabled'
+    Enable: LITERAL_SchedulerStatic_Enable = 'enabled'
 
 
 class SchedulerStaticU00(SchedulerStatic):
@@ -42,8 +48,11 @@ class SchedulerStaticUedit(SchedulerStatic, SchedulerUedit):
     pass
 
 
+LITERAL_SchedulerU04_ServerUpdate = t.Literal['04:00']
+
+
 class SchedulerU04(Scheduler):
-    ServerUpdate: t.Literal['04:00'] = '04:00'
+    ServerUpdate: LITERAL_SchedulerU04_ServerUpdate = '04:00'
 
 
 class SchedulerStaticU04(SchedulerStatic, SchedulerU04):
@@ -63,4 +72,4 @@ class SchedulerEnableUedit(SchedulerEnable):
 
 
 class SchedulerEnableU04(SchedulerEnable):
-    ServerUpdate: t.Literal['04:00'] = '04:00'
+    ServerUpdate: LITERAL_SchedulerU04_ServerUpdate = '04:00'

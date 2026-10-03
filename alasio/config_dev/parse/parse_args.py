@@ -63,14 +63,18 @@ TYPE_DT_TO_PYTHON = {
     'filter': 't.Tuple[str, ...]',
     # filter-order is an ordered subset of "option", the frontend edits the order
     # with a transfer-like dialog (see parse_arg_utils.validate_filter_order)
+    # the real annotation is Tuple[Literal[option...], ...], see get_python_type()
     'filter-order': 't.Tuple[str, ...]',
 }
 # Define which "dt" is literal type
 # Example:
 #   {'dt': 'select'} is a literal in python: Literal["option-A", "option-B"]
+#   {'dt': 'filter-order'} is a tuple of the literal: Tuple[Literal["option-A", "option-B"], ...]
+#     a "dt" in TYPE_ARG_TUPLE wraps the literal into a tuple
 TYPE_ARG_LITERAL = {
     'static',
     'select', 'radio', 'multi-select', 'multi-radio', 'secondary-select',
+    'filter-order',
 }
 # Define which "dt" is a tuple of value
 # Example:
@@ -246,8 +250,9 @@ def preprocess_arg(arg: dict) -> dict:
             raise DefinitionError('dt="secondary-select" must have "option" or "option_dict" defined')
     elif dt == 'filter-order':
         arg.pop('option_dict', None)
-        # filter-order: "option" is required, it is the universe of items the
-        # frontend editor can add, the value is an ordered subset of it.
+        # filter-order: "option" is required (checked above with the other literal
+        # datatypes), it is the universe of items the frontend editor can add,
+        # the value is an ordered subset of it.
         # The value is defined as "option-A > option-B" in yaml, or as a list,
         # normalize it to a tuple before validating (filter and the multi-*
         # datatypes keep the old split position, see below)
@@ -256,11 +261,7 @@ def preprocess_arg(arg: dict) -> dict:
         elif type(value) is list:
             value = tuple(value)
         arg['value'] = value
-        try:
-            option = arg['option']
-        except KeyError:
-            raise DefinitionError('datatype "filter-order" must have "option" defined')
-        validate_filter_order(option, value)
+        validate_filter_order(arg['option'], value)
     else:
         arg.pop('option_dict', None)
         # check option
@@ -443,31 +444,71 @@ class ArgData(Struct, omit_defaults=True):
         else:
             return ''
 
-    def get_python_type(self) -> str:
+    def get_literal_groups(self):
+        """
+        Get the literal items of this arg, grouped like "option_dict"
+
+        Returns:
+            list[list]: Literal items of each group, e.g. [['a', 'b'], ['c']]
+        """
+        if self.option_dict:
+            return [options for options in self.option_dict.values()]
+        return [self.option]
+
+    def get_literal(self, literal_ref=''):
+        """
+        Get the literal of this arg as python code
+
+        Args:
+            literal_ref (str): Name of the module level literal variable,
+                empty to build the inline literal
+
+        Returns:
+            str: Python code of the literal, e.g. "t.Literal['a', 'b']" or "LITERAL_Group_Arg"
+        """
+        if literal_ref:
+            return literal_ref
+        items = [item for options in self.get_literal_groups() for item in options]
+        option = ', '.join([repr(o) for o in items])
+        return f't.Literal[{option}]'
+
+    def get_python_type(self, literal_ref=''):
         """
         Generate python typehint in string from ArgData
 
+        Args:
+            literal_ref (str): Name of the module level literal variable,
+                empty to build the inline literal
+
         Examples:
             int
-            List[str]
-            Literal['zh', 'en', 'ja', 'kr']
+            t.Tuple[str, ...]
+            t.Tuple[LITERAL_Group_Arg, ...]
+            t.Literal['zh', 'en', 'ja', 'kr']
         """
         # Convert options to literal
         if self.dt in TYPE_ARG_LITERAL:
-            option = ', '.join([repr(o) for o in self.option])
-            return f't.Literal[{option}]'
+            literal = self.get_literal(literal_ref)
+            # a "dt" both literal and tuple (filter-order) is a tuple of the literal
+            if self.dt in TYPE_ARG_TUPLE:
+                return f't.Tuple[{literal}, ...]'
+            return literal
         # Find in pre-defined dict
         return TYPE_DT_TO_PYTHON.get(self.dt, 'Any')
 
-    def get_anno(self) -> str:
+    def get_anno(self, literal_ref=''):
         """
         Generate annotation string from ArgData
 
+        Args:
+            literal_ref (str): Name of the module level literal variable,
+                empty to build the inline literal
+
         Examples:
             Annotated[int, Meta(ge=256, le=8192)]
-            List[str]
+            t.Tuple[LITERAL_Group_Arg, ...]
         """
-        python_type = self.get_python_type()
+        python_type = self.get_python_type(literal_ref)
         meta = self.get_meta()
         if meta:
             anno = f"e.Annotated[{python_type}, {meta}]"

@@ -41,6 +41,19 @@ option_dict:
 """)
         assert list(arg.option_dict) == ['cn_android', 'en', 'jp']
 
+    def test_literal_groups(self):
+        """The literal items are grouped like "option_dict"."""
+        arg = parse_arg("""\
+dt: secondary-select
+value: 1-2
+option_dict:
+  chapter1: [1-1, 1-2]
+  chapter2: [2-1, 2-2]
+""")
+        assert arg.get_literal_groups() == [['1-1', '1-2'], ['2-1', '2-2']]
+        assert arg.get_literal() == "t.Literal['1-1', '1-2', '2-1', '2-2']"
+        assert arg.get_anno(literal_ref='LITERAL_Campaign_Name') == 'LITERAL_Campaign_Name'
+
     def test_option_dict_groups_may_be_prefixed_values(self):
         """Group names may be the i18n prefix of the values, not a value."""
         arg = parse_arg("""\

@@ -8,30 +8,47 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m module.config.gen ```
 
+LITERAL_DropRecord_API = t.Literal['default', 'cn_gz_reverse_proxy']
+LITERAL_DropRecord_ResearchRecord = t.Literal['do_not', 'save', 'upload', 'save_and_upload']
+LITERAL_DropRecord_CombatRecord = t.Literal['do_not', 'save']
+
+
 class DropRecord(a.GroupBase):
     SaveFolder: str = './screenshots'
     AzurStatsID: str = ''
-    API: t.Literal['default', 'cn_gz_reverse_proxy'] = 'default'
-    ResearchRecord: t.Literal['do_not', 'save', 'upload', 'save_and_upload'] = 'do_not'
-    CommissionRecord: t.Literal['do_not', 'save', 'upload', 'save_and_upload'] = 'do_not'
-    CombatRecord: t.Literal['do_not', 'save'] = 'do_not'
-    OpsiRecord: t.Literal['do_not', 'save', 'upload', 'save_and_upload'] = 'do_not'
-    MeowfficerBuy: t.Literal['do_not', 'save'] = 'do_not'
-    MeowfficerTalent: t.Literal['do_not', 'save', 'upload', 'save_and_upload'] = 'do_not'
+    API: LITERAL_DropRecord_API = 'default'
+    ResearchRecord: LITERAL_DropRecord_ResearchRecord = 'do_not'
+    CommissionRecord: LITERAL_DropRecord_ResearchRecord = 'do_not'
+    CombatRecord: LITERAL_DropRecord_CombatRecord = 'do_not'
+    OpsiRecord: LITERAL_DropRecord_ResearchRecord = 'do_not'
+    MeowfficerBuy: LITERAL_DropRecord_CombatRecord = 'do_not'
+    MeowfficerTalent: LITERAL_DropRecord_ResearchRecord = 'do_not'
+
+
+LITERAL_Retirement_RetireMode = t.Literal['one_click_retire', 'enhance', 'old_retire']
 
 
 class Retirement(a.GroupBase):
-    RetireMode: t.Literal['one_click_retire', 'enhance', 'old_retire'] = 'one_click_retire'
+    RetireMode: LITERAL_Retirement_RetireMode = 'one_click_retire'
+
+
+LITERAL_OneClickRetire_KeepLimitBreak = t.Literal['keep_limit_break', 'do_not_keep']
 
 
 class OneClickRetire(a.GroupBase):
-    KeepLimitBreak: t.Literal['keep_limit_break', 'do_not_keep'] = 'keep_limit_break'
+    KeepLimitBreak: LITERAL_OneClickRetire_KeepLimitBreak = 'keep_limit_break'
+
+
+LITERAL_Enhance_ShipToEnhance = t.Literal['all', 'favourite']
 
 
 class Enhance(a.GroupBase):
-    ShipToEnhance: t.Literal['all', 'favourite'] = 'all'
+    ShipToEnhance: LITERAL_Enhance_ShipToEnhance = 'all'
     Filter: str = ''
     CheckPerCategory: int = 5
+
+
+LITERAL_OldRetire_RetireAmount = t.Literal['retire_all', 'retire_10']
 
 
 class OldRetire(a.GroupBase):
@@ -39,4 +56,4 @@ class OldRetire(a.GroupBase):
     R: bool = True
     SR: bool = False
     SSR: bool = False
-    RetireAmount: t.Literal['retire_all', 'retire_10'] = 'retire_all'
+    RetireAmount: LITERAL_OldRetire_RetireAmount = 'retire_all'

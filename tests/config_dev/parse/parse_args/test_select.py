@@ -32,6 +32,19 @@ option: [1, 2, 3]
         assert arg.value == 1
         assert arg.get_anno() == 't.Literal[1, 2, 3]'
 
+    def test_literal_ref(self):
+        """The module level literal variable replaces the inline literal."""
+        arg = parse_arg("""\
+dt: select
+value: option-A
+option: [option-A, option-B]
+""")
+        assert arg.get_literal_groups() == [['option-A', 'option-B']]
+        assert arg.get_literal() == "t.Literal['option-A', 'option-B']"
+        assert arg.get_literal(literal_ref='LITERAL_Group_Arg') == 'LITERAL_Group_Arg'
+        assert arg.get_python_type(literal_ref='LITERAL_Group_Arg') == 'LITERAL_Group_Arg'
+        assert arg.get_anno(literal_ref='LITERAL_Group_Arg') == 'LITERAL_Group_Arg'
+
     def test_option_dict_is_dropped(self):
         arg = parse_arg("""\
 dt: select

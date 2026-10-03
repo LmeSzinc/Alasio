@@ -154,10 +154,43 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                 yield name, g
             yield from self.foreign_model_group_data.items()
 
-        for group_name, group in iter_groups():
-            # Skip empty group
-            if not group.args:
-                continue
+        # Empty group has no class, so it does not reserve a name either
+        groups = [(name, g) for name, g in iter_groups() if g.args]
+        used_names = {name for name, _ in groups}
+
+        # Literal variable name of each literal content of this file
+        literal_names: "dict[tuple, str]" = {}
+
+        for group_name, group in groups:
+            # Get the literal variable of each arg of this group,
+            # the new ones are emitted before the class
+            refs = {}
+            for arg_name, arg in group.override_args.items():
+                if arg.dt not in TYPE_ARG_LITERAL:
+                    continue
+                name = f'LITERAL_{group_name}_{arg_name}'
+                option_groups = arg.get_literal_groups()
+                # Key is the rendered items (repr), so a shared variable means the
+                # same source text, and 1 / True / 1.0 do not conflate
+                key = tuple(repr(item) for options in option_groups for item in options)
+                # Reuse the variable of an identical literal, or emit a new one
+                ref = literal_names.get(key)
+                if ref is None:
+                    if name in used_names:
+                        raise DefinitionError(
+                            f'Literal variable name conflict: "{name}"',
+                            file=self.file, keys=[group_name, arg_name], value=name)
+                    ref = name
+                    literal_names[key] = ref
+                    used_names.add(ref)
+                    with gen.Literal(ref).set_assign().set_literal('t.Literal').wrap('auto'):
+                        for i, options in enumerate(option_groups):
+                            for option in options:
+                                gen.Item(option)
+                            if i < len(option_groups) - 1:
+                                gen.Linebreak()
+                refs[arg_name] = ref
+
             # Define model class
             cls = gen.Class(group_name)
             if group.parent:
@@ -168,23 +201,16 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             with cls:
                 for arg_name, arg in group.override_args.items():
                     arg: ArgData
+                    literal_ref = refs.get(arg_name, '')
                     # Expand tuple
                     if arg.dt in TYPE_ARG_TUPLE:
-                        with gen.Tuple(arg_name).Anno(arg.get_anno()).wrap():
+                        with gen.Tuple(arg_name).Anno(arg.get_anno(literal_ref=literal_ref)).wrap():
                             for item in arg.value:
                                 gen.Item(item)
                         continue
-                    # Expand literal
+                    # Expand literal, reference the module level literal variable
                     if arg.dt in TYPE_ARG_LITERAL:
-                        with gen.Literal(arg_name).set_literal('t.Literal').Var(arg.value).wrap():
-                            if arg.option_dict:
-                                for options in arg.option_dict.values():
-                                    for option in options:
-                                        gen.Item(option)
-                                    gen.Linebreak()
-                            else:
-                                for option in arg.option:
-                                    gen.Item(option)
+                        gen.Anno(arg_name, literal_ref).Var(arg.value)
                         continue
                     # inline
                     gen.Anno(arg_name, arg.get_anno()).Var(arg.get_value())

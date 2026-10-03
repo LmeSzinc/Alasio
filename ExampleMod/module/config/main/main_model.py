@@ -8,26 +8,31 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m module.config.gen ```
 
+LITERAL_Campaign_Name = t.Literal[
+    '1-1', '1-2', '1-3', '1-4',
+    '2-1', '2-2', '2-3', '2-4',
+    '3-1', '3-2', '3-3', '3-4',
+    '4-1', '4-2', '4-3', '4-4',
+    '5-1', '5-2', '5-3', '5-4',
+    '6-1', '6-2', '6-3', '6-4',
+    '7-1', '7-2', '7-3', '7-4',
+    '8-1', '8-2', '8-3', '8-4',
+    '9-1', '9-2', '9-3', '9-4',
+    '10-1', '10-2', '10-3', '10-4',
+    '11-1', '11-2', '11-3', '11-4',
+    '12-1', '12-2', '12-3', '12-4',
+    '13-1', '13-2', '13-3', '13-4',
+    '14-1', '14-2', '14-3', '14-4',
+    '15-1', '15-2', '15-3', '15-4',
+]
+LITERAL_Campaign_Event = t.Literal['campaign_main']
+LITERAL_Campaign_Mode = t.Literal['normal', 'hard']
+
+
 class Campaign(a.GroupBase):
-    Name: t.Literal[
-        '1-1', '1-2', '1-3', '1-4',
-        '2-1', '2-2', '2-3', '2-4',
-        '3-1', '3-2', '3-3', '3-4',
-        '4-1', '4-2', '4-3', '4-4',
-        '5-1', '5-2', '5-3', '5-4',
-        '6-1', '6-2', '6-3', '6-4',
-        '7-1', '7-2', '7-3', '7-4',
-        '8-1', '8-2', '8-3', '8-4',
-        '9-1', '9-2', '9-3', '9-4',
-        '10-1', '10-2', '10-3', '10-4',
-        '11-1', '11-2', '11-3', '11-4',
-        '12-1', '12-2', '12-3', '12-4',
-        '13-1', '13-2', '13-3', '13-4',
-        '14-1', '14-2', '14-3', '14-4',
-        '15-1', '15-2', '15-3', '15-4',
-    ] = '12-4'
-    Event: t.Literal['campaign_main'] = 'campaign_main'
-    Mode: t.Literal['normal', 'hard'] = 'normal'
+    Name: LITERAL_Campaign_Name = '12-4'
+    Event: LITERAL_Campaign_Event = 'campaign_main'
+    Mode: LITERAL_Campaign_Mode = 'normal'
     UseClearMode: bool = True
     UseFleetLock: bool = True
     UseAutoSearch: bool = True
@@ -35,50 +40,73 @@ class Campaign(a.GroupBase):
     AmbushEvade: bool = True
 
 
+LITERAL_CampaignHard_Mode = t.Literal['normal']
+
+
 class CampaignHard(Campaign):
-    Event: t.Literal['campaign_main'] = 'campaign_main'
-    Mode: t.Literal['normal'] = 'normal'
+    Event: LITERAL_Campaign_Event = 'campaign_main'
+    Mode: LITERAL_CampaignHard_Mode = 'normal'
+
+
+LITERAL_StopCondition_MapAchievement = t.Literal[
+    'non_stop', '100_percent_clear', 'map_3_stars', 'threat_safe', 'threat_safe_without_3_stars',
+]
 
 
 class StopCondition(a.GroupBase):
     OilLimit: int = 1000
     RunCount: int = 0
-    MapAchievement: t.Literal[
-        'non_stop', '100_percent_clear', 'map_3_stars', 'threat_safe', 'threat_safe_without_3_stars',
-    ] = 'non_stop'
+    MapAchievement: LITERAL_StopCondition_MapAchievement = 'non_stop'
     StageIncrease: bool = False
     GetNewShip: bool = False
     ReachLevel: int = 0
 
 
+LITERAL_Fleet_Fleet = t.Literal[1, 2, 3, 4, 5, 6]
+LITERAL_Fleet_Formation = t.Literal['line_ahead', 'double_line', 'diamond']
+LITERAL_Fleet_FleetMode = t.Literal['combat_auto', 'combat_manual', 'stand_still_in_the_middle', 'hide_in_bottom_left']
+LITERAL_Fleet_FleetStep = t.Literal[2, 3, 4, 5]
+
+
 class Fleet(a.GroupBase):
-    Fleet: t.Literal[1, 2, 3, 4, 5, 6] = 1
-    Formation: t.Literal['line_ahead', 'double_line', 'diamond'] = 'double_line'
-    FleetMode: t.Literal[
-        'combat_auto', 'combat_manual', 'stand_still_in_the_middle', 'hide_in_bottom_left',
-    ] = 'combat_auto'
-    FleetStep: t.Literal[2, 3, 4, 5] = 3
+    Fleet: LITERAL_Fleet_Fleet = 1
+    Formation: LITERAL_Fleet_Formation = 'double_line'
+    FleetMode: LITERAL_Fleet_FleetMode = 'combat_auto'
+    FleetStep: LITERAL_Fleet_FleetStep = 3
+
+
+LITERAL_Submarine_Fleet = t.Literal[0, 1, 2]
+LITERAL_Submarine_Mode = t.Literal['do_not_use', 'hunt_only', 'boss_only', 'hunt_and_boss', 'every_combat']
+LITERAL_Submarine_AutoSearchMode = t.Literal['sub_standby', 'sub_auto_call']
+LITERAL_Submarine_DistanceToBoss = t.Literal[
+    'to_boss_position', '1_grid_to_boss', '2_grid_to_boss', 'use_open_ocean_support',
+]
 
 
 class Submarine(a.GroupBase):
-    Fleet: t.Literal[0, 1, 2] = 0
-    Mode: t.Literal['do_not_use', 'hunt_only', 'boss_only', 'hunt_and_boss', 'every_combat'] = 'do_not_use'
-    AutoSearchMode: t.Literal['sub_standby', 'sub_auto_call'] = 'sub_standby'
-    DistanceToBoss: t.Literal[
-        'to_boss_position', '1_grid_to_boss', '2_grid_to_boss', 'use_open_ocean_support',
-    ] = '2_grid_to_boss'
+    Fleet: LITERAL_Submarine_Fleet = 0
+    Mode: LITERAL_Submarine_Mode = 'do_not_use'
+    AutoSearchMode: LITERAL_Submarine_AutoSearchMode = 'sub_standby'
+    DistanceToBoss: LITERAL_Submarine_DistanceToBoss = '2_grid_to_boss'
+
+
+LITERAL_Emotion_Mode = t.Literal['calculate', 'ignore', 'calculate_ignore']
 
 
 class Emotion(a.GroupBase):
-    Mode: t.Literal['calculate', 'ignore', 'calculate_ignore'] = 'calculate'
+    Mode: LITERAL_Emotion_Mode = 'calculate'
+
+
+LITERAL_EmotionRecord_Control = t.Literal[
+    'keep_exp_bonus', 'prevent_green_face', 'prevent_yellow_face', 'prevent_red_face',
+]
+LITERAL_EmotionRecord_Recover = t.Literal['not_in_dormitory', 'dormitory_floor_1', 'dormitory_floor_2']
 
 
 class EmotionRecord(a.DashboardAmount):
     Value: e.Annotated[int, m.Meta(ge=0, le=150)] = 119
-    Control: t.Literal[
-        'keep_exp_bonus', 'prevent_green_face', 'prevent_yellow_face', 'prevent_red_face',
-    ] = 'prevent_yellow_face'
-    Recover: t.Literal['not_in_dormitory', 'dormitory_floor_1', 'dormitory_floor_2'] = 'not_in_dormitory'
+    Control: LITERAL_EmotionRecord_Control = 'prevent_yellow_face'
+    Recover: LITERAL_EmotionRecord_Recover = 'not_in_dormitory'
     Oath: bool = False
 
     @property
@@ -162,40 +190,56 @@ class HpControl(a.GroupBase):
     LowHpRetreatThreshold: float = 0.3
 
 
+LITERAL_EnemyPriority_EnemyScaleBalanceWeight = t.Literal['default_mode', 'S3_enemy_first', 'S1_enemy_first']
+
+
 class EnemyPriority(a.GroupBase):
-    EnemyScaleBalanceWeight: t.Literal['default_mode', 'S3_enemy_first', 'S1_enemy_first'] = 'default_mode'
+    EnemyScaleBalanceWeight: LITERAL_EnemyPriority_EnemyScaleBalanceWeight = 'default_mode'
+
+
+LITERAL_GemsCampaign_Name = t.Literal[
+    '2-1', '2-2', '2-3', '2-4',
+    '3-1', '3-2', '3-3', '3-4',
+    '4-1', '4-2', '4-3', '4-4',
+    '5-1', '5-2', '5-3', '5-4',
+    '6-1', '6-2', '6-3', '6-4',
+    '7-1', '7-2', '7-3', '7-4',
+    '8-1', '8-2', '8-3', '8-4',
+    '9-1', '9-2', '9-3', '9-4',
+    '10-1', '10-2', '10-3', '10-4',
+    '11-1', '11-2', '11-3', '11-4',
+    '12-1', '12-2', '12-3', '12-4',
+    '13-1', '13-2', '13-3', '13-4',
+    '14-1', '14-2', '14-3', '14-4',
+    '15-1', '15-2', '15-3', '15-4',
+]
 
 
 class GemsCampaign(Campaign):
-    Name: t.Literal[
-        '2-1', '2-2', '2-3', '2-4',
-        '3-1', '3-2', '3-3', '3-4',
-        '4-1', '4-2', '4-3', '4-4',
-        '5-1', '5-2', '5-3', '5-4',
-        '6-1', '6-2', '6-3', '6-4',
-        '7-1', '7-2', '7-3', '7-4',
-        '8-1', '8-2', '8-3', '8-4',
-        '9-1', '9-2', '9-3', '9-4',
-        '10-1', '10-2', '10-3', '10-4',
-        '11-1', '11-2', '11-3', '11-4',
-        '12-1', '12-2', '12-3', '12-4',
-        '13-1', '13-2', '13-3', '13-4',
-        '14-1', '14-2', '14-3', '14-4',
-        '15-1', '15-2', '15-3', '15-4',
-    ] = '2-4'
-    Mode: t.Literal['normal'] = 'normal'
+    Name: LITERAL_GemsCampaign_Name = '2-4'
+    Mode: LITERAL_CampaignHard_Mode = 'normal'
+
+
+LITERAL_GemsStopCondition_MapAchievement = t.Literal['non_stop']
 
 
 class GemsStopCondition(StopCondition):
     RunCount: e.Annotated[int, m.Meta(ge=0, le=999)] = 0
-    MapAchievement: t.Literal['non_stop'] = 'non_stop'
+    MapAchievement: LITERAL_GemsStopCondition_MapAchievement = 'non_stop'
+
+
+LITERAL_GemsSubmarine_Fleet = t.Literal[2]
+LITERAL_GemsSubmarine_Mode = t.Literal['hunt_and_boss']
 
 
 class GemsSubmarine(Submarine):
-    Fleet: t.Literal[2] = 2
-    Mode: t.Literal['hunt_and_boss'] = 'hunt_and_boss'
+    Fleet: LITERAL_GemsSubmarine_Fleet = 2
+    Mode: LITERAL_GemsSubmarine_Mode = 'hunt_and_boss'
+
+
+LITERAL_GemsEmotionRecord_Recover = t.Literal['dormitory_floor_2']
 
 
 class GemsEmotionRecord(EmotionRecord):
     Value: e.Annotated[int, m.Meta(ge=0, le=200)] = 150
-    Recover: t.Literal['dormitory_floor_2'] = 'dormitory_floor_2'
+    Recover: LITERAL_GemsEmotionRecord_Recover = 'dormitory_floor_2'
