@@ -318,3 +318,19 @@ class TestMain:
         monkeypatch.setattr(sys, 'argv', ['main', '--nope'])
         with pytest.raises(SystemExit):
             main.main()
+
+    def test_root_before_first_log(self, fs, run_dir, monkeypatch):
+        """--root is set before the first log: the log file of the process is
+        decided by the first write, see LogWriter.file."""
+        calls = []
+
+        class FakeServer:
+            def run(self):
+                calls.append('run')
+
+        monkeypatch.setattr(main.env, 'set_project_root', lambda root: calls.append('root'))
+        monkeypatch.setattr(main.logger, 'hr', lambda *args, **kwargs: calls.append('log'))
+        monkeypatch.setattr(main, 'PackServer', FakeServer)
+        monkeypatch.setattr(sys, 'argv', ['main', '--root', str(run_dir)])
+        main.main()
+        assert calls == ['root', 'log', 'run']

@@ -312,7 +312,8 @@ class TestRun:
     def test_update_packs(self, fs, run_dir):
         """An update pack from every lookback commit to the latest one is written."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        with logger.mock_capture_writer() as capture:
+            PackRepoGen(repo, CONFIG).run()
 
         for old in ('c1', 'c2'):
             file = join_path(run_dir, PACK_ROOT, 'c3', f'update_{old}.pack')
@@ -324,6 +325,10 @@ class TestRun:
         # every pack of the version lives in the folder of the latest commit,
         # the lookback versions have no folder of their own
         assert list(join_path(run_dir, PACK_ROOT).iter_foldernames()) == ['c3']
+        # every update pack is logged with its position in the lookback window,
+        # the lookback commits are the newest first
+        assert capture.fd.any_contains('[1/2] Packing update pack from c2')
+        assert capture.fd.any_contains('[2/2] Packing update pack from c1')
 
     def test_update_pack_records(self, fs, run_dir):
         """The update pack records the changes from the old version to the latest one."""

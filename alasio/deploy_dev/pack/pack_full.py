@@ -2,8 +2,6 @@ from functools import partial
 from hashlib import sha1
 from typing import Union
 
-from tqdm import tqdm
-
 from alasio.backport import removesuffix
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.history.encode_history import encode_commit_history
@@ -702,7 +700,7 @@ class PackFull(PackEncodeBase):
         # every task is done, see the loop below
         source_of_blob = {}
         with PACK_POOL.wait_jobs() as pool:
-            for file in tqdm(dict_fileinfo.values()):
+            for file in dict_fileinfo.values():
                 # load new files only, A (added)
                 if file.edit == 0 and file.source_lookback == 0:
                     # the git blob sha1, as the hex str the git tree carries,

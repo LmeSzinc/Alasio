@@ -175,11 +175,17 @@ class PackRepoGen:
         """
         Write the update pack of every lookback commit to the version folder.
 
+        Every update pack is logged with its position in the lookback window,
+        so the overall progress of a run with many lookback commits is visible.
+
         Args:
             pack (PackFull): Pack of the latest version, shared by every
                 update pack
         """
-        for old in self.lookback.lookback_commit:
+        commit_list = self.lookback.lookback_commit
+        total = len(commit_list)
+        for index, old in enumerate(commit_list, start=1):
+            logger.info(f'[{index}/{total}] Packing update pack from {old}')
             update = PackUpdate(pack, old)
             file = self.version_folder.joinpath(f'update_{old}.pack')
             logger.info(f'Writing update pack: {old} -> {pack.current_version}, "{file}"')

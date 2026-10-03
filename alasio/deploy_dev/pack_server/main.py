@@ -164,7 +164,6 @@ def main():
     Raises:
         SystemExit: If the arguments are invalid
     """
-    logger.hr('Start', level=0)
     parser = argparse.ArgumentParser(
         description='Generate the packs of every config of the pack server',
     )
@@ -175,6 +174,9 @@ def main():
     args = parser.parse_args()
     if args.root:
         env.set_project_root(args.root)
+    # the project root must be set before the first log: the log file of the
+    # process is decided by the first write, see LogWriter.file
+    logger.hr('Start', level=0)
     PackServer().run()
 
 
