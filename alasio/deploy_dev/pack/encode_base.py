@@ -393,7 +393,7 @@ class PackEncodeBase:
         self.full_pack_checksum = checksum.digest()
         yield self.full_pack_checksum
 
-    def latest_pack(self):
+    def latest_pack(self, index_checksum=None):
         """
         Payload of the latest.pack file: current version + index pack checksum
 
@@ -407,15 +407,30 @@ class PackEncodeBase:
         the index section first), consume one of them (e.g. write the pack to
         disk) before calling this method.
 
+        Args:
+            index_checksum (bytes, optional): Checksum to write instead of the
+                cached one, the trailing 20 bytes digest read back from a pack
+                file, see PackDecodeBase.read_index_checksum: a caller that
+                keeps the full pack of an earlier run never emitted the index
+                pack of this run. Defaults to None, the cached checksum.
+
         Returns:
             bytes: Current version in utf-8 bytes + 20 bytes index pack checksum
 
         Raises:
-            ValueError: If the index pack has not been emitted yet
+            ValueError: If the index pack has not been emitted yet and no
+                index_checksum is given, or the checksum is not 20 bytes long
         """
-        if self.index_pack_checksum is None:
+        if index_checksum is None:
+            index_checksum = self.index_pack_checksum
+            if index_checksum is None:
+                raise ValueError(
+                    'Failed to build latest.pack: index pack checksum unknown, '
+                    'consume iter_packidx_data() first'
+                )
+        if len(index_checksum) != 20:
             raise ValueError(
-                'Failed to build latest.pack: index pack checksum unknown, '
-                'consume iter_packidx_data() first'
+                f'Failed to build latest.pack: index pack checksum of {len(index_checksum)} bytes, '
+                f'expected the 20 bytes digest, see PackDecodeBase.read_index_checksum'
             )
-        return self.current_version.encode('utf-8') + self.index_pack_checksum
+        return self.current_version.encode('utf-8') + index_checksum

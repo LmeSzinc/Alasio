@@ -31,7 +31,7 @@ from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, R
 from alasio.deploy_dev.pack_server.pack_gen import PackRepoGen
 from alasio.ext import env
 from alasio.ext.path import PathStr
-from alasio.ext.path.atomic import file_read_bytes
+from alasio.ext.path.atomic import atomic_write, file_read_bytes
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -447,6 +447,127 @@ class TestRun:
         # the clients are not switched to the partial version
         assert file_read_bytes(join_path(run_dir, PACK_ROOT, 'latest.pack')) == before
         assert join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack').isfile()
+
+
+class TestExistingPacks:
+    """The packs of an earlier run are kept, latest.pack is written again."""
+
+    def test_existing_packs_are_kept(self, fs, run_dir, monkeypatch):
+        """A complete output folder is kept as it is: nothing is built again."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG).run()
+        tree = read_tree(join_path(run_dir, PACK_ROOT))
+
+        # no pack of the version may be built again: the encoder of the
+        # second run fails the test when it is constructed, and the writes
+        # are collected
+        class NoPackUpdate:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError('the pack of the version must not be built again')
+
+        written = []
+        monkeypatch.setattr(pack_gen, 'PackUpdate', NoPackUpdate)
+        monkeypatch.setattr(
+            pack_gen, 'atomic_write_stream', lambda file, data: written.append(str(file)))
+        PackRepoGen(repo, CONFIG).run()
+
+        assert written == []
+        # latest.pack is written again, from the checksum of the kept full
+        # pack: the file is the same as the one of the first run
+        assert read_tree(join_path(run_dir, PACK_ROOT)) == tree
+
+    def test_latest_pack_is_written_again(self, fs, run_dir):
+        """latest.pack is written on every run, from the checksum of the kept full pack."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG).run()
+        latest = join_path(run_dir, PACK_ROOT, 'latest.pack')
+        data = file_read_bytes(latest)
+        os.remove(latest)
+
+        PackRepoGen(repo, CONFIG).run()
+
+        assert file_read_bytes(latest) == data
+
+    def test_missing_pack_is_built_again(self, fs, run_dir, monkeypatch):
+        """Only the pack that is missing is built again."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG).run()
+        target = join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')
+        data = file_read_bytes(target)
+        os.remove(target)
+
+        # the lookback version of every pack that is built, in the order of the run
+        built = []
+        real_pack_update = pack_gen.PackUpdate
+
+        class CountingPackUpdate:
+            def __init__(self, pack, old):
+                built.append(old)
+                self.update = real_pack_update(pack, old)
+
+            def iter_pack_data(self):
+                return self.update.iter_pack_data()
+
+        monkeypatch.setattr(pack_gen, 'PackUpdate', CountingPackUpdate)
+        PackRepoGen(repo, CONFIG).run()
+
+        assert built == ['c1']
+        assert file_read_bytes(target) == data
+
+    def test_pack_of_another_format_is_written_again(self, fs, run_dir):
+        """A pack of another pack format is not kept: a version folder mixes no formats."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG).run()
+
+        folder = join_path(run_dir, PACK_ROOT, 'c3')
+        names = ('full_c3.pack', 'update_c1.pack', 'update_c2.pack')
+        for name in names:
+            file = folder.joinpath(name)
+            data = bytearray(file_read_bytes(file))
+            # the pack version is the single byte behind b'PACK'
+            data[4] = 1
+            atomic_write(file, bytes(data))
+
+        PackRepoGen(repo, CONFIG).run()
+
+        for name in names:
+            assert file_read_bytes(folder.joinpath(name))[4] == 0
+        # latest.pack is built from the full pack this run wrote
+        info = LatestInfo.parse(file_read_bytes(join_path(run_dir, PACK_ROOT, 'latest.pack')))
+        full = PackDecodeBase(file_read_bytes(folder.joinpath('full_c3.pack')))
+        assert info.checksum == full.index_checksum
+
+    def test_pack_that_is_not_a_pack_is_written_again(self, fs, run_dir):
+        """A kept file that cannot be read as a pack is overwritten, the run goes on."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG).run()
+        file = join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')
+        atomic_write(file, b'NOPE' + b'\x00' * 60)
+
+        with logger.mock_capture_writer() as capture:
+            PackRepoGen(repo, CONFIG).run()
+
+        assert capture.fd.any_contains('Failed to read the existing pack')
+        decoder = PackDecodeBase(file_read_bytes(file))
+        decoder.validate()
+        assert decoder.old_version == 'c1'
+
+    def test_pack_of_another_version_is_written_again(self, fs, run_dir):
+        """A pack of another version pair is not kept, a version folder mixes no versions."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG).run()
+        # the update pack of c2, put at the path of the update pack of c1
+        source = join_path(run_dir, PACK_ROOT, 'c3', 'update_c2.pack')
+        file = join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')
+        atomic_write(file, file_read_bytes(source))
+
+        with logger.mock_capture_writer() as capture:
+            PackRepoGen(repo, CONFIG).run()
+
+        assert capture.fd.any_contains('Existing pack is not the pack of this version')
+        decoder = PackDecodeBase(file_read_bytes(file))
+        decoder.validate()
+        assert decoder.old_version == 'c1'
 
 
 class TestUpdateApplies:

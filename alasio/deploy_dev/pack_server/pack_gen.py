@@ -19,11 +19,21 @@ Every pack of a version lives in the folder of the latest commit, an older
 folder is the folder of the version that was the latest one in an earlier
 run.
 
-latest.pack is written after every pack of the version is on the disk, so
-the clients only switch to a version whose packs are complete. An error of
-a pack build is raised to the caller: the previous latest.pack keeps
-serving the clients and the next run starts over, the atomic writes never
-leave a truncated pack at its final path.
+The bytes of a pack only depend on the version it packs, so a pack that
+already exists is kept as it is: the run of an output folder that is already
+complete builds nothing again and only rewrites latest.pack. A kept file is
+the pack of the version pair, encoded with the current
+PackEncodeBase.PACK_VERSION, see PackChecksum and _kept_pack: a file of
+another format, of another version pair, or a file that cannot be read as a
+pack is written again.
+
+latest.pack is written after every pack of the version is on the disk, and on
+every run: it is the small file the clients read the published version from.
+When the full pack was kept, the run never emitted its index pack and the
+checksum of the file is read back from the pack, see
+PackDecodeBase.read_index_checksum. An error of a pack build is raised to the
+caller: the previous latest.pack keeps serving the clients and the next run
+starts over, the atomic writes never leave a truncated pack at its final path.
 
 The repo of a config is an input of the generator, not cloned here: the
 caller opens the git repo of the config and passes it in, the generation
@@ -40,10 +50,14 @@ Usage:
     PackRepoGen(repo, config.data).run()
 """
 
+import os
+import stat
+
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.deploy_dev.pack_server.gate import check_run_dir
 from alasio.deploy_dev.pack_server.lookback import PackRepoLookback
+from alasio.deploy_dev.pack_server.pack_check import PackChecksum, PackDecodeError
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import atomic_failure_cleanup, atomic_rmtree, atomic_write, atomic_write_stream
@@ -114,16 +128,30 @@ class PackRepoGen:
         """
         return self.pack_folder.joinpath(self.lookback.latest_commit)
 
+    @cached_property
+    def full_pack_file(self):
+        """
+        File of the full pack of the latest version: {version folder}/full_{commit}.pack
+
+        Returns:
+            PathStr: Absolute path of the file
+        """
+        return self.version_folder.joinpath(f'full_{self.lookback.latest_commit}.pack')
+
     def run(self):
         """
         Generate and publish the packs of the latest version.
 
         Writes the full pack of the latest commit, an update pack from every
         lookback commit to it, then latest.pack, then removes the folders of
-        the other versions. latest.pack is written after every pack of the
-        version, and an exception is raised to the caller instead of
-        publishing a partial version: the previous latest.pack keeps serving
-        the clients and the next run starts over, see the module docstring.
+        the other versions. A pack of that version that already exists is
+        kept, see _kept_pack: the run of an output folder that is complete
+        builds nothing and only rewrites latest.pack.
+
+        latest.pack is written after every pack of the version, and an
+        exception is raised to the caller instead of publishing a partial
+        version: the previous latest.pack keeps serving the clients and the
+        next run starts over, see the module docstring.
 
         Raises:
             RunDirError: If env.PROJECT_ROOT is not a run directory of the
@@ -150,12 +178,14 @@ class PackRepoGen:
         pack = PackFull(self.repo, latest)
 
         # 1. the full pack of the latest commit, the only full pack
-        self._write_full_pack(pack)
+        kept_checksum = self._write_full_pack(pack)
         # 2. an update pack from every lookback commit to the latest one
         self._write_update_packs(pack)
         # 3. latest.pack, after every pack of the version is written, so the
-        # clients only switch to a version whose packs are complete
-        self._write_latest_pack(pack)
+        # clients only switch to a version whose packs are complete. The full
+        # pack of an earlier run was kept: this run never emitted its index
+        # pack, the checksum of the kept file is published
+        self._write_latest_pack(pack, kept_checksum)
         # 4. the folders that do not match the latest commit
         self._remove_stale_folders()
         logger.info(f'Packs of "{self.pack_folder.name}" generated, latest={latest}')
@@ -164,17 +194,34 @@ class PackRepoGen:
         """
         Write the full pack of the latest version to the version folder.
 
+        The full pack of an earlier run is kept as it is, see _kept_pack: the
+        encoding of a full pack is the most expensive step of a run, and the
+        bytes of a pack only depend on the version. latest.pack is built from
+        the checksum of the kept file, see run().
+
         Args:
             pack (PackFull): Pack of the latest version
+
+        Returns:
+            bytes | None: Index pack checksum of the kept file, None when the
+                pack was written by this run: latest.pack takes the checksum
+                cached on the encoder then, see PackEncodeBase.latest_pack
         """
-        file = self.version_folder.joinpath(f'full_{pack.current_version}.pack')
+        file = self.full_pack_file
+        kept = self._kept_pack(file, pack.pack_version, pack.current_version, '')
+        if kept is not None:
+            logger.info(f'Full pack exists, skipped: "{file}"')
+            return kept.index_checksum
         logger.info(f'Writing full pack: "{file}"')
         atomic_write_stream(file, pack.iter_pack_data())
+        return None
 
     def _write_update_packs(self, pack):
         """
         Write the update pack of every lookback commit to the version folder.
 
+        An update pack of an earlier run is kept like the full pack, see
+        _kept_pack: only the packs of the version that are missing are built.
         Every update pack is logged with its position in the lookback window,
         so the overall progress of a run with many lookback commits is visible.
 
@@ -185,22 +232,82 @@ class PackRepoGen:
         commit_list = self.lookback.lookback_commit
         total = len(commit_list)
         for index, old in enumerate(commit_list, start=1):
+            file = self.version_folder.joinpath(f'update_{old}.pack')
+            kept = self._kept_pack(file, pack.pack_version, pack.current_version, old)
+            if kept is not None:
+                logger.info(f'[{index}/{total}] Update pack exists, skipped: "{file}"')
+                continue
             logger.info(f'[{index}/{total}] Packing update pack from {old}')
             update = PackUpdate(pack, old)
-            file = self.version_folder.joinpath(f'update_{old}.pack')
             logger.info(f'Writing update pack: {old} -> {pack.current_version}, "{file}"')
             atomic_write_stream(file, update.iter_pack_data())
 
-    def _write_latest_pack(self, pack):
+    def _write_latest_pack(self, pack, index_checksum=None):
         """
         Write latest.pack: the latest version and its index pack checksum.
 
+        The file is written on every run: it is the small file the clients
+        read the published version from. A run that kept the full pack of an
+        earlier run passes the checksum of the kept file, see run().
+
         Args:
             pack (PackFull): Pack of the latest version
+            index_checksum (bytes, optional): Checksum to write, the cached
+                one of the emitted index pack by default, see
+                PackEncodeBase.latest_pack
         """
         file = self.pack_folder.joinpath('latest.pack')
         logger.info(f'Writing latest info: version={pack.current_version}, "{file}"')
-        atomic_write(file, pack.latest_pack())
+        atomic_write(file, pack.latest_pack(index_checksum))
+
+    @staticmethod
+    def _kept_pack(file, pack_version, current_version, old_version):
+        """
+        Check whether the pack of an earlier run at a path is kept.
+
+        The pack is kept when the file exists and is the pack of the version
+        pair, encoded with the current format: the bytes of a pack only depend
+        on the version it packs, so building it again is a waste of the
+        encoding time. A file of another format, of another version pair, or a
+        file that cannot be read as a pack is written again: the packs of a
+        version folder must all be the packs of that version, encoded with one
+        format.
+
+        Args:
+            file (PathStr): Path of the pack file
+            pack_version (int): Pack format version of this run
+            current_version (str): Version the pack packs
+            old_version (str): Version the pack updates from, empty for the
+                full pack
+
+        Returns:
+            PackChecksum | None: Identity of the kept file, None when the pack
+                has to be written by this run
+
+        Raises:
+            ValueError: If the path exists but is not a file
+        """
+        try:
+            st = os.stat(file)
+        except FileNotFoundError:
+            # the pack has to be written by this run
+            return None
+        if not stat.S_ISREG(st.st_mode):
+            raise ValueError(f'Pack path exists but is not a file: "{file}"')
+        try:
+            checksum = PackChecksum.from_file(file)
+        except PackDecodeError as e:
+            # nothing of a file the server cannot read can be kept: the pack
+            # is generated again, overwriting the file
+            logger.warning(f'Failed to read the existing pack, writing it again: {e}')
+            return None
+        if (checksum.pack_version != pack_version
+                or checksum.current_version != current_version
+                or checksum.old_version != old_version):
+            logger.warning(
+                f'Existing pack is not the pack of this version, writing it again: "{file}"')
+            return None
+        return checksum
 
     def _remove_stale_folders(self):
         """
