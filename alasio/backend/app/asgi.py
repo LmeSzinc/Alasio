@@ -8,6 +8,7 @@ import trio
 from hypercorn import Config
 
 from alasio.backend.app.lifespan import announce_started, get_shutdown_trigger
+from alasio.backend.auth.password import WEAK_PASSWORD_MESSAGE
 from alasio.deploy.config.model import DeployConfig
 from alasio.ext import env
 from alasio.logger import logger
@@ -126,6 +127,15 @@ def create_config(args=None):
 
     apply_hypercorn_exclusivity_patch()
     deploy = DeployConfig().config.data
+
+    # Password strength: the flag is a cached property of the config
+    # (YamlConfigWithPassword.weak_password), so the plaintext never
+    # becomes a variable of this long-lived frame: the logger renders
+    # exception tracebacks with show_locals=True. A weak password is
+    # refused by the admission gate (only the electron client passes),
+    # warn about it at startup where the user still sees the logs.
+    if DeployConfig().config.weak_password:
+        logger.warning(WEAK_PASSWORD_MESSAGE)
 
     # build host port
     if parsed_args.host:

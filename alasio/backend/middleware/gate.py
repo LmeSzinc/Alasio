@@ -6,6 +6,7 @@ from starlette import status
 from starlette.datastructures import URL
 from starlette.responses import RedirectResponse, Response
 
+from alasio.backend.auth.password import is_weak_password
 from alasio.backend.mpipe.token_backend import token_table
 from alasio.ext.cache import cached_property
 from alasio.ext.starapi.param import error_detail
@@ -84,12 +85,14 @@ class DeploymentGateMiddleware:
        https responses makes the browser upgrade http itself after the
        first https visit.
 
-    1. Rule A (no password → refuse all web access): when the password
-       is empty, only requests carrying a valid electron token
-       (X-Alasio-Token verified against the backend token table) pass;
-       all other business access (/api/*, /api/ws, /api/preview) → 403.
-       Static resources (non-/api prefix) pass so the config guidance
-       page renders.
+    1. Rule A (no usable password → refuse all web access): when the
+       password is empty, or is set but fails the strength rule, only
+       requests carrying a valid electron token (X-Alasio-Token
+       verified against the backend token table) pass; all other
+       business access (/api/*, /api/ws, /api/preview) → 403, with the
+       error key telling the login page whether a password is missing
+       or the configured one is too weak. Static resources (non-/api
+       prefix) pass so the config guidance page renders.
     2. Rule B (lan mode refuses public sources): in lan mode business
        access is source-checked with `ipaddress`: loopback, RFC1918,
        link-local and ULA pass; everything else (including CGNAT
@@ -158,17 +161,26 @@ class DeploymentGateMiddleware:
         return bool(backend.WebuiSSLCert and backend.WebuiSSLKey)
 
     @cached_property
-    def _has_password(self):
+    def _password_state(self):
         """
         Returns:
-            bool: True when a password is configured
+            str: 'strong' when a usable password is configured, 'weak'
+                when one is configured but fails the strength rule (it
+                is treated as unset: remote access is refused, only the
+                electron token passes), 'none' when none is configured
 
         Cached: mirrors JwtManager.pwd (itself cached), so changing the
         password requires a backend restart to take effect.
         """
         from alasio.backend.auth.auth import JWT_MANAGER
 
-        return bool(JWT_MANAGER.pwd)
+        # no local ever holds the plaintext: the logger renders tracebacks
+        # with show_locals=True, a frame of this middleware included
+        if not JWT_MANAGER.pwd:
+            return 'none'
+        if is_weak_password(JWT_MANAGER.pwd):
+            return 'weak'
+        return 'strong'
 
     def _has_electron_token(self, scope):
         """
@@ -299,8 +311,12 @@ class DeploymentGateMiddleware:
             tuple[str, dict]: (err key, data) when rejected, or
                 ('', {}) when allowed
         """
-        # Rule A: no password → only electron token passes
-        if not self._has_password and not self._has_electron_token(scope):
+        # Rule A: no usable password → only electron token passes
+        state = self._password_state
+        if state != 'strong' and not self._has_electron_token(scope):
+            if state == 'weak':
+                # the error key alone says why: no extra data is needed
+                return 'DEPLOY_PASSWORD_TOO_WEAK', {}
             return 'DEPLOY_PASSWORD_NOT_SET', {}
         # Rule B: lan mode → source check
         if not self._is_public:

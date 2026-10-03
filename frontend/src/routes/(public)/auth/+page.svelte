@@ -60,6 +60,12 @@
         return t.Auth.ErrElectronOnly();
       case "DEPLOY_PASSWORD_NOT_SET":
         return t.Auth.ErrDeployPasswordNotSet();
+      case "DEPLOY_PASSWORD_TOO_WEAK":
+        // the frontend keeps its own translation. The text mirrors the
+        // backend reference WEAK_PASSWORD_MESSAGE
+        // (alasio/backend/auth/password.py): the two are maintained
+        // independently and kept in sync by hand (manual contract)
+        return t.Auth.ErrDeployPasswordTooWeak();
       case "DEPLOY_CERT_NOT_SET":
         return t.Auth.ErrDeployCertNotSet();
       case "NETWORK_ERROR":

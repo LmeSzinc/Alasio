@@ -7,6 +7,8 @@ login layer (JWT cookie) run inside one middleware in a fixed order
 (admission first, then login). It must never be split or reordered.
 """
 
+import json
+
 import pytest
 from starlette.datastructures import URL
 
@@ -101,6 +103,20 @@ def status_of(sent):
     return None
 
 
+def body_of(sent):
+    """
+    Args:
+        sent (list): Messages sent by the middleware
+
+    Returns:
+        bytes: The http response body, or b'' if none was sent
+    """
+    for message in sent:
+        if message['type'] == 'http.response.body':
+            return message['body']
+    return b''
+
+
 def ws_closed(sent):
     """
     Args:
@@ -176,7 +192,9 @@ def gate(monkeypatch):
     return make
 
 
-def set_password(monkeypatch, pwd='secret'):
+def set_password(monkeypatch, pwd='secret-password'):
+    # the default must pass the strength rule, otherwise every test that
+    # needs a usable password would silently fall into rule A
     monkeypatch.setattr(JWT_MANAGER, 'pwd', pwd)
 
 
@@ -186,7 +204,8 @@ def valid_cookie_header():
 
 
 class TestRuleA:
-    """No password: only requests carrying a valid electron token pass."""
+    """No usable password (none, or configured but too weak): only
+    requests carrying a valid electron token pass."""
 
     @pytest.mark.trio
     async def test_http_without_token_403(self, gate):
@@ -231,6 +250,61 @@ class TestRuleA:
         sent = await call_gate(mw, make_ws_scope(headers=[(b'x-alasio-token', b'tok1')]))
         assert ws_closed(sent) is None
         assert app.called
+
+
+class TestRuleAWeakPassword:
+    """A configured password failing the strength rule is treated as
+    unset: remote access is refused, only the electron client passes.
+    The error key names the rule so the login page can guide the user."""
+
+    WEAK = '1234567'
+
+    @pytest.mark.trio
+    async def test_weak_password_http_403_too_weak(self, gate, monkeypatch):
+        set_password(monkeypatch, self.WEAK)
+        mw, app = gate()
+        sent = await call_gate(mw, make_http_scope())
+        assert status_of(sent) == 403
+        # the error key alone says why, no extra data is sent
+        assert json.loads(body_of(sent)) == {'err': 'DEPLOY_PASSWORD_TOO_WEAK'}
+        assert not app.called
+
+    @pytest.mark.trio
+    async def test_weak_password_ws_rejected_4001(self, gate, monkeypatch):
+        set_password(monkeypatch, self.WEAK)
+        mw, app = gate()
+        sent = await call_gate(mw, make_ws_scope())
+        assert ws_closed(sent) == 4001
+        assert not app.called
+
+    @pytest.mark.trio
+    async def test_weak_password_with_electron_token_passes(self, gate, monkeypatch):
+        # treated as unset: the local electron client still passes rule A.
+        # /api/test with the electron token but no JWT is admitted by rule
+        # A and then answered 401 by the login layer (not the 403 refusal)
+        set_password(monkeypatch, self.WEAK)
+        token_table.seed_from_supervisor(('tok1',))
+        mw, app = gate()
+        sent = await call_gate(mw, make_http_scope(headers=[(b'x-alasio-token', b'tok1')]))
+        assert status_of(sent) == 401
+        assert not app.called
+        # the real electron flow renews its JWT through /api/auth/renew,
+        # which is exempt from the login layer: rule A is the only gate
+        sent = await call_gate(mw, make_http_scope(
+            path='/api/auth/renew', headers=[(b'x-alasio-token', b'tok1')]))
+        assert status_of(sent) == 200
+        assert app.called
+
+    @pytest.mark.trio
+    async def test_min_length_password_is_accepted(self, gate, monkeypatch):
+        # boundary: a password of exactly 8 characters passes the rule,
+        # so the login layer runs (401 without a JWT) instead of rule A
+        # refusing (403)
+        set_password(monkeypatch, '1' * 8)
+        mw, app = gate()
+        sent = await call_gate(mw, make_http_scope())
+        assert status_of(sent) == 401
+        assert not app.called
 
 
 class TestRuleB:

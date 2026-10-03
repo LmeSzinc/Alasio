@@ -20,6 +20,7 @@ from typing import Optional
 from msgspec import Meta, Struct, field
 from typing_extensions import Annotated
 
+from alasio.backend.auth.password import is_weak_password
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.file.yamlconfig import YamlConfig
@@ -214,6 +215,22 @@ class BackendConfig(Struct):
         "[Default] null (no SSL)",
     ]})] = None
 
+    def __repr__(self):
+        """
+        Custom repr with the password masked.
+
+        A traceback prints the local variables of every frame (the
+        logger renders exceptions with ``show_locals=True``) and the
+        config model often appears among them: the plaintext must not
+        leak through ``repr()``. Every other field keeps the generated
+        name=value form.
+        """
+        parts = [
+            f"{name}='********'" if name == 'Password' else f'{name}={getattr(self, name)!r}'
+            for name in self.__struct_fields__
+        ]
+        return f'{type(self).__name__}({", ".join(parts)})'
+
 
 class WebappConfig(Struct):
     Lang: Annotated[str, Meta(extra={"help": [
@@ -257,6 +274,27 @@ class YamlConfigWithPassword(YamlConfig):
         if 'Password' in path:
             return '********'
         return super()._secrete_value(path)
+
+    @cached_property
+    def weak_password(self):
+        """
+        Whether the configured web ui password (``Backend.Password``)
+        fails the strength rule (alasio.backend.auth.password).
+
+        Only this flag ever leaves the config: a caller never holds the
+        plaintext as a variable of its own frame, so a traceback that
+        prints local variables (the logger renders exceptions with
+        ``show_locals=True``) cannot leak the password from it.
+
+        Cached: like the rest of the config data, changing the password
+        requires a backend restart to take effect.
+
+        Returns:
+            bool: True when a password is configured and too weak, False
+                when no password is configured or the password passes
+                the rule
+        """
+        return bool(self.data.Backend.Password) and is_weak_password(self.data.Backend.Password)
 
 
 class DeployConfig(metaclass=Singleton):

@@ -10,21 +10,27 @@ instance attributes and leave the port plaintext.
 import pytest
 
 from alasio.backend.app.asgi import create_config
+from alasio.backend.auth.password import WEAK_PASSWORD_MESSAGE, is_weak_password
+from alasio.logger import logger
 
 
 class FakeBackend:
-    def __init__(self, ssl):
+    def __init__(self, ssl, pwd=None):
         self.Host = ''
         self.Port = 0
+        self.Password = pwd
         self.WebuiSSLKey = '/path/key.pem' if ssl else None
         self.WebuiSSLCert = '/path/cert.pem' if ssl else None
 
 
 class FakeDeployData:
-    def __init__(self, ssl):
-        self.Backend = FakeBackend(ssl)
+    def __init__(self, ssl, pwd=None):
+        self.Backend = FakeBackend(ssl, pwd)
         # create_config reads `DeployConfig().config.data`
         self.data = self
+        # create_config reads the strength flag off the config object
+        # (YamlConfigWithPassword.weak_password)
+        self.weak_password = bool(pwd) and is_weak_password(pwd)
         # create_config reformats the config after reading it
         self.write_calls = 0
 
@@ -40,8 +46,8 @@ class FakeDeployData:
 
 
 class FakeDeployConfig:
-    def __init__(self, ssl):
-        self.config = FakeDeployData(ssl)
+    def __init__(self, ssl, pwd=None):
+        self.config = FakeDeployData(ssl, pwd)
 
 
 class TestCreateConfig:
@@ -90,6 +96,53 @@ class TestCreateConfig:
         create_config([])
 
         assert fake.config.write_calls == 1
+
+
+class TestCreateConfigPasswordWarning:
+    """
+    A password failing the strength rule is not rejected by the yaml
+    validation (a validation failure would fall back to the default and
+    drop the password the user set); it is kept as is and reported with
+    a startup warning, the admission gate refuses remote access with it.
+    """
+
+    def make_config(self, monkeypatch, pwd):
+        """
+        Args:
+            monkeypatch:
+            pwd (str | None): The configured Backend.Password
+
+        Returns:
+            Config: The hypercorn config built by create_config
+        """
+        monkeypatch.setattr(
+            'alasio.backend.app.asgi.apply_hypercorn_exclusivity_patch', lambda: None)
+        monkeypatch.setattr('alasio.ext.env.set_project_root', lambda root: None)
+        monkeypatch.setattr(
+            'alasio.backend.app.asgi.DeployConfig',
+            lambda: FakeDeployConfig(ssl=False, pwd=pwd),
+        )
+        return create_config([])
+
+    def test_weak_password_warns(self, monkeypatch):
+        """A too weak password is warned about, the backend still serves."""
+        with logger.mock_capture_writer() as capture:
+            config = self.make_config(monkeypatch, '1234567')
+        assert capture.fd.any_contains(WEAK_PASSWORD_MESSAGE)
+        assert config.bind
+
+    @pytest.mark.parametrize('pwd', [
+        # no password configured
+        None,
+        '',
+        # the boundary and above pass the rule
+        '12345678',
+        'a strong passphrase',
+    ])
+    def test_no_warning(self, monkeypatch, pwd):
+        with logger.mock_capture_writer() as capture:
+            self.make_config(monkeypatch, pwd)
+        assert not capture.fd.any_contains(WEAK_PASSWORD_MESSAGE)
 
 
 class TestBindAnnounce:

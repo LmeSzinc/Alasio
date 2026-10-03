@@ -29,11 +29,13 @@ class JwtManager:
     @cached_property
     def pwd(self) -> str:
         """
-        The web ui password from deploy.yaml (Backend.Password).
+        The web ui password from deploy.yaml (Backend.Password), as
+        configured, so it may be weak (see auth.password for the rule).
 
         Cached: changing the password requires a backend restart to take
-        effect. Empty string means no password is configured; the
-        DeploymentGateMiddleware then refuses every web access except
+        effect. Empty string means no password is configured; an empty
+        or weak password is treated as unset by the
+        DeploymentGateMiddleware: every web access is refused except
         requests carrying a valid electron token.
         """
         return DeployConfig().config.data.Backend.Password or ''

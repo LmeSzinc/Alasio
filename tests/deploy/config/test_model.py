@@ -11,8 +11,9 @@ import pytest
 from msgspec.msgpack import encode as msgpack_encode
 from msgspecerror import load_msgpack_with_default
 
-from alasio.deploy.config.model import UpdateConfig
+from alasio.deploy.config.model import BackendConfig, DeployModel, UpdateConfig, YamlConfigWithPassword
 from alasio.ext.file.yamlconfig import build_help_map
+from alasio.testing.filesystem import fs  # noqa: F401
 
 
 def load(value):
@@ -71,3 +72,54 @@ class TestAutoRestartTime:
         """The help lines survive the Optional annotation (YamlConfig writes them)"""
         help_text = build_help_map(UpdateConfig)[('AutoRestartTime',)]
         assert 'Scheduled restart time' in help_text
+
+
+class TestWeakPassword:
+    """
+    YamlConfigWithPassword.weak_password: the strength rule of the web ui
+    password as a cached flag of the config, so a caller (create_config)
+    never holds the plaintext as a variable of its own frame.
+    """
+
+    @pytest.mark.parametrize('password, expected', [
+        # no password configured
+        (None, False),
+        ('', False),
+        # below / at the 8 character boundary of the rule
+        ('1234567', True),
+        ('12345678', False),
+    ])
+    def test_flag(self, fs, password, expected):
+        if password is None:
+            contents = 'Backend: {}\n'
+        else:
+            contents = f'Backend:\n  Password: {password!r}\n'
+        fs.create_file('/config/deploy.yaml', contents=contents)
+        config = YamlConfigWithPassword('/config/deploy.yaml', model=DeployModel)
+        assert config.weak_password is expected
+
+    def test_weak_value_is_kept(self, fs):
+        """A weak password keeps its configured value: the rule runs at
+        runtime, a msgspec field constraint would reset it to the default"""
+        fs.create_file('/config/deploy.yaml', contents='Backend:\n  Password: "1234567"\n')
+        config = YamlConfigWithPassword('/config/deploy.yaml', model=DeployModel)
+        assert config.weak_password is True
+        assert config.data.Backend.Password == '1234567'
+
+
+class TestBackendRepr:
+    """The password must not appear in repr(): a traceback prints locals"""
+
+    def test_repr_masks_password(self):
+        backend = BackendConfig(Password='secret-password')
+        assert repr(backend) == (
+            "BackendConfig(Host='0.0.0.0', Port=22267, Password='********', "
+            "WebuiSSLKey=None, WebuiSSLCert=None)"
+        )
+
+    def test_nested_repr_masks_password(self):
+        """The whole model repr is masked through the nested BackendConfig"""
+        model = DeployModel(Backend=BackendConfig(Password='secret-password'))
+        text = repr(model)
+        assert 'secret-password' not in text
+        assert "Password='********'" in text
