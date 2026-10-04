@@ -21,12 +21,13 @@
 // Run with: pnpm run codegen -- <files...>
 // or: tsx scripts/check-format.ts <files...>
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import fg from "fast-glob";
 import { getFileInfo, format as prettierFormat, resolveConfig } from "prettier";
 import type { I18nConfig } from "./i18n/config.ts";
+import { atomicWrite } from "./utils/atomic.ts";
 
 const frontendRoot = fileURLToPath(new URL("..", import.meta.url));
 const SVELTE_KIT_BIN = join(frontendRoot, "node_modules", "@sveltejs", "kit", "svelte-kit.js");
@@ -85,7 +86,16 @@ function expandPaths(paths: string[]): string[] {
   for (const p of paths) {
     // fast-glob expects forward slashes
     const pattern = p.replaceAll("\\", "/");
-    const matches = fg.sync(pattern, { cwd: frontendRoot, onlyFiles: true, absolute: true });
+    const matches = fg.sync(pattern, {
+      cwd: frontendRoot,
+      onlyFiles: true,
+      absolute: true,
+      // A directory held open by another process (the running dev server
+      // watching the tree on Windows) makes the walk raise EPERM; skip such
+      // directories instead of failing the whole codegen, a mistyped file is
+      // still reported by the literal-path fallback below
+      suppressErrors: true,
+    });
     if (matches.length > 0) {
       for (const m of matches) {
         if (!seen.has(m)) {
@@ -137,28 +147,6 @@ async function filterFiles(files: string[]): Promise<string[]> {
 }
 
 /**
- * Atomically write a file: write to a temp file first, then rename.
- *
- * Args:
- *     file (str): Target file path
- *     content (str): Content to write
- */
-function atomicWrite(file: string, content: string): void {
-  const tmp = `${file}.tmp`;
-  try {
-    writeFileSync(tmp, content, "utf8");
-    renameSync(tmp, file);
-  } catch (error) {
-    try {
-      unlinkSync(tmp);
-    } catch {
-      // Temp file may not exist
-    }
-    throw error;
-  }
-}
-
-/**
  * Prettier format a single file in place.
  *
  * Only writes the file when the formatted output differs, so unchanged
@@ -204,7 +192,7 @@ async function formatFile(file: string): Promise<boolean> {
     console.log("All good");
   } else {
     try {
-      atomicWrite(file, formatted);
+      await atomicWrite(file, formatted);
     } catch (error) {
       console.log(`Failed to write: ${(error as Error).message}`);
       return false;
@@ -234,6 +222,9 @@ function collectDeclarations(): string[] {
     cwd: frontendRoot,
     absolute: true,
     onlyFiles: true,
+    // Same as expandPaths: a directory held open by the running dev server
+    // must not fail the whole codegen
+    suppressErrors: true,
     ignore: ["node_modules/**", ".svelte-kit/**", "dist/**", "release/**", "build/**"],
   });
   files.sort();
@@ -254,7 +245,7 @@ function collectDeclarations(): string[] {
  * Args:
  *     files (list[str]): Absolute paths of the files to check
  */
-function writeCodegenTsconfig(files: string[]): void {
+async function writeCodegenTsconfig(files: string[]): Promise<void> {
   // On a fresh checkout .svelte-kit does not exist yet; svelte-kit sync
   // would create it later, but the temp tsconfig must be written first.
   mkdirSync(SVELTE_KIT_DIR, { recursive: true });
@@ -265,7 +256,7 @@ function writeCodegenTsconfig(files: string[]): void {
     include,
     exclude: [],
   };
-  atomicWrite(CODEGEN_TSCONFIG, `${JSON.stringify(tsconfig, null, 2)}\n`);
+  await atomicWrite(CODEGEN_TSCONFIG, `${JSON.stringify(tsconfig, null, 2)}\n`);
 }
 
 /**
@@ -390,7 +381,7 @@ async function main(): Promise<void> {
   let checkOk = true;
   if (checkable.length > 0) {
     try {
-      writeCodegenTsconfig(checkable);
+      await writeCodegenTsconfig(checkable);
       checkOk = runSvelteCheck();
     } finally {
       try {

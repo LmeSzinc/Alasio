@@ -22,9 +22,10 @@
 //           Defaults to "src". May be given multiple times.
 //   --check Only report files that would change, do not write them.
 //           Exits with code 1 when global imports are found.
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { atomicWrite } from "./utils/atomic.ts";
 
 const frontendRoot = fileURLToPath(new URL("..", import.meta.url));
 const LUCIDE_INDEX = join(frontendRoot, "node_modules", "@lucide", "svelte", "dist", "icons", "index.js");
@@ -268,7 +269,7 @@ function buildReplacement(body, indent, iconMap, deprecatedMap) {
  *     dict | None: {"icons": list[str], "kept": list[str]} conversions made,
  *         or None when the file has no convertible imports
  */
-function convertFile(file, iconMap, deprecatedMap, checkOnly) {
+async function convertFile(file, iconMap, deprecatedMap, checkOnly) {
   const source = readFileSync(file, "utf-8");
   const icons = [];
   const kept = [];
@@ -289,7 +290,7 @@ function convertFile(file, iconMap, deprecatedMap, checkOnly) {
     return null;
   }
   if (!checkOnly) {
-    writeFileSync(file, output);
+    await atomicWrite(file, output);
   }
   return { icons, kept };
 }
@@ -320,7 +321,7 @@ function printHelp() {
 /**
  * Main entry: parse arguments, scan directories, convert imports.
  */
-function main() {
+async function main() {
   const args = process.argv.slice(2);
   let checkOnly = false;
   const dirs = [];
@@ -352,7 +353,7 @@ function main() {
       process.exit(2);
     }
     for (const file of files) {
-      const result = convertFile(file, iconMap, deprecatedMap, checkOnly);
+      const result = await convertFile(file, iconMap, deprecatedMap, checkOnly);
       if (result === null) {
         continue;
       }

@@ -154,12 +154,24 @@ export * from './constants';
 
 最后你的 IDE 就会认识 `t.Home.Title()` 这个函数了
 
+### 并发与原子写入
+
+同一份 `src/i18n/{Module}.json` 会被多个进程同时读写：正在运行的 vite 开发服务器插件、手动执行的 `pnpm run i18ngen`、`pnpm run codegen`，以及 `svelte-kit sync` 触发的构建扫描。普通写入会先截断文件再写新内容，另一个进程恰好读到这个中间状态时只会看到空文件，此时如果按“从零重建”写回，整个模块的翻译就会被覆盖成默认文本（key 名）。
+
+因此 i18n 的文件读写统一走 `scripts/utils/atomic.ts`（对应 python 侧的 `alasio/ext/path/atomic.py`）：
+
+- **写**：先写同目录的临时文件，命名为 `<文件名>.<6 位随机 ID>.tmp`（随机 ID 避免并发写撞名），写入并 `fsync` 后用 `rename` 原子替换目标文件；Windows 下目标被其他进程占用时，替换按指数退避重试（最多 8 次，单次最多等待 1 秒），彻底失败则清理临时文件
+- **读**：`atomicReadText` / `atomicReadBytes` 同样带重试，读到的要么是替换前的完整内容，要么是替换后的完整内容
+- **同步**：生成器读到空文件 / 解析失败（说明恰好撞上并发写入）时跳过本次同步、保留磁盘上的文件，而不是把翻译写回默认文本
+
 ## 目录结构
 
 - `scripts/i18n/`：i18n 模块目录。
   - `core.ts`：核心逻辑，负责扫描、解析和生成。
   - `config.ts`：配置文件。
   - `vite.ts`：Vite 插件的集成代码。
+- `scripts/utils/`：脚本通用工具目录。
+  - `atomic.ts`：原子文件读写（临时文件命名与 Windows 替换重试），i18n 生成器和 `check-format.ts` 使用；webapp 的 `scripts/` 下有一份相同的拷贝。
 - `src/i18n/`：**[数据源]** 这里存放 JSON 翻译文件。请务必把它们提交到 Git。
 - `src/i18ngen/`：**[生成产物]** 这里是自动生成的 TS 代码。通常不需要提交到 Git，只是构建时生成。
 

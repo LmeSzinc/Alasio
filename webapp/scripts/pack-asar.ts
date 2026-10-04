@@ -6,10 +6,11 @@
 // The archive layout replicates electron-builder's `files` config in
 // electron-builder.yml (dist/**/* plus package.json at the archive root).
 // Run with: tsx scripts/pack-asar.ts
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPackageFromFiles } from "@electron/asar";
+import { replaceTmp, toTmpFile } from "./utils/atomic.ts";
 
 const webappRoot = fileURLToPath(new URL("..", import.meta.url));
 const distDir = join(webappRoot, "dist");
@@ -73,17 +74,21 @@ function findAsarFiles(dir: string): string[] {
  * Replace an app.asar archive atomically with a freshly packed one.
  *
  * The archive is written next to the target and renamed over it, so an
- * interrupted run never leaves a half-written app.asar in place.
+ * interrupted run never leaves a half-written app.asar in place. The rename
+ * retries while a running Electron instance still holds the target archive
+ * open (Windows).
  *
  * Args:
  *     target (str): Absolute path of the app.asar to replace
  *     files (list[str]): Archive entries, relative to webappRoot
  */
 async function replaceAsar(target: string, files: string[]): Promise<void> {
-  const tmp = `${target}.tmp`;
+  // The temp archive uses the atomic util naming (random ID), so concurrent
+  // runs do not clobber each other
+  const tmp = toTmpFile(target);
   try {
     await createPackageFromFiles(webappRoot, tmp, files);
-    renameSync(tmp, target);
+    await replaceTmp(tmp, target);
     console.log(`Updated ${relative(webappRoot, target)}`);
   } finally {
     rmSync(tmp, { force: true });

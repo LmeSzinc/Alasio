@@ -88,20 +88,20 @@ export function svelteDropDevPage(options: SvelteDropDevPageOptions = {}): Plugi
       // sveltekit's own config hook is order: 'pre' and performs the route
       // scan there; this hook must run before it
       order: "pre",
-      handler(config, env) {
+      async handler(config, env) {
         const root = path.resolve(config.root ?? process.cwd(), routesDir);
         if (env.command === "build") {
           // Drop marked route files so the route scan does not see them.
           // Files already dropped by an interrupted build are kept as-is,
           // and the remaining marked files are dropped to complete it.
-          const dropped = dropMarkedRoutes(root, marker);
+          const dropped = await dropMarkedRoutes(root, marker);
           if (dropped.length > 0) {
             this.info(`[svelte-drop-dev-page] dropped ${dropped.length} route file(s) for build`);
           }
         } else {
           // Dev server (or preview): restore files left dropped by an
           // interrupted build, so dev-only pages are accessible again.
-          const restored = restoreDroppedRoutes(root);
+          const restored = await restoreDroppedRoutes(root);
           if (restored.length > 0) {
             this.info(`[svelte-drop-dev-page] restored ${restored.length} route file(s) from interrupted build`);
           }
@@ -114,7 +114,7 @@ export function svelteDropDevPage(options: SvelteDropDevPageOptions = {}): Plugi
       routesRoot = path.resolve(config.root, routesDir);
     },
 
-    closeBundle() {
+    async closeBundle() {
       // Vite build may run two passes (client + ssr); restore the dropped
       // files on every pass. Restoring is idempotent: the config hook of
       // the next pass re-drops the marked files, and the final pass ends
@@ -122,7 +122,7 @@ export function svelteDropDevPage(options: SvelteDropDevPageOptions = {}): Plugi
       // fallback, build.ssr === false) runs a single pass only, so it
       // must not be skipped either.
       if (command !== "build") return;
-      const restored = restoreDroppedRoutes(routesRoot);
+      const restored = await restoreDroppedRoutes(routesRoot);
       if (restored.length > 0) {
         this.info(`[svelte-drop-dev-page] restored ${restored.length} route file(s) after build`);
       }

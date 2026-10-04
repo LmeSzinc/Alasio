@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { atomicRename } from "../utils/atomic.ts";
 
 /**
  * Temporary suffix appended to route files during build, e.g.
@@ -61,9 +62,9 @@ function walkFiles(dir: string, out: string[] = []): string[] {
  *     marker (str): Marker comment that marks a route file to drop
  *
  * Returns:
- *     list[str]: Absolute paths of the files renamed in this call
+ *     Promise[list[str]]: Absolute paths of the files renamed in this call
  */
-export function dropMarkedRoutes(routesDir: string, marker: string): string[] {
+export async function dropMarkedRoutes(routesDir: string, marker: string): Promise<string[]> {
   const dropped: string[] = [];
   for (const file of walkFiles(routesDir)) {
     const basename = path.basename(file);
@@ -80,7 +81,7 @@ export function dropMarkedRoutes(routesDir: string, marker: string): string[] {
     }
     if (!content.includes(marker)) continue;
     try {
-      fs.renameSync(file, file + DROPPED_SUFFIX);
+      await atomicRename(file, file + DROPPED_SUFFIX);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`svelte-drop-dev-page: failed to drop route file ${file}: ${message}`);
@@ -102,9 +103,9 @@ export function dropMarkedRoutes(routesDir: string, marker: string): string[] {
  *     routesDir (str): Absolute path of the routes directory
  *
  * Returns:
- *     list[str]: Absolute paths of the restored files
+ *     Promise[list[str]]: Absolute paths of the restored files
  */
-export function restoreDroppedRoutes(routesDir: string): string[] {
+export async function restoreDroppedRoutes(routesDir: string): Promise<string[]> {
   const restored: string[] = [];
   for (const file of walkFiles(routesDir)) {
     if (!file.endsWith(DROPPED_SUFFIX)) continue;
@@ -112,7 +113,7 @@ export function restoreDroppedRoutes(routesDir: string): string[] {
     // Not a route convention file, not one of ours
     if (!ROUTE_FILES.has(path.basename(original))) continue;
     try {
-      fs.renameSync(file, original);
+      await atomicRename(file, original);
     } catch (error) {
       // Target may already exist, or the file is locked; leave it and warn
       const message = error instanceof Error ? error.message : String(error);

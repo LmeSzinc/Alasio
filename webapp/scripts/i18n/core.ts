@@ -2,6 +2,7 @@ import path from "path";
 import glob from "fast-glob";
 import fs from "fs-extra";
 import { DROPPED_SUFFIX } from "../svelte-drop-dev-page/files.ts";
+import { atomicReadText, atomicRemove, atomicWrite } from "../utils/atomic.ts";
 import { type I18nConfig, resolvePath } from "./config.ts";
 
 // Matches usage like: t.Home.Hello(
@@ -113,7 +114,7 @@ export class I18nGenerator {
       `export const DEFAULT_LANG = "${this.config.languages[0]}";`,
       "",
     ].join("\n");
-    await fs.outputFile(constPath, constContent);
+    await atomicWrite(constPath, constContent);
 
     // Generate empty t object
     const indexContent = [
@@ -123,11 +124,11 @@ export class I18nGenerator {
       `export const t = {};`, // Proxy in runtime will handle this empty object
       "",
     ].join("\n");
-    await fs.outputFile(indexPath, indexContent);
+    await atomicWrite(indexPath, indexContent);
 
     // Node mode: generate the plain language state module
     if (this.config.mode === "node") {
-      await fs.outputFile(resolvePath(this.config, this.config.genPath, "state.ts"), this.stateModuleContent());
+      await atomicWrite(resolvePath(this.config, this.config.genPath, "state.ts"), this.stateModuleContent());
     }
   }
 
@@ -146,11 +147,11 @@ export class I18nGenerator {
    */
   private async writeIfChanged(file: string, content: string) {
     try {
-      if (content === (await fs.readFile(file, "utf-8"))) return;
+      if (content === (await atomicReadText(file))) return;
     } catch {
       // File does not exist yet: fall through and write it.
     }
-    await fs.outputFile(file, content);
+    await atomicWrite(file, content);
   }
 
   /**
@@ -307,9 +308,31 @@ export class I18nGenerator {
     let currentContent = "";
     let currentOnDisk: Record<string, Record<string, string>> = {};
     try {
-      currentContent = await fs.readFile(jsonPath, "utf-8");
-      currentOnDisk = JSON.parse(currentContent);
-    } catch {}
+      currentContent = await atomicReadText(jsonPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        // The file is still locked after all read retries: skip this sync,
+        // rebuilding the JSON from an empty state would replace every
+        // translation of the module with the default key text.
+        console.log(`[i18n] ${mod}: JSON is not readable, skip this sync`);
+        return;
+      }
+      // The file does not exist yet (fresh module): every key starts with
+      // the default text below.
+    }
+    if (currentContent) {
+      try {
+        currentOnDisk = JSON.parse(currentContent);
+      } catch {
+        // An unreadable file means a concurrent generator is rewriting it
+        // (or it was corrupted). Rebuilding it from the scanned keys alone
+        // would silently replace every translation of the module with the
+        // default key text, so skip this sync and keep the file as is; the
+        // next scan runs against a complete file again.
+        console.log(`[i18n] ${mod}: JSON is not readable, skip this sync`);
+        return;
+      }
+    }
 
     const removed = Object.keys(currentOnDisk).filter((k) => !keys.has(k));
     if (removed.length > 0) {
@@ -339,7 +362,7 @@ export class I18nGenerator {
     // compare with current file content to decide whether to write
     const encoded = JSON.stringify(newData, null, 2).trimEnd() + "\n";
     if (encoded !== (currentContent || "")) {
-      await fs.outputFile(jsonPath, encoded);
+      await atomicWrite(jsonPath, encoded);
     }
 
     await this.generateModuleArtifacts(mod, newData);
@@ -349,7 +372,7 @@ export class I18nGenerator {
   private async generateModuleArtifacts(mod: string, data?: Record<string, Record<string, string>>) {
     if (!data) {
       try {
-        data = JSON.parse(await fs.readFile(resolvePath(this.config, this.config.i18nPath, `${mod}.json`), "utf-8"));
+        data = JSON.parse(await atomicReadText(resolvePath(this.config, this.config.i18nPath, `${mod}.json`)));
       } catch {
         return;
       }
@@ -446,8 +469,8 @@ export class I18nGenerator {
 
   private async removeModule(mod: string) {
     await Promise.all([
-      fs.remove(resolvePath(this.config, this.config.i18nPath, `${mod}.json`)),
-      fs.remove(resolvePath(this.config, this.config.genPath, `${mod}.ts`)),
+      atomicRemove(resolvePath(this.config, this.config.i18nPath, `${mod}.json`)),
+      atomicRemove(resolvePath(this.config, this.config.genPath, `${mod}.ts`)),
     ]);
   }
 
