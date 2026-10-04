@@ -10,6 +10,10 @@
  *
  * The pills are cut to five lines, measured on a hidden probe of the whole order
  * (jsdom lays nothing out, the tests fake that geometry, see fakeLayout).
+ *
+ * The file name ends with `.svelte.test.ts`, so the svelte plugin compiles it
+ * as a svelte module: the tests can use runes (`$state`) directly, the same as
+ * DashboardItem.svelte.test.ts does.
  */
 import { mount, unmount } from "svelte";
 import { toast } from "svelte-sonner";
@@ -18,7 +22,6 @@ import Arg from "$lib/components/arg/Arg.svelte";
 import type { ArgData } from "$lib/components/arg/utils.svelte";
 import { t } from "$lib/i18n";
 import { flushEffects } from "$lib/test-utils/flush-effects";
-import { reactive } from "$lib/test-utils/reactive.svelte";
 
 // The "edits discarded" toast is the only svelte-sonner usage of these
 // components, keep the real toast library out of the jsdom tests.
@@ -83,9 +86,10 @@ function makeArg(overrides: Partial<ArgData> = {}): ArgData {
 async function mountArg(arg: ArgData) {
   const target = document.createElement("div");
   document.body.appendChild(target);
-  // The app passes the topic data (deep reactive state) down to the rows;
-  // a plain object would not notify the pills when a sibling edits the value
-  const data = reactive(arg);
+  // The app passes the topic data (deep reactive state) down to the rows, so
+  // the test passes the same shape: a plain object would not notify the pills
+  // when the component commits a new order
+  const data = $state(arg);
   const handleEdit = vi.fn();
   mounted.push(mount(Arg, { target, props: { data, handleEdit } }));
   await settle();
@@ -231,6 +235,22 @@ describe("TestFilterOrderRender", () => {
     expect(pills(target).contains(button)).toBe(false);
     // The title row comes before the pill row in the document order
     expect(button.compareDocumentPosition(pills(target)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("marks an invalid item on the settings page, its tooltip lives in the editor", async () => {
+    const { target } = await mountArg(makeArg({ value: ["Fleet-1", "Removed"], option: ["Fleet-1", "Fleet-2"] }));
+
+    // The pill only carries the mark, no tooltip trigger. Screen readers still
+    // get the reason through the label of the icon
+    expect(pills(target).querySelector(`[role="img"][aria-label="${t.Input.FilterOrderInvalid()}"]`)).not.toBeNull();
+    expect(pills(target).querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
+
+    await openDialog(target);
+    const row = [...column("selected").querySelectorAll<HTMLElement>('[data-slot="filter-order-item"]')].find((el) =>
+      el.textContent?.includes("Removed"),
+    );
+    expect(row).toBeDefined();
+    expect(row!.querySelector('[data-slot="tooltip-trigger"]')).not.toBeNull();
   });
 
   it("keeps a plain vertical row unchanged, it has no action slot", async () => {
@@ -462,8 +482,8 @@ describe("TestFilterOrderMultiInstance", () => {
     const argB = makeArg({ arg: "OrderB", name: "Second order", value: ["Fleet-2"] });
     const target = document.createElement("div");
     document.body.appendChild(target);
-    const dataA = reactive(argA);
-    const dataB = reactive(argB);
+    const dataA = $state(argA);
+    const dataB = $state(argB);
     const handleEditA = vi.fn();
     const handleEditB = vi.fn();
     mounted.push(mount(Arg, { target, props: { data: dataA, handleEdit: handleEditA } }));

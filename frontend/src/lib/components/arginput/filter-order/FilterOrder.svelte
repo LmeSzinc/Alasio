@@ -2,7 +2,6 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { type InputProps, useArgValue } from "$lib/components/arg/utils.svelte";
   import { Badge } from "$lib/components/ui/badge";
-  import * as Tooltip from "$lib/components/ui/tooltip";
   import { t } from "$lib/i18n";
   import { elementSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
@@ -97,55 +96,48 @@
     {/if}
     <Badge variant="secondary" class="rounded-full">
       {#if isInvalid(item)}
-        <Tooltip.Root>
-          <Tooltip.Trigger>
-            <span role="img" class="inline-flex" aria-label={t.Input.FilterOrderInvalid()}>
-              <TriangleAlert class="text-destructive size-3 shrink-0" />
-            </span>
-          </Tooltip.Trigger>
-          <Tooltip.Content>
-            <p>{t.Input.FilterOrderInvalid()}</p>
-          </Tooltip.Content>
-        </Tooltip.Root>
+        <!-- The settings page only marks the item, the tooltip of the invalid
+             item lives in the editor (see FilterOrderItem.svelte) -->
+        <span role="img" class="inline-flex" aria-label={t.Input.FilterOrderInvalid()}>
+          <TriangleAlert class="text-destructive size-3 shrink-0" />
+        </span>
       {/if}
       {arg.getLabel(item)}
     </Badge>
   </span>
 {/snippet}
 
-<Tooltip.Provider>
-  <div class={cn("relative", className)}>
-    <!-- The visible list: the pills up to the cut, then the marker -->
-    <div data-slot="filter-order-pills" class={PILL_LINE}>
-      {#if items.length === 0}
-        <span class="text-muted-foreground text-xs">{t.Input.FilterOrderEmpty()}</span>
-      {:else}
-        {#each visible as item, index (item)}
-          {@render pill(item, index)}
-        {/each}
-        {#if truncated}
-          <span class="text-muted-foreground text-xs">&gt; ...</span>
-        {/if}
-      {/if}
-    </div>
-
-    <!-- Hidden probe of the whole order, the measuring source of the cut: out
-         of flow, never painted and unreachable for tab and screen readers. Its
-         trailing marker measures the width of the marker -->
-    {#if items.length > 0}
-      <div
-        bind:this={probe}
-        use:elementSize={probeSize}
-        data-slot="filter-order-probe"
-        aria-hidden="true"
-        inert
-        class={cn(PILL_LINE, "pointer-events-none invisible absolute inset-x-0 top-0")}
-      >
-        {#each items as item, index (item)}
-          {@render pill(item, index)}
-        {/each}
+<div class={cn("relative", className)}>
+  <!-- The visible list: the pills up to the cut, then the marker -->
+  <div data-slot="filter-order-pills" class={PILL_LINE}>
+    {#if items.length === 0}
+      <span class="text-muted-foreground text-xs">{t.Input.FilterOrderEmpty()}</span>
+    {:else}
+      {#each visible as item, index (item)}
+        {@render pill(item, index)}
+      {/each}
+      {#if truncated}
         <span class="text-muted-foreground text-xs">&gt; ...</span>
-      </div>
+      {/if}
     {/if}
   </div>
-</Tooltip.Provider>
+
+  <!-- Hidden probe of the whole order, the measuring source of the cut: out of
+       flow, never painted and unreachable for tab and screen readers. Its
+       trailing marker measures the width of the marker -->
+  {#if items.length > 0}
+    <div
+      bind:this={probe}
+      use:elementSize={probeSize}
+      data-slot="filter-order-probe"
+      aria-hidden="true"
+      inert
+      class={cn(PILL_LINE, "pointer-events-none invisible absolute inset-x-0 top-0")}
+    >
+      {#each items as item, index (item)}
+        {@render pill(item, index)}
+      {/each}
+      <span class="text-muted-foreground text-xs">&gt; ...</span>
+    </div>
+  {/if}
+</div>
