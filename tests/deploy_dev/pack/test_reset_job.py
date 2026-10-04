@@ -82,7 +82,7 @@ class TestJobFile:
     def test_get_unfinished_job_marker(self, app_folder):
         """A marker job file is dispatched to a resumed ResetJob."""
         ResetJob(WEBSITE_SERVER).write()
-        job = DeployJob()._get_unfinished_job(WEBSITE_SERVER)
+        job = DeployJob(server=WEBSITE_SERVER)._get_unfinished_job()
         assert job is not None
         assert isinstance(job, ResetJob)
         assert job.run()
@@ -734,7 +734,7 @@ class TestRun:
         def _fail(self):
             raise AssertionError('write() should not be called on resume')
         monkeypatch.setattr(ResetJob, 'write', _fail)
-        job = DeployJob()._get_unfinished_job(WEBSITE_SERVER)
+        job = DeployJob(server=WEBSITE_SERVER)._get_unfinished_job()
         assert job is not None
         assert job.run()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')

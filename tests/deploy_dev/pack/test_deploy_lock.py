@@ -99,7 +99,7 @@ class TestFlowLocked:
 
     def test_update_holds_the_lock(self, app_folder, monkeypatch):
         """update() holds the lock while its job runs, releases it after."""
-        deploy = DeployJob()
+        deploy = DeployJob(server=WEBSITE_SERVER)
         with logger.mock_capture_writer():
             deploy.unpack(WEBSITE_FULL_PACK)
         states = []
@@ -111,7 +111,7 @@ class TestFlowLocked:
 
         monkeypatch.setattr(ResetJob, 'run', run)
         with logger.mock_capture_writer():
-            assert deploy.update(WEBSITE_SERVER)
+            assert deploy.update()
         assert states == [True]
         assert not deploy.lock.is_locked
 

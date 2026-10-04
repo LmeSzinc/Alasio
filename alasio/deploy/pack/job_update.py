@@ -28,7 +28,7 @@ class UpdateJob(JobBase):
     job file ({ledger}/workspace/job.pack) with write() before
     unpacking, so an interrupted run can be resumed by the next run:
 
-        job = DeployJob()._get_unfinished_job(server)
+        job = DeployJob(server=server)._get_unfinished_job()
         if job is not None:
             job.run()
         job = UpdateJob(data, server=server)

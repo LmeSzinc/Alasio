@@ -17,7 +17,7 @@ class ResetJob(JobBase):
     ({ledger}/workspace/job.pack) with write() before validating, so
     an interrupted run can be resumed by the next run:
 
-        job = DeployJob()._get_unfinished_job(server)
+        job = DeployJob(server=server)._get_unfinished_job()
         if job is None:
             job = ResetJob(server)
             job.write()

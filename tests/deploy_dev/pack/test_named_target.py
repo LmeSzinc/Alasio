@@ -150,7 +150,7 @@ class TestNamedUpdate:
         monkeypatch.setattr(NAMED_SERVER, 'get_file_content', _fail)
 
         with logger.mock_capture_writer():
-            assert DeployJob(name='httpx').update(NAMED_SERVER)
+            assert DeployJob(name='httpx', server=NAMED_SERVER).update()
         for path, content in NAMED_TREE.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         # the generated history record follows the mapping too
@@ -165,7 +165,7 @@ class TestNamedUpdate:
         """The validation flow reads the ledger of the named target."""
         with logger.mock_capture_writer():
             UnpackJob(NAMED_NEW_PACK, name='httpx').run()
-            assert DeployJob(name='httpx').update(NAMED_SERVER)
+            assert DeployJob(name='httpx', server=NAMED_SERVER).update()
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/httpx/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/httpx/workspace')
@@ -177,7 +177,7 @@ class TestNamedUpdate:
             UnpackJob(NAMED_OLD_PACK, name='httpx').run()
         os.remove(env.PROJECT_ROOT / '.pack/httpx/index.pack')
         with logger.mock_capture_writer() as capture:
-            assert DeployJob(name='httpx').update(NAMED_SERVER)
+            assert DeployJob(name='httpx', server=NAMED_SERVER).update()
         assert capture.backend.any_contains('Failed to read the local version')
         for path, content in NAMED_TREE.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
@@ -198,7 +198,7 @@ class TestNamedUpdate:
         monkeypatch.setattr(NAMED_SERVER, 'get_file_content', _fail)
 
         with logger.mock_capture_writer():
-            assert DeployJob(name='b').update(NAMED_SERVER)
+            assert DeployJob(name='b', server=NAMED_SERVER).update()
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/b/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/a')

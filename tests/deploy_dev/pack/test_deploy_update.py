@@ -13,6 +13,8 @@ which the fake filesystem does not provide.
 """
 import os
 
+import pytest
+
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_rebuild import RebuildJob
@@ -110,7 +112,7 @@ class TestDeployUpdate:
         """A version mismatch downloads the update pack and applies it."""
         with logger.mock_capture_writer():
             UnpackJob(OLD_PACK).run()
-            assert DeployJob().update(SERVER)
+            assert DeployJob(server=SERVER).update()
         assert read_tree() == NEW_TREE
         # the local index pack is the new one
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
@@ -121,7 +123,7 @@ class TestDeployUpdate:
         """The same version continues with ResetJob, nothing changes."""
         with logger.mock_capture_writer():
             UnpackJob(NEW_PACK).run()
-            assert DeployJob().update(SERVER)
+            assert DeployJob(server=SERVER).update()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -129,7 +131,7 @@ class TestDeployUpdate:
         """A missing local index falls back to RebuildJob, the tree is
         rebuilt from the server."""
         with logger.mock_capture_writer() as capture:
-            assert DeployJob().update(SERVER)
+            assert DeployJob(server=SERVER).update()
         assert capture.backend.any_contains('Failed to read the local version')
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
@@ -141,7 +143,7 @@ class TestDeployUpdate:
         is rebuilt from the latest index."""
         UnpackJob(OLD_PACK).run()
         with logger.mock_capture_writer() as capture:
-            assert DeployJob().update(SERVER_NO_UPDATE)
+            assert DeployJob(server=SERVER_NO_UPDATE).update()
         assert capture.backend.any_contains('Failed to get the update pack')
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
@@ -153,7 +155,7 @@ class TestDeployUpdate:
         RebuildJob, the tree is rebuilt from the latest index."""
         UnpackJob(OLD_PACK).run()
         with logger.mock_capture_writer() as capture:
-            assert DeployJob().update(SERVER_CORRUPT_UPDATE)
+            assert DeployJob(server=SERVER_CORRUPT_UPDATE).update()
         assert capture.backend.any_contains('Failed to apply the update pack')
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
@@ -165,7 +167,7 @@ class TestDeployUpdate:
         UnpackJob(OLD_PACK).run()
         RebuildJob(SERVER).write()
         with logger.mock_capture_writer():
-            assert DeployJob().update(SERVER)
+            assert DeployJob(server=SERVER).update()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -173,6 +175,12 @@ class TestDeployUpdate:
         """An unfinished job is finished before the update."""
         with logger.mock_capture_writer():
             UnpackJob(OLD_PACK).write()
-            assert DeployJob().update(SERVER)
+            assert DeployJob(server=SERVER).update()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    def test_update_without_server(self, app_folder):
+        """A target created without a server cannot update."""
+        with pytest.raises(ValueError, match='no server provided'):
+            DeployJob().update()
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack')

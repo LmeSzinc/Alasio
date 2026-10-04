@@ -28,27 +28,34 @@ class DeployJob(DeployTarget):
     classmethods: the ledger folder is {root}/.pack. A named target
     shares its root with other targets, e.g. the python dists of a
     site-packages folder, and keeps its ledger folder in
-    {root}/.pack/{name}:
+    {root}/.pack/{name}. The server to update from is an instance
+    attribute too, it is set once in __init__:
 
-        DeployJob().unpack(data)
-        DeployJob(name='httpx').update(server)
+        DeployJob().unpack(data)                   # no server needed
+        DeployJob(name='httpx', server=server).update()
 
     The unfinished job is finished inside unpack() and update(), the
-    caller does not need to care about it. Both take the exclusive
-    lock of the target ledger for the whole flow, see locked(): two
-    updaters of the same target never interleave, the second one waits
-    (or fails at once with locked(timeout=0)).
+    caller does not need to care about it; the server of the instance
+    is handed to it, so a resumed job downloads its missing files
+    from it when set. Both take the exclusive lock of the target
+    ledger for the whole flow, see locked(): two updaters of the same
+    target never interleave, the second one waits (or fails at once
+    with locked(timeout=0)).
     """
 
-    def __init__(self, root=None, name=''):
+    def __init__(self, root=None, name='', server=None):
         """
         Args:
             root (str, optional): Folder to update. Defaults to None,
                 env.PROJECT_ROOT
             name (str, optional): Ledger key of the target. Defaults to
                 '', the project tree target
+            server (ServerFile, optional): Server to check and download
+                from, used by update() and handed to the unfinished job
+                that unpack() / update() finish. Defaults to None.
         """
         super().__init__(root=root, name=name)
+        self.server = server
         # the exclusive lock of the target ledger, held by update() and
         # unpack() for their whole flow, see locked(). The wait default
         # is the lock default: timeout=-1 waits forever, 0 fails at once
@@ -73,7 +80,7 @@ class DeployJob(DeployTarget):
         one critical section that another updater cannot interleave:
 
             with deploy.locked(timeout=0):
-                deploy.update(server)
+                deploy.update()
 
         Args:
             timeout (float, optional): Seconds to wait for the lock,
@@ -93,7 +100,7 @@ class DeployJob(DeployTarget):
         finally:
             self.lock.release()
 
-    def _get_unfinished_job(self, server=None):
+    def _get_unfinished_job(self):
         """
         Check if there is an unfinished job of this target, read it
         and create the job object of the corresponding type.
@@ -107,11 +114,10 @@ class DeployJob(DeployTarget):
 
         The lock of the target is not taken here: the returned job
         mutates the working tree, run it under locked() (update() and
-        unpack() take the lock around their whole flow).
-
-        Args:
-            server (ServerFile, optional): Server to download the
-                missing files for a resumed validation job
+        unpack() take the lock around their whole flow). The server of
+        the instance (self.server) is handed to the returned job: a
+        resumed job downloads its missing files from it when set,
+        None when the target was created without a server.
 
         Returns:
             JobBase: The unfinished job, or None if there is no
@@ -123,10 +129,10 @@ class DeployJob(DeployTarget):
             return None
         if data == ResetJob.MARK:
             # a validation job, its data comes from the local index pack
-            return ResetJob(server, resume=True, root=self.root, name=self.name)
+            return ResetJob(self.server, resume=True, root=self.root, name=self.name)
         if data == RebuildJob.MARK:
             # a rebuild job, its data comes from the local index pack
-            return RebuildJob(server, resume=True, root=self.root, name=self.name)
+            return RebuildJob(self.server, resume=True, root=self.root, name=self.name)
         try:
             decoder = PackDecodeBase(data)
         except PackDecodeError as e:
@@ -138,7 +144,7 @@ class DeployJob(DeployTarget):
         # means an update pack, an empty one a full pack
         if decoder.old_version:
             # an update pack, resume the update job
-            return UpdateJob(data, server=server, resume=True, root=self.root, name=self.name)
+            return UpdateJob(data, server=self.server, resume=True, root=self.root, name=self.name)
         return UnpackJob(data, resume=True, root=self.root, name=self.name)
 
     def unpack(self, data):
@@ -148,9 +154,12 @@ class DeployJob(DeployTarget):
         Unpacking is a local rebuild: the leftover files of the old
         version (recorded in the old local index pack, not in this
         pack) are removed, the new index pack (index.pack in the ledger
-        folder of the target) replaces the local one last. No server is
-        involved. Finishes the unfinished job first, then unpacks the
-        new data, the caller only needs to call run() of each job. The
+        folder of the target) replaces the local one last. The unpack
+        itself needs no server: the server of the instance
+        (self.server) is only handed to the unfinished job finished
+        first, a resumed job downloads its missing files from it when
+        set. Finishes the unfinished job first, then unpacks the new
+        data, the caller only needs to call run() of each job. The
         exclusive lock of the target ledger is held for the whole flow,
         see locked().
 
@@ -181,10 +190,13 @@ class DeployJob(DeployTarget):
             return ''
         return decoder.current_version
 
-    def update(self, server):
+    def update(self):
         """
-        Check the latest version on the server and update the local
-        working tree of this target to it.
+        Check the latest version on the server of the instance
+        (self.server, set in __init__) and update the local working
+        tree of this target to it:
+
+            DeployJob(server=server).update()
 
         The unified entry of the file check flow in the draft of
         PackEncodeBase:
@@ -209,35 +221,37 @@ class DeployJob(DeployTarget):
         the caller does not need to care about it. The exclusive lock
         of the target ledger is held for the whole flow, see locked().
 
-        Args:
-            server (ServerFile): Server to check and download from
-
         Returns:
             bool: True if every file is up to date, False if some
                 records stay in error
+
+        Raises:
+            ValueError: If the target was created without a server
         """
+        if self.server is None:
+            raise ValueError('Failed to update: no server provided')
         with self.locked():
             # finish the unfinished job first, its run() skips write()
-            job = self._get_unfinished_job(server)
+            job = self._get_unfinished_job()
             if job is not None:
                 logger.info(f'Found unfinished job: {job.__class__}')
                 job.run()
 
             local = self._local_version()
             logger.attr('CurrentVersion', local)
-            info = server.get_latest_info()
+            info = self.server.get_latest_info()
             logger.attr('LatestVersion', info.version)
 
             if not local:
                 # the local index is missing or malformed, the version is
                 # unknown: rebuild from the latest index
                 logger.warning('Failed to read the local version, rebuilding from the latest index')
-                job = RebuildJob(server, root=self.root, name=self.name)
+                job = RebuildJob(self.server, root=self.root, name=self.name)
                 return job.run()
             if local != info.version:
                 # a version mismatch, apply the update pack incrementally
                 try:
-                    data = server.get_update_pack(local, info.version)
+                    data = self.server.get_update_pack(local, info.version)
                 except httpx2.HTTPStatusError as e:
                     # the update pack of the local version is not on the
                     # server (out of the update window or removed), the
@@ -246,17 +260,17 @@ class DeployJob(DeployTarget):
                         f'Failed to get the update pack {local} -> {info.version}: {e}, '
                         f'rebuilding from the latest index'
                     )
-                    job = RebuildJob(server, root=self.root, name=self.name)
+                    job = RebuildJob(self.server, root=self.root, name=self.name)
                     return job.run()
-                job = UpdateJob(data, server=server, root=self.root, name=self.name)
+                job = UpdateJob(data, server=self.server, root=self.root, name=self.name)
                 if job.run():
                     return True
                 # the update pack failed to apply, rebuild from the latest
                 # index: a corrupt pack is bypassed, the latest index and
                 # the files are downloaded directly
                 logger.warning('Failed to apply the update pack, rebuilding from the latest index')
-                job = RebuildJob(server, root=self.root, name=self.name)
+                job = RebuildJob(self.server, root=self.root, name=self.name)
                 return job.run()
             # the same version, check the index and the files
-            job = ResetJob(server, root=self.root, name=self.name)
+            job = ResetJob(self.server, root=self.root, name=self.name)
             return job.run()
