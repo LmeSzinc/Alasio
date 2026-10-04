@@ -8,6 +8,7 @@
     data = $bindable(),
     parentWidth,
     InputComponent,
+    ActionComponent,
     isAdvanced = false,
     handleEdit,
     handleReset,
@@ -22,11 +23,19 @@
 </script>
 
 <div class={cn("flex flex-col gap-y-2", className)}>
-  <!-- First row: name -->
-  <div class="flex flex-row items-center justify-start gap-x-1.5 overflow-hidden">
-    <I18nText text={displayName} class="font-medium" />
-    {#if shouldFoldHelp}
-      <ToggleHelp bind:helpVisible />
+  <!-- First row: name, with the optional row action on the right (e.g. the
+       edit button of dt=filter-order); without one the row is unchanged -->
+  <div class="flex flex-row items-center justify-between gap-x-4">
+    <div class="flex min-w-0 flex-1 flex-row items-center gap-x-1.5 overflow-hidden">
+      <I18nText text={displayName} class="font-medium" />
+      {#if shouldFoldHelp}
+        <ToggleHelp bind:helpVisible />
+      {/if}
+    </div>
+    {#if ActionComponent}
+      <div class="flex w-9/20 max-w-50 shrink-0 justify-center">
+        <ActionComponent {data} {handleEdit} {handleReset} />
+      </div>
     {/if}
   </div>
 

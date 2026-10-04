@@ -7,6 +7,8 @@
   import Select from "../arginput/Select.svelte";
   import Static from "../arginput/Static.svelte";
   import Textarea from "../arginput/Textarea.svelte";
+  import FilterOrder from "../arginput/filter-order/FilterOrder.svelte";
+  import FilterOrderAction from "../arginput/filter-order/FilterOrderAction.svelte";
   import LayoutDescription from "./LayoutDescription.svelte";
   import LayoutHorizontal from "./LayoutHorizontal.svelte";
   import LayoutVertical from "./LayoutVertical.svelte";
@@ -25,6 +27,12 @@
     textarea: Textarea,
     filter: Textarea,
     static: Static,
+    "filter-order": FilterOrder,
+  };
+  // Row actions are rendered by the layout next to the name, e.g. the edit
+  // button of filter-order (see FilterOrderAction.svelte)
+  const actionMap: Record<string, Component<InputProps>> = {
+    "filter-order": FilterOrderAction,
   };
   const layoutMap: Record<string, Component<LayoutProps>> = {
     filter: LayoutVertical,
@@ -38,6 +46,7 @@
 
   // --- COMPONENT RESOLUTION ---
   const InputComponent = $derived(componentMap[data.dt] || Input);
+  const ActionComponent = $derived(actionMap[data.dt]);
   const LayoutComponent = $derived.by(() => {
     // Priority 1: Use `data.layout` if it's provided AND maps to a known layout component.
     if (data.layout && layoutAliasMap[data.layout]) {
@@ -53,4 +62,4 @@
 </script>
 
 <!-- Pass all props, including parentWidth, down to the chosen layout -->
-<LayoutComponent {data} {InputComponent} {...restProps} />
+<LayoutComponent {data} {InputComponent} {ActionComponent} {...restProps} />

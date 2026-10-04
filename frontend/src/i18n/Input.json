@@ -104,6 +104,111 @@
     "zh-TW": "長度必須最多為 {value}",
     "es-ES": "La longitud debe ser como máximo {value}"
   },
+  "FilterOrderEmpty": {
+    "en-US": "Not set",
+    "zh-CN": "未设置",
+    "ja-JP": "未設定",
+    "zh-TW": "未設定",
+    "es-ES": "Sin configurar"
+  },
+  "FilterOrderInvalid": {
+    "en-US": "Invalid item, it is not in the option list",
+    "zh-CN": "无效项，不在可选项列表中",
+    "ja-JP": "無効な項目です（選択肢にありません）",
+    "zh-TW": "無效項目，不在可選項列表中",
+    "es-ES": "Elemento no válido, no está en la lista de opciones"
+  },
+  "FilterOrderEdit": {
+    "en-US": "Edit",
+    "zh-CN": "编辑",
+    "ja-JP": "編集",
+    "zh-TW": "編輯",
+    "es-ES": "Editar"
+  },
+  "FilterOrderReverted": {
+    "en-US": "Edits discarded",
+    "zh-CN": "编辑已撤销",
+    "ja-JP": "編集を破棄しました",
+    "zh-TW": "編輯已還原",
+    "es-ES": "Ediciones descartadas"
+  },
+  "FilterOrderSelected": {
+    "en-US": "Selected",
+    "zh-CN": "已选",
+    "ja-JP": "選択済み",
+    "zh-TW": "已選",
+    "es-ES": "Seleccionado"
+  },
+  "FilterOrderSelectedEmpty": {
+    "en-US": "No items selected",
+    "zh-CN": "未选择任何元素",
+    "ja-JP": "項目が選択されていません",
+    "zh-TW": "未選擇任何項目",
+    "es-ES": "No hay elementos seleccionados"
+  },
+  "FilterOrderUnused": {
+    "en-US": "Unused",
+    "zh-CN": "未使用",
+    "ja-JP": "未使用",
+    "zh-TW": "未使用",
+    "es-ES": "Sin usar"
+  },
+  "FilterOrderUnusedEmpty": {
+    "en-US": "All items are used",
+    "zh-CN": "全部已使用",
+    "ja-JP": "すべて使用済み",
+    "zh-TW": "全部已使用",
+    "es-ES": "Todos los elementos están en uso"
+  },
+  "Cancel": {
+    "en-US": "Cancel",
+    "zh-CN": "取消",
+    "ja-JP": "キャンセル",
+    "zh-TW": "取消",
+    "es-ES": "Cancelar"
+  },
+  "Save": {
+    "en-US": "Save",
+    "zh-CN": "保存",
+    "ja-JP": "保存",
+    "zh-TW": "儲存",
+    "es-ES": "Guardar"
+  },
+  "FilterOrderDrag": {
+    "en-US": "Drag to reorder",
+    "zh-CN": "拖动排序",
+    "ja-JP": "ドラッグして並べ替え",
+    "zh-TW": "拖曳排序",
+    "es-ES": "Arrastrar para reordenar"
+  },
+  "FilterOrderMoveUp": {
+    "en-US": "Move up",
+    "zh-CN": "上移",
+    "ja-JP": "上へ移動",
+    "zh-TW": "上移",
+    "es-ES": "Subir"
+  },
+  "FilterOrderMoveDown": {
+    "en-US": "Move down",
+    "zh-CN": "下移",
+    "ja-JP": "下へ移動",
+    "zh-TW": "下移",
+    "es-ES": "Bajar"
+  },
+  "FilterOrderRemove": {
+    "en-US": "Remove",
+    "zh-CN": "移除",
+    "ja-JP": "削除",
+    "zh-TW": "移除",
+    "es-ES": "Quitar"
+  },
+  "FilterOrderAdd": {
+    "en-US": "Add",
+    "zh-CN": "添加",
+    "ja-JP": "追加",
+    "zh-TW": "新增",
+    "es-ES": "Añadir"
+  },
   "ConfigSet": {
     "en-US": "Config saved",
     "zh-CN": "设置已保存",

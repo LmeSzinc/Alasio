@@ -118,6 +118,11 @@ export type InputProps = {
 
 export type LayoutProps = InputProps & {
   InputComponent: Component<InputProps>;
+  /**
+   * Optional row action rendered by the layout, e.g. the edit button of
+   * dt=filter-order (see FilterOrderAction.svelte). Most layouts ignore it.
+   */
+  ActionComponent?: Component<InputProps>;
   parentWidth?: number;
   isAdvanced?: boolean;
 };
