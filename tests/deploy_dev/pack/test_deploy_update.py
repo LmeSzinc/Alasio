@@ -103,6 +103,10 @@ SERVER_CORRUPT_UPDATE = MockServerFile()
 SERVER_CORRUPT_UPDATE.register_version('old', OLD_PACK, OLD_INDEX)
 SERVER_CORRUPT_UPDATE.register_version('new', NEW_PACK, NEW_INDEX)
 SERVER_CORRUPT_UPDATE.register_update('old', 'new', b'garbage')
+# a third version of the mid-flow publish test: the server publishes it
+# right after the entry fetch of the flow
+OTHER_PACK = make_pack({'other.txt': b'other\n'}, commit='other')
+OTHER_INDEX = bytes(PackDecodeBase(OTHER_PACK).extract_index_pack())
 
 
 class TestDeployUpdate:
@@ -184,3 +188,122 @@ class TestDeployUpdate:
         with pytest.raises(ValueError, match='no server provided'):
             DeployJob().update()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack')
+
+
+class TestLatestInfoSnapshot:
+    """latest.pack is requested once per flow, the job reuses the snapshot.
+
+    DeployJob.update() fetches latest.pack to decide which path to take
+    and hands the snapshot to the job created for that path (the
+    _latest_info instance cache of the job is seeded), so ResetJob and
+    RebuildJob do not request it again. A resumed Reset/Rebuild job
+    still fetches twice: it runs before the decision and takes its own
+    snapshot.
+    """
+
+    @staticmethod
+    def count_latest(server, monkeypatch):
+        """
+        Wrap the get_latest_info() of a server with a call counter.
+
+        Args:
+            server (MockServerFile): Server to wrap
+            monkeypatch (pytest.MonkeyPatch): The fixture
+
+        Returns:
+            list: The call list, its length is the request count
+        """
+        calls = []
+        original = server.get_latest_info
+
+        def counting():
+            calls.append(1)
+            return original()
+
+        monkeypatch.setattr(server, 'get_latest_info', counting)
+        return calls
+
+    def test_up_to_date(self, app_folder, monkeypatch):
+        """The same version path: the entry fetch serves ResetJob too."""
+        UnpackJob(NEW_PACK).run()
+        calls = self.count_latest(SERVER, monkeypatch)
+        with logger.mock_capture_writer():
+            assert DeployJob(server=SERVER).update()
+        assert len(calls) == 1
+
+    def test_local_index_missing(self, app_folder, monkeypatch):
+        """The unknown local version path: RebuildJob reuses the entry snapshot."""
+        calls = self.count_latest(SERVER, monkeypatch)
+        with logger.mock_capture_writer():
+            assert DeployJob(server=SERVER).update()
+        assert len(calls) == 1
+        assert read_tree() == NEW_TREE
+
+    def test_update_pack_missing(self, app_folder, monkeypatch):
+        """The update pack 404 fallback: RebuildJob reuses the entry snapshot."""
+        UnpackJob(OLD_PACK).run()
+        calls = self.count_latest(SERVER_NO_UPDATE, monkeypatch)
+        with logger.mock_capture_writer():
+            assert DeployJob(server=SERVER_NO_UPDATE).update()
+        assert len(calls) == 1
+
+    def test_update_pack_corrupt(self, app_folder, monkeypatch):
+        """The corrupt update pack fallback: RebuildJob reuses the entry snapshot."""
+        UnpackJob(OLD_PACK).run()
+        calls = self.count_latest(SERVER_CORRUPT_UPDATE, monkeypatch)
+        with logger.mock_capture_writer():
+            assert DeployJob(server=SERVER_CORRUPT_UPDATE).update()
+        assert len(calls) == 1
+
+    def test_incremental(self, app_folder, monkeypatch):
+        """The incremental path: UpdateJob never reads latest.pack."""
+        UnpackJob(OLD_PACK).run()
+        calls = self.count_latest(SERVER, monkeypatch)
+        with logger.mock_capture_writer():
+            assert DeployJob(server=SERVER).update()
+        assert len(calls) == 1
+
+    def test_resumed_job(self, app_folder, monkeypatch):
+        """A resumed rebuild job takes its own snapshot before the decision
+        fetches the post-job version: two requests."""
+        UnpackJob(OLD_PACK).run()
+        RebuildJob(SERVER).write()
+        calls = self.count_latest(SERVER, monkeypatch)
+        with logger.mock_capture_writer():
+            assert DeployJob(server=SERVER).update()
+        assert len(calls) == 2
+
+    def test_mid_flow_publish(self, app_folder, monkeypatch):
+        """A version published after the entry fetch is left to the next
+        update: the flow converges to the snapshot, no second fetch and
+        no index download."""
+        server = MockServerFile()
+        server.register_version('new', NEW_PACK, NEW_INDEX)
+        server.register_version('other', OTHER_PACK, OTHER_INDEX)
+        # the flow starts on 'new', the entry fetch publishes 'other'
+        server.latest_version = 'new'
+        calls = []
+        index_calls = []
+        original_latest = server.get_latest_info
+        original_index = server.get_index_pack
+
+        def latest_then_publish():
+            calls.append(1)
+            info = original_latest()
+            server.latest_version = 'other'
+            return info
+
+        def counting_index(version):
+            index_calls.append(version)
+            return original_index(version)
+
+        monkeypatch.setattr(server, 'get_latest_info', latest_then_publish)
+        monkeypatch.setattr(server, 'get_index_pack', counting_index)
+        with logger.mock_capture_writer():
+            UnpackJob(NEW_PACK).run()
+            assert DeployJob(server=server).update()
+        # the snapshot of the entry fetch decided the whole flow
+        assert len(calls) == 1
+        assert index_calls == []
+        assert read_tree() == NEW_TREE
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')

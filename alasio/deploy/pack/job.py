@@ -8,6 +8,7 @@ from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
+from alasio.ext.cache import InstanceCacheOperation
 from alasio.ext.file.filelock import SQLiteFileLock
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_rmtree
 from alasio.logger import logger
@@ -214,6 +215,12 @@ class DeployJob(DeployTarget):
            self-consistent index is downloaded again), then every
            recorded file is verified and repaired
 
+        The latest info fetched here is handed to the job created for
+        the chosen path (the instance cache of the job's _latest_info
+        property is seeded with it): latest.pack is requested once per
+        flow and the flow converges to this snapshot, a version
+        published mid-flow is picked up by the next update.
+
         A missing or malformed local index pack has an unknown
         version, the update cannot be incremental: RebuildJob
         downloads the latest index unconditionally and rebuilds the
@@ -247,6 +254,7 @@ class DeployJob(DeployTarget):
                 # unknown: rebuild from the latest index
                 logger.warning('Failed to read the local version, rebuilding from the latest index')
                 job = RebuildJob(self.server, root=self.root, name=self.name)
+                InstanceCacheOperation.set(job, '_latest_info', info)
                 return job.run()
             if local != info.version:
                 # a version mismatch, apply the update pack incrementally
@@ -261,6 +269,7 @@ class DeployJob(DeployTarget):
                         f'rebuilding from the latest index'
                     )
                     job = RebuildJob(self.server, root=self.root, name=self.name)
+                    InstanceCacheOperation.set(job, '_latest_info', info)
                     return job.run()
                 job = UpdateJob(data, server=self.server, root=self.root, name=self.name)
                 if job.run():
@@ -270,7 +279,9 @@ class DeployJob(DeployTarget):
                 # the files are downloaded directly
                 logger.warning('Failed to apply the update pack, rebuilding from the latest index')
                 job = RebuildJob(self.server, root=self.root, name=self.name)
+                InstanceCacheOperation.set(job, '_latest_info', info)
                 return job.run()
             # the same version, check the index and the files
             job = ResetJob(self.server, root=self.root, name=self.name)
+            InstanceCacheOperation.set(job, '_latest_info', info)
             return job.run()

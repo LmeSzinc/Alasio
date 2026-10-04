@@ -149,7 +149,9 @@ class ResetJob(JobBase):
         Fetched once per job and shared by validate_latest() and
         download_index(), so the latest info is requested only once
         even when both the local index and the workspace tmp file are
-        checked.
+        checked. DeployJob.update() hands the snapshot it fetched for
+        the flow in (the instance cache is seeded before the job
+        runs), the server is not requested again then.
 
         Returns:
             LatestInfo: Latest version and index pack checksum
