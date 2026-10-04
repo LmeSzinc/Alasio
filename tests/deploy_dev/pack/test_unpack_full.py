@@ -441,7 +441,7 @@ class TestCallerFlow:
         # a previous run was interrupted, the job file is left behind
         UnpackJob(WEBSITE_FULL_PACK).write()
         # finish the unfinished job first
-        job = DeployJob.get_unfinished_job()
+        job = DeployJob().get_unfinished_job()
         if job is not None:
             job.run()
         # then unpack the new data
@@ -556,7 +556,7 @@ class TestUnpackSkip:
     def test_resume_from_job_file(self, app_folder):
         """get_unfinished_job() resumes the interrupted unpack."""
         UnpackJob(WEBSITE_FULL_PACK).write()
-        job = DeployJob.get_unfinished_job()
+        job = DeployJob().get_unfinished_job()
         assert job is not None
         job.run()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
@@ -612,7 +612,7 @@ class TestFailure:
             job.unpack()
         assert os.path.exists(env.PROJECT_ROOT / '.pack/workspace/job.pack')
         # the unfinished job can still be found
-        assert DeployJob.get_unfinished_job() is not None
+        assert DeployJob().get_unfinished_job() is not None
 
 
 class TestExecutableMode:
@@ -828,7 +828,7 @@ class TestUnpackRebuild:
         # an interruption before replace(): the job file is written,
         # the old index pack is still in place
         UnpackJob(NEW_PACK).write()
-        job = DeployJob.get_unfinished_job()
+        job = DeployJob().get_unfinished_job()
         assert job is not None
         job.run()
         assert read_tree() == NEW_TREE

@@ -35,7 +35,7 @@ def main():
     except FileNotFoundError as e:
         parser.error(f'failed to read the pack file: {e}')
     else:
-        DeployJob.unpack(data)
+        DeployJob().unpack(data)
 
 
 if __name__ == '__main__':

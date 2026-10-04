@@ -8,6 +8,8 @@ from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.deploy.simple_pip.cleanup_folder import CleanupFolder
 from alasio.ext import env
+from alasio.ext.cache import InstanceCacheOperation
+from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import (
     atomic_open, atomic_read_bytes, atomic_remove, atomic_replace, atomic_rmtree, folder_rmtree_empty
 )
@@ -80,13 +82,67 @@ class MatchResult(Struct):
         return self.match
 
 
-class JobBase:
+class DeployTarget:
+    """
+    The paths of one deploy target.
+
+    A target is a folder being updated and a ledger key (name):
+
+        {root}/.pack              name='', the project tree target
+        {root}/.pack/{name}       a named target, e.g. a python dist
+                                  sharing site-packages with others
+
+    The ledger folder holds the index pack (index.pack) and the
+    workspace of the jobs (workspace/, job.pack inside), the exclusive
+    lock the caller takes guards the index pack too. index_rel is the
+    ledger path relative to the root: it is the local form of the
+    canonical .pack/index.pack path of the packs, see
+    JobBase.local_path().
+    """
+
+    # The pack area of the pack format, relative to the target root. The
+    # constant keeps the trailing separator so local_path() maps the area
+    # with a plain startswith(), without building a prefix on every path;
+    # PACK_AREA_DIR is the folder itself (the ledger folder when name is
+    # empty), it must be a folder, never a file of a pack.
+    PACK_AREA = '.pack/'
+    PACK_AREA_DIR = PACK_AREA[:-1]
+
+    def __init__(self, root=None, name=''):
+        """
+        Args:
+            root (str, optional): Folder to update. Defaults to None,
+                env.PROJECT_ROOT
+            name (str, optional): Ledger key of the target. Defaults to
+                '', the ledger folder is {root}/.pack itself
+        """
+        self.root = env.PROJECT_ROOT if root is None else PathStr.new(root)
+        self.name = name or ''
+        self.ledger_rel = self.PACK_AREA_DIR if not self.name else f'{self.PACK_AREA}{self.name}'
+        self.ledger = self.root.joinpath(self.ledger_rel)
+        # path of the index pack relative to the root: the local form
+        # of the canonical .pack/index.pack path of the packs
+        self.index_rel = f'{self.ledger_rel}/index.pack'
+        self.index_file = self.ledger.joinpath('index.pack')
+        self.workspace = self.ledger.joinpath('workspace')
+        self.job_file = self.workspace.joinpath('job.pack')
+
+
+class JobBase(DeployTarget):
     """
     Base class of deploy jobs.
 
-    The pack data is passed in __init__, the workspace is the folder
-    where the job stores its temporary files, both are relative to
-    env.PROJECT_ROOT.
+    The pack data is passed in __init__, the target (root, name, see
+    DeployTarget) is passed together: root defaults to
+    env.PROJECT_ROOT and name to '', the project tree target. The
+    workspace is the folder where the job stores its temporary files,
+    inside the ledger folder of the target.
+
+    The pack format speaks the canonical pack area namespace .pack/**:
+    local_path() maps such a path into the ledger folder of the target
+    and localize() rewrites a decoded pack once, right after decoding,
+    so every later comparison and file operation of the job works on
+    the local paths of the target.
 
     _read_current() and _matches() are shared by every job that
     compares working tree files against the records of a pack,
@@ -94,22 +150,22 @@ class JobBase:
     the changes to the real files.
     """
 
-    # pack structure, relative to the app root folder (env.PROJECT_ROOT)
-    INDEX_PACK = '.pack/index.pack'
-    WORKSPACE = '.pack/workspace'
-    JOB_FILE = '.pack/workspace/job.pack'
     # fixed name of the new index pack in the workspace: the index
     # pack is always prepared to this file, replace() applies it
     # together with the other files
     NEW_INDEX = 'new_index.tmp'
 
-    def __init__(self, data):
+    def __init__(self, data, root=None, name=''):
         """
         Args:
             data (bytes): Pack data
+            root (str, optional): Folder to update. Defaults to None,
+                env.PROJECT_ROOT
+            name (str, optional): Ledger key of the target. Defaults to
+                '', the project tree target
         """
+        super().__init__(root=root, name=name)
         self._data = data
-        self.workspace = env.PROJECT_ROOT.joinpath(self.WORKSPACE)
         self.pending: "list[PendingFile]" = []
         # {path: IdxInfo} of the files the new version records, the
         # emptiness base of cleanup_empty_folders(). Every job sets it
@@ -120,6 +176,84 @@ class JobBase:
         # so an unknown record set never removes a folder that is not
         # empty
         self.new_fileinfo: "dict[str, IdxInfo]" = {}
+
+    def local_path(self, path):
+        """
+        Map a path of the pack format to the local path of the target.
+
+        The canonical pack area .pack/... of the packs is mapped into
+        the ledger folder of the target: .pack/index.pack becomes
+        .pack/{name}/index.pack, .pack/history.pack becomes
+        .pack/{name}/history.pack, and so on. Every other path is
+        returned unchanged. The mapping is the identity when name is
+        empty: the ledger folder is .pack itself then.
+
+        The pack area folder itself is never a file of a pack, the pack
+        builder rejects it (it must be a folder): a path equal to it is
+        rejected here too, instead of being mapped to the ledger folder.
+
+        Args:
+            path (str): Path of the pack format, relative to the root
+
+        Returns:
+            str: Local path of the target
+
+        Raises:
+            ValueError: If the path is the pack area folder itself
+        """
+        if path == self.PACK_AREA_DIR:
+            raise ValueError(
+                f'Pack path is the pack area itself, it must be a folder: {path!r}'
+            )
+        if not self.name or not path.startswith(self.PACK_AREA):
+            return path
+        # replace the pack area prefix with the ledger folder
+        return self.ledger_rel + path[len(self.PACK_AREA_DIR):]
+
+    def localize(self, decoder):
+        """
+        Rewrite the pack area paths of a decoded pack to the local
+        namespace of the target, see local_path().
+
+        The rewrite covers the three views of the decoder: idx_info
+        (the record list, rewritten in place), fileinfo and refinfo
+        (cached dicts of the same records, keyed by the path at build
+        time and rebuilt here so the keys follow the rewritten paths).
+        It must run right after decoding and before any comparison or
+        file operation: the paths of the pack (e.g. the index pack
+        record .pack/index.pack) and the local paths of the target
+        must never be mixed. Nothing to do when name is empty, the
+        mapping is the identity then.
+
+        The bytes of the index pack itself always stay canonical (it
+        is written to the ledger folder from the pack bytes): the
+        rewrite only affects the decoded views, so every reader of the
+        ledger gets the same canonical records and localizes them the
+        same way.
+
+        Args:
+            decoder (PackDecodeBase): Decoder of the pack to rewrite
+
+        Returns:
+            PackDecodeBase: The decoder, for call chaining
+        """
+        if not self.name:
+            return decoder
+        for info in decoder.idx_info:
+            info.path = self.local_path(info.path)
+            if info.source_path:
+                info.source_path = self.local_path(info.source_path)
+        # fileinfo / refinfo share the records with idx_info: rebuild
+        # the cached dicts so their keys follow the rewritten paths.
+        # The access builds the cache first when it was not built yet,
+        # then the set() replaces it with the re-keyed dict.
+        InstanceCacheOperation.set(decoder, 'refinfo', {
+            info.path: info for info in decoder.refinfo.values()
+        })
+        InstanceCacheOperation.set(decoder, 'fileinfo', {
+            info.path: info for info in decoder.fileinfo.values()
+        })
+        return decoder
 
     def run(self):
         """
@@ -144,14 +278,14 @@ class JobBase:
         """
         # create the parent folders of all targets in one batch
         batch_makedirs([
-            env.PROJECT_ROOT.joinpath(pending.info.path)
+            self.root.joinpath(pending.info.path)
             for pending in self.pending
             if pending.info.edit != 2
         ])
 
         for pending in self.pending:
             info = pending.info
-            target = env.PROJECT_ROOT.joinpath(info.path)
+            target = self.root.joinpath(info.path)
             if info.edit == 2:
                 # deleted marker, the file should not exist
                 atomic_remove(target)
@@ -174,8 +308,9 @@ class JobBase:
         it (self.new_fileinfo, the deleted markers are not files) and
         os.rmdir() confirms the folder is empty: a folder that still
         holds a file the update does not manage, e.g. a file the user
-        placed by hand, fails the removal and is kept. env.PROJECT_ROOT
-        is never removed.
+        placed by hand, fails the removal and is kept. The index pack
+        keeps its folder alive, and the root of the target is never
+        removed.
         """
         cleaner = CleanupFolder()
         cleaner.register_deleted({
@@ -191,10 +326,14 @@ class JobBase:
             for path, info in self.new_fileinfo.items()
             if info.edit != 2
         })
+        # the index pack is never deleted: its folder (the ledger
+        # folder) is kept even when every other record of the folder
+        # is gone
+        cleaner.register_file(self.index_rel)
         for folder in cleaner.get_cleanup_folders():
             # os.rmdir() only removes an empty folder: a folder that
             # still holds a file of no record is kept
-            folder_rmtree_empty(env.PROJECT_ROOT.joinpath(folder))
+            folder_rmtree_empty(self.root.joinpath(folder))
 
     def cleanup(self):
         """
@@ -206,33 +345,34 @@ class JobBase:
         """
         atomic_rmtree(self.workspace)
 
-    @staticmethod
-    def _old_fileinfo_from_index():
+    def _old_fileinfo_from_index(self):
         """
-        Read the fileinfo of the local index pack .pack/index.pack,
-        the leftover deletion base of a rebuild.
+        Read the fileinfo of the local index pack, the leftover
+        deletion base of a rebuild.
 
-        Deleted markers (edit == 2) are excluded: they describe files
-        that should not exist, not files that exist. A missing,
-        malformed or checksum-failed index pack degrades to {}: the
-        leftover cleanup is skipped, the rebuild still converges for
-        every file of the new index.
+        The index is read from the ledger folder of the target and
+        rewritten to the local namespace like every decoded pack, see
+        localize(). Deleted markers (edit == 2) are excluded: they
+        describe files that should not exist, not files that exist. A
+        missing, malformed or checksum-failed index pack degrades to
+        {}: the leftover cleanup is skipped, the rebuild still
+        converges for every file of the new index.
 
         Returns:
             dict[str, IdxInfo]: Fileinfo of the old local index pack,
                 {} when it is missing or malformed
         """
         try:
-            decoder = PackDecodeBase(
-                atomic_read_bytes(env.PROJECT_ROOT.joinpath(JobBase.INDEX_PACK)))
+            decoder = PackDecodeBase(atomic_read_bytes(self.index_file))
             decoder.validate_index()
-            return {
-                path: info for path, info in decoder.fileinfo.items()
-                if info.edit != 2
-            }
         except (FileNotFoundError, PackDecodeError) as e:
             logger.warning(f'Failed to read the old index pack: {e}')
             return {}
+        self.localize(decoder)
+        return {
+            path: info for path, info in decoder.fileinfo.items()
+            if info.edit != 2
+        }
 
     @staticmethod
     def _leftover_deletions(old_fileinfo, new_fileinfo):

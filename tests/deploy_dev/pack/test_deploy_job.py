@@ -21,24 +21,24 @@ from tests.deploy_dev.pack.conftest import WEBSITE_FILES, WEBSITE_FULL_PACK, WEB
 
 
 class TestDeployJob:
-    """The unified entry of DeployJob."""
+    """The unified entry of DeployJob, one instance per deploy target."""
 
     def test_unpack(self, app_folder):
-        """DeployJob.unpack() writes the job file and unpacks all files."""
+        """DeployJob().unpack() writes the job file and unpacks all files."""
         with logger.mock_capture_writer():
-            DeployJob.unpack(WEBSITE_FULL_PACK)
+            DeployJob().unpack(WEBSITE_FULL_PACK)
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     def test_get_unfinished_job_none(self, app_folder):
-        """No job file, DeployJob.get_unfinished_job() returns None."""
-        assert DeployJob.get_unfinished_job() is None
+        """No job file, DeployJob().get_unfinished_job() returns None."""
+        assert DeployJob().get_unfinished_job() is None
 
     def test_get_unfinished_job(self, app_folder):
         """A leftover job file is found and resumed."""
         UnpackJob(WEBSITE_FULL_PACK).write()
-        job = DeployJob.get_unfinished_job()
+        job = DeployJob().get_unfinished_job()
         assert job is not None
         assert isinstance(job, UnpackJob)
         with logger.mock_capture_writer():
@@ -49,7 +49,7 @@ class TestDeployJob:
     def test_get_unfinished_job_reset(self, app_folder):
         """A REST marker job file is a reset job."""
         ResetJob(WEBSITE_SERVER).write()
-        job = DeployJob.get_unfinished_job(WEBSITE_SERVER)
+        job = DeployJob().get_unfinished_job(WEBSITE_SERVER)
         assert job is not None
         assert isinstance(job, ResetJob)
         with logger.mock_capture_writer():
@@ -59,7 +59,7 @@ class TestDeployJob:
     def test_get_unfinished_job_rebuild(self, app_folder):
         """A RBIL marker job file is a rebuild job."""
         RebuildJob(WEBSITE_SERVER).write()
-        job = DeployJob.get_unfinished_job(WEBSITE_SERVER)
+        job = DeployJob().get_unfinished_job(WEBSITE_SERVER)
         assert job is not None
         assert isinstance(job, RebuildJob)
         with logger.mock_capture_writer():
@@ -72,7 +72,7 @@ class TestDeployJob:
         """unpack() finishes the unfinished reset job first."""
         ResetJob(WEBSITE_SERVER).write()
         with logger.mock_capture_writer():
-            DeployJob.unpack(WEBSITE_FULL_PACK)
+            DeployJob().unpack(WEBSITE_FULL_PACK)
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -84,7 +84,7 @@ class TestDeployJob:
         with open(job_file, 'wb') as f:
             f.write(b'garbage')
         with logger.mock_capture_writer() as capture:
-            job = DeployJob.get_unfinished_job()
+            job = DeployJob().get_unfinished_job()
         assert job is None
         assert capture.backend.any_contains('Failed to read the unfinished job:')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -93,7 +93,7 @@ class TestDeployJob:
         """unpack() finishes the unfinished job first, no extra call."""
         UnpackJob(WEBSITE_FULL_PACK).write()
         with logger.mock_capture_writer():
-            DeployJob.unpack(WEBSITE_FULL_PACK)
+            DeployJob().unpack(WEBSITE_FULL_PACK)
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -105,7 +105,7 @@ class TestDeployJob:
         def _fail(self):
             raise AssertionError('write() should not be called on resume')
         monkeypatch.setattr(UnpackJob, 'write', _fail)
-        job = DeployJob.get_unfinished_job()
+        job = DeployJob().get_unfinished_job()
         assert job is not None
         with logger.mock_capture_writer():
             job.run()
@@ -119,7 +119,7 @@ class TestDeployJob:
         with open(job_file, 'wb') as f:
             f.write(b'garbage')
         with logger.mock_capture_writer() as capture:
-            DeployJob.unpack(WEBSITE_FULL_PACK)
+            DeployJob().unpack(WEBSITE_FULL_PACK)
         assert capture.backend.any_contains('Failed to read the unfinished job:')
         # the new job still unpacked all files
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
@@ -133,7 +133,7 @@ class TestDeployJob:
         bad = bytearray(WEBSITE_FULL_PACK)
         bad[index_end + 100] ^= 0xFF
         with logger.mock_capture_writer() as capture:
-            DeployJob.unpack(bytes(bad))
+            DeployJob().unpack(bytes(bad))
         assert capture.backend.any_contains('Failed to unpack:')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -143,6 +143,6 @@ class TestDeployJob:
             raise RuntimeError('replace failed')
         monkeypatch.setattr(UnpackJob, 'replace', _raise)
         with logger.mock_capture_writer() as capture:
-            DeployJob.unpack(WEBSITE_FULL_PACK)
+            DeployJob().unpack(WEBSITE_FULL_PACK)
         assert capture.backend.any_contains('Failed to replace file:')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')

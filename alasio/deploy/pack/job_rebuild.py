@@ -1,6 +1,5 @@
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.pack_model import IdxInfo
-from alasio.ext import env
 from alasio.logger import logger
 
 
@@ -23,25 +22,30 @@ class RebuildJob(ResetJob):
 
     write() stores the RBIL marker to the job file, the marker is
     dispatched to a resumed RebuildJob by
-    DeployJob.get_unfinished_job().
+    DeployJob().get_unfinished_job().
 
-    Note: the exclusive lock on .pack/index.pack in the draft is shared
-    by the whole update flow (full pack, update pack and file check),
-    the caller is responsible for it.
+    Note: the exclusive lock on the local index pack (index.pack in
+    the ledger folder) in the draft is shared by the whole update flow
+    (full pack, update pack and file check), the caller is responsible
+    for it.
     """
 
     # marker of a rebuild task in the job file
     MARK = b'RBIL\x00'
 
-    def __init__(self, server, resume=False):
+    def __init__(self, server, resume=False, root=None, name=''):
         """
         Args:
             server (ServerFile): Server to download the index pack and
                 the failed files
             resume (bool): True if the job was resumed from the job
                 file, run() does not write the job file again then
+            root (str, optional): Folder to update. Defaults to None,
+                env.PROJECT_ROOT
+            name (str, optional): Ledger key of the target. Defaults to
+                '', the project tree target
         """
-        super().__init__(server, resume=resume)
+        super().__init__(server, resume=resume, root=root, name=name)
         # {path: IdxInfo} of the old local index pack, the deletion
         # base of the leftover cleanup, {} when it is missing or
         # malformed
@@ -69,7 +73,7 @@ class RebuildJob(ResetJob):
         try:
             if not self._resume:
                 self.write()
-            logger.info(f'Rebuilding files to "{env.PROJECT_ROOT}"')
+            logger.info(f'Rebuilding files to "{self.root}", name="{self.name}"')
             self._old_fileinfo = self._old_fileinfo_from_index()
             self.download_index()
             self.validate_files()
@@ -82,8 +86,8 @@ class RebuildJob(ResetJob):
             # a resumed run still computes the leftover deletion list
             # from it
             self.pending = [
-                p for p in self.pending if p.info.path != self.INDEX_PACK
-            ] + [p for p in self.pending if p.info.path == self.INDEX_PACK]
+                p for p in self.pending if p.info.path != self.index_rel
+            ] + [p for p in self.pending if p.info.path == self.index_rel]
             self.replace()
         except Exception as e:
             # no real file was written, safe to clean up

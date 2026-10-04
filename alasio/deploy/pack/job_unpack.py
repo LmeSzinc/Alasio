@@ -1,7 +1,6 @@
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_base import JobBase, PendingFile
 from alasio.deploy.pack.pack_model import IdxInfo
-from alasio.ext import env
 from alasio.ext.path.atomic import file_write
 from alasio.logger import logger
 
@@ -13,13 +12,13 @@ class UnpackJob(JobBase):
     Unpacking is a local rebuild: the working tree is rebuilt from the
     full pack data passed in __init__, the leftover files of the old
     version (recorded in the old local index pack, not in this pack)
-    are removed, the new index pack replaces .pack/index.pack last.
-    No server is involved. The pack data is passed in __init__, the
-    caller stores it to the job file .pack/workspace/job.pack with
-    write() before unpacking, so an interrupted run can be resumed by
-    the next run:
+    are removed, the new index pack (index.pack in the ledger folder
+    of the target) is replaced last. No server is involved. The pack
+    data is passed in __init__, the caller stores it to the job file
+    ({ledger}/workspace/job.pack) with write() before unpacking, so an
+    interrupted run can be resumed by the next run:
 
-        job = DeployJob.get_unfinished_job()
+        job = DeployJob().get_unfinished_job()
         if job is not None:
             job.unpack()
             job.replace()
@@ -28,13 +27,15 @@ class UnpackJob(JobBase):
         job.unpack()
         job.replace()
 
-    All files unpack into env.PROJECT_ROOT, the pack structure (.pack/)
-    lives inside it. The unpack flow follows the draft in PackEncodeBase:
+    All files unpack into the root of the target; the pack area paths
+    of the pack (.pack/**) resolve inside the ledger folder of the
+    target, see JobBase.localize(). The unpack flow follows the draft
+    in PackEncodeBase:
 
     1. unpack() reads the old local index pack, writes the index
-       section to .pack/workspace/new_index.tmp and decompresses all
-       files to .pack/workspace/{size}_{sha1}_{index}.tmp, real files
-       are untouched. The leftover files of the old version, recorded
+       section to {ledger}/workspace/new_index.tmp and decompresses
+       all files to {ledger}/workspace/{size}_{sha1}_{index}.tmp,
+       real files are untouched. The leftover files of the old version, recorded
        in the old index but not in this pack, are appended as deleted
        markers, and the new index pack is the last record: an
        interruption during replace() leaves the old index pack in
@@ -45,25 +46,30 @@ class UnpackJob(JobBase):
        removes the deleted markers. Real file operations only start
        after every tmp file is ready, so an interruption never leaves a
        half-mixed set of old and new files.
-    3. cleanup() cleans .pack/workspace atomically: the folder is
+    3. cleanup() cleans {ledger}/workspace atomically: the folder is
        renamed first, then removed slowly, so an interrupted cleanup
        never leaves a workspace that looks unfinished.
 
     On failure the workspace is kept, the next run resumes from it.
 
-    Note: the exclusive lock on .pack/index.pack in the draft is shared
-    by the whole update flow (full pack, update pack and file check),
-    the caller is responsible for it.
+    Note: the exclusive lock on the local index pack (index.pack in
+    the ledger folder) in the draft is shared by the whole update flow
+    (full pack, update pack and file check), the caller is responsible
+    for it.
     """
 
-    def __init__(self, data, resume=False):
+    def __init__(self, data, resume=False, root=None, name=''):
         """
         Args:
             data (bytes): Full pack data
             resume (bool): True if the data was read from the job file,
                 run() does not write the job file again then
+            root (str, optional): Folder to update. Defaults to None,
+                env.PROJECT_ROOT
+            name (str, optional): Ledger key of the target. Defaults to
+                '', the project tree target
         """
-        super().__init__(data)
+        super().__init__(data, root=root, name=name)
         self._resume = resume
 
     def run(self):
@@ -80,7 +86,7 @@ class UnpackJob(JobBase):
         try:
             if not self._resume:
                 self.write()
-            logger.info(f'Unpacking data to "{env.PROJECT_ROOT}"')
+            logger.info(f'Unpacking data to "{self.root}", name="{self.name}"')
             self.unpack()
         except Exception as e:
             # no real file was written, safe to clean up
@@ -88,7 +94,7 @@ class UnpackJob(JobBase):
             self.cleanup()
             return
         try:
-            logger.info(f'Replacing files to "{env.PROJECT_ROOT}"')
+            logger.info(f'Replacing files to "{self.root}", name="{self.name}"')
             self.replace()
         except Exception as e:
             # real files may be partially replaced
@@ -108,15 +114,15 @@ class UnpackJob(JobBase):
         detected by get_unfinished_job() on the next run, so a plain
         write is enough.
         """
-        file_write(env.PROJECT_ROOT.joinpath(self.JOB_FILE), self._data)
+        file_write(self.job_file, self._data)
 
     def unpack(self):
         """
         Prepare all files in the workspace, real files are untouched.
 
-        Writes the index section to .pack/workspace/new_index.tmp and
+        Writes the index section to {ledger}/workspace/new_index.tmp and
         decompresses every file to
-        .pack/workspace/{size}_{sha1}_{index}.tmp, filling self.pending
+        {ledger}/workspace/{size}_{sha1}_{index}.tmp, filling self.pending
         with the changes to apply in replace(). The old local index
         pack is read first: files recorded in it but not in this pack
         are the leftover files of the old version, removed by
@@ -130,6 +136,9 @@ class UnpackJob(JobBase):
         """
         decoder = PackDecodeBase(self._data)
         decoder.validate()
+        # rewrite the pack area paths of the pack into the ledger
+        # folder of the target before any comparison
+        self.localize(decoder)
         # the full pack records every file of the new version, the
         # emptiness base of replace()
         self.new_fileinfo = decoder.fileinfo
@@ -146,7 +155,7 @@ class UnpackJob(JobBase):
         # unpack files, the loop body is unchanged
         pending = []
         for index, (path, info) in enumerate(decoder.fileinfo.items()):
-            target = env.PROJECT_ROOT.joinpath(path)
+            target = self.root.joinpath(path)
             if info.edit == 2:
                 # deleted marker, its target is removed in replace()
                 pending.append(PendingFile(info=info, tmp=''))
@@ -182,5 +191,5 @@ class UnpackJob(JobBase):
         # index but not in this pack
         pending += self._leftover_deletions(old_fileinfo, decoder.fileinfo)
         # the new index pack is replaced last, see the docstring
-        pending.append(PendingFile(info=IdxInfo(path=self.INDEX_PACK), tmp=index_tmp))
+        pending.append(PendingFile(info=IdxInfo(path=self.index_rel), tmp=index_tmp))
         self.pending = pending

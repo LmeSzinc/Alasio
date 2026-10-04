@@ -832,7 +832,7 @@ class TestCallerFlow:
         """An update pack job file is dispatched to a resumed UpdateJob."""
         setup_app()
         UpdateJob(UPDATE).write()
-        job = DeployJob.get_unfinished_job(SERVER)
+        job = DeployJob().get_unfinished_job(SERVER)
         assert job is not None
         assert isinstance(job, UpdateJob)
         assert job.run()
@@ -851,7 +851,7 @@ class TestCallerFlow:
         # verifies it against the refinfo and reuses the tmp files
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
             bytes(OLD_DECODER.extract_index_pack())
-        job = DeployJob.get_unfinished_job(SERVER)
+        job = DeployJob().get_unfinished_job(SERVER)
         assert job is not None
         assert isinstance(job, UpdateJob)
         assert job.run()
@@ -868,7 +868,7 @@ class TestCallerFlow:
         def _fail(self):
             raise AssertionError('write() should not be called on resume')
         monkeypatch.setattr(UpdateJob, 'write', _fail)
-        job = DeployJob.get_unfinished_job(SERVER)
+        job = DeployJob().get_unfinished_job(SERVER)
         assert job is not None
         assert job.run()
         assert read_tree() == NEW_TREE
@@ -876,7 +876,7 @@ class TestCallerFlow:
     def test_full_pack_dispatched_to_unpack_job(self, app_folder):
         """A full pack job file is dispatched to UnpackJob, not UpdateJob."""
         UnpackJob(OLD_PACK).write()
-        job = DeployJob.get_unfinished_job(SERVER)
+        job = DeployJob().get_unfinished_job(SERVER)
         assert job is not None
         assert isinstance(job, UnpackJob)
 
@@ -920,7 +920,7 @@ class TestFailure:
             job.unpack()
         assert os.path.exists(env.PROJECT_ROOT / '.pack/workspace/job.pack')
         # the unfinished job can still be found
-        assert DeployJob.get_unfinished_job() is not None
+        assert DeployJob().get_unfinished_job() is not None
 
     def test_run_failure_logged_and_cleaned(self, app_folder):
         """A failed run logs a warning and cleans the workspace."""

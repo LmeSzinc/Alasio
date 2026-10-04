@@ -6,7 +6,6 @@ from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.pack_model import IdxInfo
-from alasio.ext import env
 from alasio.ext.cache import InstanceCacheOperation
 from alasio.ext.path.atomic import atomic_read_bytes, file_write
 from alasio.logger import logger
@@ -26,10 +25,10 @@ class UpdateJob(JobBase):
     An update pack unpack task, interruptible and resumable.
 
     The pack data is passed in __init__, the caller stores it to the
-    job file .pack/workspace/job.pack with write() before unpacking,
-    so an interrupted run can be resumed by the next run:
+    job file ({ledger}/workspace/job.pack) with write() before
+    unpacking, so an interrupted run can be resumed by the next run:
 
-        job = DeployJob.get_unfinished_job(server)
+        job = DeployJob().get_unfinished_job(server)
         if job is not None:
             job.run()
         job = UpdateJob(data, server=server)
@@ -39,10 +38,10 @@ class UpdateJob(JobBase):
     The update pack upgrades the local working tree from the old
     version to the new version, every file follows the same flow:
     read - verify - decompress to a tmp file, file content never
-    stays in memory. The index pack .pack/index.pack is a normal
-    record of the update:
+    stays in memory. The index pack (index.pack in the ledger folder
+    of the target) is a normal record of the update:
 
-    1. unpack() decompresses every file to .pack/workspace/
+    1. unpack() decompresses every file to {ledger}/workspace/
        {size}_{sha1}_{index}.tmp, real files are untouched. Records
        are computed from the update pack data and the old files
        recorded in refinfo: A records are decompressed directly, C
@@ -51,7 +50,7 @@ class UpdateJob(JobBase):
        file), M / RM records decompress a zstd patch from the old
        file, R (renamed) records move the old file. The record of
        the index pack is an M record from the old index to the new
-       index: the local .pack/index.pack is verified against the
+       index: the local index pack is verified against the
        refinfo like any other old file, a self-consistent but wrong
        local index fails the check. A source that fails the size +
        sha1 check (missing, wrong content or unfixable EOL) is kept
@@ -72,12 +71,13 @@ class UpdateJob(JobBase):
 
     On failure the workspace is kept, the next run resumes from it.
 
-    Note: the exclusive lock on .pack/index.pack in the draft is shared
-    by the whole update flow (full pack, update pack and file check),
-    the caller is responsible for it.
+    Note: the exclusive lock on the local index pack (index.pack in
+    the ledger folder) in the draft is shared by the whole update flow
+    (full pack, update pack and file check), the caller is responsible
+    for it.
     """
 
-    def __init__(self, data, server=None, resume=False):
+    def __init__(self, data, server=None, resume=False, root=None, name=''):
         """
         Args:
             data (bytes): Update pack data
@@ -85,8 +85,12 @@ class UpdateJob(JobBase):
                 index pack and the failed records. Defaults to None.
             resume (bool): True if the data was read from the job file,
                 run() does not write the job file again then
+            root (str, optional): Folder to update. Defaults to None,
+                env.PROJECT_ROOT
+            name (str, optional): Ledger key of the target. Defaults to
+                '', the project tree target
         """
-        super().__init__(data)
+        super().__init__(data, root=root, name=name)
         self.server = server
         self._resume = resume
         self.error: "list[PendingFile]" = []
@@ -114,7 +118,7 @@ class UpdateJob(JobBase):
         try:
             if not self._resume:
                 self.write()
-            logger.info(f'Updating files to "{env.PROJECT_ROOT}"')
+            logger.info(f'Updating files to "{self.root}", name="{self.name}"')
             self.unpack()
             self.download()
             self._validate_remaining()
@@ -124,7 +128,7 @@ class UpdateJob(JobBase):
             self.cleanup()
             return False
         try:
-            logger.info(f'Replacing files to "{env.PROJECT_ROOT}"')
+            logger.info(f'Replacing files to "{self.root}", name="{self.name}"')
             self.replace()
         except Exception as e:
             # real files may be partially replaced
@@ -145,7 +149,7 @@ class UpdateJob(JobBase):
         detected by get_unfinished_job() on the next run, so a plain
         write is enough.
         """
-        file_write(env.PROJECT_ROOT.joinpath(self.JOB_FILE), self._data)
+        file_write(self.job_file, self._data)
 
     def unpack(self):
         """
@@ -166,6 +170,9 @@ class UpdateJob(JobBase):
         decoder.validate()
         if not decoder.old_version:
             raise ValueError('UpdateJob requires an update pack, got a full pack')
+        # rewrite the pack area paths of the pack into the ledger
+        # folder of the target before any comparison
+        self.localize(decoder)
         self._version = decoder.current_version
         self._file_index = {path: index for index, path in enumerate(decoder.fileinfo)}
         # the update pack records the changed files of the new version
@@ -177,7 +184,7 @@ class UpdateJob(JobBase):
 
         pending = []
         for index, (path, info) in enumerate(decoder.fileinfo.items()):
-            target = env.PROJECT_ROOT.joinpath(path)
+            target = self.root.joinpath(path)
             if info.edit == 2:
                 # deleted marker, its target is removed in replace()
                 pending.append(PendingFile(info=info, tmp=''))
@@ -187,7 +194,7 @@ class UpdateJob(JobBase):
             deleted = info.source_path if info.edit == 3 else ''
             current = self._read_current(target)
             result = self._matches(info, current)
-            if path == self.INDEX_PACK:
+            if path == self.index_rel:
                 # the index record is always written to the fixed
                 # new_index.pack, so the new index can be found
                 # without tracking the tmp name
@@ -269,7 +276,7 @@ class UpdateJob(JobBase):
         # full pack, the whole index pack is downloaded
         new_index_data = None
         for item in self.error:
-            if item.info.path != self.INDEX_PACK:
+            if item.info.path != self.index_rel:
                 continue
             info = item.info
             tmp = self.workspace.joinpath(self.NEW_INDEX)
@@ -287,7 +294,7 @@ class UpdateJob(JobBase):
             except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
                 # the record stays in error, this is unsolvable
-                logger.warning(f'Failed to download {self.INDEX_PACK}: {e}')
+                logger.warning(f'Failed to download {self.index_rel}: {e}')
                 new_index_data = None
                 failed.append(item)
             else:
@@ -308,17 +315,17 @@ class UpdateJob(JobBase):
                 pass
         if new_index_data is None:
             try:
-                new_index_data = atomic_read_bytes(env.PROJECT_ROOT.joinpath(self.INDEX_PACK))
+                new_index_data = atomic_read_bytes(self.index_file)
             except FileNotFoundError:
                 # the local index is missing and could not be
                 # downloaded, the offsets are unavailable
-                failed += [item for item in self.error if item.info.path != self.INDEX_PACK]
+                failed += [item for item in self.error if item.info.path != self.index_rel]
                 self.pending += pending
                 self.error = failed
                 return
-        new_index = PackDecodeBase(new_index_data)
+        new_index = self.localize(PackDecodeBase(new_index_data))
         for item in self.error:
-            if item.info.path == self.INDEX_PACK:
+            if item.info.path == self.index_rel:
                 continue
             info = item.info
             index = self._file_index[info.path]
@@ -358,7 +365,7 @@ class UpdateJob(JobBase):
 
         The records of the update pack were verified in unpack(), they
         are filtered out of the index view passed to ResetJob: the
-        local .pack/index.pack is replaced in replace() with the other
+        local index pack is replaced in replace() with the other
         files, so the new index is passed in directly with only the
         remaining files. The repaired records are merged into
         self.pending, replace() applies them together with the update
@@ -369,7 +376,7 @@ class UpdateJob(JobBase):
         """
         if self.server is None:
             return
-        if '.pack/index.pack' in [item.info.path for item in self.error]:
+        if self.index_rel in [item.info.path for item in self.error]:
             # the index record failed, the local index is not the new
             # one, it cannot be trusted for the remaining check
             logger.warning('Failed to validate the remaining files: '
@@ -382,10 +389,10 @@ class UpdateJob(JobBase):
             data = atomic_read_bytes(self.workspace.joinpath(self.NEW_INDEX))
         except FileNotFoundError:
             try:
-                data = atomic_read_bytes(env.PROJECT_ROOT.joinpath(self.INDEX_PACK))
+                data = atomic_read_bytes(self.index_file)
             except FileNotFoundError:
                 return
-        new_index = PackDecodeBase(data)
+        new_index = self.localize(PackDecodeBase(data))
         # the new index records every file of the new version, the
         # emptiness base of replace(). The dict is bound before the
         # decoder cache is replaced with the filtered view below: the
@@ -400,7 +407,7 @@ class UpdateJob(JobBase):
             if path not in self._file_index
         }
         InstanceCacheOperation.set(new_index, 'fileinfo', fileinfo)
-        reset = ResetJob(self.server)
+        reset = ResetJob(self.server, root=self.root, name=self.name)
         InstanceCacheOperation.set(reset, '_index_pack', new_index)
         reset.validate_files()
         reset.download()
@@ -487,7 +494,7 @@ class UpdateJob(JobBase):
         ref = decoder.refinfo.get(source_path)
         if ref is None:
             raise SourceError(source_path)
-        current = self._read_current(env.PROJECT_ROOT.joinpath(source_path))
+        current = self._read_current(self.root.joinpath(source_path))
         if not current.exist:
             raise SourceError(source_path)
         data = current.data

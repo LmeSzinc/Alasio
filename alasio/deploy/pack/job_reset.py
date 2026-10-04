@@ -3,7 +3,6 @@ import httpx2
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
 from alasio.deploy.pack.pack_model import IdxInfo
-from alasio.ext import env
 from alasio.ext.cache import InstanceCacheOperation, cached_property
 from alasio.ext.path.atomic import atomic_read_bytes, file_write
 from alasio.logger import logger
@@ -14,17 +13,18 @@ class ResetJob(JobBase):
     A local file validation and repair task, interruptible and
     resumable.
 
-    The job writes the marker to the job file .pack/workspace/job.pack
-    with write() before validating, so an interrupted run can be
-    resumed by the next run:
+    The job writes the marker to the job file
+    ({ledger}/workspace/job.pack) with write() before validating, so
+    an interrupted run can be resumed by the next run:
 
-        job = DeployJob.get_unfinished_job(server)
+        job = DeployJob().get_unfinished_job(server)
         if job is None:
             job = ResetJob(server)
             job.write()
         job.run()
 
-    The local index pack .pack/index.pack is read once and cached.
+    The local index pack (index.pack in the ledger folder of the
+    target) is read once and cached.
     validate_index() checks the index pack itself, a failed index pack
     is prepared again from the server (download_index()). Then
     validate_latest() compares the local index pack checksum with the
@@ -40,23 +40,28 @@ class ResetJob(JobBase):
     self.error with an empty tmp, this is an unsolvable problem per
     the draft of PackEncodeBase.
 
-    Note: the exclusive lock on .pack/index.pack in the draft is shared
-    by the whole update flow (full pack, update pack and file check),
-    the caller is responsible for it.
+    Note: the exclusive lock on the local index pack (index.pack in
+    the ledger folder) in the draft is shared by the whole update flow
+    (full pack, update pack and file check), the caller is responsible
+    for it.
     """
 
     # marker of a validation task in the job file
     MARK = b'REST\x00'
 
-    def __init__(self, server, resume=False):
+    def __init__(self, server, resume=False, root=None, name=''):
         """
         Args:
             server (ServerFile): Server to download the index pack and
                 the failed files
             resume (bool): True if the job was resumed from the job
                 file, run() does not write the job file again then
+            root (str, optional): Folder to update. Defaults to None,
+                env.PROJECT_ROOT
+            name (str, optional): Ledger key of the target. Defaults to
+                '', the project tree target
         """
-        super().__init__(b'')
+        super().__init__(b'', root=root, name=name)
         self.server = server
         self._resume = resume
         self.error: "list[PendingFile]" = []
@@ -80,7 +85,7 @@ class ResetJob(JobBase):
         try:
             if not self._resume:
                 self.write()
-            logger.info(f'Resetting files to "{env.PROJECT_ROOT}"')
+            logger.info(f'Resetting files to "{self.root}", name="{self.name}"')
             if not self.validate_index():
                 # the index pack is broken, download it again
                 self.download_index()
@@ -114,13 +119,15 @@ class ResetJob(JobBase):
         detected by get_unfinished_job() on the next run, so a plain
         write is enough.
         """
-        file_write(env.PROJECT_ROOT.joinpath(self.JOB_FILE), self.MARK)
+        file_write(self.job_file, self.MARK)
 
     @cached_property
     def _index_pack(self):
         """
         The local index pack, read and decoded once per job.
 
+        The index is read from the ledger folder of the target and
+        rewritten to its local namespace, see JobBase.localize().
         validate_index() and validate_files() share this decoder, so
         the file is read only once.
 
@@ -131,8 +138,8 @@ class ResetJob(JobBase):
             FileNotFoundError: If the index pack does not exist
             PackDecodeError: If the index pack is malformed
         """
-        data = atomic_read_bytes(env.PROJECT_ROOT.joinpath(self.INDEX_PACK))
-        return PackDecodeBase(data)
+        data = atomic_read_bytes(self.index_file)
+        return self.localize(PackDecodeBase(data))
 
     @cached_property
     def _latest_info(self):
@@ -157,7 +164,8 @@ class ResetJob(JobBase):
 
     def validate_index(self):
         """
-        Validate the local index pack .pack/index.pack itself.
+        Validate the local index pack (index.pack in the ledger folder
+        of the target) itself.
 
         The index pack must exist, decode and pass its checksum,
         otherwise the files recorded in it cannot be trusted. A failed
@@ -234,7 +242,7 @@ class ResetJob(JobBase):
         """
         self.error = []
         for path, info in self._index_pack.fileinfo.items():
-            current = self._read_current(env.PROJECT_ROOT.joinpath(path))
+            current = self._read_current(self.root.joinpath(path))
             if info.edit == 2:
                 # deleted marker, the file should not exist
                 if current.exist:
@@ -278,8 +286,8 @@ class ResetJob(JobBase):
         Prepare the new index pack of the latest version in the
         workspace.
 
-        The index pack is downloaded to .pack/workspace/new_index.tmp
-        instead of replacing the local .pack/index.pack directly:
+        The index pack is downloaded to {ledger}/workspace/new_index.tmp
+        instead of replacing the local index pack directly:
         replace() applies it together with the repaired files, so the
         real files are touched only once. A leftover tmp file that is
         self-consistent and matches the latest checksum is reused, a
@@ -321,11 +329,13 @@ class ResetJob(JobBase):
                     f'expected {info.checksum}, got {decoder.index_checksum}'
                 )
             file_write(tmp, data)
-        # set the decoder of the new index pack into the cache, the
-        # next validation reads it without the file again
+        # rewrite the pack area paths of the new index and set its
+        # decoder into the cache, the next validation reads it without
+        # the file again
+        self.localize(decoder)
         InstanceCacheOperation.set(self, '_index_pack', decoder)
         # replace() moves the tmp file to the local index pack
-        self.pending.append(PendingFile(info=IdxInfo(path=self.INDEX_PACK), tmp=tmp))
+        self.pending.append(PendingFile(info=IdxInfo(path=self.index_rel), tmp=tmp))
 
     def download(self):
         """
@@ -333,8 +343,8 @@ class ResetJob(JobBase):
 
         Every failed file is fetched from the full pack of the index
         pack version with a range request, decompressed and written to
-        .pack/workspace/{size}_{sha1}_{index}.tmp, the record is moved
-        to self.pending for replace(). Records that already carry a
+        {ledger}/workspace/{size}_{sha1}_{index}.tmp, the record is
+        moved to self.pending for replace(). Records that already carry a
         tmp (an EOL or mode mismatch fixed in validate_files()) and
         deleted markers need no download and are moved to pending
         directly.
