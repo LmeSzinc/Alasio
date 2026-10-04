@@ -16,6 +16,7 @@ from random import Random
 import httpx2
 import pytest
 
+from alasio.deploy.pack import job as job_module
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.server_file import ServerFile
 from alasio.deploy_dev.pack import _pack_cache
@@ -28,14 +29,69 @@ from alasio.git.mock.mock_repo import MockGitRepo
 COMMIT = 'c1'
 
 
+class MemoryLock:
+    """
+    In-memory stand-in of SQLiteFileLock for the fake filesystem tests.
+
+    The job lock is a SQLite file lock, SQLite opens its file in the C
+    layer where the in-memory fake filesystem cannot intercept it (the
+    real lock is covered by test_deploy_lock.py on a real directory).
+    The interface used by DeployJob is implemented, re-entrant by
+    counter like SQLiteFileLock.
+    """
+
+    def __init__(self, lock_file, timeout=-1):
+        """
+        Args:
+            lock_file (str): Path of the lock file
+            timeout (float): Kept for the SQLiteFileLock interface.
+                Defaults to -1.
+        """
+        self.lock_file = str(lock_file)
+        self.timeout = timeout
+        self._count = 0
+
+    @property
+    def is_locked(self):
+        """
+        Returns:
+            bool: True if the lock is held
+        """
+        return self._count > 0
+
+    def acquire(self, timeout=None):
+        """
+        Args:
+            timeout (float, optional): Ignored, the lock is in memory.
+
+        Returns:
+            MemoryLock: self
+        """
+        self._count += 1
+        return self
+
+    def release(self, force=False):
+        """
+        Args:
+            force (bool): Ignored, kept for the SQLiteFileLock interface
+        """
+        if self._count:
+            self._count -= 1
+
+
 @pytest.fixture
 def app_folder(fs, monkeypatch):
     """Set PROJECT_ROOT to a fresh folder in the fake filesystem.
 
     The fs fixture is imported explicitly in the test modules, see
-    the usage notes in alasio/testing/filesystem/__init__.py.
+    the usage notes in alasio/testing/filesystem/__init__.py. The lock
+    of DeployJob is swapped for an in-memory lock: the SQLite file lock
+    opens its file in the C layer, which the in-memory fake filesystem
+    cannot serve, see test_deploy_lock.py for the real lock on a real
+    directory.
     """
     monkeypatch.setattr(env, 'PROJECT_ROOT', PathStr.new(fs.root_dir.path))
+    monkeypatch.setattr(job_module, 'SQLiteFileLock', MemoryLock)
 
 
 @pytest.fixture(autouse=True)

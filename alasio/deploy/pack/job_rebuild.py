@@ -22,12 +22,12 @@ class RebuildJob(ResetJob):
 
     write() stores the RBIL marker to the job file, the marker is
     dispatched to a resumed RebuildJob by
-    DeployJob().get_unfinished_job().
+    DeployJob()._get_unfinished_job().
 
-    Note: the exclusive lock on the local index pack (index.pack in
-    the ledger folder) in the draft is shared by the whole update flow
-    (full pack, update pack and file check), the caller is responsible
-    for it.
+    Note: the exclusive lock of the target ledger (the lock file, see
+    DeployJob.locked()) is held by DeployJob around the whole update
+    flow (full pack, update pack and file check); a direct user of
+    this job must take it itself.
     """
 
     # marker of a rebuild task in the job file

@@ -17,7 +17,7 @@ class ResetJob(JobBase):
     ({ledger}/workspace/job.pack) with write() before validating, so
     an interrupted run can be resumed by the next run:
 
-        job = DeployJob().get_unfinished_job(server)
+        job = DeployJob()._get_unfinished_job(server)
         if job is None:
             job = ResetJob(server)
             job.write()
@@ -40,10 +40,10 @@ class ResetJob(JobBase):
     self.error with an empty tmp, this is an unsolvable problem per
     the draft of PackEncodeBase.
 
-    Note: the exclusive lock on the local index pack (index.pack in
-    the ledger folder) in the draft is shared by the whole update flow
-    (full pack, update pack and file check), the caller is responsible
-    for it.
+    Note: the exclusive lock of the target ledger (the lock file, see
+    DeployJob.locked()) is held by DeployJob around the whole update
+    flow (full pack, update pack and file check); a direct user of
+    this job must take it itself.
     """
 
     # marker of a validation task in the job file
@@ -116,7 +116,7 @@ class ResetJob(JobBase):
         run gets interrupted.
 
         The job file lives in the workspace, a corrupted one is
-        detected by get_unfinished_job() on the next run, so a plain
+        detected by _get_unfinished_job() on the next run, so a plain
         write is enough.
         """
         file_write(self.job_file, self.MARK)

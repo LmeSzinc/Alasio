@@ -447,7 +447,7 @@ class TestResume:
         """The RBIL marker is dispatched to a resumed RebuildJob."""
         setup_old()
         RebuildJob(SERVER).write()
-        job = DeployJob().get_unfinished_job(SERVER)
+        job = DeployJob()._get_unfinished_job(SERVER)
         assert job is not None
         assert isinstance(job, RebuildJob)
         with logger.mock_capture_writer():
@@ -470,7 +470,7 @@ class TestResume:
         def _fail(self, *a, **k):
             raise AssertionError('no index download expected, the tmp file is reused')
         monkeypatch.setattr(SERVER, 'get_index_pack', _fail)
-        job = DeployJob().get_unfinished_job(SERVER)
+        job = DeployJob()._get_unfinished_job(SERVER)
         assert job is not None
         assert job.run()
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX

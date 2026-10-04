@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 import httpx2
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
@@ -6,6 +8,7 @@ from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
+from alasio.ext.file.filelock import SQLiteFileLock
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_rmtree
 from alasio.logger import logger
 
@@ -31,10 +34,66 @@ class DeployJob(DeployTarget):
         DeployJob(name='httpx').update(server)
 
     The unfinished job is finished inside unpack() and update(), the
-    caller does not need to care about it.
+    caller does not need to care about it. Both take the exclusive
+    lock of the target ledger for the whole flow, see locked(): two
+    updaters of the same target never interleave, the second one waits
+    (or fails at once with locked(timeout=0)).
     """
 
-    def get_unfinished_job(self, server=None):
+    def __init__(self, root=None, name=''):
+        """
+        Args:
+            root (str, optional): Folder to update. Defaults to None,
+                env.PROJECT_ROOT
+            name (str, optional): Ledger key of the target. Defaults to
+                '', the project tree target
+        """
+        super().__init__(root=root, name=name)
+        # the exclusive lock of the target ledger, held by update() and
+        # unpack() for their whole flow, see locked(). The wait default
+        # is the lock default: timeout=-1 waits forever, 0 fails at once
+        self.lock = SQLiteFileLock(self.lock_file)
+
+    @contextmanager
+    def locked(self, timeout=None):
+        """
+        Hold the exclusive lock of the target ledger for a block.
+
+        The lock is a SQLite file lock on the lock file of the ledger
+        folder ({ledger}/lock): exclusive across processes and threads,
+        released by the operating system when the process exits, so a
+        crashed updater never leaves a stale lock. The lock file itself
+        is never deleted, deleting it would break the exclusion. The
+        acquire is re-entrant for this instance: a block nested in one
+        the instance already holds (update() and unpack() hold the lock
+        for their whole flow) counts up instead of deadlocking.
+
+        The caller does not need the lock for update() and unpack(); it
+        is taken explicitly to put several calls of one instance into
+        one critical section that another updater cannot interleave:
+
+            with deploy.locked(timeout=0):
+                deploy.update(server)
+
+        Args:
+            timeout (float, optional): Seconds to wait for the lock,
+                overrides the wait default of the lock. Defaults to
+                None, the default of the lock (-1 waits forever).
+
+        Yields:
+            SQLiteFileLock: The lock object
+
+        Raises:
+            FilelockTimeout: If the lock is held elsewhere and the wait
+                is over, timeout=0 fails at once
+        """
+        self.lock.acquire(timeout=timeout)
+        try:
+            yield self.lock
+        finally:
+            self.lock.release()
+
+    def _get_unfinished_job(self, server=None):
         """
         Check if there is an unfinished job of this target, read it
         and create the job object of the corresponding type.
@@ -45,6 +104,10 @@ class DeployJob(DeployTarget):
         is an update pack (UpdateJob), a pack without one (empty old
         version) is a full pack (UnpackJob). A corrupted job file is
         cleaned up with a warning.
+
+        The lock of the target is not taken here: the returned job
+        mutates the working tree, run it under locked() (update() and
+        unpack() take the lock around their whole flow).
 
         Args:
             server (ServerFile, optional): Server to download the
@@ -87,20 +150,23 @@ class DeployJob(DeployTarget):
         pack) are removed, the new index pack (index.pack in the ledger
         folder of the target) replaces the local one last. No server is
         involved. Finishes the unfinished job first, then unpacks the
-        new data, the caller only needs to call run() of each job.
+        new data, the caller only needs to call run() of each job. The
+        exclusive lock of the target ledger is held for the whole flow,
+        see locked().
 
         Args:
             data (bytes): Full pack data
         """
-        # finish the unfinished job first, its run() skips write()
-        job = self.get_unfinished_job()
-        if job is not None:
-            logger.info(f'Found unfinished job: {job.__class__}')
-            job.run()
-        # unpack the new data
-        UnpackJob(data, root=self.root, name=self.name).run()
+        with self.locked():
+            # finish the unfinished job first, its run() skips write()
+            job = self._get_unfinished_job()
+            if job is not None:
+                logger.info(f'Found unfinished job: {job.__class__}')
+                job.run()
+            # unpack the new data
+            UnpackJob(data, root=self.root, name=self.name).run()
 
-    def local_version(self):
+    def _local_version(self):
         """
         The version of the local index pack (index.pack in the ledger
         folder of the target).
@@ -140,7 +206,8 @@ class DeployJob(DeployTarget):
         version, the update cannot be incremental: RebuildJob
         downloads the latest index unconditionally and rebuilds the
         working tree from it. The unfinished job is finished inside,
-        the caller does not need to care about it.
+        the caller does not need to care about it. The exclusive lock
+        of the target ledger is held for the whole flow, see locked().
 
         Args:
             server (ServerFile): Server to check and download from
@@ -149,46 +216,47 @@ class DeployJob(DeployTarget):
             bool: True if every file is up to date, False if some
                 records stay in error
         """
-        # finish the unfinished job first, its run() skips write()
-        job = self.get_unfinished_job(server)
-        if job is not None:
-            logger.info(f'Found unfinished job: {job.__class__}')
-            job.run()
+        with self.locked():
+            # finish the unfinished job first, its run() skips write()
+            job = self._get_unfinished_job(server)
+            if job is not None:
+                logger.info(f'Found unfinished job: {job.__class__}')
+                job.run()
 
-        local = self.local_version()
-        logger.attr('CurrentVersion', local)
-        info = server.get_latest_info()
-        logger.attr('LatestVersion', info.version)
+            local = self._local_version()
+            logger.attr('CurrentVersion', local)
+            info = server.get_latest_info()
+            logger.attr('LatestVersion', info.version)
 
-        if not local:
-            # the local index is missing or malformed, the version is
-            # unknown: rebuild from the latest index
-            logger.warning('Failed to read the local version, rebuilding from the latest index')
-            job = RebuildJob(server, root=self.root, name=self.name)
-            return job.run()
-        if local != info.version:
-            # a version mismatch, apply the update pack incrementally
-            try:
-                data = server.get_update_pack(local, info.version)
-            except httpx2.HTTPStatusError as e:
-                # the update pack of the local version is not on the
-                # server (out of the update window or removed), the
-                # incremental path is broken: rebuild from the latest index
-                logger.warning(
-                    f'Failed to get the update pack {local} -> {info.version}: {e}, '
-                    f'rebuilding from the latest index'
-                )
+            if not local:
+                # the local index is missing or malformed, the version is
+                # unknown: rebuild from the latest index
+                logger.warning('Failed to read the local version, rebuilding from the latest index')
                 job = RebuildJob(server, root=self.root, name=self.name)
                 return job.run()
-            job = UpdateJob(data, server=server, root=self.root, name=self.name)
-            if job.run():
-                return True
-            # the update pack failed to apply, rebuild from the latest
-            # index: a corrupt pack is bypassed, the latest index and
-            # the files are downloaded directly
-            logger.warning('Failed to apply the update pack, rebuilding from the latest index')
-            job = RebuildJob(server, root=self.root, name=self.name)
+            if local != info.version:
+                # a version mismatch, apply the update pack incrementally
+                try:
+                    data = server.get_update_pack(local, info.version)
+                except httpx2.HTTPStatusError as e:
+                    # the update pack of the local version is not on the
+                    # server (out of the update window or removed), the
+                    # incremental path is broken: rebuild from the latest index
+                    logger.warning(
+                        f'Failed to get the update pack {local} -> {info.version}: {e}, '
+                        f'rebuilding from the latest index'
+                    )
+                    job = RebuildJob(server, root=self.root, name=self.name)
+                    return job.run()
+                job = UpdateJob(data, server=server, root=self.root, name=self.name)
+                if job.run():
+                    return True
+                # the update pack failed to apply, rebuild from the latest
+                # index: a corrupt pack is bypassed, the latest index and
+                # the files are downloaded directly
+                logger.warning('Failed to apply the update pack, rebuilding from the latest index')
+                job = RebuildJob(server, root=self.root, name=self.name)
+                return job.run()
+            # the same version, check the index and the files
+            job = ResetJob(server, root=self.root, name=self.name)
             return job.run()
-        # the same version, check the index and the files
-        job = ResetJob(server, root=self.root, name=self.name)
-        return job.run()

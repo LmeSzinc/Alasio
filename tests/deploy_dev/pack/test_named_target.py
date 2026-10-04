@@ -83,8 +83,8 @@ class TestNamedUnpack:
     def test_ledger_and_workspace_are_per_name(self, app_folder):
         """A named target has its own job file and workspace."""
         UnpackJob(WEBSITE_FULL_PACK, name='a').write()
-        assert DeployJob(name='b').get_unfinished_job() is None
-        job = DeployJob(name='a').get_unfinished_job()
+        assert DeployJob(name='b')._get_unfinished_job() is None
+        job = DeployJob(name='a')._get_unfinished_job()
         assert job is not None
         assert isinstance(job, UnpackJob)
         with logger.mock_capture_writer():

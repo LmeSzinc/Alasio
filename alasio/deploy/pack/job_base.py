@@ -92,12 +92,12 @@ class DeployTarget:
         {root}/.pack/{name}       a named target, e.g. a python dist
                                   sharing site-packages with others
 
-    The ledger folder holds the index pack (index.pack) and the
-    workspace of the jobs (workspace/, job.pack inside), the exclusive
-    lock the caller takes guards the index pack too. index_rel is the
-    ledger path relative to the root: it is the local form of the
-    canonical .pack/index.pack path of the packs, see
-    JobBase.local_path().
+    The ledger folder holds the index pack (index.pack), the workspace
+    of the jobs (workspace/, job.pack inside) and the lock file of the
+    target (lock), taken by DeployJob for a whole update flow, see
+    DeployJob.locked(). index_rel is the ledger path relative to the
+    root: it is the local form of the canonical .pack/index.pack path
+    of the packs, see JobBase.local_path().
     """
 
     # The pack area of the pack format, relative to the target root. The
@@ -126,6 +126,11 @@ class DeployTarget:
         self.index_file = self.ledger.joinpath('index.pack')
         self.workspace = self.ledger.joinpath('workspace')
         self.job_file = self.workspace.joinpath('job.pack')
+        # lock file of the target ledger: a file of its own, never the
+        # index pack (every update replaces the index pack atomically,
+        # a lock on it would not survive the flow), see
+        # DeployJob.locked()
+        self.lock_file = self.ledger.joinpath('lock')
 
 
 class JobBase(DeployTarget):

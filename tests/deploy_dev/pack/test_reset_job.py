@@ -76,13 +76,13 @@ class TestJobFile:
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == b'REST\x00'
 
     def test_get_unfinished_job_none(self, app_folder):
-        """No job file, DeployJob().get_unfinished_job() returns None."""
-        assert DeployJob().get_unfinished_job() is None
+        """No job file, DeployJob()._get_unfinished_job() returns None."""
+        assert DeployJob()._get_unfinished_job() is None
 
     def test_get_unfinished_job_marker(self, app_folder):
         """A marker job file is dispatched to a resumed ResetJob."""
         ResetJob(WEBSITE_SERVER).write()
-        job = DeployJob().get_unfinished_job(WEBSITE_SERVER)
+        job = DeployJob()._get_unfinished_job(WEBSITE_SERVER)
         assert job is not None
         assert isinstance(job, ResetJob)
         assert job.run()
@@ -91,7 +91,7 @@ class TestJobFile:
     def test_get_unfinished_job_pack(self, app_folder):
         """A pack job file is dispatched to UnpackJob, not ResetJob."""
         UnpackJob(WEBSITE_FULL_PACK).write()
-        job = DeployJob().get_unfinished_job()
+        job = DeployJob()._get_unfinished_job()
         assert job is not None
         assert isinstance(job, UnpackJob)
 
@@ -734,7 +734,7 @@ class TestRun:
         def _fail(self):
             raise AssertionError('write() should not be called on resume')
         monkeypatch.setattr(ResetJob, 'write', _fail)
-        job = DeployJob().get_unfinished_job(WEBSITE_SERVER)
+        job = DeployJob()._get_unfinished_job(WEBSITE_SERVER)
         assert job is not None
         assert job.run()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')

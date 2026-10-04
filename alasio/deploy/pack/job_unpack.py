@@ -18,7 +18,7 @@ class UnpackJob(JobBase):
     ({ledger}/workspace/job.pack) with write() before unpacking, so an
     interrupted run can be resumed by the next run:
 
-        job = DeployJob().get_unfinished_job()
+        job = DeployJob()._get_unfinished_job()
         if job is not None:
             job.unpack()
             job.replace()
@@ -52,10 +52,10 @@ class UnpackJob(JobBase):
 
     On failure the workspace is kept, the next run resumes from it.
 
-    Note: the exclusive lock on the local index pack (index.pack in
-    the ledger folder) in the draft is shared by the whole update flow
-    (full pack, update pack and file check), the caller is responsible
-    for it.
+    Note: the exclusive lock of the target ledger (the lock file, see
+    DeployJob.locked()) is held by DeployJob around the whole update
+    flow (full pack, update pack and file check); a direct user of
+    this job must take it itself.
     """
 
     def __init__(self, data, resume=False, root=None, name=''):
@@ -111,7 +111,7 @@ class UnpackJob(JobBase):
         from it if this run gets interrupted.
 
         The job file lives in the workspace, a corrupted one is
-        detected by get_unfinished_job() on the next run, so a plain
+        detected by _get_unfinished_job() on the next run, so a plain
         write is enough.
         """
         file_write(self.job_file, self._data)
