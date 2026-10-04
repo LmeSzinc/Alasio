@@ -13,6 +13,11 @@ class OpsiAshAssist(a.GroupBase):
 
 
 LITERAL_OpsiGeneral_BuyActionPointLimit = t.Literal[0, 1, 2, 3, 4, 5]
+LITERAL_OpsiGeneral_AkashiShopFilter = t.Literal[
+    'ActionPoint100', 'ActionPoint50', 'ActionPoint20', 'PurpleCoins', 'RepairPack', 'RepairPack2', 'RepairPackFull',
+    'RepairPackFull2', 'RepairPackTriple', 'RepairPackTriple2', 'TuningSampleCombat', 'TuningSampleOffence',
+    'TuningSampleSurvival',
+]
 
 
 class OpsiGeneral(a.GroupBase):
@@ -21,7 +26,9 @@ class OpsiGeneral(a.GroupBase):
     OilLimit: e.Annotated[int, m.Meta(ge=500, le=20000)] = 1000
     RepairThreshold: e.Annotated[float, m.Meta(ge=0.0, le=1.0)] = 0.4
     DoRandomMapEvent: bool = True
-    AkashiShopFilter: a.T_TUPLE_STR = ('ActionPoint', 'PurpleCoins')
+    AkashiShopFilter: t.Tuple[LITERAL_OpsiGeneral_AkashiShopFilter, ...] = (
+        'ActionPoint100', 'ActionPoint50', 'ActionPoint20', 'PurpleCoins',
+    )
 
 
 LITERAL_OpsiAshBeacon_AttackMode = t.Literal['current', 'current_dossier']

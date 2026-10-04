@@ -52,8 +52,44 @@
       "en-US": {"name": "OpsiGeneral.DoRandomMapEvent", "help": ""}
     },
     "AkashiShopFilter": {
-      "zh-CN": {"name": "OpsiGeneral.AkashiShopFilter", "help": ""},
-      "en-US": {"name": "OpsiGeneral.AkashiShopFilter", "help": ""}
+      "zh-CN": {
+        "name": "OpsiGeneral.AkashiShopFilter",
+        "help": "",
+        "option_i18n": {
+          "ActionPoint100": "ActionPoint100",
+          "ActionPoint50": "ActionPoint50",
+          "ActionPoint20": "ActionPoint20",
+          "PurpleCoins": "PurpleCoins",
+          "RepairPack": "RepairPack",
+          "RepairPack2": "RepairPack2",
+          "RepairPackFull": "RepairPackFull",
+          "RepairPackFull2": "RepairPackFull2",
+          "RepairPackTriple": "RepairPackTriple",
+          "RepairPackTriple2": "RepairPackTriple2",
+          "TuningSampleCombat": "TuningSampleCombat",
+          "TuningSampleOffence": "TuningSampleOffence",
+          "TuningSampleSurvival": "TuningSampleSurvival"
+        }
+      },
+      "en-US": {
+        "name": "OpsiGeneral.AkashiShopFilter",
+        "help": "",
+        "option_i18n": {
+          "ActionPoint100": "ActionPoint100",
+          "ActionPoint50": "ActionPoint50",
+          "ActionPoint20": "ActionPoint20",
+          "PurpleCoins": "PurpleCoins",
+          "RepairPack": "RepairPack",
+          "RepairPack2": "RepairPack2",
+          "RepairPackFull": "RepairPackFull",
+          "RepairPackFull2": "RepairPackFull2",
+          "RepairPackTriple": "RepairPackTriple",
+          "RepairPackTriple2": "RepairPackTriple2",
+          "TuningSampleCombat": "TuningSampleCombat",
+          "TuningSampleOffence": "TuningSampleOffence",
+          "TuningSampleSurvival": "TuningSampleSurvival"
+        }
+      }
     }
   },
   "OpsiAshBeacon": {

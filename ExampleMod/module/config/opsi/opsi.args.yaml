@@ -18,9 +18,22 @@ OpsiGeneral:
       range: 0.0~1.0
     DoRandomMapEvent: true
     AkashiShopFilter:
-      dt: filter
-      value: |-
-        ActionPoint > PurpleCoins
+      dt: filter-order
+      value: ActionPoint100 > ActionPoint50 > ActionPoint20 > PurpleCoins
+      option:
+        - ActionPoint100
+        - ActionPoint50
+        - ActionPoint20
+        - PurpleCoins
+        - RepairPack
+        - RepairPack2
+        - RepairPackFull
+        - RepairPackFull2
+        - RepairPackTriple
+        - RepairPackTriple2
+        - TuningSampleCombat
+        - TuningSampleOffence
+        - TuningSampleSurvival
 
 OpsiAshBeacon:
   args:
