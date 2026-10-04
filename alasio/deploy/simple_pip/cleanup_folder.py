@@ -34,7 +34,8 @@ class CleanupFolder:
     escape the tree of the caller. An absolute path is accepted too, the
     walk of the parent folders stops at the filesystem root ("/") and at
     the drive root ("C:"), e.g. "/env" and "C:/env" are the top level
-    folders returned.
+    folders returned. The roots themselves are never returned, even when
+    they are registered as folders.
     """
 
     def __init__(self):
@@ -103,10 +104,10 @@ class CleanupFolder:
 
         Returns:
             list[str]: Paths of the folders, the deepest first, so a
-                folder is removed before its parent folder. The root (the
-                empty string) is never listed, the caller removes the
-                folders with os.rmdir(): a folder that is not empty fails
-                the removal and is kept
+                folder is removed before its parent folder. The root of
+                the caller (the empty string, "/" or "C:") is never
+                listed, the caller removes the folders with os.rmdir(): a
+                folder that is not empty fails the removal and is kept
         """
         # The folders holding a file, with their parent folders: they are
         # never removed. The walk stops at the first folder the set
@@ -121,8 +122,15 @@ class CleanupFolder:
         # The removal candidates: the registered folders, the folders of
         # the removed files and the parent folders a removal leaves empty.
         # Same early stop, the parent folders of a registered folder are
-        # collected by the walk of the folder itself
-        folders = set(self._folders)
+        # collected by the walk of the folder itself. A root is not a
+        # folder of the caller and is never a candidate, even when it is
+        # registered: the empty string of a relative path, the filesystem
+        # root "/" and the drive root "C:" of an absolute path
+        folders = {
+            folder
+            for folder in self._folders
+            if folder and folder != '/' and not folder.endswith(':')
+        }
         for path in self._folders:
             for parent in _iter_parents(path):
                 if parent in folders:
