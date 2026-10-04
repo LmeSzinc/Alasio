@@ -59,7 +59,6 @@ Adb:
   InstallUiautomator2: true
 Ocr:
   # Run Ocr as a service, can reduce memory usage by not import mxnet everytime you start an alas instance
-  # 
   # Whether to use ocr server
   # [Default] false
   UseOcrServer: false
@@ -81,8 +80,9 @@ Update:
   # [Default] 5
   CheckUpdateInterval: 5
   # Scheduled restart time
-  # If there are updates, Alas will automatically restart and update at this time every day
-  # and run all alas instances that running before restarted
+  # Restart Alas at this time every day, in the host local timezone
+  # All alas instances running before the restart are stopped gracefully and resumed after the restart
+  # [Format] HH:MM, e.g. 03:50
   # [Disable] null
   # [Default] 03:50
   AutoRestartTime: 03:50

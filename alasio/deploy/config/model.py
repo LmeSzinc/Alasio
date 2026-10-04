@@ -108,7 +108,6 @@ class AdbConfig(Struct):
 class OcrConfig(Struct):
     UseOcrServer: Annotated[bool, Meta(extra={"help": [
         "Run Ocr as a service, can reduce memory usage by not import mxnet everytime you start an alas instance",
-        "",
         "Whether to use ocr server",
         "[Default] false",
     ]})] = False
