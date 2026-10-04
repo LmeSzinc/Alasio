@@ -10,19 +10,23 @@ The file list is designed to cover every record type produced by PackFull:
 - algo: 0 (raw, small/incompressible files), 1 (lzma, big compressible files)
 - empty files (size = 0, sha1 = b''), deep paths, duplicate contents (C)
 """
+import sqlite3
 from hashlib import sha1
 from random import Random
 
 import httpx2
 import pytest
 
+from alasio.db.table import AlasioTable
 from alasio.deploy.pack import job as job_module
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.server_file import ServerFile
+from alasio.deploy.pack.server_url import PackMirrorRow, PackMirrorTable, ServerUrl
 from alasio.deploy_dev.pack import _pack_cache
 from alasio.deploy_dev.pack._pack_cache import PackCache
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.ext import env
+from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.git.mock.mock_repo import MockGitRepo
 
@@ -284,6 +288,90 @@ class MockServerFile(ServerFile):
 # MockServerFile serving the website packs in memory, read-only test data
 WEBSITE_SERVER = MockServerFile()
 WEBSITE_SERVER.register_version(COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK)
+
+
+class FakeMirrorTable(AlasioTable):
+    """
+    PackMirrorTable on the in-memory sqlite database, with IO counters.
+
+    The real table SQL of PackMirrorTable (CREATE_TABLE, select_one,
+    upsert_row) runs against the ':memory:' database of the connection
+    pool: the pack tests never touch the real gui.db. The database is
+    shared by every connection, the table is dropped on construction,
+    so every instance starts from an empty table (auto created on
+    first use).
+    """
+
+    TABLE_NAME = PackMirrorTable.TABLE_NAME
+    CREATE_TABLE = PackMirrorTable.CREATE_TABLE
+    MODEL = PackMirrorRow
+
+    def __init__(self):
+        super().__init__(':memory:')
+        # the pool shares one in-memory database across the connections:
+        # every instance starts from an empty table
+        self.drop_table()
+        # IO counters, the tests assert the reads and writes made
+        self.selects = 0
+        self.upserts = 0
+
+    def select_one(self, *args, **kwargs):
+        self.selects += 1
+        return super().select_one(*args, **kwargs)
+
+    def upsert_row(self, rows, conflicts='', updates='', _cursor_=None):
+        self.upserts += 1
+        return super().upsert_row(rows, conflicts=conflicts, updates=updates, _cursor_=_cursor_)
+
+    def seed(self, scope='', set_key='', name=''):
+        """
+        Write a record as fixture data, not counted in the IO counters.
+
+        Args:
+            scope (str): Scope of the record. Defaults to ''
+            set_key (str): Fingerprint of the mirror structure the
+                name was selected for. Defaults to ''
+            name (str): Recorded mirror name. Defaults to ''
+        """
+        super().upsert_row(
+            PackMirrorRow(scope=scope, set_key=set_key, name=name),
+            conflicts='scope', updates=('set_key', 'name'))
+
+
+class BrokenMirrorTable:
+    """
+    A mirror table that fails every operation, like a broken gui.db.
+    """
+
+    def select_one(self, **kwargs):
+        raise sqlite3.OperationalError('unable to open database file')
+
+    def upsert_row(self, row, conflicts='', updates=''):
+        raise sqlite3.OperationalError('unable to open database file')
+
+
+def make_server_url(mirrors, scope='', table=None):
+    """
+    A ServerUrl with a mirror table injected.
+
+    The table of a ServerUrl is a cached property created on first
+    use, the injected table replaces it before that: the pack tests
+    never touch the real gui.db.
+
+    Args:
+        mirrors (str | dict): Mirror input of the ServerUrl
+        scope (str): Scope of the gui.db record. Defaults to ''
+        table (AlasioTable-like, optional): Table to record in, e.g.
+            FakeMirrorTable / BrokenMirrorTable. Defaults to None,
+            the real PackMirrorTable is created when it is first used
+
+    Returns:
+        ServerUrl: The server url
+    """
+    server_url = ServerUrl(mirrors, scope=scope)
+    if table is not None:
+        cached_property.set(server_url, '_db', table)
+    return server_url
 
 
 # ════════════════════════════════════════════════════════════════════════════

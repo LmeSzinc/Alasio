@@ -1,8 +1,12 @@
 import httpx2
 from msgspec import Struct
 
+from alasio.deploy.httpclient.probe import AllMirrorsFailedError, ProbeBase
 from alasio.deploy.pack.decode_base import PackDecodeError
+from alasio.deploy.pack.server_url import ServerUrl
 from alasio.ext.algorithm.vint import decode_vint
+from alasio.ext.cache import cached_property
+from alasio.logger import logger
 
 
 class LatestInfo(Struct):
@@ -51,17 +55,28 @@ class LatestInfo(Struct):
         )
 
 
-class ServerFile:
+class ServerFile(ProbeBase):
     """
     HTTP client of the update server, downloads pack files with range
     requests.
 
+    The server urls are a ServerUrl mirror set: every request resolves
+    the mirror first (the only mirror, the name recorded in gui.db, or
+    the winner of a probe, see _resolve) and is sent to that mirror.
+    probe selects the mirror: the concurrency skeleton is ProbeBase
+    (constructed with the groups, run() executes), this class
+    implements probe_function() (fetch and parse latest.pack) and
+    records the winner. The payload of the probe is handed over, so a
+    probe never costs an extra request when the flow needs latest.pack
+    anyway. The probe of an instance runs at most once: a later
+    failure raises instead of racing again, see _reselect.
+
     The server layout follows the draft in PackEncodeBase:
-    - base_url/latest.pack: latest version in bytes, followed by the
+    - {mirror}/latest.pack: latest version in bytes, followed by the
       20 bytes sha1 checksum of the index pack of that version
-    - base_url/{version}/full.pack: full pack of a version, the front
+    - {mirror}/{version}/full.pack: full pack of a version, the front
       part of it is the index pack of that version
-    - base_url/{new_version}/from_{old_version}.pack: update pack
+    - {mirror}/{new_version}/from_{old_version}.pack: update pack
       from the old version to the new version
 
     get_index_pack() downloads the index section with two range
@@ -72,21 +87,272 @@ class ServerFile:
     # bytes to request first for the header: the pack header plus the
     # index section length vint (at most 8 bytes for a int64 length)
     HEADER_REQUEST_SIZE = 64
+    # budget of one probe candidate in seconds: latest.pack is a small
+    # file, a candidate that does not answer within the budget is not
+    # usable (the default timeout of httpx2.Client is the same)
+    PROBE_TIMEOUT = 5.0
 
-    def __init__(self, base_url, client=None):
+    def __init__(self, server_url, client=None):
         """
         Args:
-            base_url (str): Base URL of the update server
+            server_url (ServerUrl | dict[str, str] | str): Mirror set
+                to select from and to fetch the packs from, a str or a
+                dict is wrapped into a ServerUrl
             client (httpx2.Client, optional): Client to reuse, a new
                 one is created for every request if not given
         """
-        self.base_url = base_url
+        if not isinstance(server_url, ServerUrl):
+            server_url = ServerUrl(server_url)
+        # the probe engine of this server, its mirrors are the mirror
+        # structure, see ProbeBase (only run() executes it)
+        super().__init__(server_url.mirrors)
+        self.server_url = server_url
         self._client = client
+        # mirror resolved for this instance, the flow it serves; ''
+        # until resolved, see _resolve()
+        self._mirror = ''
+        # failure of a failed probe of this instance, re-raised by a
+        # later probe attempt; None until a probe fails, see probe
+        self._probe_error = None
+
+    @cached_property
+    def probe(self):
+        """
+        Probe the mirrors and select the first usable one, recording it
+        in gui.db.
+
+        The concurrency skeleton is ProbeBase.run(): the groups
+        (ServerUrl.groups) are connectivity paths and run in parallel
+        (the earliest group with a usable member wins), the members of
+        a group are tried in their declared order (the first usable
+        one wins, the order is a preference). probe_function() probes
+        one mirror: a candidate is usable when its latest.pack can be
+        fetched and parsed (LatestInfo).
+
+        The probe of an instance runs at most once: the result is
+        cached and a failed probe is recorded, a later access does not
+        race again - probing again in the same flow is meaningless,
+        the network environment does not change between its requests
+        (see _reselect).
+
+        The winner is recorded (ServerUrl.set_name) and its payload is
+        returned, the caller that needs latest.pack does not request
+        it again: the probe request is the prefetch.
+
+        Returns:
+            tuple[str, LatestInfo]: The selected mirror name and its
+                latest.pack
+
+        Raises:
+            AllMirrorsFailedError: If no candidate of any group is
+                usable, the message carries every failure
+        """
+        if self._probe_error is not None:
+            # the probe already failed on this instance: re-raise the
+            # recorded failure, racing again is meaningless
+            raise self._probe_error
+        try:
+            name, info = super().run()
+        except AllMirrorsFailedError as e:
+            # record the failure: the probe of this instance must not
+            # race again, see _reselect
+            self._probe_error = e
+            raise
+        self.server_url.set_name(name)
+        return name, info
+
+    def probe_function(self, name, url):
+        """
+        Probe one mirror: fetch and parse its latest.pack.
+
+        Args:
+            name (str): Mirror name, for the logs
+            url (str): Base url of the mirror
+
+        Returns:
+            LatestInfo: The latest version and index pack checksum
+
+        Raises:
+            PackDecodeError: If the response is shorter than the
+                20 bytes checksum
+            httpx2.HTTPError: If the request fails
+        """
+        return self._fetch_latest_at(url)
+
+    def _fetch_latest_at(self, url):
+        """
+        Fetch and parse latest.pack of a base url.
+
+        Args:
+            url (str): Base url of a mirror
+
+        Returns:
+            LatestInfo: The latest version and index pack checksum
+
+        Raises:
+            PackDecodeError: If the response is shorter than the
+                20 bytes checksum
+            httpx2.HTTPError: If the request fails
+        """
+        response = self._http_get(f'{url}/latest.pack', timeout=self.PROBE_TIMEOUT)
+        return LatestInfo.parse(response.content)
+
+    def _resolve(self):
+        """
+        Resolve the mirror of this instance, probing only when needed.
+
+        The resolution order: the mirror already resolved, the only
+        mirror of a single mirror set (no selection to make), the name
+        recorded in gui.db (a hint of the machine network
+        environment), then a probe (the last resort).
+
+        Returns:
+            tuple[str, LatestInfo | None]: The mirror name and the
+                latest.pack payload of a probe that just ran, None
+                when no probe was needed; the payload is the prefetch
+                of the caller that needs it, see probe
+        """
+        if self._mirror:
+            return self._mirror, None
+        single = self.server_url.single
+        if single:
+            self._mirror = single
+            return single, None
+        name = self.server_url.name
+        if name:
+            self._mirror = name
+            return name, None
+        name, info = self.probe
+        self._mirror = name
+        return name, info
+
+    def _reselect(self, failure):
+        """
+        Reselect the mirror after the resolved one failed, probing only
+        when the probe of this instance has not run yet.
+
+        The probe of an instance runs at most once (see probe): when it
+        already ran, the selection reflects the current network
+        environment and probing again is meaningless - the environment
+        does not change between the requests of one flow - so the
+        failure at hand is raised as-is. A probe that failed is
+        recorded, its error is raised as-is too instead of racing
+        again. The fresh probe never consults the recorded name, it is
+        the failed one; it overwrites the record with the winner. When
+        every mirror fails the record keeps the old name: a total
+        failure usually means the machine is offline, not that the
+        record is wrong.
+
+        Args:
+            failure (Exception): Failure of the resolved mirror, raised
+                as-is when the probe of this instance already ran
+
+        Returns:
+            tuple[str, LatestInfo]: The newly selected mirror and its
+                latest.pack
+
+        Raises:
+            Exception: The failure at hand, when the probe of this
+                instance already ran
+            AllMirrorsFailedError: If the probe finds no usable mirror
+        """
+        if self._probe_error is not None:
+            # the probe of this instance already failed, no mirror was
+            # usable: racing again is meaningless
+            raise self._probe_error
+        if cached_property.has(self, 'probe'):
+            # the mirror was selected by the cached probe of this
+            # instance: probing again would select the same mirror
+            raise failure
+        logger.warning(f'Mirror "{self._mirror}" failed: {failure}, probing again')
+        name, info = self.probe
+        self._mirror = name
+        return name, info
+
+    @staticmethod
+    def _mirror_failed(e):
+        """
+        Whether a failed request of a pack file means the mirror is
+        not usable instead of being the answer of the server.
+
+        A failure without a status code means the mirror never answered
+        - dns lookup failure, connect refusal, ssl handshake failure,
+        timeout, read/write error (e.g. a mirror that is blocked in the
+        user network raises a connect error or a timeout, there is no
+        status code at all) - another mirror may serve the file, it is
+        a mirror failure. With a status code, only the server side
+        errors (5xx, 429) are mirror failures; a 4xx is the content
+        answer, another mirror would answer the same: a missing update
+        pack falls back to a rebuild, a missing file stays in error.
+
+        Args:
+            e (httpx2.HTTPError): The request failure
+
+        Returns:
+            bool: True if the mirror should be reselected
+        """
+        if isinstance(e, httpx2.HTTPStatusError):
+            status = e.response.status_code
+            return status >= 500 or status == 429
+        return True
+
+    def _request(self, path, headers=None):
+        """
+        Get a path of the resolved mirror, reselecting the mirror when
+        it fails.
+
+        The mirror is resolved before the request (see _resolve). A
+        failure that means the mirror is not usable (see
+        _mirror_failed) drops it, reselects the mirror (see _reselect:
+        the probe of the instance runs at most once) and retries the
+        same request once on the new winner; a failure of the retry is
+        raised as-is. The pack format validates every downloaded byte
+        against its checksum, so a retry on another mirror cannot
+        corrupt the update.
+
+        Args:
+            path (str): Path of the request, e.g. '/{version}/full.pack'
+            headers (dict, optional): Request headers
+
+        Returns:
+            httpx2.Response: The response
+
+        Raises:
+            httpx2.HTTPError: If the request fails on every tried mirror
+            AllMirrorsFailedError: If the reselection finds no usable
+                mirror
+        """
+        name, _ = self._resolve()
+        try:
+            return self._http_get(f'{self.server_url.url_of(name)}{path}', headers)
+        except httpx2.HTTPError as e:
+            if self.server_url.single or not self._mirror_failed(e):
+                raise
+            failure = e
+        # the mirror is not usable: reselect (a probe runs only when
+        # this instance has not probed yet) and retry the same request
+        # once on the new winner, a failure of the retry is raised
+        # as-is
+        name, _ = self._reselect(failure)
+        return self._http_get(f'{self.server_url.url_of(name)}{path}', headers)
 
     def get_latest_info(self):
         """
         Get the latest version and the checksum of its index pack from
-        base_url/latest.pack.
+        {mirror}/latest.pack.
+
+        The mirror is resolved before the request (see _resolve). A
+        probe that just ran already fetched latest.pack, its payload
+        is returned directly without a second request; the payload is
+        not cached, a later call fetches again.
+
+        A failed request reselects the mirror (see _reselect): when the
+        probe of this instance has not run yet, the payload of the new
+        probe is the retry; once it has run, the failure is raised
+        as-is - probing again in the same flow is meaningless, the
+        network environment does not change between its requests. A
+        total failure raises and the recorded name is kept as-is (a
+        machine that is offline should not lose its hint).
 
         Returns:
             LatestInfo: The latest version and the index pack checksum
@@ -95,14 +361,30 @@ class ServerFile:
             PackDecodeError: If the response is shorter than the
                 20 bytes checksum
             httpx2.HTTPStatusError: If the request fails
+            AllMirrorsFailedError: If no mirror is usable
         """
-        response = self._http_get(f'{self.base_url}/latest.pack')
-        return LatestInfo.parse(response.content)
+        name, info = self._resolve()
+        if info is not None:
+            return info
+        try:
+            return self._fetch_latest_at(self.server_url.url_of(name))
+        except (httpx2.HTTPError, PackDecodeError) as e:
+            if self.server_url.single:
+                # nothing to reselect, the failure is the answer
+                raise
+            failure = e
+        # the mirror failed: reselect, the payload of a new probe is
+        # the retry (see _reselect)
+        _, info = self._reselect(failure)
+        return info
 
     def get_file_content(self, version, offset, size):
         """
         Get a range of the full pack of a version from
-        base_url/{version}/full.pack with an http range request.
+        {mirror}/{version}/full.pack with an http range request.
+
+        The mirror is resolved (and reselected when it fails) before
+        the request, see _request.
 
         Args:
             version (str): Version to query
@@ -114,10 +396,10 @@ class ServerFile:
 
         Raises:
             httpx2.HTTPStatusError: If the request fails
+            AllMirrorsFailedError: If no mirror is usable
         """
-        url = f'{self.base_url}/{version}/full.pack'
         headers = {'Range': f'bytes={offset}-{offset + size - 1}'}
-        response = self._http_get(url, headers)
+        response = self._request(f'/{version}/full.pack', headers)
         # a 200 response means the server ignored the range request,
         # slice the full content then
         if response.status_code == 200:
@@ -127,7 +409,7 @@ class ServerFile:
     def get_index_pack(self, version):
         """
         Get the index pack of a version from
-        base_url/{version}/full.pack.
+        {mirror}/{version}/full.pack.
 
         The index pack is the front part of the full pack: the header
         plus the index section. The section length includes the
@@ -162,7 +444,12 @@ class ServerFile:
     def get_update_pack(self, old_version, new_version):
         """
         Get the update pack from an old version to a new version from
-        base_url/{new_version}/from_{old_version}.pack.
+        {mirror}/{new_version}/from_{old_version}.pack.
+
+        The mirror is resolved (and reselected when it fails) before
+        the request, see _request. A missing update pack (a 404) is
+        the answer of the server and is raised as-is: another mirror
+        would answer the same, the caller falls back to a rebuild.
 
         Args:
             old_version (str): Version of the local files
@@ -173,18 +460,20 @@ class ServerFile:
 
         Raises:
             httpx2.HTTPStatusError: If the request fails
+            AllMirrorsFailedError: If no mirror is usable
         """
-        url = f'{self.base_url}/{new_version}/from_{old_version}.pack'
-        response = self._http_get(url)
+        response = self._request(f'/{new_version}/from_{old_version}.pack')
         return response.content
 
-    def _http_get(self, url, headers=None):
+    def _http_get(self, url, headers=None, timeout=None):
         """
         Get a url with the injected client, or a new one per request.
 
         Args:
             url (str): URL to get
             headers (dict, optional): Request headers
+            timeout (float, optional): Request timeout in seconds,
+                the client default when not given
 
         Returns:
             httpx2.Response: The response
@@ -192,12 +481,15 @@ class ServerFile:
         Raises:
             httpx2.HTTPStatusError: If the request fails
         """
+        # the timeout is only passed when set: None disables the
+        # timeout of httpx instead of using its default
+        kwargs = {'timeout': timeout} if timeout is not None else {}
         client = self._client
         if client is None:
             with httpx2.Client() as client:
-                response = client.get(url, headers=headers)
+                response = client.get(url, headers=headers, **kwargs)
                 response.raise_for_status()
                 return response
-        response = client.get(url, headers=headers)
+        response = client.get(url, headers=headers, **kwargs)
         response.raise_for_status()
         return response
