@@ -1,7 +1,7 @@
 """
 Tests for the mirror probe of ServerFile: the group racing, the
 priority inside a group, the reuse of the probe payload, the gui.db
-record and the probe-once rule.
+record, the probe-once rule and the request retry.
 
 Every mirror is an in-memory httpx2.MockTransport handler, the tests
 never touch the network. The gui.db record is the FakeMirrorTable of
@@ -289,7 +289,9 @@ class TestFailureReselection:
 
     def test_latest_timeout_reselects(self):
         """A timeout of the recorded mirror triggers a probe: the user
-        network environment may have changed."""
+        network environment may have changed. The data request is
+        retried first (transport error, up to 3 attempts), the probe
+        candidates stay single-shot."""
         requests = []
 
         def handler(request):
@@ -303,7 +305,15 @@ class TestFailureReselection:
             info = server.get_latest_info()
         assert info.version == 'a'
         assert table.select_one(scope='').name == 'a'
-        assert requests == ['http://b/latest.pack', 'http://b/latest.pack', 'http://a/latest.pack']
+        # the data request is attempted 3 times on b, then the probe
+        # retries b once (single-shot) and falls to a
+        assert requests == [
+            'http://b/latest.pack',
+            'http://b/latest.pack',
+            'http://b/latest.pack',
+            'http://b/latest.pack',
+            'http://a/latest.pack',
+        ]
 
     def test_pack_request_reselects_and_retries(self):
         """A pack file failure reselects the mirror and retries the
@@ -395,7 +405,11 @@ class TestFailureReselection:
         with logger.mock_capture_writer():
             assert server.get_update_pack('old', 'new') == b'update pack data'
         assert table.select_one(scope='').name == 'a'
+        # the data request is attempted 3 times on b, then the probe
+        # retries b once (single-shot) and the request is retried on a
         assert requests == [
+            'http://b/new/from_old.pack',
+            'http://b/new/from_old.pack',
             'http://b/new/from_old.pack',
             'http://b/latest.pack',
             'http://a/latest.pack',
@@ -418,18 +432,30 @@ class TestFailureReselection:
         with logger.mock_capture_writer():
             with pytest.raises(AllMirrorsFailedError):
                 server.get_latest_info()
-        assert requests == ['http://b/latest.pack', 'http://b/latest.pack', 'http://a/latest.pack']
+        # the data request is attempted 3 times on b, then the probe
+        # retries b once (single-shot) and a is not usable either
+        assert requests == [
+            'http://b/latest.pack',
+            'http://b/latest.pack',
+            'http://b/latest.pack',
+            'http://b/latest.pack',
+            'http://a/latest.pack',
+        ]
         # nothing was saved, the old hint stays
         assert table.select_one(scope='').name == 'b'
         # the failed probe is recorded: a later attempt raises it again
-        # instead of racing
+        # instead of racing (the data request is retried again)
         with logger.mock_capture_writer():
             with pytest.raises(AllMirrorsFailedError):
                 server.get_latest_info()
         assert requests == [
             'http://b/latest.pack',
             'http://b/latest.pack',
+            'http://b/latest.pack',
+            'http://b/latest.pack',
             'http://a/latest.pack',
+            'http://b/latest.pack',
+            'http://b/latest.pack',
             'http://b/latest.pack',
         ]
 
@@ -538,3 +564,196 @@ class TestProbeOnce:
         assert requests == tried + ['http://a/new/from_old.pack']
         # the winner of the probe replaced the record
         assert table.select_one(scope='').name == 'a'
+
+
+class TestRequestRetry:
+    """A data request is retried on the same mirror: up to 3 attempts,
+    only for transport errors, the probe candidates stay single-shot.
+    Every failed attempt is logged.
+    """
+
+    def test_transport_error_is_retried(self):
+        """The first attempt raises a transport error, the retry works."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            if len(requests) == 1:
+                raise httpx2.ReadTimeout('read timed out')
+            return httpx2.Response(200, content=latest_content('v1'))
+
+        server = ServerFile('http://only', client=make_client(handler))
+        with logger.mock_capture_writer():
+            info = server.get_latest_info()
+        assert info.version == 'v1'
+        assert requests == ['http://only/latest.pack', 'http://only/latest.pack']
+
+    def test_attempts_are_three(self):
+        """Two transport errors are retried: the third attempt is the
+        last chance and succeeds."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            if len(requests) <= 2:
+                raise httpx2.ReadTimeout('read timed out')
+            return httpx2.Response(200, content=latest_content('v1'))
+
+        server = ServerFile('http://only', client=make_client(handler))
+        with logger.mock_capture_writer():
+            info = server.get_latest_info()
+        assert info.version == 'v1'
+        assert requests == ['http://only/latest.pack'] * 3
+
+    def test_retry_is_limited(self):
+        """A persistent transport error is raised after 3 attempts."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            raise httpx2.ReadTimeout('read timed out')
+
+        server = ServerFile('http://only', client=make_client(handler))
+        with logger.mock_capture_writer():
+            with pytest.raises(httpx2.ReadTimeout):
+                server.get_latest_info()
+        assert requests == ['http://only/latest.pack'] * 3
+
+    def test_status_error_is_not_retried(self):
+        """An http status error is the answer of the server, not a
+        transport error: it is raised without a retry, and logged."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            return httpx2.Response(500)
+
+        server = ServerFile('http://only', client=make_client(handler))
+        with logger.mock_capture_writer() as capture:
+            with pytest.raises(httpx2.HTTPStatusError):
+                server.get_latest_info()
+        assert requests == ['http://only/latest.pack']
+        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
+        assert len(warnings) == 1
+        assert warnings[0].startswith(
+            'Request to "http://only/latest.pack" failed (attempt 1/3): HTTPStatusError')
+
+    def test_probe_candidate_is_not_retried(self):
+        """A probe candidate stays single-shot: a transport error makes
+        it unusable without a retry."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            if request.url.host == 'a':
+                raise httpx2.ReadTimeout('read timed out')
+            return httpx2.Response(200, content=latest_content('v1'))
+
+        server = ServerFile(
+            make_server_url({'g': {'a': 'http://a', 'b': 'http://b'}}, table=FakeMirrorTable()),
+            client=make_client(handler))
+        with logger.mock_capture_writer():
+            name, info = server.probe
+        assert name == 'b'
+        assert info.version == 'v1'
+        assert requests == ['http://a/latest.pack', 'http://b/latest.pack']
+
+    def test_every_attempt_failure_is_logged(self):
+        """Every failed attempt logs one warning, exhausted or not."""
+        def handler(request):
+            raise httpx2.ReadTimeout('read timed out')
+
+        server = ServerFile('http://only', client=make_client(handler))
+        with logger.mock_capture_writer() as capture:
+            with pytest.raises(httpx2.ReadTimeout):
+                server.get_latest_info()
+        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
+        assert warnings == [
+            'Request to "http://only/latest.pack" failed (attempt 1/3): ReadTimeout: read timed out',
+            'Request to "http://only/latest.pack" failed (attempt 2/3): ReadTimeout: read timed out',
+            'Request to "http://only/latest.pack" failed (attempt 3/3): ReadTimeout: read timed out',
+        ]
+
+    def test_retried_failure_is_logged(self):
+        """A transport error absorbed by the retry is still logged."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            if len(requests) == 1:
+                raise httpx2.ReadTimeout('read timed out')
+            return httpx2.Response(200, content=latest_content('v1'))
+
+        server = ServerFile('http://only', client=make_client(handler))
+        with logger.mock_capture_writer() as capture:
+            info = server.get_latest_info()
+        assert info.version == 'v1'
+        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
+        assert warnings == [
+            'Request to "http://only/latest.pack" failed (attempt 1/3): ReadTimeout: read timed out',
+        ]
+
+    def test_probe_candidate_failure_is_logged(self):
+        """A failed probe candidate logs its request failure, then the
+        engine logs the rejection."""
+        def handler(request):
+            if request.url.host == 'a':
+                raise httpx2.ReadTimeout('read timed out')
+            return httpx2.Response(200, content=latest_content('v1'))
+
+        server = ServerFile(
+            make_server_url({'g': {'a': 'http://a', 'b': 'http://b'}}, table=FakeMirrorTable()),
+            client=make_client(handler))
+        with logger.mock_capture_writer() as capture:
+            name, _ = server.probe
+        assert name == 'b'
+        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
+        assert warnings == [
+            'Request to "http://a/latest.pack" failed (attempt 1/1): ReadTimeout: read timed out',
+            'Mirror "a" is not usable: ReadTimeout: read timed out',
+        ]
+
+
+class TestRequestTimeout:
+    """latest.pack and the pack downloads use distinct timeouts."""
+
+    def test_latest_pack_timeout(self):
+        """A latest.pack request uses PROBE_TIMEOUT on every phase."""
+        timeouts = []
+
+        def handler(request):
+            timeouts.append(request.extensions['timeout'])
+            return httpx2.Response(200, content=latest_content('v1'))
+
+        server = ServerFile('http://only', client=make_client(handler))
+        with logger.mock_capture_writer():
+            info = server.get_latest_info()
+        assert info.version == 'v1'
+        assert timeouts == [{
+            'connect': ServerFile.PROBE_TIMEOUT,
+            'read': ServerFile.PROBE_TIMEOUT,
+            'write': ServerFile.PROBE_TIMEOUT,
+            'pool': ServerFile.PROBE_TIMEOUT,
+        }]
+
+    def test_download_timeout(self):
+        """A pack download uses DOWNLOAD_TIMEOUT: the connection budget
+        stays short, the read/write budget is longer than latest.pack's
+        (the range of one file may be large, a slow transfer must not
+        be taken for a stall)."""
+        timeouts = []
+
+        def handler(request):
+            timeouts.append(request.extensions['timeout'])
+            return httpx2.Response(206, content=b'pack data')
+
+        server = ServerFile('http://only', client=make_client(handler))
+        with logger.mock_capture_writer():
+            assert server.get_file_content('v1', 0, 4) == b'pack data'
+        assert timeouts == [{
+            'connect': ServerFile.PROBE_TIMEOUT,
+            'read': ServerFile.DOWNLOAD_TIMEOUT.read,
+            'write': ServerFile.DOWNLOAD_TIMEOUT.write,
+            'pool': ServerFile.PROBE_TIMEOUT,
+        }]
+        assert ServerFile.DOWNLOAD_TIMEOUT.read > ServerFile.PROBE_TIMEOUT

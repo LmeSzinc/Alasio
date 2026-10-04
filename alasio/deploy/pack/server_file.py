@@ -1,3 +1,5 @@
+from time import sleep
+
 import httpx2
 from msgspec import Struct
 
@@ -69,7 +71,8 @@ class ServerFile(ProbeBase):
     records the winner. The payload of the probe is handed over, so a
     probe never costs an extra request when the flow needs latest.pack
     anyway. The probe of an instance runs at most once: a later
-    failure raises instead of racing again, see _reselect.
+    failure raises instead of racing again, see _reselect. A data
+    request is retried on a transport error, see _http_get.
 
     The server layout follows the draft in PackEncodeBase:
     - {mirror}/latest.pack: latest version in bytes, followed by the
@@ -87,10 +90,24 @@ class ServerFile(ProbeBase):
     # bytes to request first for the header: the pack header plus the
     # index section length vint (at most 8 bytes for a int64 length)
     HEADER_REQUEST_SIZE = 64
-    # budget of one probe candidate in seconds: latest.pack is a small
-    # file, a candidate that does not answer within the budget is not
-    # usable (the default timeout of httpx2.Client is the same)
+    # budget of one latest.pack request in seconds (a probe candidate
+    # and the latest.pack of a flow): latest.pack is a small file, an
+    # answer slower than the budget is not usable (the default timeout
+    # of httpx2.Client is the same)
     PROBE_TIMEOUT = 5.0
+    # timeout of a pack file request: the connection budget stays short
+    # (a mirror that is blocked in the user network is dropped
+    # quickly), the read/write budget is longer than latest.pack: the
+    # range of one file may be large, a slow transfer must not be
+    # taken for a stall
+    DOWNLOAD_TIMEOUT = httpx2.Timeout(connect=PROBE_TIMEOUT, read=30.0, write=30.0, pool=PROBE_TIMEOUT)
+    # attempts of one data request: a transport error is retried, up to
+    # three attempts (a one-off network blip should not fail the update
+    # nor trigger a probe), the probe candidates stay single-shot, see
+    # _http_get
+    REQUEST_ATTEMPTS = 3
+    # seconds to wait before the retry of a data request
+    RETRY_BACKOFF = 0.5
 
     def __init__(self, server_url, client=None):
         """
@@ -179,12 +196,15 @@ class ServerFile(ProbeBase):
         """
         return self._fetch_latest_at(url)
 
-    def _fetch_latest_at(self, url):
+    def _fetch_latest_at(self, url, attempts=1):
         """
         Fetch and parse latest.pack of a base url.
 
         Args:
             url (str): Base url of a mirror
+            attempts (int): Attempts of the request, the retry of a
+                data request lives in _http_get. Defaults to 1, the
+                probe candidates stay single-shot
 
         Returns:
             LatestInfo: The latest version and index pack checksum
@@ -194,7 +214,7 @@ class ServerFile(ProbeBase):
                 20 bytes checksum
             httpx2.HTTPError: If the request fails
         """
-        response = self._http_get(f'{url}/latest.pack', timeout=self.PROBE_TIMEOUT)
+        response = self._http_get(f'{url}/latest.pack', timeout=self.PROBE_TIMEOUT, attempts=attempts)
         return LatestInfo.parse(response.content)
 
     def _resolve(self):
@@ -302,13 +322,15 @@ class ServerFile(ProbeBase):
         it fails.
 
         The mirror is resolved before the request (see _resolve). A
-        failure that means the mirror is not usable (see
-        _mirror_failed) drops it, reselects the mirror (see _reselect:
-        the probe of the instance runs at most once) and retries the
-        same request once on the new winner; a failure of the retry is
-        raised as-is. The pack format validates every downloaded byte
-        against its checksum, so a retry on another mirror cannot
-        corrupt the update.
+        transport error is retried on the same mirror first (see
+        _http_get) and the request uses DOWNLOAD_TIMEOUT (see the
+        class constants). A failure that means the mirror is not
+        usable (see _mirror_failed) drops it, reselects the mirror
+        (see _reselect: the probe of the instance runs at most once)
+        and retries the same request once on the new winner; a failure
+        of the retry is raised as-is. The pack format validates every
+        downloaded byte against its checksum, so a retry on another
+        mirror cannot corrupt the update.
 
         Args:
             path (str): Path of the request, e.g. '/{version}/full.pack'
@@ -324,7 +346,9 @@ class ServerFile(ProbeBase):
         """
         name, _ = self._resolve()
         try:
-            return self._http_get(f'{self.server_url.url_of(name)}{path}', headers)
+            return self._http_get(
+                f'{self.server_url.url_of(name)}{path}', headers,
+                timeout=self.DOWNLOAD_TIMEOUT, attempts=self.REQUEST_ATTEMPTS)
         except httpx2.HTTPError as e:
             if self.server_url.single or not self._mirror_failed(e):
                 raise
@@ -334,7 +358,9 @@ class ServerFile(ProbeBase):
         # once on the new winner, a failure of the retry is raised
         # as-is
         name, _ = self._reselect(failure)
-        return self._http_get(f'{self.server_url.url_of(name)}{path}', headers)
+        return self._http_get(
+            f'{self.server_url.url_of(name)}{path}', headers,
+            timeout=self.DOWNLOAD_TIMEOUT, attempts=self.REQUEST_ATTEMPTS)
 
     def get_latest_info(self):
         """
@@ -344,7 +370,9 @@ class ServerFile(ProbeBase):
         The mirror is resolved before the request (see _resolve). A
         probe that just ran already fetched latest.pack, its payload
         is returned directly without a second request; the payload is
-        not cached, a later call fetches again.
+        not cached, a later call fetches again. A transport error is
+        retried before the mirror is considered failed (see
+        _http_get).
 
         A failed request reselects the mirror (see _reselect): when the
         probe of this instance has not run yet, the payload of the new
@@ -367,7 +395,7 @@ class ServerFile(ProbeBase):
         if info is not None:
             return info
         try:
-            return self._fetch_latest_at(self.server_url.url_of(name))
+            return self._fetch_latest_at(self.server_url.url_of(name), attempts=self.REQUEST_ATTEMPTS)
         except (httpx2.HTTPError, PackDecodeError) as e:
             if self.server_url.single:
                 # nothing to reselect, the failure is the answer
@@ -465,15 +493,29 @@ class ServerFile(ProbeBase):
         response = self._request(f'/{new_version}/from_{old_version}.pack')
         return response.content
 
-    def _http_get(self, url, headers=None, timeout=None):
+    def _http_get(self, url, headers=None, timeout=None, attempts=1):
         """
         Get a url with the injected client, or a new one per request.
+
+        A transport error (dns lookup failure, connect refusal, ssl
+        handshake failure, timeout, read/write error - there is no
+        status code at all) is retried when more than one attempt is
+        requested: a one-off network blip should not fail the update,
+        nor be taken for a mirror failure, nor trigger a probe. An
+        http status error is never retried here, it is the answer of
+        the server and is classified by the caller (see
+        _mirror_failed). Every failed attempt is logged with a
+        warning, whatever the failure is: an absorbed blip stays
+        visible in the log and exhausted retries read as the sequence
+        of attempts.
 
         Args:
             url (str): URL to get
             headers (dict, optional): Request headers
             timeout (float, optional): Request timeout in seconds,
                 the client default when not given
+            attempts (int): Attempts of the request, the retry waits
+                RETRY_BACKOFF seconds. Defaults to 1
 
         Returns:
             httpx2.Response: The response
@@ -484,12 +526,31 @@ class ServerFile(ProbeBase):
         # the timeout is only passed when set: None disables the
         # timeout of httpx instead of using its default
         kwargs = {'timeout': timeout} if timeout is not None else {}
-        client = self._client
-        if client is None:
-            with httpx2.Client() as client:
-                response = client.get(url, headers=headers, **kwargs)
+        for attempt in range(attempts):
+            if attempt:
+                # a transport error is often a one-off blip of the
+                # network: wait a moment, then retry the same request
+                sleep(self.RETRY_BACKOFF)
+            try:
+                if self._client is None:
+                    with httpx2.Client() as client:
+                        response = client.get(url, headers=headers, **kwargs)
+                        response.raise_for_status()
+                        return response
+                response = self._client.get(url, headers=headers, **kwargs)
                 response.raise_for_status()
                 return response
-        response = client.get(url, headers=headers, **kwargs)
-        response.raise_for_status()
-        return response
+            except httpx2.TransportError as e:
+                # a transport error is logged, and retried while an
+                # attempt is left: a one-off network blip should not
+                # fail the update
+                logger.warning(
+                    f'Request to "{url}" failed (attempt {attempt + 1}/{attempts}): {type(e).__name__}: {e}')
+                if attempt + 1 >= attempts:
+                    raise
+            except Exception as e:
+                # every other failure (an http status error, ...) is
+                # logged and raised as-is, it is never retried
+                logger.warning(
+                    f'Request to "{url}" failed (attempt {attempt + 1}/{attempts}): {type(e).__name__}: {e}')
+                raise
