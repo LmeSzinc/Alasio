@@ -104,19 +104,19 @@
     "zh-TW": "長度必須最多為 {value}",
     "es-ES": "La longitud debe ser como máximo {value}"
   },
-  "FilterOrderEmpty": {
-    "en-US": "Not set",
-    "zh-CN": "未设置",
-    "ja-JP": "未設定",
-    "zh-TW": "未設定",
-    "es-ES": "Sin configurar"
-  },
   "FilterOrderInvalid": {
     "en-US": "Invalid item, it is not in the option list",
     "zh-CN": "无效项，不在可选项列表中",
     "ja-JP": "無効な項目です（選択肢にありません）",
     "zh-TW": "無效項目，不在可選項列表中",
     "es-ES": "Elemento no válido, no está en la lista de opciones"
+  },
+  "FilterOrderEmpty": {
+    "en-US": "Not set",
+    "zh-CN": "未设置",
+    "ja-JP": "未設定",
+    "zh-TW": "未設定",
+    "es-ES": "Sin configurar"
   },
   "FilterOrderEdit": {
     "en-US": "Edit",

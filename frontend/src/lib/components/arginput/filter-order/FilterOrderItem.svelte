@@ -88,7 +88,7 @@
     <div
       {...listeners.current}
       {...attributes.current}
-      class="text-muted-foreground flex h-6 shrink-0 cursor-grab items-center px-1 active:cursor-grabbing"
+      class="text-muted-foreground flex h-6 shrink-0 cursor-grab items-center px-1"
       aria-label={`${t.Input.FilterOrderDrag()} ${label}`}
     >
       <GripVertical class="size-4" />

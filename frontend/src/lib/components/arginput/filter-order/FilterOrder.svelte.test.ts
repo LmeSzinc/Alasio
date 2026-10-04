@@ -7,6 +7,9 @@
  * commits the order through handleEdit, a cancel discards it with an "edits
  * discarded" toast. The dnd gestures themselves cannot be driven in jsdom (see
  * doc/2026-10-03_filter-order.md §10), the tests cover the button paths.
+ *
+ * The pills are cut to five lines, measured on a hidden probe of the whole order
+ * (jsdom lays nothing out, the tests fake that geometry, see fakeLayout).
  */
 import { mount, unmount } from "svelte";
 import { toast } from "svelte-sonner";
@@ -23,11 +26,37 @@ vi.mock("svelte-sonner", () => ({
   toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() },
 }));
 
-// jsdom has no ResizeObserver, which the bits-ui layers may look for.
+/** The slice of a ResizeObserverEntry the elementSize action reads */
+type ProbeEntry = { contentRect: { width: number; height: number } };
+
+/**
+ * jsdom has no ResizeObserver and lays nothing out: the stub records the
+ * callbacks under the observed element, so a test can deliver a probe size by
+ * hand (the bits-ui layers observe their floating layers as well).
+ */
 class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  /** The callback of every live observer, by observed element */
+  static callbacks = new Map<Element, (entries: ProbeEntry[]) => void>();
+  callback: (entries: ProbeEntry[]) => void;
+  targets: Element[] = [];
+
+  constructor(callback: (entries: ProbeEntry[]) => void) {
+    this.callback = callback;
+  }
+
+  observe(target: Element) {
+    this.targets.push(target);
+    ResizeObserverStub.callbacks.set(target, this.callback);
+  }
+
+  unobserve(target: Element) {
+    ResizeObserverStub.callbacks.delete(target);
+  }
+
+  disconnect() {
+    for (const target of this.targets) ResizeObserverStub.callbacks.delete(target);
+    this.targets = [];
+  }
 }
 
 // mount() is generic over the component's props/exports, so its return type
@@ -79,6 +108,34 @@ function pills(target: HTMLElement): HTMLElement {
   return target.querySelector<HTMLElement>('[data-slot="filter-order-pills"]')!;
 }
 
+/** The hidden probe of the whole order, the measuring source of the cut */
+function probe(target: HTMLElement): HTMLElement {
+  return target.querySelector<HTMLElement>('[data-slot="filter-order-probe"]')!;
+}
+
+/**
+ * jsdom lays nothing out, so the geometry the cut reads is faked here (lines of
+ * `perLine` pills of 100px with a 4px gap in between, `lineWidth` for the
+ * wrapping line, `markerWidth` for the marker), then the probe size is handed
+ * to the elementSize action, as a width change of the card would.
+ */
+async function fakeLayout(target: HTMLElement, lineWidth: number, markerWidth = 40, perLine = 2) {
+  const el = probe(target);
+  const units = [...el.children] as HTMLElement[];
+  // The pills are the children of the probe, its last child is the marker
+  const marker = units.pop()!;
+  Object.defineProperty(el, "clientWidth", { value: lineWidth, configurable: true });
+  el.getBoundingClientRect = () => new DOMRect(0, 0, lineWidth, 0);
+  units.forEach((unit, index) => {
+    Object.defineProperty(unit, "offsetTop", { value: Math.floor(index / perLine) * 22, configurable: true });
+    const left = (index % perLine) * 104;
+    unit.getBoundingClientRect = () => new DOMRect(left, 0, 100, 20);
+  });
+  marker.getBoundingClientRect = () => new DOMRect(0, 0, markerWidth, 16);
+  ResizeObserverStub.callbacks.get(el)?.([{ contentRect: { width: lineWidth, height: 0 } }]);
+  await flushEffects();
+}
+
 function pillLabels(target: HTMLElement): string[] {
   return [...pills(target).querySelectorAll<HTMLElement>('[data-slot="badge"]')].map(
     (el) => el.textContent?.trim() ?? "",
@@ -126,6 +183,7 @@ async function openDialog(target: HTMLElement) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  ResizeObserverStub.callbacks.clear();
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
 });
 
@@ -180,6 +238,67 @@ describe("TestFilterOrderRender", () => {
 
     expect(editButtons(target)).toEqual([]);
     expect(target.querySelector('[data-slot="filter-order-pills"]')).toBeNull();
+  });
+});
+
+describe("TestFilterOrderCut", () => {
+  /** 14 pills, two of them fill a line of the fake layout below */
+  function longArg(): ArgData {
+    const value = Array.from({ length: 14 }, (_, index) => `Item-${index + 1}`);
+    return makeArg({ value, option: [...value] });
+  }
+
+  it("cuts the pills at the fifth line, the marker ends it", async () => {
+    const { target } = await mountArg(longArg());
+    // Without a measurement (jsdom lays nothing out) every pill is shown
+    expect(pillLabels(target)).toHaveLength(14);
+
+    await fakeLayout(target, 400);
+
+    expect(pillLabels(target)).toEqual([
+      "Item-1",
+      "Item-2",
+      "Item-3",
+      "Item-4",
+      "Item-5",
+      "Item-6",
+      "Item-7",
+      "Item-8",
+      "Item-9",
+      "Item-10",
+    ]);
+    expect(pills(target).textContent).toContain("> ...");
+    // The hidden probe keeps the whole order, it is the source of the next cut
+    expect(probe(target).querySelectorAll('[data-slot="badge"]')).toHaveLength(14);
+  });
+
+  it("drops pills of the last line when the marker does not fit", async () => {
+    const { target } = await mountArg(longArg());
+
+    await fakeLayout(target, 220);
+
+    // The second slot of the fifth line (204px) leaves no room for the marker
+    expect(pillLabels(target)).toEqual([
+      "Item-1",
+      "Item-2",
+      "Item-3",
+      "Item-4",
+      "Item-5",
+      "Item-6",
+      "Item-7",
+      "Item-8",
+      "Item-9",
+    ]);
+    expect(pills(target).textContent).toContain("> ...");
+  });
+
+  it("shows every pill when the order fits into the lines", async () => {
+    const { target } = await mountArg(makeArg());
+
+    await fakeLayout(target, 400);
+
+    expect(pillLabels(target)).toEqual(["Fleet-1", "Fleet-2", "Submarine"]);
+    expect(pills(target).textContent).not.toContain("> ...");
   });
 });
 

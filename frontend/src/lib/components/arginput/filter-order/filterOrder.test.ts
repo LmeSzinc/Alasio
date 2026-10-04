@@ -3,14 +3,16 @@
  *
  * The dialog keeps every list operation in these functions, so the drop math
  * (cross-column moves, same-list reordering, dropping on a column) is covered
- * here instead of through the dnd gestures, which jsdom cannot drive.
+ * here instead of through the dnd gestures, which jsdom cannot drive. For the
+ * same reason the cut of the pill lines (cutPills) is covered here instead of
+ * through the layout, which jsdom does not do.
  *
  * Note the file name: on a case insensitive file system "FilterOrder.test.ts"
  * would be the same file as "filterOrder.test.ts", so the component test of the
  * same component is "FilterOrder.svelte.test.ts".
  */
 import { describe, expect, it } from "vitest";
-import { appendItem, applyDrop, moveItem, removeItem, sameList } from "./filterOrder";
+import { type PillBox, appendItem, applyDrop, cutPills, moveItem, removeItem, sameList } from "./filterOrder";
 
 describe("TestSameList", () => {
   it("compares the items and the order", () => {
@@ -111,5 +113,61 @@ describe("TestApplyDrop", () => {
 
   it("appends when the target row is not in the order", () => {
     expect(applyDrop(["a"], "b", { kind: "selected", itemId: "gone", position: "top" })).toEqual(["a", "b"]);
+  });
+});
+
+describe("TestCutPills", () => {
+  /**
+   * Boxes of `total` pills of 100px, `perLine` of them per line (4px gap in
+   * between), the lines 22px apart: the right edges of a line are 100, 204, ...
+   */
+  function boxes(total: number, perLine = 2): PillBox[] {
+    return Array.from({ length: total }, (_, index) => ({
+      top: Math.floor(index / perLine) * 22,
+      right: (index % perLine) * 104 + 100,
+    }));
+  }
+
+  it("keeps every pill that fits into the lines", () => {
+    // 8 pills of 2 per line fill 4 lines
+    expect(cutPills(boxes(8), 40, 4, 208, 5)).toBe(8);
+    // 10 pills exactly fill the 5 lines: nothing is cut, so no marker is placed
+    expect(cutPills(boxes(10), 40, 4, 208, 5)).toBe(10);
+    expect(cutPills([], 40, 4, 208, 5)).toBe(0);
+  });
+
+  it("cuts at the fifth line, the marker ends the line of the last pill", () => {
+    // 14 pills over 7 lines, the marker fits next to pill 10 (line 5, slot 2)
+    expect(cutPills(boxes(14), 40, 4, 300, 5)).toBe(10);
+    // 204 + 4 + 40 exactly reaches the edge of the line
+    expect(cutPills(boxes(14), 40, 4, 248, 5)).toBe(10);
+    // A line without a gap before the marker, the same pills fit
+    expect(cutPills(boxes(14), 40, 0, 244, 5)).toBe(10);
+  });
+
+  it("drops pills of the last line until the marker fits", () => {
+    // 204 + 4 + 40 is wider than the line, pill 10 moves behind the marker
+    expect(cutPills(boxes(14), 40, 4, 247, 5)).toBe(9);
+    // 100 + 4 + 40 exactly reaches the edge: pill 9 keeps it
+    expect(cutPills(boxes(14), 40, 4, 144, 5)).toBe(9);
+  });
+
+  it("walks back into the line before the cut when the last line is too narrow", () => {
+    // Line 5 holds a single wide pill, line 4 ends with a narrow one: the marker
+    // has to move up a line to fit next to pill 4
+    const geometry: PillBox[] = [
+      { top: 0, right: 100 },
+      { top: 22, right: 100 },
+      { top: 44, right: 100 },
+      { top: 66, right: 80 },
+      { top: 88, right: 300 },
+      { top: 110, right: 300 },
+    ];
+    expect(cutPills(geometry, 40, 4, 150, 5)).toBe(4);
+  });
+
+  it("never cuts away the last pill, the marker wraps below it instead", () => {
+    // The marker fits next to no pill at all (100 + 4 + 40 > 120)
+    expect(cutPills(boxes(6, 1), 40, 4, 120, 5)).toBe(1);
   });
 });

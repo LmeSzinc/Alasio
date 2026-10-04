@@ -1,10 +1,12 @@
 /**
- * Pure helpers of the dt="filter-order" editor.
+ * Pure helpers of the dt="filter-order" input.
  *
  * dt="filter-order" is an ordered subset of "option" (e.g. the sortie order
  * `Fleet-1 > Fleet-2 > Submarine`). The transfer-like dialog keeps every list
  * operation in these functions, so the drop math (cross-column moves, same-list
- * reordering, dropping on a column) is unit-testable without a DOM.
+ * reordering, dropping on a column) is unit-testable without a DOM. The cut of
+ * the pill lines on the settings page (`cutPills`) is math on a measurement for
+ * the same reason.
  */
 
 /** An item of a filter-order value, a python literal item of "option". */
@@ -115,4 +117,53 @@ export function applyDrop(
   }
   next.splice(Math.min(Math.max(to, 0), next.length), 0, item);
   return next;
+}
+
+/**
+ * The geometry of one pill of the measured line: the top of the line the pill
+ * wrapped into, and the right edge of the pill.
+ */
+export type PillBox = { top: number; right: number };
+
+/**
+ * How many pills fit into the first "maxLines" lines when the rest is replaced
+ * by the "> ..." marker. The marker has to end the line of the last visible
+ * pill, so pills are dropped from that line (and from the one before it, if the
+ * line is too narrow) until the marker fits next to the pill kept. At least one
+ * pill is always shown, in a very narrow line the marker wraps below it.
+ *
+ * Math on the geometry of every pill, measured once on a full render: the cut
+ * needs no render of its own, the caller never shows an intermediate state.
+ *
+ * @param boxes The box of every pill, in order
+ * @param markerWidth Width of the marker
+ * @param gap The column gap between two pills of a line
+ * @param edge The right edge the pills wrap at, in the coordinates of the boxes
+ * @param maxLines Max number of lines to fill
+ * @returns The number of pills to show
+ */
+export function cutPills(
+  boxes: readonly PillBox[],
+  markerWidth: number,
+  gap: number,
+  edge: number,
+  maxLines: number,
+): number {
+  // How many pills fit into the first maxLines lines, grouped by the top of the
+  // line they wrapped into
+  const lines = new Set<number>();
+  let count = 0;
+  for (const box of boxes) {
+    if (!lines.has(box.top)) {
+      if (lines.size >= maxLines) break;
+      lines.add(box.top);
+    }
+    count++;
+  }
+  // Everything fits, there is no marker to place
+  if (count === boxes.length) return count;
+  // The marker takes the place of the pills behind the cut, it has to stay next
+  // to the last visible pill (dropping one can walk back into the line before)
+  while (count > 1 && boxes[count - 1].right + gap + markerWidth > edge) count--;
+  return count;
 }

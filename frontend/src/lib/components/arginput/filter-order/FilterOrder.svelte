@@ -1,14 +1,18 @@
 <script lang="ts">
-  import { tick } from "svelte";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { type InputProps, useArgValue } from "$lib/components/arg/utils.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import * as Tooltip from "$lib/components/ui/tooltip";
   import { t } from "$lib/i18n";
+  import { elementSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
+  import { type PillBox, cutPills } from "./filterOrder";
 
   /** Max lines of pills shown in the settings page, the rest becomes "> ..." */
   const MAX_PILL_LINES = 5;
+
+  /** The wrapping line of pills, shared by the visible list and the probe */
+  const PILL_LINE = "flex flex-wrap content-start items-center gap-x-1 gap-y-0.5";
 
   let { data = $bindable(), class: className }: InputProps = $props();
 
@@ -29,107 +33,119 @@
     return options.length > 0 && !options.includes(item);
   }
 
-  let pills: HTMLElement | null = $state(null);
-  // Number of items to show, 0 = not measured yet (render every item)
-  let shown = $state(0);
-  const visible = $derived(shown > 0 ? items.slice(0, shown) : items);
-  const truncated = $derived(shown > 0 && shown < items.length);
+  // --- Cut of the pill lines ---
+  // The list shows at most MAX_PILL_LINES lines and ends with "> ..." when
+  // something is left. Which pills fit is measured on a hidden probe of the
+  // whole order (see the markup), so the cut is computed from one render of
+  // every pill instead of rendering candidate cuts one after another: the
+  // visible list is only ever painted in its final shape, and a resize costs
+  // one measurement, not a loop of ticks.
 
-  /** Width of the last measurement, a resize only re-measures when it changes */
-  let measuredWidth = -1;
+  /** The hidden probe of the whole order, the measuring source of `measure()` */
+  let probe: HTMLElement | null = $state(null);
+  /** Size of the probe, kept up to date by `elementSize` */
+  let probeSize = $state({ width: 0, height: 0 });
+  /** Pills to show, null before the first measurement (every pill is shown) */
+  let shown: number | null = $state(null);
+  const visible = $derived(shown === null ? items : items.slice(0, shown));
+  const truncated = $derived(shown !== null && shown < items.length);
+
+  /** Everything a pill renders from: a change re-measures (the labels set the widths) */
+  const layoutKey = $derived(JSON.stringify([items, options, data.option_i18n ?? {}]));
 
   /**
-   * Count the items that fit into the first MAX_PILL_LINES lines. The count is
-   * taken from a full render: the items behind the cut would be hidden and
-   * could not be measured anymore. Both state writes happen in one task, so no
-   * frame is painted with the full list.
+   * Cut the order to the first MAX_PILL_LINES lines. Only reads the geometry of
+   * the probe, so it can run at any time, without a render of its own.
    */
-  async function measure() {
-    const el = pills;
-    if (!el) return;
-    if (shown !== 0) {
-      shown = 0;
-      await tick();
-    }
-    const lines = new Set<number>();
-    let count = 0;
-    for (const unit of [...el.children] as HTMLElement[]) {
-      const top = unit.offsetTop;
-      if (!lines.has(top)) {
-        if (lines.size >= MAX_PILL_LINES) break;
-        lines.add(top);
-      }
-      count++;
-    }
-    // The trailing "> ..." must stay inside the lines above: drop items from
-    // the cut line until the marker fits there (usually one item is enough)
-    while (count > 0 && count < items.length) {
-      shown = count;
-      await tick();
-      const marker = el.lastElementChild as HTMLElement | null;
-      const last = marker?.previousElementSibling as HTMLElement | null;
-      if (!marker || !last) break;
-      // A wrapped marker is a whole line below the last item; within one line
-      // the vertical centering keeps the tops within a few pixels
-      if (marker.offsetTop - last.offsetTop < 10) break;
-      count--;
-    }
-    shown = count;
+  function measure() {
+    const el = probe;
+    // clientWidth is 0 while an ancestor is hidden: the row is not laid out
+    // yet, the probe resizes (and re-measures) once it shows up
+    if (!el || el.clientWidth === 0) return;
+    const units = [...el.children] as HTMLElement[];
+    // The last child of the probe is the marker, it measures the marker width
+    const marker = units.pop();
+    if (!marker) return;
+    const boxes: PillBox[] = units.map((unit) => {
+      const rect = unit.getBoundingClientRect();
+      return { top: unit.offsetTop, right: rect.right };
+    });
+    const edge = el.getBoundingClientRect().right;
+    const gap = parseFloat(getComputedStyle(el).columnGap) || 0;
+    shown = cutPills(boxes, marker.getBoundingClientRect().width, gap, edge, MAX_PILL_LINES);
   }
 
   $effect(() => {
-    const el = pills;
+    const el = probe;
+    // Re-measure on a content change and on a probe size change (a narrower
+    // line wraps the pills differently). The first measurement runs here, right
+    // after the row is mounted, before anything is painted
+    void layoutKey;
+    void probeSize.width;
+    void probeSize.height;
     if (!el) return;
-    void items.length; // re-measure when the value changes
-    const observer = new ResizeObserver((entries) => {
-      // The measurement changes the height of the pill row, only a width
-      // change (a wider / narrower card) needs another measurement
-      const width = Math.round(entries[0]?.contentRect.width ?? 0);
-      if (width === measuredWidth) return;
-      measuredWidth = width;
-      void measure();
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
+    measure();
   });
 </script>
 
-<!-- Each unit binds the ">" to the pill after it, so a wrapped line can only
-     start with ">", a line never ends with one -->
-<Tooltip.Provider>
-  <div
-    bind:this={pills}
-    data-slot="filter-order-pills"
-    class={cn("flex flex-wrap content-start items-center gap-x-1 gap-y-0.5", className)}
-  >
-    {#if items.length === 0}
-      <span class="text-muted-foreground text-xs">{t.Input.FilterOrderEmpty()}</span>
-    {:else}
-      {#each visible as item, index (item)}
-        <span class="inline-flex items-center gap-x-1">
-          {#if index > 0}
-            <span class="text-muted-foreground text-xs">&gt;</span>
-          {/if}
-          <Badge variant="secondary" class="rounded-full">
-            {#if isInvalid(item)}
-              <Tooltip.Root>
-                <Tooltip.Trigger>
-                  <span role="img" class="inline-flex" aria-label={t.Input.FilterOrderInvalid()}>
-                    <TriangleAlert class="text-destructive size-3 shrink-0" />
-                  </span>
-                </Tooltip.Trigger>
-                <Tooltip.Content>
-                  <p>{t.Input.FilterOrderInvalid()}</p>
-                </Tooltip.Content>
-              </Tooltip.Root>
-            {/if}
-            {arg.getLabel(item)}
-          </Badge>
-        </span>
-      {/each}
-      {#if truncated}
-        <span class="text-muted-foreground text-xs">&gt; ...</span>
+{#snippet pill(item: any, index: number)}
+  <!-- Each unit binds the ">" to the pill after it, so a wrapped line can only
+       start with ">", a line never ends with one -->
+  <span class="inline-flex items-center gap-x-1">
+    {#if index > 0}
+      <span class="text-muted-foreground text-xs">&gt;</span>
+    {/if}
+    <Badge variant="secondary" class="rounded-full">
+      {#if isInvalid(item)}
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <span role="img" class="inline-flex" aria-label={t.Input.FilterOrderInvalid()}>
+              <TriangleAlert class="text-destructive size-3 shrink-0" />
+            </span>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>{t.Input.FilterOrderInvalid()}</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
       {/if}
+      {arg.getLabel(item)}
+    </Badge>
+  </span>
+{/snippet}
+
+<Tooltip.Provider>
+  <div class={cn("relative", className)}>
+    <!-- The visible list: the pills up to the cut, then the marker -->
+    <div data-slot="filter-order-pills" class={PILL_LINE}>
+      {#if items.length === 0}
+        <span class="text-muted-foreground text-xs">{t.Input.FilterOrderEmpty()}</span>
+      {:else}
+        {#each visible as item, index (item)}
+          {@render pill(item, index)}
+        {/each}
+        {#if truncated}
+          <span class="text-muted-foreground text-xs">&gt; ...</span>
+        {/if}
+      {/if}
+    </div>
+
+    <!-- Hidden probe of the whole order, the measuring source of the cut: out
+         of flow, never painted and unreachable for tab and screen readers. Its
+         trailing marker measures the width of the marker -->
+    {#if items.length > 0}
+      <div
+        bind:this={probe}
+        use:elementSize={probeSize}
+        data-slot="filter-order-probe"
+        aria-hidden="true"
+        inert
+        class={cn(PILL_LINE, "pointer-events-none invisible absolute inset-x-0 top-0")}
+      >
+        {#each items as item, index (item)}
+          {@render pill(item, index)}
+        {/each}
+        <span class="text-muted-foreground text-xs">&gt; ...</span>
+      </div>
     {/if}
   </div>
 </Tooltip.Provider>
