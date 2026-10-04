@@ -10,13 +10,56 @@ from alasio.ext.algorithm.vint import encode_vint
 from alasio.ext.cache import cached_property
 from alasio.ext.path.validate import validate_filepath
 
-# Paths that already passed validate_filepath while packing. Only the pack
-# encoder keeps this cache: it validates every path of every version it packs,
-# and a pack server only packs the file list of a repo, so the set is bounded by
-# the paths of the repo while it turns the per version walk into a set lookup.
-# The validator itself stays uncached, the backend runs it on untrusted user
-# input where a cache would grow without bound.
+# The pack area of the tree, relative to the tree root: the pack files of a
+# version live directly under it, see validate_pack_area(). The constant keeps
+# the trailing separator so the check is a plain startswith(), without building
+# a prefix on every record; PACK_AREA_DIR is the folder itself, it must be a
+# folder, never a file of a version.
+PACK_AREA = '.pack/'
+PACK_AREA_DIR = PACK_AREA[:-1]
+
+# Paths that already passed the pack path validation (validate_filepath and
+# validate_pack_area) while packing. Only the pack encoder keeps this cache: it
+# validates every path of every version it packs, and a pack server only packs
+# the file list of a repo, so the set is bounded by the paths of the repo while
+# it turns the per version walk into a set lookup. The validators themselves
+# stay uncached, the backend runs them on untrusted user input where a cache
+# would grow without bound.
 _VALID_PACK_PATH = set()
+
+
+def validate_pack_area(path):
+    """
+    Validate the pack area depth of a record path.
+
+    The pack area .pack of a tree holds the pack files of the version directly
+    under it: index.pack (the ledger slot of the packs), history.pack, and any
+    other pack area file. The folder itself must be a folder, never a file of a
+    version, and a path nested deeper, e.g. .pack/httpx/index.pack, is ambiguous
+    with the path organization of a deploy target: the client maps every .pack
+    path into the ledger folder of its target ({root}/.pack, or
+    {root}/.pack/{name} for a named target), so a nested record would alias the
+    ledger folder, its workspace or another pack file of the target.
+
+    Args:
+        path (str): File path of a pack record
+
+    Raises:
+        ValueError: If the path is the pack area itself, or lies under it
+            deeper than one level
+    """
+    if path == PACK_AREA_DIR:
+        raise ValueError(
+            f'Pack path is the pack area itself, it must be a folder: {path!r}'
+        )
+    if not path.startswith(PACK_AREA):
+        return
+    # a separator behind the prefix means a path nested deeper than one level
+    if path.find('/', len(PACK_AREA)) != -1:
+        raise ValueError(
+            f'Pack path is nested too deep in the pack area: {path!r}, '
+            f'only files directly under {PACK_AREA} are allowed'
+        )
 
 
 def encode_pack_version(pack_version):
@@ -215,14 +258,16 @@ class PackEncodeBase:
         # length of: FileInfo
         yield encode_vint(len(self.fileinfo))
 
-        # every record path, a pack must not carry unsafe paths: reject
-        # absolute / traversal paths and names that cannot be unpacked
-        # on some platform
+        # every record path, a pack must not carry unsafe or ambiguous
+        # paths: reject absolute / traversal paths, names that cannot be
+        # unpacked on some platform, and pack area paths nested deeper
+        # than one level
         files = list(self._iterfile(iter_ref=True, iter_file=True))
         for file in files:
             if file.path in _VALID_PACK_PATH:
                 continue
             validate_filepath(file.path)
+            validate_pack_area(file.path)
             _VALID_PACK_PATH.add(file.path)
 
         # filepath, the resulting sections are written one after another
