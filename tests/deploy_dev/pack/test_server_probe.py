@@ -8,6 +8,7 @@ never touch the network. The gui.db record is the FakeMirrorTable of
 conftest, an in-memory table injected by make_server_url().
 """
 import threading
+from time import time
 
 import httpx2
 import pytest
@@ -241,6 +242,90 @@ class TestSelectionReuse:
         # the winner is fetched
         assert requests == ['http://a/latest.pack', 'http://a/v2/full.pack']
         assert content == latest_content('v2')[:4]
+
+
+class TestRecordExpire:
+    """The expiration of the gui.db record: an expired record is not
+    a hint, the flow probes again and rewrites it.
+
+    The record is what keeps a normal flow probe-free; its expiration
+    makes the selection follow the network environment: a mirror that
+    came back becomes the selection again (an upgrade from the
+    fallback), a better one is picked up, about once a day per
+    machine.
+    """
+
+    MIRRORS = {'g': {'preferred': 'http://preferred', 'fallback': 'http://fallback'}}
+
+    def test_expired_record_selects_the_preferred_mirror_again(self):
+        """The record of a failed-over mirror expires: the probe tries
+        the preferred member first again and upgrades to it."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            return httpx2.Response(200, content=latest_content('v1'))
+
+        table = FakeMirrorTable()
+        server_url = make_server_url(self.MIRRORS, table=table)
+        table.seed(set_key=server_url.set_key, name='fallback', expire=int(time()) - 1)
+        server = ServerFile(server_url, client=make_client(handler))
+        with logger.mock_capture_writer() as capture:
+            info = server.get_latest_info()
+        assert info.version == 'v1'
+        assert capture.backend.any_contains('is expired')
+        # the expired record was ignored: the probe selected the
+        # preferred member, its payload is the answer, no extra request
+        assert requests == ['http://preferred/latest.pack']
+        # the record was rewritten with the winner and a new expiration
+        assert table.upserts == 1
+        row = table.select_one(scope='')
+        assert row.name == 'preferred'
+        assert row.expire > int(time())
+
+    def test_expired_record_is_rewritten_when_the_same_mirror_wins(self):
+        """The same mirror wins the probe again: the expired record is
+        rewritten with a fresh expiration (it was read as '' and
+        cached as ''), the same-name skip does not apply."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            if request.url.host == 'preferred':
+                return httpx2.Response(500)
+            return httpx2.Response(200, content=latest_content('v1'))
+
+        table = FakeMirrorTable()
+        server_url = make_server_url(self.MIRRORS, table=table)
+        table.seed(set_key=server_url.set_key, name='fallback', expire=int(time()) - 1)
+        server = ServerFile(server_url, client=make_client(handler))
+        with logger.mock_capture_writer():
+            info = server.get_latest_info()
+        assert info.version == 'v1'
+        assert requests == ['http://preferred/latest.pack', 'http://fallback/latest.pack']
+        assert table.upserts == 1
+        row = table.select_one(scope='')
+        assert row.name == 'fallback'
+        assert row.expire > int(time())
+
+    def test_valid_record_keeps_the_flow_probe_free(self):
+        """A record inside its lifetime is the hint: the flow goes
+        straight to the recorded mirror, no probe request, no write."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            return httpx2.Response(200, content=latest_content('v1'))
+
+        table = FakeMirrorTable()
+        server_url = make_server_url(self.MIRRORS, table=table)
+        table.seed(set_key=server_url.set_key, name='fallback')
+        server = ServerFile(server_url, client=make_client(handler))
+        with logger.mock_capture_writer():
+            info = server.get_latest_info()
+        assert info.version == 'v1'
+        assert requests == ['http://fallback/latest.pack']
+        assert table.upserts == 0
 
 
 class TestFailureReselection:

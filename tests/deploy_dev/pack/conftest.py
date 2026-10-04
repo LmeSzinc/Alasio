@@ -13,6 +13,7 @@ The file list is designed to cover every record type produced by PackFull:
 import sqlite3
 from hashlib import sha1
 from random import Random
+from time import time
 
 import httpx2
 import pytest
@@ -323,7 +324,7 @@ class FakeMirrorTable(AlasioTable):
         self.upserts += 1
         return super().upsert_row(rows, conflicts=conflicts, updates=updates, _cursor_=_cursor_)
 
-    def seed(self, scope='', set_key='', name=''):
+    def seed(self, scope='', set_key='', name='', expire=None):
         """
         Write a record as fixture data, not counted in the IO counters.
 
@@ -332,10 +333,16 @@ class FakeMirrorTable(AlasioTable):
             set_key (str): Fingerprint of the mirror structure the
                 name was selected for. Defaults to ''
             name (str): Recorded mirror name. Defaults to ''
+            expire (int): Expiration of the record, unix seconds.
+                Defaults to None, a fresh record
+                (now + the max of ServerUrl.RECORD_TTL); tests of the
+                expiration pass a value
         """
+        if expire is None:
+            expire = int(time()) + max(ServerUrl.RECORD_TTL)
         super().upsert_row(
-            PackMirrorRow(scope=scope, set_key=set_key, name=name),
-            conflicts='scope', updates=('set_key', 'name'))
+            PackMirrorRow(scope=scope, set_key=set_key, name=name, expire=expire),
+            conflicts='scope', updates=('set_key', 'name', 'expire'))
 
 
 class BrokenMirrorTable:

@@ -10,6 +10,7 @@ temporary gui.db of a real directory.
 """
 import os
 import shutil
+from time import time
 
 import pytest
 
@@ -139,6 +140,77 @@ class TestPersistence:
         table.seed(set_key=server_url.set_key, name='removed')
         assert server_url.name == ''
 
+    def test_expiration_is_written(self):
+        """set_name records a random expiration 1~1.5 days from now:
+        the random moment spreads the re-probes of a client fleet."""
+        table = FakeMirrorTable()
+        server_url = make_server_url(self.MIRRORS, table=table)
+        ttl_min, ttl_max = ServerUrl.RECORD_TTL
+        start = int(time())
+        server_url.set_name('123pan')
+        end = int(time())
+        row = table.select_one(scope='')
+        assert row.expire - start >= ttl_min
+        assert row.expire - end <= ttl_max
+
+    def test_record_is_rewritten_after_expiration(self):
+        """An expired record is read as '' and cached as '': a probe
+        that selected the same mirror again rewrites the record with a
+        fresh expiration instead of hitting the same-name skip."""
+        table = FakeMirrorTable()
+        server_url = make_server_url(self.MIRRORS, table=table)
+        table.seed(set_key=server_url.set_key, name='123pan', expire=int(time()) - 1)
+        assert server_url.name == ''
+        server_url.set_name('123pan')
+        assert table.upserts == 1
+        row = table.select_one(scope='')
+        assert row.name == '123pan'
+        assert row.expire > int(time())
+
+    def test_expired_record_is_ignored(self):
+        """A record past its expiration is treated as no record, so
+        the next flow probes again and follows the network
+        environment."""
+        table = FakeMirrorTable()
+        server_url = make_server_url(self.MIRRORS, table=table)
+        table.seed(set_key=server_url.set_key, name='123pan', expire=int(time()) - 1)
+        with logger.mock_capture_writer() as capture:
+            assert server_url.name == ''
+        assert capture.backend.any_contains('is expired')
+
+    def test_record_without_expire_is_expired(self):
+        """expire=0 (a row without the column, an old development
+        database) is expired by definition."""
+        table = FakeMirrorTable()
+        server_url = make_server_url(self.MIRRORS, table=table)
+        table.seed(set_key=server_url.set_key, name='123pan', expire=0)
+        assert server_url.name == ''
+
+    def test_record_expiring_too_far_is_ignored(self):
+        """No version of this code writes a record expiring further
+        than the max of RECORD_TTL in the future: a tampered record or
+        an abnormal clock must not pin the machine."""
+        table = FakeMirrorTable()
+        server_url = make_server_url(self.MIRRORS, table=table)
+        _, ttl_max = ServerUrl.RECORD_TTL
+        table.seed(
+            set_key=server_url.set_key, name='123pan',
+            expire=int(time()) + ttl_max + 1)
+        with logger.mock_capture_writer() as capture:
+            assert server_url.name == ''
+        assert capture.backend.any_contains('too far in the future')
+
+    def test_record_at_the_ttl_boundary_is_valid(self):
+        """A record expiring exactly the max of RECORD_TTL in the
+        future is still a hint, only a moment further is impossible."""
+        table = FakeMirrorTable()
+        server_url = make_server_url(self.MIRRORS, table=table)
+        _, ttl_max = ServerUrl.RECORD_TTL
+        table.seed(
+            set_key=server_url.set_key, name='tencent',
+            expire=int(time()) + ttl_max)
+        assert server_url.name == 'tencent'
+
     def test_scope_isolates_the_record(self):
         """Independent update servers do not overwrite each other."""
         table = FakeMirrorTable()
@@ -209,21 +281,21 @@ class TestPackMirrorTable:
         """The table is created on first use, a row is written and read."""
         assert real_table.select_one(scope='') is None
         real_table.upsert_row(
-            PackMirrorRow(scope='', set_key='k1', name='123pan'),
-            conflicts='scope', updates=('set_key', 'name'),
+            PackMirrorRow(scope='', set_key='k1', name='123pan', expire=1700000000),
+            conflicts='scope', updates=('set_key', 'name', 'expire'),
         )
         row = real_table.select_one(scope='')
-        assert (row.scope, row.set_key, row.name) == ('', 'k1', '123pan')
+        assert (row.scope, row.set_key, row.name, row.expire) == ('', 'k1', '123pan', 1700000000)
 
     def test_upsert_replaces_the_scope(self, real_table):
         """A second upsert of the scope replaces the record."""
         real_table.upsert_row(
-            PackMirrorRow(scope='', set_key='k1', name='a'),
-            conflicts='scope', updates=('set_key', 'name'),
+            PackMirrorRow(scope='', set_key='k1', name='a', expire=1700000000),
+            conflicts='scope', updates=('set_key', 'name', 'expire'),
         )
         real_table.upsert_row(
-            PackMirrorRow(scope='', set_key='k2', name='b'),
-            conflicts='scope', updates=('set_key', 'name'),
+            PackMirrorRow(scope='', set_key='k2', name='b', expire=1700000001),
+            conflicts='scope', updates=('set_key', 'name', 'expire'),
         )
         row = real_table.select_one(scope='')
-        assert (row.set_key, row.name) == ('k2', 'b')
+        assert (row.set_key, row.name, row.expire) == ('k2', 'b', 1700000001)

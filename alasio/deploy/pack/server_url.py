@@ -23,13 +23,19 @@ it carries no meaning; a mirror name is unique across the groups.
 The name a probe selected is recorded in gui.db, keyed by the scope
 (the identity of the update server) and fingerprinted by the mirror
 structure (set_key): a record of another structure, or of a mirror the
-set no longer has, is ignored. The record is a hint of the machine
-network environment, shared by every config of the installation, and
-only an optimization: a broken database degrades to a probe of every
-flow.
+set no longer has, is ignored. The record expires after a random
+1~1.5 days (RECORD_TTL): an expired record is ignored and the next
+flow probes again, so the selection follows the network environment
+(a mirror that came back becomes the selection again, a better one
+is picked up) within about a day, and the random moment spreads the
+re-probes of a client fleet in time. The record is a hint of the
+machine network environment, shared by every config of the
+installation, and only an optimization: a broken database degrades
+to a probe of every flow.
 """
 import sqlite3
 from hashlib import sha1
+from time import time
 
 import msgspec
 
@@ -50,6 +56,12 @@ class PackMirrorRow(msgspec.Struct):
     set_key: str = ''
     # name of the mirror that worked last
     name: str = ''
+    # expiration of the record, unix seconds (epoch, UTC based: a
+    # timezone or a daylight saving shift never enters the
+    # arithmetic): the writer sets it to now + a random RECORD_TTL, a
+    # record at or before now is expired (the 0 of a row written by an
+    # older version is always expired)
+    expire: int = 0
 
 
 class PackMirrorTable(AlasioGuiDB):
@@ -63,6 +75,7 @@ class PackMirrorTable(AlasioGuiDB):
         "scope" TEXT NOT NULL,
         "set_key" TEXT NOT NULL,
         "name" TEXT NOT NULL,
+        "expire" INTEGER NOT NULL,
         PRIMARY KEY ("id"),
         UNIQUE ("scope")
     );
@@ -78,12 +91,27 @@ class ServerUrl:
     url of a mirror is read with url_of(); a mirror name is unique
     across the groups. The selected mirror name is recorded in gui.db
     (PackMirrorTable), a hint of the machine network environment: the
-    probe of ServerFile overwrites it, a stale record is ignored.
+    probe of ServerFile overwrites it, a stale record is ignored, and a
+    record expires after 1~1.5 days (RECORD_TTL) so the selection
+    follows the network environment.
 
     A single mirror set has no selection to make: single, name and
     set_name() skip the database entirely and ServerFile probes the
     only mirror, so a single url behaves exactly as a plain base url.
     """
+
+    # lifetime bounds of a record in seconds, (min, max): set_name()
+    # writes expire = now + randint(*RECORD_TTL), the record expires
+    # after 1~1.5 days and the next flow probes again. An expired
+    # record is only a hint that is not an error (the update still
+    # works), it makes the selection follow the network environment: a
+    # mirror that came back becomes the selection again, a better one
+    # is picked up. The random moment spreads the re-probes of a
+    # client fleet in time, a fixed lifetime would make every client
+    # probe at the same moment. The bounds are epoch seconds (UTC
+    # based): a timezone or a daylight saving shift never enters the
+    # arithmetic, only a system clock adjustment can (see name())
+    RECORD_TTL = (86400, 129600)  # 1 ~ 1.5 days
 
     def __init__(self, mirrors, scope=''):
         """
@@ -143,11 +171,19 @@ class ServerUrl:
     def name(self):
         """
         The mirror name recorded in gui.db, the hint of the last
-        selection; '' when there is no record or the record is stale.
+        selection; '' when there is no record, the record is stale or
+        the record is expired.
 
         A record is stale when it was selected for another mirror
         structure (set_key mismatch, the set was edited) or names a
-        mirror this set no longer has. A single mirror set has no
+        mirror this set no longer has. A record is expired when its
+        expiration (a random moment 1~1.5 days after the record was
+        written, see set_name) is reached: it is treated as no record
+        and the next flow probes again, so the selection follows the
+        network environment. A record expiring further in the future
+        than the max of RECORD_TTL cannot be written by this code - it
+        is a tampered record or an abnormal clock - and is ignored too
+        instead of pinning the machine. A single mirror set has no
         record.
 
         Returns:
@@ -164,15 +200,32 @@ class ServerUrl:
             return ''
         if row is None or row.set_key != self.set_key or row.name not in self.mirrors.urls:
             return ''
+        now = int(time())
+        if row.expire <= now:
+            # the record is expired: select the mirror again, a mirror
+            # that came back, or a better one, is picked up then
+            logger.info(f'Mirror record of "{row.name}" is expired, selecting again')
+            return ''
+        if row.expire > now + self.RECORD_TTL[1]:
+            # no version of this code writes a record that expires
+            # further in the future: a tampered record or an abnormal
+            # clock must not pin the machine, ignore the record
+            logger.warning(
+                f'Mirror record of "{row.name}" expires too far in the future, ignored: {row.expire}')
+            return ''
         return row.name
 
     def set_name(self, name):
         """
-        Record the mirror a probe selected.
-
-        The write is skipped when the name is already the cached one
-        (no IO). A broken database only warns: the update works without
-        the record, it just probes every flow.
+        Record the mirror a probe selected, with an expiration of
+        randint(*RECORD_TTL) seconds from now: the next flow probes
+        again once it is reached (see the constants). An expired record
+        is read as '' and cached as '', so a reselected mirror is
+        rewritten with a fresh expiration even when the name is the
+        same (the same-name skip does not apply to it). The write is
+        skipped when the name is already the cached one (no IO). A
+        broken database only warns: the update works without the
+        record, it just probes every flow.
 
         Args:
             name (str): Mirror name selected by the probe
@@ -186,10 +239,14 @@ class ServerUrl:
             raise ValueError(f'Unknown mirror: {name!r}')
         if InstanceCacheOperation.get(self, 'name', '') == name:
             return
+
+        # a local import: only the write path needs the random module
+        from random import randint
+        expire = int(time()) + randint(*self.RECORD_TTL)
         try:
             self._db.upsert_row(
-                PackMirrorRow(scope=self.scope, set_key=self.set_key, name=name),
-                conflicts='scope', updates=('set_key', 'name'),
+                PackMirrorRow(scope=self.scope, set_key=self.set_key, name=name, expire=expire),
+                conflicts='scope', updates=('set_key', 'name', 'expire'),
             )
         except sqlite3.Error as e:
             logger.warning(f'Failed to record the mirror: {e}')
