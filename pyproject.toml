@@ -51,6 +51,12 @@ backend = [
     # 2.9.0 is the last version that support python3.8
     "PyJWT>=2.9.0",
 ]
+pack = [
+    # tomllib is the standard library module of Python 3.11+, tomli is the
+    # backport for the older versions, used to parse a pyproject.toml
+    # 2.0.1 is the tomli version the standard library tomllib is based on
+    "tomli>=2.0.1; python_version < '3.11'",
+]
 test = [
     # pytest 7 added MonkeyPatch, and pytest 7 is the last version that supports py3.7
     # 8.3.4 is the last version that support python3.8
@@ -62,7 +68,7 @@ test = [
     # alasio/codegen/ruff/ruff_format.py requires isort>=5.2.0
     "isort>=5.2.0",
 ]
-all = ["alasio[image,backend,test]"]
+all = ["alasio[image,backend,pack,test]"]
 
 [tool.setuptools]
 packages = ["alasio"]
