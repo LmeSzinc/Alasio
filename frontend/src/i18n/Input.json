@@ -160,6 +160,13 @@
     "zh-TW": "全部已使用",
     "es-ES": "Todos los elementos están en uso"
   },
+  "FilterOrderResetDefault": {
+    "en-US": "Reset to default",
+    "zh-CN": "重置为默认",
+    "ja-JP": "デフォルトに戻す",
+    "zh-TW": "重設為預設",
+    "es-ES": "Restablecer predeterminados"
+  },
   "Cancel": {
     "en-US": "Cancel",
     "zh-CN": "取消",

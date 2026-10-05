@@ -5,8 +5,10 @@
  * The order is shown as read-only pills, the edit button of the title row opens
  * the transfer-like dialog. Every edit only touches the dialog draft: save
  * commits the order through handleEdit, a cancel discards it with an "edits
- * discarded" toast. The dnd gestures themselves cannot be driven in jsdom (see
- * doc/2026-10-03_filter-order.md §10), the tests cover the button paths.
+ * discarded" toast, the footer reset button is the single-arg reset through
+ * handleReset and closes the dialog. The dnd gestures themselves cannot be
+ * driven in jsdom (see doc/2026-10-03_filter-order.md §10), the tests cover the
+ * button paths.
  *
  * The pills are cut to five lines, measured on a hidden probe of the whole order
  * (jsdom lays nothing out, the tests fake that geometry, see fakeLayout).
@@ -91,9 +93,10 @@ async function mountArg(arg: ArgData) {
   // when the component commits a new order
   const data = $state(arg);
   const handleEdit = vi.fn();
-  mounted.push(mount(Arg, { target, props: { data, handleEdit } }));
+  const handleReset = vi.fn();
+  mounted.push(mount(Arg, { target, props: { data, handleEdit, handleReset } }));
   await settle();
-  return { arg: data, target, handleEdit };
+  return { arg: data, target, handleEdit, handleReset };
 }
 
 /**
@@ -473,6 +476,47 @@ describe("TestFilterOrderSaveCancel", () => {
     // The discarded edit must not come back with the next open
     await openDialog(target);
     expect(columnLabels("selected")).toEqual(["Fleet-1", "Fleet-2", "Submarine"]);
+  });
+});
+
+describe("TestFilterOrderResetDefault", () => {
+  it("sits left of cancel and resets the arg through handleReset", async () => {
+    const { target, arg, handleEdit, handleReset } = await mountArg(makeArg());
+    await openDialog(target);
+    // A pending draft edit: the reset replaces the whole arg, the draft is
+    // dropped with the dialog
+    rowButton("selected", t.Input.FilterOrderRemove(), "Fleet-2").click();
+    await settle();
+
+    const reset = footerButton(t.Input.FilterOrderResetDefault());
+    const cancel = footerButton(t.Input.Cancel());
+    expect(reset.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    reset.click();
+    await settle();
+
+    expect(handleReset).toHaveBeenCalledTimes(1);
+    expect(handleReset.mock.calls[0][0]).toMatchObject({ task: "Test", group: "OpsiFleet", arg: "Order" });
+    // A reset is neither a save nor a cancel: no edit request, no discard
+    // toast, and the value is not changed locally (the backend broadcast of
+    // the reset carries the default)
+    expect(handleEdit).not.toHaveBeenCalled();
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(arg.value).toEqual(["Fleet-1", "Fleet-2", "Submarine"]);
+    expect(dialog()).toBeNull();
+  });
+
+  it("resets without a pending draft edit too", async () => {
+    const { target, handleReset } = await mountArg(makeArg());
+    await openDialog(target);
+
+    footerButton(t.Input.FilterOrderResetDefault()).click();
+    await settle();
+
+    // The default lives in the backend, so the button is never gated by the
+    // local order
+    expect(handleReset).toHaveBeenCalledTimes(1);
+    expect(dialog()).toBeNull();
   });
 });
 

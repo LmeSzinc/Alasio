@@ -25,14 +25,20 @@
    * Every edit only touches the local `draft`; the value is committed through
    * `onSave` when the user presses save with a changed order, and discarded
    * with an "edits discarded" toast when the dialog is cancelled.
+   *
+   * The reset button is not a draft operation: it resets the whole arg to its
+   * default through `onReset` (the single-arg reset of the backend, the same
+   * as the reset button of dt=input) and closes the dialog, the draft has no
+   * meaning once the value was replaced.
    */
   type Props = {
     open?: boolean;
     data: ArgData;
     value: FilterOrderItemValue[];
     onSave: (next: FilterOrderItemValue[]) => void;
+    onReset?: () => void;
   };
-  let { open = $bindable(false), data, value, onSave }: Props = $props();
+  let { open = $bindable(false), data, value, onSave, onReset }: Props = $props();
 
   const arg = $derived(useArgValue<FilterOrderItemValue[]>(data));
   const displayName = $derived(getArgName(data));
@@ -121,6 +127,16 @@
     open = false;
   }
 
+  /**
+   * Reset the arg to its default value (see the header comment): a committed
+   * change of the whole arg, unlike save / cancel which only deal with the
+   * draft.
+   */
+  function resetDefault() {
+    onReset?.();
+    open = false;
+  }
+
   // Every close request that comes from the dialog itself (escape, overlay
   // click, close button) is a cancel; saving closes the dialog
   // programmatically, which does not pass through here
@@ -192,6 +208,7 @@
         </div>
 
         <DialogFooter>
+          <Button variant="ghost" onclick={resetDefault}>{t.Input.FilterOrderResetDefault()}</Button>
           <Button variant="outline" onclick={cancel}>{t.Input.Cancel()}</Button>
           <Button onclick={save}>{t.Input.Save()}</Button>
         </DialogFooter>
