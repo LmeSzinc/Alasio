@@ -14,10 +14,10 @@
     cardData: CardData;
     handleEdit: InputProps["handleEdit"];
     handleReset: InputProps["handleReset"];
-    handleGroupReset?: (data: InfoData) => void;
+    handleCardReset?: (data: InfoData) => void;
     class?: string;
   };
-  let { cardData = $bindable(), handleEdit, handleReset, handleGroupReset, class: className }: Props = $props();
+  let { cardData = $bindable(), handleEdit, handleReset, handleCardReset, class: className }: Props = $props();
 
   const SchedulerEnable = $derived(cardData?.Scheduler?.Enable);
   const SchedulerNextRun = $derived(cardData?.Scheduler?.NextRun);
@@ -139,7 +139,7 @@ Z`;
       <Button
         variant="destructive"
         onclick={() => {
-          handleGroupReset?.(cardData?._info);
+          handleCardReset?.(cardData?._info);
           dialogOpen = false;
         }}
       >

@@ -275,7 +275,7 @@
     argData.value = DEFAULTS.get(key);
   }
 
-  function handleGroupReset(cardInfo: InfoData) {
+  function handleCardReset(cardInfo: InfoData) {
     const cardName = Object.entries(data).find(([, card]) => card._info.card === cardInfo.card)?.[0];
     if (cardName === undefined) return;
     for (const [groupName, groupData] of groupEntries(data[cardName])) {
@@ -298,5 +298,5 @@
     </p>
   </div>
 
-  <ArgCardList class="w-full" bind:data {handleEdit} {handleReset} {handleGroupReset} />
+  <ArgCardList class="w-full" bind:data {handleEdit} {handleReset} {handleCardReset} />
 </div>

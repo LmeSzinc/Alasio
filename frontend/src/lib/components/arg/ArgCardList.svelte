@@ -13,7 +13,7 @@
     ui?: UIState;
     handleEdit?: InputProps["handleEdit"];
     handleReset?: InputProps["handleReset"];
-    handleGroupReset?: (data: InfoData) => void;
+    handleCardReset?: (data: InfoData) => void;
     class?: string;
   };
   let {
@@ -22,7 +22,7 @@
     ui,
     handleEdit,
     handleReset,
-    handleGroupReset,
+    handleCardReset,
     class: className,
   }: $props = $props();
 
@@ -154,7 +154,7 @@
         {parentWidth}
         {handleEdit}
         {handleReset}
-        {handleGroupReset}
+        {handleCardReset}
         flashing={flashingCard === cardKey}
         class={cardClass}
       />

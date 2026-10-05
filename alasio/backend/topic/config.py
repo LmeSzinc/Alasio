@@ -173,7 +173,7 @@ class ConfigArg(BaseTopic):
         _config_event.on_config_event(config_name, [resp])
 
     @rpc
-    async def group_reset(self, card: str):
+    async def card_reset(self, card: str):
         if not card:
             return
         # get config_name
@@ -187,7 +187,7 @@ class ConfigArg(BaseTopic):
             return
 
         # get all task-group within card
-        # copy to avoid modification during iterating, group reset is rarely used so copy is acceptable
+        # copy to avoid modification during iterating, card reset is rarely used so copy is acceptable
         source = ConfigArgSource.get(mod_name, config_name, nav_name, lang)
         if source is None:
             return

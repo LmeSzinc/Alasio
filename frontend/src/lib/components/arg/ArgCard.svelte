@@ -12,7 +12,7 @@
     parentWidth: number;
     handleEdit: InputProps["handleEdit"];
     handleReset: InputProps["handleReset"];
-    handleGroupReset?: (data: InfoData) => void;
+    handleCardReset?: (data: InfoData) => void;
     flashing?: boolean;
     class?: string;
   };
@@ -21,7 +21,7 @@
     parentWidth,
     handleEdit,
     handleReset,
-    handleGroupReset,
+    handleCardReset,
     flashing = false,
     class: className,
   }: Props = $props();
@@ -66,7 +66,7 @@
         {/each}
       </div>
     {/if}
-    <CardEnable bind:cardData {handleEdit} {handleReset} {handleGroupReset} />
+    <CardEnable bind:cardData {handleEdit} {handleReset} {handleCardReset} />
   {/snippet}
   <!-- Group args -->
   {#each Object.entries(Groups) as [groupKey, groupData]}

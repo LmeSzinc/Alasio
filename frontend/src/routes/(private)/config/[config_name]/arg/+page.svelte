@@ -12,7 +12,7 @@
   const topicClient = useTopic<ConfigArgData>("ConfigArg");
   const setRpc = topicClient.rpc();
   const resetRpc = topicClient.rpc();
-  const groupResetRpc = topicClient.rpc();
+  const cardResetRpc = topicClient.rpc();
 
   // --- Event Handlers (passed down to ArgCardList) ---
   function handleEdit(data: ArgData) {
@@ -30,8 +30,8 @@
       arg: data.arg,
     });
   }
-  function handleGroupReset(data: InfoData) {
-    groupResetRpc.call("group_reset", {
+  function handleCardReset(data: InfoData) {
+    cardResetRpc.call("card_reset", {
       card: data.card,
     });
   }
@@ -60,7 +60,7 @@
     }
   });
   $effect(() => {
-    if (groupResetRpc.successMsg) {
+    if (cardResetRpc.successMsg) {
       untrack(() => {
         toast.success(t.Input.ConfigReset(), toastOptions);
       });
@@ -76,7 +76,7 @@
       {ui}
       {handleEdit}
       {handleReset}
-      {handleGroupReset}
+      {handleCardReset}
     />
   {/if}
 </div>
