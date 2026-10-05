@@ -113,12 +113,18 @@ class ServerFile(ProbeBase):
     # seconds to wait before the retry of a data request
     RETRY_BACKOFF = 0.5
 
-    def __init__(self, server_url, client=None):
+    def __init__(self, mirrors, scope='', client=None):
         """
         Args:
-            server_url (ServerUrl | dict[str, str] | str): Mirror set
-                to select from and to fetch the packs from, a str or a
-                dict is wrapped into a ServerUrl
+            mirrors (ServerUrl | Mirrors | str | dict): Mirror set to
+                select from and to fetch the packs from. A ServerUrl
+                is used as-is; anything else is wrapped into a
+                ServerUrl, see ServerUrl.__init__ and
+                Mirrors.from_input() for the accepted forms
+            scope (str): Scope of the gui.db record of the built
+                ServerUrl, so independent update servers do not
+                overwrite each other. Ignored when mirrors is already
+                a ServerUrl (its own scope is used). Defaults to ''
             client (httpx2.Client, optional): Client to use, its
                 lifetime belongs to the caller (this class never
                 closes an injected client). Defaults to None, a
@@ -126,12 +132,12 @@ class ServerFile(ProbeBase):
                 request and reused by every later one, close()
                 closes it
         """
-        if not isinstance(server_url, ServerUrl):
-            server_url = ServerUrl(server_url)
+        if not isinstance(mirrors, ServerUrl):
+            mirrors = ServerUrl(mirrors, scope=scope)
         # the probe engine of this server, its mirrors are the mirror
         # structure, see ProbeBase (only run() executes it)
-        super().__init__(server_url.mirrors)
-        self.server_url = server_url
+        super().__init__(mirrors.mirrors)
+        self.server_url = mirrors
         # the http client of this instance: the injected one, or None
         # until the first request creates the client of the instance
         # (the created client is reused, see _get_client())

@@ -10,6 +10,7 @@ import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.server_file import LatestInfo, ServerFile
+from alasio.ext.cache import cached_property
 from alasio.logger import logger
 from tests.deploy_dev.pack.conftest import (
     COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER, FakeMirrorTable, make_server_url
@@ -158,6 +159,42 @@ class TestServerFile:
         server = ServerFile('http://test', client=make_client(handler))
         with pytest.raises(httpx2.HTTPStatusError):
             server.get_update_pack('old', 'new')
+
+
+class TestConstruction:
+    """ServerFile accepts the raw mirror input and builds its ServerUrl."""
+
+    def test_mirror_input_builds_the_server_url(self):
+        """A raw mirror input and a scope build the ServerUrl."""
+        server = ServerFile(
+            {'cn': {'123pan': 'http://pan'}, 'global': 'http://global'}, scope='pack')
+        assert server.server_url.scope == 'pack'
+        assert server.server_url.single == ''
+        assert server.server_url.url_of('123pan') == 'http://pan'
+        assert server.server_url.url_of('global') == 'http://global'
+
+    def test_str_input_is_a_single_mirror(self):
+        """A str input stays the plain single mirror shortcut."""
+        server = ServerFile('http://only')
+        assert server.server_url.single == 'default'
+        assert server.server_url.url_of('default') == 'http://only'
+
+    def test_server_url_input_is_used_as_is(self):
+        """A given ServerUrl is used as-is, the scope is not applied."""
+        server_url = make_server_url('http://only')
+        server = ServerFile(server_url, scope='ignored')
+        assert server.server_url is server_url
+        assert server_url.scope == ''
+
+    def test_scope_reaches_the_record(self):
+        """The scope given to ServerFile is the scope of the gui.db
+        record of its ServerUrl."""
+        table = FakeMirrorTable()
+        server = ServerFile({'g': {'b': 'http://b', 'a': 'http://a'}}, scope='pack')
+        cached_property.set(server.server_url, '_db', table)
+        server.server_url.set_name('a')
+        assert table.select_one(scope='pack').name == 'a'
+        assert table.select_one(scope='') is None
 
 
 class FakeClient:
