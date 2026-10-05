@@ -10,7 +10,10 @@ import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.server_file import LatestInfo, ServerFile
-from tests.deploy_dev.pack.conftest import COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER
+from alasio.logger import logger
+from tests.deploy_dev.pack.conftest import (
+    COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER, FakeMirrorTable, make_server_url
+)
 
 
 def range_handler(requests, data):
@@ -155,3 +158,104 @@ class TestServerFile:
         server = ServerFile('http://test', client=make_client(handler))
         with pytest.raises(httpx2.HTTPStatusError):
             server.get_update_pack('old', 'new')
+
+
+class FakeClient:
+    """Stand-in of httpx2.Client for the reuse tests: every instance
+    is tracked, latest.pack is served from the memory."""
+
+    instances = []
+
+    def __init__(self, *args, **kwargs):
+        FakeClient.instances.append(self)
+        self.requests = []
+        self.closed = False
+
+    def get(self, url, headers=None, **kwargs):
+        self.requests.append(str(url))
+        return httpx2.Response(
+            200, content=b'v1' + b'\x00' * 20, request=httpx2.Request('GET', url))
+
+    def close(self):
+        self.closed = True
+
+
+class TestClientReuse:
+    """The http client of an instance: the injected one is used as-is,
+    a created one is reused by every request (keep-alive)."""
+
+    def test_created_once_and_reused(self, monkeypatch):
+        """Without an injected client, the first request creates the
+        client of the instance and every later request reuses it."""
+        FakeClient.instances.clear()
+        monkeypatch.setattr(httpx2, 'Client', FakeClient)
+
+        server = ServerFile('http://only')
+        assert server.get_latest_info().version == 'v1'
+        assert server.get_latest_info().version == 'v1'
+        assert len(FakeClient.instances) == 1
+        assert FakeClient.instances[0].requests == [
+            'http://only/latest.pack',
+            'http://only/latest.pack',
+        ]
+
+    def test_created_client_is_closed(self, monkeypatch):
+        """close() closes the client the instance created, closing
+        again is a no-op, a close before the first request is one."""
+        FakeClient.instances.clear()
+        monkeypatch.setattr(httpx2, 'Client', FakeClient)
+
+        server = ServerFile('http://only')
+        # nothing was created yet, close is a no-op
+        server.close()
+        assert FakeClient.instances == []
+        server.get_latest_info()
+        client = FakeClient.instances[0]
+        assert not client.closed
+        server.close()
+        assert client.closed
+        server.close()
+        assert client.closed
+
+    def test_context_manager_closes(self, monkeypatch):
+        """`with ServerFile(...) as server:` closes the created client
+        on exit."""
+        FakeClient.instances.clear()
+        monkeypatch.setattr(httpx2, 'Client', FakeClient)
+
+        with ServerFile('http://only') as server:
+            assert server.get_latest_info().version == 'v1'
+            assert not FakeClient.instances[0].closed
+        assert FakeClient.instances[0].closed
+
+    def test_injected_client_is_used_and_never_closed(self):
+        """An injected client serves the requests and is left alone by
+        close(): its lifetime belongs to the caller."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            return httpx2.Response(200, content=b'v1' + b'\x00' * 20)
+
+        client = make_client(handler)
+        server = ServerFile('http://only', client=client)
+        assert server.get_latest_info().version == 'v1'
+        server.close()
+        assert not client.is_closed
+        # the injected client is still usable
+        assert server.get_latest_info().version == 'v1'
+        assert requests == ['http://only/latest.pack', 'http://only/latest.pack']
+
+    def test_probe_threads_share_one_created_client(self, monkeypatch):
+        """The probe of a first request runs the groups in threads: the
+        client is still created once (the creation is locked)."""
+        FakeClient.instances.clear()
+        monkeypatch.setattr(httpx2, 'Client', FakeClient)
+
+        server = ServerFile(
+            make_server_url({'a': 'http://a', 'b': 'http://b'}, table=FakeMirrorTable()))
+        with logger.mock_capture_writer():
+            name, info = server.probe
+        assert name in ('a', 'b')
+        assert info.version == 'v1'
+        assert len(FakeClient.instances) == 1

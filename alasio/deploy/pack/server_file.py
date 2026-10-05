@@ -1,3 +1,4 @@
+from threading import Lock
 from time import sleep
 
 import httpx2
@@ -72,7 +73,10 @@ class ServerFile(ProbeBase):
     probe never costs an extra request when the flow needs latest.pack
     anyway. The probe of an instance runs at most once: a later
     failure raises instead of racing again, see _reselect. A data
-    request is retried on a transport error, see _http_get.
+    request is retried on a transport error, see _http_get. Every
+    request of an instance uses the same http client - the injected
+    one, or one created on the first request and reused, see
+    _get_client - and close() closes a client the instance created.
 
     The server layout follows the draft in PackEncodeBase:
     - {mirror}/latest.pack: latest version in bytes, followed by the
@@ -115,8 +119,12 @@ class ServerFile(ProbeBase):
             server_url (ServerUrl | dict[str, str] | str): Mirror set
                 to select from and to fetch the packs from, a str or a
                 dict is wrapped into a ServerUrl
-            client (httpx2.Client, optional): Client to reuse, a new
-                one is created for every request if not given
+            client (httpx2.Client, optional): Client to use, its
+                lifetime belongs to the caller (this class never
+                closes an injected client). Defaults to None, a
+                client of this instance is created on the first
+                request and reused by every later one, close()
+                closes it
         """
         if not isinstance(server_url, ServerUrl):
             server_url = ServerUrl(server_url)
@@ -124,13 +132,49 @@ class ServerFile(ProbeBase):
         # structure, see ProbeBase (only run() executes it)
         super().__init__(server_url.mirrors)
         self.server_url = server_url
+        # the http client of this instance: the injected one, or None
+        # until the first request creates the client of the instance
+        # (the created client is reused, see _get_client())
         self._client = client
+        # whether the client belongs to this instance: a created one
+        # is closed by close(), an injected one is left alone
+        self._own_client = client is None
+        # guards the lazy creation of the client: the probe of the
+        # first request runs the groups in threads
+        self._client_lock = Lock()
         # mirror resolved for this instance, the flow it serves; ''
         # until resolved, see _resolve()
         self._mirror = ''
         # failure of a failed probe of this instance, re-raised by a
         # later probe attempt; None until a probe fails, see probe
         self._probe_error = None
+
+    def close(self):
+        """
+        Close the http client of this instance when it created one.
+
+        An injected client is never closed: its lifetime belongs to
+        the caller, see __init__. The client created here is closed
+        with its keep-alive connections; a closed instance must not
+        send another request (the next request raises). Closing is
+        idempotent, `with ServerFile(...) as server:` closes it on
+        exit. Do not close while a request is in flight.
+        """
+        if self._own_client and self._client is not None:
+            self._client.close()
+
+    def __enter__(self):
+        """
+        Returns:
+            ServerFile: The instance itself, for the with statement
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """
+        Close the client of this instance on exit, see close().
+        """
+        self.close()
 
     @cached_property
     def probe(self):
@@ -493,9 +537,33 @@ class ServerFile(ProbeBase):
         response = self._request(f'/{new_version}/from_{old_version}.pack')
         return response.content
 
+    def _get_client(self):
+        """
+        The http client of this instance: the injected one, or the
+        client of the instance created on the first request.
+
+        The client is reused by every request of the instance, so the
+        keep-alive connections of a flow are reused instead of a new
+        connection pool per request. Only a client created here is
+        closed by close(); an injected one belongs to the caller. The
+        creation is guarded by a lock: the probe of the first request
+        runs the groups in threads, several workers may ask for the
+        client at the same time.
+
+        Returns:
+            httpx2.Client: The client to send the request with
+        """
+        if self._client is None:
+            with self._client_lock:
+                if self._client is None:
+                    self._client = httpx2.Client()
+        return self._client
+
     def _http_get(self, url, headers=None, timeout=None, attempts=1):
         """
-        Get a url with the injected client, or a new one per request.
+        Get a url with the client of this instance (the injected one
+        or the reusable one created on the first request, see
+        _get_client()).
 
         A transport error (dns lookup failure, connect refusal, ssl
         handshake failure, timeout, read/write error - there is no
@@ -526,18 +594,14 @@ class ServerFile(ProbeBase):
         # the timeout is only passed when set: None disables the
         # timeout of httpx instead of using its default
         kwargs = {'timeout': timeout} if timeout is not None else {}
+        client = self._get_client()
         for attempt in range(attempts):
             if attempt:
                 # a transport error is often a one-off blip of the
                 # network: wait a moment, then retry the same request
                 sleep(self.RETRY_BACKOFF)
             try:
-                if self._client is None:
-                    with httpx2.Client() as client:
-                        response = client.get(url, headers=headers, **kwargs)
-                        response.raise_for_status()
-                        return response
-                response = self._client.get(url, headers=headers, **kwargs)
+                response = client.get(url, headers=headers, **kwargs)
                 response.raise_for_status()
                 return response
             except httpx2.TransportError as e:
