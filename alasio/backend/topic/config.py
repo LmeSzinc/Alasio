@@ -173,6 +173,42 @@ class ConfigArg(BaseTopic):
         _config_event.on_config_event(config_name, [resp])
 
     @rpc
+    async def group_reset(self, task: str, group: str):
+        """
+        Reset an entire group (task.group) to its default values.
+
+        All args of the group fall back to the default value; the reset is
+        broadcast through the unified config event entry, so every view of
+        this config updates.
+
+        Args:
+            task (str): Task name
+            group (str): Group name
+        """
+        if not task or not group:
+            return
+        # get config_name
+        state = ConnState(self.conn_id, self.server)
+        nav: NavState = await state.nav_state
+        mod_name = nav.mod_name
+        config_name = nav.config_name
+        if not config_name:
+            return
+
+        # call
+        resp = await trio.to_thread.run_sync(
+            MOD_LOADER.gui_config_group_reset,
+            mod_name, config_name, task, group
+        )
+        # resp: list[ConfigSetEvent]
+        if not resp:
+            # reset failed, do nothing
+            return
+
+        # unified event entry
+        _config_event.on_config_event(config_name, resp)
+
+    @rpc
     async def card_reset(self, card: str):
         if not card:
             return
