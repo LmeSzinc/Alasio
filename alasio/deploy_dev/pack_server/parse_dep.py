@@ -88,9 +88,12 @@ def _load_toml(content):
     return tomllib.loads(content)
 
 
-def _normalize_name(name):
+def normalize_name(name):
     """
     PEP 503 normalized name of a distribution, the dist-key of the pack files.
+
+    The index url of a mirror and the wheel folder use the same normalized
+    name, see fetch_wheel.
 
     Args:
         name (str): Name as written in the dependency file
@@ -119,7 +122,7 @@ def _build_deps(deps):
     """
     pins = {}
     for name, version in deps:
-        name = _normalize_name(name)
+        name = normalize_name(name)
         other = pins.get(name)
         if other is None:
             pins[name] = version
