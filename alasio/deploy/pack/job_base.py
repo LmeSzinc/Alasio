@@ -260,7 +260,7 @@ class JobBase(DeployTarget):
         })
         return decoder
 
-    def run(self):
+    async def run(self):
         """
         Execute the job, each subclass implements its own run().
 

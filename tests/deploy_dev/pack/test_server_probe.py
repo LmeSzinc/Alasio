@@ -5,13 +5,16 @@ record, the probe-once rule and the request retry.
 
 Every mirror is an in-memory httpx2.MockTransport handler, the tests
 never touch the network. The gui.db record is the FakeMirrorTable of
-conftest, an in-memory table injected by make_server_url().
+conftest, an in-memory table injected by make_server_url(). Every test
+performing a request is async (pytest-trio); a slow candidate is a
+slow async handler, the losing groups are cancelled by the probe
+instead of running to their timeouts.
 """
-import threading
 from time import time
 
 import httpx2
 import pytest
+import trio
 
 from alasio.deploy.httpclient.probe import AllMirrorsFailedError
 from alasio.deploy.pack.server_file import ServerFile
@@ -32,15 +35,16 @@ def latest_content(version='v1'):
     return version.encode() + b'\x00' * 20
 
 
-def make_client(handler):
-    """A httpx2.Client with a MockTransport handler."""
-    return httpx2.Client(transport=httpx2.MockTransport(handler))
+def make_aclient(handler):
+    """A httpx2.AsyncClient with a MockTransport handler."""
+    return httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
 
 
 class TestSingleMirror:
     """A single mirror set has nothing to select."""
 
-    def test_direct_request(self):
+    @pytest.mark.trio
+    async def test_direct_request(self):
         """The request goes straight to the only mirror, no probe."""
         requests = []
 
@@ -48,9 +52,9 @@ class TestSingleMirror:
             requests.append(str(request.url))
             return httpx2.Response(200, content=latest_content('v1'))
 
-        server = ServerFile('http://only', client=make_client(handler))
+        server = ServerFile('http://only', client=make_aclient(handler))
         with logger.mock_capture_writer():
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'v1'
         assert requests == ['http://only/latest.pack']
 
@@ -58,7 +62,8 @@ class TestSingleMirror:
 class TestProbeSelection:
     """The two-level selection: groups race, members fall back in order."""
 
-    def test_group_members_in_order(self):
+    @pytest.mark.trio
+    async def test_group_members_in_order(self):
         """The members of a group are tried in order, the first usable wins."""
         requests = []
 
@@ -71,9 +76,9 @@ class TestProbeSelection:
         table = FakeMirrorTable()
         server = ServerFile(
             make_server_url({'cn': {'down': 'http://down', 'up': 'http://up'}}, table=table),
-            client=make_client(handler))
+            client=make_aclient(handler))
         with logger.mock_capture_writer():
-            name, info = server.probe
+            name, info = await server.probe()
         assert name == 'up'
         assert info.version == 'tencent'
         # the members were tried in the declared order
@@ -81,7 +86,8 @@ class TestProbeSelection:
         # the winner is recorded
         assert table.select_one(scope='').name == 'up'
 
-    def test_preferred_member_wins(self):
+    @pytest.mark.trio
+    async def test_preferred_member_wins(self):
         """A working preferred member is not bypassed by the fallback."""
         requests = []
 
@@ -91,54 +97,37 @@ class TestProbeSelection:
 
         server = ServerFile(
             make_server_url({'cn': {'preferred': 'http://a', 'fallback': 'http://b'}}, table=FakeMirrorTable()),
-            client=make_client(handler))
+            client=make_aclient(handler))
         with logger.mock_capture_writer():
-            name, _ = server.probe
+            name, _ = await server.probe()
         assert name == 'preferred'
         assert requests == ['http://a/latest.pack']
 
-    def test_groups_race(self, monkeypatch):
-        """The fastest group wins, a slow group is not awaited."""
-        release = threading.Event()
-        entered = threading.Event()
-        worker_done = {'slow': threading.Event(), 'fast': threading.Event()}
+    @pytest.mark.trio
+    async def test_groups_race(self):
+        """The fastest group wins, the losing group is cancelled."""
+        entered = trio.Event()
 
-        def handler(request):
+        async def handler(request):
             if request.url.host == 'slow':
                 entered.set()
-                # the losing group is abandoned by the probe, it ends
-                # when the test releases it
-                release.wait(timeout=3)
+                # the losing group is cancelled by the probe instead of
+                # running to its timeout, this sleep never finishes
+                await trio.sleep_forever()
             return httpx2.Response(200, content=latest_content(request.url.host))
 
         server = ServerFile(
             make_server_url({'slow': 'http://slow', 'fast': 'http://fast'}, table=FakeMirrorTable()),
-            client=make_client(handler))
-        # observe the completion of the group workers: the abandoned
-        # worker logs its result after the probe returned, the test
-        # waits for it before leaving the capture
-        original_probe_group = server._probe_group
-
-        def probe_group(members, results):
-            try:
-                original_probe_group(members, results)
-            finally:
-                worker_done[next(iter(members))].set()
-
-        monkeypatch.setattr(server, '_probe_group', probe_group)
+            client=make_aclient(handler))
         with logger.mock_capture_writer():
-            try:
-                name, info = server.probe
-                assert name == 'fast'
-                assert info.version == 'fast'
-                assert entered.wait(3)
-                # the probe returned while the slow group is still running
-                assert not worker_done['slow'].is_set()
-            finally:
-                release.set()
-            assert worker_done['slow'].wait(3)
+            name, info = await server.probe()
+        assert name == 'fast'
+        assert info.version == 'fast'
+        # the slow group started its request and was cancelled
+        assert entered.is_set()
 
-    def test_all_mirrors_failed(self):
+    @pytest.mark.trio
+    async def test_all_mirrors_failed(self):
         """Every candidate fails, the error carries the reasons."""
         def handler(request):
             return httpx2.Response(503)
@@ -146,10 +135,10 @@ class TestProbeSelection:
         table = FakeMirrorTable()
         server = ServerFile(
             make_server_url({'a': 'http://a', 'b': 'http://x'}, table=table),
-            client=make_client(handler))
+            client=make_aclient(handler))
         with logger.mock_capture_writer() as capture:
             with pytest.raises(AllMirrorsFailedError) as e:
-                server.get_latest_info()
+                await server.get_latest_info()
         message = str(e.value)
         assert 'a' in message
         assert 'b' in message
@@ -161,53 +150,37 @@ class TestProbeSelection:
 class TestSelectionReuse:
     """The resolved mirror of an instance: the payload, the record, the reuse."""
 
-    def test_probe_payload_is_reused(self, monkeypatch):
+    @pytest.mark.trio
+    async def test_probe_payload_is_reused(self):
         """The probe request is the prefetch: latest.pack is fetched
         once, and a later call fetches again (nothing is cached)."""
-        release = threading.Event()
         requests = []
-        worker_done = {'a': threading.Event(), 'b': threading.Event()}
 
-        def handler(request):
+        async def handler(request):
             if request.url.host == 'b':
-                # recorded after the release, the assertions below run
-                # while this losing group is still in flight
-                release.wait(timeout=3)
-                requests.append(str(request.url))
-                return httpx2.Response(200, content=latest_content('b'))
+                # the losing group is cancelled mid-flight, its request
+                # never records a response
+                await trio.sleep_forever()
             requests.append(str(request.url))
             return httpx2.Response(200, content=latest_content('a'))
 
         table = FakeMirrorTable()
         server = ServerFile(
             make_server_url({'a': 'http://a', 'b': 'http://b'}, table=table),
-            client=make_client(handler))
-        # wait for the abandoned worker before leaving the capture
-        original_probe_group = server._probe_group
-
-        def probe_group(members, results):
-            try:
-                original_probe_group(members, results)
-            finally:
-                worker_done[next(iter(members))].set()
-
-        monkeypatch.setattr(server, '_probe_group', probe_group)
+            client=make_aclient(handler))
         with logger.mock_capture_writer():
-            try:
-                info = server.get_latest_info()
-                assert info.version == 'a'
-                assert table.select_one(scope='').name == 'a'
-                # the probe request is the only request made for the winner
-                assert requests == ['http://a/latest.pack']
-                info = server.get_latest_info()
-                assert info.version == 'a'
-                # the payload was not cached, the later call fetches again
-                assert requests == ['http://a/latest.pack', 'http://a/latest.pack']
-            finally:
-                release.set()
-            assert worker_done['b'].wait(3)
+            info = await server.get_latest_info()
+            assert info.version == 'a'
+            assert table.select_one(scope='').name == 'a'
+            # the probe request is the only request made for the winner
+            assert requests == ['http://a/latest.pack']
+            info = await server.get_latest_info()
+            assert info.version == 'a'
+            # the payload was not cached, the later call fetches again
+            assert requests == ['http://a/latest.pack', 'http://a/latest.pack']
 
-    def test_recorded_mirror_is_used_directly(self):
+    @pytest.mark.trio
+    async def test_recorded_mirror_is_used_directly(self):
         """A recorded mirror is used without a probe."""
         requests = []
 
@@ -218,13 +191,14 @@ class TestSelectionReuse:
         table = FakeMirrorTable()
         server_url = make_server_url({'a': 'http://a', 'b': 'http://b'}, table=table)
         table.seed(set_key=server_url.set_key, name='b')
-        server = ServerFile(server_url, client=make_client(handler))
+        server = ServerFile(server_url, client=make_aclient(handler))
         with logger.mock_capture_writer():
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'v1'
         assert requests == ['http://b/latest.pack']
 
-    def test_pack_request_resolves_first(self):
+    @pytest.mark.trio
+    async def test_pack_request_resolves_first(self):
         """A flow whose first request is a pack file resolves (probes)
         first, the probe payload is dropped then."""
         requests = []
@@ -235,9 +209,9 @@ class TestSelectionReuse:
 
         server = ServerFile(
             make_server_url({'g': {'a': 'http://a', 'b': 'http://b'}}, table=FakeMirrorTable()),
-            client=make_client(handler))
+            client=make_aclient(handler))
         with logger.mock_capture_writer():
-            content = server.get_file_content('v2', 0, 4)
+            content = await server.get_file_content('v2', 0, 4)
         # the same group: the first member is probed, then the file of
         # the winner is fetched
         assert requests == ['http://a/latest.pack', 'http://a/v2/full.pack']
@@ -257,7 +231,8 @@ class TestRecordExpire:
 
     MIRRORS = {'g': {'preferred': 'http://preferred', 'fallback': 'http://fallback'}}
 
-    def test_expired_record_selects_the_preferred_mirror_again(self):
+    @pytest.mark.trio
+    async def test_expired_record_selects_the_preferred_mirror_again(self):
         """The record of a failed-over mirror expires: the probe tries
         the preferred member first again and upgrades to it."""
         requests = []
@@ -269,9 +244,9 @@ class TestRecordExpire:
         table = FakeMirrorTable()
         server_url = make_server_url(self.MIRRORS, table=table)
         table.seed(set_key=server_url.set_key, name='fallback', expire=int(time()) - 1)
-        server = ServerFile(server_url, client=make_client(handler))
+        server = ServerFile(server_url, client=make_aclient(handler))
         with logger.mock_capture_writer() as capture:
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'v1'
         assert capture.backend.any_contains('is expired')
         # the expired record was ignored: the probe selected the
@@ -283,7 +258,8 @@ class TestRecordExpire:
         assert row.name == 'preferred'
         assert row.expire > int(time())
 
-    def test_expired_record_is_rewritten_when_the_same_mirror_wins(self):
+    @pytest.mark.trio
+    async def test_expired_record_is_rewritten_when_the_same_mirror_wins(self):
         """The same mirror wins the probe again: the expired record is
         rewritten with a fresh expiration (it was read as '' and
         cached as ''), the same-name skip does not apply."""
@@ -298,9 +274,9 @@ class TestRecordExpire:
         table = FakeMirrorTable()
         server_url = make_server_url(self.MIRRORS, table=table)
         table.seed(set_key=server_url.set_key, name='fallback', expire=int(time()) - 1)
-        server = ServerFile(server_url, client=make_client(handler))
+        server = ServerFile(server_url, client=make_aclient(handler))
         with logger.mock_capture_writer():
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'v1'
         assert requests == ['http://preferred/latest.pack', 'http://fallback/latest.pack']
         assert table.upserts == 1
@@ -308,7 +284,8 @@ class TestRecordExpire:
         assert row.name == 'fallback'
         assert row.expire > int(time())
 
-    def test_valid_record_keeps_the_flow_probe_free(self):
+    @pytest.mark.trio
+    async def test_valid_record_keeps_the_flow_probe_free(self):
         """A record inside its lifetime is the hint: the flow goes
         straight to the recorded mirror, no probe request, no write."""
         requests = []
@@ -320,9 +297,9 @@ class TestRecordExpire:
         table = FakeMirrorTable()
         server_url = make_server_url(self.MIRRORS, table=table)
         table.seed(set_key=server_url.set_key, name='fallback')
-        server = ServerFile(server_url, client=make_client(handler))
+        server = ServerFile(server_url, client=make_aclient(handler))
         with logger.mock_capture_writer():
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'v1'
         assert requests == ['http://fallback/latest.pack']
         assert table.upserts == 0
@@ -347,10 +324,11 @@ class TestFailureReselection:
         table = FakeMirrorTable()
         server_url = make_server_url({'g': {'b': 'http://b', 'a': 'http://a'}}, table=table)
         table.seed(set_key=server_url.set_key, name='b')
-        return table, ServerFile(server_url, client=make_client(handler))
+        return table, ServerFile(server_url, client=make_aclient(handler))
 
+    @pytest.mark.trio
     @pytest.mark.parametrize('status', [500, 404])
-    def test_latest_failure_reselects(self, status):
+    async def test_latest_failure_reselects(self, status):
         """A failed latest.pack of the recorded mirror (5xx or 4xx)
         triggers a probe, the failed mirror is a candidate again."""
         requests = []
@@ -363,7 +341,7 @@ class TestFailureReselection:
 
         table, server = self.recorded_server(handler)
         with logger.mock_capture_writer() as capture:
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'a'
         # the record is replaced by the winner
         assert table.select_one(scope='').name == 'a'
@@ -372,7 +350,8 @@ class TestFailureReselection:
         assert requests == ['http://b/latest.pack', 'http://b/latest.pack', 'http://a/latest.pack']
         assert capture.backend.any_contains('probing again')
 
-    def test_latest_timeout_reselects(self):
+    @pytest.mark.trio
+    async def test_latest_timeout_reselects(self):
         """A timeout of the recorded mirror triggers a probe: the user
         network environment may have changed. The data request is
         retried first (transport error, up to 3 attempts), the probe
@@ -387,7 +366,7 @@ class TestFailureReselection:
 
         table, server = self.recorded_server(handler)
         with logger.mock_capture_writer():
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'a'
         assert table.select_one(scope='').name == 'a'
         # the data request is attempted 3 times on b, then the probe
@@ -400,7 +379,8 @@ class TestFailureReselection:
             'http://a/latest.pack',
         ]
 
-    def test_pack_request_reselects_and_retries(self):
+    @pytest.mark.trio
+    async def test_pack_request_reselects_and_retries(self):
         """A pack file failure reselects the mirror and retries the
         request once on the new winner."""
         requests = []
@@ -415,7 +395,7 @@ class TestFailureReselection:
 
         table, server = self.recorded_server(handler)
         with logger.mock_capture_writer():
-            assert server.get_update_pack('old', 'new') == b'update pack data'
+            assert await server.get_update_pack('old', 'new') == b'update pack data'
         assert table.select_one(scope='').name == 'a'
         assert requests == [
             'http://b/new/from_old.pack',
@@ -424,7 +404,8 @@ class TestFailureReselection:
             'http://a/new/from_old.pack',
         ]
 
-    def test_retry_failure_is_raised(self):
+    @pytest.mark.trio
+    async def test_retry_failure_is_raised(self):
         """The request is retried exactly once, a failure of the retry
         is raised."""
         requests = []
@@ -440,7 +421,7 @@ class TestFailureReselection:
         table, server = self.recorded_server(handler)
         with logger.mock_capture_writer():
             with pytest.raises(httpx2.HTTPStatusError):
-                server.get_update_pack('old', 'new')
+                await server.get_update_pack('old', 'new')
         assert requests == [
             'http://b/new/from_old.pack',
             'http://b/latest.pack',
@@ -448,7 +429,8 @@ class TestFailureReselection:
             'http://a/new/from_old.pack',
         ]
 
-    def test_404_is_not_reselected(self):
+    @pytest.mark.trio
+    async def test_404_is_not_reselected(self):
         """A 4xx of a pack file is the answer of the server, the mirror
         is kept and the request is not retried."""
         requests = []
@@ -460,10 +442,11 @@ class TestFailureReselection:
         table, server = self.recorded_server(handler)
         with logger.mock_capture_writer():
             with pytest.raises(httpx2.HTTPStatusError):
-                server.get_update_pack('old', 'new')
+                await server.get_update_pack('old', 'new')
         assert requests == ['http://b/new/from_old.pack']
         assert table.select_one(scope='').name == 'b'
 
+    @pytest.mark.trio
     @pytest.mark.parametrize('failure', [
         # no status code at all: dns lookup failure and ssl handshake
         # failure both raise httpx2.ConnectError, a timeout raises a
@@ -473,7 +456,7 @@ class TestFailureReselection:
         httpx2.ConnectTimeout,
         httpx2.ReadTimeout,
     ])
-    def test_transport_failure_reselects(self, failure):
+    async def test_transport_failure_reselects(self, failure):
         """A failure without a status code means the mirror is not
         usable: the request is reselected and retried."""
         requests = []
@@ -488,7 +471,7 @@ class TestFailureReselection:
 
         table, server = self.recorded_server(handler)
         with logger.mock_capture_writer():
-            assert server.get_update_pack('old', 'new') == b'update pack data'
+            assert await server.get_update_pack('old', 'new') == b'update pack data'
         assert table.select_one(scope='').name == 'a'
         # the data request is attempted 3 times on b, then the probe
         # retries b once (single-shot) and the request is retried on a
@@ -501,7 +484,8 @@ class TestFailureReselection:
             'http://a/new/from_old.pack',
         ]
 
-    def test_total_failure_keeps_the_record(self):
+    @pytest.mark.trio
+    async def test_total_failure_keeps_the_record(self):
         """Every mirror fails: the error is raised and the record keeps
         the old name, a total failure usually means the machine is
         offline."""
@@ -516,7 +500,7 @@ class TestFailureReselection:
         table, server = self.recorded_server(handler)
         with logger.mock_capture_writer():
             with pytest.raises(AllMirrorsFailedError):
-                server.get_latest_info()
+                await server.get_latest_info()
         # the data request is attempted 3 times on b, then the probe
         # retries b once (single-shot) and a is not usable either
         assert requests == [
@@ -532,7 +516,7 @@ class TestFailureReselection:
         # instead of racing (the data request is retried again)
         with logger.mock_capture_writer():
             with pytest.raises(AllMirrorsFailedError):
-                server.get_latest_info()
+                await server.get_latest_info()
         assert requests == [
             'http://b/latest.pack',
             'http://b/latest.pack',
@@ -554,7 +538,8 @@ class TestProbeOnce:
     environment does not change between its requests.
     """
 
-    def test_probe_result_is_cached(self):
+    @pytest.mark.trio
+    async def test_probe_result_is_cached(self):
         """A second access reuses the cached probe, no request again."""
         requests = []
 
@@ -564,15 +549,16 @@ class TestProbeOnce:
 
         server = ServerFile(
             make_server_url({'g': {'a': 'http://a', 'b': 'http://b'}}, table=FakeMirrorTable()),
-            client=make_client(handler))
+            client=make_aclient(handler))
         with logger.mock_capture_writer():
-            first = server.probe
-            second = server.probe
+            first = await server.probe()
+            second = await server.probe()
         assert first is second
         assert first[0] == 'a'
         assert requests == ['http://a/latest.pack']
 
-    def test_probe_failure_is_recorded(self):
+    @pytest.mark.trio
+    async def test_probe_failure_is_recorded(self):
         """A failed probe is recorded: a later access re-raises it
         without racing again."""
         requests = []
@@ -583,17 +569,18 @@ class TestProbeOnce:
 
         server = ServerFile(
             make_server_url({'g': {'a': 'http://a', 'b': 'http://b'}}, table=FakeMirrorTable()),
-            client=make_client(handler))
+            client=make_aclient(handler))
         with logger.mock_capture_writer():
             with pytest.raises(AllMirrorsFailedError):
-                server.probe
+                await server.probe()
             tried = list(requests)
             with pytest.raises(AllMirrorsFailedError):
-                server.probe
+                await server.probe()
         assert tried == ['http://a/latest.pack', 'http://b/latest.pack']
         assert requests == tried
 
-    def test_failure_after_the_resolve_probe_is_raised(self):
+    @pytest.mark.trio
+    async def test_failure_after_the_resolve_probe_is_raised(self):
         """A mirror selected by the probe is not reselected: probing
         again would select the same mirror, the failure is raised."""
         requests = []
@@ -606,15 +593,16 @@ class TestProbeOnce:
 
         server = ServerFile(
             make_server_url({'g': {'a': 'http://a', 'b': 'http://b'}}, table=FakeMirrorTable()),
-            client=make_client(handler))
+            client=make_aclient(handler))
         with logger.mock_capture_writer():
             with pytest.raises(httpx2.HTTPStatusError):
-                server.get_file_content('v1', 0, 4)
+                await server.get_file_content('v1', 0, 4)
         # the resolve probe selected a, the failed file request did not
         # probe again
         assert requests == ['http://a/latest.pack', 'http://a/v1/full.pack']
 
-    def test_late_failure_does_not_reselect(self):
+    @pytest.mark.trio
+    async def test_late_failure_does_not_reselect(self):
         """A failure after the reselect probe is raised as-is: the
         probe of the instance already ran."""
         requests = []
@@ -630,16 +618,16 @@ class TestProbeOnce:
         table = FakeMirrorTable()
         server_url = make_server_url({'g': {'b': 'http://b', 'a': 'http://a'}}, table=table)
         table.seed(set_key=server_url.set_key, name='b')
-        server = ServerFile(server_url, client=make_client(handler))
+        server = ServerFile(server_url, client=make_aclient(handler))
         with logger.mock_capture_writer():
             # the first failure reselects: the probe selects a, the
             # retry of the request fails
             with pytest.raises(httpx2.HTTPStatusError):
-                server.get_update_pack('old', 'new')
+                await server.get_update_pack('old', 'new')
             tried = list(requests)
             # the probe already ran, the second failure is raised as-is
             with pytest.raises(httpx2.HTTPStatusError):
-                server.get_update_pack('old', 'new')
+                await server.get_update_pack('old', 'new')
         assert tried == [
             'http://b/new/from_old.pack',
             'http://b/latest.pack',
@@ -657,7 +645,8 @@ class TestRequestRetry:
     Every failed attempt is logged.
     """
 
-    def test_transport_error_is_retried(self):
+    @pytest.mark.trio
+    async def test_transport_error_is_retried(self):
         """The first attempt raises a transport error, the retry works."""
         requests = []
 
@@ -667,13 +656,14 @@ class TestRequestRetry:
                 raise httpx2.ReadTimeout('read timed out')
             return httpx2.Response(200, content=latest_content('v1'))
 
-        server = ServerFile('http://only', client=make_client(handler))
+        server = ServerFile('http://only', client=make_aclient(handler))
         with logger.mock_capture_writer():
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'v1'
         assert requests == ['http://only/latest.pack', 'http://only/latest.pack']
 
-    def test_attempts_are_three(self):
+    @pytest.mark.trio
+    async def test_attempts_are_three(self):
         """Two transport errors are retried: the third attempt is the
         last chance and succeeds."""
         requests = []
@@ -684,13 +674,14 @@ class TestRequestRetry:
                 raise httpx2.ReadTimeout('read timed out')
             return httpx2.Response(200, content=latest_content('v1'))
 
-        server = ServerFile('http://only', client=make_client(handler))
+        server = ServerFile('http://only', client=make_aclient(handler))
         with logger.mock_capture_writer():
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'v1'
         assert requests == ['http://only/latest.pack'] * 3
 
-    def test_retry_is_limited(self):
+    @pytest.mark.trio
+    async def test_retry_is_limited(self):
         """A persistent transport error is raised after 3 attempts."""
         requests = []
 
@@ -698,13 +689,14 @@ class TestRequestRetry:
             requests.append(str(request.url))
             raise httpx2.ReadTimeout('read timed out')
 
-        server = ServerFile('http://only', client=make_client(handler))
+        server = ServerFile('http://only', client=make_aclient(handler))
         with logger.mock_capture_writer():
             with pytest.raises(httpx2.ReadTimeout):
-                server.get_latest_info()
+                await server.get_latest_info()
         assert requests == ['http://only/latest.pack'] * 3
 
-    def test_status_error_is_not_retried(self):
+    @pytest.mark.trio
+    async def test_status_error_is_not_retried(self):
         """An http status error is the answer of the server, not a
         transport error: it is raised without a retry, and logged."""
         requests = []
@@ -713,17 +705,18 @@ class TestRequestRetry:
             requests.append(str(request.url))
             return httpx2.Response(500)
 
-        server = ServerFile('http://only', client=make_client(handler))
+        server = ServerFile('http://only', client=make_aclient(handler))
         with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.HTTPStatusError):
-                server.get_latest_info()
+                await server.get_latest_info()
         assert requests == ['http://only/latest.pack']
         warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
         assert len(warnings) == 1
         assert warnings[0].startswith(
             'Request to "http://only/latest.pack" failed (attempt 1/3): HTTPStatusError')
 
-    def test_probe_candidate_is_not_retried(self):
+    @pytest.mark.trio
+    async def test_probe_candidate_is_not_retried(self):
         """A probe candidate stays single-shot: a transport error makes
         it unusable without a retry."""
         requests = []
@@ -736,22 +729,23 @@ class TestRequestRetry:
 
         server = ServerFile(
             make_server_url({'g': {'a': 'http://a', 'b': 'http://b'}}, table=FakeMirrorTable()),
-            client=make_client(handler))
+            client=make_aclient(handler))
         with logger.mock_capture_writer():
-            name, info = server.probe
+            name, info = await server.probe()
         assert name == 'b'
         assert info.version == 'v1'
         assert requests == ['http://a/latest.pack', 'http://b/latest.pack']
 
-    def test_every_attempt_failure_is_logged(self):
+    @pytest.mark.trio
+    async def test_every_attempt_failure_is_logged(self):
         """Every failed attempt logs one warning, exhausted or not."""
         def handler(request):
             raise httpx2.ReadTimeout('read timed out')
 
-        server = ServerFile('http://only', client=make_client(handler))
+        server = ServerFile('http://only', client=make_aclient(handler))
         with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.ReadTimeout):
-                server.get_latest_info()
+                await server.get_latest_info()
         warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
         assert warnings == [
             'Request to "http://only/latest.pack" failed (attempt 1/3): ReadTimeout: read timed out',
@@ -759,7 +753,8 @@ class TestRequestRetry:
             'Request to "http://only/latest.pack" failed (attempt 3/3): ReadTimeout: read timed out',
         ]
 
-    def test_retried_failure_is_logged(self):
+    @pytest.mark.trio
+    async def test_retried_failure_is_logged(self):
         """A transport error absorbed by the retry is still logged."""
         requests = []
 
@@ -769,16 +764,17 @@ class TestRequestRetry:
                 raise httpx2.ReadTimeout('read timed out')
             return httpx2.Response(200, content=latest_content('v1'))
 
-        server = ServerFile('http://only', client=make_client(handler))
+        server = ServerFile('http://only', client=make_aclient(handler))
         with logger.mock_capture_writer() as capture:
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'v1'
         warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
         assert warnings == [
             'Request to "http://only/latest.pack" failed (attempt 1/3): ReadTimeout: read timed out',
         ]
 
-    def test_probe_candidate_failure_is_logged(self):
+    @pytest.mark.trio
+    async def test_probe_candidate_failure_is_logged(self):
         """A failed probe candidate logs its request failure, then the
         engine logs the rejection."""
         def handler(request):
@@ -788,9 +784,9 @@ class TestRequestRetry:
 
         server = ServerFile(
             make_server_url({'g': {'a': 'http://a', 'b': 'http://b'}}, table=FakeMirrorTable()),
-            client=make_client(handler))
+            client=make_aclient(handler))
         with logger.mock_capture_writer() as capture:
-            name, _ = server.probe
+            name, _ = await server.probe()
         assert name == 'b'
         warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
         assert warnings == [
@@ -802,7 +798,8 @@ class TestRequestRetry:
 class TestRequestTimeout:
     """latest.pack and the pack downloads use distinct timeouts."""
 
-    def test_latest_pack_timeout(self):
+    @pytest.mark.trio
+    async def test_latest_pack_timeout(self):
         """A latest.pack request uses PROBE_TIMEOUT on every phase."""
         timeouts = []
 
@@ -810,9 +807,9 @@ class TestRequestTimeout:
             timeouts.append(request.extensions['timeout'])
             return httpx2.Response(200, content=latest_content('v1'))
 
-        server = ServerFile('http://only', client=make_client(handler))
+        server = ServerFile('http://only', client=make_aclient(handler))
         with logger.mock_capture_writer():
-            info = server.get_latest_info()
+            info = await server.get_latest_info()
         assert info.version == 'v1'
         assert timeouts == [{
             'connect': ServerFile.PROBE_TIMEOUT,
@@ -821,7 +818,8 @@ class TestRequestTimeout:
             'pool': ServerFile.PROBE_TIMEOUT,
         }]
 
-    def test_download_timeout(self):
+    @pytest.mark.trio
+    async def test_download_timeout(self):
         """A pack download uses DOWNLOAD_TIMEOUT: the connection budget
         stays short, the read/write budget is longer than latest.pack's
         (the range of one file may be large, a slow transfer must not
@@ -832,9 +830,9 @@ class TestRequestTimeout:
             timeouts.append(request.extensions['timeout'])
             return httpx2.Response(206, content=b'pack data')
 
-        server = ServerFile('http://only', client=make_client(handler))
+        server = ServerFile('http://only', client=make_aclient(handler))
         with logger.mock_capture_writer():
-            assert server.get_file_content('v1', 0, 4) == b'pack data'
+            assert await server.get_file_content('v1', 0, 4) == b'pack data'
         assert timeouts == [{
             'connect': ServerFile.PROBE_TIMEOUT,
             'read': ServerFile.DOWNLOAD_TIMEOUT.read,

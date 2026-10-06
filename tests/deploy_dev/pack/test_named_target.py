@@ -11,7 +11,9 @@ folder.
 
 The packs are module level singletons, built before the fake
 filesystem is active: MockGitRepo reads the real .gitattributes file,
-which the fake filesystem does not provide.
+which the fake filesystem does not provide. Tests performing requests
+are async (pytest-trio); the server stubs they monkeypatch are async
+functions too (the client awaits them).
 """
 import os
 
@@ -63,10 +65,11 @@ NAMED_SERVER.register_update('old', 'new', NAMED_UPDATE)
 class TestNamedUnpack:
     """The full pack flow on a named target."""
 
-    def test_unpack(self, app_folder):
+    @pytest.mark.trio
+    async def test_unpack(self, app_folder):
         """The ledger and the pack area paths land under .pack/{name}."""
         with logger.mock_capture_writer():
-            DeployJob(name='httpx').unpack(WEBSITE_FULL_PACK)
+            await DeployJob(name='httpx').unpack(WEBSITE_FULL_PACK)
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         # the ledger of the target, and the history of the pack mapped
@@ -80,7 +83,8 @@ class TestNamedUnpack:
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/httpx/.pack')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/httpx/workspace')
 
-    def test_ledger_and_workspace_are_per_name(self, app_folder):
+    @pytest.mark.trio
+    async def test_ledger_and_workspace_are_per_name(self, app_folder):
         """A named target has its own job file and workspace."""
         UnpackJob(WEBSITE_FULL_PACK, name='a').write()
         assert DeployJob(name='b')._get_unfinished_job() is None
@@ -88,7 +92,7 @@ class TestNamedUnpack:
         assert job is not None
         assert isinstance(job, UnpackJob)
         with logger.mock_capture_writer():
-            job.run()
+            await job.run()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
             WEBSITE_FILES['backend/main.py'][0]
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/a/workspace')
@@ -138,19 +142,20 @@ class TestNamedUnpack:
 class TestNamedUpdate:
     """The incremental flow on a named target."""
 
-    def test_update(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_update(self, app_folder, monkeypatch):
         """Everything the update needs comes from the local files: a
         download attempt means the mapping of a source path missed the
         ledger folder of the target."""
         with logger.mock_capture_writer():
-            UnpackJob(NAMED_OLD_PACK, name='httpx').run()
+            await UnpackJob(NAMED_OLD_PACK, name='httpx').run()
 
-        def _fail(*args, **kwargs):
+        async def _fail(*args, **kwargs):
             raise AssertionError('no download expected for a named target')
         monkeypatch.setattr(NAMED_SERVER, 'get_file_content', _fail)
 
         with logger.mock_capture_writer():
-            assert DeployJob(name='httpx', server=NAMED_SERVER).update()
+            assert await DeployJob(name='httpx', server=NAMED_SERVER).update()
         for path, content in NAMED_TREE.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         # the generated history record follows the mapping too
@@ -161,23 +166,25 @@ class TestNamedUpdate:
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/index.pack')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/httpx/workspace')
 
-    def test_reset(self, app_folder):
+    @pytest.mark.trio
+    async def test_reset(self, app_folder):
         """The validation flow reads the ledger of the named target."""
         with logger.mock_capture_writer():
-            UnpackJob(NAMED_NEW_PACK, name='httpx').run()
-            assert DeployJob(name='httpx', server=NAMED_SERVER).update()
+            await UnpackJob(NAMED_NEW_PACK, name='httpx').run()
+            assert await DeployJob(name='httpx', server=NAMED_SERVER).update()
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/httpx/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/httpx/workspace')
 
-    def test_rebuild_when_ledger_missing(self, app_folder):
+    @pytest.mark.trio
+    async def test_rebuild_when_ledger_missing(self, app_folder):
         """A missing ledger of a named target is rebuilt from the
         server, the new ledger included."""
         with logger.mock_capture_writer():
-            UnpackJob(NAMED_OLD_PACK, name='httpx').run()
+            await UnpackJob(NAMED_OLD_PACK, name='httpx').run()
         os.remove(env.PROJECT_ROOT / '.pack/httpx/index.pack')
         with logger.mock_capture_writer() as capture:
-            assert DeployJob(name='httpx', server=NAMED_SERVER).update()
+            assert await DeployJob(name='httpx', server=NAMED_SERVER).update()
         assert capture.backend.any_contains('Failed to read the local version')
         for path, content in NAMED_TREE.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
@@ -185,20 +192,21 @@ class TestNamedUpdate:
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/httpx/workspace')
 
-    def test_name_change_between_versions(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_name_change_between_versions(self, app_folder, monkeypatch):
         """Renaming the ledger folder between two versions keeps the
         incremental update working: the pack paths are mapped at run
         time, nothing in the pack knows the name."""
         with logger.mock_capture_writer():
-            UnpackJob(NAMED_OLD_PACK, name='a').run()
+            await UnpackJob(NAMED_OLD_PACK, name='a').run()
         os.rename(env.PROJECT_ROOT / '.pack/a', env.PROJECT_ROOT / '.pack/b')
 
-        def _fail(*args, **kwargs):
+        async def _fail(*args, **kwargs):
             raise AssertionError('no download expected after a rename')
         monkeypatch.setattr(NAMED_SERVER, 'get_file_content', _fail)
 
         with logger.mock_capture_writer():
-            assert DeployJob(name='b', server=NAMED_SERVER).update()
+            assert await DeployJob(name='b', server=NAMED_SERVER).update()
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/b/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/a')

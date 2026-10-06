@@ -79,39 +79,41 @@ class TestLocked:
 class TestFlowLocked:
     """update() and unpack() hold the lock for their whole flow."""
 
-    def test_unpack_holds_the_lock(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_unpack_holds_the_lock(self, app_folder, monkeypatch):
         """unpack() holds the lock while its job runs, releases it after."""
         deploy = DeployJob()
         states = []
         original = UnpackJob.run
 
-        def run(self):
+        async def run(self):
             states.append(deploy.lock.is_locked)
-            return original(self)
+            return await original(self)
 
         monkeypatch.setattr(UnpackJob, 'run', run)
         with logger.mock_capture_writer():
-            deploy.unpack(WEBSITE_FULL_PACK)
+            await deploy.unpack(WEBSITE_FULL_PACK)
         assert states == [True]
         assert not deploy.lock.is_locked
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
             WEBSITE_FILES['backend/main.py'][0]
 
-    def test_update_holds_the_lock(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_update_holds_the_lock(self, app_folder, monkeypatch):
         """update() holds the lock while its job runs, releases it after."""
         deploy = DeployJob(server=WEBSITE_SERVER)
         with logger.mock_capture_writer():
-            deploy.unpack(WEBSITE_FULL_PACK)
+            await deploy.unpack(WEBSITE_FULL_PACK)
         states = []
         original = ResetJob.run
 
-        def run(self):
+        async def run(self):
             states.append(deploy.lock.is_locked)
-            return original(self)
+            return await original(self)
 
         monkeypatch.setattr(ResetJob, 'run', run)
         with logger.mock_capture_writer():
-            assert deploy.update()
+            assert await deploy.update()
         assert states == [True]
         assert not deploy.lock.is_locked
 

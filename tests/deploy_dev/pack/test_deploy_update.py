@@ -7,6 +7,10 @@ latest.pack is compared with the local version, a version mismatch
 downloads the update pack /{new}/from_{old}.pack and applies it with
 UpdateJob, the same version continues with ResetJob.
 
+Every test is async (pytest-trio): update() and the jobs await their
+network phases on the test event loop, the local phases run in worker
+threads.
+
 The packs are module level singletons, built before the fake
 filesystem is active: MockGitRepo reads the real .gitattributes file,
 which the fake filesystem does not provide.
@@ -112,81 +116,89 @@ OTHER_INDEX = bytes(PackDecodeBase(OTHER_PACK).extract_index_pack())
 class TestDeployUpdate:
     """The unified update entry of DeployJob."""
 
-    def test_update_to_new_version(self, app_folder):
+    @pytest.mark.trio
+    async def test_update_to_new_version(self, app_folder):
         """A version mismatch downloads the update pack and applies it."""
         with logger.mock_capture_writer():
-            UnpackJob(OLD_PACK).run()
-            assert DeployJob(server=SERVER).update()
+            await UnpackJob(OLD_PACK).run()
+            assert await DeployJob(server=SERVER).update()
         assert read_tree() == NEW_TREE
         # the local index pack is the new one
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_up_to_date(self, app_folder):
+    @pytest.mark.trio
+    async def test_up_to_date(self, app_folder):
         """The same version continues with ResetJob, nothing changes."""
         with logger.mock_capture_writer():
-            UnpackJob(NEW_PACK).run()
-            assert DeployJob(server=SERVER).update()
+            await UnpackJob(NEW_PACK).run()
+            assert await DeployJob(server=SERVER).update()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_missing_local_index(self, app_folder):
+    @pytest.mark.trio
+    async def test_missing_local_index(self, app_folder):
         """A missing local index falls back to RebuildJob, the tree is
         rebuilt from the server."""
         with logger.mock_capture_writer() as capture:
-            assert DeployJob(server=SERVER).update()
+            assert await DeployJob(server=SERVER).update()
         assert capture.backend.any_contains('Failed to read the local version')
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_update_pack_missing_falls_back(self, app_folder):
+    @pytest.mark.trio
+    async def test_update_pack_missing_falls_back(self, app_folder):
         """A 404 of the update pack falls back to RebuildJob, the tree
         is rebuilt from the latest index."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         with logger.mock_capture_writer() as capture:
-            assert DeployJob(server=SERVER_NO_UPDATE).update()
+            assert await DeployJob(server=SERVER_NO_UPDATE).update()
         assert capture.backend.any_contains('Failed to get the update pack')
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_update_pack_corrupt_falls_back(self, app_folder):
+    @pytest.mark.trio
+    async def test_update_pack_corrupt_falls_back(self, app_folder):
         """A corrupt update pack fails to apply and falls back to
         RebuildJob, the tree is rebuilt from the latest index."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         with logger.mock_capture_writer() as capture:
-            assert DeployJob(server=SERVER_CORRUPT_UPDATE).update()
+            assert await DeployJob(server=SERVER_CORRUPT_UPDATE).update()
         assert capture.backend.any_contains('Failed to apply the update pack')
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_unfinished_rebuild_finished_first(self, app_folder):
+    @pytest.mark.trio
+    async def test_unfinished_rebuild_finished_first(self, app_folder):
         """An unfinished rebuild job is finished before the update."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         RebuildJob(SERVER).write()
         with logger.mock_capture_writer():
-            assert DeployJob(server=SERVER).update()
+            assert await DeployJob(server=SERVER).update()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_unfinished_job_finished_first(self, app_folder):
+    @pytest.mark.trio
+    async def test_unfinished_job_finished_first(self, app_folder):
         """An unfinished job is finished before the update."""
         with logger.mock_capture_writer():
             UnpackJob(OLD_PACK).write()
-            assert DeployJob(server=SERVER).update()
+            assert await DeployJob(server=SERVER).update()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_update_without_server(self, app_folder):
+    @pytest.mark.trio
+    async def test_update_without_server(self, app_folder):
         """A target created without a server cannot update."""
         with pytest.raises(ValueError, match='no server provided'):
-            DeployJob().update()
+            await DeployJob().update()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack')
 
 
@@ -195,7 +207,7 @@ class TestLatestInfoSnapshot:
 
     DeployJob.update() fetches latest.pack to decide which path to take
     and hands the snapshot to the job created for that path (the
-    _latest_info instance cache of the job is seeded), so ResetJob and
+    _latest_info attribute of the job is seeded), so ResetJob and
     RebuildJob do not request it again. A resumed Reset/Rebuild job
     still fetches twice: it runs before the decision and takes its own
     snapshot.
@@ -216,64 +228,71 @@ class TestLatestInfoSnapshot:
         calls = []
         original = server.get_latest_info
 
-        def counting():
+        async def counting():
             calls.append(1)
-            return original()
+            return await original()
 
         monkeypatch.setattr(server, 'get_latest_info', counting)
         return calls
 
-    def test_up_to_date(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_up_to_date(self, app_folder, monkeypatch):
         """The same version path: the entry fetch serves ResetJob too."""
-        UnpackJob(NEW_PACK).run()
+        await UnpackJob(NEW_PACK).run()
         calls = self.count_latest(SERVER, monkeypatch)
         with logger.mock_capture_writer():
-            assert DeployJob(server=SERVER).update()
+            assert await DeployJob(server=SERVER).update()
         assert len(calls) == 1
 
-    def test_local_index_missing(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_local_index_missing(self, app_folder, monkeypatch):
         """The unknown local version path: RebuildJob reuses the entry snapshot."""
         calls = self.count_latest(SERVER, monkeypatch)
         with logger.mock_capture_writer():
-            assert DeployJob(server=SERVER).update()
+            assert await DeployJob(server=SERVER).update()
         assert len(calls) == 1
         assert read_tree() == NEW_TREE
 
-    def test_update_pack_missing(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_update_pack_missing(self, app_folder, monkeypatch):
         """The update pack 404 fallback: RebuildJob reuses the entry snapshot."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         calls = self.count_latest(SERVER_NO_UPDATE, monkeypatch)
         with logger.mock_capture_writer():
-            assert DeployJob(server=SERVER_NO_UPDATE).update()
+            assert await DeployJob(server=SERVER_NO_UPDATE).update()
         assert len(calls) == 1
 
-    def test_update_pack_corrupt(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_update_pack_corrupt(self, app_folder, monkeypatch):
         """The corrupt update pack fallback: RebuildJob reuses the entry snapshot."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         calls = self.count_latest(SERVER_CORRUPT_UPDATE, monkeypatch)
         with logger.mock_capture_writer():
-            assert DeployJob(server=SERVER_CORRUPT_UPDATE).update()
+            assert await DeployJob(server=SERVER_CORRUPT_UPDATE).update()
         assert len(calls) == 1
 
-    def test_incremental(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_incremental(self, app_folder, monkeypatch):
         """The incremental path: UpdateJob never reads latest.pack."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         calls = self.count_latest(SERVER, monkeypatch)
         with logger.mock_capture_writer():
-            assert DeployJob(server=SERVER).update()
+            assert await DeployJob(server=SERVER).update()
         assert len(calls) == 1
 
-    def test_resumed_job(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_resumed_job(self, app_folder, monkeypatch):
         """A resumed rebuild job takes its own snapshot before the decision
         fetches the post-job version: two requests."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         RebuildJob(SERVER).write()
         calls = self.count_latest(SERVER, monkeypatch)
         with logger.mock_capture_writer():
-            assert DeployJob(server=SERVER).update()
+            assert await DeployJob(server=SERVER).update()
         assert len(calls) == 2
 
-    def test_mid_flow_publish(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_mid_flow_publish(self, app_folder, monkeypatch):
         """A version published after the entry fetch is left to the next
         update: the flow converges to the snapshot, no second fetch and
         no index download."""
@@ -287,21 +306,21 @@ class TestLatestInfoSnapshot:
         original_latest = server.get_latest_info
         original_index = server.get_index_pack
 
-        def latest_then_publish():
+        async def latest_then_publish():
             calls.append(1)
-            info = original_latest()
+            info = await original_latest()
             server.latest_version = 'other'
             return info
 
-        def counting_index(version):
+        async def counting_index(version):
             index_calls.append(version)
-            return original_index(version)
+            return await original_index(version)
 
         monkeypatch.setattr(server, 'get_latest_info', latest_then_publish)
         monkeypatch.setattr(server, 'get_index_pack', counting_index)
         with logger.mock_capture_writer():
-            UnpackJob(NEW_PACK).run()
-            assert DeployJob(server=server).update()
+            await UnpackJob(NEW_PACK).run()
+            assert await DeployJob(server=server).update()
         # the snapshot of the entry fetch decided the whole flow
         assert len(calls) == 1
         assert index_calls == []

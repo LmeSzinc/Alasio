@@ -1,3 +1,5 @@
+import trio
+
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.logger import logger
@@ -51,7 +53,7 @@ class RebuildJob(ResetJob):
         # malformed
         self._old_fileinfo: "dict[str, IdxInfo]" = {}
 
-    def run(self):
+    async def run(self):
         """
         Execute the full rebuild flow.
 
@@ -63,21 +65,22 @@ class RebuildJob(ResetJob):
         leftover files of the old version are deleted, the failed
         files are downloaded to tmp files and replaced to the real
         files. The new index pack is replaced last, see the class
-        docstring. On failure the workspace is cleaned up: errors
-        during write() and validation are safe and are logged as
-        warning.
+        docstring. The network phases await on the event loop, the
+        local phases run in a worker thread (see JobBase.run()). On
+        failure the workspace is cleaned up: errors during write() and
+        validation are safe and are logged as warning.
 
         Returns:
             bool: True if every file is rebuilt, False otherwise
         """
         try:
             if not self._resume:
-                self.write()
+                await trio.to_thread.run_sync(self.write)
             logger.info(f'Rebuilding files to "{self.root}", name="{self.name}"')
-            self._old_fileinfo = self._old_fileinfo_from_index()
-            self.download_index()
-            self.validate_files()
-            self.download()
+            self._old_fileinfo = await trio.to_thread.run_sync(self._old_fileinfo_from_index)
+            await self.download_index()
+            await trio.to_thread.run_sync(self.validate_files)
+            await self.download()
             # the new index records every file of the new version, the
             # emptiness base of replace()
             self.new_fileinfo = self._index_pack.fileinfo
@@ -88,14 +91,14 @@ class RebuildJob(ResetJob):
             self.pending = [
                 p for p in self.pending if p.info.path != self.index_rel
             ] + [p for p in self.pending if p.info.path == self.index_rel]
-            self.replace()
+            await trio.to_thread.run_sync(self.replace)
         except Exception as e:
             # no real file was written, safe to clean up
             logger.warning(f'Failed to rebuild: {e}')
-            self.cleanup()
+            await trio.to_thread.run_sync(self.cleanup)
             return False
         # the job is finished, clean the workspace atomically
-        self.cleanup()
+        await trio.to_thread.run_sync(self.cleanup)
         logger.info(f'Rebuild done')
         return not self.error
 

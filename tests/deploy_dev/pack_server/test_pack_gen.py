@@ -573,7 +573,8 @@ class TestExistingPacks:
 class TestUpdateApplies:
     """The generated update packs upgrade an unpacked old version."""
 
-    def test_update_applies(self, fs, run_dir, monkeypatch):
+    @pytest.mark.trio
+    async def test_update_applies(self, fs, run_dir, monkeypatch):
         """The update pack upgrades the old tree to the tree of the full pack."""
         repo = make_repo(VERSIONS)
         PackRepoGen(repo, CONFIG).run()
@@ -585,7 +586,7 @@ class TestUpdateApplies:
 
         # the client that has been running the old version
         client = make_client(monkeypatch, fs)
-        UnpackJob(b''.join(PackFull(repo, 'c2').iter_pack_data())).run()
+        await UnpackJob(b''.join(PackFull(repo, 'c2').iter_pack_data())).run()
         old_tree = read_tree(client)
         assert 'docs/notes.txt' in old_tree
         assert 'docs/guide.txt' not in old_tree
@@ -594,12 +595,13 @@ class TestUpdateApplies:
         update = file_read_bytes(join_path(run_dir, PACK_ROOT, 'c3', 'update_c2.pack'))
         job = UpdateJob(update)
         with logger.mock_capture_writer():
-            assert job.run()
+            assert await job.run()
         assert job.error == []
         assert read_tree(client) == expected
         assert not client.joinpath('.pack/workspace').exists()
 
-    def test_update_from_every_lookback(self, fs, run_dir, monkeypatch):
+    @pytest.mark.trio
+    async def test_update_from_every_lookback(self, fs, run_dir, monkeypatch):
         """Every lookback version can be updated to the latest one."""
         repo = make_repo(VERSIONS)
         PackRepoGen(repo, CONFIG).run()
@@ -609,10 +611,10 @@ class TestUpdateApplies:
 
         for index, old in enumerate(('c1', 'c2')):
             client = make_client(monkeypatch, fs, f'client_{index}')
-            UnpackJob(b''.join(PackFull(repo, old).iter_pack_data())).run()
+            await UnpackJob(b''.join(PackFull(repo, old).iter_pack_data())).run()
             update = file_read_bytes(join_path(run_dir, PACK_ROOT, 'c3', f'update_{old}.pack'))
             job = UpdateJob(update)
             with logger.mock_capture_writer():
-                assert job.run()
+                assert await job.run()
             assert job.error == []
             assert read_tree(client) == expected

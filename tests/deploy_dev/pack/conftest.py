@@ -17,6 +17,7 @@ from time import time
 
 import httpx2
 import pytest
+import trio
 
 from alasio.db.table import AlasioTable
 from alasio.deploy.pack import job as job_module
@@ -206,17 +207,20 @@ class MockServerFile(ServerFile):
     """
     In-memory ServerFile for tests, serves the pack data without http.
 
-    The http requests are intercepted by an httpx2.MockTransport client
-    created in __init__, so the whole ServerFile logic (range requests,
-    index pack assembly) runs as-is and only the transport differs.
-    register_version() stores the full pack and the index pack of a
-    version, the transport handler serves latest.pack and the range
-    requests from the memory.
+    The http requests are intercepted by an httpx2.AsyncClient with an
+    httpx2.MockTransport handler, so the whole ServerFile logic (range
+    requests, index pack assembly) runs as-is and only the transport
+    differs. One client is created per trio run when it is first
+    requested: httpx clients are bound to the event loop they are used
+    in, and pytest-trio runs every test case in a fresh trio.run(), so
+    a module level MockServerFile (WEBSITE_SERVER) can serve every test
+    without crossing loops. register_version() stores the full pack and
+    the index pack of a version, the transport handler serves
+    latest.pack and the range requests from the memory.
     """
 
     def __init__(self, base_url='http://mock'):
-        super().__init__(
-            base_url, client=httpx2.Client(transport=httpx2.MockTransport(self._handle)))
+        super().__init__(base_url)
         # {version: full pack}
         self.full_packs = {}
         # {version: index pack}
@@ -225,6 +229,18 @@ class MockServerFile(ServerFile):
         self.update_packs = {}
         # the latest registered version
         self.latest_version = ''
+        # {trio token: client} of the runs this instance served: one
+        # client per event loop, see the class docstring
+        self._clients = {}
+
+    def _get_aclient(self):
+        """The client of the current trio run, created on first use."""
+        token = trio.lowlevel.current_trio_token()
+        client = self._clients.get(token)
+        if client is None:
+            client = httpx2.AsyncClient(transport=httpx2.MockTransport(self._handle))
+            self._clients[token] = client
+        return client
 
     def register_version(self, version, full_pack, index_pack):
         """

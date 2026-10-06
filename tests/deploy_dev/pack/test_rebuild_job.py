@@ -8,6 +8,8 @@ built at module level like test_deploy_update.py, SERVER serves both
 versions without an update pack (the rebuild scenario). Every test
 runs in the in-memory fake filesystem, no real files are written: the
 app_folder fixture points env.PROJECT_ROOT at the fake filesystem.
+Tests performing requests are async (pytest-trio); the server stubs
+they monkeypatch are async functions too (the client awaits them).
 """
 import os
 
@@ -166,11 +168,11 @@ def server_of(old_pack, new_pack):
     return server
 
 
-def setup_old():
+async def setup_old():
     """
     Unpack the old pack, so .pack/index.pack and all files exist.
     """
-    UnpackJob(OLD_PACK).run()
+    await UnpackJob(OLD_PACK).run()
 
 
 def no_file_downloads(server, monkeypatch, message):
@@ -191,10 +193,10 @@ def no_file_downloads(server, monkeypatch, message):
     """
     original = server.get_file_content
 
-    def _wrapper(version, offset, size):
+    async def _wrapper(version, offset, size):
         if offset == 0:
             # the index pack range requests start at 0
-            return original(version, offset, size)
+            return await original(version, offset, size)
         raise AssertionError(message)
     monkeypatch.setattr(server, 'get_file_content', _wrapper)
 
@@ -202,19 +204,20 @@ def no_file_downloads(server, monkeypatch, message):
 class TestUnconditionalIndex:
     """The latest index pack is downloaded without any local check."""
 
-    def test_index_downloaded_when_local_valid(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_index_downloaded_when_local_valid(self, app_folder, monkeypatch):
         """A valid and latest local index does not skip the download:
         the download is unconditional, unlike ResetJob."""
-        UnpackJob(NEW_PACK).run()
+        await UnpackJob(NEW_PACK).run()
         calls = []
         original = SERVER.get_index_pack
 
-        def _counting(version):
+        async def _counting(version):
             calls.append(version)
-            return original(version)
+            return await original(version)
         monkeypatch.setattr(SERVER, 'get_index_pack', _counting)
         job = RebuildJob(SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         # the index pack is downloaded exactly once, even though the
         # local index is valid and latest
@@ -227,16 +230,17 @@ class TestUnconditionalIndex:
 class TestCleanRebuild:
     """Rebuild from a tree that is already the new version."""
 
-    def test_clean_rebuild_outdated_index(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_clean_rebuild_outdated_index(self, app_folder, monkeypatch):
         """A clean new tree with an outdated local index is rebuilt
         without any file download: only the index is replaced."""
-        UnpackJob(NEW_PACK).run()
+        await UnpackJob(NEW_PACK).run()
         # the local index is outdated (another version), the tree is new
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(OLD_INDEX)
         no_file_downloads(SERVER, monkeypatch, 'no file download expected, the tree is new')
         job = RebuildJob(SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
         assert read_tree() == NEW_TREE
@@ -247,21 +251,23 @@ class TestLeftoverCleanup:
     """The leftover files of the old version are removed, user files
     are kept."""
 
-    def test_leftover_deleted(self, app_folder):
+    @pytest.mark.trio
+    async def test_leftover_deleted(self, app_folder):
         """Old-only files are deleted, the tree converges to the new
         version."""
-        setup_old()
+        await setup_old()
         job = RebuildJob(SERVER)
-        assert job.run()
+        assert await job.run()
         assert read_tree() == NEW_TREE
         for path in OLD_ONLY:
             assert not os.path.exists(env.PROJECT_ROOT / path), path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_leftover_and_deleted_marker(self, app_folder):
+    @pytest.mark.trio
+    async def test_leftover_and_deleted_marker(self, app_folder):
         """The leftover deletion and the deleted marker of the new
         index work together."""
-        UnpackJob(NEW_PACK).run()
+        await UnpackJob(NEW_PACK).run()
         # an outdated local index: legacy.py is old-only then
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(OLD_INDEX)
@@ -273,22 +279,23 @@ class TestLeftoverCleanup:
             with open(target, 'wb') as f:
                 f.write(b'stale')
         job = RebuildJob(SERVER)
-        assert job.run()
+        assert await job.run()
         assert not os.path.exists(env.PROJECT_ROOT / 'backend/legacy.py')
         assert not os.path.exists(env.PROJECT_ROOT / 'scripts/__init__.py')
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_user_file_kept(self, app_folder):
+    @pytest.mark.trio
+    async def test_user_file_kept(self, app_folder):
         """A file outside every index is not a managed file and is
         kept."""
-        setup_old()
+        await setup_old()
         target = env.PROJECT_ROOT / 'user/notes.txt'
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(b'my notes')
         job = RebuildJob(SERVER)
-        assert job.run()
+        assert await job.run()
         assert file_read_bytes(target) == b'my notes'
         # the user file is not a managed file: the tree is the new
         # tree plus the user file
@@ -297,34 +304,37 @@ class TestLeftoverCleanup:
         assert tree['user/notes.txt'] == b'my notes'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_leftover_removes_empty_folder(self, app_folder):
+    @pytest.mark.trio
+    async def test_leftover_removes_empty_folder(self, app_folder):
         """The folder of the last leftover file is removed."""
-        UnpackJob(PKG_ADDED).run()
+        await UnpackJob(PKG_ADDED).run()
         assert os.path.isdir(env.PROJECT_ROOT / 'pkg')
-        assert RebuildJob(server_of(PKG_ADDED, PKG_MISSING)).run()
+        assert await RebuildJob(server_of(PKG_ADDED, PKG_MISSING)).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_user_file_keeps_folder(self, app_folder):
+    @pytest.mark.trio
+    async def test_user_file_keeps_folder(self, app_folder):
         """A file of no index keeps its folder, the managed file of the
         folder is still deleted."""
-        UnpackJob(PKG_ADDED).run()
+        await UnpackJob(PKG_ADDED).run()
         user = env.PROJECT_ROOT / 'pkg/notes.txt'
         with open(user, 'wb') as f:
             f.write(b'my notes')
-        assert RebuildJob(server_of(PKG_ADDED, PKG_MISSING)).run()
+        assert await RebuildJob(server_of(PKG_ADDED, PKG_MISSING)).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         assert file_read_bytes(user) == b'my notes'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_old_index_missing_skips_cleanup(self, app_folder):
+    @pytest.mark.trio
+    async def test_old_index_missing_skips_cleanup(self, app_folder):
         """A missing old index skips the leftover cleanup with a
         warning, the rebuild still converges for the new files."""
-        setup_old()
+        await setup_old()
         os.remove(env.PROJECT_ROOT / '.pack/index.pack')
         with logger.mock_capture_writer() as capture:
             job = RebuildJob(SERVER)
-            assert job.run()
+            assert await job.run()
         assert capture.backend.any_contains('Failed to read the old index pack')
         tree = read_tree()
         assert all(tree[path] == content for path, content in NEW_TREE.items())
@@ -334,10 +344,11 @@ class TestLeftoverCleanup:
             assert os.path.exists(env.PROJECT_ROOT / path), path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_old_index_corrupted_skips_cleanup(self, app_folder):
+    @pytest.mark.trio
+    async def test_old_index_corrupted_skips_cleanup(self, app_folder):
         """A corrupted old index skips the leftover cleanup with a
         warning, the rebuild still converges for the new files."""
-        setup_old()
+        await setup_old()
         bad = bytearray(OLD_INDEX)
         # flip a byte inside the checksum digest (the last 20 bytes)
         bad[-5] ^= 0xFF
@@ -345,7 +356,7 @@ class TestLeftoverCleanup:
             f.write(bad)
         with logger.mock_capture_writer() as capture:
             job = RebuildJob(SERVER)
-            assert job.run()
+            assert await job.run()
         assert capture.backend.any_contains('Failed to read the old index pack')
         tree = read_tree()
         assert all(tree[path] == content for path, content in NEW_TREE.items())
@@ -357,30 +368,33 @@ class TestLeftoverCleanup:
 class TestFileRepair:
     """Failed files are downloaded from the server and replaced."""
 
-    def test_missing_file_downloaded(self, app_folder):
+    @pytest.mark.trio
+    async def test_missing_file_downloaded(self, app_folder):
         """A file of the new index missing on disk is downloaded."""
-        setup_old()
+        await setup_old()
         os.remove(env.PROJECT_ROOT / 'backend/config.py')
         job = RebuildJob(SERVER)
-        assert job.run()
+        assert await job.run()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/config.py') == \
             NEW_TREE['backend/config.py']
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_damaged_file_downloaded(self, app_folder):
+    @pytest.mark.trio
+    async def test_damaged_file_downloaded(self, app_folder):
         """A file with wrong content is downloaded."""
-        setup_old()
+        await setup_old()
         with open(env.PROJECT_ROOT / 'backend/main.py', 'wb') as f:
             f.write(b'wrong content')
         job = RebuildJob(SERVER)
-        assert job.run()
+        assert await job.run()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_eol_fix_no_download(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_eol_fix_no_download(self, app_folder, monkeypatch):
         """A fixable EOL mismatch is repaired locally, no download."""
-        UnpackJob(NEW_PACK).run()
+        await UnpackJob(NEW_PACK).run()
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(OLD_INDEX)
         # docs/guide.txt is eol=1 (CRLF) in the new index, the local
@@ -390,14 +404,15 @@ class TestFileRepair:
             f.write(NEW_TREE['docs/guide.txt'].replace(b'\r\n', b'\n'))
         no_file_downloads(SERVER, monkeypatch, 'no download expected for an EOL mismatch')
         job = RebuildJob(SERVER)
-        assert job.run()
+        assert await job.run()
         assert file_read_bytes(target) == NEW_TREE['docs/guide.txt']
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_mode_fix_no_download(self, app_folder, monkeypatch, fs):
+    @pytest.mark.trio
+    async def test_mode_fix_no_download(self, app_folder, monkeypatch, fs):
         """A mode-only mismatch is repaired locally, no download."""
-        UnpackJob(NEW_PACK).run()
+        await UnpackJob(NEW_PACK).run()
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(OLD_INDEX)
         # tools/tool.sh is mode 644 in the new index, the local file
@@ -407,35 +422,37 @@ class TestFileRepair:
         fs.create_file(target, st_mode=0o100755, contents=NEW_TREE['tools/tool.sh'])
         no_file_downloads(SERVER, monkeypatch, 'no download expected for a mode mismatch')
         job = RebuildJob(SERVER)
-        assert job.run()
+        assert await job.run()
         assert os.stat(target).st_mode & 0o111 == 0
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_download_failure_stays_in_error(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_download_failure_stays_in_error(self, app_folder, monkeypatch):
         """A file that cannot be downloaded stays in error, the run
         fails and the workspace is cleaned."""
-        setup_old()
+        await setup_old()
         # keep the index pack requests (offset 0) working, serve bad
         # data for the file downloads
         original = SERVER.get_file_content
 
-        def _bad_files(version, offset, size):
+        async def _bad_files(version, offset, size):
             if offset == 0:
-                return original(version, offset, size)
+                return await original(version, offset, size)
             return b'bad data'
         monkeypatch.setattr(SERVER, 'get_file_content', _bad_files)
         job = RebuildJob(SERVER)
         with logger.mock_capture_writer():
-            assert not job.run()
+            assert not await job.run()
         assert job.error
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_no_server(self, app_folder):
+    @pytest.mark.trio
+    async def test_no_server(self, app_folder):
         """A missing server fails the run with a warning."""
         job = RebuildJob(None)
         with logger.mock_capture_writer() as capture:
-            assert not job.run()
+            assert not await job.run()
         assert capture.backend.any_contains('Failed to rebuild:')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -443,22 +460,24 @@ class TestFileRepair:
 class TestResume:
     """Interruption and resume."""
 
-    def test_get_unfinished_job_dispatch(self, app_folder):
+    @pytest.mark.trio
+    async def test_get_unfinished_job_dispatch(self, app_folder):
         """The RBIL marker is dispatched to a resumed RebuildJob."""
-        setup_old()
+        await setup_old()
         RebuildJob(SERVER).write()
         job = DeployJob(server=SERVER)._get_unfinished_job()
         assert job is not None
         assert isinstance(job, RebuildJob)
         with logger.mock_capture_writer():
-            assert job.run()
+            assert await job.run()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_resume_reuses_new_index_tmp(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_resume_reuses_new_index_tmp(self, app_folder, monkeypatch):
         """A run resumed from an interruption reuses the leftover new
         index tmp instead of downloading it again."""
-        setup_old()
+        await setup_old()
         # the job file of an interrupted run and the new index tmp it
         # already downloaded
         RebuildJob(SERVER).write()
@@ -467,22 +486,23 @@ class TestResume:
         with open(tmp, 'wb') as f:
             f.write(NEW_INDEX)
 
-        def _fail(self, *a, **k):
+        async def _fail(*args, **kwargs):
             raise AssertionError('no index download expected, the tmp file is reused')
         monkeypatch.setattr(SERVER, 'get_index_pack', _fail)
         job = DeployJob(server=SERVER)._get_unfinished_job()
         assert job is not None
-        assert job.run()
+        assert await job.run()
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_index_replaced_last(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_index_replaced_last(self, app_folder, monkeypatch):
         """The new index pack is the last pending record: an
         interruption during replace() keeps the old index, so a
         resumed run still computes the leftover deletion list from
         it."""
-        setup_old()
+        await setup_old()
         original = RebuildJob.replace
 
         def _check(self):
@@ -490,7 +510,7 @@ class TestResume:
             return original(self)
         monkeypatch.setattr(RebuildJob, 'replace', _check)
         job = RebuildJob(SERVER)
-        assert job.run()
+        assert await job.run()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -498,13 +518,14 @@ class TestResume:
 class TestIdempotent:
     """A second rebuild of the new tree."""
 
-    def test_rebuild_twice(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_rebuild_twice(self, app_folder, monkeypatch):
         """Rebuilding a new tree downloads no file."""
-        setup_old()
-        assert RebuildJob(SERVER).run()
+        await setup_old()
+        assert await RebuildJob(SERVER).run()
         no_file_downloads(SERVER, monkeypatch, 'no file download expected, the tree is new')
         # a fresh job, like a new run of the update flow
-        assert RebuildJob(SERVER).run()
+        assert await RebuildJob(SERVER).run()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -563,79 +584,86 @@ class TestRebuildMatrix:
     local file state.
     """
 
+    @pytest.mark.trio
     @pytest.mark.parametrize('old', ['added', 'deleted', 'missing'])
-    def test_new_added_local_missing_downloaded(self, app_folder, old):
+    async def test_new_added_local_missing_downloaded(self, app_folder, old):
         """Rows 1/10/19: a missing local file of a new added record
         is downloaded, whatever the old index says."""
-        UnpackJob(PKGS[old]).run()
+        await UnpackJob(PKGS[old]).run()
         set_local('missing')
-        assert RebuildJob(server_of(PKGS[old], PKG_ADDED)).run()
+        assert await RebuildJob(server_of(PKGS[old], PKG_ADDED)).run()
         assert file_read_bytes(env.PROJECT_ROOT / 'pkg/__init__.py') == GOOD
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
+    @pytest.mark.trio
     @pytest.mark.parametrize('old', ['added', 'deleted', 'missing'])
-    def test_new_added_local_bad_downloaded(self, app_folder, old):
+    async def test_new_added_local_bad_downloaded(self, app_folder, old):
         """Rows 2/11/20: a wrong local file of a new added record is
         repaired by a download."""
-        UnpackJob(PKGS[old]).run()
+        await UnpackJob(PKGS[old]).run()
         set_local('bad')
-        assert RebuildJob(server_of(PKGS[old], PKG_ADDED)).run()
+        assert await RebuildJob(server_of(PKGS[old], PKG_ADDED)).run()
         assert file_read_bytes(env.PROJECT_ROOT / 'pkg/__init__.py') == GOOD
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
+    @pytest.mark.trio
     @pytest.mark.parametrize('old', ['added', 'deleted', 'missing'])
-    def test_new_added_local_good_kept(self, app_folder, old, monkeypatch):
+    async def test_new_added_local_good_kept(self, app_folder, old, monkeypatch):
         """Rows 3/12/21: a local file that matches the new added
         record is kept without a download."""
-        UnpackJob(PKGS[old]).run()
+        await UnpackJob(PKGS[old]).run()
         set_local('good')
         # the packed history differs per version and would trigger a
         # download, align it with the target version
         set_history(PKG_ADDED)
         server = server_of(PKGS[old], PKG_ADDED)
         no_file_downloads(server, monkeypatch, 'no download expected, the file matches')
-        assert RebuildJob(server).run()
+        assert await RebuildJob(server).run()
         assert file_read_bytes(env.PROJECT_ROOT / 'pkg/__init__.py') == GOOD
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
+    @pytest.mark.trio
     @pytest.mark.parametrize('old', ['added', 'deleted', 'missing'])
-    def test_new_deleted_local_missing_noop(self, app_folder, old):
+    async def test_new_deleted_local_missing_noop(self, app_folder, old):
         """Rows 4/13/22: a deleted marker of the new index expects the
         file to not exist, a missing local file is a no-op."""
-        UnpackJob(PKGS[old]).run()
+        await UnpackJob(PKGS[old]).run()
         set_local('missing')
-        assert RebuildJob(server_of(PKGS[old], PKG_DELETED)).run()
+        assert await RebuildJob(server_of(PKGS[old], PKG_DELETED)).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
+    @pytest.mark.trio
     @pytest.mark.parametrize('old', ['added', 'deleted', 'missing'])
     @pytest.mark.parametrize('local', ['good', 'bad'])
-    def test_new_deleted_local_exists_removed(self, app_folder, old, local):
+    async def test_new_deleted_local_exists_removed(self, app_folder, old, local):
         """Rows 5/6/14/15/23/24: a deleted marker of the new index
         removes the local file, whatever its content."""
-        UnpackJob(PKGS[old]).run()
+        await UnpackJob(PKGS[old]).run()
         set_local(local)
-        assert RebuildJob(server_of(PKGS[old], PKG_DELETED)).run()
+        assert await RebuildJob(server_of(PKGS[old], PKG_DELETED)).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
+    @pytest.mark.trio
     @pytest.mark.parametrize('local', ['missing', 'good', 'bad'])
-    def test_old_added_new_missing_local_deleted(self, app_folder, local):
+    async def test_old_added_new_missing_local_deleted(self, app_folder, local):
         """Rows 7/8/9: a leftover file (old record, new index without
         the path) is deleted, a missing one is a no-op."""
-        UnpackJob(PKG_ADDED).run()
+        await UnpackJob(PKG_ADDED).run()
         set_local(local)
-        assert RebuildJob(server_of(PKG_ADDED, PKG_MISSING)).run()
+        assert await RebuildJob(server_of(PKG_ADDED, PKG_MISSING)).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
+    @pytest.mark.trio
     @pytest.mark.parametrize('local', ['missing', 'good', 'bad'])
-    def test_old_deleted_new_missing_local_kept(self, app_folder, local):
+    async def test_old_deleted_new_missing_local_kept(self, app_folder, local):
         """Rows 16/17/18: a deleted marker of the old index is ignored
         by the leftover check, a local file is kept."""
-        UnpackJob(PKG_DELETED).run()
+        await UnpackJob(PKG_DELETED).run()
         set_local(local)
-        assert RebuildJob(server_of(PKG_DELETED, PKG_MISSING)).run()
+        assert await RebuildJob(server_of(PKG_DELETED, PKG_MISSING)).run()
         if local == 'missing':
             assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         else:
@@ -643,12 +671,13 @@ class TestRebuildMatrix:
                 GOOD if local == 'good' else BAD)
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
+    @pytest.mark.trio
     @pytest.mark.parametrize('local', ['missing', 'good', 'bad'])
-    def test_old_missing_new_missing_local_kept(self, app_folder, local):
+    async def test_old_missing_new_missing_local_kept(self, app_folder, local):
         """Rows 25/26/27: a file of no index is a user file, kept."""
-        UnpackJob(PKG_MISSING).run()
+        await UnpackJob(PKG_MISSING).run()
         set_local(local)
-        assert RebuildJob(server_of(PKG_MISSING, PKG_MISSING)).run()
+        assert await RebuildJob(server_of(PKG_MISSING, PKG_MISSING)).run()
         if local == 'missing':
             assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         else:

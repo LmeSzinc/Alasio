@@ -4,7 +4,8 @@ Tests for UnpackJob: interruptible and resumable full pack unpack.
 Uses conftest.WEBSITE_FULL_PACK (mock modern full-stack website).
 Every test runs in the in-memory fake filesystem, no real files are
 written: the app_folder fixture points env.PROJECT_ROOT at the fake
-filesystem.
+filesystem. Tests running the job are async (pytest-trio); the local
+phase tests (write, unpack, replace, matching) stay sync.
 """
 import os
 from hashlib import sha1
@@ -103,9 +104,9 @@ PKG_SUB = make_pack({'pkg/sub/tool.py': b'x\n'}, commit='sub')
 PKG_DEEP = make_pack({'a/b/c/tool.py': b'x\n'}, commit='deep')
 
 
-def run_job(data=WEBSITE_FULL_PACK):
+async def run_job(data=WEBSITE_FULL_PACK):
     """The caller flow: run() does write, unpack and replace."""
-    UnpackJob(data).run()
+    await UnpackJob(data).run()
 
 
 class TestJobFile:
@@ -247,36 +248,41 @@ class TestUnpackIndex:
 class TestUnpackReplace:
     """Full flow: unpack() then replace()."""
 
-    def test_unpack_replace_all_files(self, app_folder):
+    @pytest.mark.trio
+    async def test_unpack_replace_all_files(self, app_folder):
         """Every file in the pack exists with the exact content."""
-        run_job()
+        await run_job()
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
 
-    def test_empty_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_empty_file(self, app_folder):
         """Empty files are created as empty files."""
-        run_job()
+        await run_job()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/__init__.py') == b''
 
-    def test_deleted_marker_removes_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_deleted_marker_removes_file(self, app_folder):
         """D (deleted) marker files must not exist after replace()."""
         # simulate a stale file left by a previous version
         stale = env.PROJECT_ROOT / 'backend/tools/__init__.py'
         os.makedirs(stale.uppath(), exist_ok=True)
         with open(stale, 'wb') as f:
             f.write(b'old')
-        run_job()
+        await run_job()
         assert not os.path.exists(stale)
 
-    def test_workspace_cleaned(self, app_folder):
+    @pytest.mark.trio
+    async def test_workspace_cleaned(self, app_folder):
         """job.pack and tmp files are removed after a successful run."""
-        run_job()
+        await run_job()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_unpack_replace_twice_is_idempotent(self, app_folder):
+    @pytest.mark.trio
+    async def test_unpack_replace_twice_is_idempotent(self, app_folder):
         """Running into a folder with valid files succeeds and skips."""
-        run_job()
-        run_job()
+        await run_job()
+        await run_job()
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -436,17 +442,17 @@ class TestMatchResult:
 class TestCallerFlow:
     """The exact caller usage of UnpackJob."""
 
-    def test_resume_then_new_job(self, app_folder):
+    @pytest.mark.trio
+    async def test_resume_then_new_job(self, app_folder):
         """_get_unfinished_job() first, then unpack the new data."""
         # a previous run was interrupted, the job file is left behind
         UnpackJob(WEBSITE_FULL_PACK).write()
         # finish the unfinished job first
         job = DeployJob()._get_unfinished_job()
         if job is not None:
-            job.run()
+            await job.run()
         # then unpack the new data
-        job = UnpackJob(WEBSITE_FULL_PACK)
-        job.run()
+        await UnpackJob(WEBSITE_FULL_PACK).run()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
@@ -455,27 +461,30 @@ class TestCallerFlow:
 class TestUnpackSkip:
     """Skip logic: existing files that pass the size + sha1 check."""
 
-    def test_skip_existing_valid_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_skip_existing_valid_file(self, app_folder):
         """A valid existing file is kept as-is."""
         content = WEBSITE_FILES['backend/config.py'][0]
         target = env.PROJECT_ROOT / 'backend/config.py'
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(content)
-        run_job()
+        await run_job()
         assert file_read_bytes(target) == content
 
-    def test_skip_existing_crlf_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_skip_existing_crlf_file(self, app_folder):
         """A valid CRLF file (eol=1) is recognized and skipped."""
         content = WEBSITE_FILES['backend/requirements.txt'][0]
         target = env.PROJECT_ROOT / 'backend/requirements.txt'
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(content)
-        run_job()
+        await run_job()
         assert file_read_bytes(target) == content
 
-    def test_eol_mismatch_lf_vs_crlf(self, app_folder):
+    @pytest.mark.trio
+    async def test_eol_mismatch_lf_vs_crlf(self, app_folder):
         """A LF file is replaced when the record expects CRLF (eol=1)."""
         # backend/requirements.txt is eol=1 (CRLF), the local file is LF
         lf_content = WEBSITE_FILES['backend/requirements.txt'][0].replace(b'\r\n', b'\n')
@@ -483,11 +492,12 @@ class TestUnpackSkip:
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(lf_content)
-        run_job()
+        await run_job()
         # replaced with the CRLF content of the record
         assert file_read_bytes(target) == WEBSITE_FILES['backend/requirements.txt'][0]
 
-    def test_eol_mismatch_crlf_vs_lf(self, app_folder):
+    @pytest.mark.trio
+    async def test_eol_mismatch_crlf_vs_lf(self, app_folder):
         """A CRLF file is replaced when the record expects LF (eol=0)."""
         # backend/config.py is eol=0 (LF), the local file is CRLF
         crlf_content = WEBSITE_FILES['backend/config.py'][0].replace(b'\n', b'\r\n')
@@ -495,11 +505,12 @@ class TestUnpackSkip:
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(crlf_content)
-        run_job()
+        await run_job()
         # replaced with the LF content of the record
         assert file_read_bytes(target) == WEBSITE_FILES['backend/config.py'][0]
 
-    def test_eol_mismatch_mixed_vs_crlf(self, app_folder):
+    @pytest.mark.trio
+    async def test_eol_mismatch_mixed_vs_crlf(self, app_folder):
         """A mixed LF/CRLF file is replaced when the record expects CRLF."""
         # backend/requirements.txt is eol=1 (CRLF), the local file is mixed
         content = WEBSITE_FILES['backend/requirements.txt'][0]
@@ -508,11 +519,12 @@ class TestUnpackSkip:
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(mixed)
-        run_job()
+        await run_job()
         # replaced with the pure CRLF content of the record
         assert file_read_bytes(target) == content
 
-    def test_eol_mismatch_mixed_vs_lf(self, app_folder):
+    @pytest.mark.trio
+    async def test_eol_mismatch_mixed_vs_lf(self, app_folder):
         """A mixed LF/CRLF file is replaced when the record expects LF."""
         # backend/config.py is eol=0 (LF), the local file is mixed
         content = WEBSITE_FILES['backend/config.py'][0]
@@ -521,11 +533,12 @@ class TestUnpackSkip:
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(mixed)
-        run_job()
+        await run_job()
         # replaced with the pure LF content of the record
         assert file_read_bytes(target) == content
 
-    def test_eol_mismatch_fixed_without_decompress(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_eol_mismatch_fixed_without_decompress(self, app_folder, monkeypatch):
         """A fixable EOL mismatch is converted, catfile is not called."""
         # backend/config.py is eol=0 (LF), the local file is CRLF
         target = env.PROJECT_ROOT / 'backend/config.py'
@@ -539,31 +552,34 @@ class TestUnpackSkip:
             calls.append(info.path)
             return original(self, info)
         monkeypatch.setattr(PackDecodeBase, 'catfile', _counting)
-        run_job()
+        await run_job()
         # the EOL conversion must not decompress the record
         assert 'backend/config.py' not in calls
         assert file_read_bytes(target) == WEBSITE_FILES['backend/config.py'][0]
 
-    def test_overwrite_invalid_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_overwrite_invalid_file(self, app_folder):
         """A file with wrong content is overwritten by the pack data."""
         target = env.PROJECT_ROOT / 'backend/config.py'
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(b'stale content, should be replaced')
-        run_job()
+        await run_job()
         assert file_read_bytes(target) == WEBSITE_FILES['backend/config.py'][0]
 
-    def test_resume_from_job_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_resume_from_job_file(self, app_folder):
         """_get_unfinished_job() resumes the interrupted unpack."""
         UnpackJob(WEBSITE_FULL_PACK).write()
         job = DeployJob()._get_unfinished_job()
         assert job is not None
-        job.run()
+        await job.run()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
             WEBSITE_FILES['backend/main.py'][0]
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_reuse_tmp_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_reuse_tmp_file(self, app_folder):
         """A valid leftover tmp file is moved without decompressing again."""
         # locate the record of backend/main.py in the pack
         decoder = PackDecodeBase(WEBSITE_FULL_PACK)
@@ -577,7 +593,7 @@ class TestUnpackSkip:
         os.makedirs(tmp.uppath(), exist_ok=True)
         with open(tmp, 'wb') as f:
             f.write(WEBSITE_FILES['backend/main.py'][0])
-        run_job()
+        await run_job()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
             WEBSITE_FILES['backend/main.py'][0]
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -622,17 +638,20 @@ class TestExecutableMode:
     run on every platform.
     """
 
-    def test_mode_755_is_executable(self, app_folder):
+    @pytest.mark.trio
+    async def test_mode_755_is_executable(self, app_folder):
         """Files with mode 755 are executable after replace()."""
-        run_job()
+        await run_job()
         assert os.stat(env.PROJECT_ROOT / 'scripts/deploy.sh').st_mode & 0o111
 
-    def test_mode_644_is_not_executable(self, app_folder):
+    @pytest.mark.trio
+    async def test_mode_644_is_not_executable(self, app_folder):
         """Files with mode 644 are not executable after replace()."""
-        run_job()
+        await run_job()
         assert not os.stat(env.PROJECT_ROOT / 'backend/main.py').st_mode & 0o111
 
-    def test_mode_only_fixed(self, app_folder):
+    @pytest.mark.trio
+    async def test_mode_only_fixed(self, app_folder):
         """A file with the right content but the wrong mode is fixed
         without rewriting the content."""
         # backend/config.py is a 644 record, the local file is 755
@@ -642,11 +661,12 @@ class TestExecutableMode:
         with open(target, 'wb') as f:
             f.write(content)
         os.chmod(target, 0o755)
-        run_job()
+        await run_job()
         assert not os.stat(target).st_mode & 0o111
         assert file_read_bytes(target) == content
 
-    def test_mode_755_restored(self, app_folder):
+    @pytest.mark.trio
+    async def test_mode_755_restored(self, app_folder):
         """A 755 record whose file lost the execute bit is fixed
         without rewriting the content."""
         # scripts/deploy.sh is a 755 record, the local file is 644
@@ -656,7 +676,7 @@ class TestExecutableMode:
         with open(target, 'wb') as f:
             f.write(content)
         os.chmod(target, 0o644)
-        run_job()
+        await run_job()
         assert os.stat(target).st_mode & 0o111
         assert file_read_bytes(target) == content
 
@@ -725,42 +745,45 @@ class TestUnpackRebuild:
     files of the old version are removed, the new index pack replaces
     .pack/index.pack last."""
 
-    def test_leftover_files_deleted(self, app_folder):
+    @pytest.mark.trio
+    async def test_leftover_files_deleted(self, app_folder):
         """Unpacking the new pack over the old one deletes the old-only
         files and converges the tree."""
-        UnpackJob(OLD_PACK).run()
-        UnpackJob(NEW_PACK).run()
+        await UnpackJob(OLD_PACK).run()
+        await UnpackJob(NEW_PACK).run()
         assert read_tree() == NEW_TREE
         for path in OLD_ONLY:
             assert not os.path.exists(env.PROJECT_ROOT / path), path
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_leftover_and_deleted_marker(self, app_folder):
+    @pytest.mark.trio
+    async def test_leftover_and_deleted_marker(self, app_folder):
         """The leftover deletion and the deleted marker of the new
         pack work together."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         # a file the new pack marks as deleted
         target = env.PROJECT_ROOT / 'scripts/__init__.py'
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(b'stale')
-        UnpackJob(NEW_PACK).run()
+        await UnpackJob(NEW_PACK).run()
         assert read_tree() == NEW_TREE
         for path in OLD_ONLY:
             assert not os.path.exists(env.PROJECT_ROOT / path), path
         assert not os.path.exists(target)
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_user_file_kept(self, app_folder):
+    @pytest.mark.trio
+    async def test_user_file_kept(self, app_folder):
         """A file outside every index is not a managed file and is
         kept."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         target = env.PROJECT_ROOT / 'user/notes.txt'
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(b'my notes')
-        UnpackJob(NEW_PACK).run()
+        await UnpackJob(NEW_PACK).run()
         # the user file is not a managed file: the tree is the new
         # tree plus the user file
         tree = read_tree()
@@ -768,13 +791,14 @@ class TestUnpackRebuild:
         assert tree['user/notes.txt'] == b'my notes'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_old_index_missing_ignored(self, app_folder):
+    @pytest.mark.trio
+    async def test_old_index_missing_ignored(self, app_folder):
         """A missing old index is ignored: the unpack proceeds, the
         leftovers are kept, a warning is logged."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         os.remove(env.PROJECT_ROOT / '.pack/index.pack')
         with logger.mock_capture_writer() as capture:
-            UnpackJob(NEW_PACK).run()
+            await UnpackJob(NEW_PACK).run()
         assert capture.backend.any_contains('Failed to read the old index pack')
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
         tree = read_tree()
@@ -785,17 +809,18 @@ class TestUnpackRebuild:
             assert os.path.exists(env.PROJECT_ROOT / path), path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_old_index_corrupted_ignored(self, app_folder):
+    @pytest.mark.trio
+    async def test_old_index_corrupted_ignored(self, app_folder):
         """A corrupted old index is ignored: the unpack proceeds, the
         leftovers are kept, a warning is logged."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         bad = bytearray(OLD_INDEX)
         # flip a byte inside the checksum digest (the last 20 bytes)
         bad[-5] ^= 0xFF
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(bad)
         with logger.mock_capture_writer() as capture:
-            UnpackJob(NEW_PACK).run()
+            await UnpackJob(NEW_PACK).run()
         assert capture.backend.any_contains('Failed to read the old index pack')
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
         tree = read_tree()
@@ -804,10 +829,11 @@ class TestUnpackRebuild:
             assert os.path.exists(env.PROJECT_ROOT / path), path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_index_replaced_last(self, app_folder):
+    @pytest.mark.trio
+    async def test_index_replaced_last(self, app_folder):
         """The new index pack is the last pending record, the leftover
         deletions come before it."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         job = UnpackJob(NEW_PACK)
         job.write()
         job.unpack()
@@ -821,49 +847,53 @@ class TestUnpackRebuild:
             assert item.info.edit == 2
             assert item.tmp == ''
 
-    def test_resume_leftover_cleanup(self, app_folder):
+    @pytest.mark.trio
+    async def test_resume_leftover_cleanup(self, app_folder):
         """A run resumed from an interruption before replace()
         recomputes the leftover deletion list from the old index."""
-        UnpackJob(OLD_PACK).run()
+        await UnpackJob(OLD_PACK).run()
         # an interruption before replace(): the job file is written,
         # the old index pack is still in place
         UnpackJob(NEW_PACK).write()
         job = DeployJob()._get_unfinished_job()
         assert job is not None
-        job.run()
+        await job.run()
         assert read_tree() == NEW_TREE
         for path in OLD_ONLY:
             assert not os.path.exists(env.PROJECT_ROOT / path), path
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_old_deleted_new_added_downloaded(self, app_folder):
+    @pytest.mark.trio
+    async def test_old_deleted_new_added_downloaded(self, app_folder):
         """Old D marker + new added record counts as added: the file
         is unpacked, never treated as a leftover."""
-        UnpackJob(PKG_NO_INIT).run()
-        UnpackJob(PKG_WITH_INIT).run()
+        await UnpackJob(PKG_NO_INIT).run()
+        await UnpackJob(PKG_WITH_INIT).run()
         # pkg/__init__.py is a record of the new pack, unpacked
         assert file_read_bytes(env.PROJECT_ROOT / 'pkg/__init__.py') == b''
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_old_deleted_new_missing_local_kept(self, app_folder):
+    @pytest.mark.trio
+    async def test_old_deleted_new_missing_local_kept(self, app_folder):
         """Old D marker + new pack without the path: the old D marker
         is ignored by the leftover check, a local file is kept."""
-        UnpackJob(PKG_NO_INIT).run()
+        await UnpackJob(PKG_NO_INIT).run()
         target = env.PROJECT_ROOT / 'pkg/__init__.py'
         os.makedirs(target.uppath(), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(b'stale')
-        UnpackJob(PKG_NO_PKG).run()
+        await UnpackJob(PKG_NO_PKG).run()
         # not a managed file of the new pack, kept
         assert file_read_bytes(target) == b'stale'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_old_added_new_deleted_local_good_deleted(self, app_folder):
+    @pytest.mark.trio
+    async def test_old_added_new_deleted_local_good_deleted(self, app_folder):
         """Old record + new D marker: the file is removed by the
         deleted marker of the new pack."""
-        UnpackJob(PKG_WITH_INIT).run()
-        UnpackJob(PKG_NO_INIT).run()
+        await UnpackJob(PKG_WITH_INIT).run()
+        await UnpackJob(PKG_NO_INIT).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -871,55 +901,60 @@ class TestUnpackRebuild:
 class TestEmptyFolderCleanup:
     """The folders left empty by the deleted files are removed."""
 
-    def test_leftover_removes_empty_folder(self, app_folder):
+    @pytest.mark.trio
+    async def test_leftover_removes_empty_folder(self, app_folder):
         """The folder of the last leftover file is removed."""
-        UnpackJob(PKG_WITH_INIT).run()
+        await UnpackJob(PKG_WITH_INIT).run()
         assert os.path.isdir(env.PROJECT_ROOT / 'pkg')
-        UnpackJob(PKG_NO_PKG).run()
+        await UnpackJob(PKG_NO_PKG).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg')
         assert file_read_bytes(env.PROJECT_ROOT / 'app.py') == b'y\n'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_empty_folder_chain_removed(self, app_folder):
+    @pytest.mark.trio
+    async def test_empty_folder_chain_removed(self, app_folder):
         """A parent folder that becomes empty because its child folder
         was removed is removed too."""
-        UnpackJob(PKG_DEEP).run()
+        await UnpackJob(PKG_DEEP).run()
         assert os.path.isdir(env.PROJECT_ROOT / 'a/b/c')
-        UnpackJob(PKG_NO_PKG).run()
+        await UnpackJob(PKG_NO_PKG).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'a')
 
-    def test_user_file_keeps_folder(self, app_folder):
+    @pytest.mark.trio
+    async def test_user_file_keeps_folder(self, app_folder):
         """A folder that still holds a file the pack does not manage is
         kept."""
-        UnpackJob(PKG_WITH_INIT).run()
+        await UnpackJob(PKG_WITH_INIT).run()
         user = env.PROJECT_ROOT / 'pkg/notes.txt'
         with open(user, 'wb') as f:
             f.write(b'my notes')
-        UnpackJob(PKG_NO_PKG).run()
+        await UnpackJob(PKG_NO_PKG).run()
         # the managed files are gone, the folder is kept by the user file
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/tool.py')
         assert file_read_bytes(user) == b'my notes'
 
-    def test_recorded_file_keeps_folder(self, app_folder):
+    @pytest.mark.trio
+    async def test_recorded_file_keeps_folder(self, app_folder):
         """A folder that still holds a file of the new version, at any
         depth, is kept."""
-        UnpackJob(PKG_WITH_INIT).run()
+        await UnpackJob(PKG_WITH_INIT).run()
         # the new pack records pkg/tool.py and marks pkg/__init__.py as
         # deleted: the folder is not empty
-        UnpackJob(PKG_NO_INIT).run()
+        await UnpackJob(PKG_NO_INIT).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         assert os.path.isdir(env.PROJECT_ROOT / 'pkg')
         assert file_read_bytes(env.PROJECT_ROOT / 'pkg/tool.py') == b'x\n'
 
-    def test_nested_record_keeps_folder(self, app_folder):
+    @pytest.mark.trio
+    async def test_nested_record_keeps_folder(self, app_folder):
         """A folder that holds no file of its own but a subfolder with a
         file of the new version is kept."""
         # pkg/ holds pkg/__init__.py only
-        UnpackJob(PKG_INIT).run()
+        await UnpackJob(PKG_INIT).run()
         # the new pack records pkg/sub/tool.py and marks pkg/__init__.py
         # and pkg/sub/__init__.py as deleted
-        UnpackJob(PKG_SUB).run()
+        await UnpackJob(PKG_SUB).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/__init__.py')
         assert os.path.isdir(env.PROJECT_ROOT / 'pkg')
         assert file_read_bytes(env.PROJECT_ROOT / 'pkg/sub/tool.py') == b'x\n'

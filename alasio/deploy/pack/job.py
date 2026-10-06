@@ -1,6 +1,7 @@
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 import httpx2
+import trio
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import DeployTarget
@@ -8,7 +9,6 @@ from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
-from alasio.ext.cache import InstanceCacheOperation
 from alasio.ext.file.filelock import SQLiteFileLock
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_rmtree
 from alasio.logger import logger
@@ -32,14 +32,14 @@ class DeployJob(DeployTarget):
     {root}/.pack/{name}. The server to update from is an instance
     attribute too, it is set once in __init__:
 
-        DeployJob().unpack(data)                   # no server needed
-        DeployJob(name='httpx', server=server).update()
+        await DeployJob().unpack(data)             # no server needed
+        await DeployJob(name='httpx', server=server).update()
 
     The unfinished job is finished inside unpack() and update(), the
     caller does not need to care about it; the server of the instance
     is handed to it, so a resumed job downloads its missing files
     from it when set. Both take the exclusive lock of the target
-    ledger for the whole flow, see locked(): two updaters of the same
+    ledger for the whole flow, see alocked(): two updaters of the same
     target never interleave, the second one waits (or fails at once
     with locked(timeout=0)).
     """
@@ -81,7 +81,7 @@ class DeployJob(DeployTarget):
         one critical section that another updater cannot interleave:
 
             with deploy.locked(timeout=0):
-                deploy.update()
+                await deploy.update()
 
         Args:
             timeout (float, optional): Seconds to wait for the lock,
@@ -96,6 +96,38 @@ class DeployJob(DeployTarget):
                 is over, timeout=0 fails at once
         """
         self.lock.acquire(timeout=timeout)
+        try:
+            yield self.lock
+        finally:
+            self.lock.release()
+
+    @asynccontextmanager
+    async def alocked(self, timeout=None):
+        """
+        Hold the exclusive lock of the target ledger for an async
+        block, the async form of locked() used by update() and
+        unpack().
+
+        The acquire blocks inside the sqlite layer while the lock is
+        held elsewhere (a wait bounded by the timeout), so it runs in
+        a worker thread and never stalls the event loop; the release
+        is a quick rollback and close of the sqlite connection and
+        stays inline, so it still runs when the block is unwound by a
+        cancellation.
+
+        Args:
+            timeout (float, optional): Seconds to wait for the lock,
+                overrides the wait default of the lock. Defaults to
+                None, the default of the lock (-1 waits forever).
+
+        Yields:
+            SQLiteFileLock: The lock object
+
+        Raises:
+            FilelockTimeout: If the lock is held elsewhere and the wait
+                is over, timeout=0 fails at once
+        """
+        await trio.to_thread.run_sync(self.lock.acquire, timeout)
         try:
             yield self.lock
         finally:
@@ -148,7 +180,7 @@ class DeployJob(DeployTarget):
             return UpdateJob(data, server=self.server, resume=True, root=self.root, name=self.name)
         return UnpackJob(data, resume=True, root=self.root, name=self.name)
 
-    def unpack(self, data):
+    async def unpack(self, data):
         """
         Unpack a full pack, unified wrapper of UnpackJob.
 
@@ -160,21 +192,21 @@ class DeployJob(DeployTarget):
         (self.server) is only handed to the unfinished job finished
         first, a resumed job downloads its missing files from it when
         set. Finishes the unfinished job first, then unpacks the new
-        data, the caller only needs to call run() of each job. The
-        exclusive lock of the target ledger is held for the whole flow,
-        see locked().
+        data. The exclusive lock of the target ledger is held for the
+        whole flow, see alocked(). The local phases run in worker
+        threads, see JobBase.run().
 
         Args:
             data (bytes): Full pack data
         """
-        with self.locked():
+        async with self.alocked():
             # finish the unfinished job first, its run() skips write()
-            job = self._get_unfinished_job()
+            job = await trio.to_thread.run_sync(self._get_unfinished_job)
             if job is not None:
                 logger.info(f'Found unfinished job: {job.__class__}')
-                job.run()
+                await job.run()
             # unpack the new data
-            UnpackJob(data, root=self.root, name=self.name).run()
+            await UnpackJob(data, root=self.root, name=self.name).run()
 
     def _local_version(self):
         """
@@ -191,13 +223,13 @@ class DeployJob(DeployTarget):
             return ''
         return decoder.current_version
 
-    def update(self):
+    async def update(self):
         """
         Check the latest version on the server of the instance
         (self.server, set in __init__) and update the local working
         tree of this target to it:
 
-            DeployJob(server=server).update()
+            await DeployJob(server=server).update()
 
         The unified entry of the file check flow in the draft of
         PackEncodeBase:
@@ -216,17 +248,20 @@ class DeployJob(DeployTarget):
            recorded file is verified and repaired
 
         The latest info fetched here is handed to the job created for
-        the chosen path (the instance cache of the job's _latest_info
-        property is seeded with it): latest.pack is requested once per
-        flow and the flow converges to this snapshot, a version
-        published mid-flow is picked up by the next update.
+        the chosen path (the _latest_info attribute of the job is
+        seeded with it): latest.pack is requested once per flow and
+        the flow converges to this snapshot, a version published
+        mid-flow is picked up by the next update.
 
         A missing or malformed local index pack has an unknown
         version, the update cannot be incremental: RebuildJob
         downloads the latest index unconditionally and rebuilds the
         working tree from it. The unfinished job is finished inside,
         the caller does not need to care about it. The exclusive lock
-        of the target ledger is held for the whole flow, see locked().
+        of the target ledger is held for the whole flow, see alocked().
+        The network requests await on the event loop (a cancelled task
+        interrupts them immediately), the local phases run in worker
+        threads, see JobBase.run().
 
         Returns:
             bool: True if every file is up to date, False if some
@@ -237,16 +272,16 @@ class DeployJob(DeployTarget):
         """
         if self.server is None:
             raise ValueError('Failed to update: no server provided')
-        with self.locked():
+        async with self.alocked():
             # finish the unfinished job first, its run() skips write()
-            job = self._get_unfinished_job()
+            job = await trio.to_thread.run_sync(self._get_unfinished_job)
             if job is not None:
                 logger.info(f'Found unfinished job: {job.__class__}')
-                job.run()
+                await job.run()
 
-            local = self._local_version()
+            local = await trio.to_thread.run_sync(self._local_version)
             logger.attr('CurrentVersion', local)
-            info = self.server.get_latest_info()
+            info = await self.server.get_latest_info()
             logger.attr('LatestVersion', info.version)
 
             if not local:
@@ -254,12 +289,12 @@ class DeployJob(DeployTarget):
                 # unknown: rebuild from the latest index
                 logger.warning('Failed to read the local version, rebuilding from the latest index')
                 job = RebuildJob(self.server, root=self.root, name=self.name)
-                InstanceCacheOperation.set(job, '_latest_info', info)
-                return job.run()
+                job._latest_info = info
+                return await job.run()
             if local != info.version:
                 # a version mismatch, apply the update pack incrementally
                 try:
-                    data = self.server.get_update_pack(local, info.version)
+                    data = await self.server.get_update_pack(local, info.version)
                 except httpx2.HTTPStatusError as e:
                     # the update pack of the local version is not on the
                     # server (out of the update window or removed), the
@@ -269,19 +304,19 @@ class DeployJob(DeployTarget):
                         f'rebuilding from the latest index'
                     )
                     job = RebuildJob(self.server, root=self.root, name=self.name)
-                    InstanceCacheOperation.set(job, '_latest_info', info)
-                    return job.run()
+                    job._latest_info = info
+                    return await job.run()
                 job = UpdateJob(data, server=self.server, root=self.root, name=self.name)
-                if job.run():
+                if await job.run():
                     return True
                 # the update pack failed to apply, rebuild from the latest
                 # index: a corrupt pack is bypassed, the latest index and
                 # the files are downloaded directly
                 logger.warning('Failed to apply the update pack, rebuilding from the latest index')
                 job = RebuildJob(self.server, root=self.root, name=self.name)
-                InstanceCacheOperation.set(job, '_latest_info', info)
-                return job.run()
+                job._latest_info = info
+                return await job.run()
             # the same version, check the index and the files
             job = ResetJob(self.server, root=self.root, name=self.name)
-            InstanceCacheOperation.set(job, '_latest_info', info)
-            return job.run()
+            job._latest_info = info
+            return await job.run()

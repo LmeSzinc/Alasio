@@ -1,4 +1,5 @@
 import httpx2
+import trio
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
@@ -20,8 +21,7 @@ class ResetJob(JobBase):
         job = DeployJob(server=server)._get_unfinished_job()
         if job is None:
             job = ResetJob(server)
-            job.write()
-        job.run()
+        await job.run()
 
     The local index pack (index.pack in the ledger folder of the
     target) is read once and cached.
@@ -65,47 +65,53 @@ class ResetJob(JobBase):
         self.server = server
         self._resume = resume
         self.error: "list[PendingFile]" = []
+        # latest.pack of the flow: fetched once per job by
+        # _get_latest_info(), or seeded by DeployJob.update() with the
+        # snapshot it fetched for the flow (the server is not requested
+        # again then). None until then.
+        self._latest_info = None
 
-    def run(self):
+    async def run(self):
         """
         Execute the full reset flow.
 
         Writes the job marker first unless the job was resumed from it,
         then validates and repairs: a failed index pack is downloaded
         again from the server, an outdated index pack (self-consistent
-        but not the latest, see validate_latest) is downloaded again
+        but not the latest, see validate_latest()) is downloaded again
         too, failed files are downloaded to tmp files and replaced to
-        the real files. On failure the workspace is cleaned up: errors
-        during write() and validate() are safe and are logged as
-        warning.
+        the real files. The network phases await on the event loop, the
+        local phases run in a worker thread (see JobBase.run()). On
+        failure the workspace is cleaned up: errors during write() and
+        validate() are safe and are logged as warning.
 
         Returns:
             bool: True if every file is repaired, False otherwise
         """
         try:
             if not self._resume:
-                self.write()
+                await trio.to_thread.run_sync(self.write)
             logger.info(f'Resetting files to "{self.root}", name="{self.name}"')
-            if not self.validate_index():
+            if not await trio.to_thread.run_sync(self.validate_index):
                 # the index pack is broken, download it again
-                self.download_index()
-            elif not self.validate_latest():
+                await self.download_index()
+            elif not await self.validate_latest():
                 # the index pack is self-consistent but outdated,
                 # download the latest index pack
-                self.download_index()
-            self.validate_files()
-            self.download()
+                await self.download_index()
+            await trio.to_thread.run_sync(self.validate_files)
+            await self.download()
             # the new index records every file of the new version, the
             # emptiness base of replace()
             self.new_fileinfo = self._index_pack.fileinfo
-            self.replace()
+            await trio.to_thread.run_sync(self.replace)
         except Exception as e:
             # no real file was written, safe to clean up
             logger.warning(f'Failed to reset: {e}')
-            self.cleanup()
+            await trio.to_thread.run_sync(self.cleanup)
             return False
         # the job is finished, clean the workspace atomically
-        self.cleanup()
+        await trio.to_thread.run_sync(self.cleanup)
         logger.info(f'Reset done')
         return not self.error
 
@@ -141,8 +147,7 @@ class ResetJob(JobBase):
         data = atomic_read_bytes(self.index_file)
         return self.localize(PackDecodeBase(data))
 
-    @cached_property
-    def _latest_info(self):
+    async def _get_latest_info(self):
         """
         The latest version and index pack checksum from the server.
 
@@ -150,8 +155,10 @@ class ResetJob(JobBase):
         download_index(), so the latest info is requested only once
         even when both the local index and the workspace tmp file are
         checked. DeployJob.update() hands the snapshot it fetched for
-        the flow in (the instance cache is seeded before the job
-        runs), the server is not requested again then.
+        the flow in (the attribute is seeded before the job runs), the
+        server is not requested again then. The fetch is a network
+        request on the event loop like every ServerFile call: a
+        cancelled task interrupts it immediately.
 
         Returns:
             LatestInfo: Latest version and index pack checksum
@@ -159,10 +166,13 @@ class ResetJob(JobBase):
         Raises:
             PackDecodeError: If the server is missing
         """
+        if self._latest_info is not None:
+            return self._latest_info
         server = self.server
         if server is None:
             raise PackDecodeError('Failed to validate the latest index: no server provided')
-        return server.get_latest_info()
+        self._latest_info = await server.get_latest_info()
+        return self._latest_info
 
     def validate_index(self):
         """
@@ -184,7 +194,7 @@ class ResetJob(JobBase):
             logger.warning(f'Failed to validate the index pack: {e}')
             return False
 
-    def validate_latest(self):
+    async def validate_latest(self):
         """
         Check the local index pack against the latest index pack of
         the server.
@@ -193,9 +203,9 @@ class ResetJob(JobBase):
         validate_index): a self-consistent but outdated index pack
         passes its own checksum and is only detected by comparing its
         checksum with the checksum of the latest index pack recorded
-        in latest.pack (fetched once per job, see _latest_info). The
-        comparison uses the checksum of the pack format itself: the
-        trailing 20 bytes of the index section, the same digest
+        in latest.pack (fetched once per job, see _get_latest_info()).
+        The comparison uses the checksum of the pack format itself:
+        the trailing 20 bytes of the index section, the same digest
         validate_index() verifies, not a checksum of the whole index
         pack file. A mismatch means the local index is not the latest
         one, the caller repairs it with download_index().
@@ -206,7 +216,7 @@ class ResetJob(JobBase):
         Raises:
             PackDecodeError: If the server is missing
         """
-        info = self._latest_info
+        info = await self._get_latest_info()
         # the checksum of the pack format: the trailing 20 bytes of
         # the index section, kept in the decoder cache
         local = self._index_pack.index_checksum
@@ -283,7 +293,7 @@ class ResetJob(JobBase):
                 info=info, tmp='', mode=info.mode_decoded if info.mode == 1 else None))
         return not self.error
 
-    def download_index(self):
+    async def download_index(self):
         """
         Prepare the new index pack of the latest version in the
         workspace.
@@ -295,10 +305,11 @@ class ResetJob(JobBase):
         self-consistent and matches the latest checksum is reused, a
         missing or broken one is downloaded again. The version and the
         checksum come from latest.pack, fetched once per job (see
-        _latest_info). The decoder of the new index pack is set into
+        _get_latest_info()). The decoder of the new index pack is set into
         the cache directly, the next validation reads it without the
         file again, and a pending record replaces the local index pack
-        in replace().
+        in replace(). The request awaits on the event loop; the file
+        reads and writes run in worker threads.
 
         Raises:
             PackDecodeError: If the server is missing, or the new
@@ -307,12 +318,12 @@ class ResetJob(JobBase):
         server = self.server
         if server is None:
             raise PackDecodeError('Failed to download the index pack: no server provided')
-        info = self._latest_info
+        info = await self._get_latest_info()
         tmp = self.workspace.joinpath(self.NEW_INDEX)
         # reuse a leftover tmp file that is self-consistent and matches
         # the latest checksum, download again otherwise
         try:
-            data = atomic_read_bytes(tmp)
+            data = await trio.to_thread.run_sync(atomic_read_bytes, tmp)
             decoder = PackDecodeBase(data)
             decoder.validate_index()
         except (FileNotFoundError, PackDecodeError):
@@ -320,7 +331,7 @@ class ResetJob(JobBase):
         if decoder is None or decoder.index_checksum != info.checksum:
             # the index pack is self-validating, the trailing checksum
             # covers the header, the length and the whole index section
-            data = server.get_index_pack(info.version)
+            data = await server.get_index_pack(info.version)
             decoder = PackDecodeBase(data)
             decoder.validate_index()
             if decoder.index_checksum != info.checksum:
@@ -330,7 +341,7 @@ class ResetJob(JobBase):
                     f'Failed to download the index pack: checksum mismatch, '
                     f'expected {info.checksum}, got {decoder.index_checksum}'
                 )
-            file_write(tmp, data)
+            await trio.to_thread.run_sync(file_write, tmp, data)
         # rewrite the pack area paths of the new index and set its
         # decoder into the cache, the next validation reads it without
         # the file again
@@ -339,7 +350,7 @@ class ResetJob(JobBase):
         # replace() moves the tmp file to the local index pack
         self.pending.append(PendingFile(info=IdxInfo(path=self.index_rel), tmp=tmp))
 
-    def download(self):
+    async def download(self):
         """
         Download the failed files recorded in self.error to tmp files.
 
@@ -349,10 +360,11 @@ class ResetJob(JobBase):
         moved to self.pending for replace(). Records that already carry a
         tmp (an EOL or mode mismatch fixed in validate_files()) and
         deleted markers need no download and are moved to pending
-        directly.
-        Files that cannot be downloaded or fail the size + sha1 check
-        stay in self.error with an empty tmp, this is an unsolvable
-        problem per the draft of PackEncodeBase.
+        directly. The requests await on the event loop; the file reads
+        and the tmp writes run in worker threads. Files that cannot be
+        downloaded or fail the size + sha1 check stay in self.error
+        with an empty tmp, this is an unsolvable problem per the draft
+        of PackEncodeBase.
 
         Raises:
             PackDecodeError: If the server is missing
@@ -376,7 +388,7 @@ class ResetJob(JobBase):
                 pending.append(item)
                 continue
             try:
-                tmp = self._download_file(decoder, server, info, index)
+                tmp = await self._download_file(decoder, server, info, index)
             except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
                 # keep the record in error, this is unsolvable
@@ -393,10 +405,13 @@ class ResetJob(JobBase):
         self.pending += pending
         self.error = error
 
-    def _download_file(self, decoder, server, info, index):
+    async def _download_file(self, decoder, server, info, index):
         """
         Download and decompress a file from the full pack, write the
         content to a tmp file.
+
+        The range request awaits on the event loop; the leftover tmp
+        read and the tmp write run in worker threads.
 
         Args:
             decoder (PackDecodeBase): Decoder of the local index pack
@@ -413,12 +428,13 @@ class ResetJob(JobBase):
                 sha1 check
         """
         tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{index}.tmp')
-        if self._matches(info, self._read_current(tmp)).match:
+        current = await trio.to_thread.run_sync(self._read_current, tmp)
+        if self._matches(info, current).match:
             # a leftover tmp file passes the size + sha1 check, reuse it
             return tmp
         # data_start is an offset into the full pack file, range requests
         # use it directly
-        data = server.get_file_content(decoder.current_version, info.data_start, info.data_size)
+        data = await server.get_file_content(decoder.current_version, info.data_start, info.data_size)
         content = decoder.decode_content(info, data)
-        file_write(tmp, content)
+        await trio.to_thread.run_sync(file_write, tmp, content)
         return tmp

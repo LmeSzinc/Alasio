@@ -1,3 +1,5 @@
+import trio
+
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_base import JobBase, PendingFile
 from alasio.deploy.pack.pack_model import IdxInfo
@@ -20,12 +22,8 @@ class UnpackJob(JobBase):
 
         job = DeployJob()._get_unfinished_job()
         if job is not None:
-            job.unpack()
-            job.replace()
-        job = UnpackJob(data)
-        job.write()
-        job.unpack()
-        job.replace()
+            await job.run()
+        await UnpackJob(data).run()
 
     All files unpack into the root of the target; the pack area paths
     of the pack (.pack/**) resolve inside the ledger folder of the
@@ -72,37 +70,39 @@ class UnpackJob(JobBase):
         super().__init__(data, root=root, name=name)
         self._resume = resume
 
-    def run(self):
+    async def run(self):
         """
         Execute the full unpack flow.
 
         Writes the job file first unless the job was resumed from it,
-        then unpacks and replaces all files. On failure the workspace
-        is cleaned up: errors during write() and unpack() are safe
-        because no real file was written and are logged as warning,
-        errors during replace() leave partially replaced files and are
-        logged as error.
+        then unpacks and replaces all files. The job is async like
+        every job (see JobBase.run()): its local phases run in a
+        worker thread phase by phase, so the event loop stays
+        responsive. On failure the workspace is cleaned up: errors
+        during write() and unpack() are safe because no real file was
+        written and are logged as warning, errors during replace()
+        leave partially replaced files and are logged as error.
         """
         try:
             if not self._resume:
-                self.write()
+                await trio.to_thread.run_sync(self.write)
             logger.info(f'Unpacking data to "{self.root}", name="{self.name}"')
-            self.unpack()
+            await trio.to_thread.run_sync(self.unpack)
         except Exception as e:
             # no real file was written, safe to clean up
             logger.warning(f'Failed to unpack: {e}')
-            self.cleanup()
+            await trio.to_thread.run_sync(self.cleanup)
             return
         try:
             logger.info(f'Replacing files to "{self.root}", name="{self.name}"')
-            self.replace()
+            await trio.to_thread.run_sync(self.replace)
         except Exception as e:
             # real files may be partially replaced
             logger.error(f'Failed to replace file: {e}')
-            self.cleanup()
+            await trio.to_thread.run_sync(self.cleanup)
             return
         # all changes applied, clean the workspace atomically
-        self.cleanup()
+        await trio.to_thread.run_sync(self.cleanup)
         logger.info(f'Unpack done')
 
     def write(self):

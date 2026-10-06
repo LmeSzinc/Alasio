@@ -1,6 +1,7 @@
 from hashlib import sha1
 
 import httpx2
+import trio
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
@@ -30,10 +31,9 @@ class UpdateJob(JobBase):
 
         job = DeployJob(server=server)._get_unfinished_job()
         if job is not None:
-            job.run()
+            await job.run()
         job = UpdateJob(data, server=server)
-        job.write()
-        job.run()
+        await job.run()
 
     The update pack upgrades the local working tree from the old
     version to the new version, every file follows the same flow:
@@ -99,17 +99,19 @@ class UpdateJob(JobBase):
         # version of the update pack, used to download the index pack
         self._version = ''
 
-    def run(self):
+    async def run(self):
         """
         Execute the full update flow.
 
         Writes the job file first unless the job was resumed from it,
         then unpacks, downloads the failed records, verifies the
-        remaining local files and replaces all files in one pass.
-        On failure the workspace is cleaned up: errors during write()
-        and unpack() are safe because no real file was written and are
-        logged as warning, errors during replace() leave partially
-        replaced files and are logged as error.
+        remaining local files and replaces all files in one pass. The
+        network phases await on the event loop, the local phases run
+        in a worker thread (see JobBase.run()). On failure the
+        workspace is cleaned up: errors during write() and unpack()
+        are safe because no real file was written and are logged as
+        warning, errors during replace() leave partially replaced
+        files and are logged as error.
 
         Returns:
             bool: True if every file is updated, False if some records
@@ -117,26 +119,26 @@ class UpdateJob(JobBase):
         """
         try:
             if not self._resume:
-                self.write()
+                await trio.to_thread.run_sync(self.write)
             logger.info(f'Updating files to "{self.root}", name="{self.name}"')
-            self.unpack()
-            self.download()
-            self._validate_remaining()
+            await trio.to_thread.run_sync(self.unpack)
+            await self.download()
+            await self._validate_remaining()
         except Exception as e:
             # no real file was written, safe to clean up
             logger.warning(f'Failed to update: {e}')
-            self.cleanup()
+            await trio.to_thread.run_sync(self.cleanup)
             return False
         try:
             logger.info(f'Replacing files to "{self.root}", name="{self.name}"')
-            self.replace()
+            await trio.to_thread.run_sync(self.replace)
         except Exception as e:
             # real files may be partially replaced
             logger.error(f'Failed to replace file: {e}')
-            self.cleanup()
+            await trio.to_thread.run_sync(self.cleanup)
             return False
         # all changes applied, clean the workspace atomically
-        self.cleanup()
+        await trio.to_thread.run_sync(self.cleanup)
         logger.info(f'Update done')
         return not self.error
 
@@ -243,7 +245,7 @@ class UpdateJob(JobBase):
 
         self.pending = pending
 
-    def download(self):
+    async def download(self):
         """
         Download the content of the failed records from the server
         and write their tmp files.
@@ -256,6 +258,8 @@ class UpdateJob(JobBase):
         index pack: it is not a file of the new full pack, and it is
         downloaded first because the other records need the new index
         for their offsets. The local source files are not repaired.
+        The requests await on the event loop; the file reads and the tmp
+        writes run in worker threads.
         Records that cannot be downloaded or fail the size + sha1
         check stay in self.error, this is an unsolvable problem per
         the draft of PackEncodeBase.
@@ -280,7 +284,8 @@ class UpdateJob(JobBase):
                 continue
             info = item.info
             tmp = self.workspace.joinpath(self.NEW_INDEX)
-            if self._matches(info, self._read_current(tmp)).match:
+            current = await trio.to_thread.run_sync(self._read_current, tmp)
+            if self._matches(info, current).match:
                 # a leftover tmp file passes the size + sha1 check, reuse it
                 pending.append(PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
@@ -289,7 +294,7 @@ class UpdateJob(JobBase):
                 # the index pack is self-validating, the trailing
                 # checksum covers the header, the length and the whole
                 # index section
-                new_index_data = server.get_index_pack(self._version)
+                new_index_data = await server.get_index_pack(self._version)
                 PackDecodeBase(new_index_data).validate_index()
             except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
@@ -298,7 +303,7 @@ class UpdateJob(JobBase):
                 new_index_data = None
                 failed.append(item)
             else:
-                file_write(tmp, new_index_data)
+                await trio.to_thread.run_sync(file_write, tmp, new_index_data)
                 pending.append(PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
             break
@@ -310,12 +315,13 @@ class UpdateJob(JobBase):
             # new one when the index record was skipped on a resumed
             # run)
             try:
-                new_index_data = atomic_read_bytes(self.workspace.joinpath(self.NEW_INDEX))
+                new_index_data = await trio.to_thread.run_sync(
+                    atomic_read_bytes, self.workspace.joinpath(self.NEW_INDEX))
             except FileNotFoundError:
                 pass
         if new_index_data is None:
             try:
-                new_index_data = atomic_read_bytes(self.index_file)
+                new_index_data = await trio.to_thread.run_sync(atomic_read_bytes, self.index_file)
             except FileNotFoundError:
                 # the local index is missing and could not be
                 # downloaded, the offsets are unavailable
@@ -330,7 +336,8 @@ class UpdateJob(JobBase):
             info = item.info
             index = self._file_index[info.path]
             tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{index}.tmp')
-            if self._matches(info, self._read_current(tmp)).match:
+            current = await trio.to_thread.run_sync(self._read_current, tmp)
+            if self._matches(info, current).match:
                 # a leftover tmp file passes the size + sha1 check, reuse it
                 pending.append(PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
@@ -344,7 +351,7 @@ class UpdateJob(JobBase):
             try:
                 # data_start is an offset into the new full pack file,
                 # range requests use it directly
-                data = server.get_file_content(
+                data = await server.get_file_content(
                     new_index.current_version, new_info.data_start, new_info.data_size)
                 content = new_index.decode_content(new_info, data)
             except (PackDecodeError, httpx2.HTTPError) as e:
@@ -353,13 +360,13 @@ class UpdateJob(JobBase):
                 logger.warning(f'Failed to download {info.path}: {e}')
                 failed.append(item)
                 continue
-            file_write(tmp, content)
+            await trio.to_thread.run_sync(file_write, tmp, content)
             pending.append(PendingFile(
                 info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
         self.pending += pending
         self.error = failed
 
-    def _validate_remaining(self):
+    async def _validate_remaining(self):
         """
         Verify the local files not covered by the update pack.
 
@@ -369,7 +376,9 @@ class UpdateJob(JobBase):
         files, so the new index is passed in directly with only the
         remaining files. The repaired records are merged into
         self.pending, replace() applies them together with the update
-        records, so the real files are touched only once.
+        records, so the real files are touched only once. The missing
+        files are downloaded by the nested ResetJob, its download()
+        awaits on the event loop like this job's own download().
 
         Skipped when the update has no server, or the index pack record
         failed (the local index is not the new one then).
@@ -386,10 +395,11 @@ class UpdateJob(JobBase):
         # or download(), or the local index when the index record was
         # skipped (it is already the new one then)
         try:
-            data = atomic_read_bytes(self.workspace.joinpath(self.NEW_INDEX))
+            data = await trio.to_thread.run_sync(
+                atomic_read_bytes, self.workspace.joinpath(self.NEW_INDEX))
         except FileNotFoundError:
             try:
-                data = atomic_read_bytes(self.index_file)
+                data = await trio.to_thread.run_sync(atomic_read_bytes, self.index_file)
             except FileNotFoundError:
                 return
         new_index = self.localize(PackDecodeBase(data))
@@ -409,8 +419,8 @@ class UpdateJob(JobBase):
         InstanceCacheOperation.set(new_index, 'fileinfo', fileinfo)
         reset = ResetJob(self.server, root=self.root, name=self.name)
         InstanceCacheOperation.set(reset, '_index_pack', new_index)
-        reset.validate_files()
-        reset.download()
+        await trio.to_thread.run_sync(reset.validate_files)
+        await reset.download()
         self.pending += reset.pending
         self.error += reset.error
 

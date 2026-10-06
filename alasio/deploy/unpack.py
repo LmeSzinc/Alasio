@@ -9,6 +9,8 @@ pack structure (.pack/) is created inside it.
 import argparse
 import os
 
+import trio
+
 from alasio.deploy.pack.job import DeployJob
 from alasio.ext import env
 from alasio.ext.path.atomic import atomic_read_bytes
@@ -35,7 +37,7 @@ def main():
     except FileNotFoundError as e:
         parser.error(f'failed to read the pack file: {e}')
     else:
-        DeployJob().unpack(data)
+        trio.run(DeployJob().unpack, data)
 
 
 if __name__ == '__main__':

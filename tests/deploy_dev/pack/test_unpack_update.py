@@ -12,7 +12,9 @@ old and new packs.
 
 The packs are module level singletons, built before the fake
 filesystem is active: MockGitRepo reads the real .gitattributes file,
-which the fake filesystem does not provide.
+which the fake filesystem does not provide. Tests performing requests
+are async (pytest-trio); the server stubs they monkeypatch are async
+functions too (the client awaits them).
 """
 import os
 
@@ -111,6 +113,13 @@ def read_tree():
     return tree
 
 
+def bad_content(return_value=b'bad data'):
+    """An async stand-in of a server download serving the given bytes."""
+    async def _bad(*args, **kwargs):
+        return return_value
+    return _bad
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  module level singletons, built before the fake filesystem is active
 # ════════════════════════════════════════════════════════════════════════════
@@ -186,7 +195,7 @@ FOLDER_SERVER.register_version(
 FOLDER_NEW_TREE = {'app.py': b'y\n', 'keep/keep.txt': b'keep\n'}
 
 
-def run_update(update=UPDATE, server=SERVER, tree=NEW_TREE):
+async def run_update(update=UPDATE, server=SERVER, tree=NEW_TREE):
     """
     Apply the update and assert the tree equals the new version.
 
@@ -199,14 +208,14 @@ def run_update(update=UPDATE, server=SERVER, tree=NEW_TREE):
         UpdateJob: The finished job
     """
     job = UpdateJob(update, server=server)
-    assert job.run()
+    assert await job.run()
     assert job.error == []
     assert read_tree() == tree
     assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
     return job
 
 
-def setup_app(pack=OLD_PACK):
+async def setup_app(pack=OLD_PACK):
     """
     Unpack a full pack into the app folder, like the client that has
     been running that version.
@@ -214,7 +223,7 @@ def setup_app(pack=OLD_PACK):
     Args:
         pack (bytes): Full pack of the version
     """
-    UnpackJob(pack).run()
+    await UnpackJob(pack).run()
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -260,9 +269,10 @@ class TestJobFile:
 class TestUnpack:
     """unpack() phase: write tmp files, real files untouched."""
 
-    def test_unpack_writes_tmp_only(self, app_folder):
+    @pytest.mark.trio
+    async def test_unpack_writes_tmp_only(self, app_folder):
         """unpack() writes tmp files, real files stay untouched."""
-        setup_app()
+        await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
         job.unpack()
@@ -274,15 +284,17 @@ class TestUnpack:
         # the workspace has the job file and the tmp files
         assert os.listdir(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_unpack_does_not_write_job_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_unpack_does_not_write_job_file(self, app_folder):
         """unpack() does not write the job file, the caller does."""
-        setup_app()
+        await setup_app()
         UpdateJob(UPDATE, server=SERVER).unpack()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace/job.pack')
 
-    def test_index_pack_prepared(self, app_folder):
+    @pytest.mark.trio
+    async def test_index_pack_prepared(self, app_folder):
         """unpack() decompresses the index record to a tmp file."""
-        setup_app()
+        await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
         job.unpack()
@@ -297,10 +309,11 @@ class TestUnpack:
         assert index_decoder.current_version == 'new'
         assert index_decoder.old_version == ''
 
-    def test_index_pack_written_after_run(self, app_folder):
+    @pytest.mark.trio
+    async def test_index_pack_written_after_run(self, app_folder):
         """After run() the local index pack is the new index pack."""
-        setup_app()
-        run_update()
+        await setup_app()
+        await run_update()
         data = file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack')
         assert data == bytes(NEW_DECODER.extract_index_pack())
         # it must be a valid index pack of the new version
@@ -308,9 +321,10 @@ class TestUnpack:
         decoder.validate_index()
         assert decoder.current_version == 'new'
 
-    def test_pending_records(self, app_folder):
+    @pytest.mark.trio
+    async def test_pending_records(self, app_folder):
         """unpack() fills self.pending with PendingFile records."""
-        setup_app()
+        await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
         job.unpack()
@@ -347,10 +361,11 @@ class TestUnpack:
 class TestUpdateRoundtrip:
     """The update applies to the old working tree and produces the new one."""
 
-    def test_full_scenario(self, app_folder):
+    @pytest.mark.trio
+    async def test_full_scenario(self, app_folder):
         """A realistic upgrade covering every record type at once."""
-        setup_app()
-        run_update()
+        await setup_app()
+        await run_update()
         # the update pack covers every record type
         decoder = PackDecodeBase(UPDATE)
         edits = {info.edit for info in decoder.fileinfo.values()}
@@ -373,15 +388,17 @@ class TestUpdateRoundtrip:
         assert fileinfo['.pack/index.pack'].source_path == '.pack/index.pack'
         assert '.pack/index.pack' in decoder.refinfo
 
-    def test_roundtrip_twice_is_idempotent(self, app_folder):
+    @pytest.mark.trio
+    async def test_roundtrip_twice_is_idempotent(self, app_folder):
         """Running into a folder with valid files succeeds and skips."""
-        setup_app()
-        run_update()
-        run_update()
+        await setup_app()
+        await run_update()
+        await run_update()
 
-    def test_unpack_replace_without_run(self, app_folder):
+    @pytest.mark.trio
+    async def test_unpack_replace_without_run(self, app_folder):
         """unpack() then replace() applies the changes, the caller runs."""
-        setup_app()
+        await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
         job.unpack()
@@ -390,46 +407,51 @@ class TestUpdateRoundtrip:
         # the workspace is kept, run() cleans it up
         assert os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_skip_existing_valid_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_skip_existing_valid_file(self, app_folder):
         """A valid new-version file is kept as-is."""
-        setup_app()
+        await setup_app()
         notes = env.PROJECT_ROOT / 'docs/notes.txt'
         with open(notes, 'wb') as f:
             f.write(b'updated note\r\n')
         added = env.PROJECT_ROOT / 'backend/a1.py'
         with open(added, 'wb') as f:
             f.write(NEW['backend/a1.py'])
-        run_update()
+        await run_update()
         assert file_read_bytes(notes) == b'updated note\r\n'
         assert file_read_bytes(added) == NEW['backend/a1.py']
 
-    def test_empty_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_empty_file(self, app_folder):
         """An empty added file is created as an empty file."""
-        setup_app()
-        run_update()
+        await setup_app()
+        await run_update()
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/empty.txt') == b''
 
-    def test_deleted_marker_removes_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_deleted_marker_removes_file(self, app_folder):
         """D (deleted) marker files must not exist after replace()."""
-        setup_app()
-        run_update()
+        await setup_app()
+        await run_update()
         assert not os.path.exists(env.PROJECT_ROOT / 'backend/legacy.py')
 
-    def test_renamed_source_removed(self, app_folder):
+    @pytest.mark.trio
+    async def test_renamed_source_removed(self, app_folder):
         """R / RM records move the source file, it must not exist."""
-        setup_app()
-        run_update()
+        await setup_app()
+        await run_update()
         assert not os.path.exists(env.PROJECT_ROOT / 'scripts/run.sh')
         assert not os.path.exists(env.PROJECT_ROOT / 'scripts/old_tool.py')
 
-    def test_mode_change_applied(self, app_folder):
+    @pytest.mark.trio
+    async def test_mode_change_applied(self, app_folder):
         """A mode change (755 -> 644) is applied to a file whose
         content is unchanged, without rewriting the content."""
         # tools/tool.sh is 755 in the old version, 644 in the new one
-        setup_app()
+        await setup_app()
         target = env.PROJECT_ROOT / 'tools/tool.sh'
         assert os.stat(target).st_mode & 0o111
-        run_update()
+        await run_update()
         assert not os.stat(target).st_mode & 0o111
         assert file_read_bytes(target) == NEW['tools/tool.sh'][0]
 
@@ -443,66 +465,71 @@ class TestIndexUpdate:
     """The index pack is updated like a normal file of the update,
     the local index is verified against the refinfo."""
 
-    def test_missing_index_downloaded(self, app_folder):
+    @pytest.mark.trio
+    async def test_missing_index_downloaded(self, app_folder):
         """A missing local index pack is downloaded from the server."""
-        setup_app(_simple_old_pack)
+        await setup_app(_simple_old_pack)
         os.remove(env.PROJECT_ROOT / '.pack/index.pack')
         job = UpdateJob(SIMPLE_UPDATE, server=SIMPLE_SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == SIMPLE_NEW_INDEX
         assert read_tree() == {'keep.txt': b'keep\n', 'add.txt': b'hello\n'}
 
-    def test_corrupt_index_downloaded(self, app_folder):
+    @pytest.mark.trio
+    async def test_corrupt_index_downloaded(self, app_folder):
         """A corrupt local index pack is downloaded from the server."""
-        setup_app(_simple_old_pack)
+        await setup_app(_simple_old_pack)
         bad = bytearray(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         bad[-5] ^= 0xFF
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(bad)
         job = UpdateJob(SIMPLE_UPDATE, server=SIMPLE_SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == SIMPLE_NEW_INDEX
         assert read_tree() == {'keep.txt': b'keep\n', 'add.txt': b'hello\n'}
 
-    def test_foreign_index_downloaded(self, app_folder):
+    @pytest.mark.trio
+    async def test_foreign_index_downloaded(self, app_folder):
         """A self-consistent but wrong local index is downloaded: it
         fails the refinfo size + sha1 check of the update pack."""
-        setup_app(_simple_old_pack)
+        await setup_app(_simple_old_pack)
         # the local index is a valid index pack of another version,
         # its own checksum passes but the refinfo check does not
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(OTHER_INDEX)
         job = UpdateJob(SIMPLE_UPDATE, server=SIMPLE_SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == SIMPLE_NEW_INDEX
         assert read_tree() == {'keep.txt': b'keep\n', 'add.txt': b'hello\n'}
 
-    def test_corrupt_index_still_updates(self, app_folder):
+    @pytest.mark.trio
+    async def test_corrupt_index_still_updates(self, app_folder):
         """A corrupt local index does not stop the update, the index
         is downloaded again."""
-        setup_app()
+        await setup_app()
         bad = bytearray(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         bad[-5] ^= 0xFF
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(bad)
         job = UpdateJob(UPDATE, server=SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
             bytes(NEW_DECODER.extract_index_pack())
         assert read_tree() == NEW_TREE
 
-    def test_missing_index_no_server(self, app_folder):
+    @pytest.mark.trio
+    async def test_missing_index_no_server(self, app_folder):
         """A missing index pack and no server leaves the record in
         error."""
-        setup_app()
+        await setup_app()
         os.remove(env.PROJECT_ROOT / '.pack/index.pack')
         job = UpdateJob(UPDATE)
         with logger.mock_capture_writer() as capture:
-            assert not job.run()
+            assert not await job.run()
         assert capture.backend.any_contains('no server provided')
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -517,13 +544,14 @@ class TestSourceDownload:
     """A source that fails the size + sha1 check: the content of the
     record is downloaded from the new full pack instead."""
 
-    def test_missing_copied_source_downloaded(self, app_folder):
+    @pytest.mark.trio
+    async def test_missing_copied_source_downloaded(self, app_folder):
         """A missing old file of a C record: the copy is downloaded,
         the missing source is repaired by the remaining check."""
-        setup_app()
+        await setup_app()
         os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         job = UpdateJob(UPDATE, server=SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         # the copies are downloaded from the new full pack
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Website\r\n'
@@ -533,53 +561,58 @@ class TestSourceDownload:
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme.md') == b'# Website\n'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_damaged_patch_source_downloaded(self, app_folder):
+    @pytest.mark.trio
+    async def test_damaged_patch_source_downloaded(self, app_folder):
         """A wrong old file of an M record: the record is downloaded,
         its target path is the source path, the tree is complete."""
-        setup_app()
+        await setup_app()
         with open(env.PROJECT_ROOT / 'backend/main.py', 'wb') as f:
             f.write(b'corrupt content')
-        run_update()
+        await run_update()
 
-    def test_missing_rename_source_downloaded(self, app_folder):
+    @pytest.mark.trio
+    async def test_missing_rename_source_downloaded(self, app_folder):
         """A missing old file of an R record: the moved file is
         downloaded, the tree is complete."""
-        setup_app()
+        await setup_app()
         os.remove(env.PROJECT_ROOT / 'scripts/run.sh')
-        run_update()
+        await run_update()
 
-    def test_missing_rm_source_downloaded(self, app_folder):
+    @pytest.mark.trio
+    async def test_missing_rm_source_downloaded(self, app_folder):
         """A missing old file of an RM record: the moved file is
         downloaded, the tree is complete."""
-        setup_app()
+        await setup_app()
         os.remove(env.PROJECT_ROOT / 'scripts/old_tool.py')
-        run_update()
+        await run_update()
 
-    def test_eol_mismatch_source_fixed_without_download(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_eol_mismatch_source_fixed_without_download(self, app_folder, monkeypatch):
         """A source whose EOL differs is converted, no download happens."""
-        setup_app()
+        await setup_app()
         with open(env.PROJECT_ROOT / 'docs/readme.md', 'wb') as f:
             f.write(b'# Website\r\n')
 
-        def _fail(self, *a, **k):
+        async def _fail(*args, **kwargs):
             raise AssertionError('no download expected for an EOL mismatch')
         monkeypatch.setattr(SERVER, 'get_file_content', _fail)
         job = UpdateJob(UPDATE, server=SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         # the copy records are computed from the converted source blob,
         # the copies keep their own eol (crlf)
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Website\r\n'
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy2.txt') == b'# Website\r\n'
 
-    def test_unsolvable_stays_in_error(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_unsolvable_stays_in_error(self, app_folder, monkeypatch):
         """A record that cannot be downloaded stays in error."""
-        setup_app()
+        await setup_app()
         os.remove(env.PROJECT_ROOT / 'docs/readme.md')
-        monkeypatch.setattr(SERVER, 'get_file_content', lambda *a, **k: b'bad data')
+        monkeypatch.setattr(SERVER, 'get_file_content', bad_content())
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
-            assert not job.run()
+            assert not await job.run()
         assert capture.backend.any_contains('Failed to download docs/readme_copy.txt:')
         # the failed copies and the missing unchanged source (failed
         # in the remaining check) stay in error
@@ -589,13 +622,14 @@ class TestSourceDownload:
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/a1.py') == NEW['backend/a1.py']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_no_server_sources_unsolvable(self, app_folder):
+    @pytest.mark.trio
+    async def test_no_server_sources_unsolvable(self, app_folder):
         """A missing server leaves the failed records in error."""
-        setup_app()
+        await setup_app()
         os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         job = UpdateJob(UPDATE)
         with logger.mock_capture_writer() as capture:
-            assert not job.run()
+            assert not await job.run()
         assert capture.backend.any_contains('no server provided')
         assert [item.info.path for item in job.error] == \
             ['docs/readme_copy.txt', 'docs/readme_copy2.txt']
@@ -604,33 +638,36 @@ class TestSourceDownload:
 class TestValidateRemaining:
     """UpdateJob verifies the local files not covered by the update pack."""
 
-    def test_damaged_unchanged_file_repaired(self, app_folder):
+    @pytest.mark.trio
+    async def test_damaged_unchanged_file_repaired(self, app_folder):
         """A damaged unchanged file is repaired with the new index."""
-        setup_app()
+        await setup_app()
         # data/blob.png is unchanged between the versions, it is not a
         # record of the update pack
         target = env.PROJECT_ROOT / 'data/blob.png'
         with open(target, 'wb') as f:
             f.write(b'corrupt content')
-        run_update()
+        await run_update()
         assert file_read_bytes(target) == NEW['data/blob.png']
 
-    def test_remaining_download_failed_stays_in_error(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_remaining_download_failed_stays_in_error(self, app_folder, monkeypatch):
         """A remaining file that cannot be downloaded stays in error."""
-        setup_app()
+        await setup_app()
         target = env.PROJECT_ROOT / 'data/blob.png'
         with open(target, 'wb') as f:
             f.write(b'corrupt content')
-        monkeypatch.setattr(SERVER, 'get_file_content', lambda *a, **k: b'bad data')
+        monkeypatch.setattr(SERVER, 'get_file_content', bad_content())
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
-            assert not job.run()
+            assert not await job.run()
         assert capture.backend.any_contains('Failed to download data/blob.png:')
         assert [item.info.path for item in job.error] == ['data/blob.png']
 
-    def test_index_failed_skips_remaining(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_index_failed_skips_remaining(self, app_folder, monkeypatch):
         """The remaining check is skipped when the index record failed."""
-        setup_app()
+        await setup_app()
         bad = bytearray(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         bad[-5] ^= 0xFF
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
@@ -640,34 +677,36 @@ class TestValidateRemaining:
         target = env.PROJECT_ROOT / 'data/blob.png'
         with open(target, 'wb') as f:
             f.write(b'corrupt content')
-        monkeypatch.setattr(SERVER, 'get_index_pack', lambda version: b'bad data')
+        monkeypatch.setattr(SERVER, 'get_index_pack', bad_content())
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
-            assert not job.run()
+            assert not await job.run()
         assert capture.backend.any_contains('the index pack record failed')
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
         assert file_read_bytes(target) == b'corrupt content'
 
-    def test_no_server_skips_remaining(self, app_folder):
+    @pytest.mark.trio
+    async def test_no_server_skips_remaining(self, app_folder):
         """The remaining check is skipped without a server."""
-        setup_app()
+        await setup_app()
         target = env.PROJECT_ROOT / 'data/blob.png'
         with open(target, 'wb') as f:
             f.write(b'corrupt content')
         job = UpdateJob(UPDATE)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         # the damaged remaining file is left as-is, no server to repair it
         assert file_read_bytes(target) == b'corrupt content'
 
-    def test_new_fileinfo_keeps_full_records(self, app_folder):
+    @pytest.mark.trio
+    async def test_new_fileinfo_keeps_full_records(self, app_folder):
         """_validate_remaining() replaces the fileinfo cache of the new
         index decoder with the filtered view of the remaining check, the
         bound self.new_fileinfo keeps the full records of the new
         version."""
-        setup_app()
+        await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         # a file the update pack itself records is still part of the
         # bound dict, the filtered view of the remaining check drops it
@@ -688,9 +727,10 @@ class TestDownload:
     """download(): fetch the content of the failed records from the
     server and write their tmp files."""
 
-    def test_download_failed_records(self, app_folder):
+    @pytest.mark.trio
+    async def test_download_failed_records(self, app_folder):
         """The failed records are downloaded to tmp files."""
-        setup_app()
+        await setup_app()
         os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
@@ -698,7 +738,7 @@ class TestDownload:
         # the copied records cannot be computed without the source
         assert [item.info.path for item in job.error] == \
             ['docs/readme_copy.txt', 'docs/readme_copy2.txt']
-        job.download()
+        await job.download()
         assert job.error == []
         # the records are downloaded from the new full pack, the source
         # is not in pending
@@ -711,9 +751,10 @@ class TestDownload:
         copy2 = next(item for item in job.pending if item.info.path == 'docs/readme_copy2.txt')
         assert file_read_bytes(copy2.tmp) == b'# Website\r\n'
 
-    def test_download_reuse_tmp(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_download_reuse_tmp(self, app_folder, monkeypatch):
         """A leftover tmp file that passes the check is reused."""
-        setup_app()
+        await setup_app()
         os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         # write a valid tmp file at the record tmp name, download()
         # should reuse it
@@ -732,12 +773,12 @@ class TestDownload:
         original = SERVER.get_file_content
         calls = []
 
-        def _serve(version, offset, size):
+        async def _serve(version, offset, size):
             calls.append(offset)
-            return original(version, offset, size)
+            return await original(version, offset, size)
         monkeypatch.setattr(SERVER, 'get_file_content', _serve)
         job = UpdateJob(UPDATE, server=SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Website\r\n'
         # the missing unchanged source is repaired by the remaining check
@@ -745,21 +786,23 @@ class TestDownload:
         assert len(calls) == 1
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_download_no_error_is_noop(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_download_no_error_is_noop(self, app_folder, monkeypatch):
         """A healthy tree needs no download."""
-        setup_app()
+        await setup_app()
 
-        def _fail(self, *a, **k):
+        async def _fail(*args, **kwargs):
             raise AssertionError('no download expected for a healthy tree')
         monkeypatch.setattr(SERVER, 'get_file_content', _fail)
         job = UpdateJob(UPDATE, server=SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         assert read_tree() == NEW_TREE
 
-    def test_index_download_failed_stays_in_error(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_index_download_failed_stays_in_error(self, app_folder, monkeypatch):
         """A broken index pack that cannot be downloaded stays in error."""
-        setup_app()
+        await setup_app()
         # corrupt the local index so the index record fails the
         # refinfo check in unpack()
         bad = bytearray(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
@@ -767,20 +810,21 @@ class TestDownload:
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(bad)
         # the server index pack is broken too, the record is unsolvable
-        monkeypatch.setattr(SERVER, 'get_index_pack', lambda version: b'bad data')
+        monkeypatch.setattr(SERVER, 'get_index_pack', bad_content())
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
-            assert not job.run()
+            assert not await job.run()
         assert capture.backend.any_contains('Failed to download .pack/index.pack:')
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
         # the local index is not replaced, the workspace is cleaned
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == bytes(bad)
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_index_download_http_error_stays_in_error(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_index_download_http_error_stays_in_error(self, app_folder, monkeypatch):
         """A network error while downloading the index pack keeps the
         record in error."""
-        setup_app()
+        await setup_app()
         # corrupt the local index so the index record fails the
         # refinfo check in unpack()
         bad = bytearray(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
@@ -788,7 +832,7 @@ class TestDownload:
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(bad)
 
-        def _raise(version):
+        async def _raise(version):
             request = httpx2.Request('GET', 'http://mock/new/full.pack')
             response = httpx2.Response(500, request=request)
             raise httpx2.HTTPStatusError(
@@ -796,22 +840,23 @@ class TestDownload:
         monkeypatch.setattr(SERVER, 'get_index_pack', _raise)
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
-            assert not job.run()
+            assert not await job.run()
         assert capture.backend.any_contains('Failed to download .pack/index.pack:')
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
 
-    def test_missing_index_and_download_failed(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_missing_index_and_download_failed(self, app_folder, monkeypatch):
         """The index pack cannot be downloaded and the local index is
         missing: every failed record stays in error."""
-        setup_app()
+        await setup_app()
         # the local index is missing and the copied records cannot be
         # computed without their source
         os.remove(env.PROJECT_ROOT / '.pack/index.pack')
         os.remove(env.PROJECT_ROOT / 'docs/readme.md')
-        monkeypatch.setattr(SERVER, 'get_index_pack', lambda version: b'bad data')
+        monkeypatch.setattr(SERVER, 'get_index_pack', bad_content())
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
-            assert not job.run()
+            assert not await job.run()
         assert capture.backend.any_contains('Failed to download .pack/index.pack:')
         # the offsets are unavailable: the index record and every
         # record that could not be computed locally stay in error
@@ -828,22 +873,24 @@ class TestDownload:
 class TestCallerFlow:
     """The exact caller usage of UpdateJob."""
 
-    def test_get_unfinished_job_update(self, app_folder):
+    @pytest.mark.trio
+    async def test_get_unfinished_job_update(self, app_folder):
         """An update pack job file is dispatched to a resumed UpdateJob."""
-        setup_app()
+        await setup_app()
         UpdateJob(UPDATE).write()
         job = DeployJob(server=SERVER)._get_unfinished_job()
         assert job is not None
         assert isinstance(job, UpdateJob)
-        assert job.run()
+        assert await job.run()
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_interrupted_unpack_resumed(self, app_folder):
+    @pytest.mark.trio
+    async def test_interrupted_unpack_resumed(self, app_folder):
         """A run interrupted after unpack() is resumed: the local
         index is not touched yet (replace() writes it), the tmp files
         are reused."""
-        setup_app()
+        await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
         job.unpack()
@@ -854,15 +901,16 @@ class TestCallerFlow:
         job = DeployJob(server=SERVER)._get_unfinished_job()
         assert job is not None
         assert isinstance(job, UpdateJob)
-        assert job.run()
+        assert await job.run()
         assert read_tree() == NEW_TREE
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
             bytes(NEW_DECODER.extract_index_pack())
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_resume_skips_write(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_resume_skips_write(self, app_folder, monkeypatch):
         """A resumed job skips write(), the data is already in the file."""
-        setup_app()
+        await setup_app()
         UpdateJob(UPDATE).write()
 
         def _fail(self):
@@ -870,7 +918,7 @@ class TestCallerFlow:
         monkeypatch.setattr(UpdateJob, 'write', _fail)
         job = DeployJob(server=SERVER)._get_unfinished_job()
         assert job is not None
-        assert job.run()
+        assert await job.run()
         assert read_tree() == NEW_TREE
 
     def test_full_pack_dispatched_to_unpack_job(self, app_folder):
@@ -922,16 +970,17 @@ class TestFailure:
         # the unfinished job can still be found
         assert DeployJob()._get_unfinished_job() is not None
 
-    def test_run_failure_logged_and_cleaned(self, app_folder):
+    @pytest.mark.trio
+    async def test_run_failure_logged_and_cleaned(self, app_folder):
         """A failed run logs a warning and cleans the workspace."""
-        setup_app()
+        await setup_app()
         decoder = PackDecodeBase(UPDATE)
         index_end = 5 + len(decoder.index_section)
         bad = bytearray(UPDATE)
         bad[index_end + 100] ^= 0xFF
         job = UpdateJob(bytes(bad), server=SERVER)
         with logger.mock_capture_writer() as capture:
-            assert not job.run()
+            assert not await job.run()
         assert capture.backend.any_contains('Failed to update:')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -944,64 +993,70 @@ class TestFailure:
 class TestEmptyFolderCleanup:
     """The folders left empty by the deleted files are removed."""
 
-    def test_deleted_folder_removed(self, app_folder):
+    @pytest.mark.trio
+    async def test_deleted_folder_removed(self, app_folder):
         """The update deletes the last files of a folder, the folder is
         removed."""
-        setup_app(FOLDER_OLD_PACK)
+        await setup_app(FOLDER_OLD_PACK)
         assert os.path.isdir(env.PROJECT_ROOT / 'pkg')
         job = UpdateJob(FOLDER_UPDATE, server=FOLDER_SERVER)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg')
         assert read_tree() == FOLDER_NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_empty_folder_chain_removed(self, app_folder):
+    @pytest.mark.trio
+    async def test_empty_folder_chain_removed(self, app_folder):
         """A folder chain that becomes empty is removed bottom-up."""
-        setup_app(FOLDER_OLD_PACK)
+        await setup_app(FOLDER_OLD_PACK)
         assert os.path.isdir(env.PROJECT_ROOT / 'a/b/c')
         job = UpdateJob(FOLDER_UPDATE, server=FOLDER_SERVER)
-        assert job.run()
+        assert await job.run()
         assert not os.path.exists(env.PROJECT_ROOT / 'a')
 
-    def test_unchanged_file_keeps_folder(self, app_folder):
+    @pytest.mark.trio
+    async def test_unchanged_file_keeps_folder(self, app_folder):
         """A folder that still holds an unchanged file of the new version
         is kept."""
-        setup_app(FOLDER_OLD_PACK)
+        await setup_app(FOLDER_OLD_PACK)
         job = UpdateJob(FOLDER_UPDATE, server=FOLDER_SERVER)
-        assert job.run()
+        assert await job.run()
         assert not os.path.exists(env.PROJECT_ROOT / 'keep/gone.txt')
         assert file_read_bytes(env.PROJECT_ROOT / 'keep/keep.txt') == b'keep\n'
 
-    def test_user_file_keeps_folder(self, app_folder):
+    @pytest.mark.trio
+    async def test_user_file_keeps_folder(self, app_folder):
         """A folder that still holds a file the update does not manage is
         kept."""
-        setup_app(FOLDER_OLD_PACK)
+        await setup_app(FOLDER_OLD_PACK)
         user = env.PROJECT_ROOT / 'pkg/notes.txt'
         with open(user, 'wb') as f:
             f.write(b'my notes')
         job = UpdateJob(FOLDER_UPDATE, server=FOLDER_SERVER)
-        assert job.run()
+        assert await job.run()
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg/tool.py')
         assert file_read_bytes(user) == b'my notes'
 
-    def test_no_server_still_removes_folder(self, app_folder):
+    @pytest.mark.trio
+    async def test_no_server_still_removes_folder(self, app_folder):
         """No server: the new index is unavailable, the deleted markers
         do not make the folder non-empty and os.rmdir() confirms it, the
         folder is removed too. keep/ is kept by the unchanged file."""
-        setup_app(FOLDER_OLD_PACK)
+        await setup_app(FOLDER_OLD_PACK)
         job = UpdateJob(FOLDER_UPDATE)
-        assert job.run()
+        assert await job.run()
         assert job.error == []
         assert not os.path.exists(env.PROJECT_ROOT / 'pkg')
         assert not os.path.exists(env.PROJECT_ROOT / 'a')
         assert file_read_bytes(env.PROJECT_ROOT / 'keep/keep.txt') == b'keep\n'
 
-    def test_unknown_new_fileinfo_keeps_folder(self, app_folder):
+    @pytest.mark.trio
+    async def test_unknown_new_fileinfo_keeps_folder(self, app_folder):
         """Without the records of the new version (new_fileinfo empty)
         the emptiness is decided by os.rmdir() only: a folder holding a
         file is kept, an empty one is removed."""
-        setup_app(FOLDER_OLD_PACK)
+        await setup_app(FOLDER_OLD_PACK)
         job = UpdateJob(FOLDER_UPDATE)
         job.write()
         job.unpack()
