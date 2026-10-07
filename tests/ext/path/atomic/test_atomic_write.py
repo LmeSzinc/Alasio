@@ -465,6 +465,24 @@ class TestAtomicWriteStream:
         atomic_write_stream('/data/a/b/c.txt', iter(['x', 'y']))
         assert file_read_text('/data/a/b/c.txt') == 'xy'
 
+    def test_write_stream_mode(self, fs):
+        """The mode should be used for the written file."""
+        atomic_write_stream('/data/a.sh', iter(['x']), mode=0o755)
+        assert stat.S_IMODE(os.stat('/data/a.sh').st_mode) == 0o755
+
+    def test_write_stream_mode_before_replace(self, fs, monkeypatch):
+        """The mode should be set on the tmp file, before it replaces the target."""
+        original = os.replace
+        seen = []
+
+        def checking_replace(src, dst):
+            seen.append(stat.S_IMODE(os.stat(src).st_mode))
+            return original(src, dst)
+
+        monkeypatch.setattr(os, 'replace', checking_replace)
+        atomic_write_stream('/data/a.sh', iter(['x']), mode=0o755)
+        assert seen == [0o755]
+
     def test_write_stream_failure_cleans_tmp(self, fs, monkeypatch):
         """The tmp file should be removed when the replace fails."""
         monkeypatch.setattr(atomic, 'IS_WINDOWS', False)
@@ -498,6 +516,18 @@ class TestAtomicWriteStream:
         with pytest.raises(RuntimeError, match='generator failed at once'):
             atomic_write_stream('/data/a.txt', chunks())
         assert not os.path.exists('/data')
+
+    def test_write_stream_chmod_error_cleans_tmp(self, fs, monkeypatch):
+        """A failed chmod should remove the tmp file and keep the target."""
+        file_write('/data/a.sh', 'old')
+        error = OSError(1, 'Operation not permitted')
+        calls = break_function(monkeypatch, os, 'chmod', [error])
+        with pytest.raises(OSError) as e:
+            atomic_write_stream('/data/a.sh', iter(['new']), mode=0o755)
+        assert e.value is error
+        assert len(calls) == 1
+        assert file_read_text('/data/a.sh') == 'old'
+        assert os.listdir('/data') == ['a.sh']
 
     def test_write_stream_retries_on_windows(self, fs, monkeypatch):
         """PermissionError should be retried on Windows until it works."""

@@ -389,7 +389,7 @@ class PathStr(str):
         atomic_write(self, data)
         return self
 
-    def atomic_write_stream(self, data_generator):
+    def atomic_write_stream(self, data_generator, mode=None):
         """
         Atomic file write with streaming data support.
         Handles cases where file might be read by another process.
@@ -399,11 +399,14 @@ class PathStr(str):
 
         Args:
             data_generator (Iterable): An iterable that yields data chunks (str or bytes)
+            mode (int): POSIX mode of the target file, set on the tmp file before it
+                replaces the target, so the mode of the target is never observable
+                in between. None to keep the default mode
 
         Returns:
             PathStr: Self
         """
-        atomic_write_stream(self, data_generator)
+        atomic_write_stream(self, data_generator, mode=mode)
         return self
 
     def atomic_read_text(self, encoding='utf-8', errors='strict'):

@@ -445,7 +445,7 @@ def atomic_write(file, data):
     replace_tmp(tmp, file)
 
 
-def atomic_write_stream(file, data_generator):
+def atomic_write_stream(file, data_generator, mode=None):
     """
     Atomic file write with streaming data support.
     Handles cases where file might be read by another process.
@@ -457,10 +457,15 @@ def atomic_write_stream(file, data_generator):
     Args:
         file (str): Target file path
         data_generator (Iterable): An iterable that yields data chunks (str or bytes)
+        mode (int): POSIX mode of the target file, set on the tmp file before it
+            replaces the target, so the mode of the target is never observable
+            in between. None to keep the default mode
     """
     tmp = to_tmp_file(file)
     try:
         file_write_stream(tmp, data_generator)
+        if mode is not None:
+            os.chmod(tmp, mode)
     except BaseException:
         _remove_tmp_on_failure(tmp)
         raise

@@ -20,7 +20,7 @@ import os
 import msgspec
 
 from alasio.ext.concurrent.threadpool import THREAD_POOL
-from alasio.ext.path.atomic import CHUNK_SIZE, file_read_bytes_stream, file_write, replace_tmp, to_tmp_file
+from alasio.ext.path.atomic import CHUNK_SIZE, atomic_write_stream, file_read_bytes_stream
 
 from .errors import AsarError, AsarUnsupportedError
 from .format import BLOCK_SIZE, UINT32_MAX, pack_header
@@ -35,86 +35,6 @@ CACHE_BUDGET = 64 * 1024 * 1024
 # of being handed to the thread pool: the pool is for the many small files whose
 # flush latency dominates an extraction, one flush of a large file is cheap
 POOL_FILE_SIZE = 2 * 1024 * 1024
-
-
-class AtomicChunkWriter:
-    """
-    Write one file in chunks, atomically.
-
-    Content goes to ``<file>.<rid>.tmp`` and is moved over the target with
-    ``os.replace()`` only once the file is complete, so an interrupted or failed
-    extraction never leaves a half written file behind. The Windows retry of the
-    project's atomic helpers is reused, an archive may be read by another process.
-    """
-
-    def __init__(self, file, mode=None):
-        """
-        Args:
-            file (str): Target file path
-            mode (int): POSIX mode of the target file, set on the temporary file
-                before it replaces the target, so the mode of the target is
-                never observable in between
-        """
-        self.file = file
-        self.mode = mode
-        self.tmp = to_tmp_file(file)
-        self.size = 0
-        self._f = None
-
-    def write(self, data):
-        """
-        Append a chunk to the target file.
-
-        Args:
-            data (bytes | memoryview): Content chunk
-        """
-        if self._f is None:
-            self._open()
-        self._f.write(data)
-        self.size += len(data)
-
-    def _open(self):
-        """
-        Open the temporary file, creating the parent directory if needed.
-        """
-        try:
-            self._f = open(self.tmp, 'wb')
-        except FileNotFoundError:
-            directory = os.path.dirname(self.tmp)
-            if directory:
-                os.makedirs(directory, exist_ok=True)
-            self._f = open(self.tmp, 'wb')
-
-    def close(self):
-        """
-        Finish the file and move it over the target path.
-        """
-        if self._f is None:
-            # Nothing was written, an empty file is still a file
-            file_write(self.tmp, b'')
-        else:
-            self._f.flush()
-            os.fsync(self._f.fileno())
-            self._f.close()
-            self._f = None
-        if self.mode is not None:
-            os.chmod(self.tmp, self.mode)
-        replace_tmp(self.tmp, self.file)
-
-    def abort(self):
-        """
-        Drop the temporary file, the target path is left untouched.
-        """
-        if self._f is not None:
-            try:
-                self._f.close()
-            except OSError:
-                pass
-            self._f = None
-        try:
-            os.unlink(self.tmp)
-        except OSError:
-            pass
 
 
 class ContentVerifier:
@@ -274,6 +194,32 @@ def iter_write_content(keys, info, fd, cache, chunk_size=CHUNK_SIZE):
     yield from iter_entry_content(keys, info, fd, chunk_size=chunk_size)
 
 
+def iter_checked_chunks(chunks, verifier):
+    """
+    Stream the content chunks, checking the verifier after the last one.
+
+    The check lives at the end of the generator on purpose: the generator is
+    consumed by atomic_write_stream(), a raise here fails the write before the
+    tmp file is put at the final path.
+
+    Args:
+        chunks (Iterable): Content chunks
+        verifier (ContentVerifier): Checker of the content, None to write as is
+
+    Yields:
+        bytes | memoryview: The chunks, unchanged
+
+    Raises:
+        AsarError: If the content does not match the entry it belongs to
+    """
+    for chunk in chunks:
+        if verifier is not None:
+            verifier.update(chunk)
+        yield chunk
+    if verifier is not None:
+        verifier.check()
+
+
 def write_content(dest, chunks, verifier=None, mode=None):
     """
     Write the content of one entry to its own file, atomically and checked.
@@ -287,18 +233,7 @@ def write_content(dest, chunks, verifier=None, mode=None):
     Raises:
         AsarError: If the content does not match the entry it belongs to
     """
-    writer = AtomicChunkWriter(dest, mode=mode)
-    try:
-        for chunk in chunks:
-            if verifier is not None:
-                verifier.update(chunk)
-            writer.write(chunk)
-        if verifier is not None:
-            verifier.check()
-        writer.close()
-    except BaseException:
-        writer.abort()
-        raise
+    atomic_write_stream(dest, iter_checked_chunks(chunks, verifier), mode=mode)
 
 
 class ContentWriter:
@@ -420,6 +355,45 @@ def mark_unpacked(files):
             info.offset = None
 
 
+def iter_archive_data(json_bytes, entries, fd, cache, release=None):
+    """
+    Stream the data area of an archive: the header, then the content of every
+    entry stored in it, in the canonical order.
+
+    The content is read from the source of the entry, which is checked against
+    what pass 1 read, see ContentVerifier.
+
+    Args:
+        json_bytes (bytes): Encoded header, see build_header()
+        entries (list): Canonical entries, see canonical_entries()
+        fd (io.IOBase): Open handle of the archive the entries were read from,
+            the sources that live in an archive read through it
+        cache (dict): ``{id(entry): content}`` of the entries read in pass 1
+        release (Callable): Called after the last byte was read, before the
+            generator ends and the tmp file replaces the target. It is never
+            called when the pack fails
+
+    Yields:
+        bytes | memoryview: Chunks of the archive
+
+    Raises:
+        AsarError: If a source changed between the two passes
+    """
+    yield pack_header(json_bytes)
+    for keys, info in entries:
+        if info.kind != KIND_FILE or info.unpacked:
+            continue
+        verifier = ContentVerifier(
+            keys_path(keys), info.size, info.integrity.hash if info.integrity else None,
+        )
+        for chunk in iter_write_content(keys, info, fd, cache):
+            verifier.update(chunk)
+            yield chunk
+        verifier.check()
+    if release is not None:
+        release()
+
+
 def pack_archive(files, dest, integrity=True, fd=None, release=None):
     """
     Write the flat entry table to an archive file.
@@ -510,25 +484,7 @@ def pack_archive(files, dest, integrity=True, fd=None, release=None):
                 )
 
     # Pass 2: the content, recomputed and checked against pass 1
-    writer = AtomicChunkWriter(dest)
-    try:
-        writer.write(pack_header(json_bytes))
-        for keys, info in entries:
-            if info.kind != KIND_FILE or info.unpacked:
-                continue
-            verifier = ContentVerifier(
-                keys_path(keys), info.size, info.integrity.hash if info.integrity else None,
-            )
-            for chunk in iter_write_content(keys, info, fd, cache):
-                verifier.update(chunk)
-                writer.write(chunk)
-            verifier.check()
-        if release is not None:
-            release()
-        writer.close()
-    except BaseException:
-        writer.abort()
-        raise
+    atomic_write_stream(dest, iter_archive_data(json_bytes, entries, fd, cache, release))
 
 
 def hash_file(file, chunk_size=CHUNK_SIZE):
