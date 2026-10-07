@@ -8,11 +8,26 @@ folder of a repo of the pack server:
 
     {run directory}/pack/{Author}_{Repo}_{Branch}/wheel/{distribution}/{version}/{filename}.whl
 
-One WheelFetcher instance fetches one (name, version) of one mirror:
-target_folder is the folder the wheel is put in, index_data is the wheel
-information parsed from the index page of the distribution. index_data is
-cached: the page is read once per instance, the selection and a later fetch
-use the same data.
+One WheelFetcher instance fetches one (name, version) of one mirror,
+target_folder is the folder the wheel and its index data are put in. The
+fetch runs in two steps:
+
+1. index_data: the index page of the distribution is requested at
+   {mirror}/{name}/ and parsed into one WheelInfo per wheel file of the page,
+   the parse is written to {target_folder}/index_data.json with an indent, so
+   an operator can read it (jsonfile.write_json). A fetch of the same
+   (name, version) loads the file instead of requesting the page again: the
+   cache is trusted as it is, delete the file to read the page again, e.g.
+   after the mirror of the config was changed. A cache file that holds no
+   index data is reported with a warning and the page is read again, the file
+   is written again;
+2. wheel: the pure python wheel of the version is selected from index_data
+   and downloaded to {target_folder}/{filename}. The file is downloaded when
+   it is not in the folder yet, and when the sha256 of the local file does
+   not match the sha256 of its index link: a file that matches is kept as it
+   is, no request is made. A link without sha256 has nothing to check
+   against, the local file is trusted, the first download is the authority
+   (TOFU).
 
 Only the pure python wheels of python3 are fetched: the abi and the platform
 tag of the file must be none-any, the python tag must cover py3. A version
@@ -22,9 +37,7 @@ WheelNotFoundError. The distribution name is normalized with PEP 503 for the
 index url and the folder, the same dist-key the ledger and the pack folders
 use, see parse_dep.normalize_name.
 
-A wheel that is already in the target folder is kept as it is: the wheel of a
-version is immutable and the folder is the cache of the fetch, no request is
-made. A download is written atomically, and the bytes are checked against the
+A download is written atomically, and the bytes are checked against the
 sha256 of the index link while streaming when the link carries one: a
 mismatch raises WheelHashError and no file is put at the final path.
 
@@ -44,21 +57,27 @@ from typing import List
 from urllib.parse import unquote, urljoin, urlparse
 
 import httpx2
-from msgspec import Struct
+import msgspec
+from msgspec.structs import asdict
 
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
 from alasio.ext.cache import cached_property
+from alasio.ext.file.jsonfile import write_json
 from alasio.ext.path import PathStr
+from alasio.ext.path.atomic import atomic_read_bytes, atomic_read_bytes_stream
 from alasio.logger import logger
 
 # folder of the fetched wheels in the repo folder
 WHEEL_FOLDER = 'wheel'
 
+# cache of the parsed index page, in the folder of the version
+INDEX_DATA_FILE = 'index_data.json'
+
 # the href of a link of a PEP 503 index page: href="..." or href='...'
 REGEX_LINK = re.compile(r'href=["\']([^"\']+)["\']')
 
 
-class WheelInfo(Struct):
+class WheelInfo(msgspec.Struct):
     """
     One wheel file parsed from a link of a PEP 503 index page.
 
@@ -161,6 +180,88 @@ def _fragment_sha256(fragment):
     return ''
 
 
+def _parse_index_page(text, index_url):
+    """
+    Parse a PEP 503 index page into the wheel files it links.
+
+    The links of the page are read as they are: the relative urls are
+    resolved against the index url, the sha256 fragment of a link is read and
+    the filename is parsed. A link that is not a wheel file is skipped, the
+    wheel files of every version are parsed.
+
+    Args:
+        text (str): Content of the index page
+        index_url (str): Url of the page, the relative urls of the links are
+            resolved against it
+
+    Returns:
+        list[WheelInfo]: One WheelInfo per wheel file the page links, in the
+            order of the page
+    """
+    data = []
+    for href in REGEX_LINK.findall(text):
+        link_url = urljoin(index_url, href)
+        split = urlparse(link_url)
+        filename = unquote(split.path.rpartition('/')[2])
+        parsed = _parse_wheel_file(filename)
+        if parsed is None:
+            continue
+        name, version, tags = parsed
+        # the request url carries no fragment, the sha256 fragment of the
+        # link is read separately
+        url = split._replace(fragment='').geturl()
+        data.append(WheelInfo(
+            name=name, version=version, filename=filename, url=url,
+            sha256=_fragment_sha256(split.fragment), tags=tags))
+    return data
+
+
+def _sha256_file(file):
+    """
+    The sha256 hex digest of a file, streamed in chunks.
+
+    Args:
+        file (str): Source file path
+
+    Returns:
+        str: Lowercase sha256 hex digest
+
+    Raises:
+        FileNotFoundError: If the file does not exist
+    """
+    digest = hashlib.sha256()
+    for chunk in atomic_read_bytes_stream(file):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _read_index_data(file):
+    """
+    Read the cached index data of a version.
+
+    A cache file that holds no index data of the version (an interrupted
+    write, a file of another tool) is reported with a warning and None is
+    answered: the caller reads the index page and writes the file again,
+    like a missing file.
+
+    Args:
+        file (PathStr): Path of the cache file, see WheelFetcher.index_data_file
+
+    Returns:
+        list[WheelInfo] | None: The cached wheel information, None if the
+            file does not exist or holds no index data
+    """
+    try:
+        content = atomic_read_bytes(file)
+    except FileNotFoundError:
+        return None
+    try:
+        return msgspec.json.decode(content, type=List[WheelInfo])
+    except msgspec.DecodeError as e:
+        logger.warning(f'Invalid index data, read the index page again: "{file}", {e}')
+        return None
+
+
 def _iter_checked(chunks, sha256, url):
     """
     Iter the chunks of a download, check the sha256 when the stream ends.
@@ -208,7 +309,8 @@ class WheelFetcher:
         Args:
             root (str): Folder of the repo in the pack folder of the run
                 directory, e.g. {run directory}/pack/{Author}_{Repo}_{Branch};
-                the wheel is put in {root}/wheel/{name}/{version}/
+                the index data and the wheel are put in
+                {root}/wheel/{name}/{version}/
             mirror (str): Base url of the PyPI simple index (PEP 503), e.g.
                 'https://mirrors.aliyun.com/pypi/simple', with or without the
                 trailing '/'
@@ -244,16 +346,37 @@ class WheelFetcher:
         return self.root.joinpath(WHEEL_FOLDER).joinpath(normalize_name(self.name)).joinpath(self.version)
 
     @cached_property
+    def index_data_file(self):
+        """
+        Cache file of the index data: {target_folder}/index_data.json
+
+        The file holds the parse of the index page of an earlier fetch, see
+        index_data.
+
+        Returns:
+            PathStr: Absolute path of the file
+        """
+        return self.target_folder.joinpath(INDEX_DATA_FILE)
+
+    @cached_property
     def index_data(self):
         """
-        The wheel information parsed from the index page of the distribution.
+        The wheel information of the distribution, from the cache or the page.
 
-        The index of the distribution is requested at {mirror}/{name}/, the
-        links of the page are read as they are: the relative urls are resolved
-        against the index url, the sha256 fragment of a link is read and the
-        filename is parsed. A link that is not a wheel file is skipped, the
-        wheel files of every version are parsed. The result is cached: the
-        page is read once per instance.
+        An existing index_data_file is loaded as it is and the page is not
+        requested again: the cache is trusted like the wheel folder, delete
+        the file to read the page again, e.g. after the mirror of the config
+        was changed. A cache file that holds no index data is reported with a
+        warning and the page is read again, the file is written again (an
+        interrupted write, a file of another tool). Otherwise the index of
+        the distribution is requested at {mirror}/{name}/, the links of the
+        page are read as they are: the relative urls are resolved against the
+        index url, the sha256 fragment of a link is read and the filename is
+        parsed. A link that is not a wheel file is skipped, the wheel files
+        of every version are parsed. The parse is written to the cache file
+        for the later fetches with jsonfile.write_json, with an indent, so an
+        operator can read it. The result is cached on the instance: the cache
+        file or the page is read once per instance.
 
         Returns:
             list[WheelInfo]: One WheelInfo per wheel file the page links, in
@@ -265,34 +388,30 @@ class WheelFetcher:
             httpx2.HTTPStatusError: If the index request fails with another
                 status
         """
+        file = self.index_data_file
+        data = _read_index_data(file)
+        if data is not None:
+            logger.info(f'Index data exists, loaded: "{file}"')
+            return data
+
         index_url = f'{self.mirror}/{normalize_name(self.name)}/'
         response = self._get_index(index_url)
-        data = []
-        for href in REGEX_LINK.findall(response.text):
-            link_url = urljoin(index_url, href)
-            split = urlparse(link_url)
-            filename = unquote(split.path.rpartition('/')[2])
-            parsed = _parse_wheel_file(filename)
-            if parsed is None:
-                continue
-            name, version, tags = parsed
-            # the request url carries no fragment, the sha256 fragment of the
-            # link is read separately
-            url = split._replace(fragment='').geturl()
-            data.append(WheelInfo(
-                name=name, version=version, filename=filename, url=url,
-                sha256=_fragment_sha256(split.fragment), tags=tags))
+        data = _parse_index_page(response.text, index_url)
+        write_json(file, [asdict(wheel) for wheel in data])
+        logger.info(f'Index data cached: "{index_url}" -> "{file}"')
         return data
 
     def fetch(self):
         """
         Fetch the wheel of the distribution version to the target folder.
 
-        A wheel that is already in the target folder is kept as it is and no
-        request is made, see the module docstring. Otherwise the pure python
-        wheel of the version is selected from index_data and downloaded, the
-        bytes are checked against the sha256 of its index link when the link
-        carries one.
+        The fetch runs in two steps, see the module docstring: index_data is
+        read from the cache file or the index page, then the wheel of the
+        version is selected from it. The selected file is downloaded when it
+        is not in the folder yet, and when the sha256 of the local file does
+        not match the sha256 of its index link: a file that matches is kept
+        as it is and no request is made. The bytes of a download are checked
+        against the sha256 of the index link when the link carries one.
 
         Returns:
             PathStr: Path of the wheel file, target_folder/{filename}
@@ -305,12 +424,11 @@ class WheelFetcher:
                 of the index link, no file is put at the final path
             httpx2.HTTPError: If a request fails
         """
-        wheel = self._existing_wheel()
-        if wheel is not None:
-            logger.info(f'Wheel exists, skipped: "{wheel}"')
-            return wheel
         wheel = self._select_wheel()
         file = self.target_folder.joinpath(wheel.filename)
+        if self._wheel_is_valid(file, wheel):
+            logger.info(f'Wheel exists, skipped: "{file}"')
+            return file
         logger.info(f'Download wheel: "{wheel.url}" -> "{file}"')
         self._download(wheel.url, file, wheel.sha256)
         return file
@@ -339,23 +457,33 @@ class WheelFetcher:
         """
         self.close()
 
-    def _existing_wheel(self):
+    def _wheel_is_valid(self, file, wheel):
         """
-        The wheel of the version already in the target folder, if any.
+        Whether the local file is the wheel the index data describes.
+
+        The file is the one the index data names to fetch, the filename of
+        the selected wheel: a file of another name is not this fetch, see
+        fetch. A file that does not exist is not valid, it is downloaded.
+        The sha256 of the file is checked against the sha256 of the index
+        link when the link carries one: other bytes mean the local file is
+        not the file the index describes, the file is downloaded again. A
+        link without sha256 has nothing to check against, the local file is
+        trusted: the mirror carries no hash, the first download is the
+        authority (TOFU).
+
+        Args:
+            file (PathStr): Path of the wheel in the target folder
+            wheel (WheelInfo): Wheel selected from the index data
 
         Returns:
-            PathStr | None: Path of the wheel file, None if the target folder
-                holds no wheel of the version
+            bool: True if the file is usable as it is, no download needed
         """
-        dist = normalize_name(self.name)
-        for filename in sorted(self.target_folder.iter_filenames(ext='.whl')):
-            parsed = _parse_wheel_file(filename)
-            if parsed is None:
-                continue
-            name, version, _ = parsed
-            if name == dist and version == self.version:
-                return self.target_folder.joinpath(filename)
-        return None
+        if not wheel.sha256:
+            return file.exists()
+        try:
+            return _sha256_file(file) == wheel.sha256
+        except FileNotFoundError:
+            return False
 
     def _select_wheel(self):
         """

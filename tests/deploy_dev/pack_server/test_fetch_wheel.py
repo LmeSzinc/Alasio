@@ -5,17 +5,25 @@ PyPI simple mirror.
 The mirror is simulated with an httpx2.MockTransport client: the index pages
 and the wheel files are served from the memory of the mock, no socket is
 bound and no real mirror is requested, the same pattern as the tests of
-ServerFile (tests/deploy_dev/pack/test_server_file.py).
+ServerFile (tests/deploy_dev/pack/test_server_file.py). The index data cache
+and the wheel are written to the fake filesystem
+(alasio.testing.filesystem), the cache of an earlier fetch is prepared with
+write_index_data.
 """
 import hashlib
 
 import httpx2
 import pytest
+from msgspec.structs import asdict
 
-from alasio.deploy_dev.pack_server.fetch_wheel import WHEEL_FOLDER, WheelFetcher, WheelHashError, WheelNotFoundError
+from alasio.deploy_dev.pack_server.fetch_wheel import (
+    INDEX_DATA_FILE, WHEEL_FOLDER, WheelFetcher, WheelHashError, WheelInfo, WheelNotFoundError
+)
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
 from alasio.ext import env
+from alasio.ext.file.jsonfile import json_dumps, write_json
 from alasio.ext.path import PathStr
+from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
 
@@ -29,13 +37,60 @@ def wheel_file(root, name, version, filename):
     return root.joinpath(WHEEL_FOLDER).joinpath(name).joinpath(version).joinpath(filename)
 
 
+def index_data_file(root, name, version):
+    """
+    Path of the index data cache of a version in the tests.
+
+    Returns:
+        PathStr: {root}/wheel/{name}/{version}/index_data.json
+    """
+    return root.joinpath(WHEEL_FOLDER).joinpath(name).joinpath(version).joinpath(INDEX_DATA_FILE)
+
+
+def write_index_data(root, name, version, wheels):
+    """
+    Write an index data cache like a fetch of the version wrote it.
+
+    Args:
+        root (PathStr): Folder of the repo of the tests
+        name (str): PEP 503 normalized distribution name, the folder key
+        version (str): Version of the distribution, the folder key
+        wheels (list[WheelInfo]): Wheel files the cache holds
+
+    Returns:
+        PathStr: Path of the cache file
+    """
+    file = index_data_file(root, name, version)
+    write_json(file, [asdict(wheel) for wheel in wheels])
+    return file
+
+
+def page_link(filename, digest):
+    """
+    One link of a PEP 503 index page of the mock mirror.
+
+    The link is relative, like the links of a real mirror page; it carries
+    the sha256 fragment of the file when the test registered one.
+
+    Args:
+        filename (str): Filename of the file
+        digest (str): sha256 hex of the fragment, '' for a link without one
+
+    Returns:
+        str: The link
+    """
+    fragment = f'#sha256={digest}' if digest else ''
+    return f'<a href="../../packages/{filename}{fragment}">{filename}</a><br/>\n'
+
+
 class MockMirror:
     """
     In-memory PyPI simple mirror, served through an httpx2 MockTransport.
 
     The index page of a distribution is built from the registered files: every
     link is relative and carries the sha256 fragment like the page of a real
-    mirror, so the client resolves the url against the index url. The files
+    mirror, so the client resolves the url against the index url; a file that
+    was registered without a digest is linked without a fragment. The files
     are served from the memory, a file that is not registered is a 404.
     """
 
@@ -51,7 +106,7 @@ class MockMirror:
         self.requests = []
         self.client = httpx2.Client(transport=httpx2.MockTransport(self._handle))
 
-    def register(self, name, version, tags='py3-none-any', filename='', content=b'', digest=''):
+    def register(self, name, version, tags='py3-none-any', filename='', content=b'', digest=None):
         """
         Register a file under the index of a distribution.
 
@@ -64,8 +119,9 @@ class MockMirror:
                 filename built from the arguments
             content (bytes): Content of the file. Defaults to b'', a content
                 generated from the filename
-            digest (str): sha256 hex of the link fragment. Defaults to '',
-                the sha256 of the content
+            digest (str | None): sha256 hex of the link fragment. Defaults to
+                None, the sha256 of the content; pass '' to link the file
+                without a sha256 fragment, like a mirror that carries no hash
 
         Returns:
             bytes: Content of the file
@@ -74,7 +130,7 @@ class MockMirror:
             filename = f'{name.replace("-", "_")}-{version}-{tags}.whl'
         if not content:
             content = f'{filename} content'.encode('utf-8')
-        if not digest:
+        if digest is None:
             digest = hashlib.sha256(content).hexdigest()
         self.files.setdefault(normalize_name(name), {})[filename] = (content, digest)
         return content
@@ -101,7 +157,7 @@ class MockMirror:
         if files is None:
             return httpx2.Response(404, content=b'')
         links = ''.join(
-            f'<a href="../../packages/{filename}#sha256={digest}">{filename}</a><br/>\n'
+            page_link(filename, digest)
             for filename, (_, digest) in sorted(files.items())
         )
         return httpx2.Response(200, content=f'<!DOCTYPE html><html>{links}</html>'.encode('utf-8'))
@@ -175,11 +231,13 @@ class TestWheelFetcher:
         folder = root.joinpath(WHEEL_FOLDER).joinpath('pyyaml').joinpath('6.0.1')
         assert fetcher.target_folder == folder
         assert fetcher.target_folder is fetcher.target_folder
+        # the index data cache lives in the folder of the version
+        assert fetcher.index_data_file == folder.joinpath(INDEX_DATA_FILE)
 
-    def test_index_data(self, make_fetcher, mirror):
-        """The wheel files of the index page are parsed once and cached."""
+    def test_index_data(self, fs, make_fetcher, mirror, root):
+        """The wheel files of the index page are parsed once and cached to the disk."""
         mirror.register('httpx', '0.28.0')
-        mirror.register('httpx', '0.28.1')
+        content = mirror.register('httpx', '0.28.1')
         mirror.register('httpx', '0.28.1', filename='httpx-0.28.1-cp38-cp38-win_amd64.whl')
         mirror.register('httpx', '0.28.1', filename='httpx-0.28.1.tar.gz')
         fetcher = make_fetcher('httpx', '0.28.1')
@@ -192,14 +250,63 @@ class TestWheelFetcher:
         ]
         # the links of the page are resolved against the index url and parsed
         wheel = data[2]
-        assert wheel.name == 'httpx'
-        assert wheel.version == '0.28.1'
-        assert wheel.url == 'http://mirror/packages/httpx-0.28.1-py3-none-any.whl'
-        assert wheel.tags == ['py3', 'none', 'any']
-        assert wheel.sha256 == hashlib.sha256(b'httpx-0.28.1-py3-none-any.whl content').hexdigest()
-        # the page is read once: the data is cached
+        assert wheel == WheelInfo(
+            name='httpx', version='0.28.1', filename='httpx-0.28.1-py3-none-any.whl',
+            url='http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+            sha256=hashlib.sha256(content).hexdigest(), tags=['py3', 'none', 'any'])
+        # the page is read once: the data is cached on the instance
         assert fetcher.index_data is data
         assert mirror.requests == ['http://mirror/httpx/']
+        # the parse is written to index_data.json of the version, indented
+        file = index_data_file(root, 'httpx', '0.28.1')
+        assert file.atomic_read_bytes() == json_dumps([asdict(wheel) for wheel in data])
+
+    def test_index_data_exists(self, fs, make_fetcher, mirror, root):
+        """An existing index_data.json is loaded as it is, the page is not requested."""
+        # the mirror holds the wheel file but no index of httpx: a fetch that
+        # read the index page would fail, the cached data must drive the fetch
+        content = mirror.register('other', '1.0', filename='httpx-0.28.1-py3-none-any.whl')
+        write_index_data(root, 'httpx', '0.28.1', [
+            WheelInfo(
+                name='httpx', version='0.28.1', filename='httpx-0.28.1-py3-none-any.whl',
+                url='http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+                sha256=hashlib.sha256(content).hexdigest(), tags=['py3', 'none', 'any']),
+        ])
+        file = make_fetcher('httpx', '0.28.1').fetch()
+        assert file == wheel_file(root, 'httpx', '0.28.1', 'httpx-0.28.1-py3-none-any.whl')
+        assert file.atomic_read_bytes() == content
+        # only the wheel file is requested, the index data comes from the cache
+        assert mirror.requests == ['http://mirror/packages/httpx-0.28.1-py3-none-any.whl']
+
+    @pytest.mark.parametrize('content', [
+        # not json at all
+        b'not json',
+        # a json document that is not the index data of a distribution
+        b'{"name": "httpx"}',
+    ])
+    def test_index_data_broken(self, content, fs, make_fetcher, mirror, root):
+        """An index_data.json that holds no index data is warned about and read again."""
+        mirror.register('httpx', '0.28.1')
+        file = index_data_file(root, 'httpx', '0.28.1')
+        fs.create_file(file, contents=content)
+        with logger.mock_capture_writer() as capture:
+            result = make_fetcher('httpx', '0.28.1').fetch()
+        # the broken file is reported, the page is read again and the cache
+        # is written again, the fetch itself is not blocked
+        assert capture.fd.any_contains(f'Invalid index data, read the index page again: "{file}"')
+        assert result.name == 'httpx-0.28.1-py3-none-any.whl'
+        assert mirror.requests == [
+            'http://mirror/httpx/',
+            'http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+        ]
+        assert file.atomic_read_bytes() == json_dumps([
+            {
+                'name': 'httpx', 'version': '0.28.1', 'filename': 'httpx-0.28.1-py3-none-any.whl',
+                'url': 'http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+                'sha256': hashlib.sha256(b'httpx-0.28.1-py3-none-any.whl content').hexdigest(),
+                'tags': ['py3', 'none', 'any'],
+            },
+        ])
 
     def test_name_normalized(self, make_fetcher, mirror, root):
         """The name is normalized with PEP 503 for the index url and the folder."""
@@ -220,14 +327,59 @@ class TestWheelFetcher:
             'opencv_python_headless-4.10.0.84-py3-none-any.whl')
 
     def test_skips_existing(self, fs, make_fetcher, mirror, root):
-        """A wheel already fetched is kept as it is, no request is made."""
+        """A wheel with the sha256 of the index data is kept, no request is made."""
         filename = 'httpx-0.28.1-py3-none-any.whl'
         content = b'existing wheel content'
         fs.create_file(wheel_file(root, 'httpx', '0.28.1', filename), contents=content)
+        write_index_data(root, 'httpx', '0.28.1', [
+            WheelInfo(
+                name='httpx', version='0.28.1', filename=filename,
+                url='http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+                sha256=hashlib.sha256(content).hexdigest(), tags=['py3', 'none', 'any']),
+        ])
         file = make_fetcher('httpx', '0.28.1').fetch()
         assert file == wheel_file(root, 'httpx', '0.28.1', filename)
         assert file.atomic_read_bytes() == content
         assert mirror.requests == []
+
+    def test_existing_wheel_hash_mismatch(self, fs, make_fetcher, mirror, root):
+        """A local wheel that does not match the sha256 of the index is downloaded again."""
+        filename = 'httpx-0.28.1-py3-none-any.whl'
+        content = mirror.register('httpx', '0.28.1')
+        # the local file is not the file the index describes
+        fs.create_file(wheel_file(root, 'httpx', '0.28.1', filename), contents=b'broken wheel')
+        file = make_fetcher('httpx', '0.28.1').fetch()
+        assert file == wheel_file(root, 'httpx', '0.28.1', filename)
+        assert file.atomic_read_bytes() == content
+        assert mirror.requests == [
+            'http://mirror/httpx/',
+            'http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+        ]
+
+    def test_existing_wheel_without_hash(self, fs, make_fetcher, mirror, root):
+        """A link without sha256 has nothing to check against, the local wheel is kept."""
+        # a page link without a sha256 fragment: the mirror carries no hash
+        mirror.register('httpx', '0.28.1', digest='')
+        file = wheel_file(root, 'httpx', '0.28.1', 'httpx-0.28.1-py3-none-any.whl')
+        fs.create_file(file, contents=b'existing wheel content')
+        result = make_fetcher('httpx', '0.28.1').fetch()
+        assert result == file
+        assert result.atomic_read_bytes() == b'existing wheel content'
+        # the page is read, the wheel is not downloaded
+        assert mirror.requests == ['http://mirror/httpx/']
+
+    def test_wheel_of_other_filename_not_trusted(self, fs, make_fetcher, mirror, root):
+        """The index data names the file to fetch, a local file of another name is not it."""
+        mirror.register('httpx', '0.28.1')
+        fs.create_file(
+            wheel_file(root, 'httpx', '0.28.1', 'httpx-0.28.1-py2.py3-none-any.whl'),
+            contents=b'other filename')
+        file = make_fetcher('httpx', '0.28.1').fetch()
+        assert file.name == 'httpx-0.28.1-py3-none-any.whl'
+        assert mirror.requests == [
+            'http://mirror/httpx/',
+            'http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+        ]
 
     def test_pure_wheel_selected(self, make_fetcher, mirror):
         """The pure wheel is selected when the version also has platform wheels."""
