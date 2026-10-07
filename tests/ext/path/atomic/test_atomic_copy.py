@@ -198,6 +198,22 @@ class TestAtomicCopy:
         assert os.listdir('/data') == ['a.bin']
         assert file_read_bytes('/data/a.bin') == b'data'
 
+    def test_copy_read_error_cleans_tmp(self, fs, monkeypatch):
+        """The tmp file should be removed when the source read fails midway."""
+        fs.create_file('/data/a.bin', contents=b'abcdefgh')
+        real_read = atomic.atomic_read_bytes_into
+
+        def broken_read(file, buffer):
+            read = real_read(file, buffer)
+            yield next(read)
+            raise RuntimeError('source read failed midway')
+
+        monkeypatch.setattr(atomic, 'atomic_read_bytes_into', broken_read)
+        with pytest.raises(RuntimeError, match='source read failed midway'):
+            atomic_copy('/data/a.bin', '/data/b.bin')
+        assert file_read_bytes('/data/a.bin') == b'abcdefgh'
+        assert os.listdir('/data') == ['a.bin']
+
     def test_copy_retries_on_windows(self, fs, monkeypatch):
         """PermissionError should be retried on Windows until it works."""
         monkeypatch.setattr(atomic, 'IS_WINDOWS', True)

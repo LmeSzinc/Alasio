@@ -407,10 +407,27 @@ async def afile_write_stream(file, data_iter):
         os.fsync(f.fileno())
 
 
+def _remove_tmp_on_failure(tmp):
+    """
+    Remove the tmp file of an atomic write that failed.
+
+    The error of the removal is dropped: the error of the write is the one
+    the caller has to handle, the tmp file is the lesser problem.
+
+    Args:
+        tmp (str): Temporary file path
+    """
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+
+
 def atomic_write(file, data):
     """
     Atomic file write with minimal IO operation
     and handles cases where file might be read by another process.
+    A failed write leaves the target untouched and no tmp file behind.
 
     os.replace() is an atomic operation among all OS,
     we write to temp file then do os.replace()
@@ -420,7 +437,11 @@ def atomic_write(file, data):
         data (Union[str, bytes]): Data to write
     """
     tmp = to_tmp_file(file)
-    file_write(tmp, data)
+    try:
+        file_write(tmp, data)
+    except BaseException:
+        _remove_tmp_on_failure(tmp)
+        raise
     replace_tmp(tmp, file)
 
 
@@ -428,6 +449,7 @@ def atomic_write_stream(file, data_generator):
     """
     Atomic file write with streaming data support.
     Handles cases where file might be read by another process.
+    A failed write leaves the target untouched and no tmp file behind.
 
     os.replace() is an atomic operation among all OS,
     we write to temp file then do os.replace()
@@ -437,7 +459,11 @@ def atomic_write_stream(file, data_generator):
         data_generator (Iterable): An iterable that yields data chunks (str or bytes)
     """
     tmp = to_tmp_file(file)
-    file_write_stream(tmp, data_generator)
+    try:
+        file_write_stream(tmp, data_generator)
+    except BaseException:
+        _remove_tmp_on_failure(tmp)
+        raise
     replace_tmp(tmp, file)
 
 
@@ -767,6 +793,7 @@ def file_copy(source, target, chunk_size=CHUNK_SIZE):
 def atomic_copy(source, target, chunk_size=CHUNK_SIZE):
     """
     Atomic file write with minimal IO operation and memory usage
+    A failed copy leaves the target untouched and no tmp file behind.
 
     Args:
         source (str):
@@ -774,7 +801,11 @@ def atomic_copy(source, target, chunk_size=CHUNK_SIZE):
         chunk_size (int):
     """
     tmp = to_tmp_file(source)
-    file_copy(source, tmp, chunk_size=chunk_size)
+    try:
+        file_copy(source, tmp, chunk_size=chunk_size)
+    except BaseException:
+        _remove_tmp_on_failure(tmp)
+        raise
     replace_tmp(tmp, target)
 
 

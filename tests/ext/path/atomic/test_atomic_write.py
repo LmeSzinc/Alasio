@@ -412,6 +412,15 @@ class TestAtomicWrite:
         assert len(calls) == 1
         assert os.listdir('/data') == []
 
+    def test_write_error_cleans_tmp(self, fs):
+        """A failed write should remove the tmp file and keep the target."""
+        file_write('/data/a.txt', 'old content')
+        with pytest.raises(TypeError):
+            # the tmp file is opened, then write() refuses the data
+            atomic_write('/data/a.txt', 12345)
+        assert file_read_text('/data/a.txt') == 'old content'
+        assert os.listdir('/data') == ['a.txt']
+
     def test_write_retries_on_windows(self, fs, monkeypatch):
         """PermissionError should be retried on Windows until it works."""
         monkeypatch.setattr(atomic, 'IS_WINDOWS', True)
@@ -466,6 +475,29 @@ class TestAtomicWriteStream:
         assert e.value is error
         assert len(calls) == 1
         assert os.listdir('/data') == []
+
+    def test_write_stream_error_cleans_tmp(self, fs):
+        """The tmp file should be removed when the generator fails midway."""
+        file_write('/data/a.txt', 'old content')
+
+        def chunks():
+            yield 'new'
+            raise RuntimeError('generator failed midway')
+
+        with pytest.raises(RuntimeError, match='generator failed midway'):
+            atomic_write_stream('/data/a.txt', chunks())
+        assert file_read_text('/data/a.txt') == 'old content'
+        assert os.listdir('/data') == ['a.txt']
+
+    def test_write_stream_failure_before_chunk(self, fs):
+        """A generator failing before yielding should leave no tmp file."""
+        def chunks():
+            raise RuntimeError('generator failed at once')
+            yield 'never'
+
+        with pytest.raises(RuntimeError, match='generator failed at once'):
+            atomic_write_stream('/data/a.txt', chunks())
+        assert not os.path.exists('/data')
 
     def test_write_stream_retries_on_windows(self, fs, monkeypatch):
         """PermissionError should be retried on Windows until it works."""
