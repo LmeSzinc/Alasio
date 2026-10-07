@@ -267,15 +267,20 @@ class TestFileWriteStream:
 
     def test_write_empty(self, fs):
         """A generator that yields nothing should not create the file."""
-        file_write_stream('/data/a/b.txt', iter([]))
+        assert file_write_stream('/data/a/b.txt', iter([])) is False
         assert not os.path.exists('/data/a/b.txt')
         assert not os.path.exists('/data/a')
+
+    def test_write_created(self, fs):
+        """A generator with chunks should report the file created."""
+        assert file_write_stream('/data/a.txt', iter(['a', 'b'])) is True
+        assert file_read_text('/data/a.txt') == 'ab'
 
     def test_write_creates_parents(self, fs, monkeypatch):
         """All the chunks should be written after the parent folders are created."""
         calls = break_function(monkeypatch, atomic, 'open', [FileNotFoundError(2, 'No such file or directory')])
         makedirs = break_function(monkeypatch, os, 'makedirs', [])
-        file_write_stream('/data/a/b/c.txt', iter(['x', 'y', 'z']))
+        assert file_write_stream('/data/a/b/c.txt', iter(['x', 'y', 'z'])) is True
         assert len(calls) == 2
         assert makedirs == [(('/data/a/b',), {'exist_ok': True})]
         assert file_read_text('/data/a/b/c.txt') == 'xyz'

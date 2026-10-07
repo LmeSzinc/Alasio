@@ -91,6 +91,26 @@ class TestFileCopy:
         file_copy('/data/a.bin', '/data/b.bin')
         assert file_read_bytes('/data/b.bin') == b'data'
 
+    def test_copy_empty(self, fs):
+        """An empty source should create an empty target, not no target."""
+        fs.create_file('/data/a.bin', contents=b'')
+        file_copy('/data/a.bin', '/data/b.bin')
+        assert file_read_bytes('/data/b.bin') == b''
+        assert os.listdir('/data') == ['a.bin', 'b.bin']
+
+    def test_copy_empty_over_existing(self, fs):
+        """An empty source should empty an existing target."""
+        fs.create_file('/data/a.bin', contents=b'')
+        fs.create_file('/data/b.bin', contents=b'long old content')
+        file_copy('/data/a.bin', '/data/b.bin')
+        assert file_read_bytes('/data/b.bin') == b''
+
+    def test_copy_empty_creates_parents(self, fs):
+        """The parent folders of the target should be created for an empty source."""
+        fs.create_file('/data/a.bin', contents=b'')
+        file_copy('/data/a.bin', '/data/new/b.bin')
+        assert file_read_bytes('/data/new/b.bin') == b''
+
     def test_copy_missing_source(self, fs):
         """A missing source should raise FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
@@ -121,6 +141,21 @@ class TestAtomicCopy:
         fs.create_file('/data/b.bin', contents=b'long old content')
         atomic_copy('/data/a.bin', '/data/b.bin')
         assert file_read_bytes('/data/b.bin') == b'data'
+        assert os.listdir('/data') == ['a.bin', 'b.bin']
+
+    def test_copy_empty(self, fs):
+        """An empty source should give an empty target, no tmp file left behind."""
+        fs.create_file('/data/a.bin', contents=b'')
+        atomic_copy('/data/a.bin', '/data/b.bin')
+        assert file_read_bytes('/data/b.bin') == b''
+        assert os.listdir('/data') == ['a.bin', 'b.bin']
+
+    def test_copy_empty_over_existing(self, fs):
+        """An empty source should empty an existing target."""
+        fs.create_file('/data/a.bin', contents=b'')
+        fs.create_file('/data/b.bin', contents=b'long old content')
+        atomic_copy('/data/a.bin', '/data/b.bin')
+        assert file_read_bytes('/data/b.bin') == b''
         assert os.listdir('/data') == ['a.bin', 'b.bin']
 
     def test_copy_to_other_folder(self, fs):

@@ -292,6 +292,9 @@ def file_write_stream(file, data_generator):
     Args:
         file (str): Target file path
         data_generator (Iterable): An iterable that yields data chunks (str or bytes)
+
+    Returns:
+        bool: True if file is created, False if generator is empty
     """
     # Convert generator to iterator to ensure we can peek at first chunk
     data_iter = iter(data_generator)
@@ -301,7 +304,7 @@ def file_write_stream(file, data_generator):
         first_chunk = next(data_iter)
     except StopIteration:
         # Generator is empty, no file will be created
-        return
+        return False
 
     # Determine mode, encoding and newline from first chunk
     if isinstance(first_chunk, str):
@@ -327,7 +330,7 @@ def file_write_stream(file, data_generator):
             # Ensure data flush to disk
             f.flush()
             os.fsync(f.fileno())
-        return
+        return True
     except FileNotFoundError:
         pass
     # Create parent directory
@@ -342,6 +345,7 @@ def file_write_stream(file, data_generator):
         # Ensure data flush to disk
         f.flush()
         os.fsync(f.fileno())
+    return True
 
 
 async def afile_write_stream(file, data_iter):
@@ -746,7 +750,8 @@ def _copy_iter(source, buffer, chunk_size):
 
 def file_copy(source, target, chunk_size=CHUNK_SIZE):
     """
-    Copy file with memory reuse
+    Copy file with memory reuse.
+    An empty source gives an empty target, instead of no target.
 
     Args:
         source (str):
@@ -755,7 +760,10 @@ def file_copy(source, target, chunk_size=CHUNK_SIZE):
     """
     buffer = memoryview(bytearray(chunk_size))
     stream = _copy_iter(source, buffer, chunk_size)
-    file_write_stream(target, stream)
+    if not file_write_stream(target, stream):
+        # An empty source yields no chunk so file_write_stream() creates no file,
+        # while the copy of an empty file is an empty file
+        file_write(target, b'')
 
 
 def atomic_copy(source, target, chunk_size=CHUNK_SIZE):
