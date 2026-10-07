@@ -266,21 +266,31 @@ class TestFileWriteStream:
         assert file_read_bytes('/data/a.bin') == b'abcd'
 
     def test_write_empty(self, fs):
-        """A generator that yields nothing should not create the file."""
-        assert file_write_stream('/data/a/b.txt', iter([])) is False
-        assert not os.path.exists('/data/a/b.txt')
-        assert not os.path.exists('/data/a')
+        """A generator that yields nothing should create an empty file."""
+        file_write_stream('/data/a/b.txt', iter([]))
+        assert file_read_bytes('/data/a/b.txt') == b''
+        assert os.listdir('/data/a') == ['b.txt']
 
-    def test_write_created(self, fs):
-        """A generator with chunks should report the file created."""
-        assert file_write_stream('/data/a.txt', iter(['a', 'b'])) is True
-        assert file_read_text('/data/a.txt') == 'ab'
+    def test_write_empty_over_existing(self, fs):
+        """An empty generator should empty an existing file."""
+        file_write('/data/a.txt', 'old content')
+        file_write_stream('/data/a.txt', iter([]))
+        assert file_read_bytes('/data/a.txt') == b''
+
+    def test_write_empty_creates_parents(self, fs, monkeypatch):
+        """The parent folders should be created for an empty generator too."""
+        calls = break_function(monkeypatch, atomic, 'open', [FileNotFoundError(2, 'No such file or directory')])
+        makedirs = break_function(monkeypatch, os, 'makedirs', [])
+        file_write_stream('/data/a/b.txt', iter([]))
+        assert len(calls) == 2
+        assert makedirs == [(('/data/a',), {'exist_ok': True})]
+        assert file_read_bytes('/data/a/b.txt') == b''
 
     def test_write_creates_parents(self, fs, monkeypatch):
         """All the chunks should be written after the parent folders are created."""
         calls = break_function(monkeypatch, atomic, 'open', [FileNotFoundError(2, 'No such file or directory')])
         makedirs = break_function(monkeypatch, os, 'makedirs', [])
-        assert file_write_stream('/data/a/b/c.txt', iter(['x', 'y', 'z'])) is True
+        file_write_stream('/data/a/b/c.txt', iter(['x', 'y', 'z']))
         assert len(calls) == 2
         assert makedirs == [(('/data/a/b',), {'exist_ok': True})]
         assert file_read_text('/data/a/b/c.txt') == 'xyz'
@@ -316,14 +326,14 @@ class TestAfileWriteStream:
 
     @pytest.mark.trio
     async def test_write_empty(self, fs):
-        """An iterator that yields nothing should not create the file."""
+        """An iterator that yields nothing should create an empty file."""
         async def chunks():
             for chunk in []:
                 yield chunk
 
         await afile_write_stream('/data/a/b.txt', chunks())
-        assert not os.path.exists('/data/a/b.txt')
-        assert not os.path.exists('/data/a')
+        assert file_read_bytes('/data/a/b.txt') == b''
+        assert os.listdir('/data/a') == ['b.txt']
 
     @pytest.mark.trio
     async def test_write_creates_parents(self, fs, monkeypatch):
@@ -427,6 +437,19 @@ class TestAtomicWriteStream:
         """Bytes chunks should be written as-is."""
         atomic_write_stream('/data/a.bin', iter([b'ab', b'cd']))
         assert file_read_bytes('/data/a.bin') == b'abcd'
+
+    def test_write_stream_empty(self, fs):
+        """An empty generator should write an empty file, like atomic_write(file, b'')."""
+        atomic_write_stream('/data/a/b.txt', iter([]))
+        assert file_read_bytes('/data/a/b.txt') == b''
+        assert os.listdir('/data/a') == ['b.txt']
+
+    def test_write_stream_empty_over_existing(self, fs):
+        """An empty generator should empty an existing file."""
+        file_write('/data/a.txt', 'old content')
+        atomic_write_stream('/data/a.txt', iter([]))
+        assert file_read_bytes('/data/a.txt') == b''
+        assert os.listdir('/data') == ['a.txt']
 
     def test_write_stream_creates_parents(self, fs):
         """The parent folders should be created automatically."""

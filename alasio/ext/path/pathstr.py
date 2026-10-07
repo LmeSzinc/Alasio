@@ -359,7 +359,8 @@ class PathStr(str):
 
     def file_write_stream(self, data_generator):
         """
-        Only creates a file if the generator yields at least one data chunk.
+        Creates the file even if the generator yields no data chunk,
+        an empty generator writes an empty file, replacing the content of the target.
         Auto determines write mode based on the type of first chunk.
 
         Args:

@@ -286,15 +286,13 @@ def file_write(file, data):
 
 def file_write_stream(file, data_generator):
     """
-    Only creates a file if the generator yields at least one data chunk.
+    Creates the file even if the generator yields no data chunk,
+    an empty generator writes an empty file, replacing the content of the target.
     Auto determines write mode based on the type of first chunk.
 
     Args:
         file (str): Target file path
         data_generator (Iterable): An iterable that yields data chunks (str or bytes)
-
-    Returns:
-        bool: True if file is created, False if generator is empty
     """
     # Convert generator to iterator to ensure we can peek at first chunk
     data_iter = iter(data_generator)
@@ -303,8 +301,10 @@ def file_write_stream(file, data_generator):
     try:
         first_chunk = next(data_iter)
     except StopIteration:
-        # Generator is empty, no file will be created
-        return False
+        # Generator is empty, an empty file is still written:
+        # no chunk to tell text from bytes, and an empty file has no content
+        # to encode, so an empty bytes chunk goes through the binary mode
+        first_chunk = b''
 
     # Determine mode, encoding and newline from first chunk
     if isinstance(first_chunk, str):
@@ -330,7 +330,7 @@ def file_write_stream(file, data_generator):
             # Ensure data flush to disk
             f.flush()
             os.fsync(f.fileno())
-        return True
+        return
     except FileNotFoundError:
         pass
     # Create parent directory
@@ -345,12 +345,12 @@ def file_write_stream(file, data_generator):
         # Ensure data flush to disk
         f.flush()
         os.fsync(f.fileno())
-    return True
 
 
 async def afile_write_stream(file, data_iter):
     """
-    Only creates a file if the generator yields at least one data chunk.
+    Creates the file even if the generator yields no data chunk,
+    an empty generator writes an empty file, replacing the content of the target.
     Auto determines write mode based on the type of first chunk.
 
     Args:
@@ -361,8 +361,10 @@ async def afile_write_stream(file, data_iter):
     try:
         first_chunk = await data_iter.__anext__()
     except StopAsyncIteration:
-        # Generator is empty, no file will be created
-        return
+        # Generator is empty, an empty file is still written:
+        # no chunk to tell text from bytes, and an empty file has no content
+        # to encode, so an empty bytes chunk goes through the binary mode
+        first_chunk = b''
 
     # Determine mode, encoding and newline from first chunk
     if isinstance(first_chunk, str):
@@ -750,8 +752,7 @@ def _copy_iter(source, buffer, chunk_size):
 
 def file_copy(source, target, chunk_size=CHUNK_SIZE):
     """
-    Copy file with memory reuse.
-    An empty source gives an empty target, instead of no target.
+    Copy file with memory reuse
 
     Args:
         source (str):
@@ -760,10 +761,7 @@ def file_copy(source, target, chunk_size=CHUNK_SIZE):
     """
     buffer = memoryview(bytearray(chunk_size))
     stream = _copy_iter(source, buffer, chunk_size)
-    if not file_write_stream(target, stream):
-        # An empty source yields no chunk so file_write_stream() creates no file,
-        # while the copy of an empty file is an empty file
-        file_write(target, b'')
+    file_write_stream(target, stream)
 
 
 def atomic_copy(source, target, chunk_size=CHUNK_SIZE):
