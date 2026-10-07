@@ -1,4 +1,3 @@
-import httpx2
 import trio
 from msgspec import Struct
 
@@ -6,7 +5,12 @@ from alasio.deploy.httpclient.probe import AllMirrorsFailedError, ProbeBase
 from alasio.deploy.pack.decode_base import PackDecodeError
 from alasio.deploy.pack.server_url import ServerUrl
 from alasio.ext.algorithm.vint import decode_vint
+from alasio.ext.cache import cached_class_property
 from alasio.logger import logger
+
+# httpx2 is imported lazily in the places that use it: the package resolves
+# its own version with importlib.metadata at import time, which the in-memory
+# filesystem of the tests cannot answer
 
 
 class LatestInfo(Struct):
@@ -103,12 +107,22 @@ class ServerFile(ProbeBase):
     # answer slower than the budget is not usable (the default timeout
     # of httpx2.AsyncClient is the same)
     PROBE_TIMEOUT = 5.0
+
     # timeout of a pack file request: the connection budget stays short
     # (a mirror that is blocked in the user network is dropped
     # quickly), the read/write budget is longer than latest.pack: the
     # range of one file may be large, a slow transfer must not be
-    # taken for a stall
-    DOWNLOAD_TIMEOUT = httpx2.Timeout(connect=PROBE_TIMEOUT, read=30.0, write=30.0, pool=PROBE_TIMEOUT)
+    # taken for a stall. Built on the first access, so httpx2 stays
+    # lazily imported, see the module note
+    @cached_class_property
+    def DOWNLOAD_TIMEOUT(cls):
+        """
+        Returns:
+            httpx2.Timeout: Timeout of a pack file request
+        """
+        import httpx2
+        return httpx2.Timeout(connect=cls.PROBE_TIMEOUT, read=30.0, write=30.0, pool=cls.PROBE_TIMEOUT)
+
     # attempts of one data request: a transport error is retried, up to
     # three attempts (a one-off network blip should not fail the update
     # nor trigger a probe), the probe candidates stay single-shot, see
@@ -374,6 +388,7 @@ class ServerFile(ProbeBase):
         Returns:
             bool: True if the mirror should be reselected
         """
+        import httpx2
         if isinstance(e, httpx2.HTTPStatusError):
             status = e.response.status_code
             return status >= 500 or status == 429
@@ -387,7 +402,7 @@ class ServerFile(ProbeBase):
         The mirror is resolved before the request (see _resolve). A
         transport error is retried on the same mirror first (see
         _http_get) and the request uses DOWNLOAD_TIMEOUT (see the
-        class constants). A failure that means the mirror is not
+        class attribute). A failure that means the mirror is not
         usable (see _mirror_failed) drops it, reselects the mirror
         (see _reselect: the probe of the instance runs at most once)
         and retries the same request once on the new winner; a failure
@@ -407,6 +422,7 @@ class ServerFile(ProbeBase):
             AllMirrorsFailedError: If the reselection finds no usable
                 mirror
         """
+        import httpx2
         name, _ = await self._resolve()
         try:
             return await self._http_get(
@@ -454,6 +470,7 @@ class ServerFile(ProbeBase):
             httpx2.HTTPStatusError: If the request fails
             AllMirrorsFailedError: If no mirror is usable
         """
+        import httpx2
         name, info = await self._resolve()
         if info is not None:
             return info
@@ -574,6 +591,7 @@ class ServerFile(ProbeBase):
         Returns:
             httpx2.AsyncClient: The client to send the request with
         """
+        import httpx2
         if self._client is None:
             self._client = httpx2.AsyncClient()
         return self._client
@@ -612,6 +630,8 @@ class ServerFile(ProbeBase):
         Raises:
             httpx2.HTTPStatusError: If the request fails
         """
+        import httpx2
+
         # the timeout is only passed when set: None disables the
         # timeout of httpx instead of using its default
         kwargs = {'timeout': timeout} if timeout is not None else {}

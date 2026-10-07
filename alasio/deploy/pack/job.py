@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager, contextmanager
 
-import httpx2
 import trio
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
@@ -12,6 +11,10 @@ from alasio.deploy.pack.job_update import UpdateJob
 from alasio.ext.file.filelock import SQLiteFileLock
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_rmtree
 from alasio.logger import logger
+
+# httpx2 is imported lazily in the places that use it: the package resolves
+# its own version with importlib.metadata at import time, which the in-memory
+# filesystem of the tests cannot answer
 
 
 class DeployJob(DeployTarget):
@@ -270,6 +273,7 @@ class DeployJob(DeployTarget):
         Raises:
             ValueError: If the target was created without a server
         """
+        import httpx2
         if self.server is None:
             raise ValueError('Failed to update: no server provided')
         async with self.alocked():

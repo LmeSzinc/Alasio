@@ -1,6 +1,5 @@
 from hashlib import sha1
 
-import httpx2
 import trio
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
@@ -10,6 +9,10 @@ from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext.cache import InstanceCacheOperation
 from alasio.ext.path.atomic import atomic_read_bytes, file_write
 from alasio.logger import logger
+
+# httpx2 is imported lazily in the places that use it: the package resolves
+# its own version with importlib.metadata at import time, which the in-memory
+# filesystem of the tests cannot answer
 
 
 class SourceError(Exception):
@@ -264,6 +267,7 @@ class UpdateJob(JobBase):
         check stay in self.error, this is an unsolvable problem per
         the draft of PackEncodeBase.
         """
+        import httpx2
         if not self.error:
             return
         server = self.server

@@ -1,4 +1,3 @@
-import httpx2
 import trio
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
@@ -7,6 +6,10 @@ from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext.cache import InstanceCacheOperation, cached_property
 from alasio.ext.path.atomic import atomic_read_bytes, file_write
 from alasio.logger import logger
+
+# httpx2 is imported lazily in the places that use it: the package resolves
+# its own version with importlib.metadata at import time, which the in-memory
+# filesystem of the tests cannot answer
 
 
 class ResetJob(JobBase):
@@ -369,6 +372,7 @@ class ResetJob(JobBase):
         Raises:
             PackDecodeError: If the server is missing
         """
+        import httpx2
         server = self.server
         if server is None:
             raise PackDecodeError('Failed to download the files: no server provided')
