@@ -34,9 +34,8 @@ def is_tmp_file(file):
     # Check suffix first to reduce regex calls
     if not file.endswith('.tmp'):
         return False
-    # Check temp file format
-    dot = file[-11:-10]
-    if not dot:
+    # Check temp file format: filename.RID.tmp
+    if file[-11:-10] != '.':
         return False
     rid = file[-10:-4]
     return rid.isalnum()
@@ -1011,11 +1010,14 @@ def atomic_rmtree_empty(folder):
     Returns:
         bool: If success
     """
+    if not is_empty_folder(folder):
+        # Folder not exist, or not empty, no need to rmtree
+        return False
     tmp = to_tmp_file(folder)
     try:
         atomic_replace(folder, tmp)
     except FileNotFoundError:
-        # Folder not exist, no need to rmtree
+        # Folder removed by another process after the empty check
         return False
     return folder_rmtree_empty(tmp)
 
