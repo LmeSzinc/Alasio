@@ -222,10 +222,10 @@ class FakeClient:
         self.requests = []
         self.closed = False
 
-    async def get(self, url, headers=None, **kwargs):
+    async def request(self, method, url, headers=None, **kwargs):
         self.requests.append(str(url))
         return httpx2.Response(
-            200, content=b'v1' + b'\x00' * 20, request=httpx2.Request('GET', url))
+            200, content=b'v1' + b'\x00' * 20, request=httpx2.Request(method, url))
 
     async def aclose(self):
         self.closed = True

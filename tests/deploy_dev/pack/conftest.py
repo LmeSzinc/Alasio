@@ -20,6 +20,7 @@ import pytest
 import trio
 
 from alasio.db.table import AlasioTable
+from alasio.deploy.httpclient.httpclient import AsyncHttpClient
 from alasio.deploy.pack import job as job_module
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.server_file import ServerFile
@@ -203,6 +204,45 @@ WEBSITE_FULL_PACK = b''.join(PackFull(WEBSITE_REPO, commit=COMMIT).iter_pack_dat
 WEBSITE_INDEX_PACK = b''.join(PackFull(WEBSITE_REPO, commit=COMMIT).iter_packidx_data())
 
 
+class MockHttpClient(AsyncHttpClient):
+    """
+    The AsyncHttpClient of MockServerFile: an httpx2.AsyncClient with a
+    MockTransport handler per trio run.
+
+    httpx clients are bound to the event loop they are used in, and
+    pytest-trio runs every test case in a fresh trio.run(), so a
+    module level MockServerFile (WEBSITE_SERVER) serves every test with
+    one client per run, created on first use. This class replaces the
+    client of the instance after construction (MockServerFile.__init__).
+    """
+
+    def __init__(self, server):
+        """
+        Args:
+            server (MockServerFile): The server the requests serve
+        """
+        # no injected client: the clients of this instance are created
+        # by it, the tests never close a shared mock server
+        super().__init__()
+        self.server = server
+        # {trio token: client} of the runs this instance served
+        self._clients = {}
+
+    def _get_aclient(self):
+        """
+        The client of the current trio run, created on first use.
+
+        Returns:
+            httpx2.AsyncClient: The client to send the requests with
+        """
+        token = trio.lowlevel.current_trio_token()
+        client = self._clients.get(token)
+        if client is None:
+            client = httpx2.AsyncClient(transport=httpx2.MockTransport(self.server._handle))
+            self._clients[token] = client
+        return client
+
+
 class MockServerFile(ServerFile):
     """
     In-memory ServerFile for tests, serves the pack data without http.
@@ -210,13 +250,14 @@ class MockServerFile(ServerFile):
     The http requests are intercepted by an httpx2.AsyncClient with an
     httpx2.MockTransport handler, so the whole ServerFile logic (range
     requests, index pack assembly) runs as-is and only the transport
-    differs. One client is created per trio run when it is first
-    requested: httpx clients are bound to the event loop they are used
-    in, and pytest-trio runs every test case in a fresh trio.run(), so
-    a module level MockServerFile (WEBSITE_SERVER) can serve every test
-    without crossing loops. register_version() stores the full pack and
-    the index pack of a version, the transport handler serves
-    latest.pack and the range requests from the memory.
+    differs. The client of the instance is replaced by MockHttpClient:
+    one client is created per trio run when it is first requested,
+    httpx clients are bound to the event loop they are used in, and
+    pytest-trio runs every test case in a fresh trio.run(), so a module
+    level MockServerFile (WEBSITE_SERVER) can serve every test without
+    crossing loops. register_version() stores the full pack and the
+    index pack of a version, the transport handler serves latest.pack
+    and the range requests from the memory.
     """
 
     def __init__(self, base_url='http://mock'):
@@ -229,18 +270,10 @@ class MockServerFile(ServerFile):
         self.update_packs = {}
         # the latest registered version
         self.latest_version = ''
-        # {trio token: client} of the runs this instance served: one
-        # client per event loop, see the class docstring
-        self._clients = {}
-
-    def _get_aclient(self):
-        """The client of the current trio run, created on first use."""
-        token = trio.lowlevel.current_trio_token()
-        client = self._clients.get(token)
-        if client is None:
-            client = httpx2.AsyncClient(transport=httpx2.MockTransport(self._handle))
-            self._clients[token] = client
-        return client
+        # the http client of the base serves nothing, replace it by one
+        # that serves the memory through a MockTransport, one client
+        # per trio run, see MockHttpClient
+        self._http = MockHttpClient(self)
 
     def register_version(self, version, full_pack, index_pack):
         """

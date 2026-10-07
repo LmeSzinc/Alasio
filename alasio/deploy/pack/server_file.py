@@ -1,11 +1,10 @@
-import trio
 from msgspec import Struct
 
+from alasio.deploy.httpclient.httpclient import AsyncHttpClient
 from alasio.deploy.httpclient.probe import AllMirrorsFailedError, ProbeBase
 from alasio.deploy.pack.decode_base import PackDecodeError
 from alasio.deploy.pack.server_url import ServerUrl
 from alasio.ext.algorithm.vint import decode_vint
-from alasio.ext.cache import cached_class_property
 from alasio.logger import logger
 
 # httpx2 is imported lazily in the places that use it: the package resolves
@@ -73,11 +72,12 @@ class ServerFile(ProbeBase):
     records the winner. The payload of the probe is handed over, so a
     probe never costs an extra request when the flow needs latest.pack
     anyway. The probe of an instance runs at most once: a later
-    failure raises instead of racing again, see _reselect. A data
-    request is retried on a transport error, see _http_get. Every
-    request of an instance uses the same async http client - the
-    injected one, or one created on the first request and reused, see
-    _get_aclient - and aclose() closes a client the instance created.
+    failure raises instead of racing again, see _reselect. Every
+    request of an instance goes through its retrying http client
+    (AsyncHttpClient): a data request retries a transport error, the
+    probe candidates stay single-shot (see probe_function). The
+    client is the injected one, or one created on the first request
+    and reused; aclose() closes a client the instance created.
     `async with ServerFile(...) as server:` closes it on exit.
 
     Every method of the class is async: the requests run on the event
@@ -102,34 +102,6 @@ class ServerFile(ProbeBase):
     # bytes to request first for the header: the pack header plus the
     # index section length vint (at most 8 bytes for a int64 length)
     HEADER_REQUEST_SIZE = 64
-    # budget of one latest.pack request in seconds (a probe candidate
-    # and the latest.pack of a flow): latest.pack is a small file, an
-    # answer slower than the budget is not usable (the default timeout
-    # of httpx2.AsyncClient is the same)
-    PROBE_TIMEOUT = 5.0
-
-    # timeout of a pack file request: the connection budget stays short
-    # (a mirror that is blocked in the user network is dropped
-    # quickly), the read/write budget is longer than latest.pack: the
-    # range of one file may be large, a slow transfer must not be
-    # taken for a stall. Built on the first access, so httpx2 stays
-    # lazily imported, see the module note
-    @cached_class_property
-    def DOWNLOAD_TIMEOUT(cls):
-        """
-        Returns:
-            httpx2.Timeout: Timeout of a pack file request
-        """
-        import httpx2
-        return httpx2.Timeout(connect=cls.PROBE_TIMEOUT, read=30.0, write=30.0, pool=cls.PROBE_TIMEOUT)
-
-    # attempts of one data request: a transport error is retried, up to
-    # three attempts (a one-off network blip should not fail the update
-    # nor trigger a probe), the probe candidates stay single-shot, see
-    # _http_get
-    REQUEST_ATTEMPTS = 3
-    # seconds to wait before the retry of a data request
-    RETRY_BACKOFF = 0.5
 
     def __init__(self, mirrors, scope='', client=None):
         """
@@ -143,11 +115,13 @@ class ServerFile(ProbeBase):
                 ServerUrl, so independent update servers do not
                 overwrite each other. Ignored when mirrors is already
                 a ServerUrl (its own scope is used). Defaults to ''
-            client (httpx2.AsyncClient, optional): Client to use, its
-                lifetime belongs to the caller (this class never
-                closes an injected client). Defaults to None, a
-                client of this instance is created on the first
-                request and reused by every later one, aclose()
+            client (httpx2.AsyncClient | AsyncHttpClient, optional):
+                Client to use, or an AsyncHttpClient whose client is
+                taken (independent servers can share one client, see
+                AsyncHttpClient). Its lifetime belongs to the caller
+                (this class never closes an injected client). Defaults
+                to None, a client of this instance is created on the
+                first request and reused by every later one, aclose()
                 closes it
         """
         if not isinstance(mirrors, ServerUrl):
@@ -156,13 +130,10 @@ class ServerFile(ProbeBase):
         # structure, see ProbeBase (only run() executes it)
         super().__init__(mirrors.mirrors)
         self.server_url = mirrors
-        # the http client of this instance: the injected one, or None
-        # until the first request creates the client of the instance
-        # (the created client is reused, see _get_aclient())
-        self._client = client
-        # whether the client belongs to this instance: a created one
-        # is closed by aclose(), an injected one is left alone
-        self._own_client = client is None
+        # the retrying http client of this instance: the injected http
+        # client wrapped, or one that creates its own on the first
+        # request (reused by every later request), see AsyncHttpClient
+        self._http = AsyncHttpClient(client)
         # mirror resolved for this instance, the flow it serves; ''
         # until resolved, see _resolve()
         self._mirror = ''
@@ -187,9 +158,7 @@ class ServerFile(ProbeBase):
         idempotent, `async with ServerFile(...) as server:` closes it
         on exit. Do not close while a request is in flight.
         """
-        client = self._client
-        if self._own_client and client is not None:
-            await client.aclose()
+        await self._http.aclose()
 
     async def __aenter__(self):
         """
@@ -271,17 +240,25 @@ class ServerFile(ProbeBase):
                 20 bytes checksum
             httpx2.HTTPError: If the request fails
         """
-        return await self._fetch_latest_at(url)
+        # the candidates race each other: a retry with its backoff
+        # would hold the race, they stay single-shot
+        return await self._fetch_latest_at(url, attempts=1)
 
-    async def _fetch_latest_at(self, url, attempts=1):
+    async def _fetch_latest_at(self, url, attempts=AsyncHttpClient.REQUEST_ATTEMPTS):
         """
         Fetch and parse latest.pack of a base url.
 
+        The request overrides the default timeout of the http client
+        with AsyncHttpClient.PROBE_TIMEOUT: latest.pack is a small
+        file, an answer slower than the budget is not usable.
+
         Args:
             url (str): Base url of a mirror
-            attempts (int): Attempts of the request, the retry of a
-                data request lives in _http_get. Defaults to 1, the
-                probe candidates stay single-shot
+            attempts (int): Attempts of the request, a transport error
+                is retried up to that many attempts (see
+                AsyncHttpClient.request). Defaults to
+                AsyncHttpClient.REQUEST_ATTEMPTS, a data request;
+                probe_function() passes 1 to stay single-shot
 
         Returns:
             LatestInfo: The latest version and index pack checksum
@@ -291,7 +268,8 @@ class ServerFile(ProbeBase):
                 20 bytes checksum
             httpx2.HTTPError: If the request fails
         """
-        response = await self._http_get(f'{url}/latest.pack', timeout=self.PROBE_TIMEOUT, attempts=attempts)
+        response = await self._http.get(
+            f'{url}/latest.pack', timeout=AsyncHttpClient.PROBE_TIMEOUT, attempts=attempts)
         return LatestInfo.parse(response.content)
 
     async def _resolve(self):
@@ -401,14 +379,15 @@ class ServerFile(ProbeBase):
 
         The mirror is resolved before the request (see _resolve). A
         transport error is retried on the same mirror first (see
-        _http_get) and the request uses DOWNLOAD_TIMEOUT (see the
-        class attribute). A failure that means the mirror is not
-        usable (see _mirror_failed) drops it, reselects the mirror
-        (see _reselect: the probe of the instance runs at most once)
-        and retries the same request once on the new winner; a failure
-        of the retry is raised as-is. The pack format validates every
-        downloaded byte against its checksum, so a retry on another
-        mirror cannot corrupt the update.
+        AsyncHttpClient.request) and the request uses the default
+        timeout of the http client, see AsyncHttpClient.DEFAULT_TIMEOUT.
+        A failure that means the mirror is not usable (see
+        _mirror_failed) drops it, reselects the mirror (see _reselect:
+        the probe of the instance runs at most once) and retries the
+        same request once on the new winner; a failure of the retry is
+        raised as-is. The pack format validates every downloaded byte
+        against its checksum, so a retry on another mirror cannot
+        corrupt the update.
 
         Args:
             path (str): Path of the request, e.g. '/{version}/full.pack'
@@ -425,9 +404,8 @@ class ServerFile(ProbeBase):
         import httpx2
         name, _ = await self._resolve()
         try:
-            return await self._http_get(
-                f'{self.server_url.url_of(name)}{path}', headers,
-                timeout=self.DOWNLOAD_TIMEOUT, attempts=self.REQUEST_ATTEMPTS)
+            return await self._http.get(
+                f'{self.server_url.url_of(name)}{path}', headers)
         except httpx2.HTTPError as e:
             if self.server_url.single or not self._mirror_failed(e):
                 raise
@@ -437,9 +415,8 @@ class ServerFile(ProbeBase):
         # once on the new winner, a failure of the retry is raised
         # as-is
         name, _ = await self._reselect(failure)
-        return await self._http_get(
-            f'{self.server_url.url_of(name)}{path}', headers,
-            timeout=self.DOWNLOAD_TIMEOUT, attempts=self.REQUEST_ATTEMPTS)
+        return await self._http.get(
+            f'{self.server_url.url_of(name)}{path}', headers)
 
     async def get_latest_info(self):
         """
@@ -451,7 +428,7 @@ class ServerFile(ProbeBase):
         is returned directly without a second request; the payload is
         not cached, a later call fetches again. A transport error is
         retried before the mirror is considered failed (see
-        _http_get).
+        AsyncHttpClient.request).
 
         A failed request reselects the mirror (see _reselect): when the
         probe of this instance has not run yet, the payload of the new
@@ -475,7 +452,7 @@ class ServerFile(ProbeBase):
         if info is not None:
             return info
         try:
-            return await self._fetch_latest_at(self.server_url.url_of(name), attempts=self.REQUEST_ATTEMPTS)
+            return await self._fetch_latest_at(self.server_url.url_of(name))
         except (httpx2.HTTPError, PackDecodeError) as e:
             if self.server_url.single:
                 # nothing to reselect, the failure is the answer
@@ -572,90 +549,3 @@ class ServerFile(ProbeBase):
         """
         response = await self._request(f'/{new_version}/from_{old_version}.pack')
         return response.content
-
-    def _get_aclient(self):
-        """
-        The async http client of this instance: the injected one, or
-        the client of the instance created on the first request.
-
-        The client is reused by every request of the instance, so the
-        keep-alive connections of a flow are reused instead of a new
-        connection pool per request. Only a client created here is
-        closed by aclose(); an injected one belongs to the caller. No
-        lock guards the lazy creation: every task of a flow runs on
-        the same thread (the single thread invariant of async code),
-        only await points switch tasks and the creation below has no
-        await, so nothing races on it - the concurrent probe tasks of
-        the first request all observe the same client.
-
-        Returns:
-            httpx2.AsyncClient: The client to send the request with
-        """
-        import httpx2
-        if self._client is None:
-            self._client = httpx2.AsyncClient()
-        return self._client
-
-    async def _http_get(self, url, headers=None, timeout=None, attempts=1):
-        """
-        Get a url with the client of this instance (the injected one
-        or the reusable one created on the first request, see
-        _get_aclient()).
-
-        A transport error (dns lookup failure, connect refusal, ssl
-        handshake failure, timeout, read/write error - there is no
-        status code at all) is retried when more than one attempt is
-        requested: a one-off network blip should not fail the update,
-        nor be taken for a mirror failure, nor trigger a probe. An
-        http status error is never retried here, it is the answer of
-        the server and is classified by the caller (see
-        _mirror_failed). Every failed attempt is logged with a
-        warning, whatever the failure is: an absorbed blip stays
-        visible in the log and exhausted retries read as the sequence
-        of attempts. The wait before a retry is a trio sleep, so the
-        cancellation of the enclosing task interrupts it (like it
-        interrupts the in-flight request itself).
-
-        Args:
-            url (str): URL to get
-            headers (dict, optional): Request headers
-            timeout (float, optional): Request timeout in seconds,
-                the client default when not given
-            attempts (int): Attempts of the request, the retry waits
-                RETRY_BACKOFF seconds. Defaults to 1
-
-        Returns:
-            httpx2.Response: The response
-
-        Raises:
-            httpx2.HTTPStatusError: If the request fails
-        """
-        import httpx2
-
-        # the timeout is only passed when set: None disables the
-        # timeout of httpx instead of using its default
-        kwargs = {'timeout': timeout} if timeout is not None else {}
-        client = self._get_aclient()
-        for attempt in range(attempts):
-            if attempt:
-                # a transport error is often a one-off blip of the
-                # network: wait a moment, then retry the same request
-                await trio.sleep(self.RETRY_BACKOFF)
-            try:
-                response = await client.get(url, headers=headers, **kwargs)
-                response.raise_for_status()
-                return response
-            except httpx2.TransportError as e:
-                # a transport error is logged, and retried while an
-                # attempt is left: a one-off network blip should not
-                # fail the update
-                logger.warning(
-                    f'Request to "{url}" failed (attempt {attempt + 1}/{attempts}): {type(e).__name__}: {e}')
-                if attempt + 1 >= attempts:
-                    raise
-            except Exception as e:
-                # every other failure (an http status error, ...) is
-                # logged and raised as-is, it is never retried
-                logger.warning(
-                    f'Request to "{url}" failed (attempt {attempt + 1}/{attempts}): {type(e).__name__}: {e}')
-                raise

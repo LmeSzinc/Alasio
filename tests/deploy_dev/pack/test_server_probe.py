@@ -16,6 +16,7 @@ import httpx2
 import pytest
 import trio
 
+from alasio.deploy.httpclient.httpclient import AsyncHttpClient
 from alasio.deploy.httpclient.probe import AllMirrorsFailedError
 from alasio.deploy.pack.server_file import ServerFile
 from alasio.logger import logger
@@ -796,7 +797,8 @@ class TestRequestRetry:
 
 
 class TestRequestTimeout:
-    """latest.pack and the pack downloads use distinct timeouts."""
+    """latest.pack overrides the timeout of the http client with the
+    short budget, the pack downloads use its default timeout."""
 
     @pytest.mark.trio
     async def test_latest_pack_timeout(self):
@@ -812,18 +814,18 @@ class TestRequestTimeout:
             info = await server.get_latest_info()
         assert info.version == 'v1'
         assert timeouts == [{
-            'connect': ServerFile.PROBE_TIMEOUT,
-            'read': ServerFile.PROBE_TIMEOUT,
-            'write': ServerFile.PROBE_TIMEOUT,
-            'pool': ServerFile.PROBE_TIMEOUT,
+            'connect': AsyncHttpClient.PROBE_TIMEOUT,
+            'read': AsyncHttpClient.PROBE_TIMEOUT,
+            'write': AsyncHttpClient.PROBE_TIMEOUT,
+            'pool': AsyncHttpClient.PROBE_TIMEOUT,
         }]
 
     @pytest.mark.trio
     async def test_download_timeout(self):
-        """A pack download uses DOWNLOAD_TIMEOUT: the connection budget
-        stays short, the read/write budget is longer than latest.pack's
-        (the range of one file may be large, a slow transfer must not
-        be taken for a stall)."""
+        """A pack download uses the default timeout of the http client:
+        the connection budget stays short, the read/write budget is
+        longer than latest.pack's (the range of one file may be large,
+        a slow transfer must not be taken for a stall)."""
         timeouts = []
 
         def handler(request):
@@ -834,9 +836,9 @@ class TestRequestTimeout:
         with logger.mock_capture_writer():
             assert await server.get_file_content('v1', 0, 4) == b'pack data'
         assert timeouts == [{
-            'connect': ServerFile.PROBE_TIMEOUT,
-            'read': ServerFile.DOWNLOAD_TIMEOUT.read,
-            'write': ServerFile.DOWNLOAD_TIMEOUT.write,
-            'pool': ServerFile.PROBE_TIMEOUT,
+            'connect': AsyncHttpClient.PROBE_TIMEOUT,
+            'read': AsyncHttpClient.DEFAULT_TIMEOUT.read,
+            'write': AsyncHttpClient.DEFAULT_TIMEOUT.write,
+            'pool': AsyncHttpClient.PROBE_TIMEOUT,
         }]
-        assert ServerFile.DOWNLOAD_TIMEOUT.read > ServerFile.PROBE_TIMEOUT
+        assert AsyncHttpClient.DEFAULT_TIMEOUT.read > AsyncHttpClient.PROBE_TIMEOUT
