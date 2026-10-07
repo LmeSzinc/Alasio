@@ -82,6 +82,9 @@ class UnpackJob(JobBase):
         during write() and unpack() are safe because no real file was
         written and are logged as warning, errors during replace()
         leave partially replaced files and are logged as error.
+
+        Returns:
+            bool: True if every file is unpacked, False otherwise
         """
         try:
             if not self._resume:
@@ -92,7 +95,7 @@ class UnpackJob(JobBase):
             # no real file was written, safe to clean up
             logger.warning(f'Failed to unpack: {e}')
             await trio.to_thread.run_sync(self.cleanup)
-            return
+            return False
         try:
             logger.info(f'Replacing files to "{self.root}", name="{self.name}"')
             await trio.to_thread.run_sync(self.replace)
@@ -100,10 +103,11 @@ class UnpackJob(JobBase):
             # real files may be partially replaced
             logger.error(f'Failed to replace file: {e}')
             await trio.to_thread.run_sync(self.cleanup)
-            return
+            return False
         # all changes applied, clean the workspace atomically
         await trio.to_thread.run_sync(self.cleanup)
         logger.info(f'Unpack done')
+        return True
 
     def write(self):
         """

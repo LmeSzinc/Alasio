@@ -320,3 +320,60 @@ class DeployJob(DeployTarget):
             job = ResetJob(self.server, root=self.root, name=self.name)
             job._latest_info = info
             return await job.run()
+
+    async def run_unfinished_job(self):
+        """
+        Finish the unfinished job of this target, if any.
+
+        The unfinished job is the one recorded in the job file of the
+        target ({ledger}/workspace/job.pack, see _get_unfinished_job):
+        it is written before any real file is changed and cleaned up
+        when the run ends, so only a process killed in flight leaves
+        it behind. Called at the backend startup, before the first
+        update check: an update interrupted mid-apply is finished here
+        instead of waiting for the next user click.
+
+        The found job is resumed (its missing pieces are downloaded
+        from the server of the instance, self.server set in __init__)
+        and every change is applied in one pass. A job that does not
+        finish falls back to a rebuild from the latest index, the
+        fallback of update(), so a pack corrupted in flight still
+        converges.
+
+        The exclusive lock of the target ledger is held for the whole
+        flow, see alocked().
+
+        Returns:
+            bool: True when an unfinished job was found and completed
+                (a backend restart is needed to load the new files),
+                False when there was no unfinished job (nothing is
+                done)
+
+        Raises:
+            ValueError: When a job was found, did not finish, and the
+                target has no server for the fallback rebuild
+            RuntimeError: When a job was found and neither the job nor
+                the fallback rebuild completed; the target may be in a
+                partial state, a later run continues from there
+        """
+        async with self.alocked():
+            job = await trio.to_thread.run_sync(self._get_unfinished_job)
+            if job is None:
+                return False
+            logger.info(f'Found unfinished job: {job.__class__}')
+            if await job.run():
+                return True
+            # the job did not finish (records left in error, a pack
+            # corrupted in flight): fall back to a rebuild from the
+            # latest index, the fallback of the update flow
+            if self.server is None:
+                raise ValueError(
+                    'Failed to finish the unfinished job: no server for the fallback rebuild'
+                )
+            logger.warning('Failed to finish the unfinished job, rebuilding from the latest index')
+            rebuild = RebuildJob(self.server, root=self.root, name=self.name)
+            if await rebuild.run():
+                return True
+            raise RuntimeError(
+                'Failed to finish the unfinished job: the rebuild from the latest index did not complete'
+            )
