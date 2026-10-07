@@ -20,7 +20,7 @@ import pytest
 import trio
 
 from alasio.db.table import AlasioTable
-from alasio.deploy.httpclient.httpclient import AsyncHttpClient
+from alasio.deploy.httpclient.async_client import AsyncHttpClient
 from alasio.deploy.pack import job as job_module
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.server_file import ServerFile

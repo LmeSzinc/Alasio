@@ -3,9 +3,9 @@ Tests for AsyncHttpClient: the request core (the timeout and the
 transport error retry) and the verb wrappers.
 
 The requests are served by an httpx2.MockTransport handler, the tests
-never touch the network. Every test performing a request is async
-(pytest-trio); the retry of a test runs on the virtual clock
-(autojump_clock), so the backoff is asserted exactly instead of slept.
+never touch the network. Every test is async (pytest-trio) and runs the
+retry on the virtual clock (autojump_clock), so the backoff is asserted
+exactly instead of slept.
 """
 import gc
 import weakref
@@ -14,7 +14,7 @@ import httpx2
 import pytest
 import trio
 
-from alasio.deploy.httpclient.httpclient import AsyncHttpClient
+from alasio.deploy.httpclient.async_client import AsyncHttpClient
 from alasio.logger import logger
 
 
@@ -23,7 +23,7 @@ def make_aclient(handler):
     return httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
 
 
-class TestRequest:
+class TestAsyncRequest:
     """The request core: the verb, the headers and the timeout."""
 
     @pytest.mark.trio
@@ -102,7 +102,7 @@ class TestRequest:
         assert default.read > AsyncHttpClient.PROBE_TIMEOUT
 
 
-class TestRetry:
+class TestAsyncRetry:
     """A transport error is retried up to the attempts of the request,
     every failed attempt is logged; an http status error is never
     retried."""
@@ -226,7 +226,122 @@ class TestRetry:
         ]
 
 
-class TestLifecycle:
+class TestAsyncStream:
+    """The streamed transfer: the async consumer is awaited once per
+    attempt, a transport error of the transfer (opening the response or
+    reading it) is retried as a whole with a fresh request."""
+
+    @pytest.mark.trio
+    async def test_consume(self, autojump_clock):
+        """The consumer reads the streamed response; a transport error
+        while opening it is retried."""
+        attempts = []
+
+        def handler(request):
+            attempts.append(str(request.url))
+            if len(attempts) == 1:
+                raise httpx2.ReadTimeout('read timed out')
+            return httpx2.Response(200, content=b'payload')
+
+        chunks = []
+
+        async def consume(response):
+            async for chunk in response.aiter_bytes():
+                chunks.append(chunk)
+
+        client = AsyncHttpClient(make_aclient(handler))
+        start = trio.current_time()
+        with logger.mock_capture_writer():
+            await client.stream('http://test/a', consume)
+        assert chunks == [b'payload']
+        assert attempts == ['http://test/a', 'http://test/a']
+        assert trio.current_time() - start == AsyncHttpClient.RETRY_BACKOFF
+
+    @pytest.mark.trio
+    async def test_mid_stream_error_restarts_the_transfer(self, autojump_clock):
+        """A transport error while the consumer reads the response
+        discards the attempt: the transfer starts over with a fresh
+        request."""
+        class BrokenStream(httpx2.AsyncByteStream):
+            """A stream that yields one chunk, then fails like a
+            connection that dropped mid-transfer."""
+
+            async def __aiter__(self):
+                yield b'partial '
+                raise httpx2.ReadError('connection lost')
+
+        attempts = []
+
+        def handler(request):
+            attempts.append(str(request.url))
+            if len(attempts) == 1:
+                return httpx2.Response(200, stream=BrokenStream())
+            return httpx2.Response(200, content=b'payload')
+
+        chunks = []
+
+        async def consume(response):
+            async for chunk in response.aiter_bytes():
+                chunks.append(chunk)
+
+        client = AsyncHttpClient(make_aclient(handler))
+        with logger.mock_capture_writer() as capture:
+            await client.stream('http://test/a', consume)
+        # the chunk of the failed attempt was handed over, then the
+        # whole transfer was started over
+        assert chunks == [b'partial ', b'payload']
+        assert attempts == ['http://test/a', 'http://test/a']
+        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
+        assert warnings == [
+            'Request to "http://test/a" failed (attempt 1/3): ReadError: connection lost',
+        ]
+
+    @pytest.mark.trio
+    async def test_consumer_failure_is_not_retried(self):
+        """A failure of the consumer (a hash check, ...) is raised as-is
+        and is never retried: it is not a transport error."""
+        attempts = []
+
+        def handler(request):
+            attempts.append(str(request.url))
+            return httpx2.Response(200, content=b'payload')
+
+        async def consume(response):
+            raise ValueError('digest mismatch')
+
+        client = AsyncHttpClient(make_aclient(handler))
+        with logger.mock_capture_writer() as capture:
+            with pytest.raises(ValueError, match='digest mismatch'):
+                await client.stream('http://test/a', consume)
+        assert attempts == ['http://test/a']
+        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
+        assert warnings == [
+            'Request to "http://test/a" failed (attempt 1/3): ValueError: digest mismatch',
+        ]
+
+    @pytest.mark.trio
+    async def test_attempts_one_is_single_shot(self, autojump_clock):
+        """attempts=1 makes the transfer single-shot without a wait, the
+        consumer is not called when the response does not open."""
+        attempts = []
+
+        def handler(request):
+            attempts.append(str(request.url))
+            raise httpx2.ReadTimeout('read timed out')
+
+        async def consume(response):
+            raise AssertionError('the consumer must not be called')
+
+        client = AsyncHttpClient(make_aclient(handler))
+        start = trio.current_time()
+        with logger.mock_capture_writer():
+            with pytest.raises(httpx2.ReadTimeout):
+                await client.stream('http://test/a', consume, attempts=1)
+        assert attempts == ['http://test/a']
+        assert trio.current_time() - start == 0
+
+
+class TestAsyncLifecycle:
     """The client of the instance: created on the first request and
     reused by every later one, an injected or taken client belongs to
     its owner."""

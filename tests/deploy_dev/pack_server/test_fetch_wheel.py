@@ -11,11 +11,13 @@ and the wheel are written to the fake filesystem
 write_index_data.
 """
 import hashlib
+from types import SimpleNamespace
 
 import httpx2
 import pytest
 from msgspec.structs import asdict
 
+from alasio.deploy.httpclient import sync_client as sync_client_module
 from alasio.deploy_dev.pack_server.fetch_wheel import (
     INDEX_DATA_FILE, WHEEL_FOLDER, WheelFetcher, WheelHashError, WheelInfo, WheelNotFoundError
 )
@@ -439,3 +441,61 @@ class TestWheelFetcher:
         fetcher.close()
         # the client of the caller is still usable by a later fetch
         assert make_fetcher('httpx', '0.28.2').fetch().exists()
+
+    def test_transport_error_is_retried(self, monkeypatch, root, mirror):
+        """A transport error of the wheel request is retried: the fetch
+        works and the retried transfer writes the wheel."""
+        mirror.register('httpx', '0.28.1')
+        attempts = []
+
+        def handler(request):
+            url = str(request.url)
+            attempts.append(url)
+            if url.endswith('.whl') and attempts.count(url) == 1:
+                raise httpx2.ReadTimeout('read timed out')
+            return mirror._handle(request)
+
+        # the retry waits RETRY_BACKOFF for real: skip the wait, the
+        # retry itself is what this test checks
+        monkeypatch.setattr(sync_client_module, 'time', SimpleNamespace(sleep=lambda seconds: None))
+        client = httpx2.Client(transport=httpx2.MockTransport(handler))
+        with logger.mock_capture_writer():
+            file = WheelFetcher(root, mirror.base, 'httpx', '0.28.1', client=client).fetch()
+        assert file.atomic_read_bytes() == b'httpx-0.28.1-py3-none-any.whl content'
+        assert attempts == [
+            'http://mirror/httpx/',
+            'http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+            'http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+        ]
+
+    def test_mid_stream_error_restarts_the_download(self, monkeypatch, root, mirror):
+        """A transport error in the middle of the transfer discards the
+        attempt and the download starts over: the atomic write leaves no
+        partial file behind."""
+        mirror.register('httpx', '0.28.1')
+        attempts = []
+
+        class BrokenStream(httpx2.SyncByteStream):
+            """A wheel stream that fails after a first chunk."""
+
+            def __iter__(self):
+                yield b'partial '
+                raise httpx2.ReadError('connection lost')
+
+        def handler(request):
+            url = str(request.url)
+            attempts.append(url)
+            if url.endswith('.whl') and attempts.count(url) == 1:
+                return httpx2.Response(200, stream=BrokenStream())
+            return mirror._handle(request)
+
+        monkeypatch.setattr(sync_client_module, 'time', SimpleNamespace(sleep=lambda seconds: None))
+        client = httpx2.Client(transport=httpx2.MockTransport(handler))
+        with logger.mock_capture_writer():
+            file = WheelFetcher(root, mirror.base, 'httpx', '0.28.1', client=client).fetch()
+        assert file.atomic_read_bytes() == b'httpx-0.28.1-py3-none-any.whl content'
+        assert attempts == [
+            'http://mirror/httpx/',
+            'http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+            'http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+        ]

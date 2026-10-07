@@ -41,6 +41,13 @@ A download is written atomically, and the bytes are checked against the
 sha256 of the index link while streaming when the link carries one: a
 mismatch raises WheelHashError and no file is put at the final path.
 
+Both requests go through the retrying http client of the instance
+(HttpClient): a transport error (dns failure, connect refusal, timeout,
+read error) is retried, so a one-off network blip does not fail the
+fetch; the transfer of a wheel is retried as a whole, a read error in
+the middle of a download starts it over. An http status error is the
+answer of the mirror and is never retried.
+
 Usage:
     from alasio.deploy_dev.pack_server.fetch_wheel import WheelFetcher
 
@@ -60,6 +67,7 @@ import httpx2
 import msgspec
 from msgspec.structs import asdict
 
+from alasio.deploy.httpclient.sync_client import HttpClient
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
 from alasio.ext.cache import cached_property
 from alasio.ext.file.jsonfile import write_json
@@ -319,18 +327,21 @@ class WheelFetcher:
                 folder.
             version (str): Exact version of the distribution, e.g. '0.28.1',
                 the version string a dependency file pins
-            client (httpx2.Client, optional): Client to use, its lifetime
-                belongs to the caller (this class never closes an injected
-                client). Defaults to None, a client of this instance is
-                created on the first request and reused by the later ones,
-                close() closes it
+            client (httpx2.Client | HttpClient, optional): Client to
+                use, or an HttpClient whose client is taken (independent
+                fetchers can share one client, see HttpClient). Its
+                lifetime belongs to the caller (this class never closes
+                an injected client). Defaults to None, a client of this
+                instance is created on the first request and reused by
+                the later ones, close() closes it
         """
         self.root = PathStr.new(root)
         self.mirror = mirror.rstrip('/')
         self.name = name
         self.version = version
-        self._client = client
-        self._own_client = client is None
+        # the retrying http client of this instance: every request goes
+        # through it, a transport error is retried, see HttpClient
+        self._http = HttpClient(client)
 
     @cached_property
     def target_folder(self):
@@ -441,8 +452,7 @@ class WheelFetcher:
         caller, see __init__. Closing is idempotent, `with WheelFetcher(...)
         as fetcher:` closes it on exit.
         """
-        if self._own_client and self._client is not None:
-            self._client.close()
+        self._http.close()
 
     def __enter__(self):
         """
@@ -532,19 +542,25 @@ class WheelFetcher:
                 distribution (a 404)
             httpx2.HTTPStatusError: If the request fails with another status
         """
-        response = self._get_client().get(index_url, follow_redirects=True)
+        # the http client raises the status errors of the response, a
+        # 404 means the mirror has no index of the distribution
         try:
-            response.raise_for_status()
+            return self._http.get(index_url, follow_redirects=True)
         except httpx2.HTTPStatusError as e:
             if e.response.status_code == 404:
                 raise WheelNotFoundError(
                     f'No index of "{self.name}" in "{self.mirror}"') from None
             raise
-        return response
 
     def _download(self, url, file, sha256):
         """
         Download a file, check the sha256 while streaming, write it atomically.
+
+        The transfer is retried as a whole on a transport error, see
+        HttpClient.stream: a read error in the middle of the download
+        discards the attempt and starts the transfer over, and a failed
+        attempt leaves no file behind (the atomic write removes its tmp
+        file).
 
         Args:
             url (str): Url of the file
@@ -554,24 +570,12 @@ class WheelFetcher:
         Raises:
             WheelHashError: If the bytes do not match sha256, no file is put
                 at the final path
-            httpx2.HTTPError: If the request fails
+            httpx2.HTTPError: If the transfer fails on every attempt
         """
-        with self._get_client().stream('GET', url, follow_redirects=True) as response:
-            response.raise_for_status()
+        def consume(response):
+            # the check of the digest lives in the chunk generator: a
+            # mismatch fails the atomic write before the tmp file is
+            # put at the final path
             file.atomic_write_stream(_iter_checked(response.iter_bytes(), sha256, url))
 
-    def _get_client(self):
-        """
-        The http client of this instance: the injected one, or the client of
-        the instance created on the first request.
-
-        The client is reused by every request of the instance, so the
-        keep-alive connections of a fetch are reused. Only a client created
-        here is closed by close(); an injected one belongs to the caller.
-
-        Returns:
-            httpx2.Client: The client to send the request with
-        """
-        if self._client is None:
-            self._client = httpx2.Client()
-        return self._client
+        self._http.stream(url, consume, follow_redirects=True)

@@ -1,6 +1,6 @@
 from msgspec import Struct
 
-from alasio.deploy.httpclient.httpclient import AsyncHttpClient
+from alasio.deploy.httpclient.async_client import AsyncHttpClient
 from alasio.deploy.httpclient.probe import AllMirrorsFailedError, ProbeBase
 from alasio.deploy.pack.decode_base import PackDecodeError
 from alasio.deploy.pack.server_url import ServerUrl

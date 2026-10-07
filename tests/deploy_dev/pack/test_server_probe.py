@@ -16,7 +16,7 @@ import httpx2
 import pytest
 import trio
 
-from alasio.deploy.httpclient.httpclient import AsyncHttpClient
+from alasio.deploy.httpclient.async_client import AsyncHttpClient
 from alasio.deploy.httpclient.probe import AllMirrorsFailedError
 from alasio.deploy.pack.server_file import ServerFile
 from alasio.logger import logger
