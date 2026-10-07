@@ -110,14 +110,18 @@ class MockMirror:
 @pytest.fixture
 def root(fs, monkeypatch):
     """
-    Run directory of the tests, in the fake filesystem.
+    Folder of a repo of the tests, in the fake filesystem.
+
+    The root the fetcher writes its wheel folder into: the folder of the
+    repo, {run directory}/pack/Author_Repo_master.
 
     Returns:
-        PathStr: Absolute path of the run directory
+        PathStr: Absolute path of the folder
     """
-    root = PathStr.new(fs.root_dir.path).joinpath('pack_server')
+    run = PathStr.new(fs.root_dir.path).joinpath('pack_server')
+    root = run.joinpath('pack').joinpath('Author_Repo_master')
     fs.create_dir(root)
-    monkeypatch.setattr(env, 'PROJECT_ROOT', root)
+    monkeypatch.setattr(env, 'PROJECT_ROOT', run)
     return root
 
 

@@ -71,11 +71,11 @@ class LookbackConfig(Struct):
 
 class PackRepoModel(Struct):
     """
-    1. Generate full packs to: pack/{Author}_{Repo}_{Branch}/{commit}/full_{commit}.pack
+    1. Generate full packs to: pack/{Author}_{Repo}_{Branch}/packrepo/{commit}/full_{commit}.pack
     only latest commit will have full pack
-    2. Generate update packs to: pack/{Author}_{Repo}_{Branch}/{commit}/update_{old}.pack
+    2. Generate update packs to: pack/{Author}_{Repo}_{Branch}/packrepo/{commit}/update_{old}.pack
     update packs will update from lookback commit to latest commit
-    3. generate latest info to: pack/{Author}_{Repo}_{Branch}/latest.pack
+    3. generate latest info to: pack/{Author}_{Repo}_{Branch}/packrepo/latest.pack
     content is {new} version and the sha1 checksum of latest full pack
     4. folders that does not match the latest commit will be removed
     """

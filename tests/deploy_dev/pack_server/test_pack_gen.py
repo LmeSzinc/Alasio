@@ -90,8 +90,9 @@ CONFIG = PackRepoModel(
     Lookback=LookbackConfig(MaxCommitDay=0),
 )
 
-# folder of the packs of CONFIG in the run directory
-PACK_ROOT = 'pack/Author_Repo_master'
+# folder of the packs of CONFIG in the run directory, the packrepo folder
+# of the repo folder
+PACK_ROOT = 'pack/Author_Repo_master/packrepo'
 
 
 @pytest.fixture
@@ -268,8 +269,10 @@ class TestConfigAndFolders:
     def test_pack_folder(self, fs, run_dir):
         """The folder of the packs and of the latest version are named by the config."""
         gen = PackRepoGen(make_repo(VERSIONS), CONFIG)
-        assert gen.pack_folder == join_path(run_dir, 'pack', 'Author_Repo_master')
-        assert gen.version_folder == join_path(run_dir, 'pack', 'Author_Repo_master', 'c3')
+        assert gen.repo_folder == join_path(run_dir, 'pack', 'Author_Repo_master')
+        assert gen.pack_folder == join_path(run_dir, 'pack', 'Author_Repo_master', 'packrepo')
+        assert gen.version_folder == join_path(
+            run_dir, 'pack', 'Author_Repo_master', 'packrepo', 'c3')
 
     def test_run_dir_is_a_mod(self, fs, run_dir, monkeypatch):
         """The generator refuses to run in a mod, like the config reader."""

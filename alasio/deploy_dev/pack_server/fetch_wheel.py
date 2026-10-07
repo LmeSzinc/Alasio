@@ -4,9 +4,9 @@ Fetch the wheel of a distribution version from a PyPI simple mirror.
 A pack config with PythonDeps builds the packs of the dependencies of a repo,
 the wheels are the input of the build: this module downloads the wheel of one
 (name, version) from the PyPI simple index (PEP 503) of a mirror to the wheel
-folder of a run directory:
+folder of a repo of the pack server:
 
-    {run directory}/wheel/{distribution}/{version}/{filename}.whl
+    {run directory}/pack/{Author}_{Repo}_{Branch}/wheel/{distribution}/{version}/{filename}.whl
 
 One WheelFetcher instance fetches one (name, version) of one mirror:
 target_folder is the folder the wheel is put in, index_data is the wheel
@@ -31,7 +31,9 @@ mismatch raises WheelHashError and no file is put at the final path.
 Usage:
     from alasio.deploy_dev.pack_server.fetch_wheel import WheelFetcher
 
-    fetcher = WheelFetcher(env.PROJECT_ROOT, mirror, 'httpx', '0.28.1')
+    # root = {run directory}/pack/{Author}_{Repo}_{Branch}
+    root = env.PROJECT_ROOT.joinpath('pack').joinpath('LmeSzinc_AzurLaneAutoScript_master')
+    fetcher = WheelFetcher(root, mirror, 'httpx', '0.28.1')
     file = fetcher.fetch()
     fetcher.close()
 """
@@ -49,7 +51,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.logger import logger
 
-# folder of the fetched wheels in the run directory
+# folder of the fetched wheels in the repo folder
 WHEEL_FOLDER = 'wheel'
 
 # the href of a link of a PEP 503 index page: href="..." or href='...'
@@ -196,15 +198,17 @@ class WheelFetcher:
     index_data is read.
 
     Usage:
-        fetcher = WheelFetcher(env.PROJECT_ROOT, mirror, 'httpx', '0.28.1')
+        # the folder of the repo, {run directory}/pack/{Author}_{Repo}_{Branch}
+        fetcher = WheelFetcher(repo_folder, mirror, 'httpx', '0.28.1')
         file = fetcher.fetch()
     """
 
     def __init__(self, root, mirror, name, version, client=None):
         """
         Args:
-            root (str): Run directory of the pack server, the wheel is put in
-                {root}/wheel/{name}/{version}/
+            root (str): Folder of the repo in the pack folder of the run
+                directory, e.g. {run directory}/pack/{Author}_{Repo}_{Branch};
+                the wheel is put in {root}/wheel/{name}/{version}/
             mirror (str): Base url of the PyPI simple index (PEP 503), e.g.
                 'https://mirrors.aliyun.com/pypi/simple', with or without the
                 trailing '/'

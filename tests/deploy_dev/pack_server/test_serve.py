@@ -55,18 +55,19 @@ def run_dir(fs, monkeypatch):
     """
     root = PathStr.new(fs.root_dir.path)
     folder = root.joinpath(serve.PACK_FOLDER).joinpath(FOLDER_NAME)
-    version = folder.joinpath('c3')
+    packrepo = folder.joinpath(serve.PACKREPO_FOLDER)
+    version = packrepo.joinpath('c3')
     fs.create_dir(version)
     fs.create_file(version.joinpath('full_c3.pack'), contents=FULL_PACK)
     fs.create_file(version.joinpath('update_c2.pack'), contents=UPDATE_PACK)
-    fs.create_file(folder.joinpath('latest.pack'), contents=LATEST_PACK)
+    fs.create_file(packrepo.joinpath('latest.pack'), contents=LATEST_PACK)
     monkeypatch.setattr(env, 'PROJECT_ROOT', root)
     return root
 
 
 def pack_url(*names):
     """Url of a file of the pack folder of the tests."""
-    return '/'.join((serve.PACK_URL, FOLDER_NAME, *names))
+    return '/'.join((serve.PACK_URL, FOLDER_NAME, serve.PACKREPO_FOLDER, *names))
 
 
 def make_scope(path, headers=None):
@@ -191,7 +192,7 @@ class TestPackRoutes:
                 # no folder of another version
                 pack_url('c4', 'full_c4.pack'),
                 # no folder of another config
-                '/'.join((serve.PACK_URL, 'Author_Repo_dev', 'latest.pack')),
+                '/'.join((serve.PACK_URL, 'Author_Repo_dev', serve.PACKREPO_FOLDER, 'latest.pack')),
                 # latest.pack is per repo, the pack folder itself has none
                 f'{serve.PACK_URL}/latest.pack',
                 # the packs live under the pack url

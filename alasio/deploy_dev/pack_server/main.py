@@ -11,7 +11,7 @@ The modules below do one step of the work each, this module chains them:
 2. PackRepo clones or fetches the git repo of the config into
    repo/{Author}_{Repo}
 3. PackRepoGen generates the packs of the repo into
-   pack/{Author}_{Repo}_{Branch}
+   pack/{Author}_{Repo}_{Branch}/packrepo
 
 The configs are run one by one, sorted by name. A config that fails is
 logged with its traceback and left out, the other configs still run: a

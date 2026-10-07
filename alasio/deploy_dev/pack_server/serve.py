@@ -9,11 +9,11 @@ see PackRepoGen.
 
 The url mirrors the path under the run directory: the file
 
-    {run directory}/pack/{Author}_{Repo}_{Branch}/{version}/full_{version}.pack
+    {run directory}/pack/{Author}_{Repo}_{Branch}/packrepo/{version}/full_{version}.pack
 
 is served at
 
-    /pack/{Author}_{Repo}_{Branch}/{version}/full_{version}.pack
+    /pack/{Author}_{Repo}_{Branch}/packrepo/{version}/full_{version}.pack
 
 and latest.pack, an update pack (update_{old_version}.pack) and every other
 file of a pack folder are served the same way. The packs of a version are
@@ -44,8 +44,11 @@ from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.logger import logger
 
-# folder of the packs in the run directory, see PackRepoModel
+# folder of the repos in the run directory, see PackRepoModel
 PACK_FOLDER = 'pack'
+
+# folder of the packs of a repo, the subfolder of a repo folder
+PACKREPO_FOLDER = 'packrepo'
 
 # url prefix the packs are served under, the folder name
 PACK_URL = f'/{PACK_FOLDER}'
@@ -79,8 +82,8 @@ def create_app(folder):
         Starlette: App of the development server
     """
     folder = PathStr.new(folder)
-    # the url mirrors the folder: /pack/{Author}_{Repo}_{Branch}/{version}/...
-    # is {run directory}/pack/{Author}_{Repo}_{Branch}/{version}/..., the
+    # the url mirrors the folder: /pack/{Author}_{Repo}_{Branch}/packrepo/...
+    # is {run directory}/pack/{Author}_{Repo}_{Branch}/packrepo/..., the
     # static files of starlette serve the files, their ranges and their 404s
     routes = [Mount(PACK_URL, app=StaticFiles(directory=folder))]
     return Starlette(routes=routes)
@@ -144,7 +147,7 @@ async def serve_app(args=None):
     address = config.bind[0]
     logger.info(f'Serving "{folder}" at http://{address}{PACK_URL}/')
     for name in folder.iter_foldernames():
-        logger.info(f'http://{address}{PACK_URL}/{name}/latest.pack')
+        logger.info(f'http://{address}{PACK_URL}/{name}/{PACKREPO_FOLDER}/latest.pack')
     await serve(create_app(folder), config)
 
 

@@ -5,13 +5,13 @@ The generator reads a git repo and writes the packs of the run directory,
 the output layout is fixed by PackRepoModel:
 
 1. the full pack of the latest commit to
-   pack/{Author}_{Repo}_{Branch}/{commit}/full_{commit}.pack
+   pack/{Author}_{Repo}_{Branch}/packrepo/{commit}/full_{commit}.pack
    only the latest commit has a full pack: a client downloads a full pack
    once and updates with update packs afterwards, the packs of the older
    versions do not need one
 2. an update pack from every lookback commit to
-   pack/{Author}_{Repo}_{Branch}/{commit}/update_{old}.pack
-3. the latest info to pack/{Author}_{Repo}_{Branch}/latest.pack
+   pack/{Author}_{Repo}_{Branch}/packrepo/{commit}/update_{old}.pack
+3. the latest info to pack/{Author}_{Repo}_{Branch}/packrepo/latest.pack
    the latest version and the checksum of its index pack
 4. the folders that do not match the latest commit are removed
 
@@ -64,8 +64,11 @@ from alasio.ext.path.atomic import atomic_failure_cleanup, atomic_rmtree, atomic
 from alasio.ext.path.validate import validate_filename
 from alasio.logger import logger
 
-# folder of the packs in the run directory, see PackRepoModel
+# folder of the repos in the run directory, see PackRepoModel
 PACK_FOLDER = 'pack'
+
+# folder of the packs of a repo, the subfolder of a repo folder
+PACKREPO_FOLDER = 'packrepo'
 
 
 class PackRepoGen:
@@ -92,19 +95,19 @@ class PackRepoGen:
 
         Raises:
             ValueError: If the config makes a folder name that is not a
-                single safe path component (see pack_folder), the output
+                single safe path component (see repo_folder), the output
                 folder of such a config would mix with the other repos
         """
         self.repo = repo
         self.config = config
-        # the folder name is checked before anything is written, see pack_folder
-        _ = self.pack_folder
+        # the folder name is checked before anything is written, see repo_folder
+        _ = self.repo_folder
         self.lookback = PackRepoLookback(repo, config)
 
     @cached_property
-    def pack_folder(self):
+    def repo_folder(self):
         """
-        Folder of the packs of the repo: pack/{Author}_{Repo}_{Branch}
+        Folder of the repo in the pack folder: pack/{Author}_{Repo}_{Branch}
 
         The name must be a single path component: a Branch like 'feature/x'
         would nest the folder of this repo inside the folder of another
@@ -117,6 +120,16 @@ class PackRepoGen:
         name = f'{self.config.Repo.Author}_{self.config.Repo.Repo}_{self.config.Repo.Branch}'
         validate_filename(name)
         return env.PROJECT_ROOT.joinpath(PACK_FOLDER).joinpath(name)
+
+    @cached_property
+    def pack_folder(self):
+        """
+        Folder of the packs of the repo: {repo folder}/packrepo
+
+        Returns:
+            PathStr: Absolute path of the folder
+        """
+        return self.repo_folder.joinpath(PACKREPO_FOLDER)
 
     @cached_property
     def version_folder(self):
@@ -166,7 +179,7 @@ class PackRepoGen:
         # see PackRepoLookback
         lookback = self.lookback.lookback_commit
         logger.info(
-            f'Generating packs of "{self.pack_folder.name}": '
+            f'Generating packs of "{self.repo_folder.name}": '
             f'{len(lookback) + 1} versions, latest={latest}'
         )
         # the tmp files of an interrupted run are ours to clean up, the real
@@ -188,7 +201,7 @@ class PackRepoGen:
         self._write_latest_pack(pack, kept_checksum)
         # 4. the folders that do not match the latest commit
         self._remove_stale_folders()
-        logger.info(f'Packs of "{self.pack_folder.name}" generated, latest={latest}')
+        logger.info(f'Packs of "{self.repo_folder.name}" generated, latest={latest}')
 
     def _write_full_pack(self, pack):
         """
