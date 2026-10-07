@@ -2,9 +2,8 @@
 Parse a dependency file into the requirements pinned to an exact version.
 
 A pack config with PythonDeps builds the packs of the dependencies of a repo,
-the versions to build are read from the dependency files of the repo, see
-doc/2026-09-30_python-dist-pack-update-flow.md. This module parses one such
-file:
+the versions to build are read from the dependency files of the repo. This
+module parses one such file:
 
 - RequirementsParser parses a requirements file, the pip requirement file
   format
