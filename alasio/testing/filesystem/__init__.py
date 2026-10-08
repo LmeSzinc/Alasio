@@ -62,6 +62,15 @@ is a drop-in replacement of pyfakefs for the deploy tests:
     fs.remove(target)
     env.PROJECT_ROOT = PathStr.new(fs.root_dir.path)
 
+open() and os.open() require the parent directory to exist like the
+real os, a missing parent raises FileNotFoundError. Only the test
+helpers create_file() / create_dir() / create_symlink() create the
+missing parents, the write itself never creates a directory tree:
+
+    fs.create_file('/a/b.txt')       # creates /a and /a/b.txt
+    file_write('/a/c.txt', data)     # os.makedirs on FileNotFoundError
+    open('/missing/d.txt', 'w')      # FileNotFoundError
+
 io.open_code() is NOT mocked by the fixture on purpose: a global patch
 would make the test's own Python imports read from the fake fs and
 fail. Code that loads sources through importlib (e.g. loadpy) can

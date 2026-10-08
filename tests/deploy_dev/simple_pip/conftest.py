@@ -13,6 +13,7 @@ here are imported by the tests the way tests/deploy_dev/pack does it:
 """
 import base64
 import hashlib
+import os
 import py_compile
 import zipfile
 
@@ -78,6 +79,11 @@ def build_wheel(
             rows.append(f'{folder}/RECORD,,\n')
             members[f'{folder}/RECORD'] = ''.join(rows).encode('utf-8')
 
+    # The members are written with zipfile (the builtin open), which does
+    # not create the parent directory of the wheel, unlike create_file()
+    parent = path.rpartition('/')[0]
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as zf:
         for member, content in members.items():
             if member in executable:
@@ -228,6 +234,11 @@ def pyc_compile(monkeypatch):
     under test, only the bytes of the .pyc are not real ones.
     """
     def compile_stub(py_file, cfile=None, dfile=None, **kwargs):
+        # py_compile creates the directory of the .pyc file, e.g. the
+        # __pycache__ of the source, the stub does the same
+        directory = os.path.dirname(cfile)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
         with open(cfile, 'wb') as f:
             f.write(b'\x00' * 16)
         return cfile

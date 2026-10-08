@@ -45,6 +45,12 @@ class FakeFilesystem:
 
     Everything is served from memory, the real disk is never touched.
 
+    open() and os.open() follow the real os: a file is only created when
+    its parent directory exists, a missing parent raises FileNotFoundError
+    instead of creating the directory tree. The create_file() /
+    create_dir() / create_symlink() test helpers do create the missing
+    parents, so test data stays short.
+
     The filesystem is thread safe: every public operation takes the state lock
     of the filesystem (the file objects of it take the same lock), so the code
     under test may use the filesystem from several threads, a thread pool for
@@ -164,6 +170,69 @@ class FakeFilesystem:
             or any(key.startswith(prefix) for key in self._symlinks)
         )
 
+    @staticmethod
+    def _parent_dir(path):
+        """
+        Get the parent of a normalized absolute path.
+
+        Args:
+            path (str): Normalized absolute path
+
+        Returns:
+            str: Parent path, "/" for a direct child of the POSIX root
+        """
+        parent = path.rpartition('/')[0]
+        return parent or '/'
+
+    def _missing_parents(self, path):
+        """
+        Walk up the parent chain of a path and collect the missing directories.
+
+        Args:
+            path (str): Normalized absolute path
+
+        Returns:
+            tuple[list[str], str | None]: Missing parent paths from the
+                deepest to the shallowest, and the first parent path that
+                is a file or a symlink (None when the chain has no such path)
+        """
+        parent = self._parent_dir(path)
+        missing = []
+        conflict = None
+        while parent not in self._dirs:
+            if parent in self._files or parent in self._symlinks:
+                conflict = parent
+                break
+            missing.append(parent)
+            root, sep, _ = parent.rpartition('/')
+            if not sep:
+                break
+            parent = root or '/'
+        return missing, conflict
+
+    def _require_parent_dir(self, path):
+        """
+        Check that the parents of a file to create exist.
+
+        The real os raises instead of creating the parents for open() and
+        os.open(), so a write only creates the file itself, never the
+        directory tree above it.
+
+        Args:
+            path (str): Normalized absolute path of the file to create
+
+        Raises:
+            FileNotFoundError: If a parent directory does not exist, and on
+                Windows also if a parent path is a file (Windows reports a
+                path through a file as a missing path)
+            NotADirectoryError: (POSIX) If a parent path is a file or a symlink
+        """
+        missing, conflict = self._missing_parents(path)
+        if conflict is not None and not IS_WINDOWS:
+            raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', path)
+        if missing or conflict is not None:
+            raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+
     def _create_parents(self, path):
         """
         Create the missing parent directories of a path.
@@ -174,17 +243,9 @@ class FakeFilesystem:
         Raises:
             NotADirectoryError: If a parent path is a file or a symlink
         """
-        parent, sep, _ = path.rpartition('/')
-        if not sep:
-            return
-        missing = []
-        while parent not in self._dirs:
-            if parent in self._files or parent in self._symlinks:
-                raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', parent)
-            missing.append(parent)
-            parent, sep, _ = parent.rpartition('/')
-            if not sep:
-                break
+        missing, conflict = self._missing_parents(path)
+        if conflict is not None:
+            raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', conflict)
         now = time.time()
         for folder in reversed(missing):
             self._dirs[folder] = FakeDir(
@@ -485,9 +546,11 @@ class FakeFilesystem:
             FakeFileObject: The opened file object
 
         Raises:
-            FileNotFoundError: If the file does not exist
+            FileNotFoundError: If the file does not exist, or the parent
+                directory of a file to create does not exist
             FileExistsError: If mode x is used on an existing file
             IsADirectoryError: If the path is a directory
+            NotADirectoryError: (POSIX) If a parent path is a file
             ValueError: If the mode is invalid
         """
         file = self._normpath(file)
@@ -519,15 +582,18 @@ class FakeFilesystem:
                 raise FileNotFoundError(errno.ENOENT, 'No such file or directory', file)
         elif action == 'w':
             if entry is None:
+                self._require_parent_dir(file)
                 entry = self.create_file(file, st_mode=0o666)
             else:
                 entry.content = b''
         elif action == 'a':
             if entry is None:
+                self._require_parent_dir(file)
                 entry = self.create_file(file, st_mode=0o666)
         elif action == 'x':
             if entry is not None:
                 raise FileExistsError(errno.EEXIST, 'File exists', file)
+            self._require_parent_dir(file)
             entry = self.create_file(file, st_mode=0o666)
 
         readable = action == 'r' or plus
@@ -652,15 +718,12 @@ class FakeFilesystem:
         Raises:
             FileExistsError: If dst already exists
             FileNotFoundError: If the parent directory of dst does not exist
+            NotADirectoryError: (POSIX) If a parent path of dst is a file
         """
         dst = self._normpath(dst)
         if dst in self._files or dst in self._dirs or dst in self._symlinks:
             raise FileExistsError(errno.EEXIST, 'File exists', dst)
-        parent, sep, _ = dst.rpartition('/')
-        if not sep:
-            parent = '/'
-        if parent not in self._dirs:
-            raise FileNotFoundError(errno.ENOENT, 'No such file or directory', dst)
+        self._require_parent_dir(dst)
         now = time.time()
         link = FakeSymlink(
             path=dst, target=src, mode=0o777, ino=self._next_ino(), nlink=1,
@@ -850,7 +913,9 @@ class FakeFilesystem:
 
         Raises:
             FileExistsError: If the path exists and exist_ok is False
-            NotADirectoryError: If a parent path is a file
+            FileNotFoundError: If a parent directory does not exist, and on
+                Windows also if a parent path is a file
+            NotADirectoryError: (POSIX) If a parent path is a file
         """
         path = self._normpath(path)
         if path in self._dirs:
@@ -859,7 +924,14 @@ class FakeFilesystem:
             raise FileExistsError(errno.EEXIST, 'File exists', path)
         if path in self._files or path in self._symlinks:
             raise FileExistsError(errno.EEXIST, 'File exists', path)
-        self._create_parents(path)
+        try:
+            self._create_parents(path)
+        except NotADirectoryError:
+            if not IS_WINDOWS:
+                raise
+            # The mkdir of Windows reports a path through a file as a
+            # missing path (ERROR_PATH_NOT_FOUND), like os.makedirs does
+            raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path) from None
         now = time.time()
         self._dirs[path] = FakeDir(
             path=path, mode=mode & 0o7777, ino=self._next_ino(), nlink=2,
@@ -878,15 +950,12 @@ class FakeFilesystem:
         Raises:
             FileExistsError: If the path exists
             FileNotFoundError: If the parent directory does not exist
+            NotADirectoryError: (POSIX) If a parent path is a file
         """
         path = self._normpath(path)
         if path in self._dirs or path in self._files or path in self._symlinks:
             raise FileExistsError(errno.EEXIST, 'File exists', path)
-        parent, sep, _ = path.rpartition('/')
-        if not sep:
-            parent = '/'
-        if parent not in self._dirs:
-            raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+        self._require_parent_dir(path)
         now = time.time()
         self._dirs[path] = FakeDir(
             path=path, mode=mode & 0o7777, ino=self._next_ino(), nlink=2,
@@ -1140,9 +1209,11 @@ class FakeFilesystem:
             int: Fake file descriptor
 
         Raises:
-            FileNotFoundError: If the file does not exist and O_CREAT is not set
+            FileNotFoundError: If the file does not exist and O_CREAT is not
+                set, or the parent directory of a file to create does not exist
             FileExistsError: If O_CREAT | O_EXCL is used on an existing file
             IsADirectoryError: If the path is a directory
+            NotADirectoryError: (POSIX) If a parent path is a file
         """
         path = self._normpath(path)
         path = self._follow_links(path)
@@ -1160,6 +1231,7 @@ class FakeFilesystem:
         else:
             if not flags & os.O_CREAT:
                 raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+            self._require_parent_dir(path)
             entry = self.create_file(path, st_mode=mode & 0o7777)
         append = bool(flags & os.O_APPEND)
         fobj = FakeFileObject(

@@ -620,6 +620,7 @@ demo-1.0.dist-info/top_level.txt,sha256=65wmuu5H8Z5Jk6d7ypNtD_CeNVqC09t5vxVOv_Go
 
     def test_install_wheel_without_metadata(self, fs, pyc_compile):
         """PEP 427 requires the METADATA of the .dist-info."""
+        fs.create_dir('/w')
         wheel = '/w/demo-1.0-py3-none-any.whl'
         with zipfile.ZipFile(wheel, 'w') as zf:
             zf.writestr('demo-1.0.dist-info/WHEEL', b'Wheel-Version: 1.0\n')
@@ -628,6 +629,7 @@ demo-1.0.dist-info/top_level.txt,sha256=65wmuu5H8Z5Jk6d7ypNtD_CeNVqC09t5vxVOv_Go
 
     def test_install_wheel_with_invalid_dist_info(self, fs, pyc_compile):
         """The .dist-info directory is named "<name>-<version>.dist-info"."""
+        fs.create_dir('/w')
         wheel = '/w/demo-1.0-py3-none-any.whl'
         with zipfile.ZipFile(wheel, 'w') as zf:
             zf.writestr('demo.dist-info/METADATA', b'Metadata-Version: 2.1\n')

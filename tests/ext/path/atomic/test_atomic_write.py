@@ -546,13 +546,20 @@ class TestFileEnsureExist:
 
     def test_create(self, fs):
         """A missing file should be created empty."""
+        fs.create_dir('/data')
         assert file_ensure_exist('/data/a.txt') is True
         assert file_read_bytes('/data/a.txt') == b''
 
     def test_create_default(self, fs):
         """The default content should be written on creation."""
+        fs.create_dir('/data')
         assert file_ensure_exist('/data/a.txt', default=b'data') is True
         assert file_read_bytes('/data/a.txt') == b'data'
+
+    def test_missing_parent(self, fs):
+        """A missing parent directory should be reported, nothing is created."""
+        assert file_ensure_exist('/data/a.txt') is False
+        assert not os.path.exists('/data')
 
     def test_exists(self, fs):
         """An existing file should be kept untouched."""
@@ -568,6 +575,7 @@ class TestFileEnsureExist:
 
     def test_mode(self, fs):
         """The mode should be used for the created file."""
+        fs.create_dir('/data')
         assert file_ensure_exist('/data/a.txt', mode=0o600) is True
         assert stat.S_IMODE(os.stat('/data/a.txt').st_mode) == 0o600
 
@@ -577,8 +585,15 @@ class TestFileTouch:
 
     def test_touch_create(self, fs):
         """A missing file should be created empty."""
+        fs.create_dir('/data')
         file_touch('/data/a.txt')
         assert os.path.getsize('/data/a.txt') == 0
+
+    def test_touch_missing_parent(self, fs):
+        """A missing parent directory should raise, like the real os."""
+        with pytest.raises(FileNotFoundError):
+            file_touch('/data/a.txt')
+        assert not os.path.exists('/data')
 
     def test_touch_update(self, fs):
         """An existing file should keep its content and get a new modify time."""
@@ -590,6 +605,7 @@ class TestFileTouch:
 
     def test_touch_not_exist_ok(self, fs):
         """A missing file should be created with exist_ok=False as well."""
+        fs.create_dir('/data')
         file_touch('/data/a.txt', exist_ok=False)
         assert os.path.getsize('/data/a.txt') == 0
 
