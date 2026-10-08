@@ -871,6 +871,10 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
                 # unreachable) or nothing to begin: release the rpc flag
                 logger.error(f'[Restart] Graceful restart cannot begin: {e}')
                 GRACEFUL_RESTART.running = False
+                # the hooks must learn that the replace window will never come
+                # (an update transaction waits on it, a silent return would
+                # strand its job): every early exit notifies
+                await _notify_restart_aborted(hooks, f'the restart could not begin: {e}')
                 return
 
             # the waiting set of restart_begin() is the whole set this restart

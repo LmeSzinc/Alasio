@@ -626,6 +626,34 @@ class TestRunGracefulRestart:
         assert record.configs == ['cfg_a']
 
     @pytest.mark.trio
+    async def test_begin_failure_notifies_the_hooks(self, manager, monkeypatch):
+        """
+        A restart that cannot begin must tell its hooks: the update flow
+        waits on the replace window and a silent return would strand its job
+        there (the rpc flag must be released as well).
+        """
+        aborted = []
+
+        async def on_aborted(reason):
+            aborted.append(reason)
+
+        def failing_begin():
+            raise RuntimeError('Restart already in progress')
+
+        monkeypatch.setattr(manager, 'restart_begin', failing_begin)
+        hooks = restart.RestartHooks(on_aborted=on_aborted)
+        GRACEFUL_RESTART.running = True
+
+        with logger.mock_capture_writer() as capture:
+            await run_graceful_restart(manager, hooks)
+            assert capture.fd.any_contains(
+                'Graceful restart cannot begin: Restart already in progress')
+
+        assert len(aborted) == 1
+        assert 'could not begin' in aborted[0]
+        assert GRACEFUL_RESTART.running is False
+
+    @pytest.mark.trio
     async def test_hook_failure_cancels_the_restart(self, project_root, manager, monkeypatch):
         """
         F5: a failing update hook cancels the restart, the task returns normally
