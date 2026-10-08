@@ -69,6 +69,13 @@
     "zh-TW": "重啟中",
     "es-ES": "Reiniciando"
   },
+  "Updating": {
+    "en-US": "Updating",
+    "zh-CN": "更新中",
+    "ja-JP": "更新中",
+    "zh-TW": "更新中",
+    "es-ES": "Actualizando"
+  },
   "Resuming": {
     "en-US": "Queued for resume",
     "zh-CN": "等待恢复",

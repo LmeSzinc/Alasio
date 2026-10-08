@@ -43,7 +43,19 @@ class TestRequestGracefulRestart:
         await restart.request_graceful_restart('test request', nursery=nursery)
 
         assert restart.GRACEFUL_RESTART.running is True
-        assert nursery.started == [(restart.run_graceful_restart, ())]
+        assert nursery.started == [
+            (restart.run_graceful_restart, (restart.GRACEFUL_RESTART.WORKER_MANAGER, None))]
+
+    @pytest.mark.trio
+    async def test_hooks_are_handed_to_the_orchestration(self):
+        """The hooks of the in-app update flow travel with the task"""
+        nursery = FakeNursery()
+        hooks = restart.RestartHooks(actions=['test'])
+
+        await restart.request_graceful_restart('test request', nursery=nursery, hooks=hooks)
+
+        assert nursery.started == [
+            (restart.run_graceful_restart, (restart.GRACEFUL_RESTART.WORKER_MANAGER, hooks))]
 
     @pytest.mark.trio
     async def test_rejected_while_running(self):

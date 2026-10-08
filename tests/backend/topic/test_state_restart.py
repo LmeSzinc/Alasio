@@ -50,7 +50,8 @@ class TestRestartRpc:
         await state.restart()
 
         assert restart.GRACEFUL_RESTART.running is True
-        assert restart_state.started == [(restart.run_graceful_restart, ())]
+        assert restart_state.started == [
+            (restart.run_graceful_restart, (restart.GRACEFUL_RESTART.WORKER_MANAGER, None))]
 
     @pytest.mark.trio
     async def test_restart_rejected_when_already_running(self, state):
@@ -103,6 +104,23 @@ class TestCancelRestartRpc:
         restart.GRACEFUL_RESTART.resume_scope = trio.CancelScope()
 
         with pytest.raises(RpcValueError, match='No restart in progress'):
+            await state.cancel_restart()
+
+    @pytest.mark.trio
+    async def test_cancel_restart_refused_during_an_applying_update(self, state, monkeypatch):
+        # The restart of an update transaction in its applying phase is the
+        # update itself (the workers are stopping for the file replace): it
+        # is not cancellable, the rpc must refuse before touching the restart
+        from alasio.backend.app import update as update_app
+
+        async def fake_cancel(reason=''):
+            raise AssertionError('cancel_graceful_restart must not be called')
+
+        monkeypatch.setattr(restart, 'cancel_graceful_restart', fake_cancel)
+        monkeypatch.setattr(type(update_app.UPDATE_MANAGER), 'applying', property(lambda self: True))
+        restart.GRACEFUL_RESTART.running = True
+
+        with pytest.raises(RpcValueError, match='cannot be cancelled'):
             await state.cancel_restart()
 
 

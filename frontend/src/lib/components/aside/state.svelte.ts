@@ -7,9 +7,11 @@ const STABLE_STATES: WORKER_STATE[] = [
   "scheduler-waiting",
   "error",
   "scheduler-stopping",
-  // restart states stay for a while (restarting until the backend restarted,
-  // resuming until the queue reaches the config): show them immediately
+  // restart states stay for a while (restarting / updating until the backend
+  // restarted, resuming until the queue reaches the config): show them
+  // immediately
   "restarting",
+  "updating",
   "resuming",
 ];
 

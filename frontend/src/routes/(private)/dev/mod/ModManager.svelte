@@ -1,4 +1,6 @@
 <script lang="ts">
+  import type { UpdateInfoLike, UpdateTopicLike } from "$lib/components/aside/types";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
@@ -26,6 +28,12 @@
 
   const modListTopic = useTopic<ModOption[]>("ModList");
   const modHistoryTopic = useTopic<ModHistoryData>("ModHistory");
+  // update states of the update flow: the badges, the buttons and the
+  // confirmation dialog read the Update topic, the buttons call its rpc
+  const updateTopic = useTopic<UpdateTopicLike>("Update");
+  const updateCheckRpc = updateTopic.rpc();
+  const updateApplyRpc = updateTopic.rpc();
+  const updateCancelRpc = updateTopic.rpc();
 
   // data from props for testing, otherwise from topics
   const mods = $derived(modsProp ?? modListTopic.data ?? []);
@@ -36,6 +44,48 @@
 
   function toggleShowAll(mod: string) {
     showAll[mod] = !showAll[mod];
+  }
+
+  // --- update flow ---
+
+  // the mod of the pending "update" confirmation dialog (null = closed)
+  let confirmMod = $state<ModOption | null>(null);
+  // states whose update runs (or waits for a window): a start is queued,
+  // see the update flow of the backend
+  const UPDATE_NOT_CHECKABLE = ["unmanaged", "checking", "downloading", "updating"];
+
+  function updateInfo(mod: string): UpdateInfoLike | undefined {
+    return updateTopic.data?.[mod];
+  }
+
+  /** Badge label of an update state, '' when the mod has no entry yet. */
+  function updateLabel(info: UpdateInfoLike | undefined): string {
+    switch (info?.state) {
+      case "unmanaged":
+        return t.Update.StateUnmanaged();
+      case "idle":
+        return t.Update.StateIdle();
+      case "checking":
+        return t.Update.StateChecking();
+      case "uptodate":
+        return t.Update.StateUptodate();
+      case "available":
+        return t.Update.StateAvailable();
+      case "downloading":
+        return t.Update.StateDownloading();
+      case "updating":
+        return t.Update.StateUpdating();
+      case "error":
+        return t.Update.StateError();
+      default:
+        return "";
+    }
+  }
+
+  function confirmUpdate() {
+    const mod = confirmMod;
+    confirmMod = null;
+    if (mod) updateApplyRpc.call("update_apply", { name: mod.value });
   }
 </script>
 
@@ -50,6 +100,7 @@
       {@const items = history?.data ?? []}
       {@const visibleItems = showAll[mod.value] ? items : items.slice(0, PREVIEW_COUNT)}
       {@const version = items[0]?.version ?? ""}
+      {@const info = updateInfo(mod.value)}
       <Card.Root class="flex flex-col">
         <Card.Header class="flex flex-row items-center justify-between gap-2">
           <Card.Title class="truncate">{mod.label}</Card.Title>
@@ -60,6 +111,43 @@
           {/if}
         </Card.Header>
         <Card.Content class="grow">
+          {#if info}
+            <div class="mb-2 flex flex-wrap items-center gap-2 border-b pb-2 text-sm">
+              <Badge variant={info.state === "available" ? "default" : "secondary"} class="shrink-0">
+                {updateLabel(info)}
+              </Badge>
+              {#if info.current_version || info.latest_version}
+                <span class="text-muted-foreground truncate font-mono text-xs">
+                  {info.current_version || t.Update.VersionNone()}
+                  →
+                  {info.latest_version || t.Update.VersionUnknown()}
+                </span>
+              {/if}
+              <span class="ml-auto flex shrink-0 gap-2">
+                {#if info.state === "available"}
+                  <Button size="sm" onclick={() => (confirmMod = mod)}>
+                    {t.Update.ButtonUpdate()}
+                  </Button>
+                {:else if info.state === "checking" || info.state === "downloading"}
+                  <Button size="sm" variant="outline" onclick={() => updateCancelRpc.call("update_cancel")}>
+                    {t.Update.ButtonCancel()}
+                  </Button>
+                {:else}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={UPDATE_NOT_CHECKABLE.includes(info.state)}
+                    onclick={() => updateCheckRpc.call("update_check", { name: mod.value })}
+                  >
+                    {t.Update.ButtonCheck()}
+                  </Button>
+                {/if}
+              </span>
+            </div>
+            {#if info.error}
+              <div class="text-destructive mb-2 text-xs">{info.error}</div>
+            {/if}
+          {/if}
           {#if history?.error}
             <div class="text-destructive text-sm">{history.error}</div>
           {:else if items.length === 0}
@@ -96,3 +184,25 @@
     {/each}
   </div>
 {/if}
+
+<!-- "update" confirmation: v1 applies any mod update as a full backend
+     restart, every running config comes back after it -->
+<AlertDialog.Root
+  open={confirmMod !== null}
+  onOpenChange={(value: boolean) => {
+    if (!value) confirmMod = null;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{t.Update.ConfirmTitle()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {t.Update.ConfirmDescription({ mod: confirmMod?.label ?? "" })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{t.Update.ButtonCancel()}</AlertDialog.Cancel>
+      <Button onclick={confirmUpdate}>{t.Update.ButtonUpdate()}</Button>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

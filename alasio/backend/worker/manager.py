@@ -30,6 +30,10 @@ from alasio.logger import logger
 #   will auto-resume it after the restart. The entry stays in the state dict
 #   (occupies the config, manual start rejected) and restart_wait() collects it
 #   into the resume list. Manual start is rejected.
+# updating: the same as restarting, but the restart belongs to an update
+#   transaction (the update manager set its instance window before the restart
+#   began): the frontend shows it as "updating" instead of "restarting", every
+#   other behavior (park / collect / resume / refusal) is identical.
 # resuming: queued for auto-resume after the backend restart (no process yet).
 #   The new backend builds the queue with mark_resume() and starts each entry
 #   through worker_resume() with a 1s interval.
@@ -37,14 +41,17 @@ WORKER_STATE = Literal[
     'idle', 'starting', 'running', 'disconnected', 'error',
     'scheduler-stopping', 'scheduler-waiting',
     'killing', 'force-killing',
-    'restarting', 'resuming',
+    'restarting', 'updating', 'resuming',
 ]
 # Allow worker set its state to one of the allows
 WORKER_STATE_ALLOWS = ['running', 'scheduler-waiting']
 # Worker is considered running if state in the followings
 WORKER_RUNNING_STATE = ['running', 'scheduler-stopping', 'scheduler-waiting']
 # Worker is considered stopped if state in the followings
-WORKER_STOPPED_STATE = ['idle', 'error', 'restarting', 'resuming']
+WORKER_STOPPED_STATE = ['idle', 'error', 'restarting', 'updating', 'resuming']
+# States a worker stopped for the restart in progress is parked in: the
+# restarting state and its update-transaction twin
+WORKER_PARKED_STATE = ['restarting', 'updating']
 
 # Seconds to wait for a worker to stop by itself in worker_kill(),
 # before the kill is escalated to worker_force_kill()
@@ -67,6 +74,12 @@ class WorkerState(msgspec.Struct):
     # Cleared when the user cancels the pending resume (stop / kill with the
     # default restart_resume=False) or when the worker starts again.
     pending_restart: bool = False
+    # True when the entry was queued by the update window gate (a start
+    # accepted while an update window owned the config, see
+    # _queue_update_start_locked): the update manager releases the queue when
+    # its window ends, the auto-resume queue of a restart (mark_resume) never
+    # touches these entries. Only meaningful while the state is "resuming".
+    update_queued: bool = False
 
     process: Optional[multiprocessing.Process] = None
     conn: Optional[Connection] = None
@@ -224,6 +237,21 @@ class WorkerManager(metaclass=Singleton):
         # no recorded resume intent, the default stop keeps its plain meaning
         # ("stop, do not resume") and is honoured silently (F4).
         self._restart_resume_frozen: "set[str]" = set()
+        # True when restart_wait() froze the resume list of the current
+        # transaction: the resume file is written from it, so a start accepted
+        # as a queued resume afterwards could never be resumed -- it is refused
+        # instead of being lost silently (see _queue_update_start_locked).
+        # Cleared by restart_begin() / restart_cancel().
+        self._restart_frozen = False
+
+        # Update window state of the update manager (see the update window
+        # section): the mods whose update check window is open (mod-level) and
+        # the mod of an update transaction in flight (instance-level). While a
+        # window is open, a start of an affected config is accepted as a
+        # queued resume instead of starting (worker_start) and starts
+        # automatically when the window ends.
+        self.update_locked_mods: "set[str]" = set()
+        self.update_transaction = ''
 
     @property
     def restarting(self) -> bool:
@@ -301,11 +329,11 @@ class WorkerManager(metaclass=Singleton):
                 return
             if state.pending_restart:
                 # stopped for the graceful backend restart: park the worker in
-                # "restarting" (the entry stays in the dict, blocks a manual
-                # start and is collected into the resume list by
+                # "updating" / "restarting" (the entry stays in the dict, blocks
+                # a manual start and is collected into the resume list by
                 # restart_wait()); a crashed startup is still restarted, the
                 # new backend simply retries the same way a manual start does
-                self._set_state(state, 'restarting')
+                self._set_state(state, self._parked_state())
             elif exitcode == 0:
                 self._set_state(state, 'idle')
             else:
@@ -435,6 +463,11 @@ class WorkerManager(metaclass=Singleton):
             whether success, reason
         """
         with self._lock:
+            if self.update_transaction or mod in self.update_locked_mods:
+                # an update window owns this config: the start is accepted as
+                # a queued resume instead of being refused (the window releases
+                # the queue when it ends, see the update window section)
+                return self._queue_update_start_locked(mod, config)
             if self._restarting:
                 # any worker started now would be killed when the backend exits
                 # and would never resume ("started but lost")
@@ -449,12 +482,14 @@ class WorkerManager(metaclass=Singleton):
             if state.state not in ['idle', 'error']:
                 if state.state == 'resuming':
                     return False, f'Worker is queued for auto-resume after restart: "{config}"'
-                if state.state == 'restarting':
-                    return False, f'Worker is stopped for backend restart and will auto-resume: "{config}"'
+                if state.state in WORKER_PARKED_STATE:
+                    return False, (f'Worker is stopped for the backend restart in progress '
+                                   f'and will auto-resume: "{config}"')
                 return False, f'Worker is already running: "{config}", state="{state.state}"'
             # mark immediately
             state.mod = mod
             state.pending_restart = False
+            state.update_queued = False
             child_conn = self._mark_starting_locked(state)
 
         self.on_worker_info(config, f'[WorkerManager] Starting worker: {config}')
@@ -521,7 +556,7 @@ class WorkerManager(metaclass=Singleton):
                 state.conn = None
                 # a marked worker is parked like a crashed startup (the new
                 # backend retries it), an unmarked one returns to error
-                self._set_state(state, 'restarting' if state.pending_restart else 'error')
+                self._set_state(state, self._parked_state() if state.pending_restart else 'error')
             logger.exception(e)
             raise
         # close child_conn of the parent side immediately
@@ -763,9 +798,10 @@ class WorkerManager(metaclass=Singleton):
             state.conn = None
             state.recv_thread = None
             if state.pending_restart:
-                # stopped for the graceful restart: park in "restarting" so
-                # restart_wait() collects the config into the resume list
-                self._set_state(state, 'restarting')
+                # stopped for the graceful restart: park in "updating" /
+                # "restarting" so restart_wait() collects the config into the
+                # resume list
+                self._set_state(state, self._parked_state())
             else:
                 self._set_state(state, 'idle')
 
@@ -798,12 +834,13 @@ class WorkerManager(metaclass=Singleton):
 
         Returns:
             Optional[tuple[bool, str]]: The call result when the state is
-                "restarting" / "resuming" (such a request is always answered
-                here: keep-resume no-op, the refusal of a recorded config, or
-                the cancel), None for any other state (the caller continues
-                with its normal routing, which needs a live process)
+                "restarting" / "updating" / "resuming" (such a request is
+                always answered here: keep-resume no-op, the refusal of a
+                recorded config, or the cancel), None for any other state (the
+                caller continues with its normal routing, which needs a live
+                process)
         """
-        if state.state == 'restarting':
+        if state.state in WORKER_PARKED_STATE:
             if restart_resume:
                 # the worker is already stopped for the restart, keep waiting
                 return True, 'Success'
@@ -824,6 +861,24 @@ class WorkerManager(metaclass=Singleton):
         return True, 'Success'
 
     # ---------------- graceful restart orchestration ----------------
+
+    def _parked_state(self) -> str:
+        """
+        The parking state of a worker stopped for the restart in progress
+        (must be called with the lock held, takes no lock of its own)
+
+        The restart of an update transaction parks the workers in "updating"
+        (the frontend shows 更新中), a plain graceful restart in "restarting".
+        The update manager opens its instance window before the restart begins
+        and closes it when the transaction ends, so the flag tells the two
+        apart; the states are equivalent everywhere else (stopped, collected
+        into the resume list, resumed by the new backend, manual start
+        rejected).
+
+        Returns:
+            str: 'updating' or 'restarting'
+        """
+        return 'updating' if self.update_transaction else 'restarting'
 
     def restart_begin(self) -> "List[str]":
         """
@@ -857,6 +912,7 @@ class WorkerManager(metaclass=Singleton):
             self._restart_abort.clear()
             # a new transaction freezes its own list, when its wait is over
             self._restart_resume_frozen.clear()
+            self._restart_frozen = False
             running = [
                 state for state in self.state.values()
                 if state.state in ['starting', 'running', 'scheduler-waiting']
@@ -875,7 +931,7 @@ class WorkerManager(metaclass=Singleton):
             for state in list(self.state.values()):
                 if state.state == 'resuming':
                     state.pending_restart = True
-                    self._set_state(state, 'restarting')
+                    self._set_state(state, self._parked_state())
             waiting = self._restart_pending_configs_locked()
 
         # send the graceful stop requests outside the lock (worker_scheduler_stop
@@ -979,10 +1035,11 @@ class WorkerManager(metaclass=Singleton):
         with self._lock:
             self._restarting = False
             self._restart_resume_frozen.clear()
+            self._restart_frozen = False
             for state in list(self.state.values()):
                 if state.pending_restart:
                     state.pending_restart = False
-                if state.state in ['restarting', 'resuming']:
+                if state.state in ['restarting', 'updating', 'resuming']:
                     self._set_state(state, 'idle')
 
     def _restart_pending_configs_locked(self) -> "List[str]":
@@ -990,15 +1047,16 @@ class WorkerManager(metaclass=Singleton):
         Configs the graceful restart wait covers (lock required)
 
         A worker counts as stopped when its entry is gone (idle) or its state
-        is idle / error / restarting; "disconnected" is transient (the
-        disconnect handler is finishing its cleanup) and keeps the wait going.
+        is idle / error / restarting / updating; "disconnected" is transient
+        (the disconnect handler is finishing its cleanup) and keeps the wait
+        going.
 
         Returns:
             List[str]: Sorted config names
         """
         return sorted(
             config for config, state in self.state.items()
-            if state.state not in ['idle', 'error', 'restarting']
+            if state.state not in ['idle', 'error', 'restarting', 'updating']
         )
 
     def _freeze_restart_resume_list(self) -> "tuple[bool, List[str]]":
@@ -1026,11 +1084,13 @@ class WorkerManager(metaclass=Singleton):
                 return False, []
             resume_list = sorted(
                 config for config, state in self.state.items()
-                if state.state == 'restarting'
+                if state.state in WORKER_PARKED_STATE
             )
             # the frozen list is exactly the returned one: the orchestration
-            # writes the resume file from it
+            # writes the resume file from it, and a start accepted through the
+            # update gate from now on could never be resumed (it is refused)
             self._restart_resume_frozen = set(resume_list)
+            self._restart_frozen = True
             return True, resume_list
 
     # ---------------- auto-resume queue (new backend) ----------------
@@ -1135,10 +1195,143 @@ class WorkerManager(metaclass=Singleton):
                 return False, f'Backend is gracefully restarting, cannot resume now: "{config}"'
             # mark immediately
             state.mod = mod
+            state.update_queued = False
             child_conn = self._mark_starting_locked(state)
 
         self.on_worker_info(config, f'[WorkerManager] Resuming worker: {config}')
         return self._worker_start_process(state, mod, config, child_conn, project_root, mod_root, path_main)
+
+    # ---------------- update window (start gate of the update flow) ----------------
+
+    def update_lock_mods(self, mods) -> None:
+        """
+        Open the update check window of the given mods (mod-level)
+
+        While a mod is locked, a start of one of its configs is accepted as a
+        queued resume instead of starting now: the config starts automatically
+        when the window ends (see release_update_queue), or after the backend
+        restart of an update transaction, which resumes it. The configs of
+        every other mod start normally.
+
+        Args:
+            mods (list[str]): Mod names to lock
+        """
+        with self._lock:
+            self.update_locked_mods.update(mods)
+
+    def update_unlock_mods(self, mods) -> None:
+        """
+        Close the update check window of the given mods
+
+        The queued configs are not started here: the caller lists them through
+        release_update_queue() and starts them (a restart may have collected
+        some of them in between, worker_resume() refuses those).
+
+        Args:
+            mods (list[str]): Mod names to unlock
+        """
+        with self._lock:
+            self.update_locked_mods.difference_update(mods)
+
+    def update_begin_transaction(self, mod: str) -> None:
+        """
+        Open the instance-level update window of a transaction
+        (downloading / updating): every start is accepted into the queue
+        until update_end_transaction().
+
+        Args:
+            mod (str): Mod being updated
+        """
+        with self._lock:
+            self.update_transaction = mod
+
+    def update_end_transaction(self) -> None:
+        """
+        Close the instance-level update window (idempotent)
+        """
+        with self._lock:
+            self.update_transaction = ''
+
+    def release_update_queue(self, mods=None) -> "List[str]":
+        """
+        List the configs whose start was accepted by the update gate and whose
+        entries still await their start ("resuming", update_queued): the
+        caller starts each one through worker_resume() with the standard
+        interval (worker_resume() consumes the entry, a restart that collected
+        it in between is refused there and the config resumes with the
+        restart).
+
+        The entries are not modified here. An entry created by the auto-resume
+        queue of a restart (mark_resume) is never listed: only the entries of
+        an update window carry the flag.
+
+        Must run in a worker thread (the caller uses trio.to_thread): the lock
+        is held for the scan.
+
+        Args:
+            mods (set[str], optional): Only the configs of these mods, None
+                for every queued config
+
+        Returns:
+            List[str]: Config names, in state order
+        """
+        with self._lock:
+            return [
+                config for config, state in self.state.items()
+                if state.state == 'resuming' and state.update_queued
+                and (mods is None or state.mod in mods)
+            ]
+
+    def _queue_update_start_locked(self, mod, config) -> "tuple[bool, str]":
+        """
+        Accept a start request as a queued resume while an update window owns
+        the config (lock required, see worker_start)
+
+        The caller sees a success and no error: the frontend shows the config
+        as "resuming" (Worker topic) and the config starts automatically when
+        the window ends, without a second click. This is the behavior change
+        of the update flow (the plain restart keeps refusing the starts of
+        configs outside its own windows).
+
+        Returns:
+            whether success, reason
+        """
+        state = self.state.get(config, None)
+        if state is not None:
+            if state.state in ['resuming', 'restarting', 'updating']:
+                # already queued by this window or by a restart: accepted, the
+                # entry is not created twice
+                state.mod = mod
+                return True, (f'Worker is queued for auto-resume, it starts when the update '
+                              f'window ends: "{config}"')
+            if state.state not in ['idle', 'error']:
+                return False, f'Worker is already running: "{config}", state="{state.state}"'
+        if self._restarting and self._restart_frozen:
+            # the resume list of the restart is frozen and its file is written
+            # from it: an entry queued now could never be resumed, the start is
+            # refused instead of being lost silently
+            return False, (f'The update is past its point of no return and the backend '
+                           f'restarts now, start the config after the restart: "{config}"')
+        if state is None:
+            state = WorkerState(mod=mod, config=config, state='idle')
+            self.state[config] = state
+        state.mod = mod
+        state.update_queued = True
+        if self._restarting:
+            # the restart of the update transaction owns the resume list: the
+            # entry is parked and restart_wait() collects it into the list the
+            # resume file is written from
+            state.pending_restart = True
+            self._set_state(state, self._parked_state())
+        else:
+            # a check or download window: the entry is "resuming", the window
+            # releases it when it ends (the restart of the update transaction
+            # converts it, restart_begin re-collects the "resuming" entries)
+            state.pending_restart = False
+            self._set_state(state, 'resuming')
+        self.on_worker_info(config, f'[WorkerManager] Start queued by the update window: {config}')
+        return True, (f'Worker is queued for auto-resume, it starts when the update '
+                      f'window ends: "{config}"')
 
     def close(self):
         """

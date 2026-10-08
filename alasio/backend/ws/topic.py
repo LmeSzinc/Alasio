@@ -10,6 +10,7 @@ from alasio.backend.topic.que import TaskQueue, TaskQueueI18n
 from alasio.backend.topic.restart import Restart
 from alasio.backend.topic.scan import ConfigScan
 from alasio.backend.topic.state import ConnState
+from alasio.backend.topic.update import Update
 from alasio.backend.topic.worker import Worker
 from alasio.backend.ws.ws_server import WebsocketTopicServer
 from alasio.backend.ws.ws_topic import BaseTopic
@@ -41,6 +42,7 @@ class WebsocketServer(WebsocketTopicServer):
         ConfigArg,
         Worker,
         Restart,
+        Update,
         Log,
         TaskQueue,
         TaskQueueI18n,

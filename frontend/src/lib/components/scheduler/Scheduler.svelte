@@ -173,6 +173,7 @@
       {:else if workerState === "killing"}{t.Scheduler.Killing()}
       {:else if workerState === "force-killing"}{t.Scheduler.ForceKilling()}
       {:else if workerState === "restarting"}{t.Scheduler.Restarting()}
+      {:else if workerState === "updating"}{t.Scheduler.Updating()}
       {:else if workerState === "resuming"}{t.Scheduler.Resuming()}
       {:else}{workerState}{/if}
     </span>
@@ -269,10 +270,10 @@
           title={t.Scheduler.SchedulerContinue()}
         />
       {/if}
-    {:else if displayState.value === "restarting"}
-      <!-- restarting: the backend will resume it, start is disabled; the round
-           button cancels the auto-resume (disabled once the resume list is
-           frozen: 'shutting-down' is beyond the point of no return) -->
+    {:else if displayState.value === "restarting" || displayState.value === "updating"}
+      <!-- restarting / updating: the backend will resume it, start is disabled;
+           the round button cancels the auto-resume (disabled once the resume
+           list is frozen: 'shutting-down' is beyond the point of no return) -->
       <ActionStart disabled title={t.Scheduler.Start()} class="flex-1" />
       <ActionCancelResume onclick={handleCancelResume} disabled={isResumeFrozen} title={t.Scheduler.CancelResume()} />
     {:else if displayState.value === "resuming"}

@@ -8,6 +8,7 @@ from starlette.routing import Route, WebSocketRoute
 from alasio.backend.app.frontend import SITE
 from alasio.backend.app.restart import resume_after_restart
 from alasio.backend.app.schedule import task_daily_restart
+from alasio.backend.app.update import UPDATE_MANAGER
 from alasio.backend.auth import auth
 from alasio.backend.dev.assets import ImageStaticFiles
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
@@ -203,6 +204,11 @@ async def lifespan(app):
         # restart as the settings page, so the running configs are resumed by
         # the new backend and the frontend merely reconnects over them
         nursery.start_soon(task_daily_restart)
+        # mod update checks: the startup convergence finishes the update a
+        # killed process left behind (it may end in one graceful restart),
+        # then the check loop of every mounted mod runs; the states flow
+        # through the Update topic. A no-op without an update-enabled mod
+        nursery.start_soon(UPDATE_MANAGER.run)
 
         # actual backend runs here
         yield

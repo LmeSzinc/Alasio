@@ -20,7 +20,7 @@ import os
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
-from alasio.deploy.pack.job import DeployJob
+from alasio.deploy.pack.job import DeployJob, UpdateAborted
 from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy_dev.pack.pack_full import PackFull
@@ -92,6 +92,11 @@ UPDATE = b''.join(PackUpdate(
 NEW_TREE = {
     path: bytes(NEW_DECODER.catfile(info))
     for path, info in NEW_DECODER.fileinfo.items()
+    if info.edit != 2 and not path.startswith('.pack/')
+}
+OLD_TREE = {
+    path: bytes(OLD_DECODER.catfile(info))
+    for path, info in OLD_DECODER.fileinfo.items()
     if info.edit != 2 and not path.startswith('.pack/')
 }
 SERVER = MockServerFile()
@@ -326,3 +331,92 @@ class TestLatestInfoSnapshot:
         assert index_calls == []
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+
+class FakePhaseManager:
+    """Phase callback stand-in: records the phases the job reports."""
+
+    def __init__(self):
+        self.phases = []
+
+    async def __call__(self, phase):
+        self.phases.append(phase)
+        return True
+
+
+class TestUpdatePhases:
+    """The phase contract of update(update_manager): the backend transaction
+    follows what the job is really doing ('downloading' while it downloads,
+    'updating' from the first real file change on)."""
+
+    @pytest.mark.trio
+    async def test_incremental_reports_downloading_then_updating(self, app_folder):
+        await UnpackJob(OLD_PACK).run()
+        phases = FakePhaseManager()
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER).update(phases)
+        assert phases.phases == ['downloading', 'updating']
+        assert read_tree() == NEW_TREE
+
+    @pytest.mark.trio
+    async def test_rebuild_reports_downloading_then_updating(self, app_folder):
+        """The rebuild fallback (no update pack) reports the same pair."""
+        await UnpackJob(OLD_PACK).run()
+        phases = FakePhaseManager()
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER_NO_UPDATE).update(phases)
+        assert phases.phases == ['downloading', 'updating']
+        assert read_tree() == NEW_TREE
+
+    @pytest.mark.trio
+    async def test_local_missing_reports_downloading_then_updating(self, app_folder):
+        phases = FakePhaseManager()
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER).update(phases)
+        assert phases.phases == ['downloading', 'updating']
+        assert read_tree() == NEW_TREE
+
+    @pytest.mark.trio
+    async def test_without_manager_nothing_is_reported(self, app_folder):
+        """The CLI form runs the same flow without a callback."""
+        await UnpackJob(OLD_PACK).run()
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER).update()
+        assert read_tree() == NEW_TREE
+
+    @pytest.mark.trio
+    async def test_abort_at_the_updating_phase(self, app_folder):
+        """A phase callback returning False aborts the flow before the apply:
+        nothing was changed and the temporary files are removed."""
+        await UnpackJob(OLD_PACK).run()
+        phases = []
+
+        async def on_job_phase(phase):
+            phases.append(phase)
+            return phase != 'updating'
+
+        with logger.mock_capture_writer():
+            with pytest.raises(UpdateAborted):
+                await DeployJob(server=SERVER).update(on_job_phase)
+        assert phases == ['downloading', 'updating']
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        # the local tree was not changed (the pack was never applied)
+        assert read_tree() == OLD_TREE
+
+    @pytest.mark.trio
+    async def test_abort_at_the_downloading_phase(self, app_folder):
+        """The callback also guards the downloading phase (a cancel that
+        arrived before the job could start): nothing was read or changed."""
+        await UnpackJob(OLD_PACK).run()
+        phases = []
+
+        async def on_job_phase(phase):
+            phases.append(phase)
+            return False
+
+        with logger.mock_capture_writer():
+            with pytest.raises(UpdateAborted):
+                await DeployJob(server=SERVER).update(on_job_phase)
+        assert phases == ['downloading']
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        assert read_tree() == OLD_TREE

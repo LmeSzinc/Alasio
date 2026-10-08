@@ -133,13 +133,43 @@ class RestartHooks:
         actions (list[str]): Action tags carried by the resume file and
             executed by the new backend before the auto-resume (e.g. cleaning
             stale bytecode after a code update)
+        on_aborted (callable): Async callback run when the restart ended
+            before its replace window (the content of on_all_stopped will
+            never run): the worker wait was cancelled (a force restart / a
+            backend stop), or a step before the window failed. Receives the
+            reason. The update flow of the backend aborts its transaction
+            there.
     """
 
-    def __init__(self, on_all_stopped=None, actions=None):
+    def __init__(self, on_all_stopped=None, actions=None, on_aborted=None):
         # async callback, or None
         self.on_all_stopped = on_all_stopped
         # action tags, a list of str
         self.actions = list(actions) if actions else []
+        # async callback, or None
+        self.on_aborted = on_aborted
+
+
+async def _notify_restart_aborted(hooks, reason):
+    """
+    Tell the hooks of a restart that it ended before the replace window
+
+    Never raises: the abort path is a cleanup path already, a failing hook is
+    logged only. The notification is shielded: it must land whatever the
+    state of the orchestration task (the cancelled path included), the
+    update flow of the backend waits for it.
+
+    Args:
+        hooks (RestartHooks): Hooks of the transaction, may be None
+        reason (str): Why the restart ended early
+    """
+    if hooks is None or hooks.on_aborted is None:
+        return
+    try:
+        with trio.CancelScope(shield=True):
+            await hooks.on_aborted(reason)
+    except Exception as e:
+        logger.warning(f'[Restart] on_aborted hook failed: {e}')
 
 
 class GracefulRestart:
@@ -700,14 +730,15 @@ def run_resume_actions(actions):
 # Orchestration (old backend)
 # =============================================================================
 
-async def request_graceful_restart(reason='', nursery=None):
+async def request_graceful_restart(reason='', nursery=None, hooks=None):
     """
     Request a graceful restart of the backend (entry point of every trigger)
 
     The single entry point of the graceful restart: the settings page rpc
     (ConnState.restart) and the daily scheduled restart
     (alasio.backend.app.schedule) both go through it, so the preconditions
-    and the re-entry guard exist once.
+    and the re-entry guard exist once. The in-app update flow goes through
+    it too, with the hooks carrying its apply step (see RestartHooks).
 
     The request only starts the orchestration task and returns immediately:
     the graceful stop can last up to GRACEFUL_STOP_TIMEOUT and the progress
@@ -718,6 +749,8 @@ async def request_graceful_restart(reason='', nursery=None):
         reason (str): Who requests the restart, for the log
         nursery (trio.Nursery): Nursery to schedule the orchestration in.
             Defaults to the lifespan global nursery, injectable for tests
+        hooks (RestartHooks): Optional hooks of the in-app update flow,
+            handed to the orchestration (see run_graceful_restart)
 
     Raises:
         PermissionError: When the backend runs without a supervisor (the
@@ -735,7 +768,7 @@ async def request_graceful_restart(reason='', nursery=None):
     # requests (a click and the daily schedule, or two clicks) cannot start
     # two orchestrations
     GRACEFUL_RESTART.running = True
-    nursery.start_soon(run_graceful_restart)
+    nursery.start_soon(run_graceful_restart, GRACEFUL_RESTART.WORKER_MANAGER, hooks)
 
 
 async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=None):
@@ -821,6 +854,7 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
                 # cancelled while waiting (force restart / backend stop); the
                 # cancel path already owns the state cleanup
                 logger.info('[Restart] Graceful restart was cancelled')
+                await _notify_restart_aborted(hooks, 'the worker wait was cancelled')
                 return
 
             # 2) the wait is over: publish the resume intent once (the file and
@@ -851,7 +885,9 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
             logger.info(f'[Restart] All workers stopped, restarting backend, resume list: {resume_list}')
             await lifespan_restart()
         except trio.Cancelled:
-            # the cancel path (cancel_graceful_restart) owns the cleanup
+            # the cancel path (cancel_graceful_restart) owns the cleanup; the
+            # hooks are still told: the replace window will never be reached
+            await _notify_restart_aborted(hooks, 'the restart was cancelled')
             raise
         except Exception as e:
             # the failure is treated as a cancel, never raised: see the
@@ -865,6 +901,9 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
                 # every step of the cancel is already guarded; this only keeps
                 # the orchestration task from raising under any circumstance
                 logger.error(f'[Restart] Failed to cancel the failed restart: {cancel_error}')
+            # after the cleanup: the hooks abort their own side (the update
+            # flow of the backend), the replace window was never reached
+            await _notify_restart_aborted(hooks, f'the restart failed: {e}')
             return
         finally:
             if GRACEFUL_RESTART.scope is scope:

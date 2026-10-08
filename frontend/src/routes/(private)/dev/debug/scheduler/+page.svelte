@@ -19,6 +19,7 @@
     "disconnected",
     "error",
     "restarting",
+    "updating",
     "resuming",
   ];
 
@@ -34,7 +35,7 @@
   ];
 
   // Worker states whose buttons depend on the restart phase
-  const RESTART_STATES: WORKER_STATE[] = ["scheduler-stopping", "restarting", "resuming"];
+  const RESTART_STATES: WORKER_STATE[] = ["scheduler-stopping", "restarting", "updating", "resuming"];
 
   /**
    * Preview queue of the scheduler: `pending` due tasks (the first one takes

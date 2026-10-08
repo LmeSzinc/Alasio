@@ -1,6 +1,7 @@
 <script lang="ts">
   import { mode } from "mode-watcher";
   import { onMount } from "svelte";
+  import CircleArrowUp from "@lucide/svelte/icons/circle-arrow-up";
   import CircleDotDashed from "@lucide/svelte/icons/circle-dot-dashed";
   import CirclePlay from "@lucide/svelte/icons/circle-play";
   import Ghost from "@lucide/svelte/icons/ghost";
@@ -23,7 +24,10 @@
 
   const strokeWidth = $derived(mode.current === "dark" ? "3" : "2");
   const spin = $derived(
-    workerState === "running" || workerState === "scheduler-waiting" || workerState === "restarting"
+    workerState === "running" ||
+      workerState === "scheduler-waiting" ||
+      workerState === "restarting" ||
+      workerState === "updating"
       ? "animate-spin"
       : "",
   );
@@ -59,6 +63,9 @@
   {:else if workerState === "restarting"}
     <!-- Restarting: stopped for a graceful backend restart, auto-resume later -->
     <RefreshCw class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Restarting" />
+  {:else if workerState === "updating"}
+    <!-- Updating: stopped for an update transaction, auto-resume after it -->
+    <CircleArrowUp class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Updating" />
   {:else if workerState === "resuming"}
     <!-- Resuming: queued for auto-resume after the backend restart -->
     <Loader class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Resuming" />

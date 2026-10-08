@@ -6,6 +6,7 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import * as Sheet from "$lib/components/ui/sheet";
+  import UpdateAvailableDialog from "$lib/components/update/UpdateAvailableDialog.svelte";
   import { HeaderContext, NavContext } from "$lib/slotcontext.svelte.js";
   import { screen } from "$lib/use/screen.svelte";
   import { cn } from "$lib/utils.js";
@@ -96,6 +97,10 @@
         </div>
       </Sheet.Content>
     </Sheet.Root>
+
+    <!-- 1.5 Update available popup: its Update topic subscription must be
+         alive on every page (a check completes while the user is anywhere) -->
+    <UpdateAvailableDialog />
   </div>
 {:else}
   <!-- 2. Error page -->
