@@ -52,8 +52,10 @@ TYPE_DT_TO_PYTHON = {
     # select
     'select': 'str',
     'radio': 'str',
-    'multi-select': 't.Tuple[str, ...]',
-    'multi-radio': 't.Tuple[str, ...]',
+    # multi-select / multi-radio (multiple values out of "option") are not
+    # implemented yet, no dt for them. A future one is a t.Tuple[str, ...] whose
+    # default value is an unordered subset of "option" (see dt="filter-order")
+
     # secondary-select is like select in data structure level
     # frontend will display wth secondary select menu, group -> option
     'secondary-select': 'str',
@@ -73,7 +75,7 @@ TYPE_DT_TO_PYTHON = {
 #     a "dt" in TYPE_ARG_TUPLE wraps the literal into a tuple
 TYPE_ARG_LITERAL = {
     'static',
-    'select', 'radio', 'multi-select', 'multi-radio', 'secondary-select',
+    'select', 'radio', 'secondary-select',
     'filter-order',
 }
 # Define which "dt" is a tuple of value
@@ -254,8 +256,8 @@ def preprocess_arg(arg: dict) -> dict:
         # datatypes), it is the universe of items the frontend editor can add,
         # the value is an ordered subset of it.
         # The value is defined as "option-A > option-B" in yaml, or as a list,
-        # normalize it to a tuple before validating (filter and the multi-*
-        # datatypes keep the old split position, see below)
+        # normalize it to a tuple before validating (filter keeps the old split
+        # position, see below)
         if type(value) is str:
             value = tuple(s.strip() for s in value.split('>'))
         elif type(value) is list:
