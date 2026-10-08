@@ -166,8 +166,37 @@ class TestWheelDiff:
         assert ref['demo/core.py'].sha1 == old.tree['demo/core.py'].sha1
         assert ref['demo/keep.txt'].sha1 == old.tree['demo/keep.txt'].sha1
 
-    def test_copy_chain(self, fs):
-        """A copy references the nearest earlier record of the content."""
+    @staticmethod
+    def _count_loads(monkeypatch):
+        """
+        Count the records the diff encodes, by path.
+
+        Args:
+            monkeypatch (pytest.MonkeyPatch): Monkeypatch fixture
+
+        Returns:
+            list[str]: Paths of the records that were encoded so far
+        """
+        loaded = []
+        original_added = WheelDiff._load_added
+        original_modified = WheelDiff._load_modified
+
+        def load_added(self, info, new_file):
+            loaded.append(info.path)
+            return original_added(self, info, new_file)
+
+        def load_modified(self, info, old_file, new_file):
+            loaded.append(info.path)
+            return original_modified(self, info, old_file, new_file)
+
+        monkeypatch.setattr(WheelDiff, '_load_added', load_added)
+        monkeypatch.setattr(WheelDiff, '_load_modified', load_modified)
+        return loaded
+
+    def test_copy_chain(self, fs, monkeypatch):
+        """A copy references the nearest earlier record, and only the first
+        record of a content is encoded."""
+        loaded = self._count_loads(monkeypatch)
         old = PackWheel(build_wheel(
             '/w/demo-1.0-py3-none-any.whl', {'demo/__init__.py': b''}, name='demo', version='1.0'))
         payload = b'payload\n' * 20
@@ -181,6 +210,21 @@ class TestWheelDiff:
         assert info['demo/a.txt'].source_path == ''
         assert info['demo/b.txt'].source_path == 'demo/a.txt'
         assert info['demo/c.txt'].source_path == 'demo/b.txt'
+        # the copies carry no data: only the first record of the content is
+        # encoded, the ones that copy it are not
+        assert [path for path in loaded if path.startswith('demo/')] == ['demo/a.txt']
+
+    def test_a_copy_is_not_encoded(self, fs, monkeypatch):
+        """A C (copied) record carries no data: it is never compressed."""
+        loaded = self._count_loads(monkeypatch)
+        info = WheelDiff(PackWheel(build_v1()), PackWheel(build_v2())).diff_info
+        # demo/copy.txt carries the content of the unchanged demo/keep.txt:
+        # the record is a copy, no candidate of its content was compressed
+        assert info['demo/copy.txt'].edit == 0
+        assert info['demo/copy.txt'].source_path == 'demo/keep.txt'
+        assert 'demo/copy.txt' not in loaded
+        # the changed module still goes through the patch encoding
+        assert 'demo/core.py' in loaded
 
     def test_unchanged(self, fs):
         """Two builds of the same wheel have no record at all."""

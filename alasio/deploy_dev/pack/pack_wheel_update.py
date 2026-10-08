@@ -31,7 +31,10 @@ carries no dist-key.
 The diff does not detect renames, see WheelDiff: the files of a .dist-info
 folder change their name with the version of the folder, the A + D records
 that come out of it are accepted (the folder is a few KB of metadata), and the
-client removes the folder of the old version as a whole after the update.
+client removes the folder of the old version as a whole after the update. A
+record whose content an unchanged old file or an earlier record of the new
+version already carries is decided to be a C (copied) record before any
+encoding, so the content of a copy is never compressed.
 
 Usage:
     from alasio.deploy_dev.pack.pack_wheel import PackWheel
@@ -134,6 +137,11 @@ class WheelDiff:
         file for a C record. It is empty for an A / D record and for an M
         record with plain data.
 
+        A record whose content an unchanged old file or an earlier record of
+        the new version already carries is decided to be a C (copied) record
+        before the encoding, so no candidate of it is ever compressed (see
+        _try_copy).
+
         Returns:
             dict[str, UpdateInfo]: {path: UpdateInfo}
         """
@@ -157,22 +165,30 @@ class WheelDiff:
             if path in unchanged:
                 continue
             old_file = old_files.get(path)
+            record = UpdateInfo(
+                path=path, edit=1 if old_file is not None else 0, eol=2, mode=new_file.mode)
+            # a content that already exists (an unchanged old file, or an
+            # earlier record of the new version) makes the record a C (copied)
+            # record, and a copy carries no data at all: the check runs before
+            # the encoding, so the content of a copy is never compressed. An
+            # empty file is never a copy, only a non-empty content is shared
+            # (the same rule the full pack and the git diff keep)
+            content_sha1 = new_file.sha1 if new_file.content else b''
+            if self._try_copy(record, source_map, content_sha1):
+                record.size = len(new_file.content)
+                record.sha1 = content_sha1
+                source_map[content_sha1] = path
+                out[path] = record
+                continue
             if old_file is None:
                 # A (added)
-                record = UpdateInfo(path=path, edit=0, eol=2, mode=new_file.mode)
                 self._load_added(record, new_file)
-            else:
-                # M (modified), the old file of the same path is the patch
-                # source when the zstd patch wins the encoding
-                record = UpdateInfo(path=path, edit=1, eol=2, mode=new_file.mode)
-                if self._load_modified(record, old_file, new_file):
-                    record.source_path = path
-            if record.sha1:
-                # the content may already exist (an unchanged old file, or an
-                # earlier record of the new version): the record becomes C
-                # (copied) and stores no data at all
-                self._try_copy(record, source_map)
-                source_map[record.sha1] = path
+            elif self._load_modified(record, old_file, new_file):
+                # M (modified), the record references the old file when the
+                # zstd patch won the encoding
+                record.source_path = path
+            if content_sha1:
+                source_map[content_sha1] = path
             out[path] = record
 
         # 2. deleted: the files the new version does not have, in the DFS
@@ -324,27 +340,34 @@ class WheelDiff:
         return entry
 
     @staticmethod
-    def _try_copy(info, source_map):
+    def _try_copy(info, source_map, sha1):
         """
         Convert a record to a copied record when its content already exists.
 
         A record whose content matches an unchanged old file (kept in the new
         version) or an earlier record references the source instead of
         carrying data. Only the content matters: the converted record keeps
-        its own eol / mode, encoded in the pack.
+        its own eol / mode, encoded in the pack. The caller checks this before
+        the encoding of the record, so the content of a copy is never
+        compressed (see diff_info).
 
         Args:
             info (UpdateInfo): Record to convert
             source_map (dict[str, str]): {content sha1: source path}
+            sha1 (bytes): Content sha1 of the record, b'' for an empty content
+
+        Returns:
+            bool: True when the record is a copy now, it carries no data
         """
-        if not info.sha1:
+        if not sha1:
             # empty files are not considered as copies
-            return
-        source_path = source_map.get(info.sha1)
+            return False
+        source_path = source_map.get(sha1)
         if source_path is None:
-            return
+            return False
         info.edit = 0
         info.source_path = source_path
+        return True
 
     @staticmethod
     def _new_deleted(path):
