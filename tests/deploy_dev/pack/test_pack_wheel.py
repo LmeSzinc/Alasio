@@ -365,8 +365,9 @@ class TestPathValidateCache:
     platform rejects, lengths every filesystem takes) keep a pack from
     carrying a path that cannot be unpacked somewhere; the same rules are
     applied to the install paths of a wheel and to the markers it adds, and
-    the verdict is shared with the pack encoder (the encoder validates every
-    record path again when it walks the records at the assembly).
+    the verdict is shared by the two sides of the build: the materialization
+    of the wheel and the encoder that walks the records at the assembly look
+    up the same cache of the encoder.
     """
 
     @staticmethod
@@ -380,16 +381,16 @@ class TestPathValidateCache:
         Returns:
             list[str]: Paths validated so far
         """
-        from alasio.deploy_dev.pack import encode_base
+        from alasio.deploy_dev.pack import _pack_cache
 
         checked = []
-        original = encode_base.validate_filepath
+        original = _pack_cache.validate_filepath
 
         def counting(path):
             checked.append(path)
             return original(path)
 
-        monkeypatch.setattr(encode_base, 'validate_filepath', counting)
+        monkeypatch.setattr(_pack_cache, 'validate_filepath', counting)
         return checked
 
     def test_path_validated_once(self, fs, monkeypatch):
@@ -413,13 +414,16 @@ class TestPathValidateCache:
         assert checked == []
 
     def test_the_encoder_reuses_the_validation(self, fs, monkeypatch):
-        """The encoder validates nothing at the assembly of a wheel pack."""
+        """The members of the wheel are not validated again at the assembly."""
         pack = PackWheel(build_demo(files={'cache_case_2/mod.py': b'x = 1\n'}))
         # the records are built (the install paths and the markers validated)
         _ = pack.fileinfo
         checked = self._counting_validate(monkeypatch)
         b''.join(pack.iter_pack_data())
-        assert checked == []
+        # the files the installation generates are not members of the archive:
+        # they pass the gate for the first time here, every other path of the
+        # tree is a lookup
+        assert checked == ['demo-1.0.dist-info/INSTALLER', 'demo-1.0.dist-info/RECORD']
 
     def test_invalid_path_still_rejected(self, fs, monkeypatch):
         """A path that failed is not cached, it keeps failing."""

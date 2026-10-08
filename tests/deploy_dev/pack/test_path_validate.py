@@ -156,7 +156,7 @@ class TestDecodePathValidation:
         """A pack containing a traversal path must fail to decode."""
         # the encoder validates paths too, bypass it to build a
         # malicious pack, the decoder must still reject it
-        import alasio.deploy_dev.pack.encode_base as module
+        import alasio.deploy_dev.pack._pack_cache as module
         monkeypatch.setattr(module, 'validate_filepath', lambda path: None)
         repo = MockGitRepo()
         repo.register_file('c1', '../evil.txt', b'x')

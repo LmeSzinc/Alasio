@@ -3,12 +3,12 @@ from hashlib import sha1
 from typing import Dict, Iterator
 
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
+from alasio.deploy_dev.pack import _pack_cache
 from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
 from alasio.ext.algorithm.bit2coding.vlenint_encode_c import encode_vlenint
 from alasio.ext.algorithm.pathcomb.pathcomb_encode_c import encode_path_comb
 from alasio.ext.algorithm.vint import encode_vint
 from alasio.ext.cache import cached_property
-from alasio.ext.path.validate import validate_filepath
 
 # The pack area of the tree, relative to the tree root: the pack files of a
 # version live directly under it, see validate_pack_area(). The constant keeps
@@ -17,50 +17,6 @@ from alasio.ext.path.validate import validate_filepath
 # folder, never a file of a version.
 PACK_AREA = '.pack/'
 PACK_AREA_DIR = PACK_AREA[:-1]
-
-# Paths that already passed the pack path validation (validate_filepath and
-# validate_pack_area) while packing, see validate_record_path. Every pack
-# encoder keeps this cache: the git source validates the paths of every version
-# it packs and the wheel source validates the install paths of every wheel it
-# materializes, while a pack server only packs the file list of a repo, so the
-# set is bounded by the paths of the packed tree and the per version (or per
-# wheel) walk becomes a set lookup. The validators themselves stay uncached,
-# the backend runs them on untrusted user input where a cache would grow
-# without bound.
-_VALID_PACK_PATH = set()
-
-
-def validate_record_path(path):
-    """
-    Validate the path of a pack record, through the cache of the encoders.
-
-    The rules are the cross platform ones of the pack format:
-    validate_filepath (a relative path, no traversal, no name that some
-    platform rejects, a path and a component length every filesystem takes)
-    and validate_pack_area (no path of the pack area beyond the files directly
-    under it, see there). The client decoder validates every record path with
-    the same rules, so a path that passes here is a path that can be unpacked
-    wherever the pack is applied.
-
-    The verdict is cached in _VALID_PACK_PATH: the encoders validate the paths
-    of every version they pack and the versions usually share their file list,
-    so a path that passed once costs a set lookup after that. Only the paths
-    that pass are cached, a path that failed keeps failing wherever it is used
-    again (a pack must never carry an unsafe path whatever else was packed
-    before it).
-
-    Args:
-        path (str): File path of a pack record
-
-    Raises:
-        ValueError: If the path violates the rules, see validate_filepath and
-            validate_pack_area
-    """
-    if path in _VALID_PACK_PATH:
-        return
-    validate_filepath(path)
-    validate_pack_area(path)
-    _VALID_PACK_PATH.add(path)
 
 
 def validate_pack_area(path):
@@ -225,6 +181,12 @@ class PackEncodeBase:
     PACK_VERSION = 0
 
     def __init__(self):
+        # cache of the pipeline that encodes this pack: the process cache, read
+        # through the module at construction, so a caller that swapped it before
+        # the build (a test, a benchmark) validates and encodes with the fresh
+        # one, see _pack_cache. The wheel encoders bind a cache of their own
+        # instead, see PackWheel
+        self.cache = _pack_cache.PACK_CACHE
         # version of this pack, e.g. the commit sha1 of the packed version
         self.current_version: str = ''
         # version this pack updates from, empty in a full pack, a
@@ -297,10 +259,13 @@ class PackEncodeBase:
         # paths: reject absolute / traversal paths, names that cannot be
         # unpacked on some platform, and pack area paths nested deeper
         # than one level. The paths the encoders already validated (a .py
-        # file of a version walked before) are looked up in the cache
+        # file of a version walked before) are looked up in the cache of the
+        # encoder instead of being validated again, see
+        # PackCache.validate_record_path
+        cache = self.cache
         files = list(self._iterfile(iter_ref=True, iter_file=True))
         for file in files:
-            validate_record_path(file.path)
+            cache.validate_record_path(file.path)
 
         # filepath, the resulting sections are written one after another
         list_prefix_comb, list_suffix_comb, path_data = encode_path_comb(

@@ -457,6 +457,7 @@ class PackWheelUpdate(PackUpdate):
     Attributes:
         new (PackWheel): New version
         old (PackWheel): Old version
+        cache (PackCache): Cache of the pack, the one of the new version
     """
 
     def __init__(self, new, old):
@@ -487,6 +488,10 @@ class PackWheelUpdate(PackUpdate):
                 f'PackWheelUpdate requires a PackWheel of the old version, got {type(old).__name__}')
         self.new = new
         self.old = old
+        # the records of the pack are validated and encoded through the cache of
+        # the new version, like its diff (WheelDiff): the process cache bound by
+        # PackEncodeBase.__init__ is the one of the git pipeline
+        self.cache = new.cache
         # the update pack updates from the old version to the current one,
         # and is encoded in the format of the new pack, like PackUpdate
         self.pack_version = new.pack_version

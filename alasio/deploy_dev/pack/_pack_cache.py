@@ -25,6 +25,16 @@ content again and again, the cache removes the repeated work:
   pack) and it is compressed on demand, the skip of _load_data (a patch far
   smaller than the plain best) keeps a version that does not need it from
   paying for it
+- the record paths of a pack pass the cross platform rules of the format before
+  anything is encoded (PackCache.validate_record_path: validate_filepath and
+  validate_pack_area) and a path that passed once is a set lookup after that:
+  the versions of a run, and the wheels of the dist channel, share most of
+  their file list, while the paths of every version (or wheel) are validated
+  again at the assembly of its index (PackEncodeBase.iter_index_data). Only the
+  paths that pass are kept, a path that failed keeps failing wherever it is
+  used again (a pack must never carry an unsafe path, whatever was packed
+  before it), and the validators themselves stay uncached: the backend runs
+  them on untrusted user input, where a cache would grow without bound
 
 The cache is the module level PACK_CACHE: every PackFull / PackUpdate of the
 process shares it, so the tables live across the versions of a run. It is not
@@ -78,6 +88,7 @@ from msgspec import Struct
 from alasio.deploy.pack.pack_model import FileInfo
 from alasio.ext.concurrent.processpool import get_max_worker
 from alasio.ext.concurrent.threadpool import ThreadPool
+from alasio.ext.path.validate import validate_filepath
 
 # Thread pool of the pack encoders, one worker per physical core of the machine
 # (a single worker when the count can not be detected: a narrow pool only costs
@@ -166,12 +177,14 @@ class PlainCache(Struct):
 
 class PackCache:
     """
-    Shared cache of the encoded content and the encoded patches.
+    Shared cache of the encoded content, the encoded patches and the validated
+    record paths.
 
-    The API is two methods: get reads an entry of a table (None when the table
-    has none) and submit computes it in a task of PACK_POOL (see
-    _compute_entry). The caller passes the table itself, one of the attributes
-    below.
+    The API is three methods: get reads an entry of a table (None when the
+    table has none), submit computes it in a task of PACK_POOL (see
+    _compute_entry) and validate_record_path validates a record path through
+    the verdicts of valid_path. The caller passes the tables themselves, two of
+    the attributes below.
 
     Attributes:
         content_index (Table): {git blob sha1 hex: PlainCache} encoding of a
@@ -192,6 +205,10 @@ class PackCache:
             state of the repo, see PackFull._populate_eol
         stat (dict[str, list[int]]): [hit, miss] of every table, by name (the
             two encodings of a content share the row of 'content'), see report
+        valid_path (set[str]): Record paths that already passed
+            validate_record_path, see there. Not a Table: a verdict is not an
+            entry computed on the pool, a path is validated on the spot or not
+            at all
 
     Usage:
         cache = PACK_CACHE
@@ -210,11 +227,47 @@ class PackCache:
         self.extra = Table('extra')
         self.rename = Table('rename')
         self.eol = Table('eol')
+        self.valid_path = set()
         # per key locks of the entries, {(table name, key): Lock}, see _compute_entry
         self._lock_guard = Lock()
         self._locks: "dict[tuple, Lock]" = {}
         # the counters of the tables are updated by every thread
         self._stat_lock = Lock()
+
+    def validate_record_path(self, path):
+        """
+        Validate the path of a pack record, through the cache of the encoders.
+
+        The rules are the cross platform ones of the pack format:
+        validate_filepath (a relative path, no traversal, no name that some
+        platform rejects, a path and a component length every filesystem takes)
+        and validate_pack_area (no path of the pack area beyond the files
+        directly under it). The client decoder validates every record path with
+        the same rules, so a path that passes here is a path that can be
+        unpacked wherever the pack is applied.
+
+        The verdict is cached in valid_path: the encoders validate the paths of
+        every version they pack and the versions usually share their file list,
+        so a path that passed once costs a set lookup after that. Only the
+        paths that pass are cached, a path that failed keeps failing wherever
+        it is used again (a pack must never carry an unsafe path whatever else
+        was packed before it).
+
+        Args:
+            path (str): File path of a pack record
+
+        Raises:
+            ValueError: If the path violates the rules, see validate_filepath
+                and validate_pack_area
+        """
+        if path in self.valid_path:
+            return
+        # local import to break the circular dependency: encode_base reads this
+        # cache to validate the records it encodes (PackEncodeBase.cache)
+        from alasio.deploy_dev.pack.encode_base import validate_pack_area
+        validate_filepath(path)
+        validate_pack_area(path)
+        self.valid_path.add(path)
 
     def get(self, table, key):
         """

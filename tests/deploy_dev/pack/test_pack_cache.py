@@ -18,6 +18,9 @@ tests pin the invariants of the change:
 - the entries are computed once per key even when two builds need them at the
   same time: the computation runs under the per key lock of PackCache, see
   PackCache._compute_entry
+- the paths of a pack are validated once per cache: the verdicts live on
+  PackCache.valid_path (validate_record_path looks the path up before it runs
+  the rules), a path that failed is never cached and keeps failing
 """
 import threading
 
@@ -25,6 +28,7 @@ import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import FileInfo
+from alasio.deploy_dev.pack import _pack_cache
 from alasio.deploy_dev.pack._pack_cache import PackCache, PatchCache, PlainCache
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
 from alasio.deploy_dev.pack.pack_full import PackFull
@@ -269,6 +273,77 @@ class TestPackCacheHit:
         assert 'data=' in report
         # every computation is over, the lock table is empty again
         assert 'locks=0' in report
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  the record path gate of the cache
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _count_validate_filepath(monkeypatch):
+    """
+    Count the real validations of the filepath rules, from every cache
+
+    Args:
+        monkeypatch (MonkeyPatch): Pytest monkeypatch fixture
+
+    Returns:
+        list[str]: The paths validated so far
+    """
+    checked = []
+    original = _pack_cache.validate_filepath
+
+    def counting(path):
+        checked.append(path)
+        return original(path)
+
+    monkeypatch.setattr(_pack_cache, 'validate_filepath', counting)
+    return checked
+
+
+class TestValidateRecordPath:
+    """The path gate of the cache: cache first, then the rules of the format."""
+
+    def test_a_valid_path_is_validated_once(self, cache, monkeypatch):
+        """The second call of a path is a set lookup, no re-validation"""
+        checked = _count_validate_filepath(monkeypatch)
+        for _ in range(2):
+            cache.validate_record_path('a/b.txt')
+        assert checked == ['a/b.txt']
+        assert cache.valid_path == {'a/b.txt'}
+
+    def test_an_invalid_path_is_not_cached(self, cache, monkeypatch):
+        """A path that failed keeps failing, it never enters the cache"""
+        checked = _count_validate_filepath(monkeypatch)
+        for _ in range(2):
+            with pytest.raises(ValueError, match='directory pointer'):
+                cache.validate_record_path('a/..')
+        # the failed path is not remembered, both calls ran the rules
+        assert checked == ['a/..', 'a/..']
+        assert cache.valid_path == set()
+
+    def test_the_pack_area_rule_applies(self, cache):
+        """The gate is the filepath rules plus the pack area ones"""
+        with pytest.raises(ValueError, match='pack area itself'):
+            cache.validate_record_path('.pack')
+        with pytest.raises(ValueError, match='nested too deep'):
+            cache.validate_record_path('.pack/httpx/index.pack')
+        cache.validate_record_path('.pack/index.pack')
+        assert cache.valid_path == {'.pack/index.pack'}
+
+    def test_every_cache_validates_on_its_own(self, monkeypatch):
+        """The verdicts live on the cache: a fresh cache validates again"""
+        checked = _count_validate_filepath(monkeypatch)
+        PackCache().validate_record_path('a/b.txt')
+        fresh = PackCache()
+        fresh.validate_record_path('a/b.txt')
+        assert checked == ['a/b.txt', 'a/b.txt']
+        assert fresh.valid_path == {'a/b.txt'}
+
+    def test_the_encoders_validate_through_the_cache(self, cache):
+        """The record paths of a version pass the gate of the cache of the run"""
+        PackFull(WINDOW_REPO, commit='new').index_pack
+        assert 'added.txt' in cache.valid_path
 
 
 # ════════════════════════════════════════════════════════════════════════════

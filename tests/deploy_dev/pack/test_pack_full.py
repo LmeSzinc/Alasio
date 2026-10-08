@@ -56,16 +56,16 @@ def _make_counting_validate(monkeypatch):
     Returns:
         list[str]: Paths validated so far
     """
-    from alasio.deploy_dev.pack import encode_base
+    from alasio.deploy_dev.pack import _pack_cache
 
     checked = []
-    original = encode_base.validate_filepath
+    original = _pack_cache.validate_filepath
 
     def counting(path):
         checked.append(path)
         return original(path)
 
-    monkeypatch.setattr(encode_base, 'validate_filepath', counting)
+    monkeypatch.setattr(_pack_cache, 'validate_filepath', counting)
     return checked
 
 

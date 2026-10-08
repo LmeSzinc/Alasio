@@ -22,9 +22,10 @@ and raises ValueError: the footprint of a version is the source level install
 an index that recorded one could never stay consistent with the disk), and a
 pack rooted at site-packages cannot carry the files of the other roots of the
 install scheme. Every install path (the markers included) passes the cross
-platform rules of the pack format (validate_record_path: a relative path, no
-traversal, no name or length that a platform rejects, see _validate_path), so
-a record of a wheel is never a path that cannot be unpacked somewhere. The
+platform rules of the pack format (PackCache.validate_record_path: a relative
+path, no traversal, no name or length that a platform rejects, see
+_validate_path), so a record of a wheel is never a path that cannot be
+unpacked somewhere. The
 pure python gate of the channel (no compiled extension, pure wheel tags) is
 the business of the pack server, not of this encoder.
 
@@ -48,11 +49,13 @@ of the git pipeline (PackFull) with the dist policy:
 
 The encodings are cached by the content sha1 in WHEEL_CACHE, the cache of the
 wheel pipeline: a content an earlier build of the run carried is encoded once,
-every build that follows takes the bytes from the cache. The cache is an
-instance of its own, separate from ``_pack_cache.PACK_CACHE``: the two
-pipelines key their entries by different identities (a wheel record by the
-content sha1, a git record by the git blob sha1), and one pack server run
-builds both kinds of packs in one process.
+every build that follows takes the bytes from the cache. The validated install
+paths are cached there too (PackCache.validate_record_path): the paths of a
+wheel pass the rules once, the materialization and the assembly of a later
+build look them up. The cache is an instance of its own, separate from
+``_pack_cache.PACK_CACHE``: the two pipelines key their entries by different
+identities (a wheel record by the content sha1, a git record by the git blob
+sha1), and one pack server run builds both kinds of packs in one process.
 
 Usage:
     from alasio.deploy_dev.pack.pack_wheel import PackWheel
@@ -72,7 +75,7 @@ from msgspec import Struct
 from alasio.backport import removeprefix, removesuffix
 from alasio.deploy.pack.pack_model import FileInfo
 from alasio.deploy_dev.pack._pack_cache import PACK_POOL, PackCache, PlainCache
-from alasio.deploy_dev.pack.encode_base import PACK_AREA, PACK_AREA_DIR, PackEncodeBase, validate_record_path
+from alasio.deploy_dev.pack.encode_base import PACK_AREA, PACK_AREA_DIR, PackEncodeBase
 from alasio.deploy_dev.pack.pack_full import PackFull, _dfs_path_key, apply_encoding
 from alasio.deploy_dev.simple_pip.simple_pip import DATA_CATEGORIES, SimplePip, zip_item_is_executable
 from alasio.deploy_dev.simple_pip.whl_record import RecordManager
@@ -82,13 +85,14 @@ from alasio.ext.path import PathStr
 # The cache of the wheel pipeline: the same PackCache the git pipeline uses
 # (_pack_cache.PACK_CACHE), but an instance of its own. The tables of the two
 # pipelines are keyed by different identities -- a wheel record by the content
-# sha1, a git record by the git blob sha1 -- and a pack server run builds the
-# packs of the project tree (git) and of the dependencies (wheel) in one
-# process: separate instances keep the tables, the per key locks and the
-# statistics of the two pipelines apart. Every PackWheel / PackWheelUpdate of
-# the process shares this one, so the versions of a run reuse the encodings of
-# the contents they share; a caller that wants a run scoped cache (e.g. the
-# pack server of one run) passes its own instance to the constructors.
+# sha1, a git record by the git blob sha1, a path by the path itself -- and a
+# pack server run builds the packs of the project tree (git) and of the
+# dependencies (wheel) in one process: separate instances keep the tables, the
+# per key locks and the statistics of the two pipelines apart. Every PackWheel
+# / PackWheelUpdate of the process shares this one, so the versions of a run
+# reuse the encodings of the contents they share; a caller that wants a run
+# scoped cache (e.g. the pack server of one run) passes its own instance to the
+# constructors.
 WHEEL_CACHE = PackCache()
 
 
@@ -163,7 +167,8 @@ class PackWheel(PackEncodeBase):
             METADATA (the folder name when the header is missing); not
             normalized, the dist-key of the channel is the PEP 503
             normalized form of it
-        cache (PackCache): Cache of the encodings, WHEEL_CACHE by default
+        cache (PackCache): Cache of the pack (the encodings and the validated
+            paths), WHEEL_CACHE by default
     """
 
     def __init__(self, wheel, pack_version=None, cache=None):
@@ -174,8 +179,9 @@ class PackWheel(PackEncodeBase):
                 0~255. Defaults to None, the current version of
                 PackEncodeBase; an already published pack must be rebuilt with
                 the format version it was encoded with, see PackWheelUpdate
-            cache (PackCache, optional): Cache of the encodings. Defaults to
-                None, WHEEL_CACHE of this module
+            cache (PackCache, optional): Cache of the pack (the encodings and
+                the validated paths). Defaults to None, WHEEL_CACHE of this
+                module
 
         The install tree of the wheel is materialized here (see tree): a
         wheel that is not a pack target fails at construction, with the name
@@ -192,6 +198,9 @@ class PackWheel(PackEncodeBase):
         self.wheel = PathStr.new(wheel)
         if pack_version is not None:
             self.pack_version = pack_version
+        # the cache of the wheel pipeline replaces the process cache bound by
+        # PackEncodeBase.__init__: the encodings and the validated paths of the
+        # wheels live on an instance of their own, see the module docstring
         self.cache = WHEEL_CACHE if cache is None else cache
         # the identity of the version, read from the wheel now: a caller that
         # read the version of the pack reads it before anything is encoded
@@ -386,19 +395,21 @@ class PackWheel(PackEncodeBase):
                 f'Invalid wheel for a pack, the member "{rel_path}" is a bytecode file; '
                 f'a distribution that ships bytecode is not a pack target: "{self.wheel}"')
 
-    @staticmethod
-    def _validate_path(path, what):
+    def _validate_path(self, path, what):
         """
-        Validate an install path of the pack, through the cache of the encoders.
+        Validate an install path of the pack, through the cache of the encoder.
 
         The rules are the cross platform ones of the pack format
-        (validate_record_path: validate_filepath and validate_pack_area), the
-        same rules the client decoder applies to every record of a pack, so a
-        path of a wheel never reaches a device in a form some platform cannot
-        unpack. The verdict is cached: a path the process validated before (an
-        earlier version, an earlier wheel, a file the same wheel carries
-        twice) costs a set lookup here, and the paths validated here are a set
-        lookup again when the pack encoder walks the records at the assembly.
+        (PackCache.validate_record_path: validate_filepath and
+        validate_pack_area), the same rules the client decoder applies to every
+        record of a pack, so a path of a wheel never reaches a device in a form
+        some platform cannot unpack. The verdict is cached in the cache of the
+        encoder (self.cache, WHEEL_CACHE by default): a path the wheel
+        validated before (an earlier version, an earlier build of the same
+        wheel, a file the same wheel carries twice) costs a set lookup here,
+        and the paths validated here are a set lookup again when the pack
+        encoder walks the records at the assembly
+        (PackEncodeBase.iter_index_data).
 
         Args:
             path (str): Install path of a record, relative to site-packages
@@ -409,7 +420,7 @@ class PackWheel(PackEncodeBase):
             ValueError: If the path violates the rules of the pack format
         """
         try:
-            validate_record_path(path)
+            self.cache.validate_record_path(path)
         except ValueError as e:
             raise ValueError(f'Invalid wheel, {what} installs to "{path}": {e}') from e
 
