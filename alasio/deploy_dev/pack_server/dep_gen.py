@@ -15,8 +15,8 @@ of the build, and every dependency gets a channel of its own:
    with a pack
 2. remove the wheel folders the lookback window does not ask for: the window
    is the retention boundary of the wheel cache
-3. build the full pack of every version and the update pack from every other
-   version to the target, encoded from the wheels by PackWheel /
+3. build the full pack of the target version and the update pack from every
+   other version to it, encoded from the wheels by PackWheel /
    PackWheelUpdate (a pack of a wheel is the install tree of the wheel, see
    pack_wheel), then latest.pack of every dependency
 4. remove the dependency folders, the pack folders and the update pack files
@@ -25,8 +25,13 @@ of the build, and every dependency gets a channel of its own:
 The channel of a dependency is the layout the client reads (ServerFile):
 
     pack/{Author}_{Repo}_{Branch}/packdep/{name}/latest.pack
-    pack/{Author}_{Repo}_{Branch}/packdep/{name}/{version}/full.pack
+    pack/{Author}_{Repo}_{Branch}/packdep/{name}/{new}/full.pack
     pack/{Author}_{Repo}_{Branch}/packdep/{name}/{new}/from_{old}.pack
+
+Only the target version has a full pack, the rule the git flow keeps for the
+latest commit: a client downloads the full pack of the version it updates to
+once and updates with update packs afterwards, so a version of the window
+only needs an update path to the target.
 
 pack/{Author}_{Repo}_{Branch} is the folder of the packs of the config (see
 PackRepoModel), the packdep folder lives next to the packrepo folder of the
@@ -38,8 +43,9 @@ The versions of a dependency are the pins of PythonDeps.RequirementFiles over
 the lookback window, sampled by LookbackWheel: the pin of the latest commit is
 the target of the dependency (the version a client updates to, the only
 version latest.pack publishes), the pins of the old commits are the versions a
-client may still be on, every one of them gets a full pack and an update path
-to the target. Only the names of PythonDeps.PackUpdate are built; a name of
+client may still be on, every one of them gets an update path to the target (a
+full pack is only built of the target). Only the names of
+PythonDeps.PackUpdate are built; a name of
 the list that no commit of the window pins yields no wheel and no pack and is
 reported with a warning (a range constraint builds nothing, the version must
 be pinned with '=='). A name the latest commit does not pin has no target:
@@ -374,64 +380,54 @@ class DepGen:
         """
         Write the packs of one dependency, see the module docstring for the layout.
 
-        The full pack of a version an earlier run wrote is kept as it is, see
-        kept_pack: only the packs that are missing are built, so a run over a
-        channel that is up to date builds nothing and only rewrites
+        The full pack of the target version an earlier run wrote is kept as it
+        is, see kept_pack: only the packs that are missing are built, so a run
+        over a channel that is up to date builds nothing and only rewrites
         latest.pack.
 
         Args:
             deps (list[DepVersion]): Versions of the dependency, the target
                 first
             target (DepVersion): Version of the latest commit, the version a
-                client updates to
+                client updates to, the only version with a full pack
             wheel_files (dict[tuple[str, str], PathStr]): Wheels of this run
         """
         name = target.name
         dep_folder = self.packdep_folder.joinpath(name)
-        # the packs of the versions this run built: the full pack of the
-        # target is the new side of every update pack of the dependency, the
-        # full pack of an old version the old side of its own update pack
-        packs = {}
-        target_checksum = None
 
-        # 1. the full pack of every version, the target first
-        for dep in deps:
-            file = dep_folder.joinpath(dep.version).joinpath(FULL_PACK_FILE)
-            identity = kept_pack(file, PackWheel.PACK_VERSION, dep.version, '')
-            if identity is not None:
-                logger.info(f'Full pack exists, skipped: "{file}"')
-            else:
-                wheel_file = wheel_files.get((name, dep.version))
-                if wheel_file is None:
-                    # the wheel of the version could not be fetched, the pack
-                    # cannot be built
-                    continue
-                pack = PackWheel(wheel_file)
-                logger.info(f'Writing full pack: "{file}"')
-                atomic_write_stream(file, pack.iter_pack_data())
-                packs[dep.version] = pack
-                # read the identity back from the file: the same read the
-                # kept path does, so latest.pack is built from the checksum
-                # of the pack that is on the disk
-                identity = PackChecksum.from_file(file)
-            if dep.target:
-                target_checksum = identity.index_checksum
-
-        if target_checksum is None:
-            # neither the full pack of the target version nor its wheel is
-            # available: there is no new side for the update packs and
-            # nothing to publish
-            logger.warning(
-                f'No pack of the target version "{name}=={target.version}", '
-                f'latest.pack is not written, the published version is kept')
-            return
+        # 1. the full pack of the target version, the only full pack of the
+        # channel: a client downloads it once and updates with update packs
+        # afterwards, the versions of the window do not need one
+        file = dep_folder.joinpath(target.version).joinpath(FULL_PACK_FILE)
+        identity = kept_pack(file, PackWheel.PACK_VERSION, target.version, '')
+        if identity is not None:
+            logger.info(f'Full pack exists, skipped: "{file}"')
+            target_pack = None
+            target_checksum = identity.index_checksum
+        else:
+            wheel_file = wheel_files.get((name, target.version))
+            if wheel_file is None:
+                # the wheel of the target version could not be fetched: there
+                # is no new side for the update packs and nothing to publish
+                logger.warning(
+                    f'No wheel of "{name}=={target.version}", the packs are not built, '
+                    f'latest.pack is not written, the published version is kept')
+                return
+            target_pack = PackWheel(wheel_file)
+            logger.info(f'Writing full pack: "{file}"')
+            atomic_write_stream(file, target_pack.iter_pack_data())
+            # read the identity back from the file: the same read the kept
+            # path does, so latest.pack is built from the checksum of the
+            # pack that is on the disk
+            target_checksum = PackChecksum.from_file(file).index_checksum
 
         # 2. the update pack from every other version to the target. The
-        # full pack of the old version is the old side of the update pack,
-        # the full pack of the target the new side, shared by every update
-        # pack of the dependency; the pack of a version pair that is already
-        # on the disk is kept, see kept_pack
-        new_pack = packs.get(target.version)
+        # install tree of the old version is the old side of the update pack
+        # (the wheel is the input of the pack build, a version of the window
+        # has no full pack of its own), the pack of the target the new side,
+        # shared by every update pack of the dependency; the pack of a version
+        # pair that is already on the disk is kept, see kept_pack
+        new_pack = target_pack
         for dep in deps:
             if dep.target:
                 continue
@@ -456,9 +452,7 @@ class DepGen:
                         f'No wheel of "{name}=={target.version}", the update packs are not built')
                     break
                 new_pack = PackWheel(new_wheel)
-            old_pack = packs.get(dep.version)
-            if old_pack is None:
-                old_pack = PackWheel(old_wheel)
+            old_pack = PackWheel(old_wheel)
             logger.info(f'Writing update pack: {dep.version} -> {target.version}, "{file}"')
             atomic_write_stream(file, PackWheelUpdate(new_pack, old_pack).iter_pack_data())
 
@@ -507,15 +501,18 @@ class DepGen:
         Remove the dependency folders, pack folders and pack files the sample does not ask for.
 
         A dependency the sample does not ask for has no channel anymore, its
-        folder (latest.pack included) is removed; a version of a dependency
-        the sample does not ask for is removed from the folder of the
-        dependency. An update pack is only addressed in the folder of the
-        target ({new}/from_{old}.pack, see ServerFile): a from_ file of
-        another version folder, or a from_ file of a version out of the
-        window, is the leftover of an earlier run and is removed. Only the
-        folders and the from_ files are recognized: a file of another tool
-        in the folder is left alone. A removal that fails is logged and
-        retried by the next run.
+        folder (latest.pack included) is removed. The channel of a dependency
+        is the folder of the target: it holds the full pack of the target and
+        one update pack per other version of the window, so another version
+        folder is the leftover of an earlier run and is removed (its full pack
+        was the layout of an earlier run). An update pack of a version out of
+        the window is removed too. Only the folders and the from_ files are
+        recognized: a file of another tool in the folder is left alone. A
+        removal that fails is logged and retried by the next run.
+
+        A name the latest commit dropped has no target, nothing was published
+        of it this run: its pack folders are kept as they are, only the
+        versions out of the window are removed.
 
         Args:
             sample (dict[str, list[DepVersion]]): Dependencies the window asks
@@ -536,14 +533,18 @@ class DepGen:
                 continue
             versions = {dep.version for dep in deps}
             target = self._target_of(deps)
-            # the update packs the folder of the target must hold: one for
-            # every other version of the window. A name the latest commit
-            # dropped has no target, nothing was published of it this run and
-            # its historical releases are kept as they are.
-            updated = versions - {target.version} if target is not None else None
+            if target is None:
+                keep = versions
+                # the update packs the target folder must hold: one for every
+                # other version of the window. A name the latest commit
+                # dropped has no target and no update pack at all.
+                updated = None
+            else:
+                keep = {target.version}
+                updated = versions - {target.version}
             for version in dep_folder.iter_foldernames():
                 version_folder = dep_folder.joinpath(version)
-                if version not in versions:
+                if version not in keep:
                     logger.info(f'Removing stale pack folder: "{version_folder}"')
                     try:
                         atomic_rmtree(version_folder)
@@ -552,12 +553,11 @@ class DepGen:
                     continue
                 if updated is None:
                     continue
-                needed = updated if version == target.version else set()
                 for filename in version_folder.iter_filenames(ext='.pack'):
                     if not filename.startswith('from_'):
                         continue
                     old = filename[len('from_'):-len('.pack')]
-                    if old in needed:
+                    if old in updated:
                         continue
                     file = version_folder.joinpath(filename)
                     logger.info(f'Removing stale update pack: "{file}"')
