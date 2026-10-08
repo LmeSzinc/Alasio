@@ -1,10 +1,11 @@
 """
 Tests for PackServer: generate the packs of every config of the run directory.
 
-The steps of the flow (PackRepo and PackRepoGen) are faked on the module, the
-config reader is real, so the tests check the chain that main.py builds and
-the behavior of the run: the configs are run one by one, a config that fails
-does not stop the other ones, and a failed run is reported at the end.
+The steps of the flow (PackRepo, PackRepoGen and DepGen) are faked on the
+module, the config reader is real, so the tests check the chain that main.py
+builds and the behavior of the run: the configs are run one by one, a config
+that fails does not stop the other ones, and a failed run is reported at the
+end.
 """
 import os
 import sys
@@ -160,6 +161,35 @@ def fake_gen(calls, fail=()):
     return FakeGen
 
 
+def fake_dep_gen(calls, fail=()):
+    """
+    Build a fake of DepGen, the step that generates the dependency packs.
+
+    Every run is recorded as ('dep', config, repo), the packs of a repo whose
+    name is in `fail` raise instead.
+
+    Args:
+        calls (list): Record of the steps of the test
+        fail (Iterable[str]): Repo names whose run fails. Defaults to ()
+
+    Returns:
+        type: Fake class to replace main.DepGen
+    """
+
+    class FakeDepGen:
+        def __init__(self, repo, config):
+            self.repo = repo
+            self.config = config
+
+        def run(self):
+            name = self.config.Repo.Repo
+            if name in fail:
+                raise RuntimeError(f'fake failure of the dependency packs of "{name}"')
+            calls.append(('dep', self.config, self.repo))
+
+    return FakeDepGen
+
+
 class TestIterConfig:
     """The config files of the run directory."""
 
@@ -196,16 +226,20 @@ class TestRunConfig:
         calls = []
         monkeypatch.setattr(main, 'PackRepo', fake_repo(calls))
         monkeypatch.setattr(main, 'PackRepoGen', fake_gen(calls))
+        monkeypatch.setattr(main, 'DepGen', fake_dep_gen(calls))
         main.PackServer().run_config(FILE)
 
         assert [(step, config.Repo.Repo, repo) for step, config, repo in calls] == [
             ('repo', 'AzurLaneAutoScript', 'repo AzurLaneAutoScript'),
             ('gen', 'AzurLaneAutoScript', 'repo AzurLaneAutoScript'),
+            ('dep', 'AzurLaneAutoScript', 'repo AzurLaneAutoScript'),
         ]
-        # the generator gets the repo object of PackRepo.run and the config
+        # the generators get the repo object of PackRepo.run and the config
         # the reader returned, not a copy of it
         assert calls[1][2] == calls[0][2]
         assert calls[1][1] is calls[0][1]
+        assert calls[2][2] == calls[0][2]
+        assert calls[2][1] is calls[0][1]
 
     def test_invalid_config(self, fs, run_dir, monkeypatch):
         """A config with an empty value fails in the reader, no step is run."""
@@ -228,12 +262,15 @@ class TestPackServerRun:
         calls = []
         monkeypatch.setattr(main, 'PackRepo', fake_repo(calls))
         monkeypatch.setattr(main, 'PackRepoGen', fake_gen(calls))
+        monkeypatch.setattr(main, 'DepGen', fake_dep_gen(calls))
         with logger.mock_capture_writer() as capture:
             main.PackServer().run()
 
-        assert [step for step, _, _ in calls] == ['repo', 'gen', 'repo', 'gen']
+        assert [step for step, _, _ in calls] == [
+            'repo', 'gen', 'dep', 'repo', 'gen', 'dep']
         assert [config.Repo.Repo for _, config, _ in calls] == [
-            'AzurLaneAutoScript', 'AzurLaneAutoScript', 'StarRailCopilot', 'StarRailCopilot']
+            'AzurLaneAutoScript', 'AzurLaneAutoScript', 'AzurLaneAutoScript',
+            'StarRailCopilot', 'StarRailCopilot', 'StarRailCopilot']
         assert capture.fd.any_contains('Ran 2 configs: 2 done, 0 failed')
 
     def test_failed_config_does_not_stop_the_rest(self, fs, run_dir, monkeypatch):
@@ -245,6 +282,7 @@ class TestPackServerRun:
         # the repo of the second config cannot be fetched, the packs of the third cannot be built
         monkeypatch.setattr(main, 'PackRepo', fake_repo(calls, fail=('AzurLaneAutoScript',)))
         monkeypatch.setattr(main, 'PackRepoGen', fake_gen(calls, fail=('StarRailCopilot',)))
+        monkeypatch.setattr(main, 'DepGen', fake_dep_gen(calls))
         with logger.mock_capture_writer() as capture:
             with pytest.raises(main.PackRunError) as e:
                 main.PackServer().run()
@@ -253,9 +291,10 @@ class TestPackServerRun:
         assert [name for name, _ in e.value.errors] == [FILE, OTHER]
         assert all(isinstance(error, RuntimeError) for _, error in e.value.errors)
         assert 'Failed to run 2 configs' in str(e.value)
-        # the repo of the third config is fetched, then its packs fail
+        # the repo of the third config is fetched, then its packs fail; the
+        # dependency packs of the first config are generated after its packs
         assert [(step, config.Repo.Repo) for step, config, _ in calls] == [
-            ('repo', 'Alasio'), ('gen', 'Alasio'), ('repo', 'StarRailCopilot')]
+            ('repo', 'Alasio'), ('gen', 'Alasio'), ('dep', 'Alasio'), ('repo', 'StarRailCopilot')]
         assert capture.fd.any_contains(f'Config "{FILE}" failed')
         assert capture.fd.any_contains(f'Config "{OTHER}" failed')
         assert capture.fd.any_contains('Ran 3 configs: 1 done, 2 failed')
@@ -279,6 +318,7 @@ class TestPackServerRun:
         calls = []
         monkeypatch.setattr(main, 'PackRepo', fake_repo(calls))
         monkeypatch.setattr(main, 'PackRepoGen', fake_gen(calls))
+        monkeypatch.setattr(main, 'DepGen', fake_dep_gen(calls))
         with logger.mock_capture_writer() as capture:
             main.PackServer().run()
         assert capture.fd.any_contains('Write config')
@@ -287,7 +327,8 @@ class TestPackServerRun:
         with logger.mock_capture_writer() as capture:
             main.PackServer().run()
         assert not capture.fd.any_contains('Write config')
-        assert [step for step, _, _ in calls] == ['repo', 'gen', 'repo', 'gen']
+        assert [step for step, _, _ in calls] == [
+            'repo', 'gen', 'dep', 'repo', 'gen', 'dep']
 
     def test_run_dir_is_a_mod(self, fs, run_dir, monkeypatch):
         """The run refuses a mod directory, like the modules it chains."""
@@ -308,10 +349,11 @@ class TestMain:
         calls = []
         monkeypatch.setattr(main, 'PackRepo', fake_repo(calls))
         monkeypatch.setattr(main, 'PackRepoGen', fake_gen(calls))
+        monkeypatch.setattr(main, 'DepGen', fake_dep_gen(calls))
         monkeypatch.setattr(sys, 'argv', ['main', '--root', str(run_dir)])
         main.main()
         assert env.PROJECT_ROOT == str(run_dir)
-        assert [step for step, _, _ in calls] == ['repo', 'gen']
+        assert [step for step, _, _ in calls] == ['repo', 'gen', 'dep']
 
     def test_main_bad_args(self, fs, run_dir, monkeypatch):
         """An argument that is not known raises SystemExit."""

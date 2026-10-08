@@ -2,7 +2,7 @@
 Tests for PackChecksum: read the identity of a pack file.
 
 The pack server reads the identity of a kept pack file to decide whether it is
-the pack of the version pair, see PackRepoGen._kept_pack: the format version,
+the pack of the version pair, see kept_pack: the format version,
 the versions and the index pack checksum are read from the index section of
 the file, the data section is never read.
 """
@@ -11,7 +11,7 @@ import pytest
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
-from alasio.deploy_dev.pack_server.pack_check import PackChecksum
+from alasio.deploy_dev.pack_server.pack_check import PackChecksum, kept_pack
 from alasio.ext import env
 from alasio.ext.algorithm.vint import encode_vint
 from alasio.ext.path import PathStr
@@ -137,3 +137,43 @@ class TestPackChecksum:
         atomic_write(file, b'PACK\x00' + encode_vint(26) + section)
         with pytest.raises(PackDecodeError, match='version part out of range'):
             PackChecksum.from_file(file)
+
+
+class TestKeptPack:
+    """The keep decision of a pack server flow over the identity of a file."""
+
+    def test_missing_file(self, fs):
+        """A pack that does not exist is written by this run."""
+        file = PathStr.new(fs.root_dir.path).joinpath('nothing.pack')
+        assert kept_pack(file, 0, 'c2', '') is None
+
+    def test_kept(self, full_pack_file):
+        """The file of the version pair, encoded with the format, is kept."""
+        checksum = kept_pack(full_pack_file, 0, 'c2', '')
+        assert checksum.pack_version == 0
+        assert checksum.current_version == 'c2'
+        assert checksum.old_version == ''
+        decoder = PackDecodeBase(file_read_bytes(full_pack_file))
+        assert checksum.index_checksum == bytes(decoder.extract_index_pack())[-20:]
+
+    def test_another_format(self, fs, full_pack_file):
+        """A pack of another format is written again."""
+        assert kept_pack(full_pack_file, 1, 'c2', '') is None
+
+    def test_another_version(self, fs, full_pack_file):
+        """A pack of another version pair is written again."""
+        assert kept_pack(full_pack_file, 0, 'c2', 'c1') is None
+        assert kept_pack(full_pack_file, 0, 'c1', '') is None
+
+    def test_not_a_pack(self, fs):
+        """A file that cannot be read as a pack is written again."""
+        file = PathStr.new(fs.root_dir.path).joinpath('nothing.pack')
+        atomic_write(file, b'NOPE' + b'\x00' * 60)
+        assert kept_pack(file, 0, 'c2', '') is None
+
+    def test_not_a_file(self, fs):
+        """A folder at the path of a pack is refused, not overwritten."""
+        folder = PathStr.new(fs.root_dir.path).joinpath('full.pack')
+        fs.create_dir(folder)
+        with pytest.raises(ValueError, match='not a file'):
+            kept_pack(folder, 0, 'c2', '')

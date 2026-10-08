@@ -12,6 +12,10 @@ The modules below do one step of the work each, this module chains them:
    repo/{Author}_{Repo}
 3. PackRepoGen generates the packs of the repo into
    pack/{Author}_{Repo}_{Branch}/packrepo
+4. DepGen generates the packs of the python dependencies of the repo into
+   pack/{Author}_{Repo}_{Branch}/packdep, the wheel channel of the
+   PythonDeps group of the config; a config without PythonDeps builds
+   nothing there
 
 The configs are run one by one, sorted by name. A config that fails is
 logged with its traceback and left out, the other configs still run: a
@@ -29,6 +33,7 @@ Usage:
 
 import argparse
 
+from alasio.deploy_dev.pack_server.dep_gen import DepGen
 from alasio.deploy_dev.pack_server.gate import check_run_dir
 from alasio.deploy_dev.pack_server.model import PackRepoConfig
 from alasio.deploy_dev.pack_server.pack_gen import PackRepoGen
@@ -93,7 +98,11 @@ class PackServer:
 
     def run_config(self, file):
         """
-        Run the flow of one config: read, clone or fetch, generate.
+        Run the flow of one config: read, clone or fetch, generate the packs.
+
+        The three generators of the config are run one after another: the
+        packs of the project tree (PackRepoGen), then the packs of the python
+        dependencies (DepGen, a no-op when PythonDeps is empty).
 
         Args:
             file (str): Name of the config file in the config folder
@@ -104,11 +113,13 @@ class PackServer:
             ValueError: If Author, Repo, Remote or Branch of the config is
                 empty, or the repo of the config cannot be packed
             CmdlineError: If a git command of the repo fails
+            httpx2.HTTPError: If a wheel of a dependency cannot be fetched
             OSError: If a pack of the repo cannot be written
         """
         config = PackRepoConfig(file)
         repo = PackRepo(config.data).run()
         PackRepoGen(repo, config.data).run()
+        DepGen(repo, config.data).run()
 
     def run(self):
         """

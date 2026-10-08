@@ -1,12 +1,13 @@
 """
 Read the identity of a pack file of the pack server.
 
-The pack server keeps the packs of an earlier run, see PackRepoGen: a pack is
-only built again when its file is missing, when it was encoded with another
-pack format, when it packs another version pair, or when the file cannot be
-read as a pack at all. Reading the identity of the file is what tells these
-cases apart, and the index pack checksum it carries is what latest.pack is
-built from when the full pack is kept.
+The pack server keeps the packs of an earlier run, see PackRepoGen and
+DepGen: a pack is only built again when its file is missing, when it was
+encoded with another pack format, when it packs another version pair, or when
+the file cannot be read as a pack at all. Reading the identity of the file is
+what tells these cases apart, and the index pack checksum it carries is what
+latest.pack is built from when the full pack is kept. kept_pack() is the
+whole check of a caller, over the identity of the file.
 
 This is the server side of the pack front, it does not decode a pack: only the
 header, the version parts of the index section and its trailing checksum are
@@ -15,17 +16,22 @@ alasio/deploy/pack, the server generates and checks the packs, it never
 unpacks one.
 
 Usage:
-    from alasio.deploy_dev.pack_server.pack_check import PackChecksum
+    from alasio.deploy_dev.pack_server.pack_check import PackChecksum, kept_pack
 
     checksum = PackChecksum.from_file(file)
     checksum.current_version
+    kept = kept_pack(file, pack_version, current_version, old_version)
 """
+
+import os
+import stat
 
 from msgspec import Struct
 
 from alasio.deploy.pack.decode_base import PackDecodeError
 from alasio.ext.algorithm.vint import decode_vint
 from alasio.ext.path.atomic import atomic_open
+from alasio.logger import logger
 
 # bytes read first from a pack file: the header, the length vint of the index
 # section and the two version parts behind it. A version is a commit sha1, the
@@ -170,3 +176,57 @@ def _read_versions(file, section):
         versions.append(bytes(section[offset:end]).decode('utf-8', errors='replace'))
         offset = end
     return versions[0], versions[1]
+
+
+def kept_pack(file, pack_version, current_version, old_version):
+    """
+    Check whether the pack of an earlier run at a path is kept.
+
+    The pack is kept when the file exists and is the pack of the version
+    pair, encoded with the current format: the bytes of a pack only depend
+    on the version it packs, so building it again is a waste of the
+    encoding time. A file of another format, of another version pair, or a
+    file that cannot be read as a pack is written again: the packs of a
+    version folder must all be the packs of that version, encoded with one
+    format. The pack server flows share the check, see PackRepoGen for the
+    git flow and DepGen for the dependency flow.
+
+    Only the identity of the file is read (PackChecksum): the data section
+    of a full pack is never read, neither when the pack is kept nor when it
+    is written again.
+
+    Args:
+        file (PathStr): Path of the pack file
+        pack_version (int): Pack format version of this run
+        current_version (str): Version the pack packs
+        old_version (str): Version the pack updates from, empty for the
+            full pack
+
+    Returns:
+        PackChecksum | None: Identity of the kept file, None when the pack
+            has to be written by this run
+
+    Raises:
+        ValueError: If the path exists but is not a file
+    """
+    try:
+        st = os.stat(file)
+    except FileNotFoundError:
+        # the pack has to be written by this run
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        raise ValueError(f'Pack path exists but is not a file: "{file}"')
+    try:
+        checksum = PackChecksum.from_file(file)
+    except PackDecodeError as e:
+        # nothing of a file the server cannot read can be kept: the pack
+        # is generated again, overwriting the file
+        logger.warning(f'Failed to read the existing pack, writing it again: {e}')
+        return None
+    if (checksum.pack_version != pack_version
+            or checksum.current_version != current_version
+            or checksum.old_version != old_version):
+        logger.warning(
+            f'Existing pack is not the pack of this version, writing it again: "{file}"')
+        return None
+    return checksum
