@@ -78,3 +78,47 @@ class TestRequestGracefulRestart:
         # the rejection must not leave the re-entry flag set
         assert restart.GRACEFUL_RESTART.running is False
         assert nursery.started == []
+
+    @pytest.mark.trio
+    async def test_rejected_while_an_update_transaction_is_in_flight(self, monkeypatch):
+        """An external trigger must not race the transaction: only its own
+        owner (the mod of the transaction) may request the restart (§16.3)"""
+        from alasio.backend.app import update as update_module
+
+        nursery = FakeNursery()
+        monkeypatch.setattr(update_module.UPDATE_MANAGER, '_transaction', 'm')
+
+        with pytest.raises(restart.RestartUnavailable, match='update of "m" is in progress'):
+            await restart.request_graceful_restart('test request', nursery=nursery)
+        assert nursery.started == []
+
+        # the owner of the transaction is let through
+        await restart.request_graceful_restart('test request', nursery=nursery, owner='m')
+        assert restart.GRACEFUL_RESTART.running is True
+        assert len(nursery.started) == 1
+
+    @pytest.mark.trio
+    async def test_rejected_while_the_backend_is_starting_up(self, monkeypatch):
+        """The startup gate refuses the external triggers; the convergence
+        (the owner of its own transaction) is let through (§16.8)"""
+        from alasio.backend.app import update as update_module
+        from alasio.backend.app.update_startup import UPDATE_STARTUP
+
+        nursery = FakeNursery()
+        UPDATE_STARTUP.reset()  # not initialized yet
+        with pytest.raises(restart.RestartUnavailable, match='starting up'):
+            await restart.request_graceful_restart('test request', nursery=nursery)
+        assert nursery.started == []
+
+        # initialized, but a registered mod is still in its first check
+        UPDATE_STARTUP.update_inited.set()
+        UPDATE_STARTUP.mod_event('m')
+        with pytest.raises(restart.RestartUnavailable, match='starting up'):
+            await restart.request_graceful_restart('test request', nursery=nursery)
+        assert nursery.started == []
+
+        # the convergence of the startup phase requests its own restart as
+        # the owner of its transaction
+        monkeypatch.setattr(update_module.UPDATE_MANAGER, '_transaction', 'm')
+        await restart.request_graceful_restart('test request', nursery=nursery, owner='m')
+        assert len(nursery.started) == 1

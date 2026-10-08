@@ -7,6 +7,7 @@ from typing import List, Literal, Optional
 import msgspec
 from msgspec.msgpack import encode
 
+from alasio.backend.app.update_startup import UPDATE_STARTUP
 from alasio.backend.worker.bridge import mod_entry
 from alasio.backend.worker.event import DECODER_CACHE, CommandEvent, ConfigEvent
 from alasio.ext.singleton import Singleton
@@ -205,6 +206,35 @@ class WorkerState(msgspec.Struct):
                 logger.error(f'[WorkerManager] Error while force-killing "{self.config}": {e}')
 
 
+class RestartRun:
+    """
+    State of one graceful restart orchestration (restart_begin /
+    restart_wait / restart_cancel)
+
+    One instance exists while a graceful restart owns the manager (and stays
+    on the success path until the process exits). Its frozen resume list is
+    exactly the list the orchestration records in the resume file; a stop
+    request on one of its configs after the wait is refused with an explicit
+    error instead of cancelling something the file keeps (F4).
+
+    Attributes:
+        abort (threading.Event): Set by restart_cancel() to make a blocking
+            restart_wait() return early with (False, []): a trio cancel cannot
+            interrupt the waiting thread, the abort event is the cooperative
+            wake-up
+        resume_frozen (set[str]): The frozen resume list of this run
+        frozen (bool): True when restart_wait() froze resume_frozen: the
+            resume file is written from it, so a start accepted as a queued
+            resume afterwards could never be resumed -- it is refused instead
+            of being lost silently (see _queue_update_start_locked)
+    """
+
+    def __init__(self):
+        self.abort = threading.Event()
+        self.resume_frozen: "set[str]" = set()
+        self.frozen = False
+
+
 class WorkerManager(metaclass=Singleton):
     def __init__(self):
         self._lock = threading.Lock()
@@ -215,42 +245,19 @@ class WorkerManager(metaclass=Singleton):
 
         self._ctx = multiprocessing.get_context('spawn')
 
-        # Graceful restart orchestration state (restart_begin / restart_wait /
-        # restart_cancel).
-        # True while a graceful restart is in progress: worker_start() rejects
-        # every config (any worker started now would be killed when the backend
-        # exits and would never resume: "started but lost"). The gate is kept
-        # until the process exits on the success path.
-        self._restarting = False
-        # Set by restart_cancel() to make a blocking restart_wait() return
-        # early with (False, []) (a trio cancel cannot interrupt the waiting
-        # thread, the abort event is the cooperative wake-up). Cleared by
-        # restart_begin().
-        self._restart_abort = threading.Event()
-        # The frozen resume list of the current transaction: exactly the configs
-        # the orchestration records in the resume file. Set by restart_wait()
-        # when the wait is over (in the same critical section that returns the
-        # list), cleared by restart_begin() / restart_cancel(). A stop request
-        # on a config of that list cannot cancel its auto-resume any more (the
-        # written file resumes it whatever the manager does), so it is refused
-        # with an explicit error; a "restarting" entry outside the list carries
-        # no recorded resume intent, the default stop keeps its plain meaning
-        # ("stop, do not resume") and is honoured silently (F4).
-        self._restart_resume_frozen: "set[str]" = set()
-        # True when restart_wait() froze the resume list of the current
-        # transaction: the resume file is written from it, so a start accepted
-        # as a queued resume afterwards could never be resumed -- it is refused
-        # instead of being lost silently (see _queue_update_start_locked).
-        # Cleared by restart_begin() / restart_cancel().
-        self._restart_frozen = False
+        # Graceful restart orchestration in flight (restart_begin /
+        # restart_wait / restart_cancel): one RestartRun while a graceful
+        # restart owns this manager, None otherwise. The gate is kept until
+        # the process exits on the success path (restart_cancel releases it).
+        self._restart: "Optional[RestartRun]" = None
 
-        # Update window state of the update manager (see the update window
-        # section): the mods whose update check window is open (mod-level) and
-        # the mod of an update transaction in flight (instance-level). While a
-        # window is open, a start of an affected config is accepted as a
-        # queued resume instead of starting (worker_start) and starts
-        # automatically when the window ends.
-        self.update_locked_mods: "set[str]" = set()
+        # Update window of the update flows (see the update window section):
+        # the mod of the update transaction in flight, '' when there is none.
+        # While it is open every start is accepted as a queued resume instead
+        # of starting (worker_start) and starts when the transaction releases
+        # it. The startup phase (the first update checks) gates the starts
+        # through the update startup events instead, see
+        # alasio.backend.app.update_startup (doc §16.8).
         self.update_transaction = ''
 
     @property
@@ -258,12 +265,13 @@ class WorkerManager(metaclass=Singleton):
         """
         Whether a graceful restart owns this manager (the restart gate)
 
-        Set by restart_begin() and kept until restart_cancel() releases it (or
-        the process exits on the success path). While it is on, every way in
-        which a worker can be started is refused: worker_start() (a worker
-        started now would die with the backend and never resume),
-        worker_resume() and mark_resume() -- the resume queue of the new backend
-        stops there, the graceful restart re-collects its marks instead.
+        A RestartRun exists from restart_begin() and is kept until
+        restart_cancel() releases it (or the process exits on the success
+        path). While it is on, every way in which a worker can be started is
+        refused: worker_start() (a worker started now would die with the
+        backend and never resume), worker_resume() and mark_resume() -- the
+        resume queue of the new backend stops there, the graceful restart
+        re-collects its marks instead.
 
         Read without the lock: it is a hint for the auto-resume task to end
         early when a restart takes the backend over, the authoritative refusal
@@ -272,7 +280,7 @@ class WorkerManager(metaclass=Singleton):
         Returns:
             bool: True while a graceful restart is in progress
         """
-        return self._restarting
+        return self._restart is not None
 
     def get_state_info(self):
         """
@@ -463,12 +471,18 @@ class WorkerManager(metaclass=Singleton):
             whether success, reason
         """
         with self._lock:
-            if self.update_transaction or mod in self.update_locked_mods:
-                # an update window owns this config: the start is accepted as
-                # a queued resume instead of being refused (the window releases
-                # the queue when it ends, see the update window section)
+            if self.update_transaction:
+                # the update transaction owns this config: the start is
+                # accepted as a queued resume instead of being refused (the
+                # transaction releases the queue when it ends, see the update
+                # window section)
                 return self._queue_update_start_locked(mod, config)
-            if self._restarting:
+            if not UPDATE_STARTUP.is_mod_ready(mod):
+                # the startup gate: the first update check of the mod is not
+                # over, the start is queued as a resume and released by the
+                # startup orchestration when the mod is ready (doc §16.8)
+                return self._queue_update_start_locked(mod, config)
+            if self.restarting:
                 # any worker started now would be killed when the backend exits
                 # and would never resume ("started but lost")
                 return False, (f'Backend is gracefully restarting, workers will resume '
@@ -817,7 +831,7 @@ class WorkerManager(metaclass=Singleton):
         already stopped, keep waiting (no-op success). "resuming" is always
         cancelled (no process exists, any stop means cancel).
 
-        A frozen resume list (_restart_resume_frozen, set when restart_wait()
+        A frozen resume list (RestartRun.resume_frozen, set when restart_wait()
         ended) refuses the cancel of a "restarting" entry it contains with an
         explicit error: the resume file is written from exactly that list, so
         dropping the entry here would cancel nothing but the manager state and
@@ -844,7 +858,8 @@ class WorkerManager(metaclass=Singleton):
             if restart_resume:
                 # the worker is already stopped for the restart, keep waiting
                 return True, 'Success'
-            if state.config in self._restart_resume_frozen:
+            run = self._restart
+            if run is not None and state.config in run.resume_frozen:
                 return False, (f'Restart is beyond the point of no return, the config will be resumed '
                                f'after the backend restart: "{state.config}"')
             # not recorded for the resume: no conflict, the stop cancels the
@@ -904,15 +919,11 @@ class WorkerManager(metaclass=Singleton):
             RuntimeError: When a graceful restart is already in progress
         """
         with self._lock:
-            if self._restarting:
+            if self._restart is not None:
                 raise RuntimeError('Restart already in progress')
             # gate and snapshot under the same lock as worker_start's check:
             # no worker can slip between the gate and the snapshot
-            self._restarting = True
-            self._restart_abort.clear()
-            # a new transaction freezes its own list, when its wait is over
-            self._restart_resume_frozen.clear()
-            self._restart_frozen = False
+            self._restart = RestartRun()
             running = [
                 state for state in self.state.values()
                 if state.state in ['starting', 'running', 'scheduler-waiting']
@@ -978,8 +989,15 @@ class WorkerManager(metaclass=Singleton):
                 configs to resume after it = the workers whose state is
                 "restarting" when the wait ends (sorted). A worker the user
                 stopped (default kill, no restart_resume) is not in it. A
-                cancelled wait carries no resume list ((False, []))
+                cancelled wait carries no resume list ((False, [])). A wait
+                starting after restart_cancel() released the run reports the
+                same cancellation
         """
+        run = self._restart
+        if run is None:
+            # a cancel released the run before this wait started: report it
+            # like any other cancelled wait, nothing was frozen
+            return False, []
         deadline = None if timeout is None else time.monotonic() + timeout
 
         # 1) graceful wait: until every worker stopped (return), the wait was
@@ -990,15 +1008,15 @@ class WorkerManager(metaclass=Singleton):
             if not remaining:
                 # every worker stopped: the resume list is final from here on
                 # (the freeze re-checks the abort in its own critical section)
-                return self._freeze_restart_resume_list()
-            if self._restart_abort.is_set():
+                return self._freeze_restart_resume_list(run)
+            if run.abort.is_set():
                 # cancelled: never write a resume file and never restart
                 return False, []
             if deadline is not None and time.monotonic() >= deadline:
                 break
             # wait on the abort event: a cancel wakes the loop immediately,
             # otherwise the poll does not outlive the poll interval
-            self._restart_abort.wait(RESTART_WAIT_POLL)
+            run.abort.wait(RESTART_WAIT_POLL)
 
         # 2) the timeout is over: the workers still running did not stop by
         #    themselves, end them (restart_resume=True keeps their resume intent)
@@ -1013,29 +1031,30 @@ class WorkerManager(metaclass=Singleton):
             with self._lock:
                 remaining = self._restart_pending_configs_locked()
             if not remaining:
-                return self._freeze_restart_resume_list()
-            if self._restart_abort.is_set():
+                return self._freeze_restart_resume_list(run)
+            if run.abort.is_set():
                 # cancelled while the kills were running
                 return False, []
-            self._restart_abort.wait(RESTART_WAIT_POLL)
+            run.abort.wait(RESTART_WAIT_POLL)
 
     def restart_cancel(self) -> None:
         """
         Cancel the graceful restart in progress (idempotent)
 
         Sets the abort event (a blocking restart_wait() returns early with
-        (False, []), no resume list and nothing frozen), clears the restarting
-        gate (and the frozen resume list of its transaction), drops every
-        pending_restart mark and returns the process-less "restarting" /
-        "resuming" entries to idle (removed from the state dict). Workers still
-        stopping (scheduler-stopping / killing) only lose their marks: they
-        stop through their normal path to idle and are not resumed.
+        (False, []), no resume list and nothing frozen), releases the run
+        (the restarting gate and the frozen resume list of its transaction go
+        with it), drops every pending_restart mark and returns the process-less
+        "restarting" / "resuming" entries to idle (removed from the state
+        dict). Workers still stopping (scheduler-stopping / killing) only lose
+        their marks: they stop through their normal path to idle and are not
+        resumed.
         """
-        self._restart_abort.set()
+        run = self._restart
+        if run is not None:
+            run.abort.set()
         with self._lock:
-            self._restarting = False
-            self._restart_resume_frozen.clear()
-            self._restart_frozen = False
+            self._restart = None
             for state in list(self.state.values()):
                 if state.pending_restart:
                     state.pending_restart = False
@@ -1059,7 +1078,7 @@ class WorkerManager(metaclass=Singleton):
             if state.state not in ['idle', 'error', 'restarting', 'updating']
         )
 
-    def _freeze_restart_resume_list(self) -> "tuple[bool, List[str]]":
+    def _freeze_restart_resume_list(self, run: "RestartRun") -> "tuple[bool, List[str]]":
         """
         Freeze the resume list of the finished wait and report the wait result
 
@@ -1076,21 +1095,24 @@ class WorkerManager(metaclass=Singleton):
         Returns:
             tuple[bool, List[str]]: (True, the frozen resume list) when the
                 restart may continue, (False, []) when the wait was cancelled
+
+        Args:
+            run (RestartRun): The restart this wait belongs to
         """
         with self._lock:
             # a cancel landing in the meantime wins: nothing is frozen and the
             # caller must not continue with the restart
-            if self._restart_abort.is_set():
+            if run.abort.is_set():
                 return False, []
             resume_list = sorted(
                 config for config, state in self.state.items()
                 if state.state in WORKER_PARKED_STATE
             )
             # the frozen list is exactly the returned one: the orchestration
-            # writes the resume file from it, and a start accepted through the
-            # update gate from now on could never be resumed (it is refused)
-            self._restart_resume_frozen = set(resume_list)
-            self._restart_frozen = True
+            # writes the resume file from it, and a start accepted through a
+            # window from now on could never be resumed (it is refused)
+            run.resume_frozen = set(resume_list)
+            run.frozen = True
             return True, resume_list
 
     # ---------------- auto-resume queue (new backend) ----------------
@@ -1118,7 +1140,7 @@ class WorkerManager(metaclass=Singleton):
         """
         queued = []
         with self._lock:
-            if self._restarting:
+            if self.restarting:
                 # the manager stopped accepting resumes: a graceful restart owns
                 # the backend and collects the marks itself. Creating "resuming"
                 # entries now would leave configs that no restart converts and
@@ -1188,7 +1210,7 @@ class WorkerManager(metaclass=Singleton):
                 # cancelled by the user, started by someone else, or converted
                 # to "restarting" by a new graceful restart
                 return False, f'Worker is not awaiting auto-resume: "{config}"'
-            if self._restarting:
+            if self.restarting:
                 # a new graceful restart began while the queue was draining:
                 # starting now would only be killed at backend exit, the entry
                 # is converted to "restarting" (collected by restart_wait)
@@ -1201,43 +1223,13 @@ class WorkerManager(metaclass=Singleton):
         self.on_worker_info(config, f'[WorkerManager] Resuming worker: {config}')
         return self._worker_start_process(state, mod, config, child_conn, project_root, mod_root, path_main)
 
-    # ---------------- update window (start gate of the update flow) ----------------
-
-    def update_lock_mods(self, mods) -> None:
-        """
-        Open the update check window of the given mods (mod-level)
-
-        While a mod is locked, a start of one of its configs is accepted as a
-        queued resume instead of starting now: the config starts automatically
-        when the window ends (see release_update_queue), or after the backend
-        restart of an update transaction, which resumes it. The configs of
-        every other mod start normally.
-
-        Args:
-            mods (list[str]): Mod names to lock
-        """
-        with self._lock:
-            self.update_locked_mods.update(mods)
-
-    def update_unlock_mods(self, mods) -> None:
-        """
-        Close the update check window of the given mods
-
-        The queued configs are not started here: the caller lists them through
-        release_update_queue() and starts them (a restart may have collected
-        some of them in between, worker_resume() refuses those).
-
-        Args:
-            mods (list[str]): Mod names to unlock
-        """
-        with self._lock:
-            self.update_locked_mods.difference_update(mods)
+    # ---------------- update window (start gate of the update flows) ----------------
 
     def update_begin_transaction(self, mod: str) -> None:
         """
         Open the instance-level update window of a transaction
         (downloading / updating): every start is accepted into the queue
-        until update_end_transaction().
+        until update_end_transaction(mod).
 
         Args:
             mod (str): Mod being updated
@@ -1245,21 +1237,29 @@ class WorkerManager(metaclass=Singleton):
         with self._lock:
             self.update_transaction = mod
 
-    def update_end_transaction(self) -> None:
+    def update_end_transaction(self, mod: str = '') -> None:
         """
         Close the instance-level update window (idempotent)
+
+        Args:
+            mod (str): The mod of the transaction; a close naming another mod
+                is a stale close and is ignored (it must not close the window
+                of a newer transaction). '' closes unconditionally (tests)
         """
         with self._lock:
+            if mod and self.update_transaction != mod:
+                logger.warning(f'[WorkerManager] Ignored a stale update window close: "{mod}"')
+                return
             self.update_transaction = ''
 
-    def release_update_queue(self, mods=None) -> "List[str]":
+    def release_update_queue(self) -> "List[str]":
         """
-        List the configs whose start was accepted by the update gate and whose
-        entries still await their start ("resuming", update_queued): the
-        caller starts each one through worker_resume() with the standard
-        interval (worker_resume() consumes the entry, a restart that collected
-        it in between is refused there and the config resumes with the
-        restart).
+        List the configs whose start was accepted by the update windows and
+        whose entries still await their start ("resuming", update_queued):
+        the holder of the window starts each one through worker_resume() with
+        the standard interval (worker_resume() consumes the entry, a restart
+        that collected it in between is refused there and the config resumes
+        with the restart).
 
         The entries are not modified here. An entry created by the auto-resume
         queue of a restart (mark_resume) is never listed: only the entries of
@@ -1268,10 +1268,6 @@ class WorkerManager(metaclass=Singleton):
         Must run in a worker thread (the caller uses trio.to_thread): the lock
         is held for the scan.
 
-        Args:
-            mods (set[str], optional): Only the configs of these mods, None
-                for every queued config
-
         Returns:
             List[str]: Config names, in state order
         """
@@ -1279,19 +1275,19 @@ class WorkerManager(metaclass=Singleton):
             return [
                 config for config, state in self.state.items()
                 if state.state == 'resuming' and state.update_queued
-                and (mods is None or state.mod in mods)
             ]
 
     def _queue_update_start_locked(self, mod, config) -> "tuple[bool, str]":
         """
-        Accept a start request as a queued resume while an update window owns
-        the config (lock required, see worker_start)
+        Accept a start request as a queued resume while the update flow owns
+        the instance (lock required, see worker_start): the update transaction
+        (downloading / updating), or the update startup gate (the first update
+        check of the mod is not over, doc §16.8)
 
         The caller sees a success and no error: the frontend shows the config
         as "resuming" (Worker topic) and the config starts automatically when
-        the window ends, without a second click. This is the behavior change
-        of the update flow (the plain restart keeps refusing the starts of
-        configs outside its own windows).
+        the transaction / the startup orchestration releases the queue,
+        without a second click.
 
         Returns:
             whether success, reason
@@ -1306,7 +1302,8 @@ class WorkerManager(metaclass=Singleton):
                               f'window ends: "{config}"')
             if state.state not in ['idle', 'error']:
                 return False, f'Worker is already running: "{config}", state="{state.state}"'
-        if self._restarting and self._restart_frozen:
+        run = self._restart
+        if run is not None and run.frozen:
             # the resume list of the restart is frozen and its file is written
             # from it: an entry queued now could never be resumed, the start is
             # refused instead of being lost silently
@@ -1317,16 +1314,16 @@ class WorkerManager(metaclass=Singleton):
             self.state[config] = state
         state.mod = mod
         state.update_queued = True
-        if self._restarting:
+        if run is not None:
             # the restart of the update transaction owns the resume list: the
             # entry is parked and restart_wait() collects it into the list the
             # resume file is written from
             state.pending_restart = True
             self._set_state(state, self._parked_state())
         else:
-            # a check or download window: the entry is "resuming", the window
-            # releases it when it ends (the restart of the update transaction
-            # converts it, restart_begin re-collects the "resuming" entries)
+            # a plain window (startup or download): the entry is "resuming",
+            # the holder releases it when the window ends (a restart beginning
+            # in between converts it, restart_begin re-collects "resuming")
             state.pending_restart = False
             self._set_state(state, 'resuming')
         self.on_worker_info(config, f'[WorkerManager] Start queued by the update window: {config}')

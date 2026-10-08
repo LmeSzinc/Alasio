@@ -10,6 +10,24 @@ from alasio.logger.writer import LogWriter
 
 
 @pytest.fixture(autouse=True)
+def update_startup_gate():
+    """
+    Reset the startup events of the update manager around every test
+
+    The events are process-wide (a trio.Event can only be set once) while the
+    tests run many "backends" in one process: reset them around every test and
+    open the gate by default. A test of the not-ready states resets the events
+    itself and drives them from there.
+    """
+    from alasio.backend.app.update_startup import UPDATE_STARTUP
+
+    UPDATE_STARTUP.reset()
+    UPDATE_STARTUP.update_inited.set()
+    yield
+    UPDATE_STARTUP.reset()
+
+
+@pytest.fixture(autouse=True)
 def mute_log_file():
     """
     Keep the test process from opening log files in the project log directory

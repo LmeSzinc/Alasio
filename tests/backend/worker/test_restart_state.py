@@ -352,7 +352,7 @@ class TestRestartWait:
             # before the freeze took its section: the abort event is what
             # restart_cancel() sets (the hook runs under the manager lock, so
             # the cancel itself cannot be called from here)
-            manager._restart_abort.set()
+            manager._restart.abort.set()
             return []
 
         monkeypatch.setattr(manager, '_restart_pending_configs_locked', remaining_after_a_cancel)

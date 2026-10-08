@@ -3,7 +3,7 @@ Tests for the graceful backend restart module (alasio/backend/app/restart.py)
 
 Covers the resume file protocol (write / read / credential verification /
 cleanup), the orchestration of the old backend (run_graceful_restart) and the
-consume + auto-resume of the new backend (resume_after_restart).
+consume + auto-resume of the new backend (run_startup).
 
 The resume file lives in the in-memory filesystem (fs fixture): every test
 points env.PROJECT_ROOT at the fake root.
@@ -20,8 +20,7 @@ import trio
 
 from alasio.backend.app import restart
 from alasio.backend.app.restart import (
-    GRACEFUL_RESTART, RESUME_TOKEN_ENV, ResumeRecord, cancel_graceful_restart, resume_after_restart,
-    run_graceful_restart
+    GRACEFUL_RESTART, RESUME_TOKEN_ENV, ResumeRecord, cancel_graceful_restart, run_graceful_restart, run_startup
 )
 from alasio.backend.topic.restart import RestartSource
 from alasio.backend.worker.manager import WorkerManager
@@ -1052,8 +1051,8 @@ class TestCancelLog:
 # Resume (new backend)
 # ============================================================================
 
-class TestResumeAfterRestart:
-    """resume_after_restart: read once, queue, start with an interval"""
+class TestStartup:
+    """run_startup: read once, queue, start with an interval"""
 
     @pytest.mark.trio
     async def test_resume_starts_queued_workers(self, project_root, manager, monkeypatch):
@@ -1064,7 +1063,7 @@ class TestResumeAfterRestart:
         monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.05)
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
 
-        await resume_after_restart(manager)
+        await run_startup(manager)
 
         # the file was consumed and deleted by the read
         assert GRACEFUL_RESTART.iter_resume_files() == []
@@ -1089,7 +1088,7 @@ class TestResumeAfterRestart:
         monkeypatch.setattr(GRACEFUL_RESTART, 'read_resume', fake_read)
         monkeypatch.setattr(GRACEFUL_RESTART, 'resume_cleanup', fake_cleanup)
 
-        await resume_after_restart(manager)
+        await run_startup(manager)
 
         assert order == ['read', 'cleanup']
 
@@ -1099,7 +1098,7 @@ class TestResumeAfterRestart:
         file = GRACEFUL_RESTART.resume_file_of(credential.partition('-')[0])
         monkeypatch.delenv(RESUME_TOKEN_ENV, raising=False)
 
-        await resume_after_restart(manager)
+        await run_startup(manager)
 
         assert manager.state == {}
         # the file is left alone (no credential -> never read)
@@ -1111,7 +1110,7 @@ class TestResumeAfterRestart:
         token = credential.partition('-')[0]
         monkeypatch.setenv(RESUME_TOKEN_ENV, f'{token}-0000000000000000')
 
-        await resume_after_restart(manager)
+        await run_startup(manager)
 
         assert manager.state == {}
         # the read file is deleted even when the verification fails
@@ -1135,7 +1134,7 @@ class TestResumeAfterRestart:
 
         monkeypatch.setattr(manager, 'worker_resume', spy)
 
-        await resume_after_restart(manager)
+        await run_startup(manager)
 
         assert [config for config, _ in starts] == ['cfg_a', 'cfg_b', 'cfg_c']
         gaps = [starts[i + 1][1] - starts[i][1] for i in range(len(starts) - 1)]
@@ -1163,7 +1162,7 @@ class TestResumeAfterRestart:
 
         monkeypatch.setattr(manager, 'worker_resume', spy)
 
-        await resume_after_restart(manager)
+        await run_startup(manager)
 
         assert manager.state['cfg_a'].wait_running(timeout=WORKER_STARTUP_TIMEOUT)
         assert manager.state['cfg_c'].wait_running(timeout=WORKER_STARTUP_TIMEOUT)
@@ -1184,7 +1183,7 @@ class TestResumeAfterRestart:
 
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', failing_get_mod)
 
-        await resume_after_restart(manager)
+        await run_startup(manager)
 
         # cfg_a resumed, cfg_b dropped (not stuck in "resuming")
         assert manager.state['cfg_a'].wait_running(timeout=WORKER_STARTUP_TIMEOUT)
@@ -1216,8 +1215,8 @@ class TestResumeAfterRestart:
         monkeypatch.setattr(restart, '_resume_one', broken_one)
 
         with logger.mock_capture_writer() as capture:
-            await resume_after_restart(manager)
-            assert capture.fd.any_contains('Auto-resume failed: the queue broke')
+            await run_startup(manager)
+            assert capture.fd.any_contains('Startup failed: the queue broke')
 
         # the queue stopped at cfg_b: the worker it resumed keeps running, the
         # entries it never reached are released for a manual start
@@ -1255,7 +1254,7 @@ class TestResumeAfterRestart:
         monkeypatch.setattr(manager._ctx, 'Process', flaky_process)
 
         with logger.mock_capture_writer() as capture:
-            await resume_after_restart(manager)
+            await run_startup(manager)
             assert capture.fd.any_contains('Resume failed: "cfg_a"')
 
         # cfg_a is not stuck in a queue state: its pipe is closed, no process
@@ -1287,8 +1286,8 @@ class TestResumeAfterRestart:
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
 
         with logger.mock_capture_writer() as capture:
-            await resume_after_restart(manager)
-            assert capture.fd.any_contains("Resume abandoned, configs not found: ['cfg_b']")
+            await run_startup(manager)
+            assert capture.fd.any_contains("Startup queue abandoned, configs not found: ['cfg_b']")
 
         # one forced refresh, no waiting; cfg_a resumes, cfg_b is dropped
         assert fake.reinit_forces == [True]
@@ -1312,7 +1311,7 @@ class TestResumeAfterRestart:
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
 
         with logger.mock_capture_writer() as capture:
-            await resume_after_restart(manager)
+            await run_startup(manager)
             assert capture.fd.any_contains('Config scan refresh failed: scan failed')
 
         # the resolution falls back to the data the source holds: cfg_a resumes
@@ -1337,7 +1336,7 @@ class TestResumeAfterRestart:
 
         monkeypatch.setattr(manager, 'worker_resume', spy)
 
-        await resume_after_restart(manager)
+        await run_startup(manager)
 
         assert order == ['action', 'resume']
 
@@ -1348,7 +1347,7 @@ class TestResumeAfterRestart:
         monkeypatch.setattr(restart, 'ConfigScanSource', lambda: FakeScan({}))
 
         with logger.mock_capture_writer() as capture:
-            await resume_after_restart(manager)
+            await run_startup(manager)
             assert capture.fd.any_contains('Unknown resume action ignored: no_such_action')
 
         assert manager.state == {}
@@ -1364,7 +1363,7 @@ class TestResumeAfterRestart:
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
 
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(resume_after_restart, manager)
+            nursery.start_soon(run_startup, manager)
             await wait_until(
                 lambda: manager.state.get('cfg_a') is not None
                 and manager.state['cfg_a'].state in ('starting', 'running'),
@@ -1412,8 +1411,8 @@ class TestResumeAfterRestart:
         monkeypatch.setattr(manager, 'worker_resume', spy)
 
         with logger.mock_capture_writer() as capture:
-            await resume_after_restart(manager)
-            assert capture.fd.any_contains('Resume interrupted by the shutdown: cfg_b')
+            await run_startup(manager)
+            assert capture.fd.any_contains('Startup queue interrupted by the shutdown: cfg_b')
 
         # cfg_a was resumed, the rest was never started and is not dropped
         # either: the shutdown owns the cleanup, the queue only stops
@@ -1423,6 +1422,66 @@ class TestResumeAfterRestart:
         assert manager.state['cfg_c'].state == 'resuming'
         # the interruption pushes no terminal phase: 'resuming' stands
         assert RestartSource().data['phase'] == 'resuming'
+
+    @pytest.mark.trio
+    async def test_startup_waits_for_the_first_check(self, project_root, manager, monkeypatch):
+        """The release waits behind the first update check of the mods to resume"""
+        from alasio.backend.app.update_startup import UPDATE_STARTUP
+
+        credential = await GRACEFUL_RESTART.write_resume(['cfg_a'])
+        monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+        fake = FakeScan({'cfg_a': 1})
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.0)
+
+        UPDATE_STARTUP.reset()
+        UPDATE_STARTUP.update_inited.set()
+        # the mod of the config is registered by the update manager, its first
+        # check is not over yet
+        event = UPDATE_STARTUP.mod_event('WorkerTestScheduler')
+
+        started = []
+        original = restart._resume_one
+
+        def spy(manager_, config):
+            started.append(config)
+            return original(manager_, config)
+
+        monkeypatch.setattr(restart, '_resume_one', spy)
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_startup, manager)
+            # the queue waits behind the gate: the config is marked, not started
+            await wait_until(lambda: manager.state.get('cfg_a', None) is not None)
+            await trio.sleep(0.05)
+            assert started == []
+            event.set()
+            await wait_until(lambda: started == ['cfg_a'])
+            nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_gate_starts_are_released_with_the_queue(self, project_root, manager, monkeypatch):
+        """A start accepted by the startup gate is released with the resume
+        queue (§16.8)"""
+        from alasio.backend.app.update_startup import UPDATE_STARTUP
+
+        fake = FakeScan({'cfg_a': 1, 'cfg_b': 1})
+        monkeypatch.setattr(restart, 'ConfigScanSource', lambda: fake)
+        monkeypatch.setattr('alasio.backend.topic.worker.get_mod', _fake_get_mod)
+        monkeypatch.setattr(restart, 'WORKER_START_INTERVAL', 0.01)
+
+        UPDATE_STARTUP.reset()  # the gate is shut: the start is queued
+        success, msg = manager.worker_start('m', 'cfg_b')
+        assert success is True
+        assert 'queued' in msg
+        assert manager.state['cfg_b'].state == 'resuming'
+
+        UPDATE_STARTUP.update_inited.set()  # the gate opens
+
+        await run_startup(manager)
+
+        assert manager.state['cfg_b'].wait_running(timeout=WORKER_STARTUP_TIMEOUT)
 
 
 class TestRestartTakesOverResumeQueue:
@@ -1459,7 +1518,7 @@ class TestRestartTakesOverResumeQueue:
             lambda phase: (phases.append(phase), original_push(phase))[1])
 
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(resume_after_restart, manager)
+            nursery.start_soon(run_startup, manager)
             # cfg_a resumed (its worker runs), cfg_b / cfg_c still queued
             await wait_until(
                 lambda: manager.state.get('cfg_a') is not None
@@ -1520,7 +1579,7 @@ class TestRestartTakesOverResumeQueue:
         monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
 
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(resume_after_restart, manager)
+            nursery.start_soon(run_startup, manager)
             # the file was consumed and its configs marked before the queue
             # resolved anything: the marks are what a restart can pick up
             await wait_until(lambda: manager.state.get('cfg_b') is not None
@@ -1564,7 +1623,7 @@ class TestRestartTakesOverResumeQueue:
         manager.restart_begin()
 
         with logger.mock_capture_writer() as capture:
-            await resume_after_restart(manager)
+            await run_startup(manager)
             assert capture.fd.any_contains('Resume queue refused: a graceful restart is in progress')
 
         assert manager.state == {}
@@ -1599,7 +1658,7 @@ class TestRestartTakesOverResumeQueue:
 
         monkeypatch.setattr(manager, 'worker_resume', spy)
 
-        await resume_after_restart(manager)
+        await run_startup(manager)
 
         # the gate refused the start of cfg_a and the queue ended there: the
         # restart collected every mark (none was started)
@@ -1636,7 +1695,7 @@ class TestRestartTakesOverResumeQueue:
         monkeypatch.setattr(manager, '_worker_start_process', failing_start_process)
 
         with logger.mock_capture_writer() as capture:
-            await resume_after_restart(manager)
+            await run_startup(manager)
             assert capture.fd.any_contains('Resume failed: "cfg_a"')
 
         # the failure did not cancel the collect: cfg_a is still in the resume
@@ -1691,7 +1750,7 @@ class TestTakeoverLock:
         monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', credentials.append)
 
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(resume_after_restart, manager)
+            nursery.start_soon(run_startup, manager)
             await wait_until(entered.is_set, description='the resume preparation to start')
 
             nursery.start_soon(run_graceful_restart, manager)
@@ -1748,7 +1807,7 @@ class TestTakeoverLock:
         monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', lambda credential: None)
 
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(resume_after_restart, manager)
+            nursery.start_soon(run_startup, manager)
             await wait_until(entered.is_set, description='the terminal phase to be pushed')
 
             nursery.start_soon(run_graceful_restart, manager)
@@ -1791,7 +1850,7 @@ class TestTakeoverLock:
             cancel_done.set()
 
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(resume_after_restart, manager)
+            nursery.start_soon(run_startup, manager)
             await wait_until(entered.is_set, description='the preparation to start')
             nursery.start_soon(do_cancel)
             # the reset waits for the preparation section

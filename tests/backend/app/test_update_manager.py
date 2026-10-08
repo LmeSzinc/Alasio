@@ -15,6 +15,7 @@ import trio
 
 from alasio.backend.app import update as update_module
 from alasio.backend.app.update import UpdateError, UpdateManager
+from alasio.backend.app.update_startup import UPDATE_STARTUP
 from alasio.backend.topic.update import UpdateSource
 from alasio.config.entry.const import ModEntryInfo
 from alasio.deploy.pack.job import DeployCheck, UpdateAborted
@@ -161,34 +162,29 @@ class FakeNursery:
 
 
 class FakeWorkerManager:
-    """WorkerManager stand-in: records the update windows and the releases."""
+    """WorkerManager stand-in: records the update window and the releases."""
 
     def __init__(self):
-        self.locked_mods = set()
         self.transaction = ''
         # [(mod, config)] accepted during an update window: served by
         # release_update_queue
         self.queue = []
-        self.released = []
+        self.released = 0
         self.resumed = []
         self.dropped = []
         self.killed = []
 
-    def update_lock_mods(self, mods):
-        self.locked_mods.update(mods)
-
-    def update_unlock_mods(self, mods):
-        self.locked_mods.difference_update(mods)
-
     def update_begin_transaction(self, mod):
         self.transaction = mod
 
-    def update_end_transaction(self):
+    def update_end_transaction(self, mod=''):
+        if mod and self.transaction != mod:
+            return
         self.transaction = ''
 
-    def release_update_queue(self, mods=None):
-        self.released.append(mods)
-        return [config for mod, config in self.queue if mods is None or mod in mods]
+    def release_update_queue(self):
+        self.released += 1
+        return [config for mod, config in self.queue]
 
     def worker_resume(self, mod, config):
         self.resumed.append(config)
@@ -232,8 +228,10 @@ def restarts(monkeypatch):
     tests/backend/app/test_restart_resume.py)."""
     requests = []
 
-    async def fake_request(reason='', nursery=None, hooks=None):
-        requests.append({'reason': reason, 'nursery': nursery, 'hooks': hooks})
+    async def fake_request(reason='', nursery=None, hooks=None, owner=''):
+        requests.append({'reason': reason, 'nursery': nursery, 'hooks': hooks, 'owner': owner})
+        # like the real entry point: an accepted request owns the backend
+        update_module.restart_app.GRACEFUL_RESTART.running = True
 
     monkeypatch.setattr(update_module.restart_app, 'request_graceful_restart', fake_request)
     # no interval between two starts of the released queue (the real
@@ -416,19 +414,31 @@ class TestCheckLoop:
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
-    async def test_check_window_locks_the_mod(self, manager, script, workers, monkeypatch):
-        """The window opens during the check and closes after it."""
+    async def test_check_locks_nothing(self, manager, script, workers, monkeypatch):
+        """A check is read-only: it opens no window and gates no start (§16.2)"""
         gate = trio.Event()
         script.check_gate['/m'] = gate
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')})
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(manager.run)
-            await wait_until(lambda: workers.locked_mods == {'m'}, description='the check window')
-            assert manager.mods['m'].info.state == 'checking'
+            await wait_until(lambda: state_of(manager, 'm') == 'checking')
             gate.set()
-            await wait_until(lambda: workers.locked_mods == set(), description='the window close')
+            await wait_until(lambda: state_of(manager, 'm') in ('uptodate', 'available'))
             nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_round_skipped_during_the_transaction(self, manager, script, monkeypatch):
+        """A round landing inside the transaction of its mod is skipped: it
+        must not overwrite the transaction state (§16.3, GAP-2)"""
+        script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')})
+        manager.bind_mods(manager.load_mods())
+        manager._transaction = 'm'
+
+        await manager.mods['m']._round()
+
+        assert script.calls_of('check') == []
+        assert state_of(manager, 'm') == 'idle'
 
     @pytest.mark.trio
     async def test_cancel_check_restores_the_previous_state(self, manager, script, workers,
@@ -445,7 +455,6 @@ class TestCheckLoop:
             # to the one before the check
             await wait_until(lambda: state_of(manager, 'm') == 'idle')
             assert manager.mods['m'].info.checked_at == 0.
-            await wait_until(lambda: workers.locked_mods == set())
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
@@ -518,8 +527,49 @@ def bind_transaction(manager, script, monkeypatch, supervisor, state='available'
     manager.bind_mods({'m': FakeMod('m', mirrors='https://a.example')})
     mod = manager.mods['m']
     mod.set_state(state, current='c1', latest='c2')
+    # the update transaction of a mod only starts after its first check:
+    # the startup gate is open in these tests
+    mod.first_update_checked.set()
     script.checks['/m'] = make_check(local='c1', latest='c2')
     return mod
+
+
+class TestStartupEvents:
+    """The startup events of the update manager (§16.8)."""
+
+    @pytest.mark.trio
+    async def test_events_after_the_first_rounds(self, manager, script, monkeypatch):
+        """update_inited opens with the mods (bind), first_update_checked after
+        the first check of every mod"""
+        UPDATE_STARTUP.reset()
+        script_manager(manager, monkeypatch, {
+            'm': FakeMod('m', mirrors='https://a.example'),
+            'u': FakeMod('u', mirrors=''),
+        })
+        assert UPDATE_STARTUP.update_inited.is_set() is False
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(manager.run)
+            # bind finished: the manager is inited and the mod without an
+            # update source is ready at once
+            await wait_until(lambda: UPDATE_STARTUP.update_inited.is_set())
+            await wait_until(lambda: manager.mods['u'].first_update_checked.is_set())
+            # the checked mod: after its first round
+            with trio.move_on_after(5) as scope:
+                await UPDATE_STARTUP.wait_ready(['m', 'u'])
+            assert not scope.cancelled_caught
+            assert manager.mods['m'].first_update_checked.is_set()
+            nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_wait_ready_skips_unknown_mods(self, manager):
+        """A mod the manager never registered is not gated"""
+        UPDATE_STARTUP.reset()
+        UPDATE_STARTUP.update_inited.set()
+
+        with trio.move_on_after(1) as scope:
+            await UPDATE_STARTUP.wait_ready(['unknown'])
+        assert not scope.cancelled_caught
 
 
 class TestApply:
@@ -576,10 +626,13 @@ class TestApply:
         assert 'update of mod "m"' in restarts[0]['reason']
         assert script.calls_of('update') == ['/m']
         assert mod.info.state == 'updating'
-        # the transaction window stays open until the process exits (the
-        # new backend takes the restart over)
-        assert workers.transaction == 'm'
+        # the transaction scope closed the window on the way out and the
+        # applying phase stays armed until the process exits: its restart is
+        # not cancellable (the new backend takes it over, §16.4)
+        assert workers.transaction == ''
         assert manager.applying is True
+        with pytest.raises(UpdateError, match='cannot be cancelled'):
+            await manager.cancel()
 
     @pytest.mark.trio
     async def test_preflight_uptodate_drops_the_update(self, manager, script, workers, restarts,
@@ -741,6 +794,9 @@ class TestConvergence:
             nursery.start_soon(manager.run)
             await wait_until(lambda: len(restarts) == 1)
             assert 'interrupted update' in restarts[0]['reason']
+            # the convergence requests the restart as the owner of its own
+            # transaction (external triggers are refused meanwhile, §16.3)
+            assert restarts[0]['owner'] == 'm'
             assert state_of(manager, 'm') == 'updating'
             # the checks of this process are skipped: the first round of
             # the new process runs them
@@ -795,6 +851,7 @@ class TestConvergence:
             await manager.check('m')
             await wait_until(lambda: len(restarts) == 1)
             assert 'interrupted update' in restarts[0]['reason']
+            assert restarts[0]['owner'] == 'm'
             assert state_of(manager, 'm') == 'updating'
             assert manager.mods['m'].convergence_pending is False
             nursery.cancel_scope.cancel()

@@ -6,7 +6,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
 
 from alasio.backend.app.frontend import SITE
-from alasio.backend.app.restart import resume_after_restart
+from alasio.backend.app.restart import run_startup
 from alasio.backend.app.schedule import task_daily_restart
 from alasio.backend.app.update import UPDATE_MANAGER
 from alasio.backend.auth import auth
@@ -195,10 +195,6 @@ async def lifespan(app):
         # the background, the 5s startup window of the supervisor must not be
         # spent on the whole tree (requests prepare their file on demand)
         nursery.start_soon(SITE.warm_up)
-        # auto-resume of the workers recorded before a graceful restart: a
-        # no-op without the one-shot credential (normal cold start). The stale
-        # resume file cleanup is part of this task: it must run after the read
-        nursery.start_soon(resume_after_restart)
         # daily scheduled restart (Deploy.Update.AutoRestartTime): a no-op
         # when the config disables it. It goes through the same graceful
         # restart as the settings page, so the running configs are resumed by
@@ -209,6 +205,12 @@ async def lifespan(app):
         # then the check loop of every mounted mod runs; the states flow
         # through the Update topic. A no-op without an update-enabled mod
         nursery.start_soon(UPDATE_MANAGER.run)
+        # the startup orchestration (doc §16.5): it consumes the resume
+        # credential, waits for the startup convergence and the first update
+        # checks of UPDATE_MANAGER, then releases the resume queue behind
+        # them. Every start is accepted as a queued resume while it runs; a
+        # no-op without a recorded resume intent
+        nursery.start_soon(run_startup)
 
         # actual backend runs here
         yield

@@ -31,7 +31,7 @@ import datetime
 
 import trio
 
-from alasio.backend.app.restart import RestartInProgress, request_graceful_restart
+from alasio.backend.app.restart import RestartInProgress, RestartUnavailable, request_graceful_restart
 from alasio.base.servertime import parse_server_update
 from alasio.logger import logger
 
@@ -158,6 +158,10 @@ async def task_daily_restart():
             await request_graceful_restart(reason)
         except RestartInProgress:
             logger.warning('[Schedule] A restart is already in progress, skipping the scheduled restart')
+        except RestartUnavailable as e:
+            # an update transaction / the startup window owns the backend:
+            # skip the day like any other conflict (latest command wins)
+            logger.warning(f'[Schedule] The scheduled restart is refused, skipping it: {e}')
         except Exception as e:
             # a failing trigger (e.g. no supervisor) must never kill the
             # lifespan task: report and leave the next trigger to tomorrow

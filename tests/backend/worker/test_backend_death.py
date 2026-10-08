@@ -44,6 +44,11 @@ def backend_child(conn, config, mod):
     """
     # this process only exists for the test, keep it from writing a real log file
     logger.mute(all=True)
+    # no update manager runs in this child: its startup gate must not hold the
+    # start (the gate is open in every real backend once the first checks are
+    # over, see alasio.backend.app.update_startup)
+    from alasio.backend.app.update_startup import UPDATE_STARTUP
+    UPDATE_STARTUP.update_inited.set()
 
     manager = WorkerManager()
     success, msg = manager.worker_start(mod, config)

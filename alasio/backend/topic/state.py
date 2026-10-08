@@ -83,6 +83,10 @@ class ConnState(BaseTopic):
         except restart.RestartInProgress:
             # keep the historical user-facing wording of this rpc
             raise RpcValueError('Restart already in progress') from None
+        except restart.RestartUnavailable as e:
+            # an update transaction / the startup window owns the backend: the
+            # reason carries the next step for the user (doc §16.3)
+            raise RpcValueError(str(e)) from None
 
     @rpc
     async def cancel_restart(self):

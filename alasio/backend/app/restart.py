@@ -57,6 +57,7 @@ import msgspec
 import trio
 
 from alasio.backend.app.lifespan import SHUTDOWN_EVENT, lifespan_restart
+from alasio.backend.app.update_startup import UPDATE_STARTUP
 from alasio.backend.mpipe.mpipe_backend import mpipe_backend
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.restart import RestartSource
@@ -101,6 +102,17 @@ class RestartInProgress(RuntimeError):
 
     def __init__(self):
         super().__init__('Graceful restart already in progress')
+
+
+class RestartUnavailable(RuntimeError):
+    """
+    Raised when a restart cannot start now for a reason other than another
+    restart: an update transaction owns the backend (only its own apply may
+    request the restart it ends in), or the backend is still starting up (the
+    startup convergence and the first update checks). The rpc handler
+    translates it into an RpcValueError carrying the reason; the daily
+    schedule skips its trigger.
+    """
 
 
 class ResumeRecord(msgspec.Struct):
@@ -730,7 +742,7 @@ def run_resume_actions(actions):
 # Orchestration (old backend)
 # =============================================================================
 
-async def request_graceful_restart(reason='', nursery=None, hooks=None):
+async def request_graceful_restart(reason='', nursery=None, hooks=None, owner=''):
     """
     Request a graceful restart of the backend (entry point of every trigger)
 
@@ -739,6 +751,13 @@ async def request_graceful_restart(reason='', nursery=None, hooks=None):
     (alasio.backend.app.schedule) both go through it, so the preconditions
     and the re-entry guard exist once. The in-app update flow goes through
     it too, with the hooks carrying its apply step (see RestartHooks).
+
+    Two owners can refuse the request (doc §16.3): an update transaction in
+    flight only accepts the restart requested by itself -- the owner argument
+    names the mod of the transaction, '' (the default) marks an external
+    trigger -- and the startup window of a new backend refuses the external
+    triggers until its own convergence / checks are over (the convergence
+    requests its restart as the owner of its transaction).
 
     The request only starts the orchestration task and returns immediately:
     the graceful stop can last up to GRACEFUL_STOP_TIMEOUT and the progress
@@ -751,14 +770,34 @@ async def request_graceful_restart(reason='', nursery=None, hooks=None):
             Defaults to the lifespan global nursery, injectable for tests
         hooks (RestartHooks): Optional hooks of the in-app update flow,
             handed to the orchestration (see run_graceful_restart)
+        owner (str): The mod of the update transaction requesting this
+            restart, '' = an external trigger
 
     Raises:
         PermissionError: When the backend runs without a supervisor (the
             restart could never come back)
         RestartInProgress: When a restart already owns the backend
+        RestartUnavailable: When an update transaction or the startup window
+            owns the backend
     """
     if not mpipe_backend:
         raise PermissionError('Cannot restart backend running without supervisor')
+    # an update transaction owns the backend: only the transaction itself
+    # (owner = its mod) may request the restart it ends in; every external
+    # trigger is refused -- accepting one would race the job's 'updating'
+    # phase, which then fails against the gate (doc §16.3, GAP-1)
+    from alasio.backend.app.update import UPDATE_MANAGER
+    transaction = UPDATE_MANAGER.transaction
+    if transaction and owner != transaction:
+        raise RestartUnavailable(
+            f'The update of "{transaction}" is in progress; '
+            f'wait for it (it restarts the backend itself) or cancel it first')
+    # the backend is still starting up (the startup convergence and the first
+    # update checks own the instance): an external restart would race the
+    # startup orchestration; the convergence requests its own restart as the
+    # owner of its transaction (doc §16.8)
+    if not UPDATE_STARTUP.startup_over() and not owner:
+        raise RestartUnavailable('The backend is starting up, retry in a moment')
     if GRACEFUL_RESTART.running:
         raise RestartInProgress()
     if nursery is None:
@@ -1033,30 +1072,143 @@ def _resume_one(manager, config: str):
     logger.info(f'[Restart] Worker resumed: {config}')
 
 
-async def resume_after_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
+async def _release_startup_queue(manager, queued):
     """
-    Consume the resume intent and start the recorded workers (new backend)
+    Resolve and start the startup queue: the configs marked by the resume
+    file (queued) plus the starts accepted by the startup gate.
 
-    Runs as a trio background task of the lifespan startup. Without a resume
-    credential (no supervisor, cold start, killed session) nothing is read.
-    The recorded configs are marked as queued as soon as they are read (the
-    frontend sees every one of them as "queued for resume"), then started one
-    by one with WORKER_START_INTERVAL between two starts. A user stop on a
-    queued config cancels its resume (worker_resume returns False, the queue
-    skips it).
+    The configs are resolved against the config scan (one forced refresh): a
+    config the scan does not expose is dropped, never started -- starting it
+    would recreate its file with the default settings, which the user never
+    asked for. The release waits behind the update startup events of the mods
+    to resume (the manager initialization and their first update checks, doc
+    §16.8) before it starts anything. Every phase of the queue is pushed
+    under the takeover lock with the restart gate checked inside it: a
+    restart that took the backend over drops the phase (its phases are the
+    last word) and the queue ends here (F6).
 
-    A recorded config was running before the restart, so its file exists and the
-    restart itself does not remove it: the queue never waits for a config to
-    appear. A config the config scan does not expose (its file was deleted
-    outside the backend) is dropped instead of started -- starting it would
-    recreate the file with the default settings, which the user did not ask for.
+    Args:
+        manager (WorkerManager): Manager to drive
+        queued (list[str]): Configs already marked by mark_resume()
+    """
+    window_queued = await trio.to_thread.run_sync(manager.release_update_queue)
+    configs = list(queued)
+    for config in window_queued:
+        if config not in configs:
+            configs.append(config)
+    if not configs:
+        logger.info('[Restart] Startup queue is empty, nothing to start')
+        return
+    source = ConfigScanSource()
+    try:
+        # the disk read runs in the thread pool (inside reinit)
+        await source.reinit(force=True)
+    except Exception as e:
+        # the scan decides whether a config exists: a failing refresh must not
+        # abandon the whole queue, the resolution below falls back to the data
+        # the source currently holds
+        logger.error(f'[Restart] Config scan refresh failed: {e}')
+    data = source.data
+    resolved = [config for config in configs if config in data]
+    # drop the still queued marks of the missing configs (an entry a new
+    # restart already collected is not ours to drop, drop_resume leaves it
+    # alone)
+    missing = [config for config in configs if config not in data]
+    if missing:
+        logger.warning(f'[Restart] Startup queue abandoned, configs not found: {missing}')
+        await trio.to_thread.run_sync(manager.drop_resume, missing)
+    if not resolved:
+        logger.info('[Restart] Startup queue is empty, nothing to start')
+        return
+    # wait behind the update startup events of the mods to resume (doc §16.8):
+    # the manager initialization and the first update check of every one of
+    # them. The mods the update manager never registered are not gated
+    from alasio.backend.topic.worker import get_mod
+    names = []
+    for config in resolved:
+        try:
+            name = get_mod(config)
+        except Exception:
+            continue
+        if name and name not in names:
+            names.append(name)
+    if names:
+        await UPDATE_STARTUP.wait_ready(names)
+    if not await _push_resume_phase(manager, 'resuming'):
+        logger.info('[Restart] Startup queue interrupted by a new graceful restart')
+        return
+    logger.info(f'[Restart] Startup queue: {len(resolved)} configs, '
+                f'starting with {WORKER_START_INTERVAL}s interval')
+    for config in resolved:
+        if SHUTDOWN_EVENT.is_set():
+            logger.info(f'[Restart] Startup queue interrupted by the shutdown: {config}')
+            return
+        if manager.restarting:
+            # the new restart owns the queue (its phases are the last word)
+            return
+        # blocking (mod resolution + process spawn) -> thread pool
+        await trio.to_thread.run_sync(_resume_one, manager, config)
+        # interval between two starts, measured from the worker_resume return
+        # (do not wait for the worker to reach "running")
+        await trio.sleep(WORKER_START_INTERVAL)
+    # the terminal phases, refused together when a restart took the backend
+    # over while the last config was starting: 'done' is transient, "phase
+    # present" means "a restart is in progress" for the frontend
+    if not await _push_resume_phase(manager, 'done'):
+        logger.info('[Restart] Startup queue interrupted by a new graceful restart')
+        return
+    await _push_resume_phase(manager, '')
+
+
+async def _drop_startup_queue(manager, queued):
+    """
+    Drop every entry of the startup queue still waiting (the failure path).
+
+    The resumes already started are not touched (drop_resume only handles the
+    "resuming" entries); the entries a restart collected are not ours to drop
+    either. The waiting entries return to idle: the configs are startable by
+    hand again instead of being stuck queued for a release that will never
+    come.
+
+    Args:
+        manager (WorkerManager): Manager to drive
+        queued (list[str]): Configs marked by mark_resume() of this startup
+    """
+    window_queued = await trio.to_thread.run_sync(manager.release_update_queue)
+    dropped = list(queued)
+    for config in window_queued:
+        if config not in dropped:
+            dropped.append(config)
+    if dropped:
+        await trio.to_thread.run_sync(manager.drop_resume, dropped)
+
+
+async def run_startup(manager=GRACEFUL_RESTART.WORKER_MANAGER):
+    """
+    Startup orchestration of the new backend (doc §16.8)
+
+    1. consume the resume credential (the read deletes the file), clean the
+       leftovers of dead sessions and mark the recorded configs as queued
+       (they wait, they are not started yet);
+    2. run the actions carried by the resume file;
+    3. release: the marked configs and the starts accepted by the startup
+       gate are resolved against the config scan; the release waits behind
+       the update startup events of the mods (the manager initialization and
+       their first update checks) and starts them one by one with
+       WORKER_START_INTERVAL between two starts.
+
+    Without a resume credential (no supervisor, cold start, killed session)
+    nothing is read: the release then starts only the configs the frontend
+    asked for while the startup gate was shut (accepted as queued resumes).
 
     The queue lives in the manager, so a new graceful restart can take it over
     (the latest user command wins, F6): restart_begin() re-collects its marks
     into the new resume list, and this task ends early as soon as it finds that
     the manager is restarting (mark_resume / worker_resume refuse then) -- it
     starts nothing under the gate and pushes no terminal phase over the phases
-    of the new restart.
+    of the new restart. The release of the queue is best effort (the starts
+    left queued are visible in the Worker topic and a manual retry is
+    possible).
 
     Every call into the blocking layer (the resume file read, the actions, the
     manager queue, the worker starts, the topic pushes) goes through the trio
@@ -1091,99 +1243,46 @@ async def resume_after_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
                 # finished. Same task, strict order: the two must never run as
                 # independent tasks (the cleanup would race the file just read)
                 await trio.to_thread.run_sync(GRACEFUL_RESTART.resume_cleanup)
-                if record is None:
-                    return
-                logger.info(f'[Restart] Resume intent accepted: {len(record.configs)} configs, '
-                            f'{len(record.actions)} actions, owner={record.owner}')
-                # mark the recorded configs right away -- the manager owns the
-                # intent from here on. No config scan is needed to mark; the scan
-                # below is only about resolving the configs (a config must exist
-                # and its mod must be resolvable). The manager refuses the queue
-                # while it is restarting: a restart that already took the backend
-                # over owns the resume list, this task has nothing to do
-                queued = await trio.to_thread.run_sync(manager.mark_resume, record.configs)
-            # 2) actions carried by the resume file (an update cleanup): they run
-            #    whenever a record was accepted, also when nothing was queued
-            #    (an actions-only file) or when a restart refused the queue
-            if record.actions:
+                if record is not None:
+                    logger.info(f'[Restart] Resume intent accepted: {len(record.configs)} configs, '
+                                f'{len(record.actions)} actions, owner={record.owner}')
+                    # mark the recorded configs right away -- the manager owns
+                    # the intent from here on. They are held until the release
+                    # (step 5): the startup convergence and the first update
+                    # checks run first (§16.5). The manager refuses the queue
+                    # while it is restarting: a restart that already took the
+                    # backend over owns the resume list, this task has nothing
+                    # to do
+                    queued = await trio.to_thread.run_sync(manager.mark_resume, record.configs)
+            # 2) actions carried by the resume file (an update cleanup): they
+            #    run whenever a record was accepted, also when nothing was
+            #    queued (an actions-only file)
+            if record is not None and record.actions:
                 await trio.to_thread.run_sync(run_resume_actions, record.actions)
-            if not queued:
-                if manager.restarting:
-                    logger.info('[Restart] Resume queue refused: a graceful restart is in progress')
-                else:
-                    logger.info('[Restart] Resume queue is empty, nothing to start')
+            if manager.restarting:
+                # a restart took the backend over (its own resume list owns
+                # the queue): nothing to release here
+                logger.info('[Restart] Startup interrupted by a graceful restart')
                 return
-            # 3) resolve the queued configs against the config scan: a config
-            #    recorded in the resume file was running before the restart, so
-            #    its file exists and the restart itself does not remove it --
-            #    there is nothing to wait for. One forced refresh decides (a
-            #    cached answer may still show a config whose file was deleted
-            #    meanwhile); the configs the scan does not expose are dropped,
-            #    never started: starting one would recreate its file with the
-            #    default settings, which the user never asked for
-            source = ConfigScanSource()
-            try:
-                # the disk read runs in the thread pool (inside reinit)
-                await source.reinit(force=True)
-            except Exception as e:
-                # the scan decides whether a config exists: a failing refresh
-                # must not abandon the whole queue, the resolution below falls
-                # back to the data the source currently holds (get_mod() reads
-                # the same data)
-                logger.error(f'[Restart] Config scan refresh failed: {e}')
-            data = source.data
-            configs = [config for config in queued if config in data]
-            # drop the still queued marks of the missing configs (an entry a new
-            # restart already collected is not ours to drop, drop_resume leaves
-            # it alone)
-            missing = [config for config in queued if config not in data]
-            if missing:
-                logger.warning(f'[Restart] Resume abandoned, configs not found: {missing}')
-                await trio.to_thread.run_sync(manager.drop_resume, missing)
-            if not configs:
-                logger.info('[Restart] Resume queue is empty, nothing to start')
-                return
-            # 4) every phase of the queue is pushed under the takeover lock with
-            #    the restart gate checked inside it: a restart that took the
-            #    backend over drops the phase (its phases are the last word) and
-            #    the queue ends here (F6)
-            if not await _push_resume_phase(manager, 'resuming'):
-                logger.info('[Restart] Resume queue interrupted by a new graceful restart')
-                return
-            logger.info(f'[Restart] Resume queue: {len(configs)} configs, '
-                        f'starting with {WORKER_START_INTERVAL}s interval')
-            for config in configs:
-                if SHUTDOWN_EVENT.is_set():
-                    logger.info(f'[Restart] Resume interrupted by the shutdown: {config}')
-                    return
-                if manager.restarting:
-                    break
-                # blocking (mod resolution + process spawn) -> thread pool
-                await trio.to_thread.run_sync(_resume_one, manager, config)
-                # interval between two starts, measured from the worker_resume
-                # return (do not wait for the worker to reach "running")
-                await trio.sleep(WORKER_START_INTERVAL)
-            # 5) the terminal phases, refused together when a restart took the
-            #    backend over while the last config was starting: 'done' is
-            #    transient, "phase present" means "a restart is in progress" for
-            #    the frontend
-            if not await _push_resume_phase(manager, 'done'):
-                logger.info('[Restart] Resume queue interrupted by a new graceful restart')
-                return
-            await _push_resume_phase(manager, '')
+            # 3) the release: the recorded configs and the starts accepted by
+            #    the startup gate; it waits behind the update startup events
+            #    of the mods (see _release_startup_queue)
+            await _release_startup_queue(manager, queued)
         except trio.Cancelled:
             # the cancel path (cancel_graceful_restart) owns the cleanup: the
             # queued marks are dropped by the manager reset, nothing here
             raise
         except Exception as e:
-            logger.error(f'[Restart] Auto-resume failed: {e}')
+            logger.error(f'[Restart] Startup failed: {e}')
             logger.exception(e)
             # release the entries still waiting so they do not block a manual
-            # start (an entry a restart collected is not ours to drop)
+            # start (an entry a restart collected is not ours to drop); the
+            # resumes already started keep running, only the waiting entries
+            # are dropped
             try:
-                await trio.to_thread.run_sync(manager.drop_resume, queued)
-            except Exception:
-                pass
+                await _drop_startup_queue(manager, queued)
+            except Exception as drop_error:
+                logger.error(f'[Restart] Startup cleanup failed: {drop_error}')
             # the phase of the queue is cleared unless a restart owns the topic
             await _push_resume_phase(manager, '')
         finally:
