@@ -141,8 +141,14 @@ class TestWheelDiff:
         assert info['demo/old.py'].edit == 2
         assert info['demo/extra.py'].edit == 2
         assert info['demo-1.0.dist-info/METADATA'].edit == 2
-        # the files of the new .dist-info are added, no rename is guessed
-        assert info['demo-2.0.dist-info/METADATA'].edit == 0
+        # the files of the old .dist-info are deleted like every file the new
+        # version does not have
+        assert info['demo-1.0.dist-info/METADATA'].edit == 2
+        # the new .dist-info file is matched with the one of the old version
+        # (the folder carries the version, see dist_info_pair): the content
+        # changed, so the record is M with the old file as its source
+        assert info['demo-2.0.dist-info/METADATA'].edit == 1
+        assert info['demo-2.0.dist-info/METADATA'].source_path == 'demo-1.0.dist-info/METADATA'
         # the unchanged files are not in the diff at all
         assert 'demo/__init__.py' not in info
         assert 'demo/keep.txt' not in info
@@ -161,7 +167,15 @@ class TestWheelDiff:
         old = PackWheel(build_v1())
         new = PackWheel(build_v2())
         ref = WheelDiff(old, new).refinfo
-        assert set(ref) == {'demo/core.py', 'demo/keep.txt'}
+        # the sources of the M (patch) and C records: the changed module, the
+        # unchanged file a copy references, and every file of the old .dist-info
+        # (patched when the content changed, copied when it did not)
+        assert set(ref) == {
+            'demo/core.py', 'demo/keep.txt',
+            'demo-1.0.dist-info/INSTALLER', 'demo-1.0.dist-info/METADATA',
+            'demo-1.0.dist-info/RECORD', 'demo-1.0.dist-info/WHEEL',
+            'demo-1.0.dist-info/top_level.txt',
+        }
         assert ref['demo/core.py'].size == len(CORE_V1)
         assert ref['demo/core.py'].sha1 == old.tree['demo/core.py'].sha1
         assert ref['demo/keep.txt'].sha1 == old.tree['demo/keep.txt'].sha1
@@ -241,6 +255,49 @@ class TestWheelDiff:
         with pytest.raises(ValueError, match='requires a PackWheel of the new version'):
             WheelDiff(wheel, 'new')
 
+    def test_dist_info_match(self, fs):
+        """The files of the two .dist-info folders are matched by their path
+        under the folder, so a version bump patches or copies them."""
+        old = PackWheel(build_v1())
+        new = PackWheel(build_v2())
+        diff = WheelDiff(old, new)
+        pair = diff.dist_info_pair
+        # every file of the new folder has its counterpart in the old one
+        assert set(pair) == {path for path in new.tree if path.startswith('demo-2.0.dist-info/')}
+        assert all(old_path.startswith('demo-1.0.dist-info/') for old_path in pair.values())
+
+        info = diff.diff_info
+        # the content changed: M, the patch source is the old file
+        assert info['demo-2.0.dist-info/METADATA'].edit == 1
+        assert info['demo-2.0.dist-info/METADATA'].source_path == 'demo-1.0.dist-info/METADATA'
+        assert info['demo-2.0.dist-info/RECORD'].edit == 1
+        # the content did not change (INSTALLER is "pip", the WHEEL and the
+        # top level are the same): C, no data at all
+        for name in ('INSTALLER', 'WHEEL', 'top_level.txt'):
+            record = info[f'demo-2.0.dist-info/{name}']
+            assert record.edit == 0, name
+            assert record.source_path == f'demo-1.0.dist-info/{name}', name
+            assert record.data_size == 0, name
+        # the files of the old folder are still deleted
+        assert info['demo-1.0.dist-info/WHEEL'].edit == 2
+
+    def test_dist_info_of_another_distribution_is_not_matched(self, fs):
+        """A folder of another distribution is not the old version of this one."""
+        old = PackWheel(build_wheel(
+            '/w/other-1.0-py3-none-any.whl', v1_files(), name='other', version='1.0'))
+        new = PackWheel(build_v2())
+        diff = WheelDiff(old, new)
+        assert diff.dist_info_pair == {}
+        info = diff.diff_info
+        # the unmatched folder keeps the A + D records of unrelated paths
+        assert info['demo-2.0.dist-info/METADATA'].edit == 0
+        assert info['other-1.0.dist-info/METADATA'].edit == 2
+
+    def test_the_same_folder_is_not_matched(self, fs):
+        """A rebuild of the same version keeps the plain path comparison."""
+        wheel = build_v1()
+        assert WheelDiff(PackWheel(wheel), PackWheel(wheel)).dist_info_pair == {}
+
     def test_cache_of_the_new_version(self, fs):
         """The diff encodes through the cache of the new version."""
         old = PackWheel(build_v1())
@@ -302,7 +359,12 @@ class TestUpdatePack:
         # the added module and the new .dist-info files
         assert info['demo/new.py'].edit == 0
         assert info['demo/new.py'].source_lookback == 0
-        assert info['demo-2.0.dist-info/RECORD'].edit == 0
+        # the new .dist-info: the file that changed is patched from the file
+        # of the old version, the one that did not change is a copy
+        assert info['demo-2.0.dist-info/RECORD'].edit == 1
+        assert info['demo-2.0.dist-info/RECORD'].source_path == 'demo-1.0.dist-info/RECORD'
+        assert info['demo-2.0.dist-info/INSTALLER'].edit == 0
+        assert info['demo-2.0.dist-info/INSTALLER'].source_path == 'demo-1.0.dist-info/INSTALLER'
         # the copy of the unchanged old file carries no data
         assert info['demo/copy.txt'].edit == 0
         assert info['demo/copy.txt'].source_path == 'demo/keep.txt'

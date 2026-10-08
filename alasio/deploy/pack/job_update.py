@@ -491,10 +491,14 @@ class UpdateJob(JobBase):
         """
         source_path = info.source_path
         fileinfo = decoder.fileinfo
-        if info.edit == 0 and source_path in fileinfo:
-            # C (copied): the source is an earlier new file, its
-            # content is in the tmp file written by the earlier record
-            source_info = fileinfo[source_path]
+        source_info = fileinfo.get(source_path)
+        if info.edit == 0 and source_info is not None and source_info.edit != 2:
+            # C (copied): the source is an earlier new file, its content is in
+            # the tmp file written by the earlier record. A D (deleted) record
+            # of the same path is not a copy source: the source of a C record
+            # can be a file the update deletes (the file of the old version
+            # under a moved folder, e.g. a .dist-info of another version), its
+            # content is read from the working tree below
             source_tmp = self.workspace.joinpath(
                 f'{source_info.size}_{source_info.sha1.hex()}_{self._file_index[source_path]}.tmp')
             current = self._read_current(source_tmp)

@@ -29,12 +29,11 @@ them into the ledger folder of its target (see JobBase.local_path), the pack
 carries no dist-key.
 
 The diff does not detect renames, see WheelDiff: the files of a .dist-info
-folder change their name with the version of the folder, the A + D records
-that come out of it are accepted (the folder is a few KB of metadata), and the
-client removes the folder of the old version as a whole after the update. A
-record whose content an unchanged old file or an earlier record of the new
-version already carries is decided to be a C (copied) record before any
-encoding, so the content of a copy is never compressed.
+folder change their name with the version of the folder, and the files below
+the folder are matched by the path under it (WheelDiff.dist_info_pair), so a
+version bump patches them from the old file (M) or copies the ones that did not
+change (C, e.g. a license) and only the folder name moves; the folders of the
+other files are never matched, a renamed module stays an A + D pair.
 
 Usage:
     from alasio.deploy_dev.pack.pack_wheel import PackWheel
@@ -46,6 +45,7 @@ Usage:
                         update.iter_pack_data())
 """
 
+from alasio.backport import removesuffix
 from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.pack._pack_cache import PatchCache, PlainCache
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
@@ -128,6 +128,52 @@ class WheelDiff:
         self.cache = new.cache
 
     @cached_property
+    def dist_info_pair(self) -> "dict[str, str]":
+        """
+        {new dist-info path: old dist-info path} of the two versions.
+
+        The folder of a .dist-info carries the version in its name
+        (pyjwt-2.14.0.dist-info -> pyjwt-2.15.1.dist-info), so the same file of
+        two versions has two paths and the path comparison alone makes every
+        file of the folder an A + D pair: the whole METADATA, the RECORD and
+        the licenses are shipped again on every version bump, the biggest part
+        of the update pack of a real library. The files below the folder are
+        matched by the path under it instead: the file of the new version
+        becomes M (its content changed, the patch source is the old file) or C
+        (the content is the same, e.g. a license), and only the folder name
+        moves. The files of the old folder keep their D records, the folder
+        must not stay on the disk.
+
+        The folders are paired only when they belong to the same distribution
+        (the name before the version is the same): the folder of another
+        distribution is not the old version of this one, its files keep the
+        A + D records of unrelated paths.
+
+        Returns:
+            dict[str, str]: {path in the new version: path in the old version}
+        """
+        old_folder = self.old.dist_info
+        new_folder = self.new.dist_info
+        if old_folder == new_folder:
+            return {}
+        # the version of the folder is behind the name, the '-info' of the
+        # suffix is not a separator: 'demo-1.0.dist-info' -> 'demo'
+        old_package = removesuffix(old_folder, '.dist-info')
+        new_package = removesuffix(new_folder, '.dist-info')
+        if old_package.rpartition('-')[0] != new_package.rpartition('-')[0]:
+            return {}
+        old_prefix = f'{old_folder}/'
+        new_prefix = f'{new_folder}/'
+        out = {}
+        for path in self.new.tree:
+            if not path.startswith(new_prefix):
+                continue
+            old_path = f'{old_prefix}{path[len(new_prefix):]}'
+            if old_path in self.old.tree:
+                out[path] = old_path
+        return out
+
+    @cached_property
     def diff_info(self) -> "dict[str, UpdateInfo]":
         """
         File changes from the old version to the new version, keyed by path.
@@ -161,10 +207,15 @@ class WheelDiff:
                 source_map.setdefault(file.sha1, path)
 
         out = {}
+        pair = self.dist_info_pair
         for path, new_file in new_files.items():
             if path in unchanged:
                 continue
-            old_file = old_files.get(path)
+            # the file of the old version this record comes from: the same
+            # path, or the same path under the .dist-info folder of the old
+            # version, see dist_info_pair
+            old_path = path if path in old_files else pair.get(path, '')
+            old_file = old_files.get(old_path) if old_path else None
             record = UpdateInfo(
                 path=path, edit=1 if old_file is not None else 0, eol=2, mode=new_file.mode)
             # a content that already exists (an unchanged old file, or an
@@ -174,19 +225,23 @@ class WheelDiff:
             # empty file is never a copy, only a non-empty content is shared
             # (the same rule the full pack and the git diff keep)
             content_sha1 = new_file.sha1 if new_file.content else b''
-            if self._try_copy(record, source_map, content_sha1):
+            copied = self._try_copy(record, source_map, content_sha1)
+            if not copied and content_sha1 and old_file is not None and old_file.sha1 == content_sha1:
+                # the content is the same and only the path moved (the folder
+                # of a .dist-info carries the version): C from the old file
+                record.edit = 0
+                record.source_path = old_path
+                copied = True
+            if copied:
                 record.size = len(new_file.content)
                 record.sha1 = content_sha1
-                source_map[content_sha1] = path
-                out[path] = record
-                continue
-            if old_file is None:
+            elif old_file is None:
                 # A (added)
                 self._load_added(record, new_file)
             elif self._load_modified(record, old_file, new_file):
                 # M (modified), the record references the old file when the
                 # zstd patch won the encoding
-                record.source_path = path
+                record.source_path = old_path
             if content_sha1:
                 source_map[content_sha1] = path
             out[path] = record
@@ -216,6 +271,9 @@ class WheelDiff:
         """
         diff = self.diff_info
         unchanged = set(self.old.tree) & set(self.new.tree) - set(diff)
+        # the sources of the C records: an unchanged old file, or the file of
+        # the old version under the .dist-info folder that moved
+        moved = set(self.dist_info_pair.values())
         ref_paths = set()
         for info in diff.values():
             if not info.source_path:
@@ -224,8 +282,9 @@ class WheelDiff:
                 # an M record only references the old file when patch data is
                 # used, source_path is empty otherwise
                 ref_paths.add(info.source_path)
-            elif info.source_path in unchanged:
-                # copied from an unchanged old file
+            elif info.source_path in unchanged or info.source_path in moved:
+                # copied from an unchanged old file, or from the file of the
+                # old version under the folder that moved (dist-info)
                 ref_paths.add(info.source_path)
         out = {}
         for path in sorted(ref_paths, key=_dfs_path_key):
