@@ -86,7 +86,8 @@ class TestRequestGracefulRestart:
         from alasio.backend.app import update as update_module
 
         nursery = FakeNursery()
-        monkeypatch.setattr(update_module.UPDATE_MANAGER, '_transaction', 'm')
+        monkeypatch.setattr(update_module.UPDATE_MANAGER, '_transaction',
+                            update_module.UpdateTransaction('m'))
 
         with pytest.raises(restart.RestartUnavailable, match='update of "m" is in progress'):
             await restart.request_graceful_restart('test request', nursery=nursery)
@@ -119,6 +120,7 @@ class TestRequestGracefulRestart:
 
         # the convergence of the startup phase requests its own restart as
         # the owner of its transaction
-        monkeypatch.setattr(update_module.UPDATE_MANAGER, '_transaction', 'm')
+        monkeypatch.setattr(update_module.UPDATE_MANAGER, '_transaction',
+                            update_module.UpdateTransaction('m'))
         await restart.request_graceful_restart('test request', nursery=nursery, owner='m')
         assert len(nursery.started) == 1

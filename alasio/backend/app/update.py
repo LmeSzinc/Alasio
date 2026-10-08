@@ -54,6 +54,7 @@ frontend shows 更新中 instead of 重启中).
 import contextlib
 import random
 import time
+from typing import Optional
 
 import trio
 
@@ -87,6 +88,285 @@ class UpdateError(RuntimeError):
     the backend runs without a supervisor. The topic translates it into an
     RpcValueError.
     """
+
+
+class ApplyRendezvous:
+    """
+    The rendezvous of the applying phase of one update transaction: the job
+    task and the restart orchestration wait for each other here (the
+    applying-phase handoff of doc/2026-10-05_mod-update-backend-integration.md).
+
+    The job side (ModUpdateManager.on_job_phase, the 'updating' boundary)
+    waits for the replace window -- every worker stopped, the resume intent
+    published -- and aborts when the restart ended before it. The restart
+    side (RestartHooks.on_all_stopped / on_aborted) opens the window and
+    then waits for the job: a failed apply is raised there and cancels the
+    restart (E5: the backend keeps running, the stopped configs stay
+    stopped). One instance per transaction: both events are one-shot and
+    nothing is ever reset.
+    """
+
+    def __init__(self):
+        # restart -> job: the window is open, or why it will never open
+        self._window = trio.Event()
+        self._window_error = None
+        # job -> restart: the apply ended, with the error the restart must
+        # raise to cancel itself (None when the apply succeeded)
+        self._applied = trio.Event()
+        self._apply_error = None
+
+    # ---------------------------------------------------------------- job side
+
+    async def wait_window(self):
+        """
+        Block the job's 'updating' phase until the replace window is open.
+
+        Raises:
+            RuntimeError: The restart ended before the window (it was
+                cancelled, or a step before the window failed): the job
+                aborts before changing any file
+        """
+        await self._window.wait()
+        if self._window_error is not None:
+            raise self._window_error
+
+    def finished(self, error=None):
+        """
+        The job ended (applied, failed or cancelled): release the restart
+        hook waiting for it.
+
+        Args:
+            error (Exception): The error the restart hook must raise to
+                cancel the restart, None when the apply succeeded. Defaults
+                to None
+        """
+        self._apply_error = error
+        self._applied.set()
+
+    # ------------------------------------------------------------ restart side
+
+    async def on_all_stopped(self):
+        """
+        The hook of the graceful restart of the transaction (see
+        RestartHooks.on_all_stopped): every worker stopped and the resume
+        intent published - the replace window. Open the window for the job
+        (the files may be replaced now) and wait for the job to finish; a
+        failed apply is raised here, which cancels the restart (§10: the
+        backend keeps running, the stopped configs stay stopped, the
+        half-applied tree converges on the next update).
+        """
+        self._window.set()
+        await self._applied.wait()
+        if self._apply_error is not None:
+            raise self._apply_error
+
+    async def on_aborted(self, reason):
+        """
+        The hook of the graceful restart of the transaction when it ended
+        before the replace window (see RestartHooks.on_aborted): wake the
+        job's 'updating' phase with the error it must raise. A call after
+        the window opened is a no-op -- the job is already replacing the
+        files and the restart cannot roll it back.
+
+        Args:
+            reason (str): Why the restart ended early
+        """
+        if self._window.is_set():
+            return
+        self._window_error = RuntimeError(f'The restart of the update was aborted: {reason}')
+        self._window.set()
+
+
+class UpdateTransaction:
+    """
+    The instance-level window of the single update transaction (doc §10):
+    the mod being updated and the cancel handles of the cancellable phase
+    of its task (ModUpdateManager.run_transaction).
+
+    The rpc side (UpdateManager.apply / cancel) opens the window and
+    cancels through it; the task registers the cancel scope of its running
+    phase here, so that update_cancel interrupts the in-flight request. A
+    cancel arriving before that registration (the task was just scheduled)
+    is latched and served at it; the latch also answers the fallback check
+    of the task (ModUpdateManager._cancelled) when the cancellation could
+    not be delivered at an interruption point.
+
+    Attributes (managed by the protocol methods):
+        mod (str): The mod being updated
+        scope (trio.CancelScope): The scope of the running phase of the
+            task, None while the task is between two registrations
+        cancel_requested (bool): A cancel that arrived with no scope to
+            cancel: served at the next registration
+    """
+
+    def __init__(self, mod):
+        """
+        Args:
+            mod (str): The mod being updated
+        """
+        self.mod = mod
+        self.scope: "Optional[trio.CancelScope]" = None
+        self.cancel_requested = False
+
+    def register(self, scope):
+        """
+        The task registers the cancel scope of its running phase; a latched
+        cancel is served here.
+
+        Args:
+            scope (trio.CancelScope): The scope wrapping the running phase
+        """
+        self.scope = scope
+        if self.cancel_requested:
+            scope.cancel()
+
+    def unregister(self, scope):
+        """
+        The task leaves the cancellable section (a stale scope never unsets
+        a newer one).
+
+        Args:
+            scope (trio.CancelScope): The scope registered before
+        """
+        if self.scope is scope:
+            self.scope = None
+
+    def cancelled(self):
+        """
+        Returns:
+            bool: True when the transaction must stop at its next
+                interruption point or abort at its next phase boundary:
+                the cancel was latched, or the registered scope was
+                cancelled (the cancellation may not be delivered yet)
+        """
+        if self.cancel_requested:
+            return True
+        scope = self.scope
+        return scope is not None and scope.cancel_called
+
+    def cancel(self):
+        """
+        Cancel the cancellable phase of the transaction (rpc update_cancel):
+        the in-flight request is interrupted, nothing was changed on disk.
+        Without a registered scope the cancel is latched and served at the
+        next registration.
+        """
+        if self.scope is None:
+            self.cancel_requested = True
+        else:
+            self.scope.cancel()
+
+
+class CheckLoopControl:
+    """
+    The cancel handles of the check loop of one mod (ModUpdateManager.run,
+    the only place the mod is checked).
+
+    The loop registers the cancel scope of its current wait or round
+    (enter_wait / leave_wait) and of its in-flight check request
+    (enter_check / leave_check) here; the rpc side reaches it to run a
+    round right now (request_manual: latch the manual round and cancel the
+    wait, or the check in flight) and to interrupt an in-flight request
+    alone (cancel_check: update_cancel). The manager shutdown forgets both
+    handles: their scopes are cancelled by their nursery, a later
+    update_cancel then finds nothing.
+    """
+
+    def __init__(self):
+        # the scope of the wait / round in progress, None between two
+        # registrations
+        self._wake_scope: "Optional[trio.CancelScope]" = None
+        # the scope of the in-flight check request, None when there is none
+        self._check_scope: "Optional[trio.CancelScope]" = None
+        # a manual check waits: the loop restarts its sequence when the
+        # cancellation is answered
+        self._manual_request = False
+
+    def enter_wait(self, scope):
+        """
+        The loop enters a wait or a round: request_manual() cancels this
+        scope from now on.
+
+        Args:
+            scope (trio.CancelScope): The scope of the wait / round
+        """
+        self._wake_scope = scope
+
+    def leave_wait(self, scope):
+        """
+        The loop leaves the wait or the round (a stale scope never unsets a
+        newer one).
+
+        Args:
+            scope (trio.CancelScope): The scope registered before
+        """
+        if self._wake_scope is scope:
+            self._wake_scope = None
+
+    def enter_check(self, scope):
+        """
+        A check request starts: cancel_check() cancels this scope from now
+        on.
+
+        Args:
+            scope (trio.CancelScope): The scope of the request
+        """
+        self._check_scope = scope
+
+    def leave_check(self, scope):
+        """
+        The request is over (a stale scope never unsets a newer one).
+
+        Args:
+            scope (trio.CancelScope): The scope registered before
+        """
+        if self._check_scope is scope:
+            self._check_scope = None
+
+    def request_manual(self):
+        """
+        Serve a manual check request of the rpc (UpdateManager.check):
+        cancel the pending wait (or the in-flight check) and latch the
+        manual round. The loop restarts its sequence and runs immediately.
+        """
+        self._manual_request = True
+        scope = self._wake_scope
+        if scope is not None:
+            scope.cancel()
+
+    def take_manual(self):
+        """
+        Consume the latched manual request (the loop restarts its sequence
+        and runs now).
+
+        Returns:
+            bool: True when a manual check waited
+        """
+        manual = self._manual_request
+        self._manual_request = False
+        return manual
+
+    def cancel_check(self):
+        """
+        Interrupt the in-flight check of this mod (update_cancel), see
+        UpdateManager.cancel().
+
+        Returns:
+            bool: True when a check was in flight
+        """
+        scope = self._check_scope
+        if scope is None:
+            return False
+        scope.cancel()
+        return True
+
+    def forget(self):
+        """
+        Drop both handles (the manager shutdown): the scopes are cancelled
+        by their nursery, a later update_cancel finds nothing.
+        """
+        self._wake_scope = None
+        self._check_scope = None
 
 
 class ModUpdateManager:
@@ -123,15 +403,11 @@ class ModUpdateManager:
         self.info = UpdateInfo(state='idle')
         # the update server of the mod, built on first use; the mirror record
         # (gui.db, scope = mod name) and the resolved mirror are per mod
-        self._server = None
-        # the check loop wait scope: registered while the loop waits, a manual
-        # check cancels it to run immediately; None otherwise
-        self._wake_scope = None
-        # the in-flight check scope: update_cancel cancels it (the request is
-        # interrupted, the loop continues)
-        self._check_scope = None
-        # a manual check waits: the loop restarts its sequence and runs now
-        self._manual_request = False
+        self._server: "Optional[ServerFile]" = None
+        # the cancel handles of the check loop of this mod: the loop
+        # registers its scopes, the rpcs cancel through them (see
+        # CheckLoopControl)
+        self.check_loop: "CheckLoopControl" = CheckLoopControl()
         # the startup event of this mod (doc §16.8): set when the first update
         # check is over (a check ran, failed or was skipped); the resume queue
         # and the starts of the mod wait behind it. Registered in the
@@ -141,16 +417,11 @@ class ModUpdateManager:
         # the startup convergence of the mod failed: retried before the next
         # check round until it succeeds (§2.6)
         self.convergence_pending = False
-        # the rendezvous of the applying phase (see _prepare_apply): the
-        # graceful restart hook releases the job's 'updating' phase when the
-        # replace window is open, the transaction releases the hook when the
-        # job finished (`_apply_error` carries the failure it must raise,
-        # `_apply_aborted` the reason of a restart that ended before the
-        # window)
-        self._apply_ready = None
-        self._apply_done = None
-        self._apply_error = None
-        self._apply_aborted = ''
+        # the rendezvous of the applying phase of the transaction in flight
+        # (see ApplyRendezvous): the job's 'updating' phase and the restart
+        # hooks meet there and release each other, one instance per
+        # transaction, None when no apply is in flight
+        self._apply: "Optional[ApplyRendezvous]" = None
 
     # =========================================================================
     # State on the Update topic
@@ -277,7 +548,7 @@ class ModUpdateManager:
         rounds = 0
         while True:
             with trio.CancelScope() as scope:
-                self._wake_scope = scope
+                self.check_loop.enter_wait(scope)
                 try:
                     if delay is not None:
                         if delay > 0:
@@ -297,14 +568,12 @@ class ModUpdateManager:
                         # no automatic check pending: wait for a manual one
                         await trio.sleep_forever()
                 finally:
-                    if self._wake_scope is scope:
-                        self._wake_scope = None
+                    self.check_loop.leave_wait(scope)
             if scope.cancelled_caught:
                 # interrupted by a manual check, or by the manager shutdown
                 if manager.closed:
                     return
-                if self._manual_request:
-                    self._manual_request = False
+                if self.check_loop.take_manual():
                     # the manual check restarts the sequence and runs now
                     rounds = 0
                     delay = 0.0
@@ -315,7 +584,7 @@ class ModUpdateManager:
         """
         One round of the loop: retry a failed convergence, then check.
         """
-        if self.manager._transaction == self.name:
+        if self.manager.transaction == self.name:
             # the mod is inside its update transaction (downloading /
             # updating): the check of this mod is skipped, it must not
             # overwrite the transaction state (doc §16.3, GAP-2)
@@ -379,12 +648,11 @@ class ModUpdateManager:
         try:
             try:
                 with trio.CancelScope() as scope:
-                    self._check_scope = scope
+                    self.check_loop.enter_check(scope)
                     try:
                         check = await self.job().check()
                     finally:
-                        if self._check_scope is scope:
-                            self._check_scope = None
+                        self.check_loop.leave_check(scope)
             except Exception as e:
                 logger.warning(f'[Update] Failed to check "{self.name}": {e}')
                 self.set_state('error', error=str(e))
@@ -406,39 +674,6 @@ class ModUpdateManager:
                                checked_at=time.time())
         except trio.Cancelled:
             raise
-
-    def request_manual(self):
-        """
-        Serve a manual check request of the rpc (UpdateManager.check): cancel
-        the pending wait (or the in-flight check) and mark the manual round.
-        The loop restarts its sequence and runs immediately.
-        """
-        self._manual_request = True
-        scope = self._wake_scope
-        if scope is not None:
-            scope.cancel()
-
-    def cancel_check(self):
-        """
-        Interrupt the in-flight check of this mod (update_cancel), see
-        UpdateManager.cancel().
-
-        Returns:
-            bool: True when a check was in flight
-        """
-        scope = self._check_scope
-        if scope is None:
-            return False
-        scope.cancel()
-        return True
-
-    def forget_scopes(self):
-        """
-        Drop the loop scopes of this mod (the manager shutdown): the scopes
-        are cancelled by their nursery, a later update_cancel finds nothing.
-        """
-        self._wake_scope = None
-        self._check_scope = None
 
     # =========================================================================
     # Update transaction (per mod, driven by UpdateManager.apply / cancel)
@@ -468,18 +703,15 @@ class ModUpdateManager:
         """
         manager = self.manager
         try:
-            async with manager.transaction_window(self.name):
+            async with manager.transaction_window(self.name) as transaction:
                 # phase 1: the pre-flight, the clean cancellation window
                 # before anything is stopped or changed
                 with trio.CancelScope() as scope:
-                    manager._transaction_scope = scope
+                    transaction.register(scope)
                     try:
-                        if manager._cancel_requested:
-                            scope.cancel()
                         check = await self.job().check()
                     finally:
-                        if manager._transaction_scope is scope:
-                            manager._transaction_scope = None
+                        transaction.unregister(scope)
                 if scope.cancelled_caught:
                     # update_cancel: nothing was changed, the state returns to
                     # available (the release of the queued starts belongs to
@@ -497,17 +729,17 @@ class ModUpdateManager:
                 # phase 2: the whole flow of the target, the job reports its own
                 # phases through this manager as its callback (see on_job_phase)
                 self._prepare_apply()
+                rendezvous = self._apply
                 state_error = ''
                 apply_error = None
                 cancelled = False
                 try:
                     with trio.CancelScope() as scope:
-                        manager._transaction_scope = scope
+                        transaction.register(scope)
                         try:
                             ok = await self.job().update(self.on_job_phase)
                         finally:
-                            if manager._transaction_scope is scope:
-                                manager._transaction_scope = None
+                            transaction.unregister(scope)
                     if scope.cancelled_caught:
                         # update_cancel: the in-flight request was interrupted
                         # (the common cancel path of the downloading phase), the
@@ -533,7 +765,12 @@ class ModUpdateManager:
                     state_error = str(e)
                     apply_error = e
                 finally:
-                    self._release_apply(apply_error)
+                    # release the restart hook waiting for the apply, then
+                    # disarm: the hooks hold the rendezvous instance, a late
+                    # notification can only touch a finished transaction
+                    rendezvous.finished(apply_error)
+                    if self._apply is rendezvous:
+                        self._apply = None
                 if cancelled:
                     # zero side effect: nothing was changed on disk
                     self.set_state('available')
@@ -592,7 +829,8 @@ class ModUpdateManager:
             return True
         if phase != 'updating':
             raise ValueError(f'Unknown update job phase: {phase!r}')
-        if self._apply_ready is None:
+        rendezvous = self._apply
+        if rendezvous is None:
             raise RuntimeError('The update transaction is not armed for the apply')
         # the phase boundary: the state is the not cancellable one from here
         # on, and every worker is stopped before the job changes the files
@@ -604,75 +842,42 @@ class ModUpdateManager:
         except restart_app.RestartInProgress:
             raise RuntimeError('A graceful restart is in progress') from None
         # wait for the hook: every worker stopped, the resume intent published
-        await self._apply_ready.wait()
-        if self._apply_aborted:
-            raise RuntimeError(f'The restart of the update was aborted: {self._apply_aborted}')
+        await rendezvous.wait_window()
         return True
 
     def _cancelled(self):
         """
         Whether the transaction of this mod was cancelled (update_cancel):
-        its scope was cancelled, the cancel was requested before the scope was
-        registered, or the transaction ended.
+        the registered scope of its running phase was cancelled (the
+        cancellation may not be delivered yet), the cancel was latched
+        before the phase registered (see UpdateTransaction), or the
+        transaction ended.
 
         Returns:
             bool: True when the job must abort (see on_job_phase)
         """
         manager = self.manager
-        if manager._transaction != self.name or manager._cancel_requested:
+        transaction = manager._transaction
+        if transaction is None or transaction.mod != self.name:
             return True
-        scope = manager._transaction_scope
-        return scope is not None and scope.cancel_called
+        return transaction.cancelled()
 
     def _prepare_apply(self):
         """
         Arm the rendezvous of the applying phase before the job runs, see
         on_job_phase().
         """
-        self._apply_ready = trio.Event()
-        self._apply_done = trio.Event()
-        self._apply_error = None
-        self._apply_aborted = ''
-
-    def _release_apply(self, error):
-        """
-        The job of the applying phase finished (or failed): release the
-        restart hook waiting for it, with the error it must raise (None when
-        the apply succeeded and the restart may continue).
-        """
-        self._apply_error = error
-        self._apply_done.set()
-
-    async def _on_all_stopped(self):
-        """
-        The hook of the graceful restart of this transaction (see
-        RestartHooks.on_all_stopped): every worker stopped and the resume
-        intent published - the replace window. It releases the 'updating'
-        phase of the job (the files may be replaced now) and waits for the
-        job to finish; a failed apply is raised here, which cancels the
-        restart (§10: the backend keeps running, the stopped configs stay
-        stopped, the half-applied tree converges on the next update).
-        """
-        self._apply_ready.set()
-        await self._apply_done.wait()
-        if self._apply_error is not None:
-            raise self._apply_error
-
-    async def _on_aborted(self, reason):
-        """
-        The hook of the graceful restart of this transaction when it ended
-        before the replace window (see RestartHooks.on_aborted): the job's
-        'updating' phase must not go on.
-        """
-        self._apply_aborted = reason
-        self._apply_ready.set()
+        self._apply = ApplyRendezvous()
 
     def _apply_hooks(self):
         """
-        The hooks of the graceful restart of this transaction.
+        The hooks of the graceful restart of this transaction, bound to the
+        rendezvous instance of the transaction (a late call can only touch a
+        finished transaction).
         """
+        rendezvous = self._apply
         return restart_app.RestartHooks(
-            on_all_stopped=self._on_all_stopped, on_aborted=self._on_aborted)
+            on_all_stopped=rendezvous.on_all_stopped, on_aborted=rendezvous.on_aborted)
 
 
 class UpdateManager:
@@ -688,26 +893,21 @@ class UpdateManager:
 
     def __init__(self):
         # {mod_name: ModUpdateManager}, the mounted mods of this process
-        self.mods = {}
+        self.mods: "dict[str, ModUpdateManager]" = {}
         # the shared http client of the update servers, created lazily on
         # the trio thread (a client is bound to one event loop)
-        self._client = None
+        self._client: "Optional[httpx2.AsyncClient]" = None
         # the manager task state (run())
-        self._nursery = None
-        # the mod of the update transaction in flight, '' when there is
-        # none: the instance-level window (downloading / updating)
-        self._transaction = ''
-        # CancelScope of the in-flight transaction task (its pre-flight and
-        # the download phase of its job): update_cancel cancels it while the
-        # transaction is still cancellable
-        self._transaction_scope = None
-        # True when update_cancel arrived before the download scope was
-        # registered: run_transaction cancels it right after
-        self._cancel_requested = False
+        self._nursery: "Optional[trio.Nursery]" = None
+        # the instance-level window of the update transaction in flight
+        # (downloading / updating), None when there is none: it holds the
+        # mod being updated and the cancel handles of its task (see
+        # UpdateTransaction)
+        self._transaction: "Optional[UpdateTransaction]" = None
         # automatic checks on / off and the configured interval (seconds,
         # None = only the first check of the process)
         self.auto = True
-        self.interval = None
+        self.interval: "Optional[float]" = None
 
     # =========================================================================
     # Startup / lifespan task
@@ -810,7 +1010,7 @@ class UpdateManager:
                 is none (the restart orchestration reads it to refuse an
                 external restart racing the transaction, doc §16.3)
         """
-        return self._transaction
+        return self._transaction.mod if self._transaction is not None else ''
 
     async def run(self):
         """
@@ -886,7 +1086,7 @@ class UpdateManager:
         finally:
             self._nursery = None
             for mod in self.mods.values():
-                mod.forget_scopes()
+                mod.check_loop.forget()
             await self._aclose_client()
 
     async def _aclose_client(self):
@@ -980,7 +1180,7 @@ class UpdateManager:
         if not mods:
             raise UpdateError(f'No updatable mod: "{name}"')
         for mod in mods:
-            mod.request_manual()
+            mod.check_loop.request_manual()
         logger.info(f'[Update] Update check requested: {", ".join(mod.name for mod in mods)}')
 
     def select(self, name):
@@ -1064,7 +1264,7 @@ class UpdateManager:
         if restart_app.GRACEFUL_RESTART.running:
             raise UpdateError('A graceful restart is in progress')
         if self._transaction:
-            raise UpdateError(f'An update is already in progress: "{self._transaction}"')
+            raise UpdateError(f'An update is already in progress: "{self._transaction.mod}"')
         mod = self.mods.get(name, None)
         if mod is None:
             raise UpdateError(f'No such mod: "{name}"')
@@ -1076,8 +1276,7 @@ class UpdateManager:
         # between, so two concurrent applies cannot both pass the checks
         # above), the task takes over; the window is closed by the transaction
         # scope of the task (and adopted there, see transaction_window)
-        self._transaction = name
-        self._cancel_requested = False
+        self._transaction = UpdateTransaction(name)
         BACKEND_WORKER_MANAGER.update_begin_transaction(name)
         mod.set_state('downloading')
         logger.info(f'[Update] Update transaction accepted: "{name}" '
@@ -1102,15 +1301,12 @@ class UpdateManager:
         if self.applying:
             raise UpdateError('The update is being applied and cannot be cancelled')
         if self._transaction:
-            scope = self._transaction_scope
-            if scope is None:
-                # the transaction scope is not registered yet (the task just
-                # started): the task cancels itself right after
-                self._cancel_requested = True
-                return
-            scope.cancel()
+            # cancel the pre-flight / the download of the transaction: the
+            # in-flight request is interrupted, or the cancel is latched for
+            # the task that just started (see UpdateTransaction.cancel)
+            self._transaction.cancel()
             return
-        cancelled = [mod.cancel_check() for mod in list(self.mods.values())]
+        cancelled = [mod.check_loop.cancel_check() for mod in list(self.mods.values())]
         if not any(cancelled):
             raise UpdateError('Nothing to cancel')
 
@@ -1121,22 +1317,25 @@ class UpdateManager:
         §16.4): the window is opened on entry -- or adopted when the
         acceptance of the rpc opened it already -- and closed on exit, every
         path included (a failure or a cancellation cannot leave it open).
+        The transaction handle is yielded: the task registers the cancel
+        scope of its running phase there (see UpdateTransaction).
 
         The close is paired with a best-effort release of the queued starts:
         the close itself is synchronous and always runs; the release is async
         and skips what a restart took over in between (release_queued).
         """
-        if self._transaction and self._transaction != mod:
-            raise UpdateError(f'An update is already in progress: "{self._transaction}"')
-        if not self._transaction:
-            self._transaction = mod
+        transaction = self._transaction
+        if transaction is not None and transaction.mod != mod:
+            raise UpdateError(f'An update is already in progress: "{transaction.mod}"')
+        if transaction is None:
+            transaction = UpdateTransaction(mod)
+            self._transaction = transaction
             BACKEND_WORKER_MANAGER.update_begin_transaction(mod)
         try:
-            yield
+            yield transaction
         finally:
-            if self._transaction == mod:
-                self._transaction = ''
-                self._cancel_requested = False
+            if self._transaction is transaction:
+                self._transaction = None
                 BACKEND_WORKER_MANAGER.update_end_transaction(mod)
             try:
                 await self.release_queued()
@@ -1163,7 +1362,7 @@ class UpdateManager:
         config a restart collected in between is skipped by worker_resume()
         itself.
         """
-        if self._transaction or restart_app.GRACEFUL_RESTART.running:
+        if self._transaction is not None or restart_app.GRACEFUL_RESTART.running:
             return
         if not UPDATE_STARTUP.startup_over():
             # the first update checks are still running: the queued starts

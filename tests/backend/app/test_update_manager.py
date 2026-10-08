@@ -14,7 +14,7 @@ import pytest
 import trio
 
 from alasio.backend.app import update as update_module
-from alasio.backend.app.update import UpdateError, UpdateManager
+from alasio.backend.app.update import ApplyRendezvous, UpdateError, UpdateManager, UpdateTransaction
 from alasio.backend.app.update_startup import UPDATE_STARTUP
 from alasio.backend.topic.update import UpdateSource
 from alasio.config.entry.const import ModEntryInfo
@@ -433,7 +433,7 @@ class TestCheckLoop:
         must not overwrite the transaction state (§16.3, GAP-2)"""
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')})
         manager.bind_mods(manager.load_mods())
-        manager._transaction = 'm'
+        manager._transaction = UpdateTransaction('m')
 
         await manager.mods['m']._round()
 
@@ -591,10 +591,10 @@ class TestApply:
         with pytest.raises(UpdateError, match='no update available'):
             await manager.apply('m')
         bind_transaction(manager, script, monkeypatch, supervisor)
-        manager._transaction = 'other'
+        manager._transaction = UpdateTransaction('other')
         with pytest.raises(UpdateError, match='already in progress'):
             await manager.apply('m')
-        manager._transaction = ''
+        manager._transaction = None
         update_module.restart_app.GRACEFUL_RESTART.running = True
         with pytest.raises(UpdateError, match='graceful restart'):
             await manager.apply('m')
@@ -662,7 +662,7 @@ class TestApply:
         await manager.apply('m')
         async with trio.open_nursery() as nursery:
             nursery.start_soon(mod.run_transaction)
-            await wait_until(lambda: manager._transaction_scope is not None)
+            await wait_until(lambda: manager._transaction.scope is not None)
             await manager.cancel()
             gate.set()
             await wait_until(lambda: mod.info.state == 'available')
@@ -767,10 +767,10 @@ class TestApply:
         await manager.apply('m')
         async with trio.open_nursery() as nursery:
             nursery.start_soon(mod.run_transaction)
-            await wait_until(lambda: manager._transaction_scope is not None)
+            await wait_until(lambda: manager._transaction.scope is not None)
             # as if update_cancel arrived while the pre-flight was blocked (no
             # in-flight request the cancel could interrupt)
-            manager._cancel_requested = True
+            manager._transaction.cancel_requested = True
             gate.set()
             await wait_until(lambda: mod.info.state == 'available')
             nursery.cancel_scope.cancel()
@@ -780,6 +780,149 @@ class TestApply:
         assert script.calls_of('update') == ['/m']
         assert workers.transaction == ''
         await wait_until(lambda: workers.resumed == ['cfg1'])
+
+    @pytest.mark.trio
+    async def test_on_aborted_aborts_the_job(self, manager, script, workers, restarts,
+                                             supervisor, monkeypatch):
+        """The restart ended before its replace window (cancelled, or a step
+        before the window failed): the hook wakes the job's 'updating' phase,
+        the job aborts before replacing anything and the state turns to
+        error."""
+        mod = bind_transaction(manager, script, monkeypatch, supervisor)
+
+        await manager.apply('m')
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(mod.run_transaction)
+            await wait_until(lambda: len(restarts) == 1)
+            # the restart died before its window: every early exit notifies
+            await restarts[0]['hooks'].on_aborted('the worker wait was cancelled')
+            await wait_until(lambda: mod.info.state == 'error')
+            nursery.cancel_scope.cancel()
+
+        assert 'The restart of the update was aborted' in mod.info.error
+        assert 'the worker wait was cancelled' in mod.info.error
+        # the window closed, the rendezvous was disarmed and the job never
+        # replaced anything (it raised at its phase boundary)
+        assert manager._transaction is None
+        assert mod._apply is None
+        assert workers.transaction == ''
+
+
+class TestApplyRendezvous:
+    """The applying-phase rendezvous of one update transaction."""
+
+    @pytest.mark.trio
+    async def test_window_then_apply_releases_the_hook(self):
+        """on_all_stopped opens the window and waits for the job: the apply
+        releases it and the hook returns (the restart may continue)."""
+        rendezvous = ApplyRendezvous()
+        order = []
+
+        async def hook():
+            await rendezvous.on_all_stopped()
+            order.append('hook')
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(hook)
+            # every worker stopped: the job may replace the files
+            await rendezvous.wait_window()
+            # the window alone does not release the hook
+            assert order == []
+            rendezvous.finished()
+
+        assert order == ['hook']
+
+    @pytest.mark.trio
+    async def test_abort_before_the_window_wakes_the_job(self):
+        """The restart died before its replace window: the job waiting on it
+        is woken with the error it must raise."""
+        rendezvous = ApplyRendezvous()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(rendezvous.on_aborted, 'the worker wait was cancelled')
+            with pytest.raises(RuntimeError, match='the worker wait was cancelled'):
+                await rendezvous.wait_window()
+
+    @pytest.mark.trio
+    async def test_failed_apply_cancels_the_hook(self):
+        """The apply failed after the window opened: the hook raises the
+        failure and the restart is cancelled (E5)."""
+        rendezvous = ApplyRendezvous()
+
+        async def job():
+            await rendezvous.wait_window()
+            rendezvous.finished(RuntimeError('the update did not converge'))
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(job)
+            with pytest.raises(RuntimeError, match='did not converge'):
+                await rendezvous.on_all_stopped()
+
+    @pytest.mark.trio
+    async def test_abort_after_the_window_is_ignored(self):
+        """A late notification lands after the commit point: the job is
+        already applying and the restart cannot roll it back, the abort marks
+        nothing."""
+        rendezvous = ApplyRendezvous()
+        hook_error = None
+
+        async def hook():
+            nonlocal hook_error
+            try:
+                await rendezvous.on_all_stopped()
+            except Exception as e:
+                hook_error = e
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(hook)
+            await rendezvous.wait_window()
+            await rendezvous.on_aborted('the restart was cancelled')
+            rendezvous.finished()
+
+        assert hook_error is None
+        assert rendezvous._window_error is None
+
+
+class TestUpdateTransaction:
+    """The cancel protocol of the transaction window (UpdateTransaction)."""
+
+    @pytest.mark.trio
+    async def test_cancel_before_the_registration_is_latched(self):
+        """A cancel arriving before the task registered its scope (the task
+        was just scheduled) is latched and served at the registration."""
+        transaction = UpdateTransaction('m')
+
+        transaction.cancel()
+        assert transaction.cancel_requested is True
+        assert transaction.cancelled() is True
+
+        with trio.CancelScope() as scope:
+            # the latch is served: the running phase starts cancelled
+            transaction.register(scope)
+            assert scope.cancel_called is True
+            assert transaction.cancelled() is True
+            transaction.unregister(scope)
+        assert transaction.scope is None
+
+    @pytest.mark.trio
+    async def test_cancel_reaches_the_registered_scope(self):
+        """A cancel with a registered scope reaches it directly; a stale
+        scope never unsets the registered one."""
+        transaction = UpdateTransaction('m')
+        stale = trio.CancelScope()
+
+        with trio.CancelScope() as scope:
+            transaction.register(scope)
+            transaction.cancel()
+            assert scope.cancel_called is True
+            assert transaction.cancelled() is True
+            transaction.unregister(stale)
+            assert transaction.scope is scope
+            transaction.unregister(scope)
+        assert transaction.scope is None
+        # no scope to cancel any more: the next cancel latches again
+        transaction.cancel()
+        assert transaction.cancel_requested is True
 
 
 class TestConvergence:
