@@ -19,13 +19,48 @@ PACK_AREA = '.pack/'
 PACK_AREA_DIR = PACK_AREA[:-1]
 
 # Paths that already passed the pack path validation (validate_filepath and
-# validate_pack_area) while packing. Only the pack encoder keeps this cache: it
-# validates every path of every version it packs, and a pack server only packs
-# the file list of a repo, so the set is bounded by the paths of the repo while
-# it turns the per version walk into a set lookup. The validators themselves
-# stay uncached, the backend runs them on untrusted user input where a cache
-# would grow without bound.
+# validate_pack_area) while packing, see validate_record_path. Every pack
+# encoder keeps this cache: the git source validates the paths of every version
+# it packs and the wheel source validates the install paths of every wheel it
+# materializes, while a pack server only packs the file list of a repo, so the
+# set is bounded by the paths of the packed tree and the per version (or per
+# wheel) walk becomes a set lookup. The validators themselves stay uncached,
+# the backend runs them on untrusted user input where a cache would grow
+# without bound.
 _VALID_PACK_PATH = set()
+
+
+def validate_record_path(path):
+    """
+    Validate the path of a pack record, through the cache of the encoders.
+
+    The rules are the cross platform ones of the pack format:
+    validate_filepath (a relative path, no traversal, no name that some
+    platform rejects, a path and a component length every filesystem takes)
+    and validate_pack_area (no path of the pack area beyond the files directly
+    under it, see there). The client decoder validates every record path with
+    the same rules, so a path that passes here is a path that can be unpacked
+    wherever the pack is applied.
+
+    The verdict is cached in _VALID_PACK_PATH: the encoders validate the paths
+    of every version they pack and the versions usually share their file list,
+    so a path that passed once costs a set lookup after that. Only the paths
+    that pass are cached, a path that failed keeps failing wherever it is used
+    again (a pack must never carry an unsafe path whatever else was packed
+    before it).
+
+    Args:
+        path (str): File path of a pack record
+
+    Raises:
+        ValueError: If the path violates the rules, see validate_filepath and
+            validate_pack_area
+    """
+    if path in _VALID_PACK_PATH:
+        return
+    validate_filepath(path)
+    validate_pack_area(path)
+    _VALID_PACK_PATH.add(path)
 
 
 def validate_pack_area(path):
@@ -261,14 +296,11 @@ class PackEncodeBase:
         # every record path, a pack must not carry unsafe or ambiguous
         # paths: reject absolute / traversal paths, names that cannot be
         # unpacked on some platform, and pack area paths nested deeper
-        # than one level
+        # than one level. The paths the encoders already validated (a .py
+        # file of a version walked before) are looked up in the cache
         files = list(self._iterfile(iter_ref=True, iter_file=True))
         for file in files:
-            if file.path in _VALID_PACK_PATH:
-                continue
-            validate_filepath(file.path)
-            validate_pack_area(file.path)
-            _VALID_PACK_PATH.add(file.path)
+            validate_record_path(file.path)
 
         # filepath, the resulting sections are written one after another
         list_prefix_comb, list_suffix_comb, path_data = encode_path_comb(

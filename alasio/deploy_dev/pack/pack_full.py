@@ -495,13 +495,21 @@ class PackFull(PackEncodeBase):
         cache.eol.miss += miss
         return hit, miss
 
+    @staticmethod
     def _populate_edit_copied(
-            self,
             dict_refinfo: "dict[str, RefInfo]" = None,
             dict_fileinfo: "dict[str, FileInfo]" = None,
     ):
         """
         Convert edit to C (copied), if file is the same as previous file
+
+        The records are compared by content, the order of the dict is the
+        order of the pack: the record of a content that an earlier record
+        already carries (a record of dict_refinfo, or an earlier record of
+        dict_fileinfo) is converted to a C (copied) record and references
+        it, so the content is stored once. A static method on purpose: the
+        wheel pipeline applies the same rule to its own records, see
+        PackWheel.fileinfo.
         """
         # ref files cannot be C (copied), so index starts at its length
         index = -1
