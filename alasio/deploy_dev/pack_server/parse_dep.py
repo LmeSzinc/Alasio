@@ -2,14 +2,18 @@
 Parse a dependency file into the requirements pinned to an exact version.
 
 A pack config with PythonDeps builds the packs of the dependencies of a repo,
-the versions to build are read from the dependency files of the repo. This
-module parses one such file:
+the versions to build are read from the dependency files of the repo. The
+requirements file format is parsed on the client side, by the module that
+ships, see alasio.deploy.simple_pip.parse_req: this module reads the TOML
+forms with the client rules and re-exports the client parser for the release
+modules:
 
 - RequirementsParser parses a requirements file, the pip requirement file
-  format
+  format; the rules are the client parser's, Requirements
 - PyprojectParser parses a pyproject.toml: the [project] tables of PEP 621,
   the [dependency-groups] table of PEP 735 and the dependency tables of
-  poetry
+  poetry; its PEP 508 texts and its pins are parsed by the client rules too,
+  parse_requirement and build_pins
 
 A parser takes the content of its file as a string -- the caller reads the
 files, e.g. the file of every commit of the lookback window, so no parser
@@ -34,28 +38,11 @@ Usage:
 
 import re
 
+from alasio.deploy.simple_pip.parse_req import Requirements, build_pins, parse_requirement
+# re-exported for the release modules that normalize a distribution name,
+# e.g. fetch_wheel and dep_gen
+from alasio.deploy.simple_pip.pip_list import normalize_name  # noqa: F401
 from alasio.ext.cache import cached_property
-
-# the characters a version can be written with: PEP 440 versions and the
-# legacy forms, e.g. 0.28.1, 1.0rc1, 1!2.0, 1.0+local.1, 1.0-1
-VERSION_CHARS = r'[A-Za-z0-9._+!-]+'
-
-# a version carries a digit, e.g. 1.0.dev0 does and a text like 'dev' does
-# not: a text without a digit is not a version, no wheel can carry it
-REGEX_VERSION_DIGIT = re.compile(r'[0-9]')
-
-# runs of - _ . of a distribution name, PEP 503 normalizes them to a single -
-REGEX_NAME_SEPARATOR = re.compile(r'[-_.]+')
-
-# a requirement pinned to an exact version: name[extras]==version
-# a subset of PEP 508: the extras are ignored, an environment marker after a
-# ';' is ignored, the version is a plain version without a wildcard
-REGEX_PIN = re.compile(
-    r'(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)'
-    r'(?:\s*\[[^\]]*\])?'
-    r'\s*==\s*'
-    rf'(?P<version>{VERSION_CHARS})'
-)
 
 
 def _load_toml(content):
@@ -87,76 +74,6 @@ def _load_toml(content):
     return tomllib.loads(content)
 
 
-def normalize_name(name):
-    """
-    PEP 503 normalized name of a distribution, the dist-key of the pack files.
-
-    The index url of a mirror and the wheel folder use the same normalized
-    name, see fetch_wheel.
-
-    Args:
-        name (str): Name as written in the dependency file
-
-    Returns:
-        str: Normalized name, e.g. 'ruamel.yaml' -> 'ruamel-yaml'
-    """
-    return REGEX_NAME_SEPARATOR.sub('-', name).lower()
-
-
-def _build_deps(deps):
-    """
-    Build the pins of a dependency file from its parsed (name, version) pairs.
-
-    Args:
-        deps (Iterable[tuple[str, str]]): (name, version) pairs, name as
-            written in the dependency file
-
-    Returns:
-        dict[str, str]: PEP 503 normalized name -> version
-
-    Raises:
-        ValueError: If two different versions of one name are parsed: the
-            file is ambiguous, the caller cannot tell which version the file
-            means
-    """
-    pins = {}
-    for name, version in deps:
-        name = normalize_name(name)
-        other = pins.get(name)
-        if other is None:
-            pins[name] = version
-        elif other != version:
-            raise ValueError(
-                f'Conflicting versions of "{name}" in the dependency file: "{other}" and "{version}"')
-    return pins
-
-
-def _parse_requirement(text):
-    """
-    Parse one requirement text into a pin.
-
-    The text is a subset of PEP 508: the extras are ignored, an environment
-    marker after a ';' is ignored, the version is a plain version without a
-    wildcard and with a digit.
-
-    Args:
-        text (str): Requirement text, e.g. 'httpx[cli]==0.28.1; python_version < "3.9"'
-
-    Returns:
-        tuple[str, str] | None: (name, version) of the pin, name as written
-            in the file, None if the text is not a requirement pinned to an
-            exact version
-    """
-    text = text.partition(';')[0].strip()
-    match = REGEX_PIN.fullmatch(text)
-    if not match:
-        return None
-    version = match.group('version')
-    if not REGEX_VERSION_DIGIT.search(version):
-        return None
-    return match.group('name'), version
-
-
 def _parse_requirement_list(items):
     """
     Parse a list of PEP 508 requirement strings, the entries of a pyproject table.
@@ -176,7 +93,7 @@ def _parse_requirement_list(items):
     for text in items:
         if not isinstance(text, str):
             continue
-        dep = _parse_requirement(text)
+        dep = parse_requirement(text)
         if dep is not None:
             deps.append(dep)
     return deps
@@ -218,11 +135,14 @@ def _parse_poetry_constraint(constraint):
         # anything else is an operator ('^1.0', '>=1.0', '*') or a text like
         # 'dev', none of them is a plain version
         return None
-    # a version carries only version characters and a digit: '1.0.*',
-    # '1.0, >=1.1' and '1.0 || 1.1' do not slip through
-    if not re.fullmatch(VERSION_CHARS, text):
+    # a version carries only version characters, the characters of PEP 440
+    # and the legacy forms (e.g. 0.28.1, 1.0rc1, 1!2.0, 1.0+local.1, 1.0-1):
+    # '1.0.*', '1.0, >=1.1' and '1.0 || 1.1' do not slip through
+    if not re.fullmatch(r'[A-Za-z0-9._+!-]+', text):
         return None
-    if not REGEX_VERSION_DIGIT.search(text):
+    # a version carries a digit, e.g. 1.0.dev0 does and a text like 'dev'
+    # does not
+    if not re.search(r'[0-9]', text):
         return None
     return text
 
@@ -252,47 +172,13 @@ def _parse_poetry_table(table):
     return deps
 
 
-def _iter_requirement(content):
-    """
-    Iter the requirement texts of a requirements file content.
-
-    The lines pip understands but this parser does not pin a version with are
-    handled here: a comment (a '#' at the start of a line or after
-    whitespace), an option line (--index-url, -r, -e) and the options after a
-    requirement (--hash). A '-r' include is not followed: the caller reads
-    the included file and passes its content as its own file.
-
-    Args:
-        content (str): Content of a requirements file
-
-    Yields:
-        str: Text of one requirement, e.g. 'httpx==0.28.1'
-    """
-    # the UTF-8 BOM and the line endings
-    content = content.lstrip('\ufeff').replace('\r\n', '\n').replace('\r', '\n')
-    # a line that ends with a '\' continues on the next one
-    content = re.sub(r'\\[ \t]*\n', '', content)
-    for line in content.split('\n'):
-        # a '#' starts a comment at the start of a line or after whitespace
-        line = re.sub(r'(^|\s)#.*', '', line).strip()
-        if not line:
-            continue
-        # an option line, e.g. --index-url or -r
-        if line.startswith('-'):
-            continue
-        # the options after a requirement, e.g. --hash, are not part of it
-        line = re.split(r'\s+(?=-)', line, maxsplit=1)[0]
-        if line:
-            yield line
-
-
-class RequirementsParser:
+class RequirementsParser(Requirements):
     """
     Parser of a requirements file, the pip requirement file format.
 
-    dict_deps of the parser is the mapping of the exact pins of the file,
-    every other declaration is skipped, see the module docstring. The forms
-    the parser handles:
+    The rules are the client parser's (alasio.deploy.simple_pip.parse_req):
+    the client is the side that ships, the release tooling imports it, never
+    the other way around. The forms the parser handles:
 
     - ``name==version``, with extras (``name[extra]==version``) and an
       environment marker (``name==version; python_version < "3.9"``), a
@@ -307,34 +193,6 @@ class RequirementsParser:
     Usage:
         RequirementsParser(content).dict_deps
     """
-
-    def __init__(self, content):
-        """
-        Args:
-            content (str): Content of a requirements file, e.g.
-                requirements.txt
-        """
-        self.content = content
-
-    @cached_property
-    def dict_deps(self):
-        """
-        Pins of the file, parsed on the first read and cached.
-
-        Returns:
-            dict[str, str]: PEP 503 normalized name -> exact version of every
-                requirement pinned with '==', e.g. {'httpx': '0.28.1'}
-
-        Raises:
-            ValueError: If two requirements pin two different versions of
-                the same name
-        """
-        deps = []
-        for text in _iter_requirement(self.content):
-            dep = _parse_requirement(text)
-            if dep is not None:
-                deps.append(dep)
-        return _build_deps(deps)
 
 
 class PyprojectParser:
@@ -399,7 +257,7 @@ class PyprojectParser:
         """
         deps = self._parse_pep508()
         deps.extend(self._parse_poetry())
-        return _build_deps(deps)
+        return build_pins(deps)
 
     def _parse_pep508(self):
         """
