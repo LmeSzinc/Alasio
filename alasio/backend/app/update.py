@@ -9,17 +9,21 @@ daily restart tasks):
 1. the startup convergence finishes the updates a killed process left
    behind (job.pack of every mounted mod), a completed convergence ends
    in one graceful restart (§2.6);
-2. one check loop per mounted mod: the first check runs immediately, the
-   second one after a random 5-10 minutes (the clients started together
-   re-phase themselves, their later checks never form a global wave),
-   the following ones every Deploy.Update.CheckUpdateInterval minutes. A
-   manual check (rpc update_check) cancels the pending wait, counts as
-   the first check and runs immediately.
+2. one check sequence per mounted mod, one CheckLoop object per full
+   multi-round sequence: the first check runs immediately, the second one
+   after a random 5-10 minutes (the clients started together re-phase
+   themselves, their later checks never form a global wave), the following
+   ones every Deploy.Update.CheckUpdateInterval minutes. A manual check
+   (rpc update_check) starts a new sequence (its round is the first check
+   of it, run immediately); an update transaction drops the sequence of its
+   mod (no check is needed while the mod is updated) and a fresh sequence
+   starts when the transaction ends without a backend restart.
 
 One ModUpdateManager holds the state and the flow of ONE mod (its check
-loop, its update server, its state on the Update topic); the UpdateManager
-owns the pieces shared by every mod: the http client, the task nursery and
-the instance-level window of the single update transaction.
+sequence, its update server, its state on the Update topic); the
+UpdateManager owns the pieces shared by every mod: the http client, the
+task nursery and the instance-level window of the single update
+transaction.
 
 The check of one mod is read-only: the local version of the mod ledger
 against latest.pack of its update source, one small request per round.
@@ -257,116 +261,148 @@ class UpdateTransaction:
             self.scope.cancel()
 
 
-class CheckLoopControl:
+class CheckLoop:
     """
-    The cancel handles of the check loop of one mod (ModUpdateManager.run,
-    the only place the mod is checked).
+    One full multi-round check sequence of one mod: the first check (as soon
+    as the given delay is over), the random follow-up (5-10 minutes) and the
+    configured interval rounds. One task of the manager nursery serves the
+    sequence (run(), started by ModUpdateManager.start_check_loop).
 
-    The loop registers the cancel scope of its current wait or round
-    (enter_wait / leave_wait) and of its in-flight check request
-    (enter_check / leave_check) here; the rpc side reaches it to run a
-    round right now (request_manual: latch the manual round and cancel the
-    wait, or the check in flight) and to interrupt an in-flight request
-    alone (cancel_check: update_cancel). The manager shutdown forgets both
-    handles: their scopes are cancelled by their nursery, a later
-    update_cancel then finds nothing.
+    A sequence is never rewound: its callers replace it (a manual check
+    restarts the schedule, the manual round being the first check of the new
+    sequence) or drop it (an update transaction owns the mod: no check is
+    needed while the mod is updated, and a check must not overwrite the
+    transaction state). The sequence also ends by itself when a graceful
+    restart of this process takes over (the new backend checks from
+    scratch); it always detaches itself from the mod on the way out.
+
+    The cancel scope of the wait / round in flight is registered here
+    (scope), so interrupt() reaches it; the check request of a round runs
+    under request_check, which registers the request scope, so update_cancel
+    interrupts the request alone (cancel_check) and the sequence continues.
     """
 
-    def __init__(self):
-        # the scope of the wait / round in progress, None between two
-        # registrations
-        self._wake_scope: "Optional[trio.CancelScope]" = None
-        # the scope of the in-flight check request, None when there is none
-        self._check_scope: "Optional[trio.CancelScope]" = None
-        # a manual check waits: the loop restarts its sequence when the
-        # cancellation is answered
-        self._manual_request = False
-
-    def enter_wait(self, scope):
+    def __init__(self, mod, delay, rounds=0):
         """
-        The loop enters a wait or a round: request_manual() cancels this
-        scope from now on.
-
         Args:
-            scope (trio.CancelScope): The scope of the wait / round
+            mod (ModUpdateManager): The mod this sequence checks
+            delay (float | None): Seconds to the first check, None when no
+                automatic check follows (the sequence serves only manual
+                checks, see UpdateManager.next_delay)
+            rounds (int): Rounds the sequence starts with, so the schedule
+                continues from there (the end of an update transaction
+                resumes the sequence as if its first round was done).
+                Defaults to 0
         """
-        self._wake_scope = scope
+        self.mod = mod
+        self.delay = delay
+        self.rounds = rounds
+        # the cancel scope of the wait / round in flight, None between two
+        # registrations; interrupt() cancels it
+        self.scope: "Optional[trio.CancelScope]" = None
+        # the cancel scope of the in-flight check request, None when there
+        # is none; cancel_check() cancels it
+        self.check_scope: "Optional[trio.CancelScope]" = None
+        # the sequence was interrupted (a replacement or a drop comes
+        # after): run() must end
+        self.interrupted = False
 
-    def leave_wait(self, scope):
+    def interrupt(self):
         """
-        The loop leaves the wait or the round (a stale scope never unsets a
-        newer one).
-
-        Args:
-            scope (trio.CancelScope): The scope registered before
+        Interrupt the sequence: run() ends at its next checkpoint (the
+        callers install the successor, or None, themselves).
         """
-        if self._wake_scope is scope:
-            self._wake_scope = None
-
-    def enter_check(self, scope):
-        """
-        A check request starts: cancel_check() cancels this scope from now
-        on.
-
-        Args:
-            scope (trio.CancelScope): The scope of the request
-        """
-        self._check_scope = scope
-
-    def leave_check(self, scope):
-        """
-        The request is over (a stale scope never unsets a newer one).
-
-        Args:
-            scope (trio.CancelScope): The scope registered before
-        """
-        if self._check_scope is scope:
-            self._check_scope = None
-
-    def request_manual(self):
-        """
-        Serve a manual check request of the rpc (UpdateManager.check):
-        cancel the pending wait (or the in-flight check) and latch the
-        manual round. The loop restarts its sequence and runs immediately.
-        """
-        self._manual_request = True
-        scope = self._wake_scope
+        self.interrupted = True
+        scope = self.scope
         if scope is not None:
             scope.cancel()
 
-    def take_manual(self):
+    async def request_check(self):
         """
-        Consume the latched manual request (the loop restarts its sequence
-        and runs now).
+        Run one check request of the mod (DeployJob.check()) under the request
+        cancel scope: update_cancel interrupts this request alone (see
+        cancel_check), the sequence continues.
 
         Returns:
-            bool: True when a manual check waited
+            DeployCheck | None: The result, None when the request was
+                cancelled (the caller keeps the state of the last check)
         """
-        manual = self._manual_request
-        self._manual_request = False
-        return manual
+        with trio.CancelScope() as scope:
+            self.check_scope = scope
+            try:
+                check = await self.mod.job().check()
+            finally:
+                if self.check_scope is scope:
+                    self.check_scope = None
+        if scope.cancelled_caught:
+            # update_cancel: the request alone was interrupted
+            return None
+        return check
 
     def cancel_check(self):
         """
-        Interrupt the in-flight check of this mod (update_cancel), see
+        Interrupt the in-flight check of this sequence (update_cancel), see
         UpdateManager.cancel().
 
         Returns:
             bool: True when a check was in flight
         """
-        scope = self._check_scope
+        scope = self.check_scope
         if scope is None:
             return False
         scope.cancel()
         return True
 
-    def forget(self):
+    async def run(self):
         """
-        Drop both handles (the manager shutdown): the scopes are cancelled
-        by their nursery, a later update_cancel finds nothing.
+        Serve the sequence: wait, round, compute the next delay, repeat.
+        Returns when the sequence is over: interrupted (see interrupt()), or
+        a graceful restart of this process took over (the new backend
+        checks from scratch).
         """
-        self._wake_scope = None
-        self._check_scope = None
+        mod = self.mod
+        if self.delay is None:
+            # no automatic check follows: the startup round is over by
+            # definition (the first manual check waits for nothing)
+            mod.first_update_checked.set()
+        try:
+            while not self.interrupted:
+                with trio.CancelScope() as scope:
+                    self.scope = scope
+                    try:
+                        if self.delay is not None:
+                            if self.delay > 0:
+                                await trio.sleep(self.delay)
+                            await mod.check_round()
+                            if restart_app.GRACEFUL_RESTART.running:
+                                # a restart (an update transaction or a
+                                # finished convergence) is in flight: no
+                                # further check of this process, the new
+                                # backend checks
+                                return
+                            # the first check of this mod is over
+                            # (idempotent): its startup gate opens, the
+                            # resume queue may release it
+                            mod.first_update_checked.set()
+                            self.rounds += 1
+                            self.delay = mod.manager.next_delay(self.rounds)
+                        else:
+                            # no automatic check pending: wait for a manual
+                            # one (which starts a new sequence)
+                            await trio.sleep_forever()
+                    finally:
+                        if self.scope is scope:
+                            self.scope = None
+                if scope.cancelled_caught:
+                    # interrupted: the sequence is over (replaced or dropped)
+                    return
+        finally:
+            # the sequence ended: a later interrupt / cancel finds nothing
+            self.scope = None
+            self.check_scope = None
+            if mod.check_loop is self:
+                # it ended by itself (a restart of this process took over)
+                mod.check_loop = None
 
 
 class ModUpdateManager:
@@ -375,10 +411,11 @@ class ModUpdateManager:
 
     One instance per mounted mod, built by UpdateManager.bind_mods(): it
     holds the state pushed to the Update topic, the update server of the mod
-    and the check loop of the mod (run(), a task of the manager nursery),
-    plus the per-mod parts of the update transaction. The pieces shared by
-    every mod (the http client, the instance window of the single update
-    transaction, the queue release) stay on the UpdateManager, see it.
+    and the check sequence of the mod (one CheckLoop per full multi-round
+    sequence, see start_check_loop), plus the per-mod parts of the update
+    transaction. The pieces shared by every mod (the http client, the
+    instance window of the single update transaction, the queue release)
+    stay on the UpdateManager, see it.
 
     Attributes (read-only for the outside):
         info (UpdateInfo): The state of the mod, also the value bound on the
@@ -404,10 +441,11 @@ class ModUpdateManager:
         # the update server of the mod, built on first use; the mirror record
         # (gui.db, scope = mod name) and the resolved mirror are per mod
         self._server: "Optional[ServerFile]" = None
-        # the cancel handles of the check loop of this mod: the loop
-        # registers its scopes, the rpcs cancel through them (see
-        # CheckLoopControl)
-        self.check_loop: "CheckLoopControl" = CheckLoopControl()
+        # the check sequence of this mod in flight, None when no sequence
+        # runs (an update transaction owns the mod, or the manager stopped):
+        # one CheckLoop per full multi-round sequence, replaced by
+        # start_check_loop and dropped by stop_check_loop
+        self.check_loop: "Optional[CheckLoop]" = None
         # the startup event of this mod (doc §16.8): set when the first update
         # check is over (a check ran, failed or was skipped); the resume queue
         # and the starts of the mod wait behind it. Registered in the
@@ -524,70 +562,71 @@ class ModUpdateManager:
         return DeployJob(root=self.mod.root, server=self.server())
 
     # =========================================================================
-    # Check loop (one task per mod)
+    # Check sequence (one task per sequence)
     # =========================================================================
 
-    async def run(self):
+    def start_check_loop(self, delay=0.0, rounds=0):
         """
-        Check loop of this mod: the rounds follow the automatic schedule
-        (startup check, random 5-10 minutes, the configured interval) and a
-        manual check cancels the pending wait or the in-flight check and runs
-        immediately (the manual round counts as the first check, the next
-        automatic one follows the standard schedule again). A round retries a
-        failed startup convergence first, see _round().
+        Start (or restart) the check sequence of this mod: the sequence in
+        flight, if any, is interrupted and replaced. A manual check restarts
+        the schedule this way (its round is the first check of the new
+        sequence); the startup starts it with the first check at once; the
+        end of an update transaction resumes it where the update
+        interrupted it (the standard follow-up spacing, then the configured
+        interval, see UpdateManager.next_delay).
 
-        The loop is the only place the mod is checked: the manual check of
-        the rpc is a signal, never a second concurrent check.
+        Args:
+            delay (float | None): Seconds to the first check of the new
+                sequence, None when no automatic check follows. Defaults
+                to 0.0 (immediately)
+            rounds (int): Rounds the new sequence is considered to have
+                completed (its schedule continues from there). Defaults
+                to 0
         """
-        manager = self.manager
-        delay = 0.0 if manager.auto else None
-        if delay is None:
-            # no automatic check: the startup round is over by definition
-            # (the first manual check waits for nothing)
-            self.first_update_checked.set()
-        rounds = 0
-        while True:
-            with trio.CancelScope() as scope:
-                self.check_loop.enter_wait(scope)
-                try:
-                    if delay is not None:
-                        if delay > 0:
-                            await trio.sleep(delay)
-                        await self._round()
-                        if restart_app.GRACEFUL_RESTART.running:
-                            # a restart (an update transaction or a finished
-                            # convergence) is in flight: no further check of
-                            # this process, the new backend checks
-                            return
-                        # the first check of this mod is over (idempotent): its
-                        # startup gate opens, the resume queue may release it
-                        self.first_update_checked.set()
-                        rounds += 1
-                        delay = manager.next_delay(rounds)
-                    else:
-                        # no automatic check pending: wait for a manual one
-                        await trio.sleep_forever()
-                finally:
-                    self.check_loop.leave_wait(scope)
-            if scope.cancelled_caught:
-                # interrupted by a manual check, or by the manager shutdown
-                if manager.closed:
-                    return
-                if self.check_loop.take_manual():
-                    # the manual check restarts the sequence and runs now
-                    rounds = 0
-                    delay = 0.0
-                    continue
-                return
+        nursery = self.manager._nursery
+        if nursery is None:
+            # the manager is not running (or is going down): no sequence
+            return
+        loop = CheckLoop(self, delay, rounds)
+        old = self.check_loop
+        self.check_loop = loop
+        if old is not None:
+            old.interrupt()
+        nursery.start_soon(loop.run)
 
-    async def _round(self):
+    def stop_check_loop(self):
         """
-        One round of the loop: retry a failed convergence, then check.
+        Drop the check sequence of this mod (an update transaction owns the
+        mod, or the manager is going down): no check runs until a new
+        sequence is started.
+        """
+        loop = self.check_loop
+        self.check_loop = None
+        if loop is not None:
+            loop.interrupt()
+
+    def cancel_check(self):
+        """
+        Interrupt the in-flight check of this mod (update_cancel), see
+        UpdateManager.cancel().
+
+        Returns:
+            bool: True when a check was in flight
+        """
+        loop = self.check_loop
+        return loop is not None and loop.cancel_check()
+
+    async def check_round(self):
+        """
+        One round of the check sequence: retry a failed convergence, then
+        check.
         """
         if self.manager.transaction == self.name:
-            # the mod is inside its update transaction (downloading /
-            # updating): the check of this mod is skipped, it must not
-            # overwrite the transaction state (doc §16.3, GAP-2)
+            # the mod is inside an instance-level transaction window (a
+            # convergence restart; an update transaction drops the whole
+            # sequence instead, see stop_check_loop): the check of this mod
+            # is skipped, it must not overwrite the transaction state
+            # (doc §16.3, GAP-2)
             logger.info(f'[Update] Check of "{self.name}" skipped: the update is in flight')
             return
         if self.convergence_pending:
@@ -636,31 +675,31 @@ class ModUpdateManager:
 
     async def check(self):
         """
-        One check of this mod: the request and the state update.
+        One check of this mod: the state flow around one check request of
+        the sequence.
 
         Read-only (the local ledger version against latest.pack) and
-        cancellable: update_cancel cancels the in-flight request and the
-        recorded state of the last check stays. A check locks nothing: the
-        starts of the configs are not gated by it (doc §16.2 revision).
+        cancellable: the request runs under the request scope of the
+        sequence (CheckLoop.request_check), update_cancel interrupts it and
+        the recorded state of the last check stays. A check locks nothing:
+        the starts of the configs are not gated by it (doc §16.2 revision).
         """
         previous = self.info
+        loop = self.check_loop
+        if loop is None:
+            raise RuntimeError('The check sequence of the mod is not running')
         self.set_state('checking')
         try:
             try:
-                with trio.CancelScope() as scope:
-                    self.check_loop.enter_check(scope)
-                    try:
-                        check = await self.job().check()
-                    finally:
-                        self.check_loop.leave_check(scope)
+                check = await loop.request_check()
             except Exception as e:
                 logger.warning(f'[Update] Failed to check "{self.name}": {e}')
                 self.set_state('error', error=str(e))
                 return
-            if scope.cancelled_caught:
-                # update_cancel: the in-flight request is interrupted,
-                # nothing is recorded (the previous state and its versions
-                # stay, the timing of the sequence is kept)
+            if check is None:
+                # update_cancel: the request was interrupted, nothing is
+                # recorded (the previous state and its versions stay, the
+                # timing of the sequence is kept)
                 logger.info(f'[Update] The check of "{self.name}" was cancelled')
                 self.info = previous
                 self.push(previous)
@@ -669,7 +708,7 @@ class ModUpdateManager:
                 self.set_state('uptodate', current=check.local, latest=check.latest,
                                checked_at=time.time())
             else:
-                # the verdict line is logged by check() itself
+                # the verdict line is logged by DeployJob.check() itself
                 self.set_state('available', current=check.local, latest=check.latest,
                                checked_at=time.time())
         except trio.Cancelled:
@@ -785,6 +824,14 @@ class ModUpdateManager:
             logger.error(f'[Update] Failed to prepare the update of "{self.name}": {e}')
             logger.exception(e)
             self.set_state('error', error=str(e))
+        finally:
+            # the transaction is over: the check sequence resumes where the
+            # update interrupted it -- not immediately (the state was just
+            # checked, and a failure would likely repeat), the standard
+            # follow-up spacing first, then the configured interval; None
+            # (no automatic check) parks the sequence with AutoUpdate off
+            if not restart_app.GRACEFUL_RESTART.running:
+                self.start_check_loop(delay=manager.next_delay(1), rounds=1)
 
     # =========================================================================
     # The applying phase: the phase listener contract of DeployJob.update()
@@ -1067,26 +1114,34 @@ class UpdateManager:
             async with trio.open_nursery() as nursery:
                 self._nursery = nursery
                 try:
-                    await self._startup_convergence()
-                except trio.Cancelled:
-                    raise
-                except Exception as e:
-                    # the convergence must never stop the checks: report and
-                    # continue, the failed mods are retried by their rounds
-                    logger.error(f'[Update] Startup convergence failed: {e}')
-                    logger.exception(e)
-                if restart_app.GRACEFUL_RESTART.running:
-                    # the convergence requested a restart: the first checks
-                    # belong to the new process
+                    try:
+                        await self._startup_convergence()
+                    except trio.Cancelled:
+                        raise
+                    except Exception as e:
+                        # the convergence must never stop the checks: report
+                        # and continue, the failed mods are retried by their
+                        # rounds
+                        logger.error(f'[Update] Startup convergence failed: {e}')
+                        logger.exception(e)
+                    if restart_app.GRACEFUL_RESTART.running:
+                        # the convergence requested a restart: the first
+                        # checks belong to the new process
+                        await trio.sleep_forever()
+                    for mod in self.mods.values():
+                        if mod.mod.entry.mirrors:
+                            mod.start_check_loop(delay=0.0 if self.auto else None)
                     await trio.sleep_forever()
-                for mod in self.mods.values():
-                    if mod.mod.entry.mirrors:
-                        nursery.start_soon(mod.run)
-                await trio.sleep_forever()
+                finally:
+                    # the manager is going down: from here on it schedules
+                    # no new task (start_check_loop reads this through
+                    # closed), and the sequences in flight die with the
+                    # nursery cancellation -- they detach themselves on the
+                    # way out
+                    self._nursery = None
         finally:
-            self._nursery = None
             for mod in self.mods.values():
-                mod.check_loop.forget()
+                mod.stop_check_loop()
             await self._aclose_client()
 
     async def _aclose_client(self):
@@ -1159,13 +1214,13 @@ class UpdateManager:
         Check the updates now (rpc update_check).
 
         ``name`` selects one mod, an empty name every managed mod. The check
-        of a mod runs in its loop (the only place a mod is checked): this
-        only cancels the pending wait (or the in-flight check, the request is
-        interrupted) and restarts the sequence of that mod - the manual round
-        counts as the first check, the next automatic one follows the
+        of a mod runs in its check sequence (the only place the mod is
+        checked): this interrupts the sequence in flight (its request is
+        interrupted too) and starts a new one - the manual round is the
+        first check of the new sequence, the next automatic one follows the
         standard schedule (random 5-10 minutes, then the configured
-        interval). Returns once the checks are requested, the progress flows
-        through the Update topic.
+        interval). Returns once the new sequences are started, the progress
+        flows through the Update topic.
 
         Args:
             name (str): Mod name, '' checks every managed mod
@@ -1180,7 +1235,7 @@ class UpdateManager:
         if not mods:
             raise UpdateError(f'No updatable mod: "{name}"')
         for mod in mods:
-            mod.check_loop.request_manual()
+            mod.start_check_loop()
         logger.info(f'[Update] Update check requested: {", ".join(mod.name for mod in mods)}')
 
     def select(self, name):
@@ -1278,6 +1333,12 @@ class UpdateManager:
         # scope of the task (and adopted there, see transaction_window)
         self._transaction = UpdateTransaction(name)
         BACKEND_WORKER_MANAGER.update_begin_transaction(name)
+        # the mod enters its update transaction: the check sequence of the
+        # mod is dropped (no check is needed while the mod is updated, and a
+        # check must not overwrite the transaction state); a fresh sequence
+        # starts when the transaction ends without a backend restart (see
+        # ModUpdateManager.run_transaction)
+        mod.stop_check_loop()
         mod.set_state('downloading')
         logger.info(f'[Update] Update transaction accepted: "{name}" '
                     f'{mod.info.current_version or "(none)"} -> {mod.info.latest_version}')
@@ -1306,7 +1367,7 @@ class UpdateManager:
             # the task that just started (see UpdateTransaction.cancel)
             self._transaction.cancel()
             return
-        cancelled = [mod.check_loop.cancel_check() for mod in list(self.mods.values())]
+        cancelled = [mod.cancel_check() for mod in list(self.mods.values())]
         if not any(cancelled):
             raise UpdateError('Nothing to cancel')
 

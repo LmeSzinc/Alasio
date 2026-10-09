@@ -14,7 +14,7 @@ import pytest
 import trio
 
 from alasio.backend.app import update as update_module
-from alasio.backend.app.update import ApplyRendezvous, UpdateError, UpdateManager, UpdateTransaction
+from alasio.backend.app.update import ApplyRendezvous, CheckLoop, UpdateError, UpdateManager, UpdateTransaction
 from alasio.backend.app.update_startup import UPDATE_STARTUP
 from alasio.backend.topic.update import UpdateSource
 from alasio.config.entry.const import ModEntryInfo
@@ -435,7 +435,7 @@ class TestCheckLoop:
         manager.bind_mods(manager.load_mods())
         manager._transaction = UpdateTransaction('m')
 
-        await manager.mods['m']._round()
+        await manager.mods['m'].check_round()
 
         assert script.calls_of('check') == []
         assert state_of(manager, 'm') == 'idle'
@@ -450,6 +450,8 @@ class TestCheckLoop:
         async with trio.open_nursery() as nursery:
             nursery.start_soon(manager.run)
             await wait_until(lambda: state_of(manager, 'm') == 'checking')
+            # the request runs under the request scope of the sequence
+            assert manager.mods['m'].check_loop.check_scope is not None
             await manager.cancel()
             # the in-flight request is interrupted and the state falls back
             # to the one before the check
@@ -475,6 +477,26 @@ class TestCheckLoop:
             # must interrupt it and run now
             await manager.check('m')
             await wait_until(lambda: len(script.calls_of('check')) == 2)
+            nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_manual_check_replaces_the_sequence(self, manager, script, monkeypatch):
+        """A manual check never resumes the sequence in flight: it starts a
+        new one (the manual round is its first check)."""
+        script.checks['/m'] = make_check(local='c1', latest='c1')
+        script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')})
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(manager.run)
+            await wait_until(lambda: len(script.calls_of('check')) == 1)
+            old = manager.mods['m'].check_loop
+            await manager.check('m')
+            assert old.interrupted is True
+            # the old sequence ends, the new one runs now
+            await wait_until(lambda: old.scope is None)
+            await wait_until(lambda: len(script.calls_of('check')) == 2)
+            loop = manager.mods['m'].check_loop
+            assert loop is not old
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
@@ -648,6 +670,53 @@ class TestApply:
         assert restarts == []
         assert workers.transaction == ''
         assert script.calls_of('update') == []
+
+    @pytest.mark.trio
+    async def test_apply_drops_the_check_sequence_and_resumes_it(self, manager, script, workers,
+                                                                    restarts, supervisor, monkeypatch):
+        """An update transaction owns the mod: the check sequence is dropped
+        while it is in flight, and it resumes (not immediately) when the
+        transaction ends without a backend restart."""
+        mod = bind_transaction(manager, script, monkeypatch, supervisor)
+        old = CheckLoop(mod, 0.0)
+        mod.check_loop = old
+
+        await manager.apply('m')
+        assert mod.check_loop is None
+        assert old.interrupted is True
+
+        # the update is gone (applied elsewhere): the transaction ends with
+        # no restart and the sequence resumes
+        script.checks['/m'] = make_check(local='c2', latest='c2')
+        await mod.run_transaction()
+
+        assert mod.info.state == 'uptodate'
+        assert restarts == []
+        loop = mod.check_loop
+        assert isinstance(loop, CheckLoop)
+        assert loop is not old
+        # no immediate check: the standard follow-up spacing first, then the
+        # configured interval (the sequence resumes where it was interrupted)
+        assert 300.0 <= loop.delay <= 600.0
+        assert loop.rounds == 1
+        # the resumed sequence is scheduled (the fake nursery recorded it)
+        assert manager._nursery.started[-1] == (loop.run, ())
+
+    @pytest.mark.trio
+    async def test_restart_leaves_no_check_sequence(self, manager, script, workers, restarts,
+                                                    supervisor, monkeypatch):
+        """The update transaction ends in a backend restart: no sequence is
+        started (the new process checks from scratch)."""
+        mod = bind_transaction(manager, script, monkeypatch, supervisor)
+        old = CheckLoop(mod, 0.0)
+        mod.check_loop = old
+
+        await manager.apply('m')
+        await drive_transaction(mod, restarts)
+
+        assert len(restarts) == 1
+        assert mod.info.state == 'updating'
+        assert mod.check_loop is None
 
     @pytest.mark.trio
     async def test_cancel_downloading(self, manager, script, workers, restarts,
