@@ -56,45 +56,36 @@ def cleanup_python_packages(root: PathStr):
         root: Path to python/Lib/site-packages
     """
     print(f'Cleanup python/Lib/site-packages: {root}')
-    rm(root / 'anyio/_core/_testing.py')
-    rm(root / 'anyio/abc/_testing.py')
-    rm(root / 'asgiref/testing.py')
+    # Keep folders and modules named `testing`, many libraries are non-standard:
+    # `numpy/testing` is imported by `numpy/__init__.py`, `anyio/_core/_testing.py` is
+    # imported by anyio 3.x, `pygments/lexers/testing.py` is a gherkin/TAP lexer, etc.
+    # Only folders and modules named `test` / `tests` are removed, no one imports them.
     rmtree(root / 'async_generator/_tests')
     rmtree(root / 'colorama/tests')
     rmtree(root / 'commonmark/tests')
-    rm(root / 'click/testing.py')
     rmtree(root / 'Crypto/SelfTest')
     rmtree(root / 'future/tests')
     rmtree(root / 'gevent/tests')
-    rmtree(root / 'gevent/testing')
-    rm(root / 'google/protobuf/internal/testing_refleaks.py')
     rm(root / 'google/protobuf/internal/_parameterized.py')
     rmtree(root / 'greenlet/tests')
     rmtree(root / 'h11/tests')
     rm(root / 'humanfriendly/tests.py')
-    rm(root / 'humanfriendly/testing.py')
     rmtree(root / 'isapi/doc')
     rmtree(root / 'isapi/samples')
     rmtree(root / 'isapi/test')
     rmtree(root / 'matplotlib/tests')
-    rmtree(root / 'matplotlib/testing')
     rmtree(root / 'mpl_toolkits/tests')
     rmtree(root / 'mpmath/tests')
     rmtree(root / 'numpy/tests')
-    rmtree(root / 'numpy/testing/tests')
     rmtree(root / 'psutil/tests')
-    rm(root / 'pygments/lexers/testing.py')
-    rm(root / 'pyparsing/testing.py')
     rmtree(root / 'pyreadline3/test')
     rmtree(root / 'retry/tests')
     rmtree(root / 'shapely/tests')
-    rm(root / 'shapely/testing.py')
     rmtree(root / 'setuptools/tests')
     rmtree(root / 'setuptools/_distutils/tests')
     rmtree(root / 'sniffio/_tests')
     rmtree(root / 'sqlite_bro/tests')
     rmtree(root / 'tornado/test')
-    rm(root / 'tornado/testing.py')
     rm(root / 'ua_parser/user_agent_parser_test.py')
     rm(root / 'user_agents/tests.py')
     rmtree(root / 'wcwidth/tests')
@@ -106,7 +97,6 @@ def cleanup_python_packages(root: PathStr):
 
     # pip/_vender
     rmtree(root / 'pip/_vendor/colorama/tests')
-    rm(root / 'pip/_vendor/pyparsing/testing.py')
 
     # pywin32 tests, demos, docs
     rmtree(root / 'adodbapi/examples')
@@ -138,14 +128,17 @@ def cleanup_python_packages(root: PathStr):
 
     # scipy tests in submodules
     for path in root.joinpath('numpy').iter_folders(recursive=False):
+        # `numpy/testing` is kept as a whole, including its own tests
+        if path.endswith('testing'):
+            continue
         rmtree(path / 'tests')
-    rmtree(root / 'numpy/testing')
+    # Do not remove numpy/testing, `numpy/__init__.py` does `from .testing import Tester`,
+    # removing it breaks `import numpy` and everything importing numpy (e.g. cv2).
     rm(root / 'numpy/_pyinstaller/test_pyinstaller.py')
     for path in root.joinpath('scipy').iter_folders(recursive=True):
         rmtree(path / 'tests')
     for path in root.joinpath('sympy').iter_folders(recursive=True):
         rmtree(path / 'tests')
-    rmtree(root / 'sympy/testing')
     rmtree(root / 'sympy/parsing/autolev/test-examples')
 
     # demo images in imageio, so you can access with
@@ -154,7 +147,6 @@ def cleanup_python_packages(root: PathStr):
     # print(im.shape)  # (300, 451, 3)
     # I don't think you need these in production
     rmtree(root / 'imageio/resources')
-    rm(root / 'imageio/testing.py')
 
     # mxnet tools
     rm(root / 'mxnet/tools/bandwidth/.gitignore')
@@ -164,7 +156,66 @@ def cleanup_python_packages(root: PathStr):
 
     # opencv face-detection features
     # which means you can't use `cv2.CascadeClassifier`, `detectMultiScale()`
-    rmtree(root / 'cv2/data')
+    # Keep `cv2/data/__init__.py`, `cv2/__init__.py` does `from .data import *`,
+    # remove the haarcascade xml files (9.3 MB) only
+    for file in (root / 'cv2/data').iter_files(recursive=True):
+        if file.name == '__init__.py':
+            continue
+        rm(file)
+
+
+# Files that are imported at runtime, do not remove them in the cleanup above.
+# (installed package, files that the package requires when it is installed)
+RUNTIME_REQUIRED = (
+    # `numpy/__init__.py` does `from .testing import Tester`
+    ('numpy', (
+        'numpy/testing/__init__.py',
+        'numpy/testing/_private/utils.py',
+    )),
+    # `cv2/__init__.py` does `from .data import *`
+    ('cv2', (
+        'cv2/data/__init__.py',
+    )),
+    # `pygments/lexers/_mapping.py` registers the gherkin/TAP lexer
+    ('pygments', (
+        'pygments/lexers/testing.py',
+    )),
+    # Testing helpers are kept, some libraries import them in runtime code
+    ('matplotlib', ('matplotlib/testing/__init__.py',)),
+    ('gevent', ('gevent/testing/__init__.py',)),
+    ('click', ('click/testing.py',)),
+    ('tornado', ('tornado/testing.py',)),
+    ('imageio', ('imageio/testing.py',)),
+    ('asgiref', ('asgiref/testing.py',)),
+    ('pyparsing', ('pyparsing/testing.py',)),
+    ('humanfriendly', ('humanfriendly/testing.py',)),
+    ('shapely', ('shapely/testing.py',)),
+)
+
+
+def check_runtime_required(root: PathStr):
+    """
+    Check files that are imported at runtime, but are easy to remove by mistake
+
+    Args:
+        root: path to the release folder
+    """
+    print(f'Check runtime required files: {root}')
+    site_packages = root / 'toolkit/Lib/site-packages'
+    missing = []
+    for package, files in RUNTIME_REQUIRED:
+        if not (site_packages / package).exists():
+            # Package is not installed in this release
+            continue
+        for file in files:
+            if not (site_packages / file).exists():
+                missing.append(file)
+    if missing:
+        print('=' * 72)
+        print('MISSING files that are imported at runtime, the release may fail:')
+        for file in missing:
+            print(f'MISSING {site_packages / file}')
+        print('=' * 72)
 
 
 KEEP_EXT = {'.py', '.pyi', '.pyd', '.dll', '.so'}
@@ -254,6 +305,9 @@ def cleanup(root: str):
     # electron
     cleanup_electron(root)
     cleanup_electron(root / 'toolkit/WebApp')
+
+    # verify
+    check_runtime_required(root)
 
 
 if __name__ == '__main__':
