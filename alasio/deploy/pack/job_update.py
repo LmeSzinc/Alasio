@@ -202,8 +202,10 @@ class UpdateJob(JobBase):
                 # deleted marker, its target is removed in replace()
                 pending.append(PendingFile(info=info, tmp=''))
                 continue
-            # R / RM records move the source file, its deletion is
-            # scheduled in replace() on every path
+            # R / RM records move the source file: its deletion is
+            # scheduled here as a deleted marker and applied by
+            # replace_data() after every write of the batch (the
+            # pending order does not matter)
             deleted = info.source_path if info.edit == 3 else ''
             current = self._read_current(target)
             result = self._matches(info, current)
@@ -567,6 +569,12 @@ class UpdateJob(JobBase):
     def _append_deleted(pending, path):
         """
         Schedule the deletion of a renamed source file.
+
+        replace_data() applies the deletion only after every write of
+        the batch (the pending order does not matter): the target of
+        the rename is written before its source is removed, so an
+        interruption never loses the file (a leftover source is
+        removed by the next run, which finds the target in place).
 
         Args:
             pending (list[PendingFile]): Pending list to append to

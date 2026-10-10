@@ -306,10 +306,16 @@ class JobBase(DeployTarget):
 
     def replace_data(self):
         """
-        Apply the pending data files to the real files.
+        Apply the pending data files to the real files: the writes
+        first, the deletions after every write.
 
         Every tmp file is moved to the target path atomically and the
-        deleted markers are removed. The target is chmod-ed when
+        deleted markers are removed. The two groups of paths are
+        disjoint (a deletion removes a file the new version does not
+        have, a write targets a file it has), so applying every write
+        before every deletion is safe, whatever the order of the
+        pending list is: an interruption leaves the old files in place
+        instead of half-deleted. The target is chmod-ed when
         pending.mode is set, the mode decision is made by the job that
         prepared the pending list. The folders left empty by the
         deletions are removed, see cleanup_empty_folders(). The
@@ -317,23 +323,24 @@ class JobBase(DeployTarget):
         changes are applied. The index pack is not a data file, see
         pending_index and replace_index().
         """
+        applies = [pending for pending in self.pending if pending.info.edit != 2]
+        deletes = [pending for pending in self.pending if pending.info.edit == 2]
+
         # create the parent folders of all targets in one batch
         batch_makedirs([
             self.root.joinpath(pending.info.path)
-            for pending in self.pending
-            if pending.info.edit != 2
+            for pending in applies
         ])
 
-        for pending in self.pending:
-            info = pending.info
-            target = self.root.joinpath(info.path)
-            if info.edit == 2:
-                # deleted marker, the file should not exist
-                atomic_remove(target)
-                continue
+        for pending in applies:
+            target = self.root.joinpath(pending.info.path)
             atomic_replace(pending.tmp, target)
             if pending.mode is not None:
                 os.chmod(target, pending.mode)
+
+        for pending in deletes:
+            # deleted marker, the file should not exist
+            atomic_remove(self.root.joinpath(pending.info.path))
 
         self.cleanup_empty_folders()
 

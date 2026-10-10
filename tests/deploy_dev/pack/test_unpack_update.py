@@ -194,6 +194,34 @@ FOLDER_SERVER.register_version(
 # the working tree of the new version, the pack structure excluded
 FOLDER_NEW_TREE = {'app.py': b'y\n', 'keep/keep.txt': b'keep\n'}
 
+# a copy chain with an unchanged source: a.txt is the same in both
+# versions, b.txt / c.txt / d.txt are new files duplicating it, the
+# encoder links them as a copy chain a.txt -> b.txt -> c.txt -> d.txt
+CHAIN_REPO = make_repo({
+    'old': {'a.txt': b'chained\n'},
+    'new': {
+        'a.txt': b'chained\n',
+        'b.txt': b'chained\n',
+        'c.txt': b'chained\n',
+        'd.txt': b'chained\n',
+    },
+})
+CHAIN_OLD_PACK = b''.join(PackFull(CHAIN_REPO, commit='old').iter_pack_data())
+CHAIN_NEW_PACK = b''.join(PackFull(CHAIN_REPO, commit='new').iter_pack_data())
+CHAIN_UPDATE = b''.join(PackUpdate(
+    PackFull(CHAIN_REPO, commit='new'), 'old').iter_pack_data())
+CHAIN_DECODER = PackDecodeBase(CHAIN_UPDATE)
+CHAIN_SERVER = MockServerFile()
+CHAIN_SERVER.register_version(
+    'old', CHAIN_OLD_PACK, bytes(PackDecodeBase(CHAIN_OLD_PACK).extract_index_pack()))
+CHAIN_SERVER.register_version(
+    'new', CHAIN_NEW_PACK, bytes(PackDecodeBase(CHAIN_NEW_PACK).extract_index_pack()))
+# the working tree of the new version, the pack structure excluded
+CHAIN_NEW_TREE = {
+    'a.txt': b'chained\n', 'b.txt': b'chained\n',
+    'c.txt': b'chained\n', 'd.txt': b'chained\n',
+}
+
 
 async def run_update(update=UPDATE, server=SERVER, tree=NEW_TREE):
     """
@@ -336,7 +364,8 @@ class TestUnpack:
         deleted = pending['backend/legacy.py']
         assert deleted.info.edit == 2
         assert deleted.tmp == ''
-        # the R / RM source files are moved, their deletion is scheduled
+        # the R / RM source files are moved: their deletion is scheduled
+        # as deleted markers, applied after every write by replace_data()
         assert pending['scripts/run.sh'].info.edit == 2
         assert pending['scripts/old_tool.py'].info.edit == 2
         # the index pack is the commit record, not a pending data file:
@@ -449,6 +478,68 @@ class TestUpdateRoundtrip:
         assert not os.path.exists(env.PROJECT_ROOT / 'scripts/old_tool.py')
 
     @pytest.mark.trio
+    async def test_rename_source_removed_after_target(self, app_folder, monkeypatch):
+        """The target of a rename is written before its source is
+        removed: an interruption between the two keeps both files and
+        the next run converges."""
+        await setup_app()
+        import alasio.deploy.pack.job_base as job_base
+        original_remove = job_base.atomic_remove
+
+        def _fail(path):
+            if str(path).replace('\\', '/').endswith('scripts/run.sh'):
+                raise PermissionError('interrupted')
+            return original_remove(path)
+        monkeypatch.setattr(job_base, 'atomic_remove', _fail)
+        job = UpdateJob(UPDATE, server=SERVER)
+        with logger.mock_capture_writer() as capture:
+            assert not await job.run()
+        assert capture.backend.any_contains('Failed to replace file')
+        # the target was written first, the source is still in place:
+        # the renamed file is never missing on both paths
+        assert file_read_bytes(env.PROJECT_ROOT / 'scripts/runner.sh') == NEW['scripts/runner.sh']
+        assert file_read_bytes(env.PROJECT_ROOT / 'scripts/run.sh') == OLD['scripts/run.sh']
+        # the next run removes the leftover source and converges
+        monkeypatch.setattr(job_base, 'atomic_remove', original_remove)
+        assert await UpdateJob(UPDATE, server=SERVER).run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'scripts/run.sh')
+        assert read_tree() == NEW_TREE
+
+    @pytest.mark.trio
+    async def test_writes_applied_before_deletions(self, app_folder, monkeypatch):
+        """replace_data() applies every write before the first deletion,
+        whatever the order of the pending list is: only the index commit
+        closes the flow after them."""
+        await setup_app()
+        import alasio.deploy.pack.job_base as job_base
+        original_replace = job_base.atomic_replace
+        original_remove = job_base.atomic_remove
+        calls = []
+
+        def _replace(tmp, target):
+            calls.append(('replace', str(target).replace('\\', '/')))
+            return original_replace(tmp, target)
+
+        def _remove(target):
+            calls.append(('remove', str(target).replace('\\', '/')))
+            return original_remove(target)
+        monkeypatch.setattr(job_base, 'atomic_replace', _replace)
+        monkeypatch.setattr(job_base, 'atomic_remove', _remove)
+        assert await UpdateJob(UPDATE, server=SERVER).run()
+        kinds = [kind for kind, target in calls]
+        first_remove = kinds.index('remove')
+        # every data write lands before the first deletion
+        assert kinds[:first_remove] == ['replace'] * first_remove
+        # after the deletions the only write is the index commit
+        assert all(
+            target.endswith('index.pack')
+            for kind, target in calls[first_remove:] if kind == 'replace'
+        )
+        assert calls[-1][0] == 'replace'
+        assert calls[-1][1].endswith('index.pack')
+        assert read_tree() == NEW_TREE
+
+    @pytest.mark.trio
     async def test_mode_change_applied(self, app_folder):
         """A mode change (755 -> 644) is applied to a file whose
         content is unchanged, without rewriting the content."""
@@ -464,6 +555,45 @@ class TestUpdateRoundtrip:
 # ════════════════════════════════════════════════════════════════════════════
 #  index pack update
 # ════════════════════════════════════════════════════════════════════════════
+
+
+class TestCopyChain:
+    """Copied references: a source may be an earlier new record, the
+    chain a.txt -> b.txt -> c.txt -> d.txt is decoded in record order."""
+
+    @pytest.mark.trio
+    async def test_chain_encoded_and_decoded(self, app_folder):
+        """Every new file references the previous record, the decoder
+        resolves the chain in record order."""
+        await UnpackJob(CHAIN_OLD_PACK).run()
+        # the encoder links b -> a, c -> b, d -> c
+        fileinfo = CHAIN_DECODER.fileinfo
+        assert fileinfo['b.txt'].source_path == 'a.txt'
+        assert fileinfo['c.txt'].source_path == 'b.txt'
+        assert fileinfo['d.txt'].source_path == 'c.txt'
+        # the decoder reads the source from the tmp file of the earlier
+        # record, the whole chain lands
+        await run_update(CHAIN_UPDATE, server=CHAIN_SERVER, tree=CHAIN_NEW_TREE)
+
+    @pytest.mark.trio
+    async def test_chain_with_matched_source(self, app_folder):
+        """A source record that needs no write leaves no tmp file behind:
+        the copies that reference it are downloaded from the full pack."""
+        await UnpackJob(CHAIN_OLD_PACK).run()
+        # the local b.txt already is the new content: the b.txt record
+        # is skipped and writes no tmp file
+        with open(env.PROJECT_ROOT / 'b.txt', 'wb') as f:
+            f.write(b'chained\n')
+        job = UpdateJob(CHAIN_UPDATE, server=CHAIN_SERVER)
+        job.write()
+        job.unpack()
+        # the copies of b.txt find no tmp file and fail the unpack
+        assert [item.info.path for item in job.error] == ['c.txt', 'd.txt']
+        # download() fetches their content from the full pack
+        await job.download()
+        assert job.error == []
+        job.replace()
+        assert read_tree() == CHAIN_NEW_TREE
 
 
 class TestIndexUpdate:
@@ -944,7 +1074,8 @@ class TestCallerFlow:
 
 
 class TestFailure:
-    """Failure keeps the workspace for the next run to resume."""
+    """Failure handling: a caught failure cleans the workspace up, only
+    a process killed in flight leaves it for the next run to resume."""
 
     def test_invalid_pack_raises(self, app_folder):
         """Not a pack file raises PackDecodeError."""
