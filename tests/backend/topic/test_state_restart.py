@@ -111,13 +111,13 @@ class TestCancelRestartRpc:
         # The restart of an update transaction in its applying phase is the
         # update itself (the workers are stopping for the file replace): it
         # is not cancellable, the rpc must refuse before touching the restart
-        from alasio.backend.app import update as update_app
+        from alasio.backend.app.update_manager import UPDATE_MANAGER
 
         async def fake_cancel(reason=''):
             raise AssertionError('cancel_graceful_restart must not be called')
 
         monkeypatch.setattr(restart, 'cancel_graceful_restart', fake_cancel)
-        monkeypatch.setattr(type(update_app.UPDATE_MANAGER), 'applying', property(lambda self: True))
+        monkeypatch.setattr(type(UPDATE_MANAGER), 'applying', property(lambda self: True))
         restart.GRACEFUL_RESTART.running = True
 
         with pytest.raises(RpcValueError, match='cannot be cancelled'):

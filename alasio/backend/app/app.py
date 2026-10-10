@@ -8,7 +8,7 @@ from starlette.routing import Route, WebSocketRoute
 from alasio.backend.app.frontend import SITE
 from alasio.backend.app.restart import run_startup
 from alasio.backend.app.schedule import task_daily_restart
-from alasio.backend.app.update import UPDATE_MANAGER
+from alasio.backend.app.update_manager import UPDATE_MANAGER
 from alasio.backend.auth import auth
 from alasio.backend.dev.assets import ImageStaticFiles
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
@@ -205,7 +205,7 @@ async def lifespan(app):
         # then the check loop of every mounted mod runs; the states flow
         # through the Update topic. A no-op without an update-enabled mod
         nursery.start_soon(UPDATE_MANAGER.run)
-        # the startup orchestration (doc §16.5): it consumes the resume
+        # the startup orchestration: it consumes the resume
         # credential, waits for the startup convergence and the first update
         # checks of UPDATE_MANAGER, then releases the resume queue behind
         # them. Every start is accepted as a queued resume while it runs; a

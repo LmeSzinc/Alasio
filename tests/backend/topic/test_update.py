@@ -7,8 +7,8 @@ tests/backend/app/test_update_manager.py).
 import pytest
 import trio
 
-from alasio.backend.app import update as update_module
-from alasio.backend.app.update import UpdateError
+from alasio.backend.app import update_manager as update_module
+from alasio.backend.app.update_manager import UpdateError
 from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.topic.update import Update, UpdateInfo, UpdateSource
 from tests.backend.reactive.test_source_base import MockTopic, decode

@@ -13,8 +13,9 @@ topic source is the real one, cleared per test.
 import pytest
 import trio
 
-from alasio.backend.app import update as update_module
-from alasio.backend.app.update import CheckLoop, UpdateError, UpdateManager, UpdateTransaction
+from alasio.backend.app import restart as restart_app, update_manager, update_mod
+from alasio.backend.app.update_manager import UpdateError, UpdateManager, UpdateTransaction
+from alasio.backend.app.update_mod import CheckLoop
 from alasio.backend.app.update_startup import UPDATE_STARTUP
 from alasio.backend.topic.update import UpdateSource
 from alasio.config.entry.const import ModEntryInfo
@@ -242,7 +243,7 @@ class FakeRestartWindow:
         self.cancels.append(reason)
         self.aborted = True
         # like the real withdraw: the window releases the backend
-        update_module.restart_app.GRACEFUL_RESTART.running = False
+        restart_app.GRACEFUL_RESTART.running = False
 
 
 class FakeRestart:
@@ -269,7 +270,7 @@ class FakeRestart:
         window = FakeRestartWindow(self, reason)
         self.windows.append(window)
         # like the real entry point: an accepted window owns the backend
-        update_module.restart_app.GRACEFUL_RESTART.running = True
+        restart_app.GRACEFUL_RESTART.running = True
         return window
 
 
@@ -284,7 +285,7 @@ def cleanup_source():
 def script(monkeypatch):
     """Fake deploy jobs of the manager."""
     script = FakeScript()
-    monkeypatch.setattr(update_module, 'DeployJob', script.job)
+    monkeypatch.setattr(update_mod, 'DeployJob', script.job)
     return script
 
 
@@ -292,7 +293,7 @@ def script(monkeypatch):
 def workers(monkeypatch):
     """Fake worker manager of the manager."""
     workers = FakeWorkerManager()
-    monkeypatch.setattr(update_module, 'BACKEND_WORKER_MANAGER', workers)
+    monkeypatch.setattr(update_manager, 'BACKEND_WORKER_MANAGER', workers)
     return workers
 
 
@@ -302,13 +303,13 @@ def restarts(monkeypatch):
     covered by tests/backend/app/test_restart_resume.py)."""
     restarts = FakeRestart()
 
-    monkeypatch.setattr(update_module.restart_app, 'open_restart_window', restarts.open)
+    monkeypatch.setattr(restart_app, 'open_restart_window', restarts.open)
     # no interval between two starts of the released queue (the real
     # interval is covered by the restart queue tests)
-    monkeypatch.setattr(update_module.restart_app, 'WORKER_START_INTERVAL', 0.0)
-    update_module.restart_app.GRACEFUL_RESTART.reset()
+    monkeypatch.setattr(restart_app, 'WORKER_START_INTERVAL', 0.0)
+    restart_app.GRACEFUL_RESTART.reset()
     yield restarts
-    update_module.restart_app.GRACEFUL_RESTART.reset()
+    restart_app.GRACEFUL_RESTART.reset()
 
 
 @pytest.fixture
@@ -321,7 +322,7 @@ def manager():
 def supervisor(monkeypatch):
     """A running supervisor (the pipe of the backend)."""
     marker = object()
-    monkeypatch.setattr(update_module, 'mpipe_backend', marker)
+    monkeypatch.setattr(update_manager, 'mpipe_backend', marker)
     return marker
 
 
@@ -455,7 +456,7 @@ class TestCheckLoop:
 
     @pytest.mark.trio
     async def test_check_locks_nothing(self, manager, script, workers, monkeypatch):
-        """A check is read-only: it opens no window and gates no start (§16.2)"""
+        """A check is read-only: it opens no window and gates no start"""
         gate = trio.Event()
         script.check_gate['/m'] = gate
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')})
@@ -470,7 +471,7 @@ class TestCheckLoop:
     @pytest.mark.trio
     async def test_round_skipped_during_the_transaction(self, manager, script, monkeypatch):
         """A round landing inside the transaction of its mod is skipped: it
-        must not overwrite the transaction state (§16.3, GAP-2)"""
+        must not overwrite the transaction state"""
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')})
         manager.bind_mods(manager.load_mods())
         manager._transaction = UpdateTransaction('m')
@@ -597,7 +598,7 @@ def bind_transaction(manager, script, monkeypatch, supervisor, state='available'
 
 
 class TestStartupEvents:
-    """The startup events of the update manager (§16.8)."""
+    """The startup events of the update manager."""
 
     @pytest.mark.trio
     async def test_events_after_the_first_rounds(self, manager, script, monkeypatch):
@@ -640,7 +641,7 @@ class TestApply:
     @pytest.mark.trio
     async def test_refusals(self, manager, script, supervisor, monkeypatch):
         bind_transaction(manager, script, monkeypatch, supervisor)
-        update_module.restart_app.GRACEFUL_RESTART.reset()
+        restart_app.GRACEFUL_RESTART.reset()
 
         manager.mods = {}
         with pytest.raises(UpdateError, match='No such mod'):
@@ -657,15 +658,15 @@ class TestApply:
         with pytest.raises(UpdateError, match='already in progress'):
             await manager.apply('m')
         manager._transaction = None
-        update_module.restart_app.GRACEFUL_RESTART.running = True
+        restart_app.GRACEFUL_RESTART.running = True
         with pytest.raises(UpdateError, match='graceful restart'):
             await manager.apply('m')
-        update_module.restart_app.GRACEFUL_RESTART.running = False
+        restart_app.GRACEFUL_RESTART.running = False
 
     @pytest.mark.trio
     async def test_apply_without_supervisor(self, manager, script, monkeypatch):
         bind_transaction(manager, script, monkeypatch, supervisor=None)
-        monkeypatch.setattr(update_module, 'mpipe_backend', None)
+        monkeypatch.setattr(update_manager, 'mpipe_backend', None)
 
         with pytest.raises(UpdateError, match='without supervisor'):
             await manager.apply('m')
@@ -698,15 +699,15 @@ class TestApply:
         assert window.shutdowns == 1
         # the transaction scope closed the window on the way out and the
         # applying phase stays armed until the process exits: its restart is
-        # not cancellable (the new backend takes it over, §16.4)
+        # not cancellable (the new backend takes it over)
         assert workers.transaction == ''
         assert manager.applying is True
         with pytest.raises(UpdateError, match='cannot be cancelled'):
             await manager.cancel()
         # the restart owns the backend until the process exits, the transaction
         # itself is over (the new backend resumes the configs)
-        assert update_module.restart_app.GRACEFUL_RESTART.running is True
-        assert update_module.restart_app.GRACEFUL_RESTART.holder == ''
+        assert restart_app.GRACEFUL_RESTART.running is True
+        assert restart_app.GRACEFUL_RESTART.holder == ''
 
     @pytest.mark.trio
     async def test_check_is_refused_while_the_transaction_runs(self, manager, script, workers,
@@ -800,7 +801,7 @@ class TestApply:
         script.check_gate['/m'] = gate
         # a config the user started during the window: released on cancel
         workers.queue = [('m', 'cfg1')]
-        monkeypatch.setattr(update_module, 'get_mod', lambda config: manager.mods['m'].mod)
+        monkeypatch.setattr(update_manager, 'get_mod', lambda config: manager.mods['m'].mod)
 
         await manager.apply('m')
         async with trio.open_nursery() as nursery:
@@ -826,7 +827,7 @@ class TestApply:
         mod = bind_transaction(manager, script, monkeypatch, supervisor)
         script.checks['/m'] = RuntimeError('offline')
         workers.queue = [('m', 'cfg1')]
-        monkeypatch.setattr(update_module, 'get_mod', lambda config: manager.mods['m'].mod)
+        monkeypatch.setattr(update_manager, 'get_mod', lambda config: manager.mods['m'].mod)
 
         await manager.apply('m')
         await mod.run_transaction()
@@ -857,7 +858,7 @@ class TestApply:
         assert restarts.windows[0].published is True
         assert restarts.windows[0].shutdowns == 0
         assert restarts.windows[0].cancels != []
-        assert update_module.restart_app.GRACEFUL_RESTART.running is False
+        assert restart_app.GRACEFUL_RESTART.running is False
         assert workers.transaction == ''
 
     @pytest.mark.trio
@@ -890,7 +891,7 @@ class TestApply:
         assert 'without supervisor' in mod.info.error
         assert mod.info.state == 'error'
         assert restarts.windows[0].cancels != []
-        assert update_module.restart_app.GRACEFUL_RESTART.running is False
+        assert restart_app.GRACEFUL_RESTART.running is False
         # the checks of this process resume (the new backend never took over)
         assert mod.check_loop is not None
 
@@ -928,7 +929,7 @@ class TestApply:
         gate = trio.Event()
         script.check_gate['/m'] = gate
         workers.queue = [('m', 'cfg1')]
-        monkeypatch.setattr(update_module, 'get_mod', lambda config: manager.mods['m'].mod)
+        monkeypatch.setattr(update_manager, 'get_mod', lambda config: manager.mods['m'].mod)
 
         await manager.apply('m')
         async with trio.open_nursery() as nursery:
@@ -974,7 +975,7 @@ class TestApply:
 
 
 class TestRestartWindowDrive:
-    """The transaction driving its own restart window (doc §7.1/§7.2)."""
+    """The transaction driving its own restart window."""
 
     @pytest.mark.trio
     async def test_the_resume_intent_is_published_before_the_files_change(
@@ -1071,7 +1072,7 @@ class TestUpdateTransaction:
 
 
 class TestConvergence:
-    """The startup convergence of a killed process' update (§2.6)."""
+    """The startup convergence of a killed process' update."""
 
     @pytest.mark.trio
     async def test_convergence_restarts(self, manager, script, restarts, monkeypatch):
@@ -1099,8 +1100,7 @@ class TestConvergence:
     async def test_convergence_restart_failure_resumes_the_checks(self, manager, script, restarts,
                                                                   monkeypatch):
         """The convergence restart cannot be handed over: the disk is converged,
-        the process keeps the old modules and its own checks run (§7.3 R2: the
-        manager no longer parks on a flag someone else cleared)."""
+        the process keeps the old modules and its own checks run ."""
         script.unfinished['/m'] = True
         restarts.shutdown_error = PermissionError(
             'Cannot restart backend running without supervisor')

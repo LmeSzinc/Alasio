@@ -1,9 +1,8 @@
 """
 Update topic: the update state of every mod (data = dict[mod_name,
-UpdateInfo]), pushed by the update manager (alasio.backend.app.update).
+UpdateInfo]), pushed by the update manager (alasio.backend.app.update_manager).
 
-The state pipeline of one mod (see
-doc/2026-10-05_mod-update-backend-integration.md §2.2):
+The state pipeline of one mod:
 
     checking -> uptodate / available -> downloading -> updating
 
@@ -126,7 +125,7 @@ class Update(BaseTopic):
         Args:
             name (str): Mod name, '' checks every managed mod
         """
-        from alasio.backend.app.update import UPDATE_MANAGER, UpdateError
+        from alasio.backend.app.update_manager import UPDATE_MANAGER, UpdateError
 
         try:
             await UPDATE_MANAGER.check(name)
@@ -149,7 +148,7 @@ class Update(BaseTopic):
         Args:
             name (str): Mod name
         """
-        from alasio.backend.app.update import UPDATE_MANAGER, UpdateError
+        from alasio.backend.app.update_manager import UPDATE_MANAGER, UpdateError
 
         try:
             await UPDATE_MANAGER.apply(name)
@@ -167,7 +166,7 @@ class Update(BaseTopic):
         changed on disk and the state returns to 'available'. The apply of
         a transaction is not cancellable and refuses this call.
         """
-        from alasio.backend.app.update import UPDATE_MANAGER, UpdateError
+        from alasio.backend.app.update_manager import UPDATE_MANAGER, UpdateError
 
         try:
             await UPDATE_MANAGER.cancel()

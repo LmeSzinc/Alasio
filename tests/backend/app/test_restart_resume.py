@@ -18,10 +18,9 @@ import msgspec
 import pytest
 import trio
 
-from alasio.backend.app import restart
-from alasio.backend.app.restart import (
-    GRACEFUL_RESTART, RESUME_TOKEN_ENV, ResumeRecord, cancel_graceful_restart, run_graceful_restart, run_startup
-)
+from alasio.backend.app import restart, restart_context
+from alasio.backend.app.restart import cancel_graceful_restart, run_graceful_restart, run_startup
+from alasio.backend.app.restart_context import GRACEFUL_RESTART, RESUME_TOKEN_ENV, ResumeRecord
 from alasio.backend.topic.restart import RestartSource
 from alasio.backend.worker.manager import WorkerManager
 from alasio.ext import env
@@ -277,8 +276,8 @@ class TestResumeFileIO:
             raise PermissionError(13, 'Permission denied')
 
         calls = []
-        monkeypatch.setattr(restart, 'atomic_read_bytes', denied)
-        monkeypatch.setattr(restart, 'atomic_remove', lambda path: calls.append(path))
+        monkeypatch.setattr(restart_context, 'atomic_read_bytes', denied)
+        monkeypatch.setattr(restart_context, 'atomic_remove', lambda path: calls.append(path))
         monkeypatch.setenv(RESUME_TOKEN_ENV, f'{token}-checksum')
         with logger.mock_capture_writer() as capture:
             assert GRACEFUL_RESTART.read_resume() is None
@@ -297,14 +296,14 @@ class TestResumeFileIO:
             raise OSError(5, 'Input/output error')
 
         calls = []
-        real_remove = restart.atomic_remove
+        real_remove = restart_context.atomic_remove
 
         def spy_remove(path):
             calls.append(path)
             return real_remove(path)
 
-        monkeypatch.setattr(restart, 'atomic_read_bytes', unreadable)
-        monkeypatch.setattr(restart, 'atomic_remove', spy_remove)
+        monkeypatch.setattr(restart_context, 'atomic_read_bytes', unreadable)
+        monkeypatch.setattr(restart_context, 'atomic_remove', spy_remove)
         monkeypatch.setenv(RESUME_TOKEN_ENV, f'{token}-checksum')
         with logger.mock_capture_writer() as capture:
             assert GRACEFUL_RESTART.read_resume() is None
@@ -325,8 +324,8 @@ class TestResumeFileIO:
         def locked_file(path):
             raise OSError('the file is locked by another process')
 
-        monkeypatch.setattr(restart, 'atomic_read_bytes', unreadable)
-        monkeypatch.setattr(restart, 'atomic_remove', locked_file)
+        monkeypatch.setattr(restart_context, 'atomic_read_bytes', unreadable)
+        monkeypatch.setattr(restart_context, 'atomic_remove', locked_file)
         monkeypatch.setenv(RESUME_TOKEN_ENV, f'{token}-checksum')
         with logger.mock_capture_writer() as capture:
             assert GRACEFUL_RESTART.read_resume() is None
@@ -344,7 +343,7 @@ class TestResumeFileIO:
         def locked_file(path):
             raise OSError('the file is locked by another process')
 
-        monkeypatch.setattr(restart, 'atomic_remove', locked_file)
+        monkeypatch.setattr(restart_context, 'atomic_remove', locked_file)
         monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
         with logger.mock_capture_writer() as capture:
             record = GRACEFUL_RESTART.read_resume()
@@ -409,7 +408,7 @@ class TestResumeCleanup:
     def test_removes_only_stale_resume_files(self, project_root, monkeypatch):
         import os
 
-        monkeypatch.setattr(restart, 'RESUME_CLEANUP_AGE', 100.0)
+        monkeypatch.setattr(restart_context, 'RESUME_CLEANUP_AGE', 100.0)
         fresh = GRACEFUL_RESTART.resume_file_of('aaaa1111')
         stale = GRACEFUL_RESTART.resume_file_of('bbbb2222')
         other = GRACEFUL_RESTART.resume_folder.joinpath('notes.json')
@@ -610,7 +609,7 @@ class TestRunGracefulRestart:
 
     @pytest.mark.trio
     async def test_the_caller_drives_the_window(self, project_root, manager, monkeypatch):
-        """The steps of the window belong to its caller (doc §7.1): every worker
+        """The steps of the window belong to its caller: every worker
         stopped and the intent published before its critical section, the
         backend restart after it"""
         start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
@@ -856,7 +855,7 @@ class TestRunGracefulRestart:
 
         entered = threading.Event()
         release = threading.Event()
-        original_write = restart.atomic_write
+        original_write = restart_context.atomic_write
 
         def parked_write(file, payload):
             # the write window: the file is not on disk yet, the cancel lands here
@@ -864,7 +863,7 @@ class TestRunGracefulRestart:
             assert release.wait(5), 'the test never released the write'
             return original_write(file, payload)
 
-        monkeypatch.setattr(restart, 'atomic_write', parked_write)
+        monkeypatch.setattr(restart_context, 'atomic_write', parked_write)
 
         async def fake_lifespan_restart():
             raise AssertionError('the forced restart owns the restart, not the orchestration')
@@ -935,13 +934,13 @@ class TestRunGracefulRestart:
         start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
 
         writes = []
-        original_write = restart.atomic_write
+        original_write = restart_context.atomic_write
 
         def spy_write(file, payload):
             writes.append(file)
             return original_write(file, payload)
 
-        monkeypatch.setattr(restart, 'atomic_write', spy_write)
+        monkeypatch.setattr(restart_context, 'atomic_write', spy_write)
 
         async def fake_lifespan_restart():
             raise AssertionError('the forced restart owns the restart, not the orchestration')
@@ -1007,7 +1006,7 @@ class TestRunGracefulRestart:
         def locked_file(path):
             raise OSError('the file is locked by another process')
 
-        monkeypatch.setattr(restart, 'atomic_remove', locked_file)
+        monkeypatch.setattr(restart_context, 'atomic_remove', locked_file)
         with logger.mock_capture_writer() as capture:
             await cancel_graceful_restart('test cancel')
             assert capture.fd.any_contains('Failed to remove the resume file')
@@ -1499,7 +1498,7 @@ class TestStartup:
     @pytest.mark.trio
     async def test_gate_starts_are_released_with_the_queue(self, project_root, manager, monkeypatch):
         """A start accepted by the startup gate is released with the resume
-        queue (§16.8)"""
+        queue"""
         from alasio.backend.app.update_startup import UPDATE_STARTUP
 
         fake = FakeScan({'cfg_a': 1, 'cfg_b': 1})

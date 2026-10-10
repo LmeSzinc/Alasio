@@ -6,8 +6,7 @@ One config knob drives it: ``config/deploy.yaml`` -> ``Deploy.Update.AutoRestart
 lifespan background task: it wakes at the configured time and requests the
 same graceful restart as the settings page (ConnState.restart) -- every
 running worker is stopped gracefully and resumed by the new backend, the
-frontend reconnects over the existing ws reconnect path (see
-doc/2026-09-13_graceful-backend-restart.md).
+frontend reconnects over the existing ws reconnect path.
 
 The value is parsed with :func:`alasio.base.servertime.parse_server_update`
 (the shared "HH:MM" parser); the accepted form is pinned by the msgspec

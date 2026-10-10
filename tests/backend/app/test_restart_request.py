@@ -76,7 +76,7 @@ class TestRequestGracefulRestart:
     async def test_rejected_while_an_update_transaction_owns_the_backend(self):
         """The holder registry refuses the external trigger: only the owner
         itself drives its restart (the internal entry), and the refusal names
-        the holder (§16.3/§7.1)"""
+        the holder"""
         nursery = FakeNursery()
         restart.GRACEFUL_RESTART.set_holder('update of "m"')
 
@@ -98,7 +98,7 @@ class TestRequestGracefulRestart:
 
     @pytest.mark.trio
     async def test_rejected_while_the_backend_is_starting_up(self):
-        """The startup gate refuses every external trigger (§16.8)"""
+        """The startup gate refuses every external trigger"""
         from alasio.backend.app.update_startup import UPDATE_STARTUP
 
         nursery = FakeNursery()

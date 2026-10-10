@@ -257,7 +257,7 @@ class WorkerManager(metaclass=Singleton):
         # of starting (worker_start) and starts when the transaction releases
         # it. The startup phase (the first update checks) gates the starts
         # through the update startup events instead, see
-        # alasio.backend.app.update_startup (doc §16.8).
+        # alasio.backend.app.update_startup.
         self.update_transaction = ''
 
     @property
@@ -480,7 +480,7 @@ class WorkerManager(metaclass=Singleton):
             if not UPDATE_STARTUP.is_mod_ready(mod):
                 # the startup gate: the first update check of the mod is not
                 # over, the start is queued as a resume and released by the
-                # startup orchestration when the mod is ready (doc §16.8)
+                # startup orchestration when the mod is ready
                 return self._queue_update_start_locked(mod, config)
             if self.restarting:
                 # any worker started now would be killed when the backend exits
@@ -1282,7 +1282,7 @@ class WorkerManager(metaclass=Singleton):
         Accept a start request as a queued resume while the update flow owns
         the instance (lock required, see worker_start): the update transaction
         (downloading / updating), or the update startup gate (the first update
-        check of the mod is not over, doc §16.8)
+        check of the mod is not over)
 
         The caller sees a success and no error: the frontend shows the config
         as "resuming" (Worker topic) and the config starts automatically when

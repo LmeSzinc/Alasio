@@ -85,7 +85,7 @@ class ConnState(BaseTopic):
             raise RpcValueError('Restart already in progress') from None
         except restart.RestartUnavailable as e:
             # an update transaction / the startup window owns the backend: the
-            # reason carries the next step for the user (doc §16.3)
+            # reason carries the next step for the user
             raise RpcValueError(str(e)) from None
 
     @rpc
@@ -101,12 +101,12 @@ class ConnState(BaseTopic):
         continue it).
 
         The restart of an update transaction in its applying phase is refused
-        (the update is not cancellable past its download phase, §2.5): the
-        stop of the workers there is the update, not a plain restart.
+        (the update is not cancellable past its download phase): the stop of
+        the workers there is the update, not a plain restart.
         """
         # local import (see restart above)
         from alasio.backend.app import restart
-        from alasio.backend.app.update import UPDATE_MANAGER
+        from alasio.backend.app.update_manager import UPDATE_MANAGER
 
         if UPDATE_MANAGER.applying:
             raise RpcValueError('The update is being applied and cannot be cancelled')

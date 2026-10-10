@@ -14,7 +14,7 @@ other:
 A start request landing before the events is accepted as a queued resume by
 the worker manager (its gate reads is_set(), a plain attribute check with no
 scheduling involved, safe inside the worker lock); the startup orchestration
-releases the queue once the events of the mods are set (doc §16.8).
+releases the queue once the events of the mods are set.
 """
 import trio
 
