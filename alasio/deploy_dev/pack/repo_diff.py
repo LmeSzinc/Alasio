@@ -150,6 +150,15 @@ class RepoDiff:
         # new pack order
         renames = self._find_renames(real_old, real_new)
         renamed_old = set(renames.values())
+        # a rename source is still readable in the working tree when a
+        # copied record references it (the source deletion is applied
+        # only after every write of the client), so it serves as a copy
+        # source too. A source that is downgraded to add + delete later
+        # is dropped from the map again, see the rename branch
+        for old_path in renamed_old:
+            old_info = real_old[old_path]
+            if old_info.sha1:
+                source_map.setdefault(old_info.sha1, old_path)
 
         # 2. records of the new version: renamed (R / RM), added (A / C)
         # and modified (M / C) records follow the DFS path order of the
@@ -180,11 +189,20 @@ class RepoDiff:
                         record.edit = 0
                         record.source_path = ''
                         downgraded_old.add(old_path)
+                        # the source becomes a deleted file: a copied record
+                        # must not reference it from now on
+                        if source_map.get(old_info.sha1) == old_path:
+                            del source_map[old_info.sha1]
                         if record.sha1:
                             # the downgraded record is an A record, it joins
                             # the copy detection like other added records
                             self._try_copy(record, source_map)
                             source_map[record.sha1] = path
+                    elif record.sha1:
+                        # the target of the rename serves as a copy source for
+                        # the later records (the decoder writes its tmp file,
+                        # or finds the content in the working tree)
+                        source_map[record.sha1] = path
                     out[path] = record
             elif path in added:
                 record = UpdateInfo(path=path, edit=0, eol=new_info.eol, mode=new_info.mode)
@@ -221,8 +239,10 @@ class RepoDiff:
 
         These records must appear in the refinfo of the update pack:
         the sources of M (patch) / R / RM records and the copied old
-        files. A copied record whose source is a new file (an earlier
-        record of the new version) is not a ref record.
+        files. A copied source that is not a record of the new version
+        (an unchanged file, a rename source or a deleted file) is a ref
+        record; one that is an earlier record of the new version is not
+        (the decoder reads its tmp file).
 
         The order follows the DFS path sort of pack_full (old.idx_info
         in production), a convention shared with the client's local
@@ -247,8 +267,13 @@ class RepoDiff:
             elif info.edit == 3:
                 # R / RM records always reference the old file
                 ref_paths.add(info.source_path)
-            elif info.source_path in unchanged:
-                # copied from an unchanged old file
+            elif info.source_path in diff and diff[info.source_path].edit != 2:
+                # copied from an earlier record of the new version: the
+                # decoder reads the source tmp file, no ref record needed
+                continue
+            else:
+                # copied from an old file: unchanged, renamed away or
+                # deleted, the decoder reads it from the working tree
                 ref_paths.add(info.source_path)
         missing = ref_paths - set(self._real_old)
         if missing:
@@ -579,12 +604,14 @@ class RepoDiff:
         """
         Convert a record to a copied record when its content already exists.
 
-        A record whose content matches an unchanged old file (kept in
-        the new version) or an earlier record references the source
-        instead of carrying data: a new file that duplicates an
-        existing file, a modified file whose new content matches an
-        existing file, or a modified file whose new content matches
-        another modified file.
+        A record whose content matches an old file that stays readable
+        (an unchanged file, or the source of a rename, which is deleted
+        only after every write of the client) or an earlier record of
+        the new version (a new file, a modified file or the target of a
+        rename) references the source instead of carrying data: a new
+        file that duplicates an existing file, a modified file whose
+        new content matches an existing file, or a modified file whose
+        new content matches another modified file.
 
         Only the content matters: the converted record keeps its own
         eol / mode, encoded in the pack, so a copy across eol or mode

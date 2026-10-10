@@ -374,6 +374,30 @@ class TestRepoDiffCopied:
         assert second.data_size > 0
         assert second.sha1 == first.sha1
 
+    def test_copy_rename_source_and_target(self):
+        """The rename source and the rename target are copy sources: the
+        source is still readable in the working tree, the target is an
+        earlier record (its tmp file, or the working tree when skipped)."""
+        base = b''.join(b'line %d\n' % i for i in range(100))
+        changed = base.replace(b'line 99\n', b'line 99 changed\n')
+        diff = make_diff(
+            {'a.txt': base, 'c.txt': b'unrelated old content\n'},
+            {'b.txt': changed, 'c.txt': base, 'd.txt': changed},
+        )
+        diff_info = diff.diff_info
+        # a.txt -> b.txt is a rename + modify
+        assert diff_info['b.txt'].edit == 3
+        assert diff_info['b.txt'].source_path == 'a.txt'
+        # c.txt copies the old a.txt content (the rename source)
+        assert diff_info['c.txt'].edit == 0
+        assert diff_info['c.txt'].source_path == 'a.txt'
+        # d.txt copies the new b.txt content (the rename target)
+        assert diff_info['d.txt'].edit == 0
+        assert diff_info['d.txt'].source_path == 'b.txt'
+        # the rename source is a ref record, the rename target is not
+        assert 'a.txt' in diff.refinfo
+        assert 'b.txt' not in diff.refinfo
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  ref paths

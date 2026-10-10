@@ -489,14 +489,16 @@ class UpdateJob(JobBase):
 
         A C (copied) record may reference an earlier new file: its
         content is already written to the tmp file by the earlier
-        record, it is read from there and verified against the
-        record. The source of a C / M / RM / R record is otherwise an
-        old file, read from the working tree and verified against the
-        refinfo of the update pack (the pack is self-describing, no
-        old index pack is needed): the size and sha1 of the LF blob
-        must match, an EOL mismatch is converted. A file that fails
-        the check raises SourceError, the caller fetches the record
-        content from the server instead.
+        record, it is read from there and verified against the record.
+        A source record that was skipped (its target already matched
+        the record) left no tmp file behind: its content is read from
+        the working tree then. The source of a C / M / RM / R record
+        is otherwise an old file, read from the working tree and
+        verified against the refinfo of the update pack (the pack is
+        self-describing, no old index pack is needed): the size and
+        sha1 of the LF blob must match, an EOL mismatch is converted.
+        A file that fails the check raises SourceError, the caller
+        fetches the record content from the server instead.
 
         Args:
             decoder (PackDecodeBase): Decoder of the update pack
@@ -523,8 +525,15 @@ class UpdateJob(JobBase):
             current = self._read_current(source_tmp)
             result = self._matches(source_info, current)
             if not result.match and not result.match_data:
-                # the source record failed too, its tmp file is missing
-                raise SourceError(source_path)
+                # the source record wrote no tmp file: it was skipped (its
+                # target already matched the record), the source content is
+                # the working tree file then. A source record that failed
+                # or is not applied yet does not match either, the record
+                # stays unsolvable and is downloaded
+                current = self._read_current(self.root.joinpath(source_path))
+                result = self._matches(source_info, current)
+                if not result.match and not result.match_data:
+                    raise SourceError(source_path)
             data = result.match_data if result.match_data else current.data
             return self._to_blob(data, source_info.eol)
         # the source is an old file, verified against the refinfo

@@ -222,6 +222,42 @@ CHAIN_NEW_TREE = {
     'c.txt': b'chained\n', 'd.txt': b'chained\n',
 }
 
+# a rename with copies on both ends: a.txt is renamed + modified to b.txt;
+# c.txt (modified) takes the old a.txt content, d.txt (added) takes the new
+# b.txt content. The files are large enough for the rename detection, a
+# tiny file scores below the similarity bar (zstd frame overhead)
+_rename_copy_base = b''.join(b'line %d\n' % i for i in range(100))
+_rename_copy_changed = _rename_copy_base.replace(b'line 99\n', b'line 99 changed\n')
+RENAME_COPY_REPO = make_repo({
+    'old': {
+        'a.txt': _rename_copy_base,
+        'c.txt': b'unrelated old content\n',
+    },
+    'new': {
+        'b.txt': _rename_copy_changed,
+        'c.txt': _rename_copy_base,
+        'd.txt': _rename_copy_changed,
+    },
+})
+RENAME_COPY_OLD_PACK = b''.join(PackFull(RENAME_COPY_REPO, commit='old').iter_pack_data())
+RENAME_COPY_NEW_PACK = b''.join(PackFull(RENAME_COPY_REPO, commit='new').iter_pack_data())
+RENAME_COPY_UPDATE = b''.join(PackUpdate(
+    PackFull(RENAME_COPY_REPO, commit='new'), 'old').iter_pack_data())
+RENAME_COPY_DECODER = PackDecodeBase(RENAME_COPY_UPDATE)
+RENAME_COPY_SERVER = MockServerFile()
+RENAME_COPY_SERVER.register_version(
+    'old', RENAME_COPY_OLD_PACK,
+    bytes(PackDecodeBase(RENAME_COPY_OLD_PACK).extract_index_pack()))
+RENAME_COPY_SERVER.register_version(
+    'new', RENAME_COPY_NEW_PACK,
+    bytes(PackDecodeBase(RENAME_COPY_NEW_PACK).extract_index_pack()))
+# the working tree of the new version, the pack structure excluded
+RENAME_COPY_NEW_TREE = {
+    'b.txt': _rename_copy_changed,
+    'c.txt': _rename_copy_base,
+    'd.txt': _rename_copy_changed,
+}
+
 
 async def run_update(update=UPDATE, server=SERVER, tree=NEW_TREE):
     """
@@ -576,24 +612,80 @@ class TestCopyChain:
         await run_update(CHAIN_UPDATE, server=CHAIN_SERVER, tree=CHAIN_NEW_TREE)
 
     @pytest.mark.trio
-    async def test_chain_with_matched_source(self, app_folder):
+    async def test_chain_with_matched_source(self, app_folder, monkeypatch):
         """A source record that needs no write leaves no tmp file behind:
-        the copies that reference it are downloaded from the full pack."""
+        the copies read the source content from the working tree instead,
+        no download happens."""
         await UnpackJob(CHAIN_OLD_PACK).run()
         # the local b.txt already is the new content: the b.txt record
         # is skipped and writes no tmp file
         with open(env.PROJECT_ROOT / 'b.txt', 'wb') as f:
             f.write(b'chained\n')
+
+        async def _fail(*args, **kwargs):
+            raise AssertionError('no download expected, the content is local')
+        monkeypatch.setattr(CHAIN_SERVER, 'get_file_content', _fail)
         job = UpdateJob(CHAIN_UPDATE, server=CHAIN_SERVER)
         job.write()
         job.unpack()
-        # the copies of b.txt find no tmp file and fail the unpack
-        assert [item.info.path for item in job.error] == ['c.txt', 'd.txt']
-        # download() fetches their content from the full pack
-        await job.download()
+        # the copies of b.txt find no tmp file and read the working tree
         assert job.error == []
         job.replace()
         assert read_tree() == CHAIN_NEW_TREE
+
+
+class TestRenameCopySource:
+    """The rename source and the rename target serve as copy sources:
+    the encoder links c.txt to a.txt and d.txt to b.txt."""
+
+    @pytest.mark.trio
+    async def test_copy_from_rename_source(self, app_folder, monkeypatch):
+        """c.txt copies the old a.txt (the rename source), d.txt copies
+        the new b.txt (the rename target), both resolve on the client."""
+        await UnpackJob(RENAME_COPY_OLD_PACK).run()
+        # the encoder: a.txt -> b.txt is a rename, c.txt copies the old
+        # a.txt content, d.txt copies the rename target b.txt
+        fileinfo = RENAME_COPY_DECODER.fileinfo
+        assert fileinfo['b.txt'].edit == 3
+        assert fileinfo['b.txt'].source_path == 'a.txt'
+        assert fileinfo['c.txt'].edit == 0
+        assert fileinfo['c.txt'].source_path == 'a.txt'
+        assert fileinfo['d.txt'].edit == 0
+        assert fileinfo['d.txt'].source_path == 'b.txt'
+        # the old a.txt is a ref record (c.txt reads it from the working
+        # tree), the rename target is not (read from its tmp file)
+        assert 'a.txt' in RENAME_COPY_DECODER.refinfo
+        assert 'b.txt' not in RENAME_COPY_DECODER.refinfo
+
+        async def _fail(*args, **kwargs):
+            raise AssertionError('no download expected, the content is local')
+        monkeypatch.setattr(RENAME_COPY_SERVER, 'get_file_content', _fail)
+        job = UpdateJob(RENAME_COPY_UPDATE, server=RENAME_COPY_SERVER)
+        job.write()
+        job.unpack()
+        assert job.error == []
+        job.replace()
+        assert read_tree() == RENAME_COPY_NEW_TREE
+
+    @pytest.mark.trio
+    async def test_copy_from_matched_rename_target(self, app_folder, monkeypatch):
+        """The rename target already matches locally (no tmp file): the
+        copy of it reads the working tree instead, no download happens."""
+        await UnpackJob(RENAME_COPY_OLD_PACK).run()
+        # the local b.txt already is the new content: the b.txt record
+        # is skipped and writes no tmp file
+        with open(env.PROJECT_ROOT / 'b.txt', 'wb') as f:
+            f.write(_rename_copy_changed)
+
+        async def _fail(*args, **kwargs):
+            raise AssertionError('no download expected, the content is local')
+        monkeypatch.setattr(RENAME_COPY_SERVER, 'get_file_content', _fail)
+        job = UpdateJob(RENAME_COPY_UPDATE, server=RENAME_COPY_SERVER)
+        job.write()
+        job.unpack()
+        assert job.error == []
+        job.replace()
+        assert read_tree() == RENAME_COPY_NEW_TREE
 
 
 class TestIndexUpdate:
