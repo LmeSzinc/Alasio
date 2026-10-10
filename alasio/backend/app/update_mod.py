@@ -49,23 +49,14 @@ from alasio.deploy.pack.job import DeployJob, UpdateAborted
 from alasio.deploy.pack.server_file import ServerFile
 from alasio.logger import logger
 
-# Seconds of the second check of a mod: the first check of a process runs
-# immediately, the second one waits a random delay of this range (every mod
-# of every client rolls its own). The startup moment of simultaneous clients
-# is synchronized, the random spread re-phases them so their later checks
-# never form a wave again.
-FIRST_CHECK_DELAY = (300.0, 600.0)
-# Fallback interval when Deploy.Update.CheckUpdateInterval cannot be read
-# (a broken config file must not stop the update manager): seconds.
-CHECK_INTERVAL_FALLBACK = 300.0
-
 
 class CheckLoop:
     """
     One full multi-round check sequence of one mod: the first check (as soon
-    as the given delay is over), the random follow-up (5-10 minutes) and the
-    configured interval rounds. One task of the manager nursery serves the
-    sequence (run(), started by ModUpdateManager.start_check_loop).
+    as the given delay is over), the random follow-up and the following
+    rounds (the schedule belongs to UpdateManager.next_delay). One task of
+    the manager nursery serves the sequence (run(), started by
+    ModUpdateManager.start_check_loop).
 
     A sequence is never rewound: its callers replace it (a manual check
     restarts the schedule, the manual round being the first check of the new
@@ -371,8 +362,8 @@ class ModUpdateManager:
         the schedule this way (its round is the first check of the new
         sequence); the startup starts it with the first check at once; the
         end of an update transaction resumes it where the update
-        interrupted it (the standard follow-up spacing, then the configured
-        interval, see UpdateManager.next_delay).
+        interrupted it (the standard follow-up spacing, then the interval,
+        see UpdateManager.next_delay).
 
         Args:
             delay (float | None): Seconds to the first check of the new
@@ -649,8 +640,8 @@ class ModUpdateManager:
             # the transaction is over: the check sequence resumes where the
             # update interrupted it -- not immediately (the state was just
             # checked, and a failure would likely repeat), the standard
-            # follow-up spacing first, then the configured interval; None
-            # (no automatic check) parks the sequence with AutoUpdate off.
+            # follow-up spacing first, then the interval; None (no automatic
+            # check) parks the sequence with AutoUpdate off.
             # The restarted backend is the exception: its process takes the
             # mods over and the first checks belong to it
             if not restarting:

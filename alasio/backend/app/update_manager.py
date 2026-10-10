@@ -10,13 +10,14 @@ daily restart tasks):
    in one graceful restart;
 2. one check sequence per mounted mod, one CheckLoop object per full
    multi-round sequence: the first check runs immediately, the second one
-   after a random 5-10 minutes (the clients started together re-phase
-   themselves, their later checks never form a global wave), the following
-   ones every Deploy.Update.CheckUpdateInterval minutes. A manual check
-   (rpc update_check) starts a new sequence (its round is the first check
-   of it, run immediately); an update transaction drops the sequence of its
-   mod (no check is needed while the mod is updated) and a fresh sequence
-   starts when the transaction ends without a backend restart.
+   after a random delay of CHECK_INTERVAL to CHECK_INTERVAL * 2 (the
+   clients started together re-phase themselves, their later checks never
+   form a global wave), the following ones every CHECK_INTERVAL seconds
+   (see the constant below). A manual check (rpc update_check) starts a new
+   sequence (its round is the first check of it, run immediately); an
+   update transaction drops the sequence of its mod (no check is needed
+   while the mod is updated) and a fresh sequence starts when the
+   transaction ends without a backend restart.
 
 The per-mod state and flow live in alasio.backend.app.update_mod
 (ModUpdateManager); the UpdateManager owns the pieces shared by every mod:
@@ -39,13 +40,22 @@ from typing import Optional
 import trio
 
 from alasio.backend.app import restart as restart_app
-from alasio.backend.app.update_mod import CHECK_INTERVAL_FALLBACK, FIRST_CHECK_DELAY, ModUpdateManager
+from alasio.backend.app.update_mod import ModUpdateManager
 from alasio.backend.app.update_startup import UPDATE_STARTUP
 from alasio.backend.mpipe.mpipe_backend import mpipe_backend
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.worker import get_mod
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.logger import logger
+
+# Interval of the automatic update checks of one mod, in seconds: the first
+# check of a process runs immediately, the second one after a random delay of
+# [CHECK_INTERVAL, CHECK_INTERVAL * 2] (the startup of simultaneous clients is
+# synchronized, the random spread re-phases them so their later checks never
+# form a wave again), the following ones every CHECK_INTERVAL. Not
+# configurable: a check is one small request, the interval only has to stay
+# long enough not to hammer the update server.
+CHECK_INTERVAL = 300.0
 
 
 class UpdateError(RuntimeError):
@@ -161,10 +171,9 @@ class UpdateManager:
         # mod being updated and the cancel handles of its task (see
         # UpdateTransaction)
         self._transaction: "Optional[UpdateTransaction]" = None
-        # automatic checks on / off and the configured interval (seconds,
-        # None = only the first check of the process)
+        # automatic checks on / off (Deploy.Update.AutoUpdate: with the
+        # checks off the sequences only serve the manual ones)
         self.auto = True
-        self.interval: "Optional[float]" = None
 
     # =========================================================================
     # Startup / lifespan task
@@ -199,21 +208,17 @@ class UpdateManager:
         restart). A broken config falls back to the defaults, the checks of
         a broken installation must not stop.
 
-        Sets `auto` and `interval`.
+        Sets `auto`.
         """
         from alasio.deploy.config.model import DeployConfig
 
         try:
             update = DeployConfig().config.data.Update
             auto = bool(update.AutoUpdate)
-            interval = int(update.CheckUpdateInterval)
         except Exception as e:
             logger.warning(f'[Update] Failed to read the update schedule: {e}, using the defaults')
-            auto, interval = True, CHECK_INTERVAL_FALLBACK / 60
+            auto = True
         self.auto = auto
-        # 0 = only the first check of a sequence (the startup one, or the
-        # manual one that reset the sequence)
-        self.interval = max(interval, 0) * 60.0 or None
 
     def next_delay(self, rounds):
         """
@@ -225,17 +230,15 @@ class UpdateManager:
         Returns:
             float | None: The delay, None when no automatic check follows
                 (the loop waits for a manual check then): automatic checks
-                off, or CheckUpdateInterval = 0 after the follow-up of the
-                first check
+                off (AutoUpdate = false)
         """
         if not self.auto:
             return None
         if rounds == 1:
-            # the second check of a sequence: the random spread
-            return random.uniform(*FIRST_CHECK_DELAY)
-        if self.interval is None:
-            return None
-        return self.interval
+            # the second check of a sequence: the random spread, see
+            # CHECK_INTERVAL
+            return random.uniform(CHECK_INTERVAL, CHECK_INTERVAL * 2)
+        return CHECK_INTERVAL
 
     def client(self):
         """
@@ -467,8 +470,8 @@ class UpdateManager:
         checked): this interrupts the sequence in flight (its request is
         interrupted too) and starts a new one - the manual round is the
         first check of the new sequence, the next automatic one follows the
-        standard schedule (random 5-10 minutes, then the configured
-        interval). Returns once the new sequences are started, the progress
+        standard schedule (the random follow-up, then CHECK_INTERVAL
+        seconds). Returns once the new sequences are started, the progress
         flows through the Update topic.
 
         Args:

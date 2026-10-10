@@ -75,10 +75,6 @@ Update:
   # Update Alas at startup
   # [In most cases] Use true
   AutoUpdate: true
-  # Check update every X minute
-  # [Disable] 0
-  # [Default] 5
-  CheckUpdateInterval: 5
   # Scheduled restart time
   # Restart Alas at this time every day, in the host local timezone
   # All alas instances running before the restart are stopped gracefully and resumed after the restart

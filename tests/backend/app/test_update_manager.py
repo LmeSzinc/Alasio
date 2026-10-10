@@ -326,7 +326,7 @@ def supervisor(monkeypatch):
     return marker
 
 
-def script_manager(manager, monkeypatch, mods, auto=True, interval=300.0):
+def script_manager(manager, monkeypatch, mods, auto=True):
     """
     Script the mods and the schedule of a manager (run() reads both).
 
@@ -335,14 +335,11 @@ def script_manager(manager, monkeypatch, mods, auto=True, interval=300.0):
         monkeypatch: pytest monkeypatch fixture
         mods (dict[str, FakeMod]): Mods of the manager
         auto (bool): Value of the AutoUpdate config. Defaults to True.
-        interval (float | None): Check interval in seconds, None = only
-            the first check. Defaults to 300.
     """
     monkeypatch.setattr(manager, 'load_mods', lambda: dict(mods))
 
     def load_schedule():
         manager.auto = auto
-        manager.interval = interval
 
     monkeypatch.setattr(manager, 'load_schedule', load_schedule)
 
@@ -352,27 +349,21 @@ class TestNextDelay:
 
     def test_second_check_random(self, manager):
         manager.auto = True
-        manager.interval = 300.0
-        delay = manager.next_delay(1)
-        assert 300.0 <= delay <= 600.0
+        # the random spread re-phases the clients that started together:
+        # their later checks never form a wave again
+        delays = [manager.next_delay(1) for _ in range(20)]
+        assert all(update_manager.CHECK_INTERVAL <= d <= 2 * update_manager.CHECK_INTERVAL
+                   for d in delays)
+        assert len(set(delays)) > 1
 
     def test_third_check_interval(self, manager):
         manager.auto = True
-        manager.interval = 300.0
-        assert manager.next_delay(2) == 300.0
-        assert manager.next_delay(10) == 300.0
-
-    def test_interval_zero_stops_after_the_followup(self, manager):
-        """CheckUpdateInterval = 0 keeps the first check and its follow-up."""
-        manager.auto = True
-        manager.interval = None
-        assert 300.0 <= manager.next_delay(1) <= 600.0
-        assert manager.next_delay(2) is None
+        assert manager.next_delay(2) == update_manager.CHECK_INTERVAL
+        assert manager.next_delay(10) == update_manager.CHECK_INTERVAL
 
     def test_auto_off(self, manager):
         """AutoUpdate = false: no automatic check at all."""
         manager.auto = False
-        manager.interval = 300.0
         assert manager.next_delay(1) is None
         assert manager.next_delay(2) is None
 
@@ -545,7 +536,7 @@ class TestCheckLoop:
         """Without automatic checks the loop only serves the manual ones."""
         script.checks['/m'] = make_check(local='c1', latest='c2')
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')},
-                       auto=False, interval=None)
+                       auto=False)
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(manager.run)
@@ -561,7 +552,7 @@ class TestCheckLoop:
         script_manager(manager, monkeypatch, {
             'a': FakeMod('a', mirrors='https://a.example'),
             'b': FakeMod('b', mirrors=''),
-        }, auto=False, interval=None)
+        }, auto=False)
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(manager.run)
@@ -771,7 +762,7 @@ class TestApply:
         assert isinstance(loop, CheckLoop)
         assert loop is not old
         # no immediate check: the standard follow-up spacing first, then the
-        # configured interval (the sequence resumes where it was interrupted)
+        # interval (the sequence resumes where it was interrupted)
         assert 300.0 <= loop.delay <= 600.0
         assert loop.rounds == 1
         # the resumed sequence is scheduled (the fake nursery recorded it)
@@ -1121,7 +1112,7 @@ class TestConvergence:
     async def test_convergence_failure_is_retried(self, manager, script, monkeypatch):
         script.unfinished['/m'] = RuntimeError('offline')
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')},
-                       auto=False, interval=None)
+                       auto=False)
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(manager.run)
@@ -1153,7 +1144,7 @@ class TestConvergence:
         """A retried convergence that succeeds ends in one restart."""
         script.unfinished['/m'] = RuntimeError('offline')
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')},
-                       auto=False, interval=None)
+                       auto=False)
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(manager.run)

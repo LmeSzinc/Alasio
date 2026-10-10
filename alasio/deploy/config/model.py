@@ -138,11 +138,6 @@ class UpdateConfig(Struct):
         "Update Alas at startup",
         "[In most cases] Use true",
     ]})] = True
-    CheckUpdateInterval: Annotated[int, Meta(extra={"help": [
-        "Check update every X minute",
-        "[Disable] 0",
-        "[Default] 5",
-    ]})] = 5
     AutoRestartTime: Annotated[
         Optional[Annotated[str, Meta(pattern=AUTO_RESTART_TIME_PATTERN)]],
         Meta(extra={"help": [
