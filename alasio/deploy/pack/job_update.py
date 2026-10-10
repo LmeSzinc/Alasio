@@ -70,7 +70,8 @@ class UpdateJob(JobBase):
        problem per the draft of PackEncodeBase.
     3. replace() moves every tmp file to the target path atomically,
        removes the deleted markers and the renamed sources, and
-       writes the new index pack like any other file.
+       commits the new index pack last (replace_index()), only when
+       every record landed.
 
     On failure the workspace is kept, the next run resumes from it.
 
@@ -109,12 +110,13 @@ class UpdateJob(JobBase):
         Writes the job file first unless the job was resumed from it,
         then unpacks, downloads the failed records, verifies the
         remaining local files and replaces all files in one pass. The
-        network phases await on the event loop, the local phases run
-        in a worker thread (see JobBase.run()). On failure the
-        workspace is cleaned up: errors during write() and unpack()
-        are safe because no real file was written and are logged as
-        warning, errors during replace() leave partially replaced
-        files and are logged as error.
+        new index pack is committed last and only when every record
+        landed, see replace_index(). The network phases await on the
+        event loop, the local phases run in a worker thread (see
+        JobBase.run()). On failure the workspace is cleaned up: errors
+        during write() and unpack() are safe because no real file was
+        written and are logged as warning, errors during replace()
+        leave partially replaced files and are logged as error.
 
         Returns:
             bool: True if every file is updated, False if some records
@@ -134,7 +136,9 @@ class UpdateJob(JobBase):
             return False
         try:
             logger.info(f'Replacing files to "{self.root}", name="{self.name}"')
-            await trio.to_thread.run_sync(self.replace)
+            # the new index pack is committed only when every record
+            # landed: a failed flow keeps the old local version
+            await trio.to_thread.run_sync(self.replace, not self.error)
         except Exception as e:
             # real files may be partially replaced
             logger.error(f'Failed to replace file: {e}')
@@ -162,8 +166,8 @@ class UpdateJob(JobBase):
 
         Computes every record of the update pack: files that exist and
         pass the size + sha1 check are skipped, the others are
-        decompressed to tmp files, filling self.pending with the
-        changes to apply in replace(). Every file follows the same
+        decompressed to tmp files, filling self.pending with the data
+        changes to apply in replace_data(). Every file follows the same
         flow: read the source, verify it, decompress to a tmp file,
         the content never stays in memory. The index pack is updated
         like a normal file, its local copy is verified against the
@@ -181,7 +185,7 @@ class UpdateJob(JobBase):
         self._version = decoder.current_version
         self._file_index = {path: index for index, path in enumerate(decoder.fileinfo)}
         # the update pack records the changed files of the new version
-        # only: a partial emptiness base of replace(), the new index
+        # only: a partial emptiness base of replace_data(), the new index
         # decoded in _validate_remaining() replaces it with the full
         # records when the server is available
         self.new_fileinfo = decoder.fileinfo
@@ -246,7 +250,13 @@ class UpdateJob(JobBase):
             pending.append(PendingFile(
                 info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
 
-        self.pending = pending
+        # the index pack is the commit record of the flow, replace_index()
+        # commits it after every data file: route it out of pending. A
+        # skipped index record (the local index is already the new one)
+        # leaves pending_index as None
+        index = [p for p in pending if p.info.path == self.index_rel]
+        self.pending_index = index[0] if index else None
+        self.pending = [p for p in pending if p.info.path != self.index_rel]
 
     async def download(self):
         """
@@ -291,8 +301,8 @@ class UpdateJob(JobBase):
             current = await trio.to_thread.run_sync(self._read_current, tmp)
             if self._matches(info, current).match:
                 # a leftover tmp file passes the size + sha1 check, reuse it
-                pending.append(PendingFile(
-                    info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
+                self.pending_index = PendingFile(
+                    info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None)
                 continue
             try:
                 # the index pack is self-validating, the trailing
@@ -308,8 +318,8 @@ class UpdateJob(JobBase):
                 failed.append(item)
             else:
                 await trio.to_thread.run_sync(file_write, tmp, new_index_data)
-                pending.append(PendingFile(
-                    info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
+                self.pending_index = PendingFile(
+                    info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None)
             break
         # the other records, downloaded from the new full pack with
         # the offsets of the new index records
@@ -376,13 +386,14 @@ class UpdateJob(JobBase):
 
         The records of the update pack were verified in unpack(), they
         are filtered out of the index view passed to ResetJob: the
-        local index pack is replaced in replace() with the other
-        files, so the new index is passed in directly with only the
-        remaining files. The repaired records are merged into
-        self.pending, replace() applies them together with the update
-        records, so the real files are touched only once. The missing
-        files are downloaded by the nested ResetJob, its download()
-        awaits on the event loop like this job's own download().
+        local index pack is committed by replace_index() after the
+        data files, so the new index is passed in directly with only
+        the remaining files. The repaired records are merged into
+        self.pending, replace_data() applies them together with the
+        update records, so the real files are touched only once. The
+        missing files are downloaded by the nested ResetJob, its
+        download() awaits on the event loop like this job's own
+        download().
 
         Skipped when the update has no server, or the index pack record
         failed (the local index is not the new one then).
@@ -425,6 +436,8 @@ class UpdateJob(JobBase):
         InstanceCacheOperation.set(reset, '_index_pack', new_index)
         await trio.to_thread.run_sync(reset.validate_files)
         await reset.download()
+        # the nested reset never prepares an index record (the index is
+        # filtered out of its view), pending_index stays this job's own
         self.pending += reset.pending
         self.error += reset.error
 

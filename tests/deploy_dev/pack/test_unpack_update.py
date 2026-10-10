@@ -323,7 +323,8 @@ class TestUnpack:
 
     @pytest.mark.trio
     async def test_pending_records(self, app_folder):
-        """unpack() fills self.pending with PendingFile records."""
+        """unpack() fills self.pending with the data records and
+        pending_index with the index record."""
         await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
         job.write()
@@ -338,8 +339,12 @@ class TestUnpack:
         # the R / RM source files are moved, their deletion is scheduled
         assert pending['scripts/run.sh'].info.edit == 2
         assert pending['scripts/old_tool.py'].info.edit == 2
-        # the index pack is updated like a normal file
-        index_pack = pending['.pack/index.pack']
+        # the index pack is the commit record, not a pending data file:
+        # it is prepared to pending_index, replace_index() commits it
+        assert '.pack/index.pack' not in pending
+        index_pack = job.pending_index
+        assert index_pack is not None
+        assert index_pack.info.path == '.pack/index.pack'
         assert index_pack.info.edit == 1
         assert index_pack.tmp
         assert os.path.exists(index_pack.tmp)
@@ -621,6 +626,10 @@ class TestSourceDownload:
         # the other changes are still applied, the workspace is cleaned
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/a1.py') == NEW['backend/a1.py']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        # the new index pack is not committed: the local version does
+        # not advance, the next check still sees the update available
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
+            bytes(OLD_DECODER.extract_index_pack())
 
     @pytest.mark.trio
     async def test_no_server_sources_unsolvable(self, app_folder):

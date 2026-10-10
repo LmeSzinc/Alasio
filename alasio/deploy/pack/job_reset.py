@@ -34,14 +34,16 @@ class ResetJob(JobBase):
     latest index pack checksum of the server, an outdated (self-
     consistent but not the latest) index pack is prepared again too.
     The new index pack is downloaded to the workspace new_index.tmp
-    instead of replacing the local index directly, replace() applies
-    it together with the repaired files, so the real files are
+    instead of replacing the local index directly, replace_index()
+    commits it after the repaired files, so the real files are
     touched only once. Then validate_files() checks every file
     recorded in the index, failed files are downloaded to tmp files
     by download() and replaced to the real files by replace(). Files
     that cannot be downloaded or fail the size + sha1 check stay in
     self.error with an empty tmp, this is an unsolvable problem per
-    the draft of PackEncodeBase.
+    the draft of PackEncodeBase. The new index pack is committed only
+    when every file was repaired, a failed flow keeps the old local
+    version.
 
     Note: the exclusive lock of the target ledger (the lock file, see
     DeployJob.locked()) is held by DeployJob around the whole update
@@ -83,10 +85,12 @@ class ResetJob(JobBase):
         again from the server, an outdated index pack (self-consistent
         but not the latest, see validate_latest()) is downloaded again
         too, failed files are downloaded to tmp files and replaced to
-        the real files. The network phases await on the event loop, the
-        local phases run in a worker thread (see JobBase.run()). On
-        failure the workspace is cleaned up: errors during write() and
-        validate() are safe and are logged as warning.
+        the real files. The new index pack is committed by replace()
+        only when every file was repaired, see replace_index(). The
+        network phases await on the event loop, the local phases run in
+        a worker thread (see JobBase.run()). On failure the workspace is
+        cleaned up: errors during write() and validate() are safe and
+        are logged as warning.
 
         Returns:
             bool: True if every file is repaired, False otherwise
@@ -105,9 +109,11 @@ class ResetJob(JobBase):
             await trio.to_thread.run_sync(self.validate_files)
             await self.download()
             # the new index records every file of the new version, the
-            # emptiness base of replace()
+            # emptiness base of replace_data()
             self.new_fileinfo = self._index_pack.fileinfo
-            await trio.to_thread.run_sync(self.replace)
+            # the new index pack is committed only when every file was
+            # repaired: a failed flow keeps the old local version
+            await trio.to_thread.run_sync(self.replace, not self.error)
         except Exception as e:
             # no real file was written, safe to clean up
             logger.warning(f'Failed to reset: {e}')
@@ -303,15 +309,15 @@ class ResetJob(JobBase):
 
         The index pack is downloaded to {ledger}/workspace/new_index.tmp
         instead of replacing the local index pack directly:
-        replace() applies it together with the repaired files, so the
+        replace_index() commits it after the repaired files, so the
         real files are touched only once. A leftover tmp file that is
         self-consistent and matches the latest checksum is reused, a
         missing or broken one is downloaded again. The version and the
         checksum come from latest.pack, fetched once per job (see
         _get_latest_info()). The decoder of the new index pack is set into
         the cache directly, the next validation reads it without the
-        file again, and a pending record replaces the local index pack
-        in replace(). The request awaits on the event loop; the file
+        file again, and the record is committed to the local index pack
+        by replace_index(). The request awaits on the event loop; the file
         reads and writes run in worker threads.
 
         Raises:
@@ -350,8 +356,9 @@ class ResetJob(JobBase):
         # the file again
         self.localize(decoder)
         InstanceCacheOperation.set(self, '_index_pack', decoder)
-        # replace() moves the tmp file to the local index pack
-        self.pending.append(PendingFile(info=IdxInfo(path=self.index_rel), tmp=tmp))
+        # the index pack is the commit record of the flow, replace_index()
+        # moves the tmp file to the local index pack
+        self.pending_index = PendingFile(info=IdxInfo(path=self.index_rel), tmp=tmp)
 
     async def download(self):
         """

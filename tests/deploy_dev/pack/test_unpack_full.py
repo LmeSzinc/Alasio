@@ -159,7 +159,8 @@ class TestUnpack:
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == WEBSITE_INDEX_PACK
 
     def test_pending_records(self, app_folder):
-        """unpack() fills self.pending with PendingFile records."""
+        """unpack() fills self.pending with the data records and
+        pending_index with the index record."""
         job = UnpackJob(WEBSITE_FULL_PACK)
         job.write()
         job.unpack()
@@ -168,17 +169,16 @@ class TestUnpack:
         assert all(isinstance(item, PendingFile) for item in job.pending)
         # every fileinfo record is in pending, refinfo is not unpacked
         # + 2 for the D marker and the packed commit history
-        # + 1 for the index pack, prepared like every other record
-        assert len(job.pending) == len(WEBSITE_FILES) + 3
-        # the index pack record is prepared to the workspace, replace()
-        # applies it to .pack/index.pack
-        index = [
-            item for item in job.pending
-            if item.info.path == '.pack/index.pack'
-        ]
-        assert len(index) == 1
-        assert index[0].info.edit == 0
-        assert index[0].tmp
+        assert len(job.pending) == len(WEBSITE_FILES) + 2
+        # the index pack is the commit record, not a pending data file:
+        # it is prepared to the workspace, replace_index() commits it
+        assert all(
+            item.info.path != '.pack/index.pack' for item in job.pending)
+        index = job.pending_index
+        assert index is not None
+        assert index.info.path == '.pack/index.pack'
+        assert index.info.edit == 0
+        assert index.tmp
         # deleted marker record, its target is removed in replace()
         deleted = [
             item for item in job.pending
@@ -831,21 +831,48 @@ class TestUnpackRebuild:
 
     @pytest.mark.trio
     async def test_index_replaced_last(self, app_folder):
-        """The new index pack is the last pending record, the leftover
-        deletions come before it."""
+        """The new index pack is the commit record, not a pending data
+        file: replace_index() commits it after the data files, the
+        leftover deletions are pending data records."""
         await UnpackJob(OLD_PACK).run()
         job = UnpackJob(NEW_PACK)
         job.write()
         job.unpack()
-        assert job.pending[-1].info.path == '.pack/index.pack'
-        # the leftover deletions are scheduled before the index record
-        index_pos = len(job.pending) - 1
-        leftover = [item for item in job.pending[:index_pos]
+        assert job.pending_index is not None
+        assert job.pending_index.info.path == '.pack/index.pack'
+        assert all(
+            item.info.path != '.pack/index.pack' for item in job.pending)
+        # the leftover deletions are pending data records
+        leftover = [item for item in job.pending
                     if item.info.path in OLD_ONLY]
         assert len(leftover) == len(OLD_ONLY)
         for item in leftover:
             assert item.info.edit == 2
             assert item.tmp == ''
+
+    @pytest.mark.trio
+    async def test_interrupted_replace_keeps_old_index(self, app_folder, monkeypatch):
+        """An interruption during the data pass keeps the old index: the
+        new index pack is committed by replace_index() only after every
+        data file landed."""
+        await UnpackJob(OLD_PACK).run()
+        import alasio.deploy.pack.job_base as job_base
+        original = job_base.atomic_replace
+        calls = []
+
+        def _fail(tmp, target):
+            if calls:
+                raise PermissionError('interrupted')
+            calls.append(target)
+            return original(tmp, target)
+        monkeypatch.setattr(job_base, 'atomic_replace', _fail)
+        with logger.mock_capture_writer():
+            assert not await UnpackJob(NEW_PACK).run()
+        # the interrupted pass replaced a data file, never the index pack
+        assert len(calls) == 1
+        assert not str(calls[0]).endswith('index.pack')
+        # the commit never ran: the old index pack is still in place
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == OLD_INDEX
 
     @pytest.mark.trio
     async def test_resume_leftover_cleanup(self, app_folder):

@@ -446,6 +446,9 @@ class TestFileRepair:
             assert not await job.run()
         assert job.error
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        # the new index pack is not committed: the local version does
+        # not advance (see JobBase.replace())
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == OLD_INDEX
 
     @pytest.mark.trio
     async def test_no_server(self, app_folder):
@@ -498,19 +501,26 @@ class TestResume:
 
     @pytest.mark.trio
     async def test_index_replaced_last(self, app_folder, monkeypatch):
-        """The new index pack is the last pending record: an
-        interruption during replace() keeps the old index, so a
-        resumed run still computes the leftover deletion list from
-        it."""
+        """The new index pack is the commit record: replace_data()
+        runs with the old index still in place, replace_index() commits
+        it after the data files. An interruption during the data pass
+        keeps the old index, so a resumed run still computes the
+        leftover deletion list from it."""
         await setup_old()
-        original = RebuildJob.replace
+        original = RebuildJob.replace_data
 
         def _check(self):
-            assert self.pending[-1].info.path == '.pack/index.pack'
+            # the index is not a pending data file, the commit has not
+            # happened yet: the old index is still in place
+            assert all(
+                item.info.path != '.pack/index.pack' for item in self.pending)
+            assert self.pending_index is not None
+            assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == OLD_INDEX
             return original(self)
-        monkeypatch.setattr(RebuildJob, 'replace', _check)
+        monkeypatch.setattr(RebuildJob, 'replace_data', _check)
         job = RebuildJob(SERVER)
         assert await job.run()
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 

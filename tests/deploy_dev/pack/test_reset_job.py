@@ -446,7 +446,7 @@ class TestDownloadIndex:
         # validation reads it without the file again
         assert job.validate_index()
         # the local index pack is not replaced directly, the new index
-        # pack is prepared in the workspace and replace() applies it
+        # pack is prepared in the workspace and replace_index() commits it
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == bytes(bad)
         tmp = env.PROJECT_ROOT / f'.pack/workspace/{ResetJob.NEW_INDEX}'
         assert file_read_bytes(tmp) == WEBSITE_INDEX_PACK
@@ -482,8 +482,13 @@ class TestDownloadIndex:
         # the local index pack is not replaced, the tmp file is kept
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/index.pack')
         assert file_read_bytes(tmp) == WEBSITE_INDEX_PACK
-        # replace() applies the tmp file to the local index pack
-        assert [item.info.path for item in job.pending] == ['.pack/index.pack']
+        # the record is ready for the commit: pending_index carries the
+        # tmp file, replace_index() moves it to the local index pack
+        index = job.pending_index
+        assert index is not None
+        assert index.info.path == '.pack/index.pack'
+        assert index.tmp
+        assert job.pending == []
 
     @pytest.mark.trio
     async def test_download_index_outdated_tmp_redownloaded(self, app_folder):
@@ -802,3 +807,65 @@ class TestRun:
             assert not await job.run()
         assert capture.backend.any_contains('Failed to reset:')
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+
+class TestIndexCommit:
+    """The index pack is the commit record of the local version: it is
+    committed by replace_index() after the data files and only when the
+    flow fully succeeded (see JobBase.replace())."""
+
+    @pytest.mark.trio
+    async def test_failed_run_keeps_the_old_index(self, app_folder, fs, monkeypatch):
+        """A flow with records left in error does not commit the new
+        index pack: the local version does not advance."""
+        await setup_app(fs)
+        # an outdated (self-consistent but not the latest) local index:
+        # the run prepares the latest one during the flow
+        with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
+            f.write(OTHER_INDEX)
+        # a file that cannot be downloaded: the run ends with an error
+        os.remove(env.PROJECT_ROOT / 'backend/__init__.py')
+        server = WEBSITE_SERVER
+
+        async def _index_pack(version):
+            return WEBSITE_INDEX_PACK
+        monkeypatch.setattr(server, 'get_index_pack', _index_pack)
+        monkeypatch.setattr(server, 'get_file_content', bad_content())
+        job = ResetJob(server)
+        assert not await job.run()
+        assert [item.info.path for item in job.error] == ['backend/__init__.py']
+        # the new index pack was prepared but not committed: the local
+        # index pack is still the outdated one, the next check still
+        # sees the target as updatable
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == OTHER_INDEX
+
+    @pytest.mark.trio
+    async def test_interrupted_replace_keeps_the_old_index(self, app_folder, fs, monkeypatch):
+        """An interruption during the data pass does not commit the new
+        index pack: the version only advances when every file landed."""
+        await setup_app(fs)
+        with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
+            f.write(OTHER_INDEX)
+        # two damaged files: the first replace succeeds, the second
+        # raises, the index commit at the end of replace() never runs
+        for path in ('backend/config.py', 'backend/main.py'):
+            with open(env.PROJECT_ROOT / path, 'wb') as f:
+                f.write(b'wrong')
+        import alasio.deploy.pack.job_base as job_base
+        original = job_base.atomic_replace
+        calls = []
+
+        def _fail(tmp, target):
+            if calls:
+                raise PermissionError('interrupted')
+            calls.append(target)
+            return original(tmp, target)
+        monkeypatch.setattr(job_base, 'atomic_replace', _fail)
+        job = ResetJob(WEBSITE_SERVER)
+        with logger.mock_capture_writer():
+            assert not await job.run()
+        # the interrupted pass replaced a data file, never the index pack
+        assert len(calls) == 1
+        assert not str(calls[0]).endswith('index.pack')
+        # the commit never ran: the old index pack is still in place
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == OTHER_INDEX

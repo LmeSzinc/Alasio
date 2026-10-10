@@ -35,13 +35,15 @@ class UnpackJob(JobBase):
        all files to {ledger}/workspace/{size}_{sha1}_{index}.tmp,
        real files are untouched. The leftover files of the old version, recorded
        in the old index but not in this pack, are appended as deleted
-       markers, and the new index pack is the last record: an
-       interruption during replace() leaves the old index pack in
-       place, so a resumed run still computes the leftover deletion
-       list from it. Files that exist and pass the size + sha1 check
+       markers, and the new index pack is committed last by
+       replace_index() when every data file landed: an interruption
+       during replace() leaves the old index pack in place, so a
+       resumed run still computes the leftover deletion list from it.
+       Files that exist and pass the size + sha1 check
        are skipped, leftover tmp files that pass the check are reused.
-    2. replace() moves every tmp file to the target path atomically and
-       removes the deleted markers. Real file operations only start
+    2. replace() moves every tmp file to the target path atomically,
+       removes the deleted markers and commits the new index pack last,
+       see JobBase.replace(). Real file operations only start
        after every tmp file is ready, so an interruption never leaves a
        half-mixed set of old and new files.
     3. cleanup() cleans {ledger}/workspace atomically: the folder is
@@ -127,14 +129,15 @@ class UnpackJob(JobBase):
         Writes the index section to {ledger}/workspace/new_index.tmp and
         decompresses every file to
         {ledger}/workspace/{size}_{sha1}_{index}.tmp, filling self.pending
-        with the changes to apply in replace(). The old local index
+        with the changes to apply in replace_data(). The old local index
         pack is read first: files recorded in it but not in this pack
         are the leftover files of the old version, removed by
-        replace() like the deleted markers. A target file whose
+        replace_data() like the deleted markers. A target file whose
         content matches the record only after converting its EOL is
         written to the tmp file with the converted content, no
-        decompression is needed. The new index pack is replaced last:
-        an interruption during replace() leaves the old index pack in
+        decompression is needed. The new index pack is committed last
+        by replace_index() when every data file landed: an
+        interruption during replace() leaves the old index pack in
         place, so a resumed run still computes the leftover deletion
         list from it.
         """
@@ -144,7 +147,7 @@ class UnpackJob(JobBase):
         # folder of the target before any comparison
         self.localize(decoder)
         # the full pack records every file of the new version, the
-        # emptiness base of replace()
+        # emptiness base of replace_data()
         self.new_fileinfo = decoder.fileinfo
         # the old index is read before the new index pack replaces it
         old_fileinfo = self._old_fileinfo_from_index()
@@ -194,6 +197,8 @@ class UnpackJob(JobBase):
         # the leftover files of the old version, recorded in the old
         # index but not in this pack
         pending += self._leftover_deletions(old_fileinfo, decoder.fileinfo)
-        # the new index pack is replaced last, see the docstring
-        pending.append(PendingFile(info=IdxInfo(path=self.index_rel), tmp=index_tmp))
         self.pending = pending
+        # the new index pack is the commit record of the flow, not a
+        # data file of pending: replace_index() commits it after every
+        # data file, see the docstring
+        self.pending_index = PendingFile(info=IdxInfo(path=self.index_rel), tmp=index_tmp)

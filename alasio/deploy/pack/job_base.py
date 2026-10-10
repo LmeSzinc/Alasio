@@ -34,7 +34,7 @@ class CurrentFile(Struct):
 
 class PendingFile(Struct):
     """
-    A file change to apply in replace().
+    A file change to apply in replace_data().
 
     The tmp file is moved to the target path, deleted records
     (edit == 2) have empty tmp, their targets are removed instead.
@@ -151,13 +151,14 @@ class JobBase(DeployTarget):
 
     _read_current() and _matches() are shared by every job that
     compares working tree files against the records of a pack,
-    replace() and cleanup_empty_folders() by every job that applies
-    the changes to the real files.
+    replace() / replace_data() / replace_index() and
+    cleanup_empty_folders() by every job that applies the changes to
+    the real files.
     """
 
     # fixed name of the new index pack in the workspace: the index
-    # pack is always prepared to this file, replace() applies it
-    # together with the other files
+    # pack is always prepared to this file, replace_index() commits
+    # it to the local index pack as the last change of the flow
     NEW_INDEX = 'new_index.tmp'
 
     def __init__(self, data, root=None, name=''):
@@ -172,6 +173,14 @@ class JobBase(DeployTarget):
         super().__init__(root=root, name=name)
         self._data = data
         self.pending: "list[PendingFile]" = []
+        # the new index pack of the flow, the commit record of the
+        # local version: the jobs prepare it here, it is not a data
+        # file of pending. replace_index() commits it after every data
+        # file of replace_data() landed, so a flow that did not fully
+        # succeed keeps the old index pack and the next check still
+        # sees the update as available. None when the flow has no
+        # index pack change to commit
+        self.pending_index: "Optional[PendingFile]" = None
         # {path: IdxInfo} of the files the new version records, the
         # emptiness base of cleanup_empty_folders(). Every job sets it
         # to its best knowledge (UnpackJob: the full pack, UpdateJob:
@@ -269,9 +278,35 @@ class JobBase(DeployTarget):
         """
         raise NotImplementedError
 
-    def replace(self):
+    def replace(self, commit=True):
         """
-        Apply the pending changes to the real files.
+        Apply the pending changes to the real files: the data files
+        first, the new index pack last.
+
+        The index pack is the commit record of the local version, the
+        version DeployJob.check() reads: a committed index on a
+        partially updated tree would tell the caller the update
+        succeeded when it did not. It is therefore committed only
+        after every data file landed and only when commit is True, so
+        every failure path (an exception during replace_data(),
+        records left in error) keeps the old index pack in place. The
+        two steps are separate methods (replace_data() /
+        replace_index()) for the jobs that need to interleave their
+        own changes, a caller must never commit the index first.
+
+        Args:
+            commit (bool): True to commit the new index pack after the
+                data files. False replaces the data files only and
+                keeps the local index pack untouched (the flow did not
+                fully succeed). Defaults to True
+        """
+        self.replace_data()
+        if commit:
+            self.replace_index()
+
+    def replace_data(self):
+        """
+        Apply the pending data files to the real files.
 
         Every tmp file is moved to the target path atomically and the
         deleted markers are removed. The target is chmod-ed when
@@ -279,7 +314,8 @@ class JobBase(DeployTarget):
         prepared the pending list. The folders left empty by the
         deletions are removed, see cleanup_empty_folders(). The
         workspace is kept, the caller (run()) cleans it up after all
-        changes are applied.
+        changes are applied. The index pack is not a data file, see
+        pending_index and replace_index().
         """
         # create the parent folders of all targets in one batch
         batch_makedirs([
@@ -300,6 +336,30 @@ class JobBase(DeployTarget):
                 os.chmod(target, pending.mode)
 
         self.cleanup_empty_folders()
+
+    def replace_index(self):
+        """
+        Commit the new index pack of the flow, the last change applied.
+
+        The new index pack prepared to pending_index (new_index.tmp in
+        the workspace, see NEW_INDEX) is moved to the local index pack
+        (index.pack in the ledger folder of the target). A missing
+        pending_index is a no-op: the flow has no index pack change to
+        commit, e.g. the local index is already the latest one.
+        """
+        pending = self.pending_index
+        if pending is None:
+            return
+        target = self.root.joinpath(pending.info.path)
+        # the ledger folder of the target holds the workspace of the
+        # job, it exists by now; the batch keeps the replace below
+        # working when it does not (a target updated without a
+        # workspace, e.g. a direct job call)
+        batch_makedirs([target])
+        atomic_replace(pending.tmp, target)
+        if pending.mode is not None:
+            os.chmod(target, pending.mode)
+        self.pending_index = None
 
     def cleanup_empty_folders(self):
         """
@@ -383,7 +443,7 @@ class JobBase(DeployTarget):
     def _leftover_deletions(old_fileinfo, new_fileinfo):
         """
         The leftover files of the old version: recorded in the old
-        index but not in the new one, removed by replace().
+        index but not in the new one, removed by replace_data().
 
         Args:
             old_fileinfo (dict[str, IdxInfo]): Fileinfo of the old
@@ -393,7 +453,7 @@ class JobBase(DeployTarget):
 
         Returns:
             list[PendingFile]: Deleted markers (edit == 2) of the
-                leftover paths, removed by replace()
+                leftover paths, removed by replace_data()
         """
         return [
             PendingFile(info=IdxInfo(path=path, edit=2), tmp='')

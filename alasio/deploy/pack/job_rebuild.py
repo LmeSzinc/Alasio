@@ -17,8 +17,9 @@ class RebuildJob(ResetJob):
     difference between the old local index and the new one, so only
     managed files are removed, files the user placed by hand are
     untouched. The old fileinfo is read before the new index is
-    downloaded, and the new index pack is replaced last in replace():
-    an interruption during replace() leaves the old index pack in
+    downloaded, and the new index pack is committed last by
+    replace_index(), only when every file of it landed: an
+    interruption during replace() leaves the old index pack in
     place, so a resumed run still computes the leftover deletion list
     from it.
 
@@ -64,11 +65,12 @@ class RebuildJob(ResetJob):
         first. Every file is verified against the new index, the
         leftover files of the old version are deleted, the failed
         files are downloaded to tmp files and replaced to the real
-        files. The new index pack is replaced last, see the class
-        docstring. The network phases await on the event loop, the
-        local phases run in a worker thread (see JobBase.run()). On
-        failure the workspace is cleaned up: errors during write() and
-        validation are safe and are logged as warning.
+        files. The new index pack is committed last by replace_index()
+        and only when every file was rebuilt, see the class docstring.
+        The network phases await on the event loop, the local phases
+        run in a worker thread (see JobBase.run()). On failure the
+        workspace is cleaned up: errors during write() and validation
+        are safe and are logged as warning.
 
         Returns:
             bool: True if every file is rebuilt, False otherwise
@@ -82,16 +84,14 @@ class RebuildJob(ResetJob):
             await trio.to_thread.run_sync(self.validate_files)
             await self.download()
             # the new index records every file of the new version, the
-            # emptiness base of replace()
+            # emptiness base of replace_data()
             self.new_fileinfo = self._index_pack.fileinfo
-            # the new index pack is replaced last: an interruption
-            # during replace() leaves the old index pack in place, so
-            # a resumed run still computes the leftover deletion list
-            # from it
-            self.pending = [
-                p for p in self.pending if p.info.path != self.index_rel
-            ] + [p for p in self.pending if p.info.path == self.index_rel]
-            await trio.to_thread.run_sync(self.replace)
+            # the new index pack is committed after the rebuild and
+            # only when every file of it landed: an interruption keeps
+            # the old index pack in place, so a resumed run still
+            # computes the leftover deletion list from it (the index
+            # is prepared to pending_index, see JobBase.replace_index())
+            await trio.to_thread.run_sync(self.replace, not self.error)
         except Exception as e:
             # no real file was written, safe to clean up
             logger.warning(f'Failed to rebuild: {e}')
@@ -111,7 +111,7 @@ class RebuildJob(ResetJob):
         fixable EOL or mode mismatches are written to tmp files
         without a download), then the leftover files are appended to
         self.pending: paths recorded in the old index but not in the
-        new one become deleted markers, removed by replace(). The
+        new one become deleted markers, removed by replace_data(). The
         leftover deletions never enter self.error: self.error is the
         download list of download(), the leftover files are deleted,
         not downloaded. They are appended after the validation:
