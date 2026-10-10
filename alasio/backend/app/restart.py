@@ -130,60 +130,6 @@ class ResumeRecord(msgspec.Struct):
     actions: List[str]
 
 
-class RestartHooks:
-    """
-    Optional hooks of a restart transaction (used by the in-app update flow,
-    which reuses the whole orchestration)
-
-    Attributes:
-        on_all_stopped (callable): Async callback run after every worker
-            stopped and before the backend shutdown. The backend process is
-            still alive and its python modules are loaded: replacing the files
-            on disk is safe here (nothing holds the files open) and the
-            supervisor restarts the backend with the new code afterwards. A
-            raised error cancels the restart.
-        actions (list[str]): Action tags carried by the resume file and
-            executed by the new backend before the auto-resume (e.g. cleaning
-            stale bytecode after a code update)
-        on_aborted (callable): Async callback run when the restart ended
-            before its replace window (the content of on_all_stopped will
-            never run): the worker wait was cancelled (a force restart / a
-            backend stop), or a step before the window failed. Receives the
-            reason. The update flow of the backend aborts its transaction
-            there.
-    """
-
-    def __init__(self, on_all_stopped=None, actions=None, on_aborted=None):
-        # async callback, or None
-        self.on_all_stopped = on_all_stopped
-        # action tags, a list of str
-        self.actions = list(actions) if actions else []
-        # async callback, or None
-        self.on_aborted = on_aborted
-
-
-async def _notify_restart_aborted(hooks, reason):
-    """
-    Tell the hooks of a restart that it ended before the replace window
-
-    Never raises: the abort path is a cleanup path already, a failing hook is
-    logged only. The notification is shielded: it must land whatever the
-    state of the orchestration task (the cancelled path included), the
-    update flow of the backend waits for it.
-
-    Args:
-        hooks (RestartHooks): Hooks of the transaction, may be None
-        reason (str): Why the restart ended early
-    """
-    if hooks is None or hooks.on_aborted is None:
-        return
-    try:
-        with trio.CancelScope(shield=True):
-            await hooks.on_aborted(reason)
-    except Exception as e:
-        logger.warning(f'[Restart] on_aborted hook failed: {e}')
-
-
 class GracefulRestart:
     """
     Runtime state of the restart orchestration (module singleton)
@@ -198,11 +144,21 @@ class GracefulRestart:
             orchestration takes it as the default `manager` argument and tests
             inject their own there
         running (bool): True while this backend owns a restart transaction.
-            Set synchronously by the rpc handler (re-entry guard), cleared by
+            Set synchronously by the entries (re-entry guard), cleared by
             cancel_graceful_restart(); kept on the success path, the gate stays
             until the process exits
         scope (trio.CancelScope): Orchestration task scope, cancelled and
             dropped by cancel_graceful_restart()
+        window (RestartWindow): The window of the restart in flight (the one
+            of the default driver or the one the update flow drives itself),
+            None when no restart was opened. An external cancel marks it
+            withdrawn: its shutdown is then refused (the process keeps
+            running)
+        holder (str): Description of the internal owner of the backend (the
+            update transaction, 'update of "m"'), '' when none. The public
+            entry request_graceful_restart() refuses while a holder is
+            registered, open_restart_window() is the entry of the holder
+            itself (doc §7.1)
         resume_scope (trio.CancelScope): Resume task scope of the new backend
         resume_file (PathStr): Resume file published by this transaction (the
             withdrawal removes it and retracts its credential), None when
@@ -217,6 +173,8 @@ class GracefulRestart:
     def __init__(self):
         self.running = False
         self.scope = None
+        self.window = None
+        self.holder = ''
         self.resume_scope = None
         self.resume_file: "Optional[PathStr]" = None
         self.resume_owner = ''
@@ -271,6 +229,34 @@ class GracefulRestart:
                 something (an idle backend has nothing to cancel)
         """
         return bool(self.running or self.scope is not None or self.resume_scope is not None)
+
+    def set_holder(self, holder):
+        """
+        Register the internal owner of the backend (the update transaction)
+
+        Called in the same synchronous section that opens the update
+        transaction (no await in between): the registry and the transaction
+        can never drift apart, and an external restart requested right after
+        sees the new holder.
+
+        Args:
+            holder (str): Description of the owner, e.g. 'update of "m"'
+        """
+        self.holder = holder
+
+    def clear_holder(self, holder):
+        """
+        Clear the registration of the internal owner
+
+        Only the registration of that holder is cleared: a stale close never
+        drops a newer owner (the same rule as the update window of the worker
+        manager).
+
+        Args:
+            holder (str): The description registered before
+        """
+        if self.holder == holder:
+            self.holder = ''
 
     # =========================================================================
     # Resume file: path, credential, read / write / cleanup
@@ -742,22 +728,189 @@ def run_resume_actions(actions):
 # Orchestration (old backend)
 # =============================================================================
 
-async def request_graceful_restart(reason='', nursery=None, hooks=None, owner=''):
+class RestartWindow:
     """
-    Request a graceful restart of the backend (entry point of every trigger)
+    One graceful restart transaction, driven step by step by its caller
+    (doc/2026-10-09_mod-update-backend-adversarial-review.md §7.1):
 
-    The single entry point of the graceful restart: the settings page rpc
+        window = RestartWindow(manager)
+        waiting = await window.begin()                # gate + stop requests + 'stopping'
+        success, resume_list = await window.wait_stopped(GRACEFUL_STOP_TIMEOUT)
+        await window.publish(resume_list, actions)    # resume file + credential
+        # --- the caller's critical section (the update flow replaces the files
+        #     here: every worker stopped, the backend still alive) ---
+        await window.shutdown()                       # 'shutting-down' + backend restart
+
+    The default driver run_graceful_restart() is exactly this sequence with an
+    empty critical section; the update transaction drives the same steps itself
+    (doc §7.2).
+
+    The window is the transaction state of the orchestration: begin() opens the
+    manager gate, wait_stopped() freezes the resume list (from then on the
+    per-config cancels of that list are refused, F4), publish() writes the
+    resume file and announces its credential inside the publication section (a
+    cancel landing there is left to the withdrawal, F3), shutdown() hands the
+    process over to the supervisor. cancel() withdraws the whole transaction
+    (idempotent) and never interrupts a critical section already reached: a
+    cancel landing after the publication lets the replace finish and marks the
+    window withdrawn (its shutdown() is refused); a force restart or a backend
+    stop drives the process exit itself.
+    """
+
+    def __init__(self, manager=GRACEFUL_RESTART.WORKER_MANAGER):
+        """
+        Args:
+            manager (WorkerManager): Manager to drive, defaults to
+                GRACEFUL_RESTART.WORKER_MANAGER (the process singleton,
+                injectable for tests)
+        """
+        self.manager = manager
+        # the resume list of the wait, for the shutdown log
+        self.resume_list: "List[str]" = []
+        # the window was withdrawn (a cancel interrupted it, or the caller
+        # cancelled it): the shutdown is refused, the process keeps running
+        self.aborted = False
+
+    async def begin(self) -> "List[str]":
+        """
+        Open the transaction: the gate, the graceful stop requests and the
+        first phase of the Restart topic.
+
+        The takeover is one critical section of the takeover lock: the restart
+        gate, the marks of a resume queue that is still being prepared or
+        drained (restart_begin re-collects them) and this transaction's first
+        phase. The preparation of the new backend takes the same lock, so it is
+        waited for and the marks of an already consumed resume file always
+        exist before the restart collects them (F6); a queue phase cannot
+        overwrite the phases below either.
+
+        Returns:
+            List[str]: Sorted configs the wait will cover, for the caller's log
+
+        Raises:
+            Exception: restart_begin() failed (a restart already owns the
+                manager, or nothing to begin): the caller releases the rpc
+                flag and aborts
+        """
+        async with GRACEFUL_RESTART._takeover_lock:
+            # blocking: snapshots the running workers and sends the graceful
+            # stop requests over the worker pipes
+            waiting = await trio.to_thread.run_sync(self.manager.restart_begin)
+            await push_restart_phase('stopping')
+            # the window is the transaction the cancel entry marks: registered
+            # inside the section, so a cancel either lands before it (nothing
+            # to mark, its abort event stops the wait instead) or finds it (the
+            # critical section of the caller is left to run, the shutdown is
+            # refused)
+            GRACEFUL_RESTART.window = self
+        return waiting
+
+    async def wait_stopped(self, timeout=None) -> "tuple[bool, List[str]]":
+        """
+        Block for every worker to stop and freeze the resume list.
+
+        The wait lives in the manager (thread-safe, no trio), the timeout
+        escalation happens inside restart_wait and the abort event makes it
+        return early. Its success flag is the whole verdict of the wait: a
+        cancelled one (force restart / backend stop) must never write a resume
+        file and never restart.
+
+        Args:
+            timeout (float): Seconds to wait for the graceful stop before
+                escalating to a kill. None waits forever
+
+        Returns:
+            tuple[bool, List[str]]: (True, the frozen resume list) when the
+                restart may continue, (False, []) when the wait was cancelled
+        """
+        return await trio.to_thread.run_sync(self.manager.restart_wait, timeout)
+
+    async def publish(self, resume_list, actions=None):
+        """
+        Publish the resume intent: write the file and announce its credential.
+
+        The file and its credential are one step inside the publication section
+        of GracefulRestart.write_resume(): a cancel landing while the section is
+        held waits for it and withdraws it, one landing before it cancels the
+        caller at the lock acquire instead (F3). Only called after
+        wait_stopped() succeeded: the list is frozen from here on and the file
+        resumes it whatever a later per-config request does (F4).
+
+        Args:
+            resume_list (list[str]): Configs to auto-resume after the restart
+            actions (list[str]): Optional action tags the new backend runs
+                before the resume. Defaults to None
+        """
+        self.resume_list = list(resume_list)
+        if resume_list or actions:
+            await GRACEFUL_RESTART.write_resume(resume_list, OWNER_RESTART, actions)
+        else:
+            logger.info('[Restart] No worker to resume and no action to run, '
+                        'restarting backend directly')
+
+    async def shutdown(self) -> bool:
+        """
+        Enter the backend restart step: the terminal phase and the supervisor
+        request.
+
+        The success path does NOT release the gate: it stays until the process
+        exits, so no worker is started (and lost) in between. The caller's
+        critical section is over when this is called. A withdrawn window (a
+        cancel landed while the caller was in its critical section) does not
+        restart anything: the backend keeps running and the caller decides
+        what happens to what it changed.
+
+        Returns:
+            bool: True when the restart was handed to the supervisor (the
+                process is going down), False when the window was withdrawn
+        """
+        if self.aborted:
+            logger.info('[Restart] The restart was withdrawn by a cancel, '
+                        'the backend keeps running')
+            return False
+        try:
+            await push_restart_phase('shutting-down')
+            logger.info(f'[Restart] All workers stopped, restarting backend, '
+                        f'resume list: {self.resume_list}')
+            await lifespan_restart()
+            return True
+        finally:
+            if GRACEFUL_RESTART.window is self:
+                GRACEFUL_RESTART.window = None
+
+    async def cancel(self, reason=''):
+        """
+        Withdraw the transaction: release the gate, remove the published resume
+        file, retract its credential, clear the Restart topic (idempotent).
+
+        The module-level cancel_graceful_restart() is the implementation (it is
+        also reached by the force restart / backend stop entries); the window
+        only binds it to its manager. The window is marked withdrawn: a
+        shutdown after it is refused.
+
+        Args:
+            reason (str): Log message
+        """
+        self.aborted = True
+        await cancel_graceful_restart(reason, self.manager)
+
+
+async def request_graceful_restart(reason='', nursery=None):
+    """
+    Request a graceful restart of the backend (the public entry point)
+
+    The single entry point of every external trigger: the settings page rpc
     (ConnState.restart) and the daily scheduled restart
     (alasio.backend.app.schedule) both go through it, so the preconditions
-    and the re-entry guard exist once. The in-app update flow goes through
-    it too, with the hooks carrying its apply step (see RestartHooks).
+    and the re-entry guard exist once. The in-app update flow does not come
+    through here: it drives its own window through open_restart_window(),
+    the entry of the transaction that owns the backend.
 
-    Two owners can refuse the request (doc §16.3): an update transaction in
-    flight only accepts the restart requested by itself -- the owner argument
-    names the mod of the transaction, '' (the default) marks an external
-    trigger -- and the startup window of a new backend refuses the external
-    triggers until its own convergence / checks are over (the convergence
-    requests its restart as the owner of its transaction).
+    Two internal owners refuse the request (doc §16.3): an update transaction
+    in flight (GRACEFUL_RESTART.holder -- accepting an external trigger would
+    race the job's 'updating' phase, which then fails against the gate) and
+    the startup window of a new backend, until its own convergence / checks
+    are over (doc §16.8).
 
     The request only starts the orchestration task and returns immediately:
     the graceful stop can last up to GRACEFUL_STOP_TIMEOUT and the progress
@@ -768,10 +921,6 @@ async def request_graceful_restart(reason='', nursery=None, hooks=None, owner=''
         reason (str): Who requests the restart, for the log
         nursery (trio.Nursery): Nursery to schedule the orchestration in.
             Defaults to the lifespan global nursery, injectable for tests
-        hooks (RestartHooks): Optional hooks of the in-app update flow,
-            handed to the orchestration (see run_graceful_restart)
-        owner (str): The mod of the update transaction requesting this
-            restart, '' = an external trigger
 
     Raises:
         PermissionError: When the backend runs without a supervisor (the
@@ -782,21 +931,18 @@ async def request_graceful_restart(reason='', nursery=None, hooks=None, owner=''
     """
     if not mpipe_backend:
         raise PermissionError('Cannot restart backend running without supervisor')
-    # an update transaction owns the backend: only the transaction itself
-    # (owner = its mod) may request the restart it ends in; every external
-    # trigger is refused -- accepting one would race the job's 'updating'
-    # phase, which then fails against the gate (doc §16.3, GAP-1)
-    from alasio.backend.app.update import UPDATE_MANAGER
-    transaction = UPDATE_MANAGER.transaction
-    if transaction and owner != transaction:
+    # an update transaction owns the backend: only the transaction itself may
+    # request the restart it ends in (through the internal entry); every
+    # external trigger is refused meanwhile (doc §16.3, GAP-1)
+    holder = GRACEFUL_RESTART.holder
+    if holder:
         raise RestartUnavailable(
-            f'The update of "{transaction}" is in progress; '
+            f'The {holder} is in progress; '
             f'wait for it (it restarts the backend itself) or cancel it first')
     # the backend is still starting up (the startup convergence and the first
     # update checks own the instance): an external restart would race the
-    # startup orchestration; the convergence requests its own restart as the
-    # owner of its transaction (doc §16.8)
-    if not UPDATE_STARTUP.startup_over() and not owner:
+    # startup orchestration (doc §16.8)
+    if not UPDATE_STARTUP.startup_over():
         raise RestartUnavailable('The backend is starting up, retry in a moment')
     if GRACEFUL_RESTART.running:
         raise RestartInProgress()
@@ -807,16 +953,71 @@ async def request_graceful_restart(reason='', nursery=None, hooks=None, owner=''
     # requests (a click and the daily schedule, or two clicks) cannot start
     # two orchestrations
     GRACEFUL_RESTART.running = True
-    nursery.start_soon(run_graceful_restart, GRACEFUL_RESTART.WORKER_MANAGER, hooks)
+    nursery.start_soon(run_graceful_restart, GRACEFUL_RESTART.WORKER_MANAGER)
 
 
-async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=None):
+async def open_restart_window(reason='', manager=GRACEFUL_RESTART.WORKER_MANAGER):
     """
-    Graceful restart orchestration (old backend)
+    Open the restart window of the internal owner of the backend
+
+    The internal entry point: the caller is the owner by construction (the
+    update transaction registered in GRACEFUL_RESTART.holder, or the startup
+    convergence of one), so neither the holder registry nor the startup window
+    refuses it -- only a restart already in flight does. The gate, the graceful
+    stop requests and the first phase of the Restart topic are done here; the
+    caller drives the rest of the window itself (doc §7.1):
+
+        window = await open_restart_window('update of mod "m"')
+        success, resume_list = await window.wait_stopped(GRACEFUL_STOP_TIMEOUT)
+        await window.publish(resume_list)
+        # --- the caller's critical section: the files may be replaced here ---
+        await window.shutdown()
+
+    Args:
+        reason (str): Who requests the restart, for the log
+        manager (WorkerManager): Manager to drive, defaults to the process
+            singleton (injectable for tests)
+
+    Returns:
+        RestartWindow: The opened window (begin() succeeded)
+
+    Raises:
+        RestartInProgress: When a restart already owns the backend
+        Exception: begin() failed (a restart already owns the manager, or
+            nothing to begin): the rpc flag is released and the error travels
+            to the caller, which withdraws its own transaction
+    """
+    if GRACEFUL_RESTART.running:
+        raise RestartInProgress()
+    logger.info(f'[Restart] Graceful restart requested, reason: {reason or "unspecified"}')
+    # the flag is set synchronously (no await in between), like the public
+    # entry: no other restart can start while this window lives
+    GRACEFUL_RESTART.running = True
+    window = RestartWindow(manager)
+    try:
+        await window.begin()
+    except BaseException:
+        # the transaction never began (or a step of the begin failed): the flag
+        # must not stay set -- the caller is an update transaction still in
+        # flight and its own failure handling (withdraw, state, checks) follows
+        GRACEFUL_RESTART.running = False
+        raise
+    return window
+
+
+async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER):
+    """
+    Graceful restart orchestration (old backend): the default driver
 
     Runs as a trio background task (the rpc returns immediately): the graceful
     stop can last up to GRACEFUL_STOP_TIMEOUT and the frontend keeps watching
     the worker states through the Worker topic while it waits.
+
+    The default driver of the restart window (doc §7.1): begin -> wait_stopped
+    -> publish -> shutdown, with an empty critical section between the
+    publication and the shutdown. The in-app update flow drives the same steps
+    from its own task, with the file replacement as its critical section (see
+    open_restart_window).
 
     The resume file is written once the wait is over -- never during it -- and
     the credential is announced inside that write. Every call into the blocking
@@ -833,48 +1034,32 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
     and the queue task -- whose mark_resume() / worker_resume() are refused by
     the gate -- ends early on that refusal (the latest user command wins, F6).
 
-    An error raised after the wait (a failing update hook, the supervisor pipe
-    gone) is handled exactly like a cancel -- the manager state is reset (the
-    workers back to idle, a manual retry is possible), the resume file is
-    withdrawn and the Restart topic is cleared -- and it never escapes this
-    task: the task runs in the lifespan global nursery, where a raised error
-    would cancel every other lifespan task and take the whole backend process
-    down (the supervisor would count it as a crash instead of leaving the user
-    with an idle backend). The backend stays alive and the error is reported
-    through the logs (F5).
+    An error raised after the wait (the supervisor pipe gone) is handled
+    exactly like a cancel -- the manager state is reset (the workers back to
+    idle, a manual retry is possible), the resume file is withdrawn and the
+    Restart topic is cleared -- and it never escapes this task: the task runs
+    in the lifespan global nursery, where a raised error would cancel every
+    other lifespan task and take the whole backend process down (the
+    supervisor would count it as a crash instead of leaving the user with an
+    idle backend). The backend stays alive and the error is reported through
+    the logs (F5).
 
     Args:
         manager (WorkerManager): Manager to drive, defaults to
             GRACEFUL_RESTART.WORKER_MANAGER (the process singleton, injectable
             for tests)
-        hooks (RestartHooks): Optional hooks of the in-app update flow
     """
     with trio.CancelScope() as scope:
         GRACEFUL_RESTART.scope = scope
+        window = RestartWindow(manager)
         try:
             try:
-                # the takeover is one critical section of the takeover lock:
-                # the restart gate, the marks of a resume queue that is still
-                # being prepared or drained (restart_begin re-collects them) and
-                # this transaction's first phase. The preparation of the new
-                # backend takes the same lock, so it is waited for and the marks
-                # of an already consumed resume file always exist before the
-                # restart collects them (F6); a queue phase cannot overwrite the
-                # phases below either
-                async with GRACEFUL_RESTART._takeover_lock:
-                    # blocking: snapshots the running workers and sends the
-                    # graceful stop requests over the worker pipes
-                    waiting = await trio.to_thread.run_sync(manager.restart_begin)
-                    await push_restart_phase('stopping')
+                waiting = await window.begin()
             except Exception as e:
                 # already restarting (the rpc re-entry guard makes this
                 # unreachable) or nothing to begin: release the rpc flag
                 logger.error(f'[Restart] Graceful restart cannot begin: {e}')
                 GRACEFUL_RESTART.running = False
-                # the hooks must learn that the replace window will never come
-                # (an update transaction waits on it, a silent return would
-                # strand its job): every early exit notifies
-                await _notify_restart_aborted(hooks, f'the restart could not begin: {e}')
                 return
 
             # the waiting set of restart_begin() is the whole set this restart
@@ -891,13 +1076,11 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
             #    success flag is the whole verdict of the wait: a cancelled one
             #    (force restart / backend stop) must never write a resume file
             #    and never restart
-            success, resume_list = await trio.to_thread.run_sync(
-                manager.restart_wait, GRACEFUL_STOP_TIMEOUT)
+            success, resume_list = await window.wait_stopped(GRACEFUL_STOP_TIMEOUT)
             if not success:
                 # cancelled while waiting (force restart / backend stop); the
                 # cancel path already owns the state cleanup
                 logger.info('[Restart] Graceful restart was cancelled')
-                await _notify_restart_aborted(hooks, 'the worker wait was cancelled')
                 return
 
             # 2) the wait is over: publish the resume intent once (the file and
@@ -909,28 +1092,17 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
             #    on, because this file resumes it whatever the request does; a
             #    "restarting" entry outside the list carries no resume intent
             #    and stays cancellable
-            actions = getattr(hooks, 'actions', None)
-            if resume_list or actions:
-                await GRACEFUL_RESTART.write_resume(resume_list, OWNER_RESTART, actions)
-            else:
-                logger.info('[Restart] No worker to resume and no action to run, '
-                            'restarting backend directly')
+            await window.publish(resume_list)
 
-            # 3) replacement window of the in-app update flow: every worker
-            #    stopped, the backend still runs (a failure here cancels below)
-            if hooks is not None and hooks.on_all_stopped is not None:
-                await hooks.on_all_stopped()
+            # 3) the critical section (empty here): every worker stopped, the
+            #    backend still runs, the resume intent published
 
             # 4) all workers stopped: enter the existing backend restart step.
             #    The success path does NOT release the gate: it stays until the
             #    process exits, so no worker is started (and lost) in between
-            await push_restart_phase('shutting-down')
-            logger.info(f'[Restart] All workers stopped, restarting backend, resume list: {resume_list}')
-            await lifespan_restart()
+            await window.shutdown()
         except trio.Cancelled:
-            # the cancel path (cancel_graceful_restart) owns the cleanup; the
-            # hooks are still told: the replace window will never be reached
-            await _notify_restart_aborted(hooks, 'the restart was cancelled')
+            # the cancel path (cancel_graceful_restart) owns the cleanup
             raise
         except Exception as e:
             # the failure is treated as a cancel, never raised: see the
@@ -939,14 +1111,11 @@ async def run_graceful_restart(manager=GRACEFUL_RESTART.WORKER_MANAGER, hooks=No
             logger.error(f'[Restart] Graceful restart failed: {e}')
             logger.exception(e)
             try:
-                await cancel_graceful_restart(f'graceful restart failed: {e}', manager)
+                await window.cancel(f'graceful restart failed: {e}')
             except Exception as cancel_error:
                 # every step of the cancel is already guarded; this only keeps
                 # the orchestration task from raising under any circumstance
                 logger.error(f'[Restart] Failed to cancel the failed restart: {cancel_error}')
-            # after the cleanup: the hooks abort their own side (the update
-            # flow of the backend), the replace window was never reached
-            await _notify_restart_aborted(hooks, f'the restart failed: {e}')
             return
         finally:
             if GRACEFUL_RESTART.scope is scope:
@@ -984,6 +1153,16 @@ async def cancel_graceful_restart(reason: str = '', manager=GRACEFUL_RESTART.WOR
     # scope (the orchestration task being cancelled, a backend shutdown): every
     # await below is shielded
     with trio.CancelScope(shield=True):
+        # the window of the transaction in flight (the driver's or the one the
+        # update flow drives itself) is marked withdrawn: whatever the caller
+        # does next, its shutdown() must not take the backend down any more (the
+        # publication is withdrawn below, the gate released). A caller already
+        # in its critical section is not interrupted: the cancel only takes the
+        # restart away from it
+        window = GRACEFUL_RESTART.window
+        if window is not None:
+            window.aborted = True
+            GRACEFUL_RESTART.window = None
         # read before the cleanup below resets it: only a transaction actually
         # in flight reports the cancellation (the cleanup itself is idempotent
         # and runs unconditionally: it is the shutdown guarantee)

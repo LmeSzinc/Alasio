@@ -334,7 +334,8 @@ class DeployJob(DeployTarget):
 
         Args:
             on_job_phase (callable, optional): The async callback of update()
-            phase (str): 'downloading' or 'updating'
+            phase (str): 'checking' (the version check), 'downloading' (the
+                update pack download) or 'updating' (the local changes)
 
         Raises:
             UpdateAborted: The callback returned False (the transaction was
@@ -402,8 +403,9 @@ class DeployJob(DeployTarget):
         Args:
             on_job_phase (callable, optional): Async callback of the update
                 transaction, called before each phase of the flow with
-                'downloading' (the version check and the download run) or
-                'updating' (the local changes start). Its returned bool tells
+                'checking' (the version check), 'downloading' (the update pack
+                download) or 'updating' (the local changes start). Its returned
+                bool tells
                 the flow whether to continue: False aborts the flow before it
                 changes anything, the temporary files are removed and
                 UpdateAborted is raised - the fallback check of a
@@ -423,57 +425,69 @@ class DeployJob(DeployTarget):
         if self.server is None:
             raise ValueError('Failed to update: no server provided')
         async with self.alocked():
+            # the version check opens the flow: the phase is the first
+            # cancellation point of a transaction (see _job_phase), the
+            # unfinished job below is finished inside it
+            await self._job_phase(on_job_phase, 'checking')
+
             # finish the unfinished job first, its run() skips write()
             job = await trio.to_thread.run_sync(self._get_unfinished_job)
             if job is not None:
                 logger.info(f'Found unfinished job: {job.__class__}')
                 await job.run()
 
-            await self._job_phase(on_job_phase, 'downloading')
             check = await self.check()
             local = check.local
             info = check.info
 
+            if local and local == info.version:
+                # the same version: check the index and the files, the local
+                # repair path (nothing to download, no version to compare)
+                await self._job_phase(on_job_phase, 'updating')
+                job = ResetJob(self.server, root=self.root, name=self.name)
+                job._latest_info = info
+                return await job.run()
             if not local:
                 # the local index is missing or malformed, the version is
-                # unknown: rebuild from the latest index
+                # unknown: rebuild from the latest index. There is no version
+                # to compare and no update pack to download, the rebuild is one
+                # apply (its own index download happens inside it)
                 logger.warning('Failed to read the local version, rebuilding from the latest index')
                 await self._job_phase(on_job_phase, 'updating')
                 job = RebuildJob(self.server, root=self.root, name=self.name)
                 job._latest_info = info
                 return await job.run()
-            if local != info.version:
-                # a version mismatch, apply the update pack incrementally
-                try:
-                    data = await self.server.get_update_pack(local, info.version)
-                except httpx2.HTTPStatusError as e:
-                    # the update pack of the local version is not on the
-                    # server (out of the update window or removed), the
-                    # incremental path is broken: rebuild from the latest index
-                    logger.warning(
-                        f'Failed to get the update pack {local} -> {info.version}: {e}, '
-                        f'rebuilding from the latest index'
-                    )
-                    await self._job_phase(on_job_phase, 'updating')
-                    job = RebuildJob(self.server, root=self.root, name=self.name)
-                    job._latest_info = info
-                    return await job.run()
-                # the download is over, the local changes start: the workers
-                # are stopped before them (the manager phase)
+
+            # the main branch: the version mismatches, apply the update pack
+            # incrementally. The download has its own phase (the transaction
+            # stays cancellable and shows the download), the local changes come
+            # after it
+            await self._job_phase(on_job_phase, 'downloading')
+            try:
+                data = await self.server.get_update_pack(local, info.version)
+            except httpx2.HTTPStatusError as e:
+                # the update pack of the local version is not on the server (out
+                # of the update window or removed), the incremental path is
+                # broken: rebuild from the latest index
+                logger.warning(
+                    f'Failed to get the update pack {local} -> {info.version}: {e}, '
+                    f'rebuilding from the latest index'
+                )
                 await self._job_phase(on_job_phase, 'updating')
-                job = UpdateJob(data, server=self.server, root=self.root, name=self.name)
-                if await job.run():
-                    return True
-                # the update pack failed to apply, rebuild from the latest
-                # index: a corrupt pack is bypassed, the latest index and
-                # the files are downloaded directly
-                logger.warning('Failed to apply the update pack, rebuilding from the latest index')
                 job = RebuildJob(self.server, root=self.root, name=self.name)
                 job._latest_info = info
                 return await job.run()
-            # the same version, check the index and the files
+            # the download is over, the local changes start: the workers are
+            # stopped before them (the manager phase)
             await self._job_phase(on_job_phase, 'updating')
-            job = ResetJob(self.server, root=self.root, name=self.name)
+            job = UpdateJob(data, server=self.server, root=self.root, name=self.name)
+            if await job.run():
+                return True
+            # the update pack failed to apply, rebuild from the latest index: a
+            # corrupt pack is bypassed, the latest index and the files are
+            # downloaded directly
+            logger.warning('Failed to apply the update pack, rebuilding from the latest index')
+            job = RebuildJob(self.server, root=self.root, name=self.name)
             job._latest_info = info
             return await job.run()
 

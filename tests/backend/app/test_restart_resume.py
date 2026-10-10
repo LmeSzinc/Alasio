@@ -586,14 +586,21 @@ class TestRunGracefulRestart:
 
     @pytest.mark.trio
     async def test_actions_write_file_without_workers(self, project_root, manager, monkeypatch):
+        """The publication of the caller carries the action tags of the resume
+        file (they belong to the resume protocol, not to a hook)"""
+
         async def fake_lifespan_restart():
             return None
 
         monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
         monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', lambda credential: None)
 
-        hooks = restart.RestartHooks(actions=['test_action'])
-        await run_graceful_restart(manager, hooks)
+        window = restart.RestartWindow(manager)
+        await window.begin()
+        success, resume_list = await window.wait_stopped(restart.GRACEFUL_STOP_TIMEOUT)
+        assert success is True
+        await window.publish(resume_list, actions=['test_action'])
+        assert await window.shutdown() is True
 
         files = GRACEFUL_RESTART.iter_resume_files()
         assert len(files) == 1
@@ -602,14 +609,12 @@ class TestRunGracefulRestart:
         assert record.actions == ['test_action']
 
     @pytest.mark.trio
-    async def test_hooks_order_and_actions(self, project_root, manager, monkeypatch):
+    async def test_the_caller_drives_the_window(self, project_root, manager, monkeypatch):
+        """The steps of the window belong to its caller (doc §7.1): every worker
+        stopped and the intent published before its critical section, the
+        backend restart after it"""
         start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
         order = []
-
-        async def on_all_stopped():
-            # the hook runs after every worker stopped, before the restart
-            assert manager.state['cfg_a'].state == 'restarting'
-            order.append('hook')
 
         async def fake_lifespan_restart():
             order.append('restart')
@@ -617,56 +622,39 @@ class TestRunGracefulRestart:
         monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
         monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', lambda credential: None)
 
-        hooks = restart.RestartHooks(on_all_stopped=on_all_stopped, actions=['test_action'])
-        await run_graceful_restart(manager, hooks)
+        window = await restart.open_restart_window('test window', manager)
+        assert GRACEFUL_RESTART.window is window
+        assert GRACEFUL_RESTART.running is True
+        success, resume_list = await window.wait_stopped(restart.GRACEFUL_STOP_TIMEOUT)
+        assert success is True
+        assert resume_list == ['cfg_a']
+        await window.publish(resume_list, actions=['test_action'])
 
-        assert order == ['hook', 'restart']
+        # the critical section of the caller: every worker stopped, the resume
+        # intent published, the backend still alive
+        assert manager.state['cfg_a'].state == 'restarting'
+        assert RestartSource().data['phase'] == 'stopping'
+        order.append('critical')
+
+        assert await window.shutdown() is True
+        assert order == ['critical', 'restart']
         record = read_record(GRACEFUL_RESTART.iter_resume_files()[0])
         assert record.actions == ['test_action']
         assert record.configs == ['cfg_a']
 
     @pytest.mark.trio
-    async def test_begin_failure_notifies_the_hooks(self, manager, monkeypatch):
+    async def test_a_failed_caller_withdraws_its_window(self, project_root, manager, monkeypatch):
         """
-        A restart that cannot begin must tell its hooks: the update flow
-        waits on the replace window and a silent return would strand its job
-        there (the rpc flag must be released as well).
-        """
-        aborted = []
+        F5/E5: a failure in the caller's critical section is withdrawn, the
+        backend keeps running
 
-        async def on_aborted(reason):
-            aborted.append(reason)
-
-        def failing_begin():
-            raise RuntimeError('Restart already in progress')
-
-        monkeypatch.setattr(manager, 'restart_begin', failing_begin)
-        hooks = restart.RestartHooks(on_aborted=on_aborted)
-        GRACEFUL_RESTART.running = True
-
-        with logger.mock_capture_writer() as capture:
-            await run_graceful_restart(manager, hooks)
-            assert capture.fd.any_contains(
-                'Graceful restart cannot begin: Restart already in progress')
-
-        assert len(aborted) == 1
-        assert 'could not begin' in aborted[0]
-        assert GRACEFUL_RESTART.running is False
-
-    @pytest.mark.trio
-    async def test_hook_failure_cancels_the_restart(self, project_root, manager, monkeypatch):
-        """
-        F5: a failing update hook cancels the restart, the task returns normally
-
-        The error must never escape the orchestration task: it runs in the
-        lifespan global nursery (GLOBAL_CONTEXT.global_nursery), where a raised
-        error cancels every other lifespan task and takes the whole backend
-        process down.
+        The window published the resume intent; the caller cannot finish (its
+        replacement failed), so it cancels the window: the file is removed, the
+        gate released and the Restart topic cleared -- the backend stays alive
+        with the configs it stopped stopped, and the withdrawn window refuses
+        to shut the backend down.
         """
         start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
-
-        async def failing_hook():
-            raise RuntimeError('replacement failed')
 
         async def fake_lifespan_restart():
             raise AssertionError('the backend must not restart')
@@ -674,21 +662,45 @@ class TestRunGracefulRestart:
         monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
         monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', lambda credential: None)
 
-        hooks = restart.RestartHooks(on_all_stopped=failing_hook)
+        window = await restart.open_restart_window('test window', manager)
+        success, resume_list = await window.wait_stopped(restart.GRACEFUL_STOP_TIMEOUT)
+        assert success is True
+        await window.publish(resume_list)
+        assert GRACEFUL_RESTART.iter_resume_files() != []
+
+        # the caller's critical section failed: it withdraws the transaction
         with logger.mock_capture_writer() as capture:
-            await run_graceful_restart(manager, hooks)
-            # the failure is logged (the fd log and the backend log stream the
-            # frontend subscribes to) and then treated as a cancel
-            assert capture.fd.any_contains('Graceful restart failed: replacement failed')
-            assert capture.fd.any_contains(
-                'Graceful restart cancelled: graceful restart failed: replacement failed')
-            assert capture.backend.any_contains('Graceful restart failed: replacement failed')
+            await window.cancel('the replacement failed')
+            assert capture.fd.any_contains('Graceful restart cancelled: the replacement failed')
 
         # cancelled: no resume file, the gate is released, entries are back to idle
         assert GRACEFUL_RESTART.iter_resume_files() == []
         assert GRACEFUL_RESTART.restart_in_progress() is False
         assert 'cfg_a' not in manager.state
         assert RestartSource().data == {}
+        # and the withdrawn window never restarts the backend
+        assert await window.shutdown() is False
+
+    @pytest.mark.trio
+    async def test_begin_failure_releases_the_flag(self, manager, monkeypatch):
+        """
+        A restart that cannot begin releases the rpc flag and returns: the
+        entry point reports the error only (the update flow handles a failed
+        begin through its own window, see TestOpenRestartWindow in
+        tests/backend/app/test_restart_request.py).
+        """
+        def failing_begin():
+            raise RuntimeError('Restart already in progress')
+
+        monkeypatch.setattr(manager, 'restart_begin', failing_begin)
+        GRACEFUL_RESTART.running = True
+
+        with logger.mock_capture_writer() as capture:
+            await run_graceful_restart(manager)
+            assert capture.fd.any_contains(
+                'Graceful restart cannot begin: Restart already in progress')
+
+        assert GRACEFUL_RESTART.running is False
 
     @pytest.mark.trio
     async def test_restart_failure_cancels_and_removes_file(self, project_root, manager, monkeypatch):
@@ -739,18 +751,14 @@ class TestRunGracefulRestart:
         """
         start_worker(manager, 'WorkerTestScheduler', 'cfg_a')
 
-        async def failing_hook():
-            raise RuntimeError('replacement failed')
+        async def failing_restart():
+            raise PermissionError('Cannot restart backend running without supervisor')
 
-        async def fake_lifespan_restart():
-            raise AssertionError('the backend must not restart')
-
-        monkeypatch.setattr(restart, 'lifespan_restart', fake_lifespan_restart)
+        monkeypatch.setattr(restart, 'lifespan_restart', failing_restart)
         monkeypatch.setattr(GRACEFUL_RESTART, 'announce_resume_token', lambda credential: None)
 
-        hooks = restart.RestartHooks(on_all_stopped=failing_hook)
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(run_graceful_restart, manager, hooks)
+            nursery.start_soon(run_graceful_restart, manager)
             await wait_until(
                 lambda: 'cfg_a' not in manager.state
                 and GRACEFUL_RESTART.restart_in_progress() is False,

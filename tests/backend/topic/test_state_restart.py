@@ -51,7 +51,7 @@ class TestRestartRpc:
 
         assert restart.GRACEFUL_RESTART.running is True
         assert restart_state.started == [
-            (restart.run_graceful_restart, (restart.GRACEFUL_RESTART.WORKER_MANAGER, None))]
+            (restart.run_graceful_restart, (restart.GRACEFUL_RESTART.WORKER_MANAGER,))]
 
     @pytest.mark.trio
     async def test_restart_rejected_when_already_running(self, state):

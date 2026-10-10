@@ -27,19 +27,24 @@ transaction.
 
 The check of one mod is read-only: the local version of the mod ledger
 against latest.pack of its update source, one small request per round.
-The update transaction (rpc update_apply) has two phases:
+The update transaction (rpc update_apply) has three phases, one per step of
+the flow (they are the phases the deploy job reports, see DeployJob.update):
 
-- 'downloading': the version pre-flight - DeployJob.check() reads the
-  local version against latest.pack, read-only and cancellable through
-  update_cancel (nothing was changed, the same flow can be retried). The
-  pre-flight only decides whether the update is still there: the download
-  belongs to the exclusive lock of DeployJob.update(), see below;
-- 'updating': the graceful restart machinery is reused, its on_all_stopped
-  hook runs DeployJob.update() - the whole download and replace flow of
-  the target under the one exclusive lock of the job - while every worker
-  is stopped and the backend is still alive (replacing the files is safe
-  there), then the supervisor restarts the backend and the new process
-  resumes the recorded configs.
+- 'checking': the version check - the transaction pre-flight (DeployJob.check()
+  before the lock) and the check inside the job flow read the local version
+  against latest.pack, read-only and cancellable through update_cancel
+  (nothing was changed, the same flow can be retried). The state of the mod
+  follows the phases the job reports, this one included;
+- 'downloading': the update pack downloads into memory, still cancellable
+  through update_cancel and with nothing changed on disk;
+- 'updating': the update transaction opens and drives its own graceful restart
+  window (restart.RestartWindow): every worker is stopped and the resume intent
+  published before DeployJob.update() - the whole download and replace flow of
+  the target under the one exclusive lock of the job - replaces the files while
+  the backend is still alive, then the window hands the process to the
+  supervisor and the new backend resumes the recorded configs. A failure after
+  the window opened withdraws it again: the backend keeps running and the
+  half-updated tree converges on the next update.
 
 A separate download phase was rejected: it would run outside the lock of
 update() and could race a second updater of the same target (the lock is
@@ -92,93 +97,6 @@ class UpdateError(RuntimeError):
     the backend runs without a supervisor. The topic translates it into an
     RpcValueError.
     """
-
-
-class ApplyRendezvous:
-    """
-    The rendezvous of the applying phase of one update transaction: the job
-    task and the restart orchestration wait for each other here (the
-    applying-phase handoff of doc/2026-10-05_mod-update-backend-integration.md).
-
-    The job side (ModUpdateManager.on_job_phase, the 'updating' boundary)
-    waits for the replace window -- every worker stopped, the resume intent
-    published -- and aborts when the restart ended before it. The restart
-    side (RestartHooks.on_all_stopped / on_aborted) opens the window and
-    then waits for the job: a failed apply is raised there and cancels the
-    restart (E5: the backend keeps running, the stopped configs stay
-    stopped). One instance per transaction: both events are one-shot and
-    nothing is ever reset.
-    """
-
-    def __init__(self):
-        # restart -> job: the window is open, or why it will never open
-        self._window = trio.Event()
-        self._window_error = None
-        # job -> restart: the apply ended, with the error the restart must
-        # raise to cancel itself (None when the apply succeeded)
-        self._applied = trio.Event()
-        self._apply_error = None
-
-    # ---------------------------------------------------------------- job side
-
-    async def wait_window(self):
-        """
-        Block the job's 'updating' phase until the replace window is open.
-
-        Raises:
-            RuntimeError: The restart ended before the window (it was
-                cancelled, or a step before the window failed): the job
-                aborts before changing any file
-        """
-        await self._window.wait()
-        if self._window_error is not None:
-            raise self._window_error
-
-    def finished(self, error=None):
-        """
-        The job ended (applied, failed or cancelled): release the restart
-        hook waiting for it.
-
-        Args:
-            error (Exception): The error the restart hook must raise to
-                cancel the restart, None when the apply succeeded. Defaults
-                to None
-        """
-        self._apply_error = error
-        self._applied.set()
-
-    # ------------------------------------------------------------ restart side
-
-    async def on_all_stopped(self):
-        """
-        The hook of the graceful restart of the transaction (see
-        RestartHooks.on_all_stopped): every worker stopped and the resume
-        intent published - the replace window. Open the window for the job
-        (the files may be replaced now) and wait for the job to finish; a
-        failed apply is raised here, which cancels the restart (§10: the
-        backend keeps running, the stopped configs stay stopped, the
-        half-applied tree converges on the next update).
-        """
-        self._window.set()
-        await self._applied.wait()
-        if self._apply_error is not None:
-            raise self._apply_error
-
-    async def on_aborted(self, reason):
-        """
-        The hook of the graceful restart of the transaction when it ended
-        before the replace window (see RestartHooks.on_aborted): wake the
-        job's 'updating' phase with the error it must raise. A call after
-        the window opened is a no-op -- the job is already replacing the
-        files and the restart cannot roll it back.
-
-        Args:
-            reason (str): Why the restart ended early
-        """
-        if self._window.is_set():
-            return
-        self._window_error = RuntimeError(f'The restart of the update was aborted: {reason}')
-        self._window.set()
 
 
 class UpdateTransaction:
@@ -455,11 +373,11 @@ class ModUpdateManager:
         # the startup convergence of the mod failed: retried before the next
         # check round until it succeeds (§2.6)
         self.convergence_pending = False
-        # the rendezvous of the applying phase of the transaction in flight
-        # (see ApplyRendezvous): the job's 'updating' phase and the restart
-        # hooks meet there and release each other, one instance per
-        # transaction, None when no apply is in flight
-        self._apply: "Optional[ApplyRendezvous]" = None
+        # the restart window of the applying phase of the transaction in flight
+        # (restart.RestartWindow): the job's 'updating' phase opens and drives
+        # it (see on_job_phase), the transaction task closes it (shutdown or
+        # withdraw). None when no apply is in flight
+        self._window = None
 
     # =========================================================================
     # State on the Update topic
@@ -726,14 +644,20 @@ class ModUpdateManager:
            against latest.pack, read-only and cancellable through
            update_cancel (nothing is changed, the same flow can be retried);
         2. the whole update flow of the target (DeployJob.update(), its one
-           exclusive lock) with this manager as its phase listener: the pack
-           download stays cancellable ('downloading'), and at the 'updating'
-           phase boundary every worker is stopped and the resume intent
-           published (the graceful restart takes the backend over) before
-           the job changes the real files;
-        3. the graceful restart of the transaction restarts the backend with
-           the new files on disk, the new process resumes the recorded
-           configs.
+           exclusive lock) with this manager as its phase listener: the
+           phases of the flow drive the state ('checking' / 'downloading'
+           while the files on disk are untouched, then 'updating'), and at
+           the 'updating'
+           phase boundary the transaction opens its own restart window --
+           every worker stopped, the resume intent published -- before the
+           job changes the real files (see on_job_phase);
+        3. the job replaced the files: the window is shut down and the
+           supervisor restarts the backend with the new files on disk, the
+           new process resumes the recorded configs;
+        4. anything else withdraws the window again (the resume file removed,
+           the gate released): the backend keeps running, the stopped configs
+           stay stopped and the half-updated tree converges on the next
+           update (E5).
 
         Never raises: the task lives in the manager nursery, where a raised
         error would cancel every other task; every failure ends in the error
@@ -741,6 +665,10 @@ class ModUpdateManager:
         queued configs on the way out (§16.4).
         """
         manager = self.manager
+        # whether the transaction handed the backend to the supervisor: the
+        # check sequence only resumes when it did not (the new process checks
+        # from scratch, §16.4)
+        restarting = False
         try:
             async with manager.transaction_window(self.name) as transaction:
                 # phase 1: the pre-flight, the clean cancellation window
@@ -767,10 +695,7 @@ class ModUpdateManager:
                     return
                 # phase 2: the whole flow of the target, the job reports its own
                 # phases through this manager as its callback (see on_job_phase)
-                self._prepare_apply()
-                rendezvous = self._apply
                 state_error = ''
-                apply_error = None
                 cancelled = False
                 try:
                     with trio.CancelScope() as scope:
@@ -787,7 +712,6 @@ class ModUpdateManager:
                     elif not ok:
                         # some records stay in error: the tree did not converge
                         state_error = 'Some files failed to update, retry the update'
-                        apply_error = RuntimeError(f'The update of "{self.name}" did not converge')
                 except UpdateAborted as e:
                     # the fallback check of the phase callback: the transaction
                     # was cancelled while the job had no request to interrupt
@@ -795,29 +719,45 @@ class ModUpdateManager:
                     cancelled = True
                 except trio.Cancelled:
                     # the manager is going down (its nursery was cancelled): the
-                    # hook must not let the restart continue
-                    apply_error = RuntimeError('The update manager stopped')
+                    # window must not let the restart continue
+                    await self._withdraw_window('the update manager stopped')
                     raise
                 except Exception as e:
                     logger.error(f'[Update] Failed to apply the update of "{self.name}": {e}')
                     logger.exception(e)
                     state_error = str(e)
-                    apply_error = e
-                finally:
-                    # release the restart hook waiting for the apply, then
-                    # disarm: the hooks hold the rendezvous instance, a late
-                    # notification can only touch a finished transaction
-                    rendezvous.finished(apply_error)
-                    if self._apply is rendezvous:
-                        self._apply = None
+                # the restart window of the applying phase (opened by
+                # on_job_phase at its 'updating' boundary)
+                if cancelled or state_error:
+                    # nothing was applied (or the tree did not converge): the
+                    # published intent is withdrawn, the backend keeps running
+                    await self._withdraw_window(f'the update of "{self.name}" did not apply')
+                else:
+                    # the job replaced the files: hand the process over to the
+                    # supervisor, the new backend resumes the recorded configs
+                    window = self._take_window()
+                    if window is not None:
+                        try:
+                            restarting = await window.shutdown()
+                        except Exception as e:
+                            # the supervisor pipe is gone: withdraw the published
+                            # intent, the backend stays alive
+                            logger.error(f'[Update] Failed to restart the backend: {e}')
+                            logger.exception(e)
+                            state_error = str(e)
+                            try:
+                                await window.cancel(
+                                    f'the restart of the update of "{self.name}" failed')
+                            except Exception as cancel_error:
+                                logger.error(f'[Update] Failed to withdraw the restart: {cancel_error}')
                 if cancelled:
                     # zero side effect: nothing was changed on disk
                     self.set_state('available')
                     return
                 if state_error:
                     self.set_state('error', error=state_error)
-                # the success path has nothing to do here: the hook of the restart
-                # lets it continue with its shutdown and the new backend takes over
+                # the success path has nothing to do here: the window handed the
+                # process to the supervisor, the new backend takes over
         except trio.Cancelled:
             raise
         except Exception as e:
@@ -829,8 +769,10 @@ class ModUpdateManager:
             # update interrupted it -- not immediately (the state was just
             # checked, and a failure would likely repeat), the standard
             # follow-up spacing first, then the configured interval; None
-            # (no automatic check) parks the sequence with AutoUpdate off
-            if not restart_app.GRACEFUL_RESTART.running:
+            # (no automatic check) parks the sequence with AutoUpdate off.
+            # The restarted backend is the exception: its process takes the
+            # mods over and the first checks belong to it
+            if not restarting:
                 self.start_check_loop(delay=manager.next_delay(1), rounds=1)
 
     # =========================================================================
@@ -844,13 +786,18 @@ class ModUpdateManager:
         the cancellability of the transaction follow what the job is really
         doing):
 
-        - 'downloading': the version check and the pack download run (the
-          transaction is still cancellable through update_cancel, nothing on
-          the real files was changed yet);
-        - 'updating': the local changes start: every worker is stopped here
-          (with the resume intent published) and this call returns only when
-          the replace window is open; the transaction is not cancellable any
-          more.
+        - 'checking': the version check of the flow runs (the transaction is
+          still cancellable through update_cancel, nothing on the real files
+          was changed yet);
+        - 'downloading': the update pack downloads (still cancellable through
+          update_cancel, nothing on the real files was changed yet);
+        - 'updating': the local changes start. This opens the restart window of
+          the transaction and drives it to its publication: the gate, the
+          graceful stop of every worker, the freeze of the resume list and the
+          resume file. The call returns True only once the window is open --
+          the backend still runs, the files may be replaced from here on -- and
+          only the transaction task closes it (see run_transaction); the
+          transaction is not cancellable any more.
 
         The call is also the fallback check of a cancellation: a cancel
         interrupts an in-flight request itself, but one that arrived while the
@@ -859,7 +806,7 @@ class ModUpdateManager:
         temporary files and raises UpdateAborted).
 
         Args:
-            phase (str): 'downloading' or 'updating'
+            phase (str): 'checking', 'downloading' or 'updating'
 
         Returns:
             bool: True to let the job continue, False when the transaction was
@@ -871,25 +818,42 @@ class ModUpdateManager:
         """
         if self._cancelled():
             return False
+        if phase == 'checking':
+            self.set_state('checking')
+            return True
         if phase == 'downloading':
             self.set_state('downloading')
             return True
         if phase != 'updating':
             raise ValueError(f'Unknown update job phase: {phase!r}')
-        rendezvous = self._apply
-        if rendezvous is None:
-            raise RuntimeError('The update transaction is not armed for the apply')
         # the phase boundary: the state is the not cancellable one from here
         # on, and every worker is stopped before the job changes the files
         self.set_state('updating')
         try:
-            await restart_app.request_graceful_restart(
-                reason=f'update of mod "{self.name}"', hooks=self._apply_hooks(),
-                owner=self.name)
+            window = await restart_app.open_restart_window(
+                reason=f'update of mod "{self.name}"')
         except restart_app.RestartInProgress:
             raise RuntimeError('A graceful restart is in progress') from None
-        # wait for the hook: every worker stopped, the resume intent published
-        await rendezvous.wait_window()
+        self._window = window
+        try:
+            success, resume_list = await window.wait_stopped(restart_app.GRACEFUL_STOP_TIMEOUT)
+        except BaseException:
+            # the wait was interrupted (the manager is going down): the window
+            # wrote nothing yet, withdraw it and let the job abort
+            await self._withdraw_window('the restart of the update was interrupted')
+            raise
+        if not success:
+            # a force restart / a backend stop cancelled the wait: nothing was
+            # published, the resume list is not frozen and the job aborts
+            # before changing anything (E5)
+            await self._withdraw_window('the worker wait was cancelled')
+            raise RuntimeError(
+                'The restart of the update was aborted: the worker wait was cancelled')
+        # the publication (the resume file and its credential): the configs of
+        # the list are resumed by the new backend whatever happens from here on,
+        # and the caller's critical section (the file replacement) runs in the
+        # job after this returns
+        await window.publish(resume_list)
         return True
 
     def _cancelled(self):
@@ -909,22 +873,35 @@ class ModUpdateManager:
             return True
         return transaction.cancelled()
 
-    def _prepare_apply(self):
+    def _take_window(self):
         """
-        Arm the rendezvous of the applying phase before the job runs, see
-        on_job_phase().
-        """
-        self._apply = ApplyRendezvous()
+        Take the restart window of the applying phase out of the manager.
 
-    def _apply_hooks(self):
+        Returns:
+            restart.RestartWindow: The window opened by on_job_phase, None when
+                the job never reached its applying phase
         """
-        The hooks of the graceful restart of this transaction, bound to the
-        rendezvous instance of the transaction (a late call can only touch a
-        finished transaction).
+        window = self._window
+        self._window = None
+        return window
+
+    async def _withdraw_window(self, reason):
         """
-        rendezvous = self._apply
-        return restart_app.RestartHooks(
-            on_all_stopped=rendezvous.on_all_stopped, on_aborted=rendezvous.on_aborted)
+        Withdraw the restart window of the applying phase (best effort)
+
+        The published resume file is removed and the gate released: the backend
+        keeps running whatever the caller does next.
+
+        Args:
+            reason (str): Log message
+        """
+        window = self._take_window()
+        if window is None:
+            return
+        try:
+            await window.cancel(reason)
+        except Exception as e:
+            logger.error(f'[Update] Failed to withdraw the restart of "{self.name}": {e}')
 
 
 class UpdateManager:
@@ -1115,7 +1092,7 @@ class UpdateManager:
                 self._nursery = nursery
                 try:
                     try:
-                        await self._startup_convergence()
+                        restarting = await self._startup_convergence()
                     except trio.Cancelled:
                         raise
                     except Exception as e:
@@ -1124,9 +1101,10 @@ class UpdateManager:
                         # rounds
                         logger.error(f'[Update] Startup convergence failed: {e}')
                         logger.exception(e)
-                    if restart_app.GRACEFUL_RESTART.running:
-                        # the convergence requested a restart: the first
-                        # checks belong to the new process
+                        restarting = False
+                    if restarting:
+                        # the convergence handed the process to the supervisor:
+                        # the first checks belong to the new backend
                         await trio.sleep_forever()
                     for mod in self.mods.values():
                         if mod.mod.entry.mirrors:
@@ -1161,7 +1139,7 @@ class UpdateManager:
         except Exception as e:
             logger.warning(f'[Update] Failed to close the http client: {e}')
 
-    async def _startup_convergence(self):
+    async def _startup_convergence(self) -> bool:
         """
         Finish the updates a killed process left behind (§2.6).
 
@@ -1171,39 +1149,77 @@ class UpdateManager:
         (missing pieces are downloaded from the mod server). A convergence
         failure is reported on the topic of the mod and retried before its
         next check round.
-        """
-        converged = []
-        for mod in self.mods.values():
-            if await mod.finish_convergence():
-                converged.append(mod)
-        if not converged:
-            return
-        await self.request_convergence_restart(converged)
 
-    async def request_convergence_restart(self, mods):
+        Returns:
+            bool: True when a convergence restart was handed to the supervisor
+                (the process is going down, the checks belong to the new one),
+                False when there was nothing to converge or the restart could
+                not be handed over
+        """
+        converged = [mod for mod in self.mods.values() if await mod.finish_convergence()]
+        if not converged:
+            return False
+        return await self.request_convergence_restart(converged)
+
+    async def request_convergence_restart(self, mods) -> bool:
         """
         Apply a finished convergence: one graceful restart, the states of the
         converged mods move to 'updating' (the disk changed under the modules
         this process loaded, §2.6).
 
+        The restart is driven here (the internal window, an empty critical
+        section): the workers are stopped, the resume intent published and the
+        backend handed to the supervisor. A restart that cannot be handed over
+        (no supervisor, another owner, a cancelled wait) is reported on the
+        topic of the mods and the caller continues without it.
+
         Args:
             mods (list[ModUpdateManager]): The mods whose disk was converged
+
+        Returns:
+            bool: True when the restart was handed to the supervisor (the
+                process is going down), False when it could not be
         """
         names = ', '.join(mod.name for mod in mods)
         async with self.transaction_window(mods[0].name):
             for mod in mods:
                 mod.set_state('updating')
             try:
-                await restart_app.request_graceful_restart(
-                    reason=f'finished the interrupted update of {names}',
-                    owner=mods[0].name)
+                window = await restart_app.open_restart_window(
+                    reason=f'finished the interrupted update of {names}')
             except Exception as e:
-                # no supervisor (a development run) or a conflict (another
-                # updater took the instance meanwhile): the disk is converged,
-                # the running process keeps the old modules, report and move on
-                logger.warning(f'[Update] The convergence cannot restart the backend: {e}')
-                for mod in mods:
-                    mod.set_state('error', error=f'Restart required to apply the finished update: {e}')
+                self._report_convergence_failure(mods, e)
+                return False
+            try:
+                success, resume_list = await window.wait_stopped(
+                    restart_app.GRACEFUL_STOP_TIMEOUT)
+                if not success:
+                    raise RuntimeError('the worker wait was cancelled')
+                await window.publish(resume_list)
+                return await window.shutdown()
+            except Exception as e:
+                self._report_convergence_failure(mods, e)
+                try:
+                    await window.cancel(f'the convergence restart failed: {e}')
+                except Exception as cancel_error:
+                    logger.error(
+                        f'[Update] Failed to withdraw the convergence restart: {cancel_error}')
+                return False
+
+    def _report_convergence_failure(self, mods, error):
+        """
+        Report a convergence restart that could not be handed over
+
+        Args:
+            mods (list[ModUpdateManager]): The converged mods
+            error (Exception): Why the restart failed
+        """
+        # no supervisor (a development run), a conflict (another updater took
+        # the instance meanwhile) or a failed step: the disk is converged, the
+        # running process keeps the old modules, report and move on
+        logger.warning(f'[Update] The convergence cannot restart the backend: {error}')
+        for mod in mods:
+            mod.set_state('error', error=f'Restart required to apply the finished update: {error}')
 
     # =========================================================================
     # Manual check (rpc update_check)
@@ -1258,13 +1274,34 @@ class UpdateManager:
                 raise UpdateError(f'No such mod: "{name}"')
             if not mod.mod.entry.mirrors:
                 raise UpdateError(f'The mod declares no update source: "{name}"')
-            if mod.info.state in ('downloading', 'updating'):
+            if self._busy(mod):
                 raise UpdateError(f'The mod is busy with an update: "{name}"')
             return [mod]
         return [
             mod for mod in self.mods.values()
-            if mod.mod.entry.mirrors and mod.info.state not in ('downloading', 'updating')
+            if mod.mod.entry.mirrors and not self._busy(mod)
         ]
+
+    def _busy(self, mod):
+        """
+        Whether a mod is inside its update transaction
+
+        The transaction is the judge, not its state: the pre-flight of a
+        transaction is 'checking' (the state of a plain check too, the state
+        alone cannot tell them apart), and the applying phase outlives the
+        transaction scope on the success path (the process is restarting, the
+        state stays 'updating').
+
+        Args:
+            mod (ModUpdateManager): The mod to test
+
+        Returns:
+            bool: True when no check may be started on the mod
+        """
+        transaction = self._transaction
+        if transaction is not None and transaction.mod == mod.name:
+            return True
+        return mod.info.state in ('downloading', 'updating')
 
     # =========================================================================
     # Update transaction (rpc update_apply / update_cancel)
@@ -1298,8 +1335,8 @@ class UpdateManager:
         backend must run under a supervisor (the update ends in a backend
         restart).
 
-        The transaction first runs the version pre-flight and the pack
-        download with the workers still running ('downloading', cancellable
+        The transaction runs the version pre-flight and the pack download with
+        the workers still running ('checking' then 'downloading', cancellable
         through update_cancel, nothing is changed on disk), then applies the
         update inside the graceful restart ('updating', irreversible): at the
         phase boundary every worker is stopped (the resume intent published),
@@ -1331,17 +1368,17 @@ class UpdateManager:
         # between, so two concurrent applies cannot both pass the checks
         # above), the task takes over; the window is closed by the transaction
         # scope of the task (and adopted there, see transaction_window)
-        self._transaction = UpdateTransaction(name)
-        BACKEND_WORKER_MANAGER.update_begin_transaction(name)
+        self._open_transaction(name)
         # the mod enters its update transaction: the check sequence of the
         # mod is dropped (no check is needed while the mod is updated, and a
         # check must not overwrite the transaction state); a fresh sequence
         # starts when the transaction ends without a backend restart (see
         # ModUpdateManager.run_transaction)
         mod.stop_check_loop()
-        mod.set_state('downloading')
-        logger.info(f'[Update] Update transaction accepted: "{name}" '
-                    f'{mod.info.current_version or "(none)"} -> {mod.info.latest_version}')
+        # the state of the mod follows the phases the job reports (see
+        # on_job_phase): the acceptance only opens the transaction, the
+        # transaction task reports 'checking' when its flow starts
+        logger.info(f'[Update] Update transaction accepted: "{name}"')
         self._nursery.start_soon(mod.run_transaction)
 
     async def cancel(self):
@@ -1349,12 +1386,12 @@ class UpdateManager:
         Cancel the cancellable phase of the update flow (rpc update_cancel).
 
         A check in flight: the request is interrupted and the check window
-        closes, the recorded state of the last check stays. The downloading
-        phase of an update transaction (its pre-flight and the pack download
-        of the job): the job is interrupted, nothing was changed on disk, the
-        state returns to 'available'. The applying phase of a transaction
-        (the workers are stopping or stopped, the files are about to change)
-        is not cancellable: an explicit refusal.
+        closes, the recorded state of the last check stays. The pre-flight and
+        downloading phase of an update transaction ('checking' / 'downloading',
+        the pack download of the job): the flow is interrupted, nothing was
+        changed on disk, the state returns to 'available'. The applying phase
+        of a transaction (the workers are stopping or stopped, the files are
+        about to change) is not cancellable: an explicit refusal.
 
         Raises:
             UpdateError: Nothing to cancel, or the update is being applied
@@ -1370,6 +1407,42 @@ class UpdateManager:
         cancelled = [mod.cancel_check() for mod in list(self.mods.values())]
         if not any(cancelled):
             raise UpdateError('Nothing to cancel')
+
+    def _open_transaction(self, mod):
+        """
+        Open the instance-level window of an update transaction (synchronous)
+
+        The window of the manager and the holder registration of the graceful
+        restart are opened in one synchronous section (no await in between):
+        an external restart requested right after sees the transaction, and
+        _close_transaction() below is the only place that clears them.
+
+        Args:
+            mod (str): The mod being updated
+        """
+        self._transaction = UpdateTransaction(mod)
+        BACKEND_WORKER_MANAGER.update_begin_transaction(mod)
+        # the restart registry: the public entry of the graceful restart
+        # refuses while the holder is set, the transaction itself drives its
+        # restart through the internal entry (open_restart_window)
+        restart_app.GRACEFUL_RESTART.set_holder(f'update of "{mod}"')
+
+    def _close_transaction(self, transaction, mod):
+        """
+        Close the instance-level window of an update transaction (synchronous)
+
+        A stale close (another transaction took the window over) leaves both
+        registrations alone.
+
+        Args:
+            transaction (UpdateTransaction): The window opened before
+            mod (str): The mod of that window
+        """
+        if self._transaction is not transaction:
+            return
+        self._transaction = None
+        BACKEND_WORKER_MANAGER.update_end_transaction(mod)
+        restart_app.GRACEFUL_RESTART.clear_holder(f'update of "{mod}"')
 
     @contextlib.asynccontextmanager
     async def transaction_window(self, mod):
@@ -1389,15 +1462,12 @@ class UpdateManager:
         if transaction is not None and transaction.mod != mod:
             raise UpdateError(f'An update is already in progress: "{transaction.mod}"')
         if transaction is None:
-            transaction = UpdateTransaction(mod)
-            self._transaction = transaction
-            BACKEND_WORKER_MANAGER.update_begin_transaction(mod)
+            self._open_transaction(mod)
+            transaction = self._transaction
         try:
             yield transaction
         finally:
-            if self._transaction is transaction:
-                self._transaction = None
-                BACKEND_WORKER_MANAGER.update_end_transaction(mod)
+            self._close_transaction(transaction, mod)
             try:
                 await self.release_queued()
             except trio.Cancelled:

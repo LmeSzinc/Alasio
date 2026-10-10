@@ -346,34 +346,49 @@ class FakePhaseManager:
 
 class TestUpdatePhases:
     """The phase contract of update(update_manager): the backend transaction
-    follows what the job is really doing ('downloading' while it downloads,
-    'updating' from the first real file change on)."""
+    follows what the job is really doing ('checking' for the version check,
+    'downloading' while it downloads, 'updating' from the first real file
+    change on)."""
 
     @pytest.mark.trio
-    async def test_incremental_reports_downloading_then_updating(self, app_folder):
+    async def test_incremental_reports_checking_downloading_updating(self, app_folder):
         await UnpackJob(OLD_PACK).run()
         phases = FakePhaseManager()
         with logger.mock_capture_writer():
             assert await DeployJob(server=SERVER).update(phases)
-        assert phases.phases == ['downloading', 'updating']
+        assert phases.phases == ['checking', 'downloading', 'updating']
         assert read_tree() == NEW_TREE
 
     @pytest.mark.trio
-    async def test_rebuild_reports_downloading_then_updating(self, app_folder):
-        """The rebuild fallback (no update pack) reports the same pair."""
+    async def test_rebuild_fallback_reports_checking_downloading_updating(self, app_folder):
+        """The rebuild fallback (no update pack) reports the same phases: the
+        download was attempted (and failed), the rebuild follows."""
         await UnpackJob(OLD_PACK).run()
         phases = FakePhaseManager()
         with logger.mock_capture_writer():
             assert await DeployJob(server=SERVER_NO_UPDATE).update(phases)
-        assert phases.phases == ['downloading', 'updating']
+        assert phases.phases == ['checking', 'downloading', 'updating']
         assert read_tree() == NEW_TREE
 
     @pytest.mark.trio
-    async def test_local_missing_reports_downloading_then_updating(self, app_folder):
+    async def test_local_missing_reports_checking_then_updating(self, app_folder):
+        """A missing local index has no version to compare and no pack to
+        download: the rebuild from the latest index is one apply."""
         phases = FakePhaseManager()
         with logger.mock_capture_writer():
             assert await DeployJob(server=SERVER).update(phases)
-        assert phases.phases == ['downloading', 'updating']
+        assert phases.phases == ['checking', 'updating']
+        assert read_tree() == NEW_TREE
+
+    @pytest.mark.trio
+    async def test_up_to_date_reports_checking_then_updating(self, app_folder):
+        """The same version has no pack to download: the repair path reports
+        the check and the local changes."""
+        await UnpackJob(NEW_PACK).run()
+        phases = FakePhaseManager()
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER).update(phases)
+        assert phases.phases == ['checking', 'updating']
         assert read_tree() == NEW_TREE
 
     @pytest.mark.trio
@@ -398,7 +413,7 @@ class TestUpdatePhases:
         with logger.mock_capture_writer():
             with pytest.raises(UpdateAborted):
                 await DeployJob(server=SERVER).update(on_job_phase)
-        assert phases == ['downloading', 'updating']
+        assert phases == ['checking', 'downloading', 'updating']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
         # the local tree was not changed (the pack was never applied)
         assert read_tree() == OLD_TREE
@@ -412,11 +427,11 @@ class TestUpdatePhases:
 
         async def on_job_phase(phase):
             phases.append(phase)
-            return False
+            return phase != 'downloading'
 
         with logger.mock_capture_writer():
             with pytest.raises(UpdateAborted):
                 await DeployJob(server=SERVER).update(on_job_phase)
-        assert phases == ['downloading']
+        assert phases == ['checking', 'downloading']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
         assert read_tree() == OLD_TREE

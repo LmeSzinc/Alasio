@@ -2,19 +2,19 @@
 Tests for UpdateManager / ModUpdateManager (alasio/backend/app/update.py):
 the check loop of a mod, the update windows and the update transaction.
 
-The deploy jobs, the worker manager and the graceful restart are faked:
-the manager logic (states, windows, cancellation, the transaction
+The deploy jobs, the worker manager and the graceful restart window are
+faked: the manager logic (states, windows, cancellation, the transaction
 orchestration) runs without network and processes. The fake job plays the
 phase contract of the real one (on_job_phase at the 'updating' boundary)
-and the tests drive the orchestration side of the fake restart (its
-recorded hook), like run_graceful_restart would. The topic source is the
-real one, cleared per test.
+and the tests script the restart side the transaction drives itself (the
+recorded window), like restart.open_restart_window() would build it. The
+topic source is the real one, cleared per test.
 """
 import pytest
 import trio
 
 from alasio.backend.app import update as update_module
-from alasio.backend.app.update import ApplyRendezvous, CheckLoop, UpdateError, UpdateManager, UpdateTransaction
+from alasio.backend.app.update import CheckLoop, UpdateError, UpdateManager, UpdateTransaction
 from alasio.backend.app.update_startup import UPDATE_STARTUP
 from alasio.backend.topic.update import UpdateSource
 from alasio.config.entry.const import ModEntryInfo
@@ -100,6 +100,8 @@ class FakeJob:
         if on_job_phase is not None:
             # the phase contract of the real job (see DeployJob.update): the
             # returned bool is honored, False aborts the flow
+            if not await on_job_phase('checking'):
+                raise UpdateAborted('the transaction was cancelled')
             if not await on_job_phase('downloading'):
                 raise UpdateAborted('the transaction was cancelled')
             if not await on_job_phase('updating'):
@@ -199,6 +201,78 @@ class FakeWorkerManager:
         return True, 'Success'
 
 
+class FakeRestartWindow:
+    """
+    RestartWindow stand-in: the driver side of one update transaction.
+
+    The real window (alasio/backend/app/restart.py) is covered by
+    tests/backend/app/test_restart_resume.py; here it records what the
+    transaction drives and reads the verdicts of the script (the tests stop
+    the wait, fail the shutdown).
+    """
+
+    def __init__(self, script, reason=''):
+        self.script = script
+        self.reason = reason
+        self.waited = False
+        # the frozen resume list of the wait
+        self.resume_list = []
+        self.published = False
+        self.actions = None
+        self.shutdowns = 0
+        self.cancels = []
+        self.aborted = False
+
+    async def wait_stopped(self, timeout=None):
+        self.waited = True
+        return self.script.stop, list(self.script.resume)
+
+    async def publish(self, resume_list, actions=None):
+        self.published = True
+        self.resume_list = list(resume_list)
+        self.actions = actions
+
+    async def shutdown(self):
+        self.shutdowns += 1
+        if self.script.shutdown_error is not None:
+            raise self.script.shutdown_error
+        return self.script.restarted
+
+    async def cancel(self, reason=''):
+        self.cancels.append(reason)
+        self.aborted = True
+        # like the real withdraw: the window releases the backend
+        update_module.restart_app.GRACEFUL_RESTART.running = False
+
+
+class FakeRestart:
+    """
+    The fake restart side of the update flow: one recorded window per
+    transaction, plus the verdicts the next window returns.
+    """
+
+    def __init__(self):
+        self.windows = []
+        # the verdict of wait_stopped of the next window: False = the wait
+        # was cancelled (a force restart / a backend stop)
+        self.stop = True
+        # the frozen resume list the next window returns
+        self.resume = []
+        # the verdict of shutdown of the next window: False = the window was
+        # withdrawn meanwhile (the caller's shutdown is refused)
+        self.restarted = True
+        # the error shutdown() raises (the supervisor pipe gone),
+        # None = the shutdown succeeds
+        self.shutdown_error = None
+
+    async def open(self, reason='', manager=None):
+        window = FakeRestartWindow(self, reason)
+        self.windows.append(window)
+        # like the real entry point: an accepted window owns the backend
+        update_module.restart_app.GRACEFUL_RESTART.running = True
+        return window
+
+
 @pytest.fixture(autouse=True)
 def cleanup_source():
     """Clear the UpdateSource singleton after each test."""
@@ -224,21 +298,16 @@ def workers(monkeypatch):
 
 @pytest.fixture
 def restarts(monkeypatch):
-    """Recorded graceful restart requests (the restart itself is covered by
-    tests/backend/app/test_restart_resume.py)."""
-    requests = []
+    """Recorded restart windows of the update flow (the restart itself is
+    covered by tests/backend/app/test_restart_resume.py)."""
+    restarts = FakeRestart()
 
-    async def fake_request(reason='', nursery=None, hooks=None, owner=''):
-        requests.append({'reason': reason, 'nursery': nursery, 'hooks': hooks, 'owner': owner})
-        # like the real entry point: an accepted request owns the backend
-        update_module.restart_app.GRACEFUL_RESTART.running = True
-
-    monkeypatch.setattr(update_module.restart_app, 'request_graceful_restart', fake_request)
+    monkeypatch.setattr(update_module.restart_app, 'open_restart_window', restarts.open)
     # no interval between two starts of the released queue (the real
     # interval is covered by the restart queue tests)
     monkeypatch.setattr(update_module.restart_app, 'WORKER_START_INTERVAL', 0.0)
     update_module.restart_app.GRACEFUL_RESTART.reset()
-    yield requests
+    yield restarts
     update_module.restart_app.GRACEFUL_RESTART.reset()
 
 
@@ -275,35 +344,6 @@ def script_manager(manager, monkeypatch, mods, auto=True, interval=300.0):
         manager.interval = interval
 
     monkeypatch.setattr(manager, 'load_schedule', load_schedule)
-
-
-async def drive_transaction(mod, restarts, expect_restart=True):
-    """
-    Run run_transaction() with the orchestration side of the fake restart: the
-    hook of the recorded request, which the real run_graceful_restart would
-    run after its wait. Returns when the transaction task finished.
-
-    Args:
-        mod (ModUpdateManager): The mod whose transaction to run
-        restarts (list): Recorded requests of the fake request_graceful_restart
-        expect_restart (bool): Whether the transaction reaches the applying
-            phase (a restart request is expected). Defaults to True.
-    """
-    done = trio.Event()
-
-    async def run():
-        try:
-            await mod.run_transaction()
-        finally:
-            done.set()
-
-    async with trio.open_nursery() as nursery:
-        nursery.start_soon(run)
-        if expect_restart:
-            await wait_until(lambda: len(restarts) == 1, description='the restart request')
-            nursery.start_soon(restarts[0]['hooks'].on_all_stopped)
-        await done.wait()
-        nursery.cancel_scope.cancel()
 
 
 class TestNextDelay:
@@ -631,23 +671,31 @@ class TestApply:
             await manager.apply('m')
 
     @pytest.mark.trio
-    async def test_apply_downloading_to_updating(self, manager, script, workers, restarts,
+    async def test_apply_transaction_to_updating(self, manager, script, workers, restarts,
                                                  supervisor, monkeypatch):
         mod = bind_transaction(manager, script, monkeypatch, supervisor)
 
         await manager.apply('m')
-        # accepted: the window is open and the task is scheduled
-        assert mod.info.state == 'downloading'
+        # accepted: the window is open and the task is scheduled. The
+        # acceptance itself does not change the state -- the phases the job
+        # reports drive it (see on_job_phase)
+        assert mod.info.state == 'available'
+        assert manager._transaction.mod == 'm'
         assert workers.transaction == 'm'
         assert manager._nursery.started == [(mod.run_transaction, ())]
 
-        await drive_transaction(mod, restarts)
-        # the job reported its phases: the restart was requested at the
-        # 'updating' boundary and the apply ran with the replace window open
-        assert len(restarts) == 1
-        assert 'update of mod "m"' in restarts[0]['reason']
+        await mod.run_transaction()
+        # the job reported its phases: the transaction opened its restart window
+        # at the 'updating' boundary, published the resume intent and restarted
+        # the backend once the replacement was done
+        assert len(restarts.windows) == 1
+        window = restarts.windows[0]
+        assert 'update of mod "m"' in window.reason
         assert script.calls_of('update') == ['/m']
         assert mod.info.state == 'updating'
+        assert window.waited is True
+        assert window.published is True
+        assert window.shutdowns == 1
         # the transaction scope closed the window on the way out and the
         # applying phase stays armed until the process exits: its restart is
         # not cancellable (the new backend takes it over, §16.4)
@@ -655,6 +703,32 @@ class TestApply:
         assert manager.applying is True
         with pytest.raises(UpdateError, match='cannot be cancelled'):
             await manager.cancel()
+        # the restart owns the backend until the process exits, the transaction
+        # itself is over (the new backend resumes the configs)
+        assert update_module.restart_app.GRACEFUL_RESTART.running is True
+        assert update_module.restart_app.GRACEFUL_RESTART.holder == ''
+
+    @pytest.mark.trio
+    async def test_check_is_refused_while_the_transaction_runs(self, manager, script, workers,
+                                                               restarts, supervisor, monkeypatch):
+        """The transaction is the judge of 'busy', not the state: the
+        acceptance leaves the state at 'available' until the job reports its
+        first phase, and no check may be started on the mod meanwhile."""
+        mod = bind_transaction(manager, script, monkeypatch, supervisor)
+        gate = trio.Event()
+        script.check_gate['/m'] = gate
+
+        await manager.apply('m')
+        # the state is still the one of the last check: the transaction (not
+        # the state) is what refuses the check
+        assert mod.info.state == 'available'
+        with pytest.raises(UpdateError, match='busy with an update'):
+            await manager.check('m')
+        # and the busy mod is excluded from a check-all
+        assert manager.select('') == []
+
+        gate.set()
+        await mod.run_transaction()
 
     @pytest.mark.trio
     async def test_preflight_uptodate_drops_the_update(self, manager, script, workers, restarts,
@@ -667,7 +741,7 @@ class TestApply:
         await mod.run_transaction()
 
         assert mod.info.state == 'uptodate'
-        assert restarts == []
+        assert restarts.windows == []
         assert workers.transaction == ''
         assert script.calls_of('update') == []
 
@@ -691,7 +765,7 @@ class TestApply:
         await mod.run_transaction()
 
         assert mod.info.state == 'uptodate'
-        assert restarts == []
+        assert restarts.windows == []
         loop = mod.check_loop
         assert isinstance(loop, CheckLoop)
         assert loop is not old
@@ -712,9 +786,9 @@ class TestApply:
         mod.check_loop = old
 
         await manager.apply('m')
-        await drive_transaction(mod, restarts)
+        await mod.run_transaction()
 
-        assert len(restarts) == 1
+        assert len(restarts.windows) == 1
         assert mod.info.state == 'updating'
         assert mod.check_loop is None
 
@@ -734,11 +808,14 @@ class TestApply:
             await wait_until(lambda: manager._transaction.scope is not None)
             await manager.cancel()
             gate.set()
-            await wait_until(lambda: mod.info.state == 'available')
+            # the transaction is over when its window is closed (the state is
+            # 'available' from the start: the acceptance does not touch it)
+            await wait_until(lambda: manager._transaction is None)
+            assert mod.info.state == 'available'
             # zero side effect: nothing applied, the window closed, the
             # queued config started
             assert script.calls_of('update') == []
-            assert restarts == []
+            assert restarts.windows == []
             assert workers.transaction == ''
             await wait_until(lambda: workers.resumed == ['cfg1'])
             nursery.cancel_scope.cancel()
@@ -756,29 +833,31 @@ class TestApply:
 
         assert mod.info.state == 'error'
         assert 'offline' in mod.info.error
-        assert restarts == []
+        assert restarts.windows == []
         assert workers.transaction == ''
         await wait_until(lambda: workers.resumed == ['cfg1'])
 
     @pytest.mark.trio
     async def test_apply_failure_in_the_job(self, manager, script, workers, restarts,
                                             supervisor, monkeypatch):
-        """The apply did not converge: the hook raises, the restart is
-        cancelled by the orchestration (here: the test observes the raise)."""
+        """The apply did not converge: the window is withdrawn, the backend
+        never restarts (E5: the process keeps running, the stopped configs stay
+        stopped and the half-updated tree converges on the next update)."""
         mod = bind_transaction(manager, script, monkeypatch, supervisor)
         script.updates['/m'] = False
 
         await manager.apply('m')
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(mod.run_transaction)
-            await wait_until(lambda: len(restarts) == 1)
-            hooks = restarts[0]['hooks']
-            with pytest.raises(RuntimeError, match='did not converge'):
-                await hooks.on_all_stopped()
-            await wait_until(lambda: mod.info.state == 'error')
-            nursery.cancel_scope.cancel()
+        await mod.run_transaction()
 
         assert 'Some files failed' in mod.info.error
+        assert mod.info.state == 'error'
+        # the resume intent was published before the replacement, then
+        # withdrawn: nothing restarts, the gate is released
+        assert len(restarts.windows) == 1
+        assert restarts.windows[0].published is True
+        assert restarts.windows[0].shutdowns == 0
+        assert restarts.windows[0].cancels != []
+        assert update_module.restart_app.GRACEFUL_RESTART.running is False
         assert workers.transaction == ''
 
     @pytest.mark.trio
@@ -788,16 +867,32 @@ class TestApply:
         script.updates['/m'] = RuntimeError('boom')
 
         await manager.apply('m')
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(mod.run_transaction)
-            await wait_until(lambda: len(restarts) == 1)
-            hooks = restarts[0]['hooks']
-            with pytest.raises(RuntimeError, match='boom'):
-                await hooks.on_all_stopped()
-            await wait_until(lambda: mod.info.state == 'error')
-            nursery.cancel_scope.cancel()
+        await mod.run_transaction()
 
         assert 'boom' in mod.info.error
+        assert mod.info.state == 'error'
+        assert restarts.windows[0].shutdowns == 0
+        assert restarts.windows[0].cancels != []
+        assert workers.transaction == ''
+
+    @pytest.mark.trio
+    async def test_restart_failure_withdraws_the_window(self, manager, script, workers, restarts,
+                                                        supervisor, monkeypatch):
+        """The backend restart itself failed (the supervisor pipe gone): the
+        published intent is withdrawn, the backend stays alive."""
+        mod = bind_transaction(manager, script, monkeypatch, supervisor)
+        restarts.shutdown_error = PermissionError(
+            'Cannot restart backend running without supervisor')
+
+        await manager.apply('m')
+        await mod.run_transaction()
+
+        assert 'without supervisor' in mod.info.error
+        assert mod.info.state == 'error'
+        assert restarts.windows[0].cancels != []
+        assert update_module.restart_app.GRACEFUL_RESTART.running is False
+        # the checks of this process resume (the new backend never took over)
+        assert mod.check_loop is not None
 
     @pytest.mark.trio
     async def test_apply_cancel_is_refused(self, manager, script, restarts,
@@ -810,15 +905,17 @@ class TestApply:
         await manager.apply('m')
         async with trio.open_nursery() as nursery:
             nursery.start_soon(mod.run_transaction)
-            await wait_until(lambda: len(restarts) == 1)
-            nursery.start_soon(restarts[0]['hooks'].on_all_stopped)
+            # the replace window is open: the workers are stopped, the resume
+            # intent published, the job is replacing the files
+            await wait_until(lambda: len(restarts.windows) == 1)
+            await wait_until(lambda: restarts.windows[0].published is True)
             await wait_until(lambda: manager.applying is True)
 
             with pytest.raises(UpdateError, match='cannot be cancelled'):
                 await manager.cancel()
 
             gate.set()
-            await wait_until(lambda: mod.info.state == 'error' or script.calls_of('update'))
+            await wait_until(lambda: restarts.windows[0].shutdowns == 1)
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
@@ -841,115 +938,94 @@ class TestApply:
             # in-flight request the cancel could interrupt)
             manager._transaction.cancel_requested = True
             gate.set()
-            await wait_until(lambda: mod.info.state == 'available')
+            await wait_until(lambda: manager._transaction is None)
+            assert mod.info.state == 'available'
             nursery.cancel_scope.cancel()
 
         # the job was aborted at its first phase and never reached the apply
-        assert restarts == []
+        assert restarts.windows == []
         assert script.calls_of('update') == ['/m']
         assert workers.transaction == ''
         await wait_until(lambda: workers.resumed == ['cfg1'])
 
     @pytest.mark.trio
-    async def test_on_aborted_aborts_the_job(self, manager, script, workers, restarts,
-                                             supervisor, monkeypatch):
-        """The restart ended before its replace window (cancelled, or a step
-        before the window failed): the hook wakes the job's 'updating' phase,
-        the job aborts before replacing anything and the state turns to
-        error."""
+    async def test_cancelled_wait_aborts_the_job(self, manager, script, workers, restarts,
+                                                 supervisor, monkeypatch):
+        """The restart died before its replace window (the wait was cancelled by
+        a force restart / a backend stop): the transaction withdraws the window
+        and the job aborts before replacing anything (E5)."""
         mod = bind_transaction(manager, script, monkeypatch, supervisor)
+        # the wait returns cancelled: nothing is published, nothing is frozen
+        restarts.stop = False
 
         await manager.apply('m')
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(mod.run_transaction)
-            await wait_until(lambda: len(restarts) == 1)
-            # the restart died before its window: every early exit notifies
-            await restarts[0]['hooks'].on_aborted('the worker wait was cancelled')
-            await wait_until(lambda: mod.info.state == 'error')
-            nursery.cancel_scope.cancel()
+        await mod.run_transaction()
 
         assert 'The restart of the update was aborted' in mod.info.error
         assert 'the worker wait was cancelled' in mod.info.error
-        # the window closed, the rendezvous was disarmed and the job never
-        # replaced anything (it raised at its phase boundary)
+        assert mod.info.state == 'error'
+        # the job never replaced anything, the window withdrew itself
+        assert script.calls_of('update') == ['/m']
+        assert restarts.windows[0].published is False
+        assert restarts.windows[0].cancels != []
         assert manager._transaction is None
-        assert mod._apply is None
+        assert mod._window is None
         assert workers.transaction == ''
 
 
-class TestApplyRendezvous:
-    """The applying-phase rendezvous of one update transaction."""
+class TestRestartWindowDrive:
+    """The transaction driving its own restart window (doc §7.1/§7.2)."""
 
     @pytest.mark.trio
-    async def test_window_then_apply_releases_the_hook(self):
-        """on_all_stopped opens the window and waits for the job: the apply
-        releases it and the hook returns (the restart may continue)."""
-        rendezvous = ApplyRendezvous()
-        order = []
+    async def test_the_resume_intent_is_published_before_the_files_change(
+            self, manager, script, workers, restarts, supervisor, monkeypatch):
+        """The phase callback returns only once the window is open: the frozen
+        resume list is published, then the job replaces the files."""
+        mod = bind_transaction(manager, script, monkeypatch, supervisor)
+        restarts.resume = ['cfg_a', 'cfg_b']
+        gate = trio.Event()
+        script.update_gate['/m'] = gate
+        seen = {}
 
-        async def hook():
-            await rendezvous.on_all_stopped()
-            order.append('hook')
+        async def watch():
+            await gate.wait()
+            seen['published'] = restarts.windows[0].published
+            seen['resume'] = list(restarts.windows[0].resume_list)
 
+        await manager.apply('m')
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(hook)
-            # every worker stopped: the job may replace the files
-            await rendezvous.wait_window()
-            # the window alone does not release the hook
-            assert order == []
-            rendezvous.finished()
+            nursery.start_soon(watch)
+            nursery.start_soon(mod.run_transaction)
+            # the job is inside its replacement (the gate), the window is open
+            await wait_until(lambda: restarts.windows and restarts.windows[0].published is True)
+            gate.set()
+            await wait_until(lambda: restarts.windows[0].shutdowns == 1)
+            nursery.cancel_scope.cancel()
 
-        assert order == ['hook']
+        # the replacement ran against an open, published window
+        assert seen['published'] is True
+        assert seen['resume'] == ['cfg_a', 'cfg_b']
 
     @pytest.mark.trio
-    async def test_abort_before_the_window_wakes_the_job(self):
-        """The restart died before its replace window: the job waiting on it
-        is woken with the error it must raise."""
-        rendezvous = ApplyRendezvous()
+    async def test_a_withdrawn_window_keeps_the_backend_running(
+            self, manager, script, workers, restarts, supervisor, monkeypatch):
+        """A cancel landing in the caller's critical section does not interrupt
+        the replacement: the shutdown is refused, the checks resume."""
+        mod = bind_transaction(manager, script, monkeypatch, supervisor)
+        # the window was withdrawn while the job was replacing the files
+        restarts.restarted = False
 
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(rendezvous.on_aborted, 'the worker wait was cancelled')
-            with pytest.raises(RuntimeError, match='the worker wait was cancelled'):
-                await rendezvous.wait_window()
+        await manager.apply('m')
+        await mod.run_transaction()
 
-    @pytest.mark.trio
-    async def test_failed_apply_cancels_the_hook(self):
-        """The apply failed after the window opened: the hook raises the
-        failure and the restart is cancelled (E5)."""
-        rendezvous = ApplyRendezvous()
-
-        async def job():
-            await rendezvous.wait_window()
-            rendezvous.finished(RuntimeError('the update did not converge'))
-
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(job)
-            with pytest.raises(RuntimeError, match='did not converge'):
-                await rendezvous.on_all_stopped()
-
-    @pytest.mark.trio
-    async def test_abort_after_the_window_is_ignored(self):
-        """A late notification lands after the commit point: the job is
-        already applying and the restart cannot roll it back, the abort marks
-        nothing."""
-        rendezvous = ApplyRendezvous()
-        hook_error = None
-
-        async def hook():
-            nonlocal hook_error
-            try:
-                await rendezvous.on_all_stopped()
-            except Exception as e:
-                hook_error = e
-
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(hook)
-            await rendezvous.wait_window()
-            await rendezvous.on_aborted('the restart was cancelled')
-            rendezvous.finished()
-
-        assert hook_error is None
-        assert rendezvous._window_error is None
+        # the replacement finished, the shutdown was refused and nothing is
+        # left armed: the next check round reports the real state
+        assert script.calls_of('update') == ['/m']
+        assert restarts.windows[0].shutdowns == 1
+        assert restarts.windows[0].cancels == []
+        assert mod.info.state == 'updating'
+        assert mod.check_loop is not None
+        assert manager._transaction is None
 
 
 class TestUpdateTransaction:
@@ -1004,16 +1080,41 @@ class TestConvergence:
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(manager.run)
-            await wait_until(lambda: len(restarts) == 1)
-            assert 'interrupted update' in restarts[0]['reason']
-            # the convergence requests the restart as the owner of its own
-            # transaction (external triggers are refused meanwhile, §16.3)
-            assert restarts[0]['owner'] == 'm'
+            await wait_until(lambda: len(restarts.windows) == 1)
+            assert 'interrupted update' in restarts.windows[0].reason
+            # the convergence drives its own restart window (the internal
+            # entry, an empty critical section): the workers were stopped, the
+            # resume intent published and the backend handed to the supervisor
+            assert restarts.windows[0].waited is True
+            assert restarts.windows[0].published is True
+            assert restarts.windows[0].shutdowns == 1
             assert state_of(manager, 'm') == 'updating'
             # the checks of this process are skipped: the first round of
             # the new process runs them
             await trio.sleep(0.05)
             assert script.calls_of('check') == []
+            nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_convergence_restart_failure_resumes_the_checks(self, manager, script, restarts,
+                                                                  monkeypatch):
+        """The convergence restart cannot be handed over: the disk is converged,
+        the process keeps the old modules and its own checks run (§7.3 R2: the
+        manager no longer parks on a flag someone else cleared)."""
+        script.unfinished['/m'] = True
+        restarts.shutdown_error = PermissionError(
+            'Cannot restart backend running without supervisor')
+        script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')})
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(manager.run)
+            # the failed restart was withdrawn and the checks of this process
+            # run (the manager no longer parks on a flag someone else cleared):
+            # the first round reports the real state of the mod
+            await wait_until(lambda: script.calls_of('check') == ['/m'])
+            assert restarts.windows[0].cancels != []
+            assert restarts.windows[0].shutdowns == 1
+            await wait_until(lambda: state_of(manager, 'm') == 'available')
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
@@ -1043,7 +1144,7 @@ class TestConvergence:
         async with trio.open_nursery() as nursery:
             nursery.start_soon(manager.run)
             await wait_until(lambda: state_of(manager, 'm') in ('uptodate', 'available', 'error'))
-            assert restarts == []
+            assert restarts.windows == []
             assert script.calls_of('unfinished') == ['/m']
             nursery.cancel_scope.cancel()
 
@@ -1061,9 +1162,9 @@ class TestConvergence:
             # requested and the state moves to updating
             script.unfinished['/m'] = True
             await manager.check('m')
-            await wait_until(lambda: len(restarts) == 1)
-            assert 'interrupted update' in restarts[0]['reason']
-            assert restarts[0]['owner'] == 'm'
+            await wait_until(lambda: len(restarts.windows) == 1)
+            assert 'interrupted update' in restarts.windows[0].reason
+            assert restarts.windows[0].shutdowns == 1
             assert state_of(manager, 'm') == 'updating'
             assert manager.mods['m'].convergence_pending is False
             nursery.cancel_scope.cancel()
