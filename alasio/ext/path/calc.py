@@ -65,7 +65,11 @@ def joinnormpath(root: str, path: str) -> str:
 
     if root:
         if path:
-            return f'{root}/{path}'
+            if root == '/':
+                # linux root, don't create '//path'
+                return f'/{path}'
+            else:
+                return f'{root}/{path}'
         else:
             return root
     else:
@@ -181,13 +185,15 @@ def subpath_to(path, root):
         str:
     """
     if path.startswith(root):
-        path = path[len(root):]
-        if WINDOWS_SEP:
-            return path.lstrip('\\/')
-        else:
-            return path.lstrip('/')
-    else:
-        return path
+        subpath = path[len(root):]
+        # Both paths are normalized (separator "/"), a plain string prefix is
+        # not enough, the rest of the path must continue at a separator
+        # boundary, otherwise "/a/bc" would be treated as a sub-path to "/a/b"
+        if not subpath:
+            return subpath
+        if subpath[0] == '/' or root.endswith('/'):
+            return subpath.lstrip('/')
+    return path
 
 
 def get_name(path: str) -> str:
@@ -333,7 +339,7 @@ def with_suffix(path: str, suffix: str) -> str:
         if dot:
             return f'{stem}{suffix}'
         else:
-            return suffix
+            return f'{name}{suffix}'
 
 
 def with_multisuffix(path: str, suffix: str) -> str:
@@ -353,4 +359,4 @@ def with_multisuffix(path: str, suffix: str) -> str:
         if dot:
             return f'{stem}{suffix}'
         else:
-            return suffix
+            return f'{name}{suffix}'
