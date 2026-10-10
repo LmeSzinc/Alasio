@@ -45,8 +45,12 @@ class UpdateJob(JobBase):
     of the target) is a normal record of the update:
 
     1. unpack() decompresses every file to {ledger}/workspace/
-       {size}_{sha1}_{index}.tmp, real files are untouched. Records
-       are computed from the update pack data and the old files
+       {size}_{sha1}_{rank}.tmp, real files are untouched. The tmp
+       files are named by the tmp manager of the workspace (the rank
+       is the occurrence index of the content among the records that
+       need a tmp file, see TmpManager), so a leftover tmp file of an
+       interrupted run is found again and reused. Records are computed
+       from the update pack data and the old files
        recorded in refinfo: A records are decompressed directly, C
        (copied) records copy the source blob (read from the tmp file
        of the earlier new file, or from the verified working tree
@@ -102,8 +106,10 @@ class UpdateJob(JobBase):
         self.server = server
         self._resume = resume
         self.error: "list[PendingFile]" = []
-        # {path: index} of fileinfo, used to build the tmp file names
-        self._file_index: "dict[str, int]" = {}
+        # paths of the records of the update pack, the filter base of
+        # _validate_remaining(): the nested reset validates exactly the
+        # files the update pack does not cover
+        self._pack_paths: "set[str]" = set()
         # version of the update pack, used to download the index pack
         self._version = ''
 
@@ -187,7 +193,7 @@ class UpdateJob(JobBase):
         # folder of the target before any comparison
         self.localize(decoder)
         self._version = decoder.current_version
-        self._file_index = {path: index for index, path in enumerate(decoder.fileinfo)}
+        self._pack_paths = set(decoder.fileinfo)
         # the update pack records the changed files of the new version
         # only: a partial emptiness base of replace_data(), the new index
         # decoded in _validate_remaining() replaces it with the full
@@ -195,8 +201,10 @@ class UpdateJob(JobBase):
         self.new_fileinfo = decoder.fileinfo
         self.error = []
 
+        # the changes to apply in replace_data(), the index pack record is
+        # routed out of the list at the end
         pending = []
-        for index, (path, info) in enumerate(decoder.fileinfo.items()):
+        for path, info in decoder.fileinfo.items():
             target = self.root.joinpath(path)
             if info.edit == 2:
                 # deleted marker, its target is removed in replace()
@@ -209,48 +217,54 @@ class UpdateJob(JobBase):
             deleted = info.source_path if info.edit == 3 else ''
             current = self._read_current(target)
             result = self._matches(info, current)
-            if path == self.index_rel:
-                # the index record is always written to the fixed
-                # new_index.pack, so the new index can be found
-                # without tracking the tmp name
-                tmp = self.workspace.joinpath(self.NEW_INDEX)
-            else:
-                tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{index}.tmp')
             if result.match:
                 # the target file exists and passes the size + sha1 check
                 if deleted:
                     self._append_deleted(pending, deleted)
                 if result.mode_matched:
+                    # the content and the mode are verified, the record
+                    # needs no tmp file and applies for no tmp name
                     continue
                 # only the mode differs, the content is verified:
                 # write the current content to the tmp file, replace()
                 # chmod-ed the target to the record mode
+                tmp = self.tmp_file(path, info)
                 if not self._matches(info, self._read_current(tmp)).match:
                     file_write(tmp, current.data)
+                self.register_tmp(path, info, tmp)
                 pending.append(PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded))
                 continue
             if result.match_data:
                 # only the EOL differs, write the converted content
                 # to the tmp file without reading the sources
+                tmp = self.tmp_file(path, info)
                 file_write(tmp, result.match_data)
                 if deleted:
                     self._append_deleted(pending, deleted)
+                self.register_tmp(path, info, tmp)
                 pending.append(PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
                 continue
             try:
-                content = self._read_file(decoder, info)
+                content, source_tmp = self._read_file(decoder, info)
             except SourceError:
                 # the source fails the size + sha1 check, download()
-                # fetches the content of the record instead
+                # fetches the content of the record instead and applies
+                # for the tmp file there
                 self.error.append(PendingFile(info=info, tmp=''))
                 continue
+            # the record uses the leftover its source lookup read the
+            # content from when there is one (the file it read is claimed
+            # by the lookup and is the tmp file it writes here), a fresh
+            # name otherwise
+            tmp = source_tmp or self.tmp_file(path, info)
             if not self._matches(info, self._read_current(tmp)).match:
                 # decompress and write to the tmp file
                 file_write(tmp, content)
             if deleted:
                 self._append_deleted(pending, deleted)
+            self.register_tmp(path, info, tmp)
             # the file is written by python with the default mode 666,
             # a 755 record is chmod-ed in replace()
             pending.append(PendingFile(
@@ -354,11 +368,11 @@ class UpdateJob(JobBase):
             if item.info.path == self.index_rel:
                 continue
             info = item.info
-            index = self._file_index[info.path]
-            tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{index}.tmp')
+            tmp = self.tmp_file(info.path, info)
             current = await trio.to_thread.run_sync(self._read_current, tmp)
             if self._matches(info, current).match:
                 # a leftover tmp file passes the size + sha1 check, reuse it
+                self.register_tmp(info.path, info, tmp)
                 pending.append(PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
                 continue
@@ -381,6 +395,7 @@ class UpdateJob(JobBase):
                 failed.append(item)
                 continue
             await trio.to_thread.run_sync(file_write, tmp, content)
+            self.register_tmp(info.path, info, tmp)
             pending.append(PendingFile(
                 info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
         self.pending += pending
@@ -435,11 +450,16 @@ class UpdateJob(JobBase):
         # validates exactly them
         fileinfo = {
             path: info for path, info in new_index.fileinfo.items()
-            if path not in self._file_index
+            if path not in self._pack_paths
         }
         InstanceCacheOperation.set(new_index, 'fileinfo', fileinfo)
         reset = ResetJob(self.server, root=self.root, name=self.name)
         InstanceCacheOperation.set(reset, '_index_pack', new_index)
+        # the nested reset shares the tmp manager of this job: the two
+        # jobs write into the same workspace, their records must never
+        # share a tmp file, so the occurrence counters continue with
+        # the records of this job
+        InstanceCacheOperation.set(reset, 'tmp_manager', self.tmp_manager)
         await trio.to_thread.run_sync(reset.validate_files)
         await reset.download()
         # the nested reset never prepares an index record (the index is
@@ -463,7 +483,9 @@ class UpdateJob(JobBase):
             info (IdxInfo): Record of the file
 
         Returns:
-            bytes: Working tree content of the file
+            tuple[bytes, str]: Working tree content of the file, and the
+                tmp file the content was read from when the record can
+                claim it (see _read_source_blob()), '' when there is none
 
         Raises:
             SourceError: If the source of the record fails the size +
@@ -471,16 +493,18 @@ class UpdateJob(JobBase):
         """
         if info.edit == 0 and info.source_lookback:
             # C (copied), the content is the source blob with the own eol
-            return PackDecodeBase.apply_eol(self._read_source_blob(decoder, info), info.eol)
+            blob, source_tmp = self._read_source_blob(decoder, info)
+            return PackDecodeBase.apply_eol(blob, info.eol), source_tmp
         if info.edit == 3 and info.data_size == 0:
             # R (renamed), the content is the source blob with the own eol
-            return PackDecodeBase.apply_eol(self._read_source_blob(decoder, info), info.eol)
+            blob, _ = self._read_source_blob(decoder, info)
+            return PackDecodeBase.apply_eol(blob, info.eol), ''
         if info.algo == 2 and info.source_lookback:
             # zstd patch from the old blob, the source is the dictionary
-            source = self._read_source_blob(decoder, info)
-            return decoder.decode_content(info, decoder.catdata(info), source=source)
+            blob, _ = self._read_source_blob(decoder, info)
+            return decoder.decode_content(info, decoder.catdata(info), source=blob), ''
         # A (added), or M / RM with plain data
-        return decoder.catfile(info)
+        return decoder.catfile(info), ''
 
     def _read_source_blob(self, decoder, info):
         """
@@ -488,24 +512,30 @@ class UpdateJob(JobBase):
         the update pack.
 
         A C (copied) record may reference an earlier new file: its
-        content is already written to the tmp file by the earlier
-        record, it is read from there and verified against the record.
-        A source record that was skipped (its target already matched
-        the record) left no tmp file behind: its content is read from
-        the working tree then. The source of a C / M / RM / R record
-        is otherwise an old file, read from the working tree and
-        verified against the refinfo of the update pack (the pack is
-        self-describing, no old index pack is needed): the size and
-        sha1 of the LF blob must match, an EOL mismatch is converted.
-        A file that fails the check raises SourceError, the caller
-        fetches the record content from the server instead.
+        content is read from the tmp files of the source content (the
+        leftovers of an interrupted run and the tmp files this run
+        wrote, see TmpManager.candidates()), the first one that passes
+        the check is used. The leftover it was read from is claimed: the
+        file the reader read is the tmp file it writes, no second name
+        and no second file for the same bytes. A source record that
+        needed no tmp file (its target already matched the record) wrote
+        none: its content is the working tree file then. The source of a
+        C / M / RM / R record is otherwise an old file, read from the
+        working tree and verified against the refinfo of the update pack
+        (the pack is self-describing, no old index pack is needed): the
+        size and sha1 of the LF blob must match, an EOL mismatch is
+        converted. A file that fails the check raises SourceError, the
+        caller fetches the record content from the server instead.
 
         Args:
             decoder (PackDecodeBase): Decoder of the update pack
             info (IdxInfo): Record whose source is read
 
         Returns:
-            bytes: LF blob of the source file
+            tuple[bytes, str]: LF blob of the source file, and the tmp
+                file it was read from when the record claims it (a
+                leftover of the content), '' when it came from the tmp
+                file of another record or the working tree
 
         Raises:
             SourceError: If the source fails the size + sha1 check
@@ -514,28 +544,33 @@ class UpdateJob(JobBase):
         fileinfo = decoder.fileinfo
         source_info = fileinfo.get(source_path)
         if info.edit == 0 and source_info is not None and source_info.edit != 2:
-            # C (copied): the source is an earlier new file, its content is in
-            # the tmp file written by the earlier record. A D (deleted) record
-            # of the same path is not a copy source: the source of a C record
-            # can be a file the update deletes (the file of the old version
-            # under a moved folder, e.g. a .dist-info of another version), its
-            # content is read from the working tree below
-            source_tmp = self.workspace.joinpath(
-                f'{source_info.size}_{source_info.sha1.hex()}_{self._file_index[source_path]}.tmp')
-            current = self._read_current(source_tmp)
-            result = self._matches(source_info, current)
-            if not result.match and not result.match_data:
-                # the source record wrote no tmp file: it was skipped (its
-                # target already matched the record), the source content is
-                # the working tree file then. A source record that failed
-                # or is not applied yet does not match either, the record
-                # stays unsolvable and is downloaded
-                current = self._read_current(self.root.joinpath(source_path))
-                result = self._matches(source_info, current)
-                if not result.match and not result.match_data:
-                    raise SourceError(source_path)
-            data = result.match_data if result.match_data else current.data
-            return self._to_blob(data, source_info.eol)
+            # C (copied): the source is an earlier new file. A D (deleted)
+            # record of the same path is not a copy source: the source of a C
+            # record can be a file the update deletes (the file of the old
+            # version under a moved folder, e.g. a .dist-info of another
+            # version), its content is read from the working tree below
+            for rank, source_tmp in self.tmp_manager.candidates(source_info.size, source_info.sha1):
+                data = self._read_matched(source_tmp, source_info)
+                if data is None:
+                    continue
+                # the file the content was read from is claimed when it is an
+                # unclaimed leftover: it becomes the tmp file of this record
+                # (it is not read twice, no second file is built for the same
+                # bytes). A tmp file of this run belongs to its record (rank
+                # -1): it is only read, replace_data() moves it to the target
+                # of that record
+                if rank >= 0 and self.tmp_manager.claim(
+                        source_info.size, source_info.sha1, rank):
+                    return self._to_blob(data, source_info.eol), source_tmp
+                return self._to_blob(data, source_info.eol), ''
+            # no tmp file of the source content, or none that passes the
+            # check: the source content is the working tree file then. A
+            # source record that is not applied yet does not match either, the
+            # record stays unsolvable and is downloaded
+            data = self._read_matched(self.root.joinpath(source_path), source_info)
+            if data is None:
+                raise SourceError(source_path)
+            return self._to_blob(data, source_info.eol), ''
         # the source is an old file, verified against the refinfo
         ref = decoder.refinfo.get(source_path)
         if ref is None:
@@ -547,14 +582,33 @@ class UpdateJob(JobBase):
         # the record size and sha1 are of the LF blob, a CRLF working
         # tree file is converted before the check
         if len(data) == ref.size and (not ref.sha1 or sha1(data).digest() == ref.sha1):
-            return data
+            return data, ''
         converted = data.replace(b'\r\n', b'\n')
         if b'\r' in converted:
             # a lone CR, the EOL cannot be converted cleanly
             raise SourceError(source_path)
         if len(converted) != ref.size or (ref.sha1 and sha1(converted).digest() != ref.sha1):
             raise SourceError(source_path)
-        return converted
+        return converted, ''
+
+    def _read_matched(self, file, info):
+        """
+        Read a file and check it against a record.
+
+        Args:
+            file (str): File to read
+            info (IdxInfo): Record to check against
+
+        Returns:
+            bytes: Content of the file in the record eol (match_data of
+                the check when the content matches after converting the
+                eol), None when the file does not match the record
+        """
+        current = self._read_current(file)
+        result = self._matches(info, current)
+        if not result.match and not result.match_data:
+            return None
+        return result.match_data if result.match_data else current.data
 
     @staticmethod
     def _to_blob(content, eol):

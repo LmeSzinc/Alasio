@@ -143,14 +143,16 @@ class PackEncodeBase:
       refinfo 是解压数据需要参照的旧文件的索引
       old version非空就是增量包，为空则是全量包
     - 根据索引块尝试读取目标文件，如果目标文件存在且size+sha1校验通过则跳过
-    - 将文件解压到临时文件 .pack/workspace/{size}_{sha1}_{index}.tmp
+    - 将文件解压到临时文件 .pack/workspace/{size}_{sha1}_{rank}.tmp
+      其中 rank 是同一内容在本次记录序中的出现序号（0 起），
+      名字与包的记录集 / 记录位置无关，中断重跑时同名文件可直接复用
       如果临时文件存在且size+sha1校验通过则跳过
       - edit=A (added) 直接解压
       - 增量包中有多种edit模式
         以 edit=M (modified) 为例：根据 refinfo 读取已有文件，检查 size sha1，使用zstd解压
     - 将临时文件移动到目标路径
       这样保证了文件内容的原子性，文件列表的原子性由任务恢复保证
-    - 清空 .pack/workspace 文件夹，包括job.pack和剩余未知的{size}_{sha1}_{index}.tmp
+    - 清空 .pack/workspace 文件夹，包括job.pack和剩余未知的{size}_{sha1}_{rank}.tmp
     - 释放 .pack/index.pack 的锁
 
     文件校验流程：
@@ -168,7 +170,7 @@ class PackEncodeBase:
         - 申请 .pack/index.pack 的排它锁，防止竞争操作
         - 写入特定内容到 .pack/workspace/job.pack 标记正在执行校验任务
         - 根据索引记录的 data_size 计算出目标文件在全量包的位置
-        - 使用 http range 请求下载文件，同样解压到临时文件 .pack/workspace/{size}_{sha1}_{index}.tmp
+        - 使用 http range 请求下载文件，同样解压到临时文件 .pack/workspace/{size}_{sha1}_{rank}.tmp
           如果临时文件存在且size+sha1校验通过则跳过
           如果特定区块无法下载或者下载的内容校验不通过则跳过，这是无法解决的问题
         - 将临时文件移动到目标路径
@@ -324,7 +326,9 @@ class PackEncodeBase:
                 raise ValueError(f'Empty sha1 from {file}')
             yield file.sha1
         for file in self._iterfile_with_content(iter_file=True):
-            # sha1 of empty content is always the same, no need to store it
+            # sha1 of empty content is always the same, no need to store it;
+            # the sha1 of an R record (no data, non-empty content) is restored
+            # from its source record by the decoder
             if file.data_size == 0:
                 continue
             # this shouldn't happen

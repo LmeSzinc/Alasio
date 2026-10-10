@@ -581,15 +581,14 @@ class TestUnpackSkip:
     @pytest.mark.trio
     async def test_reuse_tmp_file(self, app_folder):
         """A valid leftover tmp file is moved without decompressing again."""
-        # locate the record of backend/main.py in the pack
+        # the record of backend/main.py in the pack: its content is the
+        # only one of its kind, so its tmp rank is 0
         decoder = PackDecodeBase(WEBSITE_FULL_PACK)
-        index = next(
-            i for i, info in enumerate(decoder.idx_info)
-            if info.path == 'backend/main.py'
-        )
-        info = decoder.idx_info[index]
+        info = decoder.fileinfo['backend/main.py']
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1.hex()}_0.tmp'
+        # the name is the one unpack() applies for on the record
+        assert UnpackJob(WEBSITE_FULL_PACK).tmp_file('backend/main.py', info) == tmp
         # write a valid tmp file, unpack() should reuse it
-        tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1.hex()}_{index}.tmp'
         os.makedirs(tmp.uppath(), exist_ok=True)
         with open(tmp, 'wb') as f:
             f.write(WEBSITE_FILES['backend/main.py'][0])
@@ -597,6 +596,67 @@ class TestUnpackSkip:
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
             WEBSITE_FILES['backend/main.py'][0]
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+
+class TestTmpNames:
+    """The tmp file names of the run: {size}_{sha1hex}_{rank}, the rank
+    being the occurrence index of the content, see TmpManager."""
+
+    def test_duplicate_content_records_do_not_share_a_tmp(self, app_folder):
+        """Three records of the same content get three tmp files: every
+        tmp file is moved to its own target by replace_data()."""
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        job.unpack()
+        pending = {item.info.path: item for item in job.pending}
+        same = ['backend/config.py', 'backend/settings.py', 'backend/utils.py']
+        tmps = [pending[path].tmp for path in same]
+        assert len(set(tmps)) == 3
+        assert [tmp.rpartition('_')[2] for tmp in tmps] == ['0.tmp', '1.tmp', '2.tmp']
+        assert all(os.path.exists(tmp) for tmp in tmps)
+
+    def test_rerun_reuses_all_tmps(self, app_folder, monkeypatch):
+        """A rerun of the same pack reuses every tmp file of the
+        interrupted run: the names are the occurrence indices of the
+        contents, so the second run computes the ones of the first."""
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        job.write()
+        job.unpack()
+        tmps = [item.tmp for item in job.pending if item.tmp]
+        assert tmps
+        # the workspace is kept (as an interrupted run leaves it), the
+        # second run writes nothing again
+        import alasio.deploy.pack.job_unpack as module
+        writes = []
+        original = module.file_write
+
+        def _counting(file, data):
+            writes.append(file)
+            return original(file, data)
+        monkeypatch.setattr(module, 'file_write', _counting)
+        second = UnpackJob(WEBSITE_FULL_PACK)
+        second.unpack()
+        assert writes == []
+        assert {item.tmp for item in second.pending if item.tmp} == set(tmps)
+
+    def test_matched_record_applies_for_no_name(self, app_folder):
+        """A record whose target already matches needs no tmp file and
+        consumes no rank: the later records of the same content keep the
+        low ranks and hit the leftovers of the first run."""
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
+        same = ['backend/config.py', 'backend/settings.py', 'backend/utils.py']
+        assert len({decoder.fileinfo[path].sha1 for path in same}) == 1
+        # the first record of the content is already applied
+        target = env.PROJECT_ROOT / 'backend/config.py'
+        os.makedirs(target.uppath(), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(WEBSITE_FILES['backend/config.py'][0])
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        job.unpack()
+        pending = {item.info.path: item for item in job.pending}
+        # only the records that need a tmp file applied for a name
+        assert 'backend/config.py' not in pending
+        assert pending['backend/settings.py'].tmp.rpartition('_')[2] == '0.tmp'
+        assert pending['backend/utils.py'].tmp.rpartition('_')[2] == '1.tmp'
 
 
 class TestFailure:

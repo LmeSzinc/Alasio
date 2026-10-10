@@ -41,9 +41,12 @@ class ResetJob(JobBase):
     by download() and replaced to the real files by replace(). Files
     that cannot be downloaded or fail the size + sha1 check stay in
     self.error with an empty tmp, this is an unsolvable problem per
-    the draft of PackEncodeBase. The new index pack is committed only
-    when every file was repaired, a failed flow keeps the old local
-    version.
+    the draft of PackEncodeBase. The tmp files are named by the tmp
+    manager of the workspace (see TmpManager and JobBase.tmp_file()),
+    a record applies for its name when it needs the tmp file, so a
+    leftover tmp file of an interrupted run is found again and reused. The new index pack is
+    committed only when every file was repaired, a failed flow keeps
+    the old local version.
 
     Note: the exclusive lock of the target ledger (the lock file, see
     DeployJob.locked()) is held by DeployJob around the whole update
@@ -261,9 +264,11 @@ class ResetJob(JobBase):
         pending without a download. A file whose content matches but
         whose mode differs is written to a tmp file with the current
         content, replace() chmod-ed the target to the record mode,
-        no download is needed either. Other failed files are
-        collected in self.error with an empty tmp, the caller repairs
-        them.
+        no download is needed either. The tmp file names come from the
+        tmp manager of the run, applied for when the tmp file is needed,
+        see tmp_file(). Other failed
+        files are collected in self.error with an empty tmp, the caller
+        repairs them.
 
         Returns:
             bool: True if every file matches its record, False
@@ -279,17 +284,16 @@ class ResetJob(JobBase):
                     self.error.append(PendingFile(info=info, tmp=''))
                 continue
             result = self._matches(info, current)
+            if result.match and result.mode_matched:
+                # the content and the mode are verified, the record needs
+                # no tmp file and applies for no tmp name
+                continue
             if result.match:
-                if result.mode_matched:
-                    continue
                 # only the mode differs, the content is verified:
                 # write the current content to a tmp file, download()
                 # moves it to pending without a download, replace()
                 # chmod-ed the target to the record mode
-                # the tmp name is built from the index of the record
-                # in self.error, matching the download() convention
-                tmp = self.workspace.joinpath(
-                    f'{info.size}_{info.sha1.hex()}_{len(self.error)}.tmp')
+                tmp = self.tmp_file(path, info)
                 if not self._matches(info, self._read_current(tmp)).match:
                     file_write(tmp, current.data)
                 self.error.append(PendingFile(info=info, tmp=tmp, mode=info.mode_decoded))
@@ -297,15 +301,14 @@ class ResetJob(JobBase):
             if result.match_data:
                 # only the EOL differs, write the converted content
                 # to a tmp file, download() moves it to pending
-                # the tmp name is built from the index of the record
-                # in self.error, matching the download() convention
-                tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{len(self.error)}.tmp')
+                tmp = self.tmp_file(path, info)
                 file_write(tmp, result.match_data)
                 self.error.append(PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
                 continue
             # missing or wrong size + sha1, the file is rewritten
-            # by python with the default mode 666
+            # by python with the default mode 666; download() applies for
+            # the tmp file of the record and writes the content there
             self.error.append(PendingFile(
                 info=info, tmp='', mode=info.mode_decoded if info.mode == 1 else None))
         return not self.error
@@ -374,7 +377,8 @@ class ResetJob(JobBase):
 
         Every failed file is fetched from the full pack of the index
         pack version with a range request, decompressed and written to
-        {ledger}/workspace/{size}_{sha1}_{index}.tmp, the record is
+        its tmp file ({ledger}/workspace/{size}_{sha1}_{rank}.tmp,
+        see JobBase.tmp_file()), the record is
         moved to self.pending for replace(). Records that already carry a
         tmp (an EOL or mode mismatch fixed in validate_files()) and
         deleted markers need no download and are moved to pending
@@ -394,7 +398,7 @@ class ResetJob(JobBase):
         decoder = self._index_pack
         pending = []
         error = []
-        for index, item in enumerate(self.error):
+        for item in self.error:
             info = item.info
             if info.edit == 2:
                 # deleted marker, no download, its target is removed
@@ -407,7 +411,7 @@ class ResetJob(JobBase):
                 pending.append(item)
                 continue
             try:
-                tmp = await self._download_file(decoder, server, info, index)
+                tmp = await self._download_file(decoder, server, info)
             except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
                 # keep the record in error, this is unsolvable
@@ -424,7 +428,7 @@ class ResetJob(JobBase):
         self.pending += pending
         self.error = error
 
-    async def _download_file(self, decoder, server, info, index):
+    async def _download_file(self, decoder, server, info):
         """
         Download and decompress a file from the full pack, write the
         content to a tmp file.
@@ -436,8 +440,6 @@ class ResetJob(JobBase):
             decoder (PackDecodeBase): Decoder of the local index pack
             server (ServerFile): Server to download from
             info (IdxInfo): Record of the file to download
-            index (int): Index of the record in self.error, used to
-                build the tmp file name
 
         Returns:
             str: Path of the tmp file
@@ -446,7 +448,7 @@ class ResetJob(JobBase):
             PackDecodeError: If the downloaded data fails the size +
                 sha1 check
         """
-        tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{index}.tmp')
+        tmp = self.tmp_file(info.path, info)
         current = await trio.to_thread.run_sync(self._read_current, tmp)
         if self._matches(info, current).match:
             # a leftover tmp file passes the size + sha1 check, reuse it

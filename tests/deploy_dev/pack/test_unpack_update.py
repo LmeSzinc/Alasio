@@ -458,6 +458,32 @@ class TestUpdateRoundtrip:
         assert fileinfo['.pack/index.pack'].source_path == '.pack/index.pack'
         assert '.pack/index.pack' in decoder.refinfo
 
+    def test_pure_rename_sha1_restored(self, app_folder):
+        """The pack stores no sha1 for a data-less record and an R record
+        has no data: the decoder restores the sha1 from the source record,
+        so the record is checked by content (its size alone would accept
+        any file of that size, e.g. a leftover tmp file of another pack)."""
+        decoder = PackDecodeBase(UPDATE)
+        info = decoder.fileinfo['scripts/runner.sh']
+        assert info.edit == 3
+        assert info.data_size == 0
+        assert info.sha1
+        assert info.sha1 == decoder.refinfo['scripts/run.sh'].sha1
+
+    @pytest.mark.trio
+    async def test_rename_target_wrong_same_size_content(self, app_folder):
+        """An R record is verified by content: a file of the same size at
+        its target is rewritten, not accepted as already updated."""
+        await setup_app()
+        target = env.PROJECT_ROOT / 'scripts/runner.sh'
+        wrong = b'#!/bin/sh\nset -e\necho "xyz"\n'
+        assert len(wrong) == len(NEW['scripts/runner.sh'])
+        os.makedirs(target.uppath(), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(wrong)
+        await run_update()
+        assert file_read_bytes(target) == NEW['scripts/runner.sh']
+
     @pytest.mark.trio
     async def test_roundtrip_twice_is_idempotent(self, app_folder):
         """Running into a folder with valid files succeeds and skips."""
@@ -586,6 +612,73 @@ class TestUpdateRoundtrip:
         await run_update()
         assert not os.stat(target).st_mode & 0o111
         assert file_read_bytes(target) == NEW['tools/tool.sh'][0]
+
+
+class TestCopiedSource:
+    """The source lookup of a copied record."""
+
+    @pytest.mark.trio
+    async def test_read_from_registered_tmp(self, app_folder):
+        """The tmp files this run wrote are registered per content: a
+        copied record reads the content from the tmp file of the earlier
+        record instead of walking the records or the working tree, so the
+        whole copy chain (a1 -> a2 -> a3, App -> App2, readme_copy ->
+        readme_copy2) resolves locally."""
+        await setup_app()
+        job = UpdateJob(UPDATE, server=SERVER)
+        job.write()
+        job.unpack()
+        assert job.error == []
+        assert not os.path.exists(env.PROJECT_ROOT / 'backend/a2.py')
+        # the copy writes its own tmp file: the tmp file it read is the one
+        # of the earlier record and stays that record's own file, it is
+        # moved to the target of that record by replace_data()
+        pending = {item.info.path: item.tmp for item in job.pending}
+        assert pending['backend/a1.py'] != pending['backend/a2.py']
+        assert pending['backend/a2.py'] != pending['backend/a3.py']
+        job.replace()
+        assert file_read_bytes(env.PROJECT_ROOT / 'backend/a1.py') == NEW['backend/a1.py']
+        assert file_read_bytes(env.PROJECT_ROOT / 'backend/a2.py') == NEW['backend/a2.py']
+        assert file_read_bytes(env.PROJECT_ROOT / 'backend/a3.py') == NEW['backend/a3.py']
+
+    @pytest.mark.trio
+    async def test_read_leftover_is_claimed_as_its_tmp(self, app_folder, monkeypatch):
+        """A copied record that reads its source from a leftover claims
+        the very file as its own tmp file: the file it read is the file
+        it writes, there is no second name and no second file."""
+        await setup_app()
+        # the source record of the second copy cannot be computed (its own
+        # source, the unchanged readme.md, is gone); the workspace holds a
+        # stale leftover of the content and a valid one
+        os.remove(env.PROJECT_ROOT / 'docs/readme.md')
+        decoder = PackDecodeBase(UPDATE)
+        info = decoder.fileinfo['docs/readme_copy2.txt']
+        stale = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1.hex()}_0.tmp'
+        os.makedirs(stale.uppath(), exist_ok=True)
+        with open(stale, 'wb') as f:
+            f.write(b'stale contents')
+        leftover = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1.hex()}_1.tmp'
+        with open(leftover, 'wb') as f:
+            f.write(b'# Website\r\n')
+        import alasio.deploy.pack.job_update as module
+        writes = []
+        original = module.file_write
+
+        def _counting(file, data):
+            writes.append(file)
+            return original(file, data)
+        monkeypatch.setattr(module, 'file_write', _counting)
+        job = UpdateJob(UPDATE, server=SERVER)
+        job.write()
+        job.unpack()
+        # the copied record read the valid leftover and claimed it: the tmp
+        # file of the record is the file it read (not the stale leftover of
+        # the lower rank, which the plain sequence would hand out), and the
+        # file it read is not written again
+        pending = {item.info.path: item for item in job.pending}
+        assert pending['docs/readme_copy2.txt'].tmp == leftover
+        assert leftover not in writes
+        assert file_read_bytes(leftover) == b'# Website\r\n'
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -948,6 +1041,31 @@ class TestValidateRemaining:
         # a path deleted by the update is no record of the new version
         assert 'backend/legacy.py' not in job.new_fileinfo
 
+    @pytest.mark.trio
+    async def test_tmp_files_unique_across_the_flow(self, app_folder):
+        """The update job and its nested reset write into the same
+        workspace, so they share the tmp manager: no two records of the
+        flow get the same tmp file (replace_data() moves every tmp file
+        once), the counters continue with the records of the update."""
+        await setup_app()
+        # the missing source sends the two copied records to the download
+        # of the update job, the nested reset repairs the source itself
+        os.remove(env.PROJECT_ROOT / 'docs/readme.md')
+        job = UpdateJob(UPDATE, server=SERVER)
+        job.write()
+        assert await job.run()
+        assert job.error == []
+        names = {
+            item.info.path: item.tmp
+            for item in job.pending if item.tmp
+        }
+        assert len(set(names.values())) == len(names)
+        # the two copied records of the update pack are rank 0 and 1 of
+        # their content, the nested reset continues at rank 2
+        assert names['docs/readme_copy.txt'].endswith('_0.tmp')
+        assert names['docs/readme_copy2.txt'].endswith('_1.tmp')
+        assert names['docs/readme.md'].endswith('_2.tmp')
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  download phase
@@ -987,20 +1105,22 @@ class TestDownload:
         """A leftover tmp file that passes the check is reused."""
         await setup_app()
         os.remove(env.PROJECT_ROOT / 'docs/readme.md')
-        # write a valid tmp file at the record tmp name, download()
-        # should reuse it
+        # write a valid tmp file at the record tmp name, the run should
+        # reuse it: the name is {size}_{sha1hex}_{rank}, the copied record
+        # is the first one of its content (readme_copy2.txt shares the
+        # content, it is rank 1)
         decoder = PackDecodeBase(UPDATE)
-        index = list(decoder.fileinfo).index('docs/readme_copy.txt')
         info = decoder.fileinfo['docs/readme_copy.txt']
-        tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1.hex()}_{index}.tmp'
+        tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1.hex()}_0.tmp'
         os.makedirs(tmp.uppath(), exist_ok=True)
         with open(tmp, 'wb') as f:
             f.write(b'# Website\r\n')
 
         # the copy record is served from the leftover tmp without a
-        # download; only the missing readme.md is downloaded by the
-        # remaining check (its data range is the same as the copy's,
-        # the copy restores the data range of its source)
+        # download; the missing readme.md is downloaded by the remaining
+        # check, the first copy is the second download (the leftover was
+        # already claimed as the tmp file of the second copy): one
+        # download less than without the leftover
         original = SERVER.get_file_content
         calls = []
 
@@ -1011,10 +1131,13 @@ class TestDownload:
         job = UpdateJob(UPDATE, server=SERVER)
         assert await job.run()
         assert job.error == []
+        # the leftover was claimed as the tmp file of one of the records
+        # (it is moved to its target by replace_data(), no rewrite)
+        assert tmp in {item.tmp for item in job.pending}
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Website\r\n'
         # the missing unchanged source is repaired by the remaining check
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme.md') == b'# Website\n'
-        assert len(calls) == 1
+        assert len(calls) == 2
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     @pytest.mark.trio

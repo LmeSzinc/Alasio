@@ -583,7 +583,9 @@ class TestDownload:
         job = ResetJob(WEBSITE_SERVER)
         job.validate_index()
         job.validate_files()
-        # write a valid tmp file, download() should reuse it
+        # write a valid tmp file at the name download() applies for, it
+        # should reuse it: the empty content of the record is the only one
+        # of its kind in the index, so its rank is 0
         item = job.error[0]
         tmp = job.workspace.joinpath(f'{item.info.size}_{item.info.sha1.hex()}_0.tmp')
         os.makedirs(tmp.uppath(), exist_ok=True)

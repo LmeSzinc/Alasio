@@ -6,9 +6,10 @@ from msgspec import Struct
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.pack_model import IdxInfo
+from alasio.deploy.pack.tmp_manager import TmpManager
 from alasio.deploy.simple_pip.cleanup_folder import CleanupFolder
 from alasio.ext import env
-from alasio.ext.cache import InstanceCacheOperation
+from alasio.ext.cache import InstanceCacheOperation, cached_property
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import (
     atomic_open, atomic_read_bytes, atomic_remove, atomic_replace, atomic_rmtree, folder_rmtree_empty
@@ -154,6 +155,9 @@ class JobBase(DeployTarget):
     replace() / replace_data() / replace_index() and
     cleanup_empty_folders() by every job that applies the changes to
     the real files.
+
+    The tmp files of the run are named by the tmp manager of the
+    workspace, see TmpManager and tmp_file().
     """
 
     # fixed name of the new index pack in the workspace: the index
@@ -190,6 +194,80 @@ class JobBase(DeployTarget):
         # so an unknown record set never removes a folder that is not
         # empty
         self.new_fileinfo: "dict[str, IdxInfo]" = {}
+
+    @cached_property
+    def tmp_manager(self):
+        """
+        The tmp file names of the job workspace, see TmpManager.
+
+        The manager scans the workspace on the first access, before the
+        first tmp file of this run is written, so the leftovers of an
+        interrupted run are found. A nested job of the same run takes
+        the manager of its caller (see UpdateJob._validate_remaining):
+        the two jobs write into the same workspace, sharing the manager
+        keeps the tmp names of their records apart.
+
+        Returns:
+            TmpManager: The tmp manager of this job workspace
+        """
+        return TmpManager(self.workspace)
+
+    def tmp_file(self, path, info):
+        """
+        The tmp file of a record, applied for when the caller needs it.
+
+        The name comes from TmpManager.get() and every call hands out a
+        new one: the caller applies for the tmp file it is about to use
+        (the unpack writes it, download() writes the content of a failed
+        record there) and keeps the returned path in the record it is
+        preparing (the tmp of a pending change). A reader that picked a
+        tmp file itself (the source lookup of a copied record) claims it
+        through TmpManager.claim() and uses the path it read instead of
+        calling here. A record that needs no tmp file (its target already
+        matches the record) is never applied for and consumes no name, so
+        the names of a run are the tmp files it writes, see TmpManager.
+        The deleted markers (edit == 2) are applied by removal and get an
+        empty tmp path; the index pack record of an update pack is always
+        prepared to the fixed new_index.tmp and applies for no name
+        either.
+
+        Args:
+            path (str): Path of the record
+            info (IdxInfo): Record of the file
+
+        Returns:
+            str: Path of the tmp file, empty for a deleted marker
+        """
+        if info.edit == 2:
+            return ''
+        if path == self.index_rel:
+            # the index pack record of an update pack: the new index is
+            # always prepared to the fixed new_index.tmp, so it can be
+            # found without tracking a tmp name
+            return self.workspace.joinpath(self.NEW_INDEX)
+        return self.tmp_manager.get(info.size, info.sha1)
+
+    def register_tmp(self, path, info, tmp):
+        """
+        Register a tmp file the record prepared, see TmpManager.register().
+
+        The caller registers every tmp file it prepared for a record of
+        the pack (written by the unpack or by download(), or a leftover
+        that passed the check): the source lookup of a copied record
+        finds the content this way instead of walking the records of the
+        run. The virtual tmp files of a job are skipped: a deleted marker
+        has none, and the index pack record of an update pack is prepared
+        to the fixed new_index.tmp, which holds no content of a record of
+        the pack.
+
+        Args:
+            path (str): Path of the record
+            info (IdxInfo): Record the tmp file was prepared for
+            tmp (str): Path of the tmp file
+        """
+        if info.edit == 2 or path == self.index_rel:
+            return
+        self.tmp_manager.register(info.size, info.sha1, tmp)
 
     def local_path(self, path):
         """

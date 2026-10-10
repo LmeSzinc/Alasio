@@ -32,15 +32,20 @@ class UnpackJob(JobBase):
 
     1. unpack() reads the old local index pack, writes the index
        section to {ledger}/workspace/new_index.tmp and decompresses
-       all files to {ledger}/workspace/{size}_{sha1}_{index}.tmp,
-       real files are untouched. The leftover files of the old version, recorded
-       in the old index but not in this pack, are appended as deleted
-       markers, and the new index pack is committed last by
-       replace_index() when every data file landed: an interruption
-       during replace() leaves the old index pack in place, so a
-       resumed run still computes the leftover deletion list from it.
-       Files that exist and pass the size + sha1 check
-       are skipped, leftover tmp files that pass the check are reused.
+       all files to {ledger}/workspace/{size}_{sha1}_{rank}.tmp,
+       real files are untouched. The tmp files are named by the tmp
+       manager of the workspace (the rank is the occurrence index of
+       the content among the records that need a tmp file, see
+       TmpManager), so a leftover
+       tmp file of an interrupted run is found again and reused. The
+       leftover files of the old version, recorded in the old index but
+       not in this pack, are appended as deleted markers, and the new
+       index pack is committed last by replace_index() when every data
+       file landed: an interruption during replace() leaves the old
+       index pack in place, so a resumed run still computes the
+       leftover deletion list from it. Files that exist and pass the
+       size + sha1 check are skipped, leftover tmp files that pass the
+       check are reused.
     2. replace() moves every tmp file to the target path atomically,
        removes the deleted markers and commits the new index pack last,
        see JobBase.replace(). Real file operations only start
@@ -132,7 +137,7 @@ class UnpackJob(JobBase):
 
         Writes the index section to {ledger}/workspace/new_index.tmp and
         decompresses every file to
-        {ledger}/workspace/{size}_{sha1}_{index}.tmp, filling self.pending
+        {ledger}/workspace/{size}_{sha1}_{rank}.tmp, filling self.pending
         with the changes to apply in replace_data(). The old local index
         pack is read first: files recorded in it but not in this pack
         are the leftover files of the old version, removed by
@@ -165,7 +170,7 @@ class UnpackJob(JobBase):
 
         # unpack files, the loop body is unchanged
         pending = []
-        for index, (path, info) in enumerate(decoder.fileinfo.items()):
+        for path, info in decoder.fileinfo.items():
             target = self.root.joinpath(path)
             if info.edit == 2:
                 # deleted marker, its target is removed in replace()
@@ -173,11 +178,14 @@ class UnpackJob(JobBase):
                 continue
             current = self._read_current(target)
             result = self._matches(info, current)
-            tmp = self.workspace.joinpath(f'{info.size}_{info.sha1.hex()}_{index}.tmp')
-            if result.match:
+            if result.match and result.mode_matched:
                 # the target file exists and passes the size + sha1 check
-                if result.mode_matched:
-                    continue
+                # with the record mode: the record needs no tmp file and
+                # applies for no tmp name
+                continue
+            # the record needs a tmp file, it applies for its name now
+            tmp = self.tmp_file(path, info)
+            if result.match:
                 # only the mode differs, the content is verified:
                 # write the current content to the tmp file, replace()
                 # chmod-ed the target to the record mode

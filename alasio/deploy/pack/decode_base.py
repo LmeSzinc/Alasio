@@ -406,7 +406,8 @@ class PackDecodeBase:
             info.data_size -= diff
 
         # sha1: all refinfo + non-D non-C fileinfo with data_size > 0,
-        # matching iter_sha1_data() which skips data_size == 0
+        # matching iter_sha1_data() which skips data_size == 0 (the sha1
+        # of a data-less record is restored from its source below)
         count_sha1 = len_refinfo + sum(1 for info in non_dc if info.data_size)
         if len(self._sha1_part) != count_sha1 * 20:
             raise PackDecodeError(
@@ -444,6 +445,17 @@ class PackDecodeBase:
                 info.data_size = source.data_size
                 info.data_start = source.data_start
                 info.sha1 = source.sha1
+
+        # renamed: the content is identical to the source record, the
+        # encoder stores no sha1 for a record without data (data_size ==
+        # 0 is the empty content rule of the sha1 section, a full pack
+        # carries no R record); restore it from the source record, so
+        # the size + sha1 check of a record is exact for R records too
+        # (the size alone would accept any file of that size). eol /
+        # mode / size keep the values decoded from the pack
+        for i, info in enumerate(info_list[len_refinfo:], start=len_refinfo):
+            if info.edit == 3 and not info.data_size and info.source_lookback:
+                info.sha1 = info_list[i - info.source_lookback].sha1
 
         self._len_refinfo = len_refinfo
         return info_list

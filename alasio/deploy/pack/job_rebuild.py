@@ -123,9 +123,10 @@ class RebuildJob(ResetJob):
         leftover deletions never enter self.error: self.error is the
         download list of download(), the leftover files are deleted,
         not downloaded. They are appended after the validation:
-        ResetJob.validate_files() resets self.error at its start, and
-        the tmp file names built during the validation keep their
-        positions in self.error.
+        ResetJob.validate_files() resets self.error at its start and
+        applies for the tmp file names of the records only where they
+        are needed (see tmp_file()), the appended deletions carry no
+        tmp file and affect neither.
 
         Returns:
             bool: True if every file matches the new index, False
