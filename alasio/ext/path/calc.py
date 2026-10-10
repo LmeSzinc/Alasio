@@ -10,11 +10,14 @@ def normpath(path: str) -> str:
     if WINDOWS_SEP:
         # In most cases just normpath('xxx.png') check '/' first to be faster
         if '\\' in path:
-            return path.rstrip('\\/').replace('\\', '/')
+            normalized = path.rstrip('\\/').replace('\\', '/')
         else:
-            return path.rstrip('\\/')
+            normalized = path.rstrip('\\/')
     else:
-        return path.rstrip('/')
+        normalized = path.rstrip('/')
+    # A bare root ("/" / "\\") is kept as "/" instead of becoming an empty
+    # string, an empty input stays empty
+    return normalized or ('/' if path else '')
 
 
 def joinpath(root: str, path: str) -> str:
@@ -131,7 +134,7 @@ def abspath(path: str) -> str:
     """
     if is_abspath(path):
         return path
-    root = os.getcwd()
+    root = normpath(os.getcwd())
     return joinpath(root, path)
 
 

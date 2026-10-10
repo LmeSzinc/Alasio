@@ -39,7 +39,7 @@ class PathStr(str):
         Returns:
             PathStr: Current working directory
         """
-        return cls(os.getcwd())
+        return cls.new(os.getcwd())
 
     def chdir_here(self):
         """

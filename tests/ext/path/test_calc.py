@@ -60,11 +60,12 @@ class TestNormpathWhenWindows:
         # Only separators are removed, "C:" keeps its drive colon
         ('C:\\', 'C:'),
         ('C:', 'C:'),
-        # Deviation: a bare root becomes an empty string instead of "/"
-        ('/', ''),
-        ('\\', ''),
-        ('//', ''),
-        ('\\\\', ''),
+        # A bare root keeps the root as "/" instead of becoming an empty string
+        ('/', '/'),
+        ('\\', '/'),
+        # Deviation: "//" is collapsed, os.path.normpath would keep it on POSIX
+        ('//', '/'),
+        ('\\\\', '/'),
         # A leading "//" of a UNC path is not a separator to strip
         ('\\\\server\\share\\', '//server/share'),
         # Unicode path
@@ -96,9 +97,11 @@ class TestNormpathWhenPosix:
         # Backslash is not a separator, it stays untouched
         ('a\\', 'a\\'),
         ('a\\b', 'a\\b'),
-        # Deviation: a bare root becomes an empty string instead of "/"
-        ('/', ''),
-        ('//', ''),
+        # A bare root keeps the root as "/" (os.path.normpath agrees)
+        ('/', '/'),
+        # Deviation: "//" is collapsed, os.path.normpath would keep it as "//"
+        ('//', '/'),
+        ('///', '/'),
         # No platform detection, a Windows path is not converted
         ('C:/x/', 'C:/x'),
         ('C:\\x\\', 'C:\\x\\'),
@@ -339,17 +342,22 @@ class TestAbspathWhenWindows:
         ('C:/a', 'C:/a'),
         ('C:\\a', 'C:\\a'),
         ('C:', 'C:'),
-        # Deviation: cwd is not normalized, the result keeps the backslash of
-        # os.getcwd() (like posixpath.abspath on Windows), the relative part is
-        # joined with "/"
-        ('a', 'C:\\fake\\cwd/a'),
-        ('a/b', 'C:\\fake\\cwd/a/b'),
+        # The cwd is normalized as well, the result is fully "/" separated
+        ('a', 'C:/fake/cwd/a'),
+        ('a/b', 'C:/fake/cwd/a/b'),
+        # The cwd itself is returned when the path is empty
+        ('', 'C:/fake/cwd'),
         # Deviation: "/a" is not absolute on the Windows branch, it is joined as well
-        ('/a', 'C:\\fake\\cwd//a'),
+        ('/a', 'C:/fake/cwd//a'),
     ])
     def test_abspath(self, path, expected):
         """Absolute paths should be kept, relative paths joined under the cwd."""
         assert abspath(path) == expected
+
+    def test_abspath_cwd_drive_root(self, monkeypatch):
+        """A drive root cwd should be normalized to "C:" and joined as usual."""
+        monkeypatch.setattr(os, 'getcwd', lambda: 'C:\\')
+        assert abspath('a') == 'C:/a'
 
 
 class TestAbspathWhenPosix:
@@ -367,12 +375,18 @@ class TestAbspathWhenPosix:
         ('/a/b', '/a/b'),
         ('a', '/fake/cwd/a'),
         ('a/b', '/fake/cwd/a/b'),
+        ('', '/fake/cwd'),
         # A Windows path is not absolute on POSIX, it is joined under the cwd
         ('C:/a', '/fake/cwd/C:/a'),
     ])
     def test_abspath(self, path, expected):
         """Absolute paths should be kept, relative paths joined under the cwd."""
         assert abspath(path) == expected
+
+    def test_abspath_cwd_is_root(self, monkeypatch):
+        """A root cwd should keep the joined path under "/" instead of dropping it."""
+        monkeypatch.setattr(os, 'getcwd', lambda: '/')
+        assert abspath('a') == '/a'
 
 
 class TestToPosix:
