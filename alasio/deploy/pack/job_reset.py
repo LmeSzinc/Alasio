@@ -89,8 +89,10 @@ class ResetJob(JobBase):
         only when every file was repaired, see replace_index(). The
         network phases await on the event loop, the local phases run in
         a worker thread (see JobBase.run()). On failure the workspace is
-        cleaned up: errors during write() and validate() are safe and
-        are logged as warning.
+        cleaned up: errors during write() and validate() are safe
+        because no real file was written and are logged as warning,
+        errors during replace() leave partially replaced files and are
+        logged as error.
 
         Returns:
             bool: True if every file is repaired, False otherwise
@@ -111,12 +113,18 @@ class ResetJob(JobBase):
             # the new index records every file of the new version, the
             # emptiness base of replace_data()
             self.new_fileinfo = self._index_pack.fileinfo
+        except Exception as e:
+            # no real file was written, safe to clean up
+            logger.warning(f'Failed to reset: {e}')
+            await trio.to_thread.run_sync(self.cleanup)
+            return False
+        try:
             # the new index pack is committed only when every file was
             # repaired: a failed flow keeps the old local version
             await trio.to_thread.run_sync(self.replace, not self.error)
         except Exception as e:
-            # no real file was written, safe to clean up
-            logger.warning(f'Failed to reset: {e}')
+            # real files may be partially replaced
+            logger.error(f'Failed to replace file: {e}')
             await trio.to_thread.run_sync(self.cleanup)
             return False
         # the job is finished, clean the workspace atomically

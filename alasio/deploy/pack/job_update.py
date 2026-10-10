@@ -73,7 +73,11 @@ class UpdateJob(JobBase):
        commits the new index pack last (replace_index()), only when
        every record landed.
 
-    On failure the workspace is kept, the next run resumes from it.
+    On failure the workspace is cleaned up: errors during write() and
+    unpack() are safe, no real file was written, errors during
+    replace() leave partially replaced files. Only a process killed in
+    flight leaves the workspace behind for the next run to resume from
+    (the job file and the tmp files written so far).
 
     Note: the exclusive lock of the target ledger (the lock file, see
     DeployJob.locked()) is held by DeployJob around the whole update

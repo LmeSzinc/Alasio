@@ -524,6 +524,31 @@ class TestResume:
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
+    @pytest.mark.trio
+    async def test_interrupted_replace_keeps_old_index(self, app_folder, monkeypatch):
+        """An interruption during the data pass keeps the old index and is
+        logged as error: real files may be partially replaced."""
+        await setup_old()
+        import alasio.deploy.pack.job_base as job_base
+        original = job_base.atomic_replace
+        calls = []
+
+        def _fail(tmp, target):
+            if calls:
+                raise PermissionError('interrupted')
+            calls.append(target)
+            return original(tmp, target)
+        monkeypatch.setattr(job_base, 'atomic_replace', _fail)
+        job = RebuildJob(SERVER)
+        with logger.mock_capture_writer() as capture:
+            assert not await job.run()
+        assert capture.backend.any_contains('Failed to replace file')
+        # the interrupted pass replaced a data file, never the index pack
+        assert len(calls) == 1
+        assert not str(calls[0]).endswith('index.pack')
+        # the commit never ran: the old index pack is still in place
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == OLD_INDEX
+
 
 class TestIdempotent:
     """A second rebuild of the new tree."""

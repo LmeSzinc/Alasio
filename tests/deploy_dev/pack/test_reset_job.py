@@ -862,8 +862,11 @@ class TestIndexCommit:
             return original(tmp, target)
         monkeypatch.setattr(job_base, 'atomic_replace', _fail)
         job = ResetJob(WEBSITE_SERVER)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert not await job.run()
+        # the replace failure is an error: real files may be partially
+        # replaced, it is not the safe "no real file was written" case
+        assert capture.backend.any_contains('Failed to replace file')
         # the interrupted pass replaced a data file, never the index pack
         assert len(calls) == 1
         assert not str(calls[0]).endswith('index.pack')

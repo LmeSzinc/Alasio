@@ -70,7 +70,9 @@ class RebuildJob(ResetJob):
         The network phases await on the event loop, the local phases
         run in a worker thread (see JobBase.run()). On failure the
         workspace is cleaned up: errors during write() and validation
-        are safe and are logged as warning.
+        are safe because no real file was written and are logged as
+        warning, errors during replace() leave partially replaced files
+        and are logged as error.
 
         Returns:
             bool: True if every file is rebuilt, False otherwise
@@ -86,6 +88,12 @@ class RebuildJob(ResetJob):
             # the new index records every file of the new version, the
             # emptiness base of replace_data()
             self.new_fileinfo = self._index_pack.fileinfo
+        except Exception as e:
+            # no real file was written, safe to clean up
+            logger.warning(f'Failed to rebuild: {e}')
+            await trio.to_thread.run_sync(self.cleanup)
+            return False
+        try:
             # the new index pack is committed after the rebuild and
             # only when every file of it landed: an interruption keeps
             # the old index pack in place, so a resumed run still
@@ -93,8 +101,8 @@ class RebuildJob(ResetJob):
             # is prepared to pending_index, see JobBase.replace_index())
             await trio.to_thread.run_sync(self.replace, not self.error)
         except Exception as e:
-            # no real file was written, safe to clean up
-            logger.warning(f'Failed to rebuild: {e}')
+            # real files may be partially replaced
+            logger.error(f'Failed to replace file: {e}')
             await trio.to_thread.run_sync(self.cleanup)
             return False
         # the job is finished, clean the workspace atomically
