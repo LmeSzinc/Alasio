@@ -4,7 +4,9 @@ Tests for DeployJob.check: the read-only version check of the update flow.
 The server is an in-memory MockServerFile, the local ledger is built by
 UnpackJob like the other e2e tests. check() is read-only: no lock is
 taken and nothing is written, a check never conflicts with an update of
-the same target.
+the same target. check(version) verifies additionally that the server
+publishes the given version as its latest one: a server that publishes
+another version provides no valid update and is refused.
 
 Every test is async (pytest-trio): the network phase awaits the mock
 transport on the test event loop, the local read runs in a worker thread.
@@ -82,10 +84,34 @@ class TestDeployCheck:
         assert check.uptodate() is False
 
     @pytest.mark.trio
+    async def test_known_version(self, app_folder):
+        """The version-driven check accepts the version the server publishes
+        as its latest: the pair is the one of the latest-driven check."""
+        await UnpackJob(WEBSITE_FULL_PACK).run()
+
+        check = await DeployJob(server=SERVER_C2).check(version='c2')
+
+        assert (check.local, check.latest) == ('c1', 'c2')
+        assert check.checksum == LATEST_CHECKSUM
+        assert check.uptodate() is False
+
+    @pytest.mark.trio
+    async def test_known_version_not_published(self, app_folder):
+        """A server that does not publish the requested version provides no
+        valid update, even when the local version already is the requested
+        one."""
+        await UnpackJob(WEBSITE_FULL_PACK).run()
+
+        with pytest.raises(ValueError, match='no valid update'):
+            await DeployJob(server=SERVER_C2).check(version='c1')
+
+    @pytest.mark.trio
     async def test_no_server(self, app_folder):
         """A target created without a server cannot check."""
         with pytest.raises(ValueError, match='no server'):
             await DeployJob().check()
+        with pytest.raises(ValueError, match='no server'):
+            await DeployJob().check(version='c1')
 
     @pytest.mark.trio
     async def test_read_only(self, app_folder):
@@ -117,6 +143,28 @@ class TestCheckLogs:
         await UnpackJob(WEBSITE_FULL_PACK).run()
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER_C2).update()
+        current = [log for log in capture.backend.logs if '[CurrentVersion]' in log['m']]
+        latest = [log for log in capture.backend.logs if '[LatestVersion]' in log['m']]
+        assert len(current) == 1
+        assert len(latest) == 1
+
+    @pytest.mark.trio
+    async def test_check_logs_the_pair_with_a_version(self, app_folder):
+        """A given version only verifies the latest one: the pair is logged
+        like the latest-driven check logs it."""
+        await UnpackJob(WEBSITE_FULL_PACK).run()
+        with logger.mock_capture_writer() as capture:
+            await DeployJob(server=SERVER_C2).check(version='c2')
+        assert capture.backend.any_contains('[CurrentVersion] c1')
+        assert capture.backend.any_contains('[LatestVersion] c2')
+
+    @pytest.mark.trio
+    async def test_update_with_a_version_logs_the_pair_once(self, app_folder):
+        """The version-driven update() takes the pair from check(version),
+        the pair is logged once."""
+        await UnpackJob(WEBSITE_FULL_PACK).run()
+        with logger.mock_capture_writer() as capture:
+            assert await DeployJob(server=SERVER_C2).update(version='c2')
         current = [log for log in capture.backend.logs if '[CurrentVersion]' in log['m']]
         latest = [log for log in capture.backend.logs if '[LatestVersion]' in log['m']]
         assert len(current) == 1

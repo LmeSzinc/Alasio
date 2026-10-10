@@ -281,16 +281,16 @@ class DeployJob(DeployTarget):
             return ''
         return decoder.current_version
 
-    async def check(self):
+    async def check(self, version=''):
         """
-        Check the latest version on the server of the instance
-        (self.server, set in __init__) against the local version of this
-        target:
+        Check the local version of this target against the server of the
+        instance (self.server, set in __init__):
 
             check = await DeployJob(server=server).check()
+            check = await DeployJob(server=server).check(version='0.28.1')
 
         Read-only: the local version comes from the local index pack
-        (index.pack in the ledger folder of the target), the latest one
+        (index.pack in the ledger folder of the target), the target comes
         from latest.pack on the server. Nothing is written and no lock
         is taken - a check never conflicts with an update of the same
         target (the index pack of a target being updated is read
@@ -301,12 +301,25 @@ class DeployJob(DeployTarget):
         loop, a cancelled task interrupts it immediately. The comparison
         is left to the caller, see DeployCheck.uptodate().
 
+        When version is given, the target is verified additionally: the
+        server must publish that version as its latest one (the dependency
+        install of a mod passes the pin of its requirements file, see
+        alasio.deploy.simple_pip.pip_pack). A server that publishes another
+        version provides no valid update: the check is refused with a
+        ValueError and nothing was changed.
+
+        Args:
+            version (str, optional): Version the server must publish as its
+                latest, verified additionally, see the docstring. Defaults
+                to '', no extra verification
+
         Returns:
             DeployCheck: The local version and the latest info of the
                 server
 
         Raises:
-            ValueError: If the target was created without a server
+            ValueError: If the target was created without a server, or the
+                server does not publish the given version
             httpx2.HTTPError: If the request fails
             AllMirrorsFailedError: If no mirror is usable
         """
@@ -316,6 +329,14 @@ class DeployJob(DeployTarget):
         logger.attr('CurrentVersion', local)
         info = await self.server.get_latest_info()
         logger.attr('LatestVersion', info.version)
+        if version and info.version != version:
+            # the extra verification of a given version: the server must
+            # publish it as its latest target, a server that publishes
+            # another one provides no valid update
+            raise ValueError(
+                f'The server provides no valid update: latest is "{info.version}", '
+                f'the requested version is "{version}"'
+            )
         check = DeployCheck(local=local, info=info)
         # the verdict, one line either way: the update flow reads the same
         # pair from this same call
@@ -355,14 +376,21 @@ class DeployJob(DeployTarget):
         await trio.to_thread.run_sync(atomic_rmtree, self.workspace)
         raise UpdateAborted(f'The update was cancelled by the caller at the {phase!r} phase')
 
-    async def update(self, on_job_phase=None):
+    async def update(self, on_job_phase=None, version=''):
         """
-        Check the latest version on the server of the instance
-        (self.server, set in __init__) and update the local working
-        tree of this target to it:
+        Update the local working tree of this target to the latest version
+        of the server of the instance (self.server, set in __init__):
 
             await DeployJob(server=server).update()
             await DeployJob(server=server).update(update_manager)
+            await DeployJob(server=server).update(version='0.28.1')
+
+        A version given by the caller is an extra verification of the
+        target: the server must publish it as its latest one, a server that
+        publishes another version provides no valid update and the update
+        is refused (check(version) raises). The dependency install of a mod
+        passes the pin of its requirements file this way
+        (alasio.deploy.simple_pip.pip_pack).
 
         The unified entry of the file check flow in the draft of
         PackEncodeBase
@@ -413,13 +441,19 @@ class DeployJob(DeployTarget):
                 normal cancel interrupts the request itself, the backend
                 transaction turns that into its cancellation). Defaults to
                 None, the whole flow runs without a callback (the CLI)
+            version (str, optional): Version the server must publish as its
+                latest, verified additionally by the check, see the
+                docstring (the dependency install of a mod passes the pin
+                of its requirements file). Defaults to '', no extra
+                verification
 
         Returns:
             bool: True if every file is up to date, False if some
                 records stay in error
 
         Raises:
-            ValueError: If the target was created without a server
+            ValueError: If the target was created without a server, or the
+                server does not publish the given version
         """
         import httpx2
         if self.server is None:
@@ -436,7 +470,7 @@ class DeployJob(DeployTarget):
                 logger.info(f'Found unfinished job: {job.__class__}')
                 await job.run()
 
-            check = await self.check()
+            check = await self.check(version)
             local = check.local
             info = check.info
 

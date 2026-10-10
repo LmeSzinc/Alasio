@@ -5,7 +5,10 @@ The server is an in-memory MockServerFile serving two versions and the
 update pack between them. The flow follows the draft in PackEncodeBase:
 latest.pack is compared with the local version, a version mismatch
 downloads the update pack /{new}/from_{old}.pack and applies it with
-UpdateJob, the same version continues with ResetJob.
+UpdateJob, the same version continues with ResetJob. The update(version)
+form, covered by TestVersionDrivenUpdate, adds one verification: latest.pack
+must publish the given version, otherwise the server provides no valid
+update and the flow is refused.
 
 Every test is async (pytest-trio): update() and the jobs await their
 network phases on the test event loop, the local phases run in worker
@@ -26,7 +29,7 @@ from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.ext import env
-from alasio.ext.path.atomic import file_read_bytes
+from alasio.ext.path.atomic import file_read_bytes, file_write
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -435,3 +438,108 @@ class TestUpdatePhases:
         assert phases == ['checking', 'downloading']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
         assert read_tree() == OLD_TREE
+
+
+class TestVersionDrivenUpdate:
+    """update(version): the caller's version is verified against latest.pack.
+
+    The dependency install of a mod passes the pin its requirements file
+    holds for a distribution (alasio.deploy.simple_pip.pip_pack): the check
+    of the flow verifies that the server publishes exactly that version as
+    its latest one, a server that publishes another version provides no
+    valid update and the flow is refused. The rest of the flow is the
+    latest-driven one, the target is the latest version the check verified;
+    the counting wrapper of TestLatestInfoSnapshot shows the pair is still
+    fetched once per flow (the resumed flow fetches it twice, like the
+    latest-driven one).
+    """
+
+    @pytest.mark.trio
+    async def test_incremental(self, app_folder, monkeypatch):
+        """A version mismatch applies the update pack of the version."""
+        await UnpackJob(OLD_PACK).run()
+        latest_calls = TestLatestInfoSnapshot.count_latest(SERVER, monkeypatch)
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER).update(version='new')
+        assert len(latest_calls) == 1
+        assert read_tree() == NEW_TREE
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    @pytest.mark.trio
+    async def test_rebuild_when_local_missing(self, app_folder, monkeypatch):
+        """No local index: the rebuild reads the index pack of the version
+        the check verified."""
+        latest_calls = TestLatestInfoSnapshot.count_latest(SERVER, monkeypatch)
+        index_calls = []
+        original_index = SERVER.get_index_pack
+
+        async def counting_index(version):
+            index_calls.append(version)
+            return await original_index(version)
+
+        monkeypatch.setattr(SERVER, 'get_index_pack', counting_index)
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER).update(version='new')
+        assert len(latest_calls) == 1
+        assert index_calls == ['new']
+        assert read_tree() == NEW_TREE
+        decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
+        assert decoder.current_version == 'new'
+
+    @pytest.mark.trio
+    async def test_same_version_repairs(self, app_folder, monkeypatch):
+        """The same version verifies the local files against the published
+        index and repairs a damaged one from the full pack of the version."""
+        await UnpackJob(NEW_PACK).run()
+        file_write(env.PROJECT_ROOT / 'backend/main.py', b'damaged\n')
+        latest_calls = TestLatestInfoSnapshot.count_latest(SERVER, monkeypatch)
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER).update(version='new')
+        assert len(latest_calls) == 1
+        assert read_tree() == NEW_TREE
+
+    @pytest.mark.trio
+    async def test_update_pack_missing_falls_back(self, app_folder, monkeypatch):
+        """A 404 of the update pack falls back to a rebuild from the index
+        pack of the version."""
+        await UnpackJob(OLD_PACK).run()
+        latest_calls = TestLatestInfoSnapshot.count_latest(SERVER_NO_UPDATE, monkeypatch)
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER_NO_UPDATE).update(version='new')
+        assert len(latest_calls) == 1
+        assert read_tree() == NEW_TREE
+        decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
+        assert decoder.current_version == 'new'
+
+    @pytest.mark.trio
+    async def test_version_not_published(self, app_folder):
+        """A server that does not publish the requested version provides no
+        valid update: the flow is refused before anything runs."""
+        with pytest.raises(ValueError, match='no valid update'):
+            await DeployJob(server=SERVER).update(version='gone')
+        assert read_tree() == {}
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack')
+
+    @pytest.mark.trio
+    async def test_resumed_job_is_finished_first(self, app_folder, monkeypatch):
+        """An unfinished job is finished before the check (the resumed job
+        fetches the pair of its own), the version is verified after it."""
+        await UnpackJob(OLD_PACK).run()
+        RebuildJob(SERVER).write()
+        latest_calls = TestLatestInfoSnapshot.count_latest(SERVER, monkeypatch)
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER).update(version='new')
+        assert len(latest_calls) == 2
+        assert read_tree() == NEW_TREE
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    @pytest.mark.trio
+    async def test_phases(self, app_folder):
+        """The version-driven flow reports the same phases as the
+        latest-driven one."""
+        await UnpackJob(OLD_PACK).run()
+        phases = FakePhaseManager()
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=SERVER).update(phases, version='new')
+        assert phases.phases == ['checking', 'downloading', 'updating']
+        assert read_tree() == NEW_TREE
