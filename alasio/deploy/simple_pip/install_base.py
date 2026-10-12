@@ -11,19 +11,18 @@ config names (Deploy.Python.RequirementsFile, see
 alasio.deploy.simple_pip.parse_req). The site-packages folder has to
 satisfy the pins: this module reads the pins (Requirements), compares them
 with the installed distributions (PipList) and reports the pins the folder
-does not satisfy as dict_update, the local check of an update.
+does not satisfy as get_dict_update(), the local check of an update.
 
 The distributions a mod updates by pack are declared on its entry
 (mod.entry.pack_update_deps, an entry attribute like mirrors), the other
 pins install with pip, by the flow of the caller: install_pack() installs
 the out-of-date pins that are declared from the pack channels of the mod,
-one distribution at a time (PipPack and the deploy job machine, see
-doc/2026-09-30_python-dist-pack-update-flow.md).
+one distribution at a time (PipPack and the deploy job machine).
 
 Usage:
     install = InstallBase(mod, site_packages)
-    print(install.dict_update)        # {'httpx': '0.28.1'}
-    await install.install_pack()      # {'httpx': True}
+    print(await install.get_dict_update())  # {'httpx': '0.28.1'}
+    await install.install_pack()            # {'httpx': True}
 """
 
 import trio
@@ -32,7 +31,6 @@ from alasio.deploy.httpclient.probe import AllMirrorsFailedError
 from alasio.deploy.simple_pip.parse_req import Requirements
 from alasio.deploy.simple_pip.pip_list import PipList, normalize_name
 from alasio.deploy.simple_pip.pip_pack import PipPack
-from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_text
 from alasio.logger import logger
@@ -42,8 +40,8 @@ class InstallBase:
     """
     The dependency install of one mod.
 
-    One instance is one read of the environment: dict_update reads the
-    requirements file of the mod, the metadata of the site-packages
+    One instance is one read of the environment: get_dict_update() reads
+    the requirements file of the mod, the metadata of the site-packages
     folder and the pack ledgers of the mod once and caches the result, so
     the instance has to be created after the tree of the mod is at the
     version whose pins are installed -- the flow of a mod update applies
@@ -79,6 +77,9 @@ class InstallBase:
         self.mod = mod
         self.site_packages = PathStr.new(site_packages)
         self.client = client
+        # The pins of the one read of get_dict_update(), None until the
+        # first call, see the class docstring
+        self._dict_update = None
 
     @property
     def path_requirements(self):
@@ -90,8 +91,7 @@ class InstallBase:
         """
         return self.mod.root.joinpath(self.mod.entry.requirements_file)
 
-    @cached_property
-    def dict_update(self):
+    async def get_dict_update(self):
         """
         The pins of the requirements file of the mod the site-packages
         folder does not satisfy.
@@ -111,10 +111,29 @@ class InstallBase:
         an update here. A mod without a requirements file has nothing to
         install: a warning is logged and the pins are empty.
 
+        The read of the folder is blocking file IO and runs on a worker
+        thread (PipList is synchronous), so the caller awaits it without
+        blocking the event loop. The result is read once per instance and
+        cached, see the class docstring.
+
         Returns:
             dict[str, str]: PEP 503 normalized name -> pinned version of
                 the pins to install or update, e.g. {'httpx': '0.28.1'}.
                 Empty when every pin is satisfied
+        """
+        if self._dict_update is None:
+            self._dict_update = await trio.to_thread.run_sync(self._read_dict_update)
+        return self._dict_update
+
+    def _read_dict_update(self):
+        """
+        Read the pins of the mod and the installed distributions of the
+        folder: the work of get_dict_update(), blocking file IO, called on
+        a worker thread.
+
+        Returns:
+            dict[str, str]: PEP 503 normalized name -> pinned version of
+                the pins to install or update
         """
         path = self.path_requirements
         try:
@@ -141,24 +160,25 @@ class InstallBase:
         """
         Install the out-of-date pins the mod updates by pack.
 
-        Every pin of dict_update whose name is declared in pack_update_deps
-        (mod.entry.pack_update_deps, any case and separator style) is
-        installed at the pinned version by PipPack, from the pack channel of
-        the mod: the pinned version is the version the install requires the
-        channel to publish as its latest one (DeployJob.update(version)), a
-        deployment that publishes another version provides no valid update
-        and the install is refused. Every other pin is left to the pip
-        install of the caller, an undeclared distribution is not touched
-        here. The local check (dict_update) runs on a worker thread first
-        (it reads the requirements file and the metadata of the folder,
-        blocking file IO); when nothing is out of date, nothing is
-        requested and no update source is needed.
+        Every pin of get_dict_update() whose name is declared in
+        pack_update_deps (mod.entry.pack_update_deps, any case and
+        separator style) is installed at the pinned version by PipPack,
+        from the pack channel of the mod: the pinned version is the version
+        the install requires the channel to publish as its latest one
+        (DeployJob.update(version)), a deployment that publishes another
+        version provides no valid update and the install is refused. Every
+        other pin is left to the pip install of the caller, an undeclared
+        distribution is not touched here. The local check
+        (get_dict_update()) runs first, on a worker thread (it reads the
+        requirements file and the metadata of the folder, blocking file
+        IO); when nothing is out of date, nothing is requested and no
+        update source is needed.
 
         One distribution is installed after another; a failure of one does
-        not stop the others (the per-dist independence of the pack flow,
-        see doc/2026-09-30_python-dist-pack-update-flow.md §3.3): a channel
-        that publishes another version, a network failure and a failed file
-        operation are logged and reported as False, the next call retries.
+        not stop the others (the distributions of the pack flow are
+        independent of each other): a channel that publishes another
+        version, a network failure and a failed file operation are logged
+        and reported as False, the next call retries.
         Every install holds the exclusive lock of the ledger of its
         distribution for its whole flow (DeployJob.update), so two installs
         of one distribution never interleave.
@@ -173,7 +193,16 @@ class InstallBase:
             ValueError: When a declared pin is out of date but the mod
                 declares no usable update source (PipPack refuses it)
         """
-        deps = await trio.to_thread.run_sync(self._pack_deps)
+        dict_update = await self.get_dict_update()
+        # The declared pins of the check: the names of pack_update_deps,
+        # any case and separator style (the compare is on the normalized
+        # name, PEP 503)
+        names = {normalize_name(name) for name in self.mod.entry.pack_update_deps}
+        deps = {
+            name: version
+            for name, version in dict_update.items()
+            if name in names
+        }
         if not deps:
             return {}
         # httpx2 is imported lazily in the places that catch its errors, see
@@ -193,20 +222,3 @@ class InstallBase:
                 ok = False
             out[name] = ok
         return out
-
-    def _pack_deps(self):
-        """
-        The out-of-date pins the mod updates by pack: the work of
-        install_pack() before the installs, blocking file IO, called on a
-        worker thread.
-
-        Returns:
-            dict[str, str]: PEP 503 normalized name -> pinned version of
-                the pins of dict_update declared in pack_update_deps
-        """
-        names = {normalize_name(name) for name in self.mod.entry.pack_update_deps}
-        return {
-            name: version
-            for name, version in self.dict_update.items()
-            if name in names
-        }

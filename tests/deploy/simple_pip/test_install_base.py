@@ -3,12 +3,12 @@ Tests for InstallBase: the dependency install of one mod.
 
 InstallBase reads the requirements file of the mod (the requirements_file
 of its entry) and compares its pins with the distributions installed in
-the site-packages folder (PipList): dict_update is the pins the folder
-does not satisfy, missing locally or at another version. install_pack
-installs the out-of-date pins that the entry declares for pack updates
-(pack_update_deps) from the pack channels of the mod, one PipPack install
-per distribution, and leaves the other pins to the pip install of the
-caller.
+the site-packages folder (PipList): get_dict_update() is the pins the
+folder does not satisfy, missing locally or at another version.
+install_pack installs the out-of-date pins that the entry declares for
+pack updates (pack_update_deps) from the pack channels of the mod, one
+PipPack install per distribution, and leaves the other pins to the pip
+install of the caller.
 
 The channels of a test are in-memory channel servers (MockServerFile of
 tests.deploy_dev.pack) whose base url carries the path prefix of a
@@ -236,7 +236,8 @@ def patch_servers(monkeypatch, expected_scope, *dists):
 class TestDictUpdate:
     """The local check: the pins of the requirements file against the folder."""
 
-    def test_out_of_date_pins(self, fs):
+    @pytest.mark.trio
+    async def test_out_of_date_pins(self, fs):
         """A pin that is missing and a pin at another version are out of date,
         a satisfied pin is not."""
         site = site_packages(fs)
@@ -258,9 +259,10 @@ nopin>=1.0
         # httpx and ruamel.yaml are at their versions (the names compare
         # normalized), demo is at another one and missing is not installed;
         # the declaration without a pin is not a dependency
-        assert install.dict_update == {'demo': '2.0', 'missing': '3.1'}
+        assert await install.get_dict_update() == {'demo': '2.0', 'missing': '3.1'}
 
-    def test_the_file_of_the_entry(self, fs):
+    @pytest.mark.trio
+    async def test_the_file_of_the_entry(self, fs):
         """The pins are read from {mod.root}/{entry.requirements_file}."""
         site = site_packages(fs)
         root = abs_path(fs, '/mod')
@@ -269,26 +271,30 @@ nopin>=1.0
         mod = FakeMod(root=root, requirements_file='deploy/requirements-lock.txt')
         install = InstallBase(mod, site)
         assert install.path_requirements == f'{root}/deploy/requirements-lock.txt'
-        assert install.dict_update == {'demo': '2.0'}
+        assert await install.get_dict_update() == {'demo': '2.0'}
 
-    def test_missing_file(self, fs):
+    @pytest.mark.trio
+    async def test_missing_file(self, fs):
         """A mod without a requirements file has nothing to install."""
         with logger.mock_capture_writer() as capture:
-            assert InstallBase(make_mod(fs), site_packages(fs)).dict_update == {}
+            install = InstallBase(make_mod(fs), site_packages(fs))
+            assert await install.get_dict_update() == {}
         assert capture.fd.any_contains('no requirements file')
 
-    def test_cached(self, fs):
-        """dict_update is read once and cached on the instance."""
+    @pytest.mark.trio
+    async def test_cached(self, fs):
+        """The pins are read once and cached on the instance."""
         site = site_packages(fs)
         install = InstallBase(make_mod(fs, content='demo==1.0\n'), site)
-        assert install.dict_update == {'demo': '1.0'}
+        assert await install.get_dict_update() == {'demo': '1.0'}
         # the folder reaches the version afterwards: the cached read does
         # not change, a new instance reads the new state
         create_dist(fs, {}, name='demo', version='1.0')
-        assert install.dict_update == {'demo': '1.0'}
-        assert InstallBase(install.mod, site).dict_update == {}
+        assert await install.get_dict_update() == {'demo': '1.0'}
+        assert await InstallBase(install.mod, site).get_dict_update() == {}
 
-    def test_first_metadata_entry_wins(self, fs):
+    @pytest.mark.trio
+    async def test_first_metadata_entry_wins(self, fs):
         """A name with two installed entries checks the first of the listing,
         the entry list() keeps and reports with a warning: the check is not a
         file-level verification, a stale entry does not hide the version of
@@ -297,14 +303,16 @@ nopin>=1.0
         create_dist(fs, {}, name='demo', version='1.0')
         create_dist(fs, {}, name='demo', version='2.0')
         with logger.mock_capture_writer() as capture:
-            assert InstallBase(make_mod(fs, content='demo==1.0\n', root='/mod-a'), site).dict_update == {}
+            install_a = InstallBase(make_mod(fs, content='demo==1.0\n', root='/mod-a'), site)
+            assert await install_a.get_dict_update() == {}
             assert capture.fd.any_contains('Skipped a duplicate installation of "demo"')
             install_b = InstallBase(make_mod(fs, content='demo==2.0\n', root='/mod-b'), site)
-            assert install_b.dict_update == {
+            assert await install_b.get_dict_update() == {
                 'demo': '2.0',
             }
 
-    def test_the_pack_ledger_wins(self, fs):
+    @pytest.mark.trio
+    async def test_the_pack_ledger_wins(self, fs):
         """The check reads the version of the pack ledger of a declared
         distribution: the metadata an interrupted update already shows does
         not satisfy a pin of the new version."""
@@ -316,19 +324,20 @@ nopin>=1.0
         fs.create_file(f'{site}/.pack/demo/index.pack', contents=index)
 
         mod = make_mod(fs, content='demo==2.0\n', pack_update_deps=['demo'])
-        assert InstallBase(mod, site).dict_update == {'demo': '2.0'}
+        assert await InstallBase(mod, site).get_dict_update() == {'demo': '2.0'}
         # the version the ledger records is satisfied, whatever the metadata
         mod = make_mod(fs, content='demo==1.0\n', root='/mod-b', pack_update_deps=['demo'])
-        assert InstallBase(mod, site).dict_update == {}
+        assert await InstallBase(mod, site).get_dict_update() == {}
 
-    def test_only_the_declared_ledgers_are_read(self, fs):
+    @pytest.mark.trio
+    async def test_only_the_declared_ledgers_are_read(self, fs):
         """A ledger of a distribution the mod does not declare is not read."""
         site = site_packages(fs)
         create_dist(fs, {}, name='demo', version='2.0')
         _, index = build_dist('demo', '1.0')
         fs.create_file(f'{site}/.pack/demo/index.pack', contents=index)
 
-        assert InstallBase(make_mod(fs, content='demo==2.0\n'), site).dict_update == {}
+        assert await InstallBase(make_mod(fs, content='demo==2.0\n'), site).get_dict_update() == {}
 
 
 class TestInstallPack:
@@ -352,7 +361,7 @@ plain==1.0
         servers['demo'].register_version('2.0', full, index)
 
         install = InstallBase(mod, site)
-        assert install.dict_update == {'demo': '2.0', 'plain': '1.0'}
+        assert await install.get_dict_update() == {'demo': '2.0', 'plain': '1.0'}
         assert await install.install_pack() == {'demo': True}
 
         # the files and the metadata of the channel landed, at the version

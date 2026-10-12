@@ -399,38 +399,6 @@ class TestOrder:
         assert names(run_list('/env/two')) == [('alasio', '0.0.1'), ('demo', '1.0')]
 
 
-class TestGet:
-    def test_found(self, fs):
-        """The name is compared normalized, the style of the caller does not matter."""
-        create_dist_info(fs, 'ruamel_yaml-0.18.6.dist-info', metadata('ruamel.yaml', '0.18.6'))
-        dist = PipList(SITE).get('Ruamel.Yaml')
-        assert dist is not None
-        assert names([dist]) == [('ruamel.yaml', '0.18.6')]
-
-    def test_not_installed(self, fs):
-        """A name the directory holds no distribution of gives None."""
-        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
-        assert PipList(SITE).get('alasio') is None
-
-    def test_first_of_the_same_name(self, fs):
-        """The distribution of the first metadata entry of the name is returned,
-        the entry the aggregate of list() keeps."""
-        create_dist_info(fs, 'demo-2.0.dist-info', metadata('demo', '2.0'))
-        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
-        assert PipList(SITE).get('demo').version == '1.0'
-
-    def test_legacy(self, fs):
-        """A legacy installation is found the same way."""
-        create_egg_info(fs, 'alasio.egg-info', metadata('alasio', '0.0.1'))
-        assert PipList(SITE).get('alasio').version == '0.0.1'
-
-    def test_the_pack_ledger_wins(self, fs):
-        """The version of a pack ledger wins over the metadata, get() reports it."""
-        create_dist_info(fs, 'demo-2.0.dist-info', metadata('demo', '2.0'))
-        create_pack(fs, 'demo', '1.0')
-        assert PipList(SITE, mod=FakeMod('demo')).get('demo').version == '1.0'
-
-
 class TestPackList:
     def test_no_mod(self, fs):
         """A listing created without a mod declares no pack updated distribution."""

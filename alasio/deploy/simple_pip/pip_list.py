@@ -180,9 +180,10 @@ class PipList:
         of the directory, with the versions the pack ledgers of the mod
         record. Every name appears once in the listing, so the entries are
         keyed by the PEP 503 normalized name (the dist-key, the identity
-        of a distribution, any case and separator style of a name finds
-        it). The conflicts of the two listings are resolved here, so the
-        listing reports the trusted version of a distribution:
+        of a distribution: any case and separator style of a name
+        normalizes to one key). The conflicts of the two listings are
+        resolved here, so the listing reports the trusted version of a
+        distribution:
 
             - Two metadata entries of one name, e.g. the .dist-info
               directory of an old version left behind by an update: the
@@ -305,23 +306,6 @@ class PipList:
                 out.append(Distribution(name, version, index_file))
         out.sort(key=lambda dist: dist.dist_key)
         return out
-
-    def get(self, name):
-        """
-        Find the distribution of a name.
-
-        Args:
-            name (str): Name of the distribution, e.g. "ruamel.yaml", any
-                case and separator style, the compare is on the normalized
-                name (PEP 503): "Ruamel.Yaml" finds "ruamel-yaml"
-
-        Returns:
-            Distribution | None: The distribution of the name in the
-                listing of list() (the trusted version of the pack ledger
-                of the mod included), None if the directory holds no
-                distribution of the name
-        """
-        return self.list().get(normalize_name(name))
 
     def _read_entry(self, entry):
         """
