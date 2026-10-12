@@ -93,13 +93,12 @@ class DeployJob(DeployTarget):
         await DeployJob().unpack(data)             # no server needed
         await DeployJob(name='httpx', server=server).update()
 
-    The unfinished job is finished inside unpack() and update(), the
-    caller does not need to care about it; the server of the instance
-    is handed to it, so a resumed job downloads its missing files
-    from it when set. Both take the exclusive lock of the target
-    ledger for the whole flow, see alocked(): two updaters of the same
-    target never interleave, the second one waits (or fails at once
-    with locked(timeout=0)).
+    Both entry points take the exclusive lock of the target ledger for the
+    whole flow, see alocked(): two updaters of the same target never
+    interleave, the second one waits (or fails at once with
+    locked(timeout=0)). The server of the instance is handed to the job of
+    the flow, the downloads of the job (the index pack, the failed records)
+    use it.
     """
 
     def __init__(self, root=None, name='', server=None):
@@ -110,8 +109,7 @@ class DeployJob(DeployTarget):
             name (str, optional): Ledger key of the target. Defaults to
                 '', the project tree target
             server (ServerFile, optional): Server to check and download
-                from, used by update() and handed to the unfinished job
-                that unpack() / update() finish. Defaults to None.
+                from, used by update(). Defaults to None.
         """
         super().__init__(root=root, name=name)
         self.server = server
@@ -224,13 +222,9 @@ class DeployJob(DeployTarget):
         version (recorded in the old local index pack, not in this
         pack) are removed, the new index pack (index.pack in the ledger
         folder of the target) replaces the local one last. The unpack
-        itself needs no server: the server of the instance
-        (self.server) is only handed to the unfinished job finished
-        first, a resumed job downloads its missing files from it when
-        set. Finishes the unfinished job first, then unpacks the new
-        data. The exclusive lock of the target ledger is held for the
-        whole flow, see alocked(). The local phases run in worker
-        threads, see JobBase.run().
+        itself needs no server. The exclusive lock of the target ledger
+        is held for the whole flow, see alocked(). The local phases run
+        in worker threads, see JobBase.run().
 
         Args:
             data (bytes): Full pack data
@@ -490,9 +484,8 @@ class DeployJob(DeployTarget):
         A missing or malformed local index pack has an unknown
         version, the update cannot be incremental: RebuildJob
         downloads the latest index unconditionally and rebuilds the
-        working tree from it. The unfinished job is finished inside,
-        the caller does not need to care about it. The exclusive lock
-        of the target ledger is held for the whole flow, see alocked():
+        working tree from it. The exclusive lock of the target ledger is
+        held for the whole flow, see alocked():
         the whole download and replace flow of one caller is one
         critical section (a second updater of the same target waits,
         see locked()) - a caller must never split the flow to hold the
