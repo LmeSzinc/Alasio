@@ -2,6 +2,7 @@ import os
 from hashlib import sha1
 from typing import Optional
 
+import trio
 from msgspec import Struct
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
@@ -165,6 +166,12 @@ class JobBase(DeployTarget):
     # it to the local index pack as the last change of the flow
     NEW_INDEX = 'new_index.tmp'
 
+    # the tmp file names of the job workspace, see TmpManager: created and
+    # scanned by tmp_manager_init() (the scan reads the workspace, it runs
+    # in a worker thread), None until then. A job whose phases use tmp files
+    # needs the init awaited before them, see tmp_file() and register_tmp()
+    tmp_manager: "Optional[TmpManager]" = None
+
     def __init__(self, data, root=None, name=''):
         """
         Args:
@@ -200,22 +207,26 @@ class JobBase(DeployTarget):
         # empty
         self.new_fileinfo: "dict[str, IdxInfo]" = {}
 
-    @cached_property
-    def tmp_manager(self):
+    async def tmp_manager_init(self):
         """
-        The tmp file names of the job workspace, see TmpManager.
+        Create the tmp manager of the job workspace and scan it (the
+        leftovers of an interrupted run are read here).
 
-        The manager scans the workspace on the first access, before the
-        first tmp file of this run is written, so the leftovers of an
-        interrupted run are found. A nested job of the same run takes
-        the manager of its caller (see UpdateJob._validate_remaining):
-        the two jobs write into the same workspace, sharing the manager
-        keeps the tmp names of their records apart.
+        run() awaits this before the local phases: building the manager is
+        a plain object construction, the scan is the only io step and runs
+        in a worker thread, it never blocks the event loop. Idempotent, a
+        manager already created is returned as-is (a nested job of the same
+        run shares the manager of its caller, see
+        UpdateJob._validate_remaining).
 
         Returns:
             TmpManager: The tmp manager of this job workspace
         """
-        return TmpManager(self.workspace)
+        manager = self.tmp_manager
+        if manager is None:
+            manager = self.tmp_manager = TmpManager(self.workspace)
+            await trio.to_thread.run_sync(manager.scan)
+        return manager
 
     def tmp_file(self, path, info):
         """
@@ -242,6 +253,9 @@ class JobBase(DeployTarget):
 
         Returns:
             str: Path of the tmp file, empty for a deleted marker
+
+        Raises:
+            RuntimeError: If tmp_manager_init() was not awaited
         """
         if info.edit == 2:
             return ''
@@ -250,7 +264,11 @@ class JobBase(DeployTarget):
             # always prepared to the fixed new_index.tmp, so it can be
             # found without tracking a tmp name
             return self.workspace.joinpath(self.NEW_INDEX)
-        return self.tmp_manager.get(info.size, info.sha1)
+        manager = self.tmp_manager
+        if manager is None:
+            raise RuntimeError('The tmp manager of the job was not created: '
+                               'tmp_manager_init() was not awaited')
+        return manager.get(info.size, info.sha1)
 
     def register_tmp(self, path, info, tmp):
         """
@@ -269,10 +287,17 @@ class JobBase(DeployTarget):
             path (str): Path of the record
             info (IdxInfo): Record the tmp file was prepared for
             tmp (str): Path of the tmp file
+
+        Raises:
+            RuntimeError: If tmp_manager_init() was not awaited
         """
         if info.edit == 2 or path == self.index_rel:
             return
-        self.tmp_manager.register(info.size, info.sha1, tmp)
+        manager = self.tmp_manager
+        if manager is None:
+            raise RuntimeError('The tmp manager of the job was not created: '
+                               'tmp_manager_init() was not awaited')
+        manager.register(info.size, info.sha1, tmp)
 
     def local_path(self, path):
         """

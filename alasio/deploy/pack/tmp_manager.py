@@ -2,6 +2,7 @@ import re
 from threading import Lock
 
 from alasio.ext.path import PathStr
+from alasio.ext.path.atomic import atomic_remove, is_tmp_file
 from alasio.logger import logger
 
 
@@ -28,8 +29,11 @@ class TmpManager:
     The name is a pure function of (content, occurrence index), so a tmp
     file left by an interrupted run is found again by the next run.
 
-    The workspace is scanned at init and the tmp files found there are
-    the leftover pool of each content, see scan(). The tmp files a run
+    The workspace is scanned by the caller (scan()): the constructor only
+    stores the workspace, so the io of the scan runs wherever the caller
+    runs it (JobBase.tmp_manager_init runs it in a worker thread). The tmp
+    files found by the scan are the leftover pool of each content, see
+    scan(). The tmp files a run
     writes are registered per content, see register(): a reader that
     needs a content (the source lookup of a copied record, see
     candidates()) finds the leftovers and the files of the run without
@@ -66,7 +70,8 @@ class TmpManager:
         # {(size, sha1hex): {path}} of the tmp files this run wrote (or
         # reused), see register()
         self.written: "dict[tuple[int, str], set[str]]" = {}
-        self.scan()
+        # the leftover pool stays empty until scan() runs, the caller scans
+        # (see the class docstring)
 
     def scan(self):
         """
@@ -75,22 +80,28 @@ class TmpManager:
 
         Every file of the workspace is parsed on its own, so the ranks of
         a content may be non-continuous, see the class docstring. A file
-        that does not follow the naming rule is not a tmp file of a job
-        and is ignored. A rank below the counter of its content was
-        handed out already (a claimed leftover that is not moved to its
-        target yet, or a fresh name): it never returns to the pool, a
-        name is handed out once.
+        that does not follow the naming rule is not a tmp file of a job:
+        a leftover of an interrupted atomic write (filename.RID.tmp, see
+        is_tmp_file) is removed, anything else is ignored. A rank below
+        the counter of its content was handed out already (a claimed
+        leftover that is not moved to its target yet, or a fresh name):
+        it never returns to the pool, a name is handed out once.
         """
         # {size}_{sha1hex}_{rank}.tmp: sha1hex is the 40 hex chars of the
         # content sha1, empty for an empty file (size 0, sha1 b'')
         pattern = re.compile(r'^(\d+)_([0-9a-f]{40}|)_(\d+)\.tmp$')
         names = list(self.workspace.iter_filenames(ext='.tmp'))
         leftover: "dict[tuple[int, str], set[int]]" = {}
+        stale = []
         with self._lock:
             for name in names:
                 matched = pattern.match(name)
                 if matched is None:
-                    # not a tmp file of a job, e.g. new_index.tmp
+                    # not a tmp file of a job: an interrupted atomic write
+                    # is removed, anything else (e.g. new_index.tmp) is
+                    # left alone
+                    if is_tmp_file(name):
+                        stale.append(name)
                     continue
                 size, sha1hex, rank = matched.groups()
                 key = (int(size), sha1hex)
@@ -101,6 +112,15 @@ class TmpManager:
                     leftover[key] = set()
                 leftover[key].add(int(rank))
             self.leftover = leftover
+        for name in stale:
+            file = self.workspace.joinpath(name)
+            try:
+                atomic_remove(file)
+            except OSError as e:
+                logger.warning(f'Failed to remove the leftover of an interrupted atomic write '
+                               f'"{file}": {e}')
+            else:
+                logger.info(f'Removed the leftover of an interrupted atomic write: {file}')
         if leftover:
             count = sum(len(ranks) for ranks in leftover.values())
             logger.debug(

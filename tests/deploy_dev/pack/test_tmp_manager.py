@@ -14,7 +14,24 @@ from hashlib import sha1
 from threading import Lock, Thread
 from time import sleep
 
-from alasio.deploy.pack.tmp_manager import TmpManager
+from alasio.deploy.pack.tmp_manager import TmpManager as _TmpManager
+
+
+class TmpManager(_TmpManager):
+    """
+    TmpManager scanned at construction, the reader of the tests.
+
+    The manager itself only stores the workspace, its caller scans: the io
+    of the scan runs wherever the caller runs it (JobBase.tmp_manager_init
+    runs it in a worker thread). The tests build a manager right before
+    reading it, so they scan here.
+    """
+
+    def __init__(self, workspace):
+        super().__init__(workspace)
+        self.scan()
+
+
 from alasio.ext import env
 from alasio.testing.filesystem import fs  # noqa: F401
 
@@ -25,6 +42,24 @@ def workspace():
         PathStr: The workspace folder of the default target
     """
     return env.PROJECT_ROOT / '.pack/workspace'
+
+
+class TestAtomicLeftovers:
+    """The scan removes the leftovers of interrupted atomic writes."""
+
+    def test_scan_removes_atomic_write_leftovers(self, fs):
+        """A filename.RID.tmp left by an interrupted atomic write is removed
+        by the scan, new_index.tmp and the tmp files of jobs stay."""
+        root = '/atomic_leftovers'
+        fs.create_file(f'{root}/job.pack.sTD2kF.tmp', contents='half written')
+        fs.create_file(f'{root}/new_index.tmp', contents='index pack')
+        fs.create_file(f'{root}/3_{"a" * 40}_0.tmp', contents='abc')
+
+        manager = TmpManager(root)
+
+        assert not os.path.exists(f'{root}/job.pack.sTD2kF.tmp')
+        assert os.path.exists(f'{root}/new_index.tmp')
+        assert manager.leftover == {(3, 'a' * 40): {0}}
 
 
 def digest_of(content):
