@@ -3,8 +3,10 @@ import os
 
 import pytest
 
+from alasio.config.entry.const import ModEntryInfo
 from alasio.deploy.simple_pip import pip_list
 from alasio.deploy.simple_pip.pip_list import Distribution, PipList, normalize_name
+from alasio.deploy_dev.pack.encode_base import PackEncodeBase
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import IS_WINDOWS
 from alasio.logger import logger
@@ -82,15 +84,15 @@ def create_egg_info(fake, folder, content=None):
 
 def run_list(root=SITE):
     """
-    List the distributions of a site-packages directory.
+    List the metadata entries of a site-packages directory, pip_list().
 
     Args:
         root (str): Path of the directory. Defaults to SITE
 
     Returns:
-        list[Distribution]: The distributions, in the order of the listing
+        list[Distribution]: The distributions, in the order of pip_list()
     """
-    return PipList(root).list()
+    return PipList(root).pip_list()
 
 
 def names(dists):
@@ -98,12 +100,108 @@ def names(dists):
     (name, version) pairs of a listing, the compact form of an assert.
 
     Args:
-        dists (list[Distribution]): Listing of a directory
+        dists (Iterable[Distribution]): Listing of a directory
 
     Returns:
         list[tuple[str, str]]: The pairs, in the order of the listing
     """
     return [(dist.name, dist.version) for dist in dists]
+
+
+def keyed(listing):
+    """
+    (key, name, version) triples of an aggregate listing.
+
+    Args:
+        listing (dict[str, Distribution]): Listing of a directory, the
+            aggregate of list()
+
+    Returns:
+        list[tuple[str, str, str]]: The triples, in the order of the listing
+    """
+    return [(key, dist.name, dist.version) for key, dist in listing.items()]
+
+
+def pack_index(version, old=''):
+    """
+    Bytes of an index.pack ledger that records a version.
+
+    The ledger is emitted by the encoder of the pack pipeline, the bytes
+    a pack flow commits last; the listing reads the version part only, so
+    the ledger of a test carries no file records.
+
+    Args:
+        version (str): Version the ledger records
+        old (str): Version the ledger updates from. Defaults to ''
+
+    Returns:
+        bytes: Content of the index.pack of a ledger
+    """
+    encoder = PackEncodeBase()
+    encoder.current_version = version
+    encoder.old_version = old
+    return b''.join(encoder.iter_packidx_data())
+
+
+def create_pack(fake, name='demo', version='1.0', contents=None):
+    """
+    Write the pack ledger of a distribution into the pack area.
+
+    Args:
+        fake (FakeFilesystem): Active fake filesystem
+        name (str): Name of the distribution, the ledger folder is its
+            normalized name. Defaults to 'demo'
+        version (str): Version the ledger records. Defaults to '1.0'
+        contents (bytes | None): Content of the index.pack. Defaults to
+            None, the ledger of the version
+
+    Returns:
+        str: Path of the index.pack
+    """
+    path = f'{SITE}/.pack/{normalize_name(name)}/index.pack'
+    fake.create_file(path, contents=pack_index(version) if contents is None else contents)
+    return path
+
+
+class FakeMod:
+    """Mod stand-in: an entry carrying the pack updated names."""
+
+    def __init__(self, *names):
+        """
+        Args:
+            *names (str): Names to declare in pack_update_deps
+        """
+        self.name = 'alas'
+        self.entry = ModEntryInfo(name='alas', pack_update_deps=dict.fromkeys(names))
+
+
+def run_pack_list(names, root=SITE):
+    """
+    List the pack ledgers of a mod that declares the names.
+
+    Args:
+        names (Iterable[str]): Names declared in pack_update_deps
+        root (str): Path of the site-packages directory. Defaults to SITE
+
+    Returns:
+        list[Distribution]: The distributions, in the order of pack_list()
+    """
+    return PipList(root, mod=FakeMod(*names)).pack_list()
+
+
+def run_aggregate(names=(), root=SITE):
+    """
+    List the distributions of a site-packages directory, the aggregate.
+
+    Args:
+        names (Iterable[str]): Names declared in pack_update_deps of the
+            mod. Defaults to (), no ledger is declared
+        root (str): Path of the site-packages directory. Defaults to SITE
+
+    Returns:
+        dict[str, Distribution]: The distributions, in the order of list()
+    """
+    return PipList(root, mod=FakeMod(*names)).list()
 
 
 class TestNormalizeName:
@@ -142,6 +240,12 @@ class TestInit:
         """The directory path is normalized: a trailing separator is stripped."""
         assert PipList(SITE).site_packages == SITE
         assert PipList(f'{SITE}/').site_packages == SITE
+
+    def test_mod(self):
+        """The mod of the listing is kept, the pack ledgers are read for it."""
+        mod = FakeMod('demo')
+        assert PipList(SITE).mod is None
+        assert PipList(SITE, mod=mod).mod is mod
 
     @pytest.mark.skipif(not IS_WINDOWS, reason='A Windows path is normalized on Windows only')
     def test_normalize_root_windows(self):
@@ -309,7 +413,8 @@ class TestGet:
         assert PipList(SITE).get('alasio') is None
 
     def test_first_of_the_same_name(self, fs):
-        """The distribution of the first entry in the order of list() is returned."""
+        """The distribution of the first metadata entry of the name is returned,
+        the entry the aggregate of list() keeps."""
         create_dist_info(fs, 'demo-2.0.dist-info', metadata('demo', '2.0'))
         create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
         assert PipList(SITE).get('demo').version == '1.0'
@@ -319,14 +424,173 @@ class TestGet:
         create_egg_info(fs, 'alasio.egg-info', metadata('alasio', '0.0.1'))
         assert PipList(SITE).get('alasio').version == '0.0.1'
 
+    def test_the_pack_ledger_wins(self, fs):
+        """The version of a pack ledger wins over the metadata, get() reports it."""
+        create_dist_info(fs, 'demo-2.0.dist-info', metadata('demo', '2.0'))
+        create_pack(fs, 'demo', '1.0')
+        assert PipList(SITE, mod=FakeMod('demo')).get('demo').version == '1.0'
+
+
+class TestPackList:
+    def test_no_mod(self, fs):
+        """A listing created without a mod declares no pack updated distribution."""
+        create_pack(fs)
+        assert PipList(SITE).pack_list() == []
+
+    def test_the_version_of_the_ledger(self, fs):
+        """A declared name with a pack ledger is listed at the version of the ledger."""
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        ledger = create_pack(fs, 'demo', '2.0')
+        result = run_pack_list(['demo'])
+        assert names(result) == [('demo', '2.0')]
+        assert result[0].info == ledger
+        assert isinstance(result[0].info, PathStr)
+
+    def test_the_folder_is_normalized(self, fs):
+        """The ledger folder of a name is its normalized name, any case and
+        separator style."""
+        create_pack(fs, 'Ruamel.Yaml', '0.18.6')
+        assert names(run_pack_list(['ruamel_yaml'])) == [('ruamel_yaml', '0.18.6')]
+        assert names(run_pack_list(['Ruamel.Yaml'])) == [('Ruamel.Yaml', '0.18.6')]
+
+    def test_not_declared(self, fs):
+        """A ledger of a name the mod does not declare is not read."""
+        create_pack(fs, 'demo', '1.0')
+        assert run_pack_list(['other']) == []
+
+    def test_no_ledger(self, fs):
+        """A declared name without a ledger was never applied from a pack channel."""
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        assert run_pack_list(['demo']) == []
+
+    def test_malformed_ledger(self, fs):
+        """A ledger that is not a pack file is skipped with a warning."""
+        ledger = create_pack(fs, 'demo', contents=b'not a pack')
+        with logger.mock_capture_writer() as capture:
+            assert run_pack_list(['demo']) == []
+        assert capture.fd.any_contains(f'Skipped a malformed pack ledger: {ledger}')
+
+    def test_ledger_without_a_version(self, fs):
+        """A ledger that records no version is skipped with a warning."""
+        ledger = create_pack(fs, 'demo', contents=pack_index(''))
+        with logger.mock_capture_writer() as capture:
+            assert run_pack_list(['demo']) == []
+        assert capture.fd.any_contains(f'Skipped a pack ledger that records no version: {ledger}')
+
+    def test_name_declared_twice(self, fs):
+        """A name declared twice is read once, the first declaration names the entry."""
+        create_pack(fs, 'ruamel.yaml', '0.18.6')
+        result = run_pack_list(['ruamel.yaml', 'ruamel_yaml'])
+        assert names(result) == [('ruamel.yaml', '0.18.6')]
+
+    def test_sorted_by_normalized_name(self, fs):
+        """The ledger entries are sorted by the normalized name."""
+        create_pack(fs, 'Zope', '5.8.6')
+        create_pack(fs, 'alasio', '0.0.1')
+        assert names(run_pack_list(['Zope', 'alasio'])) == [('alasio', '0.0.1'), ('Zope', '5.8.6')]
+
+    def test_silent_on_a_healthy_ledger(self, fs):
+        """A ledger that records a version logs nothing."""
+        create_pack(fs, 'demo', '1.0')
+        with logger.mock_capture_writer() as capture:
+            assert names(run_pack_list(['demo'])) == [('demo', '1.0')]
+        assert capture.fd.logs == []
+
+
+class TestAggregate:
+    def test_metadata_only(self, fs):
+        """Without a pack ledger the aggregate is the metadata listing."""
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        assert keyed(run_aggregate()) == [('demo', 'demo', '1.0')]
+
+    def test_no_mod(self, fs):
+        """A listing created without a mod reads no pack ledger."""
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        create_pack(fs, 'demo', '2.0')
+        assert keyed(PipList(SITE).list()) == [('demo', 'demo', '1.0')]
+
+    def test_keyed_by_normalized_name(self, fs):
+        """The keys are the normalized names, the style of the name of the
+        metadata does not decide the key."""
+        create_dist_info(fs, 'ruamel_yaml-0.18.6.dist-info', metadata('Ruamel.Yaml', '0.18.6'))
+        result = run_aggregate()
+        assert keyed(result) == [('ruamel-yaml', 'Ruamel.Yaml', '0.18.6')]
+        assert result['ruamel-yaml'].version == '0.18.6'
+
+    def test_duplicate_installation(self, fs):
+        """Two metadata entries of one name are one entry, the first of
+        pip_list() wins and the skipped one is logged."""
+        create_dist_info(fs, 'demo-2.0.dist-info', metadata('demo', '2.0'))
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        with logger.mock_capture_writer() as capture:
+            result = run_aggregate()
+        assert keyed(result) == [('demo', 'demo', '1.0')]
+        assert result['demo'].info == f'{SITE}/demo-1.0.dist-info'
+        assert capture.fd.any_contains(
+            f'Skipped a duplicate installation of "demo": {SITE}/demo-2.0.dist-info ("2.0"), '
+            f'using {SITE}/demo-1.0.dist-info ("1.0")'
+        )
+
+    def test_the_ledger_wins(self, fs):
+        """A ledger and a metadata entry at different versions are one entry,
+        the ledger wins and the conflict is logged."""
+        create_dist_info(fs, 'demo-2.0.dist-info', metadata('demo', '2.0'))
+        ledger = create_pack(fs, 'demo', '1.0')
+        with logger.mock_capture_writer() as capture:
+            result = run_aggregate(['demo'])
+        assert keyed(result) == [('demo', 'demo', '1.0')]
+        assert result['demo'].info == ledger
+        assert capture.fd.any_contains(
+            f'The pack ledger version of "demo" wins over its metadata: '
+            f'"1.0" ({ledger}), the metadata has "2.0" ({SITE}/demo-2.0.dist-info)'
+        )
+
+    def test_the_ledger_agrees(self, fs):
+        """A ledger at the version of the metadata is no conflict, the
+        metadata entry is kept."""
+        info = create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        create_pack(fs, 'demo', '1.0')
+        with logger.mock_capture_writer() as capture:
+            result = run_aggregate(['demo'])
+        assert keyed(result) == [('demo', 'demo', '1.0')]
+        assert result['demo'].info == info
+        assert capture.fd.logs == []
+
+    def test_ledger_only(self, fs):
+        """A distribution only a pack ledger records is listed from the ledger."""
+        ledger = create_pack(fs, 'demo', '1.0')
+        result = run_aggregate(['demo'])
+        assert keyed(result) == [('demo', 'demo', '1.0')]
+        assert result['demo'].info == ledger
+
+    def test_one_entry_per_name(self, fs):
+        """The aggregate lists every distribution once."""
+        create_dist_info(fs, 'demo-2.0.dist-info', metadata('demo', '2.0'))
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        create_pack(fs, 'demo', '1.0')
+        with logger.mock_capture_writer():
+            assert keyed(run_aggregate(['demo'])) == [('demo', 'demo', '1.0')]
+
+    def test_sorted_by_normalized_name(self, fs):
+        """The aggregate is ordered by the normalized name, the metadata
+        entries and the ledger entries mixed."""
+        create_pack(fs, 'Zope', '5.8.6')
+        create_dist_info(fs, 'alasio-0.0.1.dist-info', metadata('alasio', '0.0.1'))
+        create_dist_info(fs, 'ruamel_yaml-0.18.6.dist-info', metadata('ruamel.yaml', '0.18.6'))
+        assert keyed(run_aggregate(['Zope'])) == [
+            ('alasio', 'alasio', '0.0.1'),
+            ('ruamel-yaml', 'ruamel.yaml', '0.18.6'),
+            ('zope', 'Zope', '5.8.6'),
+        ]
+
 
 class TestFreshListing:
     def test_installation_visible(self, fs):
         """The directory is read on every call, an installation in between is listed."""
         site = PipList(SITE)
-        assert site.list() == []
+        assert site.list() == {}
         create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
-        assert names(site.list()) == [('demo', '1.0')]
+        assert keyed(site.list()) == [('demo', 'demo', '1.0')]
 
 
 class TestSymlinks:

@@ -41,6 +41,16 @@ class ModEntryInfo(Struct):
     # flat/nested mix). The mods with an empty value declare no update
     # source and are never checked. Defaults to ''
     mirrors: Union[str, Dict[str, str], Dict[str, Dict[str, str]]] = ''
+    # relative path from mod root to the requirements file of the mod: the
+    # distributions it runs with, every one pinned to an exact version, see
+    # alasio.deploy.simple_pip.install_base. Defaults to 'requirements.txt'
+    requirements_file: str = 'requirements.txt'
+    # distributions updated from the pack channel of the mod instead of pip:
+    # the names of the requirements file, any case and separator style (the
+    # compare is on the PEP 503 normalized name). A distribution not
+    # declared here installs with pip. Defaults to empty, see
+    # alasio.deploy.simple_pip.install_base
+    pack_update_deps: Dict[str, None] = field(default_factory=dict)
 
     def copy(self):
         """

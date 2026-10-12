@@ -233,7 +233,7 @@ class TestWithPipList:
             contents='Metadata-Version: 2.1\nName: ruamel.yaml\nVersion: 0.18.6\n\n',
         )
         pins = parse_requirements('ruamel.yaml==0.18.6')
-        installed = {dist.dist_key: dist for dist in PipList(SITE).list()}
+        installed = PipList(SITE).list()
         assert pins == {'ruamel-yaml': '0.18.6'}
         assert list(installed) == list(pins)
         assert installed['ruamel-yaml'].version == pins['ruamel-yaml']

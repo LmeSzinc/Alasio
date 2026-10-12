@@ -1,7 +1,8 @@
 """
-Tests for ModEntryInfo.mirrors (alasio/config/entry/const.py): the update
-source of a mod, in the input forms of Mirrors.from_input (see
-doc/2026-10-05_mod-update-backend-integration.md §9).
+Tests for the mod entry fields of ModEntryInfo (alasio/config/entry/const.py):
+the update source of a mod (mirrors), in the input forms of
+Mirrors.from_input (see doc/2026-10-05_mod-update-backend-integration.md
+§9), and the dependency fields (requirements_file and pack_update_deps).
 """
 import pytest
 
@@ -53,3 +54,32 @@ class TestModEntryInfoMirrors:
 
         assert other.mirrors == entry.mirrors
         assert other.mirrors is not entry.mirrors
+
+
+class TestModEntryInfoDependencies:
+    """The dependency fields of a mod entry."""
+
+    def test_defaults(self):
+        """By default a mod reads requirements.txt and updates nothing by pack."""
+        entry = ModEntryInfo(name='m')
+        assert entry.requirements_file == 'requirements.txt'
+        assert entry.pack_update_deps == {}
+
+    def test_declared(self):
+        """The declared names and the requirements path are kept."""
+        entry = ModEntryInfo(
+            name='m',
+            requirements_file='deploy/AidLux/0.92/requirements.txt',
+            pack_update_deps={'httpx': None, 'ruamel.yaml': None},
+        )
+        assert entry.requirements_file == 'deploy/AidLux/0.92/requirements.txt'
+        assert list(entry.pack_update_deps) == ['httpx', 'ruamel.yaml']
+
+    def test_copy_keeps_the_dependencies(self):
+        """ModEntryInfo.copy() (deepcopy) keeps the declared pack updated names."""
+        entry = ModEntryInfo(name='m', pack_update_deps={'httpx': None})
+
+        other = entry.copy()
+
+        assert other.pack_update_deps == entry.pack_update_deps
+        assert other.pack_update_deps is not entry.pack_update_deps
