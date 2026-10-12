@@ -26,6 +26,7 @@ from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job import DeployJob, UpdateAborted
 from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_unpack import UnpackJob
+from alasio.deploy.pack.job_update import UpdateJob
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.ext import env
@@ -80,6 +81,19 @@ def read_tree():
     return tree
 
 
+def workspace_file(name):
+    """
+    Path of a file in the workspace of the default target.
+
+    Args:
+        name (str): File name
+
+    Returns:
+        PathStr: Full path
+    """
+    return env.PROJECT_ROOT / '.pack' / 'workspace' / name
+
+
 # module level singletons, built before the fake filesystem is active
 SCENARIO_REPO = make_repo({'old': FULL_SCENARIO_OLD, 'new': FULL_SCENARIO_NEW})
 OLD_PACK = b''.join(PackFull(SCENARIO_REPO, commit='old').iter_pack_data())
@@ -92,6 +106,33 @@ NEW_INDEX = bytes(NEW_DECODER.extract_index_pack())
 # the old version is its commit
 UPDATE = b''.join(PackUpdate(
     PackFull(SCENARIO_REPO, commit='new'), 'old').iter_pack_data())
+# the whole-pack checksum of the update pack: the trailing 20 bytes, the
+# value the server serves and a kept pack is compared against
+UPDATE_CHECKSUM = UPDATE[-20:].hex()
+# a republished update pack: the same version pair, other records (what a
+# server that regenerated the pack serves, the kept pack must not be reused)
+OTHER_UPDATE = b''.join(PackUpdate(
+    PackFull(make_repo({
+        'old': {'other.txt': b'old\n'},
+        'new': {'other.txt': b'new\n'},
+    }), commit='new'), 'old').iter_pack_data())
+
+
+def make_server():
+    """
+    A MockServerFile serving the two scenario versions and their update pack,
+    like the module level SERVER (every test gets its own transfer counters).
+
+    Returns:
+        MockServerFile: The server
+    """
+    server = MockServerFile()
+    server.register_version('old', OLD_PACK, OLD_INDEX)
+    server.register_version('new', NEW_PACK, NEW_INDEX)
+    server.register_update('old', 'new', UPDATE)
+    return server
+
+
 NEW_TREE = {
     path: bytes(NEW_DECODER.catfile(info))
     for path, info in NEW_DECODER.fileinfo.items()
@@ -519,3 +560,114 @@ class TestVersionDrivenUpdate:
             assert await DeployJob(server=SERVER).update(phases, version='new')
         assert phases.phases == ['checking', 'downloading', 'updating']
         assert read_tree() == NEW_TREE
+
+
+class TestKeptPack:
+    """DeployJob._load_kept_pack: what the flow offers for reuse.
+
+    The workspace of an interrupted run keeps the update pack it downloaded
+    (job.pack): only the completed pack of the requested version pair is
+    offered, with the digest of its whole content. The checks are a sanity
+    gate, whether the kept pack may be used is decided by the server, see
+    DeployJob._get_update_pack.
+    """
+
+    def test_kept_pack_of_the_pair(self, app_folder):
+        """The pack of the version pair is offered with its whole-pack digest."""
+        UpdateJob(UPDATE, server=SERVER).write()
+        kept, checksum = DeployJob(server=SERVER)._load_kept_pack('old', 'new')
+        assert kept == UPDATE
+        assert checksum == UPDATE_CHECKSUM
+
+    def test_pack_of_another_pair(self, app_folder):
+        """A kept pack of another version pair is not offered."""
+        UpdateJob(UPDATE, server=SERVER).write()
+        assert DeployJob(server=SERVER)._load_kept_pack('other', 'new') == (None, '')
+
+    def test_damaged_pack(self, app_folder):
+        """A kept pack that fails a checksum is not offered."""
+        damaged = bytearray(UPDATE)
+        damaged[-1] ^= 0xFF
+        file_write(workspace_file('job.pack'), bytes(damaged))
+        assert DeployJob(server=SERVER)._load_kept_pack('old', 'new') == (None, '')
+
+    def test_without_the_pack(self, app_folder):
+        """Without a kept pack there is nothing to reuse."""
+        assert DeployJob(server=SERVER)._load_kept_pack('old', 'new') == (None, '')
+
+
+class TestUpdatePackReuse:
+    """The kept update pack is reused only when the server confirms its digest.
+
+    The download is skipped when the pack kept in the workspace is the pack of
+    the version pair and the server still serves the very same file: the
+    trailing 20 bytes digest of the pack (the sha1 of the whole file) must be
+    the digest of the kept one, only those 20 bytes are transferred, see
+    ServerFile.get_update_pack_checksum.
+    """
+
+    @pytest.mark.trio
+    async def test_kept_pack_reused_when_the_server_confirms_it(self, app_folder):
+        """The server serves the digest of the kept pack: the flow applies it
+        without transferring the body again."""
+        server = make_server()
+        await UnpackJob(OLD_PACK).run()
+        UpdateJob(UPDATE, server=server).write()
+        with logger.mock_capture_writer() as capture:
+            assert await DeployJob(server=server).update()
+        assert capture.backend.any_contains(
+            'Update pack unchanged, reusing the kept pack: old -> new')
+        assert read_tree() == NEW_TREE
+        # the trailing 20 bytes digest was transferred, not the body
+        assert server.update_bytes == 20
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    @pytest.mark.trio
+    async def test_download_is_reused_by_the_next_run(self, app_folder, monkeypatch):
+        """A run killed after its download: the next run reuses the kept pack
+        once the server confirmed its digest."""
+        server = make_server()
+        await UnpackJob(OLD_PACK).run()
+
+        # the first run dies right after the download, before the apply: the
+        # job file stays in the workspace (a killed process leaves exactly
+        # this state behind)
+        with monkeypatch.context() as dying:
+            def failing_unpack(self):
+                raise KeyboardInterrupt
+
+            dying.setattr(UpdateJob, 'unpack', failing_unpack)
+            with logger.mock_capture_writer():
+                with pytest.raises(KeyboardInterrupt):
+                    await DeployJob(server=server).update()
+        assert file_read_bytes(workspace_file('job.pack')) == UPDATE
+        assert server.update_bytes == len(UPDATE)
+
+        # the next run reuses the kept pack, the body is not transferred again
+        with logger.mock_capture_writer() as capture:
+            assert await DeployJob(server=server).update()
+        assert capture.backend.any_contains('reusing the kept pack')
+        assert read_tree() == NEW_TREE
+        assert server.update_bytes == len(UPDATE) + 20
+
+    @pytest.mark.trio
+    async def test_another_pack_served_downloads(self, app_folder):
+        """The server serves another pack of the pair (another digest): the
+        kept pack is not reused, the body is downloaded."""
+        server = make_server()
+        server.register_update('old', 'new', OTHER_UPDATE)
+        await UnpackJob(OLD_PACK).run()
+        UpdateJob(UPDATE, server=server).write()
+        data = await DeployJob(server=server)._get_update_pack('old', 'new')
+        assert data == OTHER_UPDATE
+        assert server.update_bytes == 20 + len(OTHER_UPDATE)
+
+    @pytest.mark.trio
+    async def test_without_a_kept_pack_downloads(self, app_folder):
+        """Without a kept pack the flow downloads the body as before."""
+        server = make_server()
+        await UnpackJob(OLD_PACK).run()
+        with logger.mock_capture_writer():
+            assert await DeployJob(server=server).update()
+        assert read_tree() == NEW_TREE
+        assert server.update_bytes == len(UPDATE)

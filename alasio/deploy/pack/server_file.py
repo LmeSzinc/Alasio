@@ -549,3 +549,44 @@ class ServerFile(ProbeBase):
         """
         response = await self._request(f'/{new_version}/from_{old_version}.pack')
         return response.content
+
+    async def get_update_pack_checksum(self, old_version, new_version, size):
+        """
+        Get the whole-pack checksum of the update pack from
+        {mirror}/{new_version}/from_{old_version}.pack.
+
+        The pack format keeps a 20 bytes digest as the trailing bytes of the
+        pack file, the sha1 of everything before it (PackDecodeBase validates
+        it as the data section checksum): equal digests mean the two files
+        are byte-identical. The caller compares it with the digest of the
+        pack it kept from an interrupted run, the server's word that the kept
+        pack is still the one it serves, see DeployJob._get_update_pack. One
+        range request is made, for the last 20 bytes of the pack: `size` is
+        the size of the kept pack, the range is a hint, a size that does not
+        match the served file only makes the digests differ (the caller
+        downloads the pack as usual). The mirror is resolved (and reselected
+        when it fails) before the request, see _request.
+
+        Args:
+            old_version (str): Version of the local files
+            new_version (str): Version to update to
+            size (int): Size of the pack kept by the caller
+
+        Returns:
+            tuple[str, bytes]: The checksum, hex string, and the whole pack
+                when the server ignored the range request (a server without
+                range support serves the whole pack as a 200 response, the
+                caller uses that body instead of downloading it again), b''
+                otherwise
+
+        Raises:
+            httpx2.HTTPStatusError: If the request fails
+            AllMirrorsFailedError: If no mirror is usable
+        """
+        headers = {'Range': f'bytes={size - 20}-{size - 1}'}
+        response = await self._request(f'/{new_version}/from_{old_version}.pack', headers)
+        # a 200 response means the server ignored the range request: the
+        # whole pack is the body, its trailing 20 bytes are the checksum
+        if response.status_code == 200:
+            return response.content[-20:].hex(), response.content
+        return response.content.hex(), b''

@@ -353,6 +353,96 @@ class DeployJob(DeployTarget):
         await trio.to_thread.run_sync(atomic_rmtree, self.workspace)
         raise UpdateAborted(f'The update was cancelled by the caller at the {phase!r} phase')
 
+    async def _get_update_pack(self, old_version, new_version):
+        """
+        Get the update pack of the flow, reusing the kept one when the server
+        confirms it.
+
+        The workspace of an interrupted run keeps the update pack it
+        downloaded (job.pack): the download is skipped when the kept pack is
+        the pack of this version pair and the server still serves the very
+        same file. The confirmation is the server's: the digest kept as the
+        trailing 20 bytes of the pack (the sha1 of everything before it, see
+        ServerFile.get_update_pack_checksum) must be the digest of the kept
+        pack, and only those 20 bytes are transferred, not the body.
+
+        The reuse cannot apply content the server does not serve: equal
+        digests mean the two packs are byte-identical (the digest covers the
+        whole file, a damaged or crafted file cannot match the server's), and
+        a server that ignored the range request answers with the whole pack,
+        which is used as the download. The local checks (_load_kept_pack)
+        only tell that the kept file is a pack of this version pair worth
+        asking about, they are never a trust anchor.
+
+        Args:
+            old_version (str): Version of the local files
+            new_version (str): Version to update to
+
+        Returns:
+            bytes: Update pack data
+
+        Raises:
+            httpx2.HTTPStatusError: If the request fails
+        """
+        import httpx2
+        kept, checksum = await trio.to_thread.run_sync(
+            self._load_kept_pack, old_version, new_version)
+        if kept is not None:
+            try:
+                server_checksum, body = await self.server.get_update_pack_checksum(
+                    old_version, new_version, len(kept))
+            except httpx2.HTTPError as e:
+                # the probe failed (a missing pack, a mirror that went down):
+                # the download below reports the server's state as usual and
+                # the caller falls back like any failed download
+                logger.warning(f'Failed to read the checksum of the update pack '
+                               f'{old_version} -> {new_version}: {e}, downloading it')
+                server_checksum, body = '', b''
+            if body:
+                # the server ignored the range request: its body is the pack
+                # of this flow, no second request is needed
+                return body
+            if server_checksum == checksum:
+                logger.info(f'Update pack unchanged, reusing the kept pack: '
+                            f'{old_version} -> {new_version}')
+                return kept
+        return await self.server.get_update_pack(old_version, new_version)
+
+    def _load_kept_pack(self, old_version, new_version):
+        """
+        The update pack kept in the workspace when it is the one of this
+        version pair, with the digest of its content.
+
+        The kept pack is verified before it is offered for reuse (the
+        checksums of both sections, the version pair): a truncated, damaged or
+        foreign file is never offered, the pack is downloaded as usual. The
+        digest returned is the trailing 20 bytes of the pack, proven by
+        validate() to be the sha1 of every byte before it: whether the kept
+        pack is still the one the server serves is decided by the server
+        itself, see _get_update_pack.
+
+        Args:
+            old_version (str): Version of the local files
+            new_version (str): Version to update to
+
+        Returns:
+            tuple[bytes, str]: Content of the kept pack and its whole-pack
+                checksum, hex string, (None, '') when there is nothing to
+                reuse
+        """
+        try:
+            data = atomic_read_bytes(self.job_file)
+        except FileNotFoundError:
+            return None, ''
+        try:
+            decoder = PackDecodeBase(data)
+            decoder.validate()
+        except PackDecodeError:
+            return None, ''
+        if decoder.old_version != old_version or decoder.current_version != new_version:
+            return None, ''
+        return data, data[-20:].hex()
+
     async def update(self, on_job_phase=None, version=''):
         """
         Update the local working tree of this target to the latest version
@@ -380,7 +470,10 @@ class DeployJob(DeployTarget):
            /{new_version}/from_{old_version}.pack and applies it with
            UpdateJob, a missing update pack (out of the update window
            or removed) falls back to RebuildJob, a failed update also
-           falls back to RebuildJob
+           falls back to RebuildJob. The download reuses the pack kept in
+           the workspace when the server still serves it: the trailing 20
+           bytes digests of the two packs are compared and only they
+           travel, see _get_update_pack
         3. the same version continues with ResetJob: the local index
            pack is checked against the latest checksum (an outdated
            self-consistent index is downloaded again), then every
@@ -465,10 +558,11 @@ class DeployJob(DeployTarget):
             # the main branch: the version mismatches, apply the update pack
             # incrementally. The download has its own phase (the transaction
             # stays cancellable and shows the download), the local changes come
-            # after it
+            # after it; the download reuses the kept pack of this version pair
+            # when the server still serves it, see _get_update_pack
             await self._job_phase(on_job_phase, 'downloading')
             try:
-                data = await self.server.get_update_pack(local, info.version)
+                data = await self._get_update_pack(local, info.version)
             except httpx2.HTTPStatusError as e:
                 # the update pack of the local version is not on the server (out
                 # of the update window or removed), the incremental path is

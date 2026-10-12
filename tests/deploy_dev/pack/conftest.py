@@ -268,6 +268,10 @@ class MockServerFile(ServerFile):
         self.index_packs = {}
         # {(old_version, new_version): update pack}
         self.update_packs = {}
+        # bytes of the update pack served (full bodies and ranges): the tests
+        # assert what was transferred, the reuse of a kept pack reads the
+        # trailing 20 bytes digest only
+        self.update_bytes = 0
         # the latest registered version
         self.latest_version = ''
         # the http client of the base serves nothing, replace it by one
@@ -327,7 +331,17 @@ class MockServerFile(ServerFile):
                 # is broken: DeployJob.update() falls back to
                 # RebuildJob on the 404
                 return httpx2.Response(404, content=b'')
-            return httpx2.Response(200, content=content)
+            # the update pack is read with range requests too: the client
+            # compares the trailing whole-pack digest of a kept pack with
+            # the served one, see ServerFile.get_update_pack_checksum. A
+            # request without a range serves the whole body
+            start, _, end = request.headers.get('Range', '').partition('=')[2].partition('-')
+            if not start:
+                self.update_bytes += len(content)
+                return httpx2.Response(200, content=content)
+            start, end = int(start), int(end)
+            self.update_bytes += end - start + 1
+            return httpx2.Response(206, content=content[start:end + 1])
         # base_url/{version}/full.pack, served as a range request
         version = path.strip('/').partition('/')[0]
         start, _, end = request.headers['Range'].partition('=')[2].partition('-')

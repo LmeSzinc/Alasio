@@ -174,6 +174,39 @@ class TestServerFile:
         with pytest.raises(httpx2.HTTPStatusError):
             await server.get_update_pack('old', 'new')
 
+    @pytest.mark.trio
+    async def test_get_update_pack_checksum(self):
+        """The trailing whole-pack digest is read with one 20 bytes range
+        request, the body is not transferred."""
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            start, _, end = request.headers['Range'].partition('=')[2].partition('-')
+            return httpx2.Response(206, content=WEBSITE_FULL_PACK[int(start):int(end) + 1])
+
+        size = len(WEBSITE_FULL_PACK)
+        server = ServerFile('http://test', client=make_aclient(handler))
+        checksum, body = await server.get_update_pack_checksum('old', 'new', size)
+        assert checksum == WEBSITE_FULL_PACK[-20:].hex()
+        assert body == b''
+        assert str(requests[0].url) == 'http://test/new/from_old.pack'
+        assert requests[0].headers['Range'] == f'bytes={size - 20}-{size - 1}'
+
+    @pytest.mark.trio
+    async def test_get_update_pack_checksum_range_ignored(self):
+        """A server that ignores the range request serves the whole pack: the
+        body is returned with the checksum, the caller uses it as the
+        download."""
+        def handler(request):
+            return httpx2.Response(200, content=WEBSITE_FULL_PACK)
+
+        size = len(WEBSITE_FULL_PACK)
+        server = ServerFile('http://test', client=make_aclient(handler))
+        checksum, body = await server.get_update_pack_checksum('old', 'new', size)
+        assert checksum == WEBSITE_FULL_PACK[-20:].hex()
+        assert body == WEBSITE_FULL_PACK
+
 
 class TestConstruction:
     """ServerFile accepts the raw mirror input and builds its ServerUrl."""
