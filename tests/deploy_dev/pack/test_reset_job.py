@@ -202,6 +202,7 @@ class TestValidateFiles:
         fs.remove(target)
         fs.create_file(target, st_mode=0o100755, contents=WEBSITE_FILES['backend/main.py'][0])
         job = ResetJob(WEBSITE_SERVER)
+        await job.tmp_manager_init()
         assert not job.validate_files()
         error = job.error[0]
         assert error.info.path == 'backend/main.py'
@@ -277,6 +278,7 @@ class TestValidateEolFix:
         with open(target, 'wb') as f:
             f.write(WEBSITE_FILES['backend/config.py'][0].replace(b'\n', b'\r\n'))
         job = ResetJob(WEBSITE_SERVER)
+        await job.tmp_manager_init()
         assert not job.validate_files()
         assert len(job.error) == 1
         item = job.error[0]
@@ -297,6 +299,7 @@ class TestValidateEolFix:
         with open(target, 'wb') as f:
             f.write(WEBSITE_FILES['backend/config.py'][0].replace(b'\n', b'\r\n'))
         job = ResetJob(WEBSITE_SERVER)
+        await job.tmp_manager_init()
         job.validate_index()
         job.validate_files()
         await job.download()
@@ -351,6 +354,7 @@ class TestValidateModeFix:
         fs.remove(target)
         fs.create_file(target, st_mode=0o100755, contents=WEBSITE_FILES['backend/main.py'][0])
         job = ResetJob(WEBSITE_SERVER)
+        await job.tmp_manager_init()
         job.validate_index()
         job.validate_files()
         await job.download()
@@ -503,6 +507,7 @@ class TestDownload:
         with open(env.PROJECT_ROOT / 'backend/main.py', 'wb') as f:
             f.write(b'wrong')
         job = ResetJob(WEBSITE_SERVER)
+        await job.tmp_manager_init()
         job.validate_index()
         job.validate_files()
         await job.download()
@@ -523,6 +528,7 @@ class TestDownload:
         server = WEBSITE_SERVER
         monkeypatch.setattr(server, 'get_file_content', bad_content())
         job = ResetJob(server)
+        await job.tmp_manager_init()
         job.validate_index()
         job.validate_files()
         with logger.mock_capture_writer() as capture:
@@ -555,6 +561,7 @@ class TestDownload:
         await setup_app(fs)
         os.remove(env.PROJECT_ROOT / 'backend/__init__.py')
         job = ResetJob(WEBSITE_SERVER)
+        await job.tmp_manager_init()
         job.validate_index()
         job.validate_files()
         # write a valid tmp file at the name download() applies for, it
@@ -581,6 +588,7 @@ class TestReplace:
         with open(env.PROJECT_ROOT / 'backend/main.py', 'wb') as f:
             f.write(b'wrong')
         job = ResetJob(WEBSITE_SERVER)
+        await job.tmp_manager_init()
         job.validate_index()
         job.validate_files()
         await job.download()
@@ -614,6 +622,7 @@ class TestReplace:
         target = env.PROJECT_ROOT / 'scripts/deploy.sh'
         os.remove(target)
         job = ResetJob(WEBSITE_SERVER)
+        await job.tmp_manager_init()
         job.validate_index()
         job.validate_files()
         await job.download()

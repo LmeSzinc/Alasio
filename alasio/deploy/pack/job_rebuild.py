@@ -23,9 +23,10 @@ class RebuildJob(ResetJob):
     place, so a resumed run still computes the leftover deletion list
     from it.
 
-    write() stores the RBIL marker to the job file, the marker is
-    dispatched to a resumed RebuildJob by
-    DeployJob()._get_unfinished_job().
+    write() stores the RBIL marker to the job file: it is the record of
+    the task in flight, a marker is never dispatched (the next flow
+    derives its work from the tree and the local index, see
+    JobBase.residue_fileinfo()).
 
     Note: the exclusive lock of the target ledger (the lock file, see
     DeployJob.locked()) is held by DeployJob around the whole update
@@ -56,8 +57,7 @@ class RebuildJob(ResetJob):
         """
         Execute the full rebuild flow.
 
-        Writes the job marker first unless the job was resumed from it,
-        then reads the old local index for the leftover cleanup and
+        Writes the job marker first, then reads the old local index for the leftover cleanup and
         downloads the latest index pack unconditionally: the local
         index is never trusted, unlike ResetJob which validates it
         first. Every file is verified against the new index, the
@@ -82,6 +82,7 @@ class RebuildJob(ResetJob):
             # the records of the job file of a previous run join the
             # deletion base (R19): read them before write() replaces it
             await trio.to_thread.run_sync(self._warm_residue)
+            await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
             logger.info(f'Rebuilding files to "{self.root}", name="{self.name}"')
             # the deletion base of the leftover cleanup: the old local

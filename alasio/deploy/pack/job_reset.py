@@ -4,7 +4,7 @@ from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext.cache import InstanceCacheOperation, cached_property
-from alasio.ext.path.atomic import atomic_read_bytes, file_write
+from alasio.ext.path.atomic import atomic_read_bytes, atomic_write, file_write
 from alasio.logger import logger
 
 # httpx2 is imported lazily in the places that use it: the package resolves
@@ -18,12 +18,10 @@ class ResetJob(JobBase):
     resumable.
 
     The job writes the marker to the job file
-    ({ledger}/workspace/job.pack) with write() before validating, so
-    an interrupted run can be resumed by the next run:
+    ({ledger}/workspace/job.pack) with write() before validating, so a
+    killed process leaves the record of the task in flight:
 
-        job = DeployJob(server=server)._get_unfinished_job()
-        if job is None:
-            job = ResetJob(server)
+        job = ResetJob(server)
         await job.run()
 
     The local index pack (index.pack in the ledger folder of the
@@ -83,8 +81,7 @@ class ResetJob(JobBase):
         """
         Execute the full reset flow.
 
-        Writes the job marker first unless the job was resumed from it,
-        then validates and repairs: a failed index pack is downloaded
+        Writes the job marker first, then validates and repairs: a failed index pack is downloaded
         again from the server, an outdated index pack (self-consistent
         but not the latest, see validate_latest()) is downloaded again
         too, failed files are downloaded to tmp files and replaced to
@@ -106,6 +103,7 @@ class ResetJob(JobBase):
             # the records of the job file of a previous run join the
             # deletion base (R19): read them before write() replaces it
             await trio.to_thread.run_sync(self._warm_residue)
+            await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
             logger.info(f'Resetting files to "{self.root}", name="{self.name}"')
             if not await trio.to_thread.run_sync(self.validate_index):
@@ -159,14 +157,16 @@ class ResetJob(JobBase):
     def write(self):
         """
         Write the job marker to the job file, marking a validation task
-        in progress, so that a future run can resume from it if this
-        run gets interrupted.
+        in progress: the file is the record of the task in flight (the
+        next flow derives its work from the tree and the local index, see
+        residue_fileinfo()).
 
-        The job file lives in the workspace, a corrupted one is
-        detected by _get_unfinished_job() on the next run, so a plain
-        write is enough.
+        The job file lives in the workspace, it is written atomically: a
+        killed process leaves the previous content (or none) instead of a
+        truncated file, and the leftovers of the interrupted write are
+        removed by the tmp manager of the next run (TmpManager).
         """
-        file_write(self.job_file, self.MARK)
+        atomic_write(self.job_file, self.MARK)
 
     @cached_property
     def _index_pack(self):

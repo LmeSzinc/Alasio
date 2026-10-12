@@ -5,7 +5,9 @@ Uses conftest.WEBSITE_FULL_PACK (mock modern full-stack website).
 Every test runs in the in-memory fake filesystem, no real files are
 written: the app_folder fixture points env.PROJECT_ROOT at the fake
 filesystem. Tests running the job are async (pytest-trio); the local
-phase tests (write, unpack, replace, matching) stay sync.
+phase tests (write, unpack, replace, matching) are async too, they await
+the tmp manager init of the caller before the phases (see
+JobBase.tmp_manager_init, the phases themselves stay sync).
 """
 import os
 from hashlib import sha1
@@ -121,9 +123,11 @@ class TestJobFile:
 class TestUnpack:
     """unpack() phase: write tmp files, real files untouched."""
 
-    def test_unpack_writes_tmp_only(self, app_folder):
+    @pytest.mark.trio
+    async def test_unpack_writes_tmp_only(self, app_folder):
         """unpack() writes tmp files, real files stay untouched."""
         job = UnpackJob(WEBSITE_FULL_PACK)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         # real files are not applied yet
@@ -134,15 +138,20 @@ class TestUnpack:
         # the workspace has the job file and tmp files
         assert os.listdir(env.PROJECT_ROOT / '.pack/workspace')
 
-    def test_unpack_does_not_write_job_file(self, app_folder):
+    @pytest.mark.trio
+    async def test_unpack_does_not_write_job_file(self, app_folder):
         """unpack() does not write the job file, the caller does."""
-        UnpackJob(WEBSITE_FULL_PACK).unpack()
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        await job.tmp_manager_init()
+        job.unpack()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace/job.pack')
 
-    def test_index_pack_written(self, app_folder):
+    @pytest.mark.trio
+    async def test_index_pack_written(self, app_folder):
         """The front part of the full pack is prepared to the workspace
         and applied to .pack/index.pack in replace()."""
         job = UnpackJob(WEBSITE_FULL_PACK)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         tmp = env.PROJECT_ROOT / f'.pack/workspace/{JobBase.NEW_INDEX}'
@@ -157,10 +166,12 @@ class TestUnpack:
         job.replace()
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == WEBSITE_INDEX_PACK
 
-    def test_pending_records(self, app_folder):
+    @pytest.mark.trio
+    async def test_pending_records(self, app_folder):
         """unpack() fills self.pending with the data records and
         pending_index with the index record."""
         job = UnpackJob(WEBSITE_FULL_PACK)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         assert isinstance(job.pending, list)
@@ -207,7 +218,8 @@ class TestUnpack:
 class TestUnpackIndex:
     """unpack(): reuse of a leftover workspace index pack."""
 
-    def test_reuse_valid_new_index(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_reuse_valid_new_index(self, app_folder, monkeypatch):
         """A valid leftover new_index.tmp is reused without a rewrite."""
         # the workspace tmp left by an interrupted run, already the
         # index pack of this version
@@ -224,6 +236,7 @@ class TestUnpackIndex:
             return original(file, data)
         monkeypatch.setattr(module, 'file_write', _counting)
         job = UnpackJob(WEBSITE_FULL_PACK)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         # the valid leftover tmp is reused: the index pack is not
@@ -231,13 +244,15 @@ class TestUnpackIndex:
         assert tmp not in writes
         assert file_read_bytes(tmp) == WEBSITE_INDEX_PACK
 
-    def test_broken_new_index_rewritten(self, app_folder):
+    @pytest.mark.trio
+    async def test_broken_new_index_rewritten(self, app_folder):
         """A broken leftover new_index.tmp is rewritten."""
         tmp = env.PROJECT_ROOT / f'.pack/workspace/{JobBase.NEW_INDEX}'
         os.makedirs(tmp.uppath(), exist_ok=True)
         with open(tmp, 'wb') as f:
             f.write(b'garbage')
         job = UnpackJob(WEBSITE_FULL_PACK)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         # the broken tmp fails the content check and is overwritten
@@ -556,7 +571,9 @@ class TestCallerFlow:
         info = decoder.fileinfo['backend/main.py']
         tmp = env.PROJECT_ROOT / f'.pack/workspace/{info.size}_{info.sha1.hex()}_0.tmp'
         # the name is the one unpack() applies for on the record
-        assert UnpackJob(WEBSITE_FULL_PACK).tmp_file('backend/main.py', info) == tmp
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        await job.tmp_manager_init()
+        assert job.tmp_file('backend/main.py', info) == tmp
         # write a valid tmp file, unpack() should reuse it
         os.makedirs(tmp.uppath(), exist_ok=True)
         with open(tmp, 'wb') as f:
@@ -571,10 +588,12 @@ class TestTmpNames:
     """The tmp file names of the run: {size}_{sha1hex}_{rank}, the rank
     being the occurrence index of the content, see TmpManager."""
 
-    def test_duplicate_content_records_do_not_share_a_tmp(self, app_folder):
+    @pytest.mark.trio
+    async def test_duplicate_content_records_do_not_share_a_tmp(self, app_folder):
         """Three records of the same content get three tmp files: every
         tmp file is moved to its own target by replace_data()."""
         job = UnpackJob(WEBSITE_FULL_PACK)
+        await job.tmp_manager_init()
         job.unpack()
         pending = {item.info.path: item for item in job.pending}
         same = ['backend/config.py', 'backend/settings.py', 'backend/utils.py']
@@ -583,11 +602,13 @@ class TestTmpNames:
         assert [tmp.rpartition('_')[2] for tmp in tmps] == ['0.tmp', '1.tmp', '2.tmp']
         assert all(os.path.exists(tmp) for tmp in tmps)
 
-    def test_rerun_reuses_all_tmps(self, app_folder, monkeypatch):
+    @pytest.mark.trio
+    async def test_rerun_reuses_all_tmps(self, app_folder, monkeypatch):
         """A rerun of the same pack reuses every tmp file of the
         interrupted run: the names are the occurrence indices of the
         contents, so the second run computes the ones of the first."""
         job = UnpackJob(WEBSITE_FULL_PACK)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         tmps = [item.tmp for item in job.pending if item.tmp]
@@ -603,11 +624,13 @@ class TestTmpNames:
             return original(file, data)
         monkeypatch.setattr(module, 'file_write', _counting)
         second = UnpackJob(WEBSITE_FULL_PACK)
+        await second.tmp_manager_init()
         second.unpack()
         assert writes == []
         assert {item.tmp for item in second.pending if item.tmp} == set(tmps)
 
-    def test_matched_record_applies_for_no_name(self, app_folder):
+    @pytest.mark.trio
+    async def test_matched_record_applies_for_no_name(self, app_folder):
         """A record whose target already matches needs no tmp file and
         consumes no rank: the later records of the same content keep the
         low ranks and hit the leftovers of the first run."""
@@ -620,12 +643,49 @@ class TestTmpNames:
         with open(target, 'wb') as f:
             f.write(WEBSITE_FILES['backend/config.py'][0])
         job = UnpackJob(WEBSITE_FULL_PACK)
+        await job.tmp_manager_init()
         job.unpack()
         pending = {item.info.path: item for item in job.pending}
         # only the records that need a tmp file applied for a name
         assert 'backend/config.py' not in pending
         assert pending['backend/settings.py'].tmp.rpartition('_')[2] == '0.tmp'
         assert pending['backend/utils.py'].tmp.rpartition('_')[2] == '1.tmp'
+
+
+class TestTmpManagerInit:
+    """The tmp manager of the job: the caller creates it before the
+    phases that use tmp files, see JobBase.tmp_manager_init()."""
+
+    def test_tmp_files_require_the_manager(self, app_folder):
+        """A job whose tmp manager was not created rejects tmp_file() and
+        register_tmp(): the caller must await tmp_manager_init() first."""
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
+        info = decoder.fileinfo['backend/main.py']
+        with pytest.raises(RuntimeError, match='tmp_manager_init'):
+            job.tmp_file('backend/main.py', info)
+        with pytest.raises(RuntimeError, match='tmp_manager_init'):
+            job.register_tmp('backend/main.py', info, job.workspace.joinpath('1_00_0.tmp'))
+
+    @pytest.mark.trio
+    async def test_init_creates_and_scans(self, app_folder):
+        """tmp_manager_init() creates the manager of the workspace and
+        scans it: the leftovers of an interrupted run are pooled. The init
+        is idempotent, the manager of the run is created once."""
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
+        info = decoder.fileinfo['backend/main.py']
+        workspace = env.PROJECT_ROOT / '.pack/workspace'
+        tmp = workspace.joinpath(f'{info.size}_{info.sha1.hex()}_0.tmp')
+        os.makedirs(workspace, exist_ok=True)
+        with open(tmp, 'wb') as f:
+            f.write(WEBSITE_FILES['backend/main.py'][0])
+        job = UnpackJob(WEBSITE_FULL_PACK)
+        assert job.tmp_manager is None
+        manager = await job.tmp_manager_init()
+        assert manager is job.tmp_manager
+        # the scan pooled the leftover of the interrupted run
+        assert (info.size, info.sha1.hex()) in manager.leftover
+        assert await job.tmp_manager_init() is manager
 
 
 class TestFailure:
@@ -864,6 +924,7 @@ class TestUnpackRebuild:
         leftover deletions are pending data records."""
         await UnpackJob(OLD_PACK).run()
         job = UnpackJob(NEW_PACK)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         assert job.pending_index is not None

@@ -3,7 +3,7 @@ import trio
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_base import JobBase, PendingFile
 from alasio.deploy.pack.pack_model import IdxInfo
-from alasio.ext.path.atomic import file_write
+from alasio.ext.path.atomic import atomic_write, file_write
 from alasio.logger import logger
 
 
@@ -99,6 +99,7 @@ class UnpackJob(JobBase):
             # the records of the job file of a previous run join the
             # deletion base (R19): read them before write() replaces it
             await trio.to_thread.run_sync(self._warm_residue)
+            await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
             logger.info(f'Unpacking data to "{self.root}", name="{self.name}"')
             await trio.to_thread.run_sync(self.unpack)
@@ -129,10 +130,12 @@ class UnpackJob(JobBase):
         flow as an extra deletion base (see residue_fileinfo()) and may
         reuse the data instead of computing or downloading it again.
 
-        The job file lives in the workspace, an undecodable one is
-        ignored by the next run, so a plain write is enough.
+        The job file lives in the workspace, it is written atomically: a
+        killed process leaves the previous content (or none) instead of a
+        truncated file, and the leftovers of the interrupted write are
+        removed by the tmp manager of the next run (TmpManager).
         """
-        file_write(self.job_file, self._data)
+        atomic_write(self.job_file, self._data)
 
     def unpack(self):
         """

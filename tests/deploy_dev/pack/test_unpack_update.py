@@ -339,6 +339,7 @@ class TestUnpack:
         """unpack() writes tmp files, real files stay untouched."""
         await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         # real files are not applied yet, the index is written by
@@ -353,7 +354,9 @@ class TestUnpack:
     async def test_unpack_does_not_write_job_file(self, app_folder):
         """unpack() does not write the job file, the caller does."""
         await setup_app()
-        UpdateJob(UPDATE, server=SERVER).unpack()
+        job = UpdateJob(UPDATE, server=SERVER)
+        await job.tmp_manager_init()
+        job.unpack()
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace/job.pack')
 
     @pytest.mark.trio
@@ -361,6 +364,7 @@ class TestUnpack:
         """unpack() decompresses the index record to a tmp file."""
         await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         # the index record is always written to the fixed new_index.pack
@@ -392,6 +396,7 @@ class TestUnpack:
         pending_index with the index record."""
         await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         assert job.error == []
@@ -497,6 +502,7 @@ class TestUpdateRoundtrip:
         """unpack() then replace() applies the changes, the caller runs."""
         await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         job.replace()
@@ -627,6 +633,7 @@ class TestCopiedSource:
         readme_copy2) resolves locally."""
         await setup_app()
         job = UpdateJob(UPDATE, server=SERVER)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         assert job.error == []
@@ -670,6 +677,7 @@ class TestCopiedSource:
             return original(file, data)
         monkeypatch.setattr(module, 'file_write', _counting)
         job = UpdateJob(UPDATE, server=SERVER)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         # the copied record read the valid leftover and claimed it: the tmp
@@ -761,6 +769,7 @@ class TestCopyChain:
             raise AssertionError('no download expected, the content is local')
         monkeypatch.setattr(CHAIN_SERVER, 'get_file_content', _fail)
         job = UpdateJob(CHAIN_UPDATE, server=CHAIN_SERVER)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         # the copies of b.txt find no tmp file and read the working tree
@@ -796,6 +805,7 @@ class TestRenameCopySource:
             raise AssertionError('no download expected, the content is local')
         monkeypatch.setattr(RENAME_COPY_SERVER, 'get_file_content', _fail)
         job = UpdateJob(RENAME_COPY_UPDATE, server=RENAME_COPY_SERVER)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         assert job.error == []
@@ -816,6 +826,7 @@ class TestRenameCopySource:
             raise AssertionError('no download expected, the content is local')
         monkeypatch.setattr(RENAME_COPY_SERVER, 'get_file_content', _fail)
         job = UpdateJob(RENAME_COPY_UPDATE, server=RENAME_COPY_SERVER)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         assert job.error == []
@@ -1127,6 +1138,7 @@ class TestDownload:
         await setup_app()
         os.remove(env.PROJECT_ROOT / 'docs/readme.md')
         job = UpdateJob(UPDATE, server=SERVER)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         # the copied records cannot be computed without the source
@@ -1511,6 +1523,7 @@ class TestEmptyFolderCleanup:
         file is kept, an empty one is removed."""
         await setup_app(FOLDER_OLD_PACK)
         job = UpdateJob(FOLDER_UPDATE)
+        await job.tmp_manager_init()
         job.write()
         job.unpack()
         job.new_fileinfo = {}

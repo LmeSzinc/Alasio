@@ -7,7 +7,7 @@ from alasio.deploy.pack.job_base import JobBase, PendingFile
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext.cache import InstanceCacheOperation
-from alasio.ext.path.atomic import atomic_read_bytes, file_write
+from alasio.ext.path.atomic import atomic_read_bytes, atomic_write, file_write
 from alasio.logger import logger
 
 # httpx2 is imported lazily in the places that use it: the package resolves
@@ -30,11 +30,9 @@ class UpdateJob(JobBase):
 
     The pack data is passed in __init__, the caller stores it to the
     job file ({ledger}/workspace/job.pack) with write() before
-    unpacking, so an interrupted run can be resumed by the next run:
+    unpacking, so a killed process leaves the record of the task in
+    flight:
 
-        job = DeployJob(server=server)._get_unfinished_job()
-        if job is not None:
-            await job.run()
         job = UpdateJob(data, server=server)
         await job.run()
 
@@ -120,8 +118,7 @@ class UpdateJob(JobBase):
         """
         Execute the full update flow.
 
-        Writes the job file first unless the job was resumed from it,
-        then unpacks, downloads the failed records, verifies the
+        Writes the job file first, then unpacks, downloads the failed records, verifies the
         remaining local files and replaces all files in one pass. The
         new index pack is committed last and only when every record
         landed, see replace_index(). The network phases await on the
@@ -141,6 +138,7 @@ class UpdateJob(JobBase):
             # the records of the job file of a previous run join the
             # deletion base (R19): read them before write() replaces it
             await trio.to_thread.run_sync(self._warm_residue)
+            await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
             logger.info(f'Updating files to "{self.root}", name="{self.name}"')
             await trio.to_thread.run_sync(self.unpack)
@@ -179,18 +177,21 @@ class UpdateJob(JobBase):
 
     def write(self):
         """
-        Write the data to the job file, so that a future run can resume
-        from it if this run gets interrupted.
+        Write the data to the job file, so that the file is the record of
+        the task in flight (the next flow derives its work from the tree
+        and the local index, see residue_fileinfo()).
 
-        The job file lives in the workspace, a corrupted one is
-        detected by _get_unfinished_job() on the next run, so a plain
-        write is enough. A run whose data was read back from the job file
-        (job_file_kept, the kept pack the server confirmed) does not write
-        it again: the file already holds exactly these bytes.
+        The job file lives in the workspace, it is written atomically: a
+        killed process leaves the previous content (or none) instead of a
+        truncated file, and the leftovers of the interrupted write are
+        removed by the tmp manager of the next run (TmpManager). A run
+        whose data was read back from the job file (job_file_kept, the kept
+        pack the server confirmed) does not write it again: the file
+        already holds exactly these bytes.
         """
         if self.job_file_kept:
             return
-        file_write(self.job_file, self._data)
+        atomic_write(self.job_file, self._data)
 
     def unpack(self):
         """
@@ -493,7 +494,7 @@ class UpdateJob(JobBase):
         # jobs write into the same workspace, their records must never
         # share a tmp file, so the occurrence counters continue with
         # the records of this job
-        InstanceCacheOperation.set(reset, 'tmp_manager', self.tmp_manager)
+        reset.tmp_manager = self.tmp_manager
         await trio.to_thread.run_sync(reset.validate_files)
         await reset.download()
         # the nested reset never prepares an index record (the index is
@@ -583,7 +584,8 @@ class UpdateJob(JobBase):
             # record can be a file the update deletes (the file of the old
             # version under a moved folder, e.g. a .dist-info of another
             # version), its content is read from the working tree below
-            for rank, source_tmp in self.tmp_manager.candidates(source_info.size, source_info.sha1):
+            manager = self.tmp_manager
+            for rank, source_tmp in manager.candidates(source_info.size, source_info.sha1):
                 data = self._read_matched(source_tmp, source_info)
                 if data is None:
                     continue
@@ -593,7 +595,7 @@ class UpdateJob(JobBase):
                 # bytes). A tmp file of this run belongs to its record (rank
                 # -1): it is only read, replace_data() moves it to the target
                 # of that record
-                if rank >= 0 and self.tmp_manager.claim(
+                if rank >= 0 and manager.claim(
                         source_info.size, source_info.sha1, rank):
                     return self._to_blob(data, source_info.eol), source_tmp
                 return self._to_blob(data, source_info.eol), ''
