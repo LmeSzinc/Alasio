@@ -172,8 +172,10 @@ class RepoDiff:
             if path in renames:
                 old_path = renames[path]
                 old_info = real_old[old_path]
-                if old_info.sha1 == new_info.sha1 and old_info.eol == new_info.eol:
-                    # pure rename, the content is identical, no data needed
+                if old_info.sha1 == new_info.sha1:
+                    # pure rename, the content is identical, no data needed.
+                    # The eol may differ (a .gitattributes change), the client
+                    # applies the eol of the record to the source blob
                     record = UpdateInfo(path=path, edit=3, eol=new_info.eol, mode=new_info.mode)
                     record.source_path = old_path
                     record.size = new_info.size

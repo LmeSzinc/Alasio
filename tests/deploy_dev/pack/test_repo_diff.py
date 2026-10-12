@@ -191,6 +191,22 @@ class TestRepoDiffRename:
         assert 'a.txt' not in diff.diff_info
         assert 'a.txt' in diff.refinfo
 
+    def test_eol_only_rename(self):
+        """Same content at a new path with another eol (a .gitattributes
+        change) is still a pure R record: the client applies the eol of
+        the record to the source blob, no data is needed."""
+        diff = make_diff(
+            {'.gitattributes': b'*.txt text eol=lf\n', 'a.txt': b'hello world\n' * 20},
+            {'.gitattributes': b'*.txt text eol=crlf\n', 'moved.txt': b'hello world\n' * 20},
+        )
+        info = diff.diff_info['moved.txt']
+        assert info.edit == 3
+        assert info.source_path == 'a.txt'
+        assert info.eol == 1
+        assert info.data_size == 0
+        assert 'a.txt' not in diff.diff_info
+        assert 'a.txt' in diff.refinfo
+
     def test_rename_modify(self):
         """A renamed file with changes becomes an RM record with a patch."""
         lines = code_lines(4000)

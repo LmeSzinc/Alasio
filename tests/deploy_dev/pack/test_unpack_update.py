@@ -681,6 +681,47 @@ class TestCopiedSource:
         assert file_read_bytes(leftover) == b'# Website\r\n'
 
 
+# an eol-only rename: the .gitattributes flips the txt rule and a.txt moves
+# to b.txt with the same content, the encoder writes a pure R record (no data)
+EOL_RENAME_REPO = make_repo({
+    'old': {'.gitattributes': b'*.txt text eol=lf\n', 'a.txt': b'chained\n'},
+    'new': {'.gitattributes': b'*.txt text eol=crlf\n', 'b.txt': b'chained\n'},
+})
+EOL_RENAME_OLD_PACK = b''.join(PackFull(EOL_RENAME_REPO, commit='old').iter_pack_data())
+EOL_RENAME_NEW_PACK = b''.join(PackFull(EOL_RENAME_REPO, commit='new').iter_pack_data())
+EOL_RENAME_UPDATE = b''.join(PackUpdate(
+    PackFull(EOL_RENAME_REPO, commit='new'), 'old').iter_pack_data())
+EOL_RENAME_DECODER = PackDecodeBase(EOL_RENAME_UPDATE)
+EOL_RENAME_SERVER = MockServerFile()
+EOL_RENAME_SERVER.register_version(
+    'old', EOL_RENAME_OLD_PACK, bytes(PackDecodeBase(EOL_RENAME_OLD_PACK).extract_index_pack()))
+EOL_RENAME_SERVER.register_version(
+    'new', EOL_RENAME_NEW_PACK, bytes(PackDecodeBase(EOL_RENAME_NEW_PACK).extract_index_pack()))
+# the working tree of the new version, the pack structure excluded
+EOL_RENAME_NEW_TREE = {
+    '.gitattributes': b'*.txt text eol=crlf\n',
+    'b.txt': b'chained\r\n',
+}
+
+
+class TestEolRename:
+    """A rename that only changes the eol of the file."""
+
+    @pytest.mark.trio
+    async def test_eol_only_rename(self, app_folder):
+        """The record is a pure R (no data) and the client applies the eol
+        of the record to the source blob: the moved file is CRLF."""
+        info = EOL_RENAME_DECODER.fileinfo['b.txt']
+        assert info.edit == 3
+        assert info.data_size == 0
+        assert info.eol == 1
+        await UnpackJob(EOL_RENAME_OLD_PACK).run()
+        job = UpdateJob(EOL_RENAME_UPDATE, server=EOL_RENAME_SERVER)
+        assert await job.run()
+        assert job.error == []
+        assert read_tree() == EOL_RENAME_NEW_TREE
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  index pack update
 # ════════════════════════════════════════════════════════════════════════════
