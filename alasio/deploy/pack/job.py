@@ -379,7 +379,9 @@ class DeployJob(DeployTarget):
             new_version (str): Version to update to
 
         Returns:
-            bytes: Update pack data
+            tuple[bytes, bool]: Update pack data and whether it was read back
+                from the job file (the kept pack: the file already holds
+                exactly these bytes, the caller keeps it as-is)
 
         Raises:
             httpx2.HTTPStatusError: If the request fails
@@ -401,12 +403,12 @@ class DeployJob(DeployTarget):
             if body:
                 # the server ignored the range request: its body is the pack
                 # of this flow, no second request is needed
-                return body
+                return body, False
             if server_checksum == checksum:
                 logger.info(f'Update pack unchanged, reusing the kept pack: '
                             f'{old_version} -> {new_version}')
-                return kept
-        return await self.server.get_update_pack(old_version, new_version)
+                return kept, True
+        return await self.server.get_update_pack(old_version, new_version), False
 
     def _load_kept_pack(self, old_version, new_version):
         """
@@ -562,7 +564,7 @@ class DeployJob(DeployTarget):
             # when the server still serves it, see _get_update_pack
             await self._job_phase(on_job_phase, 'downloading')
             try:
-                data = await self._get_update_pack(local, info.version)
+                data, kept = await self._get_update_pack(local, info.version)
             except httpx2.HTTPStatusError as e:
                 # the update pack of the local version is not on the server (out
                 # of the update window or removed), the incremental path is
@@ -579,6 +581,9 @@ class DeployJob(DeployTarget):
             # stopped before them (the manager phase)
             await self._job_phase(on_job_phase, 'updating')
             job = UpdateJob(data, server=self.server, root=self.root, name=self.name)
+            # the pack came back from the job file (the server confirmed the
+            # kept one): the file already holds it, write() keeps it as-is
+            job.job_file_kept = kept
             if await self._run_job(job):
                 return True
             # the update pack failed to apply, rebuild from the latest index: a

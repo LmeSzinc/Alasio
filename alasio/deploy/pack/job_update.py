@@ -111,6 +111,10 @@ class UpdateJob(JobBase):
         self._pack_paths: "set[str]" = set()
         # version of the update pack, used to download the index pack
         self._version = ''
+        # the data was read back from the job file (the kept pack the server
+        # confirmed, see DeployJob._get_update_pack): write() keeps the file
+        # as-is instead of rewriting the same bytes
+        self.job_file_kept = False
 
     async def run(self):
         """
@@ -180,8 +184,12 @@ class UpdateJob(JobBase):
 
         The job file lives in the workspace, a corrupted one is
         detected by _get_unfinished_job() on the next run, so a plain
-        write is enough.
+        write is enough. A run whose data was read back from the job file
+        (job_file_kept, the kept pack the server confirmed) does not write
+        it again: the file already holds exactly these bytes.
         """
+        if self.job_file_kept:
+            return
         file_write(self.job_file, self._data)
 
     def unpack(self):

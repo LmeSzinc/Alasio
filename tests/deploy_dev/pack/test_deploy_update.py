@@ -625,7 +625,7 @@ class TestUpdatePackReuse:
     @pytest.mark.trio
     async def test_download_is_reused_by_the_next_run(self, app_folder, monkeypatch):
         """A run killed after its download: the next run reuses the kept pack
-        once the server confirmed its digest."""
+        once the server confirmed its digest, and does not write it again."""
         server = make_server()
         await UnpackJob(OLD_PACK).run()
 
@@ -643,12 +643,22 @@ class TestUpdatePackReuse:
         assert file_read_bytes(workspace_file('job.pack')) == UPDATE
         assert server.update_bytes == len(UPDATE)
 
-        # the next run reuses the kept pack, the body is not transferred again
+        # the next run reuses the kept pack: the body is not transferred again
+        # and the job file is not written again either
+        writes = []
+        original_write = UpdateJob.write
+
+        def counting_write(self):
+            writes.append(self.job_file_kept)
+            return original_write(self)
+
+        monkeypatch.setattr(UpdateJob, 'write', counting_write)
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=server).update()
         assert capture.backend.any_contains('reusing the kept pack')
         assert read_tree() == NEW_TREE
         assert server.update_bytes == len(UPDATE) + 20
+        assert writes == [True]
 
     @pytest.mark.trio
     async def test_another_pack_served_downloads(self, app_folder):
@@ -658,9 +668,18 @@ class TestUpdatePackReuse:
         server.register_update('old', 'new', OTHER_UPDATE)
         await UnpackJob(OLD_PACK).run()
         UpdateJob(UPDATE, server=server).write()
-        data = await DeployJob(server=server)._get_update_pack('old', 'new')
+        data, kept = await DeployJob(server=server)._get_update_pack('old', 'new')
         assert data == OTHER_UPDATE
+        assert kept is False
         assert server.update_bytes == 20 + len(OTHER_UPDATE)
+
+    def test_kept_pack_is_not_written_again(self, app_folder):
+        """A pack read back from the job file is not written again."""
+        file_write(workspace_file('job.pack'), b'kept bytes')
+        job = UpdateJob(UPDATE, server=SERVER)
+        job.job_file_kept = True
+        job.write()
+        assert file_read_bytes(workspace_file('job.pack')) == b'kept bytes'
 
     @pytest.mark.trio
     async def test_without_a_kept_pack_downloads(self, app_folder):
