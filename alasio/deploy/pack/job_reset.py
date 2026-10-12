@@ -41,7 +41,10 @@ class ResetJob(JobBase):
     by download() and replaced to the real files by replace(). Files
     that cannot be downloaded or fail the size + sha1 check stay in
     self.error with an empty tmp, this is an unsolvable problem per
-    the draft of PackEncodeBase. The tmp files are named by the tmp
+    the draft of PackEncodeBase. The records of the job file of a
+    previous run are an extra deletion base (R19, see
+    residue_fileinfo()): the paths they describe that the local version
+    does not have are removed by replace() too. The tmp files are named by the tmp
     manager of the workspace (see TmpManager and JobBase.tmp_file()),
     a record applies for its name when it needs the tmp file, so a
     leftover tmp file of an interrupted run is found again and reused. The new index pack is
@@ -57,13 +60,11 @@ class ResetJob(JobBase):
     # marker of a validation task in the job file
     MARK = b'REST\x00'
 
-    def __init__(self, server, resume=False, root=None, name=''):
+    def __init__(self, server, root=None, name=''):
         """
         Args:
             server (ServerFile): Server to download the index pack and
                 the failed files
-            resume (bool): True if the job was resumed from the job
-                file, run() does not write the job file again then
             root (str, optional): Folder to update. Defaults to None,
                 env.PROJECT_ROOT
             name (str, optional): Ledger key of the target. Defaults to
@@ -71,7 +72,6 @@ class ResetJob(JobBase):
         """
         super().__init__(b'', root=root, name=name)
         self.server = server
-        self._resume = resume
         self.error: "list[PendingFile]" = []
         # latest.pack of the flow: fetched once per job by
         # _get_latest_info(), or seeded by DeployJob.update() with the
@@ -92,17 +92,21 @@ class ResetJob(JobBase):
         only when every file was repaired, see replace_index(). The
         network phases await on the event loop, the local phases run in
         a worker thread (see JobBase.run()). On failure the workspace is
-        cleaned up: errors during write() and validate() are safe
-        because no real file was written and are logged as warning,
-        errors during replace() leave partially replaced files and are
-        logged as error.
+        kept so the next run resumes the job: errors during write() and
+        validate() are safe because no real file was written and are
+        logged as warning, errors during replace() leave partially
+        replaced files and are logged as error. The workspace is
+        cleaned up only when every file was repaired, no file stayed in
+        self.error and the new index pack was committed.
 
         Returns:
             bool: True if every file is repaired, False otherwise
         """
         try:
-            if not self._resume:
-                await trio.to_thread.run_sync(self.write)
+            # the records of the job file of a previous run join the
+            # deletion base (R19): read them before write() replaces it
+            await trio.to_thread.run_sync(self._warm_residue)
+            await trio.to_thread.run_sync(self.write)
             logger.info(f'Resetting files to "{self.root}", name="{self.name}"')
             if not await trio.to_thread.run_sync(self.validate_index):
                 # the index pack is broken, download it again
@@ -116,24 +120,41 @@ class ResetJob(JobBase):
             # the new index records every file of the new version, the
             # emptiness base of replace_data()
             self.new_fileinfo = self._index_pack.fileinfo
+            # the records of the job file of a previous run (R19): the
+            # paths it may have written that the local version does not
+            # have are removed as well (the local index part of the base
+            # cancels out, the target of a reset is the local index)
+            self.pending += self._leftover_deletions(
+                self.residue_fileinfo, self.new_fileinfo)
         except Exception as e:
-            # no real file was written, safe to clean up
-            logger.warning(f'Failed to reset: {e}')
-            await trio.to_thread.run_sync(self.cleanup)
+            # no real file was written: the workspace (the job file
+            # and the tmp files written so far) is kept as the resume
+            # base of the next run
+            logger.warning(f'Failed to reset: {e}, keeping the workspace for the next run')
             return False
         try:
             # the new index pack is committed only when every file was
             # repaired: a failed flow keeps the old local version
             await trio.to_thread.run_sync(self.replace, not self.error)
         except Exception as e:
-            # real files may be partially replaced
-            logger.error(f'Failed to replace file: {e}')
-            await trio.to_thread.run_sync(self.cleanup)
+            # real files may be partially replaced, the workspace is
+            # kept for the next run to resume and repair the targets
+            logger.error(f'Failed to replace file: {e}, keeping the workspace for the next run')
             return False
-        # the job is finished, clean the workspace atomically
+        if self.error:
+            # some records could not be downloaded or verified: the new
+            # index pack was not committed, the workspace is kept and
+            # the next run retries the records
+            logger.warning(
+                f'Failed to reset: {len(self.error)} file(s) stayed in error, '
+                f'the workspace is kept for the next run'
+            )
+            return False
+        # every file was repaired and the new index pack is committed:
+        # the workspace is done, clean it up atomically
         await trio.to_thread.run_sync(self.cleanup)
         logger.info(f'Reset done')
-        return not self.error
+        return True
 
     def write(self):
         """

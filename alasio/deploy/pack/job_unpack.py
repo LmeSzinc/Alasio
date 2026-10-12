@@ -9,21 +9,20 @@ from alasio.logger import logger
 
 class UnpackJob(JobBase):
     """
-    A full pack unpack task, interruptible and resumable.
+    A full pack unpack task.
 
     Unpacking is a local rebuild: the working tree is rebuilt from the
     full pack data passed in __init__, the leftover files of the old
-    version (recorded in the old local index pack, not in this pack)
-    are removed, the new index pack (index.pack in the ledger folder
-    of the target) is replaced last. No server is involved. The pack
-    data is passed in __init__, the caller stores it to the job file
-    ({ledger}/workspace/job.pack) with write() before unpacking, so an
-    interrupted run can be resumed by the next run:
-
-        job = DeployJob()._get_unfinished_job()
-        if job is not None:
-            await job.run()
-        await UnpackJob(data).run()
+    version (recorded in the old local index pack and in the job file of
+    a previous run, see residue_fileinfo(), not in this pack) are
+    removed, the new index pack (index.pack in the ledger folder of the
+    target) is replaced last. No server is involved. The pack data is
+    passed in __init__; the caller stores it to the job file
+    ({ledger}/workspace/job.pack) with write() before unpacking, so the
+    flow leaves a record of what it applies. A run never works from an
+    old job file: it re-derives every file and cleans the workspace up
+    when it fully succeeded (the tmp files of a failed run are reused by
+    content, see TmpManager).
 
     All files unpack into the root of the target; the pack area paths
     of the pack (.pack/**) resolve inside the ledger folder of the
@@ -55,11 +54,12 @@ class UnpackJob(JobBase):
        renamed first, then removed slowly, so an interrupted cleanup
        never leaves a workspace that looks unfinished.
 
-    On failure the workspace is cleaned up: errors during write() and
-    unpack() are safe, no real file was written, errors during
-    replace() leave partially replaced files. Only a process killed in
-    flight leaves the workspace behind for the next run to resume from
-    (the job file and the tmp files written so far).
+    On failure the workspace is kept for the next run to resume from
+    (the job file and the tmp files written so far): errors during
+    write() and unpack() are safe, no real file was written, errors
+    during replace() leave partially replaced files that the resumed
+    run repairs. The workspace is cleaned up only when every file
+    landed and the new index pack was committed, see run().
 
     Note: the exclusive lock of the target ledger (the lock file, see
     DeployJob.locked()) is held by DeployJob around the whole update
@@ -67,67 +67,70 @@ class UnpackJob(JobBase):
     this job must take it itself.
     """
 
-    def __init__(self, data, resume=False, root=None, name=''):
+    def __init__(self, data, root=None, name=''):
         """
         Args:
             data (bytes): Full pack data
-            resume (bool): True if the data was read from the job file,
-                run() does not write the job file again then
             root (str, optional): Folder to update. Defaults to None,
                 env.PROJECT_ROOT
             name (str, optional): Ledger key of the target. Defaults to
                 '', the project tree target
         """
         super().__init__(data, root=root, name=name)
-        self._resume = resume
 
     async def run(self):
         """
         Execute the full unpack flow.
 
-        Writes the job file first unless the job was resumed from it,
-        then unpacks and replaces all files. The job is async like
+        Writes the job file first, then unpacks and replaces all files. The job is async like
         every job (see JobBase.run()): its local phases run in a
         worker thread phase by phase, so the event loop stays
-        responsive. On failure the workspace is cleaned up: errors
-        during write() and unpack() are safe because no real file was
-        written and are logged as warning, errors during replace()
-        leave partially replaced files and are logged as error.
+        responsive. On failure the workspace is kept so the next run
+        resumes the job: errors during write() and unpack() are safe
+        because no real file was written and are logged as warning,
+        errors during replace() leave partially replaced files and are
+        logged as error. The workspace is cleaned up only when every
+        file landed and the new index pack was committed.
 
         Returns:
             bool: True if every file is unpacked, False otherwise
         """
         try:
-            if not self._resume:
-                await trio.to_thread.run_sync(self.write)
+            # the records of the job file of a previous run join the
+            # deletion base (R19): read them before write() replaces it
+            await trio.to_thread.run_sync(self._warm_residue)
+            await trio.to_thread.run_sync(self.write)
             logger.info(f'Unpacking data to "{self.root}", name="{self.name}"')
             await trio.to_thread.run_sync(self.unpack)
         except Exception as e:
-            # no real file was written, safe to clean up
-            logger.warning(f'Failed to unpack: {e}')
-            await trio.to_thread.run_sync(self.cleanup)
+            # no real file was written: the workspace (the job file
+            # and the tmp files written so far) is kept as the resume
+            # base of the next run
+            logger.warning(f'Failed to unpack: {e}, keeping the workspace for the next run')
             return False
         try:
             logger.info(f'Replacing files to "{self.root}", name="{self.name}"')
             await trio.to_thread.run_sync(self.replace)
         except Exception as e:
-            # real files may be partially replaced
-            logger.error(f'Failed to replace file: {e}')
-            await trio.to_thread.run_sync(self.cleanup)
+            # real files may be partially replaced, the workspace is
+            # kept for the next run to resume and repair the targets
+            logger.error(f'Failed to replace file: {e}, keeping the workspace for the next run')
             return False
-        # all changes applied, clean the workspace atomically
+        # every file landed and the new index pack is committed: the
+        # workspace is done, clean it up atomically
         await trio.to_thread.run_sync(self.cleanup)
         logger.info(f'Unpack done')
         return True
 
     def write(self):
         """
-        Write the data to the job file, so that a future run can resume
-        from it if this run gets interrupted.
+        Write the data to the job file, so that the flow leaves a record
+        of what it applies: the next run takes the records of a failed
+        flow as an extra deletion base (see residue_fileinfo()) and may
+        reuse the data instead of computing or downloading it again.
 
-        The job file lives in the workspace, a corrupted one is
-        detected by _get_unfinished_job() on the next run, so a plain
-        write is enough.
+        The job file lives in the workspace, an undecodable one is
+        ignored by the next run, so a plain write is enough.
         """
         file_write(self.job_file, self._data)
 
@@ -141,7 +144,11 @@ class UnpackJob(JobBase):
         with the changes to apply in replace_data(). The old local index
         pack is read first: files recorded in it but not in this pack
         are the leftover files of the old version, removed by
-        replace_data() like the deleted markers. A target file whose
+        replace_data() like the deleted markers; the records of the job
+        file of a previous run are taken as a second base (R19, see
+        residue_fileinfo()), so a file that only an intermediate version
+        has - it is in neither the index nor this pack - is removed too.
+        A target file whose
         content matches the record only after converting its EOL is
         written to the tmp file with the converted content, no
         decompression is needed. The new index pack is committed last
@@ -158,8 +165,11 @@ class UnpackJob(JobBase):
         # the full pack records every file of the new version, the
         # emptiness base of replace_data()
         self.new_fileinfo = decoder.fileinfo
-        # the old index is read before the new index pack replaces it
-        old_fileinfo = self._old_fileinfo_from_index()
+        # the old index is read before the new index pack replaces it,
+        # and it joins the records of the job file of a previous run
+        # (R19, read before this run replaced it): a file that only an
+        # intermediate version has is in neither base alone
+        old_fileinfo = {**self._old_fileinfo_from_index(), **self.residue_fileinfo}
 
         # unpack index
         index_tmp = self.workspace.joinpath(self.NEW_INDEX)

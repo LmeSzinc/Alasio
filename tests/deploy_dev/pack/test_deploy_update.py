@@ -289,17 +289,6 @@ class TestLatestInfoSnapshot:
         assert len(calls) == 1
 
     @pytest.mark.trio
-    async def test_resumed_job(self, app_folder, monkeypatch):
-        """A resumed rebuild job takes its own snapshot before the decision
-        fetches the post-job version: two requests."""
-        await UnpackJob(OLD_PACK).run()
-        RebuildJob(SERVER).write()
-        calls = self.count_latest(SERVER, monkeypatch)
-        with logger.mock_capture_writer():
-            assert await DeployJob(server=SERVER).update()
-        assert len(calls) == 2
-
-    @pytest.mark.trio
     async def test_mid_flow_publish(self, app_folder, monkeypatch):
         """A version published after the entry fetch is left to the next
         update: the flow converges to the snapshot, no second fetch and
@@ -519,19 +508,6 @@ class TestVersionDrivenUpdate:
             await DeployJob(server=SERVER).update(version='gone')
         assert read_tree() == {}
         assert not os.path.exists(env.PROJECT_ROOT / '.pack')
-
-    @pytest.mark.trio
-    async def test_resumed_job_is_finished_first(self, app_folder, monkeypatch):
-        """An unfinished job is finished before the check (the resumed job
-        fetches the pair of its own), the version is verified after it."""
-        await UnpackJob(OLD_PACK).run()
-        RebuildJob(SERVER).write()
-        latest_calls = TestLatestInfoSnapshot.count_latest(SERVER, monkeypatch)
-        with logger.mock_capture_writer():
-            assert await DeployJob(server=SERVER).update(version='new')
-        assert len(latest_calls) == 2
-        assert read_tree() == NEW_TREE
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     @pytest.mark.trio
     async def test_phases(self, app_folder):

@@ -16,7 +16,6 @@ import os
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
-from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy_dev.pack.pack_full import PackFull
@@ -430,7 +429,7 @@ class TestFileRepair:
     @pytest.mark.trio
     async def test_download_failure_stays_in_error(self, app_folder, monkeypatch):
         """A file that cannot be downloaded stays in error, the run
-        fails and the workspace is cleaned."""
+        fails and the workspace is kept for the next run to resume."""
         await setup_old()
         # keep the index pack requests (offset 0) working, serve bad
         # data for the file downloads
@@ -442,62 +441,30 @@ class TestFileRepair:
             return b'bad data'
         monkeypatch.setattr(SERVER, 'get_file_content', _bad_files)
         job = RebuildJob(SERVER)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert job.error
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        assert capture.backend.any_contains('stayed in error')
+        # the index was not committed: the workspace is the resume base
+        # of the next run, which retries the failed records
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == RebuildJob.MARK
         # the new index pack is not committed: the local version does
         # not advance (see JobBase.replace())
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == OLD_INDEX
 
     @pytest.mark.trio
     async def test_no_server(self, app_folder):
-        """A missing server fails the run with a warning."""
+        """A missing server fails the run with a warning, the job file
+        is kept for the next run to resume."""
         job = RebuildJob(None)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.backend.any_contains('Failed to rebuild:')
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == RebuildJob.MARK
 
 
 class TestResume:
     """Interruption and resume."""
-
-    @pytest.mark.trio
-    async def test_get_unfinished_job_dispatch(self, app_folder):
-        """The RBIL marker is dispatched to a resumed RebuildJob."""
-        await setup_old()
-        RebuildJob(SERVER).write()
-        job = DeployJob(server=SERVER)._get_unfinished_job()
-        assert job is not None
-        assert isinstance(job, RebuildJob)
-        with logger.mock_capture_writer():
-            assert await job.run()
-        assert read_tree() == NEW_TREE
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
-
-    @pytest.mark.trio
-    async def test_resume_reuses_new_index_tmp(self, app_folder, monkeypatch):
-        """A run resumed from an interruption reuses the leftover new
-        index tmp instead of downloading it again."""
-        await setup_old()
-        # the job file of an interrupted run and the new index tmp it
-        # already downloaded
-        RebuildJob(SERVER).write()
-        tmp = env.PROJECT_ROOT / f'.pack/workspace/{RebuildJob.NEW_INDEX}'
-        os.makedirs(tmp.uppath(), exist_ok=True)
-        with open(tmp, 'wb') as f:
-            f.write(NEW_INDEX)
-
-        async def _fail(*args, **kwargs):
-            raise AssertionError('no index download expected, the tmp file is reused')
-        monkeypatch.setattr(SERVER, 'get_index_pack', _fail)
-        job = DeployJob(server=SERVER)._get_unfinished_job()
-        assert job is not None
-        assert await job.run()
-        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
-        assert read_tree() == NEW_TREE
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     @pytest.mark.trio
     async def test_index_replaced_last(self, app_folder, monkeypatch):

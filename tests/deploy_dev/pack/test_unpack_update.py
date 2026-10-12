@@ -22,7 +22,8 @@ import httpx2
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
-from alasio.deploy.pack.job import DeployJob
+from alasio.deploy.pack.job_rebuild import RebuildJob
+from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
 from alasio.deploy.pack.pack_model import IdxInfo
@@ -893,7 +894,9 @@ class TestIndexUpdate:
             assert not await job.run()
         assert capture.backend.any_contains('no server provided')
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        # the flow did not succeed: the workspace is kept as the resume
+        # base of the next run
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == UPDATE
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -979,9 +982,10 @@ class TestSourceDownload:
         # in the remaining check) stay in error
         assert [item.info.path for item in job.error] == \
             ['docs/readme_copy.txt', 'docs/readme_copy2.txt', 'docs/readme.md']
-        # the other changes are still applied, the workspace is cleaned
+        # the other changes are still applied, the workspace is kept for
+        # the next run to resume: the failed records are retried from it
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/a1.py') == NEW['backend/a1.py']
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == UPDATE
         # the new index pack is not committed: the local version does
         # not advance, the next check still sees the update available
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
@@ -1211,9 +1215,10 @@ class TestDownload:
             assert not await job.run()
         assert capture.backend.any_contains('Failed to download .pack/index.pack:')
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
-        # the local index is not replaced, the workspace is cleaned
+        # the local index is not replaced, the workspace is kept as the
+        # resume base of the next run
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == bytes(bad)
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == UPDATE
 
     @pytest.mark.trio
     async def test_index_download_http_error_stays_in_error(self, app_folder, monkeypatch):
@@ -1257,7 +1262,9 @@ class TestDownload:
         # record that could not be computed locally stay in error
         assert [item.info.path for item in job.error] == [
             '.pack/index.pack', 'docs/readme_copy.txt', 'docs/readme_copy2.txt']
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        # the flow did not succeed: the workspace is kept as the resume
+        # base of the next run
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == UPDATE
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1269,69 +1276,21 @@ class TestCallerFlow:
     """The exact caller usage of UpdateJob."""
 
     @pytest.mark.trio
-    async def test_get_unfinished_job_update(self, app_folder):
-        """An update pack job file is dispatched to a resumed UpdateJob."""
+    async def test_a_new_flow_converges_a_failed_run(self, app_folder):
+        """A flow is always a new one: the job file of a previous run is a
+        record (its records join the deletion base, R19), never a task to
+        resume -- a fresh UpdateJob of the same pack converges the tree."""
         await setup_app()
-        UpdateJob(UPDATE).write()
-        job = DeployJob(server=SERVER)._get_unfinished_job()
-        assert job is not None
-        assert isinstance(job, UpdateJob)
-        assert await job.run()
-        assert read_tree() == NEW_TREE
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
-
-    @pytest.mark.trio
-    async def test_interrupted_unpack_resumed(self, app_folder):
-        """A run interrupted after unpack() is resumed: the local
-        index is not touched yet (replace() writes it), the tmp files
-        are reused."""
-        await setup_app()
+        # the state a failed run leaves: the job file of the update pack
+        # written, no file of it applied
+        UpdateJob(UPDATE, server=SERVER).write()
         job = UpdateJob(UPDATE, server=SERVER)
-        job.write()
-        job.unpack()
-        # the local index is still the old one, the resumed run
-        # verifies it against the refinfo and reuses the tmp files
-        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
-            bytes(OLD_DECODER.extract_index_pack())
-        job = DeployJob(server=SERVER)._get_unfinished_job()
-        assert job is not None
-        assert isinstance(job, UpdateJob)
-        assert await job.run()
+        with logger.mock_capture_writer():
+            assert await job.run()
         assert read_tree() == NEW_TREE
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
             bytes(NEW_DECODER.extract_index_pack())
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
-
-    @pytest.mark.trio
-    async def test_resume_skips_write(self, app_folder, monkeypatch):
-        """A resumed job skips write(), the data is already in the file."""
-        await setup_app()
-        UpdateJob(UPDATE).write()
-
-        def _fail(self):
-            raise AssertionError('write() should not be called on resume')
-        monkeypatch.setattr(UpdateJob, 'write', _fail)
-        job = DeployJob(server=SERVER)._get_unfinished_job()
-        assert job is not None
-        assert await job.run()
-        assert read_tree() == NEW_TREE
-
-    def test_full_pack_dispatched_to_unpack_job(self, app_folder):
-        """A full pack job file is dispatched to UnpackJob, not UpdateJob."""
-        UnpackJob(OLD_PACK).write()
-        job = DeployJob(server=SERVER)._get_unfinished_job()
-        assert job is not None
-        assert isinstance(job, UnpackJob)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  failure
-# ════════════════════════════════════════════════════════════════════════════
-
-
-class TestFailure:
-    """Failure handling: a caught failure cleans the workspace up, only
-    a process killed in flight leaves it for the next run to resume."""
 
     def test_invalid_pack_raises(self, app_folder):
         """Not a pack file raises PackDecodeError."""
@@ -1353,7 +1312,8 @@ class TestFailure:
             UpdateJob(bytes(bad)).unpack()
 
     def test_failure_keeps_job_file(self, app_folder):
-        """job.pack survives a failed run for crash recovery."""
+        """job.pack survives a failed run: the next flow takes its records
+        as a deletion base (R19) and its tmp files as a cache."""
         decoder = PackDecodeBase(UPDATE)
         index_end = 5 + len(decoder.index_section)
         bad = bytearray(UPDATE)
@@ -1362,13 +1322,12 @@ class TestFailure:
         job.write()
         with pytest.raises(PackDecodeError):
             job.unpack()
-        assert os.path.exists(env.PROJECT_ROOT / '.pack/workspace/job.pack')
-        # the unfinished job can still be found
-        assert DeployJob()._get_unfinished_job() is not None
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == bytes(bad)
 
     @pytest.mark.trio
-    async def test_run_failure_logged_and_cleaned(self, app_folder):
-        """A failed run logs a warning and cleans the workspace."""
+    async def test_run_failure_keeps_the_workspace(self, app_folder):
+        """A failed run logs a warning and keeps the workspace for the
+        next run to resume."""
         await setup_app()
         decoder = PackDecodeBase(UPDATE)
         index_end = 5 + len(decoder.index_section)
@@ -1378,12 +1337,110 @@ class TestFailure:
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.backend.any_contains('Failed to update:')
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        # the job file of the failed run is the resume base of the next
+        # run, the tmp files written so far are its cache
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == bytes(bad)
 
 
 # ════════════════════════════════════════════════════════════════════════════
 #  empty folder cleanup
 # ════════════════════════════════════════════════════════════════════════════
+
+
+# three versions where the middle one added b.txt and the last one dropped
+# it again: b.txt is in no pack of the V1 -> V3 transition, it is on disk
+# only because a flow failed half way through V2
+INTER_REPO = make_repo({
+    'old': {'a.txt': b'a\n', 'keep.txt': b'keep\n'},
+    'new': {'a.txt': b'a\n', 'keep.txt': b'keep\n', 'b.txt': b'b\n'},
+    'newer': {'a.txt': b'a\n', 'keep.txt': b'keep\n', 'c.txt': b'c\n'},
+})
+INTER_FULL_OLD = b''.join(PackFull(INTER_REPO, commit='old').iter_pack_data())
+INTER_FULL_NEW = b''.join(PackFull(INTER_REPO, commit='new').iter_pack_data())
+INTER_FULL_NEWER = b''.join(PackFull(INTER_REPO, commit='newer').iter_pack_data())
+INTER_UPDATE_12 = b''.join(PackUpdate(PackFull(INTER_REPO, commit='new'), 'old').iter_pack_data())
+INTER_UPDATE_13 = b''.join(PackUpdate(PackFull(INTER_REPO, commit='newer'), 'old').iter_pack_data())
+INTER_INDEX_1 = bytes(PackDecodeBase(INTER_FULL_OLD).extract_index_pack())
+INTER_TREE_1 = {'a.txt': b'a\n', 'keep.txt': b'keep\n'}
+INTER_TREE_3 = {'a.txt': b'a\n', 'keep.txt': b'keep\n', 'c.txt': b'c\n'}
+INTER_SERVER = MockServerFile()
+INTER_SERVER.register_version('old', INTER_FULL_OLD, INTER_INDEX_1)
+INTER_SERVER.register_version(
+    'new', INTER_FULL_NEW, bytes(PackDecodeBase(INTER_FULL_NEW).extract_index_pack()))
+INTER_SERVER.register_version(
+    'newer', INTER_FULL_NEWER, bytes(PackDecodeBase(INTER_FULL_NEWER).extract_index_pack()))
+INTER_SERVER.register_update('old', 'new', INTER_UPDATE_12)
+INTER_SERVER.register_update('old', 'newer', INTER_UPDATE_13)
+# a server whose latest version is V1 (the V2 release was withdrawn)
+INTER_ROLLBACK_SERVER = MockServerFile()
+INTER_ROLLBACK_SERVER.register_version('old', INTER_FULL_OLD, INTER_INDEX_1)
+
+
+async def unpack_intermediate():
+    """
+    Build the state a failed V1 -> V2 apply leaves.
+
+    The failed run kept its workspace (job.pack and the tmp files, see the
+    jobs' run()): the job file of the V1 -> V2 update pack is in the
+    workspace, b.txt (the file only V2 has) is on disk - the files the
+    failed run applied before the failure - and the local index is still
+    V1 (it is committed only when the flow fully succeeds).
+    """
+    await UnpackJob(INTER_FULL_OLD).run()
+    UpdateJob(INTER_UPDATE_12, server=INTER_SERVER).write()
+    with open(env.PROJECT_ROOT / 'b.txt', 'wb') as f:
+        f.write(b'b\n')
+    assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == INTER_UPDATE_12
+
+
+class TestIntermediateLeftovers:
+    """R19: the files of an intermediate version, recorded by nothing.
+
+    A flow that fails half way applies the files it computed and does not
+    commit the local index: a file that only the intermediate version has
+    is left in the tree while no index and no pack of the two versions a
+    later flow compares records it. The records of the job file of the
+    failed run (a pack, kept with the rest of the workspace) join the
+    deletion base, so those files are removed like the leftover files of
+    the old version.
+    """
+
+    @pytest.mark.trio
+    async def test_update_removes_intermediate_file(self, app_folder):
+        """The retry that goes to V3 removes b.txt (only V2 has it)."""
+        await unpack_intermediate()
+        # the premise: b.txt is neither in the local index nor in the
+        # update pack the retry applies
+        assert 'b.txt' not in PackDecodeBase(INTER_INDEX_1).fileinfo
+        assert 'b.txt' not in PackDecodeBase(INTER_UPDATE_13).fileinfo
+        job = UpdateJob(INTER_UPDATE_13, server=INTER_SERVER)
+        # the deletion base: the records of the job file of the failed run
+        assert 'b.txt' in job.residue_fileinfo
+        with logger.mock_capture_writer():
+            assert await job.run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'b.txt')
+        assert read_tree() == INTER_TREE_3
+
+    @pytest.mark.trio
+    async def test_rebuild_removes_intermediate_file(self, app_folder):
+        """The rebuild from the latest index removes b.txt too."""
+        await unpack_intermediate()
+        job = RebuildJob(INTER_SERVER)
+        with logger.mock_capture_writer():
+            assert await job.run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'b.txt')
+        assert read_tree() == INTER_TREE_3
+
+    @pytest.mark.trio
+    async def test_reset_removes_intermediate_file(self, app_folder):
+        """A reset (the latest version is the local one) removes b.txt
+        as well: the withdrawn V2 release leaves no file behind."""
+        await unpack_intermediate()
+        job = ResetJob(INTER_ROLLBACK_SERVER)
+        with logger.mock_capture_writer():
+            assert await job.run()
+        assert not os.path.exists(env.PROJECT_ROOT / 'b.txt')
+        assert read_tree() == INTER_TREE_1
 
 
 class TestEmptyFolderCleanup:

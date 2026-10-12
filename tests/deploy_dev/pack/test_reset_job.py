@@ -15,7 +15,6 @@ import os
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
-from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_base import PendingFile
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
@@ -83,31 +82,6 @@ class TestJobFile:
         """write() stores the REST marker to the job file."""
         ResetJob(WEBSITE_SERVER).write()
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == b'REST\x00'
-
-    def test_get_unfinished_job_none(self, app_folder):
-        """No job file, DeployJob()._get_unfinished_job() returns None."""
-        assert DeployJob()._get_unfinished_job() is None
-
-    @pytest.mark.trio
-    async def test_get_unfinished_job_marker(self, app_folder):
-        """A marker job file is dispatched to a resumed ResetJob."""
-        ResetJob(WEBSITE_SERVER).write()
-        job = DeployJob(server=WEBSITE_SERVER)._get_unfinished_job()
-        assert job is not None
-        assert isinstance(job, ResetJob)
-        assert await job.run()
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
-
-    def test_get_unfinished_job_pack(self, app_folder):
-        """A pack job file is dispatched to UnpackJob, not ResetJob."""
-        UnpackJob(WEBSITE_FULL_PACK).write()
-        job = DeployJob()._get_unfinished_job()
-        assert job is not None
-        assert isinstance(job, UnpackJob)
-
-
-class TestValidateIndex:
-    """validate_index()."""
 
     @pytest.mark.trio
     async def test_valid(self, app_folder, fs):
@@ -759,9 +733,10 @@ class TestRun:
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.backend.any_contains('Failed to reset:')
-        # the broken index pack is not replaced, the workspace is cleaned
+        # the broken index pack is not replaced, the workspace is kept
+        # as the resume base of the next run
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == bytes(bad)
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == ResetJob.MARK
 
     @pytest.mark.trio
     async def test_run_unsolvable(self, app_folder, fs, monkeypatch):
@@ -773,48 +748,19 @@ class TestRun:
         job = ResetJob(server)
         assert not await job.run()
         assert [item.info.path for item in job.error] == ['backend/__init__.py']
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        # the failed record is retried by the next run from the kept
+        # workspace
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == ResetJob.MARK
 
     @pytest.mark.trio
     async def test_run_no_server(self, app_folder):
-        """A missing server fails the run with a warning."""
+        """A missing server fails the run with a warning, the job file
+        is kept for the next run to resume."""
         job = ResetJob(None)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.backend.any_contains('Failed to reset:')
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
-
-    @pytest.mark.trio
-    async def test_run_resumed_skips_write(self, app_folder, fs, monkeypatch):
-        """A resumed job skips write(), the marker is already there."""
-        await setup_app(fs)
-        ResetJob(WEBSITE_SERVER).write()
-
-        def _fail(self):
-            raise AssertionError('write() should not be called on resume')
-        monkeypatch.setattr(ResetJob, 'write', _fail)
-        job = DeployJob(server=WEBSITE_SERVER)._get_unfinished_job()
-        assert job is not None
-        assert await job.run()
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
-
-    @pytest.mark.trio
-    async def test_run_write_error_cleaned(self, app_folder, monkeypatch):
-        """A write error is logged as warning and the workspace is cleaned."""
-        def _fail(self):
-            raise RuntimeError('write failed')
-        monkeypatch.setattr(ResetJob, 'write', _fail)
-        with logger.mock_capture_writer() as capture:
-            job = ResetJob(WEBSITE_SERVER)
-            assert not await job.run()
-        assert capture.backend.any_contains('Failed to reset:')
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
-
-
-class TestIndexCommit:
-    """The index pack is the commit record of the local version: it is
-    committed by replace_index() after the data files and only when the
-    flow fully succeeded (see JobBase.replace())."""
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == ResetJob.MARK
 
     @pytest.mark.trio
     async def test_failed_run_keeps_the_old_index(self, app_folder, fs, monkeypatch):

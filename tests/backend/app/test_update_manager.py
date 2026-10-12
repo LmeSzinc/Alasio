@@ -113,13 +113,9 @@ class FakeJob:
         result = self.script.updates.get(self.root, True)
         if isinstance(result, Exception):
             raise result
-        return result
-
-    async def run_unfinished_job(self):
-        self.script.calls.append((self.root, 'unfinished'))
-        result = self.script.unfinished.get(self.root, False)
-        if isinstance(result, Exception):
-            raise result
+        # the real flow records whether it changed real files: the startup
+        # round restarts the backend only then (DeployJob.changed)
+        self.changed = self.script.changed.get(self.root, False)
         return result
 
 
@@ -133,10 +129,10 @@ class FakeScript:
         self.check_gate = {}
         # {root: bool | Exception} of update() (the apply)
         self.updates = {}
+        # {root: bool} of whether update() changed real files
+        self.changed = {}
         # {root: trio.Event} blocking the update of a root
         self.update_gate = {}
-        # {root: bool | Exception} of run_unfinished_job()
-        self.unfinished = {}
         # [(root, method)]
         self.calls = []
 
@@ -1062,25 +1058,28 @@ class TestUpdateTransaction:
         assert transaction.cancel_requested is True
 
 
-class TestConvergence:
-    """The startup convergence of a killed process' update."""
+class TestStartupRound:
+    """The startup round of the manager: one update flow per mod."""
 
     @pytest.mark.trio
-    async def test_convergence_restarts(self, manager, script, restarts, monkeypatch):
-        script.unfinished['/m'] = True
+    async def test_startup_update_restarts(self, manager, script, restarts, monkeypatch):
+        """The startup flow applies an update and hands one restart over."""
+        script.updates['/m'] = True
+        script.changed['/m'] = True
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')})
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(manager.run)
             await wait_until(lambda: len(restarts.windows) == 1)
-            assert 'interrupted update' in restarts.windows[0].reason
-            # the convergence drives its own restart window (the internal
-            # entry, an empty critical section): the workers were stopped, the
-            # resume intent published and the backend handed to the supervisor
+            assert 'startup update' in restarts.windows[0].reason
+            # the round drives its own restart window (the internal entry, an
+            # empty critical section): the workers were stopped, the resume
+            # intent published and the backend handed to the supervisor
             assert restarts.windows[0].waited is True
             assert restarts.windows[0].published is True
             assert restarts.windows[0].shutdowns == 1
             assert state_of(manager, 'm') == 'updating'
+            assert script.calls_of('update') == ['/m']
             # the checks of this process are skipped: the first round of
             # the new process runs them
             await trio.sleep(0.05)
@@ -1088,11 +1087,12 @@ class TestConvergence:
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
-    async def test_convergence_restart_failure_resumes_the_checks(self, manager, script, restarts,
-                                                                  monkeypatch):
-        """The convergence restart cannot be handed over: the disk is converged,
-        the process keeps the old modules and its own checks run ."""
-        script.unfinished['/m'] = True
+    async def test_startup_restart_failure_resumes_the_checks(self, manager, script, restarts,
+                                                              monkeypatch):
+        """The startup restart cannot be handed over: the disk is updated,
+        the process keeps the old modules and its own checks run."""
+        script.updates['/m'] = True
+        script.changed['/m'] = True
         restarts.shutdown_error = PermissionError(
             'Cannot restart backend running without supervisor')
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')})
@@ -1109,8 +1109,11 @@ class TestConvergence:
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
-    async def test_convergence_failure_is_retried(self, manager, script, monkeypatch):
-        script.unfinished['/m'] = RuntimeError('offline')
+    async def test_startup_failure_is_reported(self, manager, script, restarts, monkeypatch):
+        """A failed startup flow is reported on the topic; a check round does
+        not retry it (the next flow runs at the next startup, the user's
+        click or the daily restart)."""
+        script.updates['/m'] = RuntimeError('offline')
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')},
                        auto=False)
 
@@ -1118,44 +1121,24 @@ class TestConvergence:
             nursery.start_soon(manager.run)
             await wait_until(lambda: state_of(manager, 'm') == 'error')
             assert 'offline' in manager.mods['m'].info.error
-            assert manager.mods['m'].convergence_pending is True
-            # the next round retries the convergence first: it still fails
-            # and the check of the round is skipped
+            assert restarts.windows == []
+            # the next round only checks: no second update flow
             await manager.check('m')
-            await wait_until(lambda: len(script.calls_of('unfinished')) == 2)
+            await wait_until(lambda: script.calls_of('check') == ['/m'])
             await trio.sleep(0.05)
-            assert script.calls_of('check') == []
+            assert script.calls_of('update') == ['/m']
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
-    async def test_convergence_nothing_to_finish(self, manager, script, restarts, monkeypatch):
-        """No unfinished job: no restart, the checks run as usual."""
+    async def test_startup_without_change_does_not_restart(self, manager, script, restarts,
+                                                           monkeypatch):
+        """A startup flow that changed nothing needs no restart: the checks
+        run as usual (the validation of the local files is the common case)."""
         script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')})
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(manager.run)
             await wait_until(lambda: state_of(manager, 'm') in ('uptodate', 'available', 'error'))
             assert restarts.windows == []
-            assert script.calls_of('unfinished') == ['/m']
-            nursery.cancel_scope.cancel()
-
-    @pytest.mark.trio
-    async def test_convergence_retry_restarts(self, manager, script, restarts, monkeypatch):
-        """A retried convergence that succeeds ends in one restart."""
-        script.unfinished['/m'] = RuntimeError('offline')
-        script_manager(manager, monkeypatch, {'m': FakeMod('m', mirrors='https://a.example')},
-                       auto=False)
-
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(manager.run)
-            await wait_until(lambda: state_of(manager, 'm') == 'error')
-            # the next round: the retry succeeds, the convergence restart is
-            # requested and the state moves to updating
-            script.unfinished['/m'] = True
-            await manager.check('m')
-            await wait_until(lambda: len(restarts.windows) == 1)
-            assert 'interrupted update' in restarts.windows[0].reason
-            assert restarts.windows[0].shutdowns == 1
-            assert state_of(manager, 'm') == 'updating'
-            assert manager.mods['m'].convergence_pending is False
+            assert script.calls_of('update') == ['/m']
             nursery.cancel_scope.cancel()

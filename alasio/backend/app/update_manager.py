@@ -328,7 +328,7 @@ class UpdateManager:
                 self._nursery = nursery
                 try:
                     try:
-                        restarting = await self._startup_convergence()
+                        restarting = await self._startup_round()
                     except trio.Cancelled:
                         raise
                     except Exception as e:
@@ -375,33 +375,33 @@ class UpdateManager:
         except Exception as e:
             logger.warning(f'[Update] Failed to close the http client: {e}')
 
-    async def _startup_convergence(self) -> bool:
+    async def _startup_round(self) -> bool:
         """
-        Finish the updates a killed process left behind.
+        The startup round of every mod: one unconditional update flow each.
 
-        Every mod manager checks its target ledger for an unfinished job
-        (job.pack, written before the real files are changed and only left
-        behind by a process killed in flight) and finishes the found ones
-        (missing pieces are downloaded from the mod server). A convergence
-        failure is reported on the topic of the mod and retried before its
-        next check round.
+        Every mod checks its update source and applies what it finds (or
+        validates its local files when the version is the latest one), see
+        ModUpdateManager.startup_round(). A failure is reported on the topic
+        of the mod and retried by the next flow that runs (the next startup,
+        the user's update, the daily restart, §10.2) — a check round never
+        applies anything itself.
 
         Returns:
-            bool: True when a convergence restart was handed to the supervisor
-                (the process is going down, the checks belong to the new one),
-                False when there was nothing to converge or the restart could
-                not be handed over
+            bool: True when a restart was handed to the supervisor because at
+                least one flow changed files (the process is going down, the
+                checks belong to the new one), False when nothing changed or
+                the restart could not be handed over
         """
-        converged = [mod for mod in self.mods.values() if await mod.finish_convergence()]
-        if not converged:
+        changed = [mod for mod in self.mods.values() if await mod.startup_round()]
+        if not changed:
             return False
-        return await self.request_convergence_restart(converged)
+        return await self.request_convergence_restart(changed)
 
     async def request_convergence_restart(self, mods) -> bool:
         """
-        Apply a finished convergence: one graceful restart, the states of the
-        converged mods move to 'updating' (the disk changed under the modules
-        this process loaded).
+        Apply the disk changes of the startup round: one graceful restart, the
+        states of the changed mods move to 'updating' (the disk changed under
+        the modules this process loaded).
 
         The restart is driven here (the internal window, an empty critical
         section): the workers are stopped, the resume intent published and the
@@ -422,7 +422,7 @@ class UpdateManager:
                 mod.set_state('updating')
             try:
                 window = await restart_app.open_restart_window(
-                    reason=f'finished the interrupted update of {names}')
+                    reason=f'applied the startup update of {names}')
             except Exception as e:
                 self._report_convergence_failure(mods, e)
                 return False

@@ -13,7 +13,6 @@ from hashlib import sha1
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
-from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_base import CurrentFile, JobBase, MatchResult
 from alasio.deploy.pack.job_unpack import PendingFile, UnpackJob
 from alasio.deploy.pack.pack_model import IdxInfo
@@ -443,25 +442,6 @@ class TestCallerFlow:
     """The exact caller usage of UnpackJob."""
 
     @pytest.mark.trio
-    async def test_resume_then_new_job(self, app_folder):
-        """_get_unfinished_job() first, then unpack the new data."""
-        # a previous run was interrupted, the job file is left behind
-        UnpackJob(WEBSITE_FULL_PACK).write()
-        # finish the unfinished job first
-        job = DeployJob()._get_unfinished_job()
-        if job is not None:
-            await job.run()
-        # then unpack the new data
-        await UnpackJob(WEBSITE_FULL_PACK).run()
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
-        for path, (content, _) in WEBSITE_FILES.items():
-            assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
-
-
-class TestUnpackSkip:
-    """Skip logic: existing files that pass the size + sha1 check."""
-
-    @pytest.mark.trio
     async def test_skip_existing_valid_file(self, app_folder):
         """A valid existing file is kept as-is."""
         content = WEBSITE_FILES['backend/config.py'][0]
@@ -568,17 +548,6 @@ class TestUnpackSkip:
         assert file_read_bytes(target) == WEBSITE_FILES['backend/config.py'][0]
 
     @pytest.mark.trio
-    async def test_resume_from_job_file(self, app_folder):
-        """_get_unfinished_job() resumes the interrupted unpack."""
-        UnpackJob(WEBSITE_FULL_PACK).write()
-        job = DeployJob()._get_unfinished_job()
-        assert job is not None
-        await job.run()
-        assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
-            WEBSITE_FILES['backend/main.py'][0]
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
-
-    @pytest.mark.trio
     async def test_reuse_tmp_file(self, app_folder):
         """A valid leftover tmp file is moved without decompressing again."""
         # the record of backend/main.py in the pack: its content is the
@@ -677,7 +646,8 @@ class TestFailure:
             UnpackJob(bytes(bad)).unpack()
 
     def test_failure_keeps_job_file(self, app_folder):
-        """job.pack survives a failed run for crash recovery."""
+        """job.pack survives a failed run: the next flow takes its records
+        as a deletion base (R19) and its tmp files as a cache."""
         decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         index_end = 5 + len(decoder.index_section)
         bad = bytearray(WEBSITE_FULL_PACK)
@@ -686,9 +656,7 @@ class TestFailure:
         job.write()
         with pytest.raises(PackDecodeError):
             job.unpack()
-        assert os.path.exists(env.PROJECT_ROOT / '.pack/workspace/job.pack')
-        # the unfinished job can still be found
-        assert DeployJob()._get_unfinished_job() is not None
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == bytes(bad)
 
 
 class TestExecutableMode:
@@ -936,23 +904,6 @@ class TestUnpackRebuild:
         assert not str(calls[0]).endswith('index.pack')
         # the commit never ran: the old index pack is still in place
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == OLD_INDEX
-
-    @pytest.mark.trio
-    async def test_resume_leftover_cleanup(self, app_folder):
-        """A run resumed from an interruption before replace()
-        recomputes the leftover deletion list from the old index."""
-        await UnpackJob(OLD_PACK).run()
-        # an interruption before replace(): the job file is written,
-        # the old index pack is still in place
-        UnpackJob(NEW_PACK).write()
-        job = DeployJob()._get_unfinished_job()
-        assert job is not None
-        await job.run()
-        assert read_tree() == NEW_TREE
-        for path in OLD_ONLY:
-            assert not os.path.exists(env.PROJECT_ROOT / path), path
-        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     @pytest.mark.trio
     async def test_old_deleted_new_added_downloaded(self, app_folder):

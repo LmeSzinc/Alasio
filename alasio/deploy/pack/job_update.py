@@ -77,11 +77,13 @@ class UpdateJob(JobBase):
        commits the new index pack last (replace_index()), only when
        every record landed.
 
-    On failure the workspace is cleaned up: errors during write() and
-    unpack() are safe, no real file was written, errors during
-    replace() leave partially replaced files. Only a process killed in
-    flight leaves the workspace behind for the next run to resume from
-    (the job file and the tmp files written so far).
+    On failure the workspace is kept for the next run to resume from
+    (the job file and the tmp files written so far): errors during
+    write() and unpack() are safe, no real file was written, errors
+    during replace() leave partially replaced files that the resumed
+    run repairs. The workspace is cleaned up only when every record
+    landed, no record stayed in self.error and the new index pack was
+    committed, see run().
 
     Note: the exclusive lock of the target ledger (the lock file, see
     DeployJob.locked()) is held by DeployJob around the whole update
@@ -89,14 +91,12 @@ class UpdateJob(JobBase):
     this job must take it itself.
     """
 
-    def __init__(self, data, server=None, resume=False, root=None, name=''):
+    def __init__(self, data, server=None, root=None, name=''):
         """
         Args:
             data (bytes): Update pack data
             server (ServerFile, optional): Server to download the
                 index pack and the failed records. Defaults to None.
-            resume (bool): True if the data was read from the job file,
-                run() does not write the job file again then
             root (str, optional): Folder to update. Defaults to None,
                 env.PROJECT_ROOT
             name (str, optional): Ledger key of the target. Defaults to
@@ -104,7 +104,6 @@ class UpdateJob(JobBase):
         """
         super().__init__(data, root=root, name=name)
         self.server = server
-        self._resume = resume
         self.error: "list[PendingFile]" = []
         # paths of the records of the update pack, the filter base of
         # _validate_remaining(): the nested reset validates exactly the
@@ -123,26 +122,31 @@ class UpdateJob(JobBase):
         new index pack is committed last and only when every record
         landed, see replace_index(). The network phases await on the
         event loop, the local phases run in a worker thread (see
-        JobBase.run()). On failure the workspace is cleaned up: errors
-        during write() and unpack() are safe because no real file was
-        written and are logged as warning, errors during replace()
-        leave partially replaced files and are logged as error.
+        JobBase.run()). On failure the workspace is kept so the next
+        run resumes the job: errors during write() and unpack() are
+        safe because no real file was written and are logged as
+        warning, errors during replace() leave partially replaced
+        files and are logged as error. The workspace is cleaned up
+        only when every record landed, no record stayed in self.error
+        and the new index pack was committed.
 
         Returns:
-            bool: True if every file is updated, False if some records
-                stay in self.error
+            bool: True if every file is updated, False otherwise
         """
         try:
-            if not self._resume:
-                await trio.to_thread.run_sync(self.write)
+            # the records of the job file of a previous run join the
+            # deletion base (R19): read them before write() replaces it
+            await trio.to_thread.run_sync(self._warm_residue)
+            await trio.to_thread.run_sync(self.write)
             logger.info(f'Updating files to "{self.root}", name="{self.name}"')
             await trio.to_thread.run_sync(self.unpack)
             await self.download()
             await self._validate_remaining()
         except Exception as e:
-            # no real file was written, safe to clean up
-            logger.warning(f'Failed to update: {e}')
-            await trio.to_thread.run_sync(self.cleanup)
+            # no real file was written: the workspace (the job file
+            # and the tmp files written so far) is kept as the resume
+            # base of the next run
+            logger.warning(f'Failed to update: {e}, keeping the workspace for the next run')
             return False
         try:
             logger.info(f'Replacing files to "{self.root}", name="{self.name}"')
@@ -150,14 +154,24 @@ class UpdateJob(JobBase):
             # landed: a failed flow keeps the old local version
             await trio.to_thread.run_sync(self.replace, not self.error)
         except Exception as e:
-            # real files may be partially replaced
-            logger.error(f'Failed to replace file: {e}')
-            await trio.to_thread.run_sync(self.cleanup)
+            # real files may be partially replaced, the workspace is
+            # kept for the next run to resume and repair the targets
+            logger.error(f'Failed to replace file: {e}, keeping the workspace for the next run')
             return False
-        # all changes applied, clean the workspace atomically
+        if self.error:
+            # some records could not be downloaded or verified: the new
+            # index pack was not committed, the workspace is kept and
+            # the next run retries the records
+            logger.warning(
+                f'Failed to update: {len(self.error)} file(s) stayed in error, '
+                f'the workspace is kept for the next run'
+            )
+            return False
+        # every record landed and the new index pack is committed: the
+        # workspace is done, clean it up atomically
         await trio.to_thread.run_sync(self.cleanup)
         logger.info(f'Update done')
-        return not self.error
+        return True
 
     def write(self):
         """
@@ -416,6 +430,12 @@ class UpdateJob(JobBase):
         download() awaits on the event loop like this job's own
         download().
 
+        The deletion base of the flow also covers the records of the job
+        file of a previous run (R19, see residue_fileinfo()): a file
+        that only an intermediate version has - neither the local index
+        nor the update pack describes it - is removed with the leftover
+        files of the old version.
+
         Skipped when the update has no server, or the index pack record
         failed (the local index is not the new one then).
         """
@@ -445,6 +465,12 @@ class UpdateJob(JobBase):
         # set() rebinds the cached attribute to another dict, the one
         # bound here keeps the full records
         self.new_fileinfo = new_index.fileinfo
+        # the records of the job file of a previous run (R19): the paths
+        # it may have written that the new version does not have are
+        # removed, like the leftover files of the old version (the local
+        # index part of the base is already covered by the pack records)
+        self.pending += self._leftover_deletions(
+            self.residue_fileinfo, self.new_fileinfo)
         # the records of the update pack were verified in unpack(),
         # keep only the remaining files in the index view, so ResetJob
         # validates exactly them

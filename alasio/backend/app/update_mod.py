@@ -210,8 +210,6 @@ class ModUpdateManager:
     Attributes (read-only for the outside):
         info (UpdateInfo): The state of the mod, also the value bound on the
             Update topic
-        convergence_pending (bool): The startup convergence of the mod
-            failed and is retried before its next check round
     """
 
     def __init__(self, manager, mod):
@@ -242,9 +240,6 @@ class ModUpdateManager:
         # process-wide UPDATE_STARTUP so the sync world (the worker manager)
         # reads its is_set() without importing this module
         self.first_update_checked = UPDATE_STARTUP.mod_event(self.name)
-        # the startup convergence of the mod failed: retried before the next
-        # check round until it succeeds
-        self.convergence_pending = False
         # the restart window of the applying phase of the transaction in flight
         # (restart.RestartWindow): the job's 'updating' phase opens and drives
         # it (see on_job_phase), the transaction task closes it (shutdown or
@@ -408,8 +403,11 @@ class ModUpdateManager:
 
     async def check_round(self):
         """
-        One round of the check sequence: retry a failed convergence, then
-        check.
+        One round of the check sequence: check the update source.
+
+        A round never updates by itself: the flows that apply are the
+        startup round, the user's update and the daily restart (§10.2), see
+        startup_round().
         """
         if self.manager.transaction == self.name:
             # the mod is inside an instance-level transaction window (a
@@ -419,48 +417,42 @@ class ModUpdateManager:
             #
             logger.info(f'[Update] Check of "{self.name}" skipped: the update is in flight')
             return
-        if self.convergence_pending:
-            if not await self.finish_convergence():
-                # still failing: the error is on the topic, wait for the
-                # next round
-                return
-            # the disk was converged by this process: one restart applies it
-            await self.manager.request_convergence_restart([self])
-            return
         await self.check()
 
-    async def finish_convergence(self):
+    async def startup_round(self):
         """
-        Finish the interrupted update this mod may hold: the
-        unfinished job recorded in job.pack of its target ledger, written
-        before the real files are changed and only left behind by a process
-        killed in flight.
+        The startup round of the mod: one unconditional update flow.
 
-        A found job is resumed (its missing pieces are downloaded from the
-        mod server) and every change is applied in one pass; a job that does
-        not finish falls back to a rebuild from the latest index, the
-        fallback of update(). A failure is reported on the topic and the mod
-        retries before its next check round.
+        DeployJob.update() checks the update source and either applies what
+        it finds (in the background: the first round needs no user click;
+        the apply validates the whole tree, the update pack records plus the
+        remaining files) or, when the local version is the latest one,
+        validates and repairs the local files. The caller restarts the
+        backend only when the flow changed real files (job.changed): the
+        disk is converged either way.
 
         Returns:
-            bool: True when the disk of the mod was converged (the caller
-                restarts the backend to apply it), False when there was
-                nothing to finish or the convergence failed
+            bool: True when the flow changed files (a restart applies them),
+                False when there was nothing to change or the flow failed
+                (the error is on the topic of the mod; the next flow runs at
+                the next startup, the user's click or the daily restart)
         """
         job = DeployJob(root=self.mod.root, name='', server=self.server_or_none())
         try:
-            completed = await job.run_unfinished_job()
+            completed = await job.update()
         except trio.Cancelled:
             raise
         except Exception as e:
-            logger.error(f'[Update] Failed to finish the interrupted update of "{self.name}": {e}')
-            self.convergence_pending = True
+            logger.error(f'[Update] Failed to update "{self.name}" on startup: {e}')
             self.set_state('error', error=str(e))
             return False
-        self.convergence_pending = False
         if not completed:
+            self.set_state('error', error='Some files failed to update, retry the update')
             return False
-        logger.info(f'[Update] Finished the interrupted update of "{self.name}"')
+        if not job.changed:
+            logger.info(f'[Update] "{self.name}" is up to date, nothing to apply')
+            return False
+        logger.info(f'[Update] Applied the startup update of "{self.name}"')
         return True
 
     async def check(self):

@@ -115,6 +115,11 @@ class DeployJob(DeployTarget):
         """
         super().__init__(root=root, name=name)
         self.server = server
+        # whether the last flow of this instance changed real files
+        # (writes, deletions or mode changes; a committed index alone
+        # does not count): the startup round restarts the backend only
+        # when the flow changed something, see update()
+        self.changed = False
         # the exclusive lock of the target ledger, held by update() and
         # unpack() for their whole flow, see locked(). The wait default
         # is the lock default: timeout=-1 waits forever, 0 fails at once
@@ -191,52 +196,25 @@ class DeployJob(DeployTarget):
         finally:
             self.lock.release()
 
-    def _get_unfinished_job(self):
+    async def _run_job(self, job):
         """
-        Check if there is an unfinished job of this target, read it
-        and create the job object of the corresponding type.
+        Run one job of the flow and remember whether it changed files.
 
-        The job type is decided by the job file content: the REST
-        marker is a validation job (ResetJob), the RBIL marker is a
-        rebuild job (RebuildJob), a pack with a non-empty old version
-        is an update pack (UpdateJob), a pack without one (empty old
-        version) is a full pack (UnpackJob). A corrupted job file is
-        cleaned up with a warning.
+        The startup round restarts the backend only when the flow it ran
+        changed real files (a repair that changed nothing needs no
+        restart): every job records that in JobBase.changed, the flow
+        collects it here for its caller, see update().
 
-        The lock of the target is not taken here: the returned job
-        mutates the working tree, run it under locked() (update() and
-        unpack() take the lock around their whole flow). The server of
-        the instance (self.server) is handed to the returned job: a
-        resumed job downloads its missing files from it when set,
-        None when the target was created without a server.
+        Args:
+            job (JobBase): Job to run
 
         Returns:
-            JobBase: The unfinished job, or None if there is no
-                unfinished job
+            bool: The result of job.run(), False when records stayed in
+                error
         """
-        try:
-            data = atomic_read_bytes(self.job_file)
-        except FileNotFoundError:
-            return None
-        if data == ResetJob.MARK:
-            # a validation job, its data comes from the local index pack
-            return ResetJob(self.server, resume=True, root=self.root, name=self.name)
-        if data == RebuildJob.MARK:
-            # a rebuild job, its data comes from the local index pack
-            return RebuildJob(self.server, resume=True, root=self.root, name=self.name)
-        try:
-            decoder = PackDecodeBase(data)
-        except PackDecodeError as e:
-            # the job file is corrupted, clean it up
-            logger.warning(f'Failed to read the unfinished job: {e}')
-            atomic_rmtree(self.workspace)
-            return None
-        # the version part tells the job type: a non-empty old version
-        # means an update pack, an empty one a full pack
-        if decoder.old_version:
-            # an update pack, resume the update job
-            return UpdateJob(data, server=self.server, resume=True, root=self.root, name=self.name)
-        return UnpackJob(data, resume=True, root=self.root, name=self.name)
+        result = await job.run()
+        self.changed = job.changed
+        return result
 
     async def unpack(self, data):
         """
@@ -258,13 +236,12 @@ class DeployJob(DeployTarget):
             data (bytes): Full pack data
         """
         async with self.alocked():
-            # finish the unfinished job first, its run() skips write()
-            job = await trio.to_thread.run_sync(self._get_unfinished_job)
-            if job is not None:
-                logger.info(f'Found unfinished job: {job.__class__}')
-                await job.run()
-            # unpack the new data
-            await UnpackJob(data, root=self.root, name=self.name).run()
+            # a flow is always a new one: the workspace a failed run left
+            # (job.pack and its tmp files) is only a record and a cache,
+            # the unpack re-derives everything from the new pack and
+            # cleans the workspace up at the end
+            job = UnpackJob(data, root=self.root, name=self.name)
+            await self._run_job(job)
 
     def _local_version(self):
         """
@@ -460,15 +437,8 @@ class DeployJob(DeployTarget):
             raise ValueError('Failed to update: no server provided')
         async with self.alocked():
             # the version check opens the flow: the phase is the first
-            # cancellation point of a transaction (see _job_phase), the
-            # unfinished job below is finished inside it
+            # cancellation point of a transaction (see _job_phase)
             await self._job_phase(on_job_phase, 'checking')
-
-            # finish the unfinished job first, its run() skips write()
-            job = await trio.to_thread.run_sync(self._get_unfinished_job)
-            if job is not None:
-                logger.info(f'Found unfinished job: {job.__class__}')
-                await job.run()
 
             check = await self.check(version)
             local = check.local
@@ -480,7 +450,7 @@ class DeployJob(DeployTarget):
                 await self._job_phase(on_job_phase, 'updating')
                 job = ResetJob(self.server, root=self.root, name=self.name)
                 job._latest_info = info
-                return await job.run()
+                return await self._run_job(job)
             if not local:
                 # the local index is missing or malformed, the version is
                 # unknown: rebuild from the latest index. There is no version
@@ -490,7 +460,7 @@ class DeployJob(DeployTarget):
                 await self._job_phase(on_job_phase, 'updating')
                 job = RebuildJob(self.server, root=self.root, name=self.name)
                 job._latest_info = info
-                return await job.run()
+                return await self._run_job(job)
 
             # the main branch: the version mismatches, apply the update pack
             # incrementally. The download has its own phase (the transaction
@@ -510,12 +480,12 @@ class DeployJob(DeployTarget):
                 await self._job_phase(on_job_phase, 'updating')
                 job = RebuildJob(self.server, root=self.root, name=self.name)
                 job._latest_info = info
-                return await job.run()
+                return await self._run_job(job)
             # the download is over, the local changes start: the workers are
             # stopped before them (the manager phase)
             await self._job_phase(on_job_phase, 'updating')
             job = UpdateJob(data, server=self.server, root=self.root, name=self.name)
-            if await job.run():
+            if await self._run_job(job):
                 return True
             # the update pack failed to apply, rebuild from the latest index: a
             # corrupt pack is bypassed, the latest index and the files are
@@ -523,61 +493,4 @@ class DeployJob(DeployTarget):
             logger.warning('Failed to apply the update pack, rebuilding from the latest index')
             job = RebuildJob(self.server, root=self.root, name=self.name)
             job._latest_info = info
-            return await job.run()
-
-    async def run_unfinished_job(self):
-        """
-        Finish the unfinished job of this target, if any.
-
-        The unfinished job is the one recorded in the job file of the
-        target ({ledger}/workspace/job.pack, see _get_unfinished_job):
-        it is written before any real file is changed and cleaned up
-        when the run ends, so only a process killed in flight leaves
-        it behind. Called at the backend startup, before the first
-        update check: an update interrupted mid-apply is finished here
-        instead of waiting for the next user click.
-
-        The found job is resumed (its missing pieces are downloaded
-        from the server of the instance, self.server set in __init__)
-        and every change is applied in one pass. A job that does not
-        finish falls back to a rebuild from the latest index, the
-        fallback of update(), so a pack corrupted in flight still
-        converges.
-
-        The exclusive lock of the target ledger is held for the whole
-        flow, see alocked().
-
-        Returns:
-            bool: True when an unfinished job was found and completed
-                (a backend restart is needed to load the new files),
-                False when there was no unfinished job (nothing is
-                done)
-
-        Raises:
-            ValueError: When a job was found, did not finish, and the
-                target has no server for the fallback rebuild
-            RuntimeError: When a job was found and neither the job nor
-                the fallback rebuild completed; the target may be in a
-                partial state, a later run continues from there
-        """
-        async with self.alocked():
-            job = await trio.to_thread.run_sync(self._get_unfinished_job)
-            if job is None:
-                return False
-            logger.info(f'Found unfinished job: {job.__class__}')
-            if await job.run():
-                return True
-            # the job did not finish (records left in error, a pack
-            # corrupted in flight): fall back to a rebuild from the
-            # latest index, the fallback of the update flow
-            if self.server is None:
-                raise ValueError(
-                    'Failed to finish the unfinished job: no server for the fallback rebuild'
-                )
-            logger.warning('Failed to finish the unfinished job, rebuilding from the latest index')
-            rebuild = RebuildJob(self.server, root=self.root, name=self.name)
-            if await rebuild.run():
-                return True
-            raise RuntimeError(
-                'Failed to finish the unfinished job: the rebuild from the latest index did not complete'
-            )
+            return await self._run_job(job)

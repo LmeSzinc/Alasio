@@ -177,6 +177,11 @@ class JobBase(DeployTarget):
         super().__init__(root=root, name=name)
         self._data = data
         self.pending: "list[PendingFile]" = []
+        # whether replace_data() changed real files (writes, deletions or
+        # mode changes; a committed index alone does not count): the
+        # startup round restarts the backend only then, see
+        # DeployJob.changed
+        self.changed = False
         # the new index pack of the flow, the commit record of the
         # local version: the jobs prepare it here, it is not a data
         # file of pending. replace_index() commits it after every data
@@ -413,12 +418,13 @@ class JobBase(DeployTarget):
         for pending in applies:
             target = self.root.joinpath(pending.info.path)
             atomic_replace(pending.tmp, target)
+            self.changed = True
             if pending.mode is not None:
                 os.chmod(target, pending.mode)
 
         for pending in deletes:
             # deleted marker, the file should not exist
-            atomic_remove(self.root.joinpath(pending.info.path))
+            self.changed |= atomic_remove(self.root.joinpath(pending.info.path))
 
         self.cleanup_empty_folders()
 
@@ -545,6 +551,60 @@ class JobBase(DeployTarget):
             for path in old_fileinfo
             if path not in new_fileinfo
         ]
+
+    @cached_property
+    def residue_fileinfo(self):
+        """
+        The records of the job file a previous run left in the workspace.
+
+        A run that does not commit its flow keeps the workspace, the
+        job file included (see the jobs' run()): when it is a pack (the
+        full or update pack of the interrupted flow), its records
+        describe a version the working tree may hold files of - a flow
+        that failed half way leaves the files it already applied, and
+        the local index is not committed then. The leftover cleanup
+        takes them as an extra deletion base besides the local index
+        (see _leftover_deletions()): a file that only an intermediate
+        version has is in no index and in no pack of the two versions a
+        later flow compares, so the local index alone cannot describe
+        it. The file must be read before this job's write() replaces
+        it: run() calls _warm_residue() first.
+
+        The ResetJob / RebuildJob markers are not packs, and a missing
+        or undecodable file is ignored: no residue, no extra deletion.
+        The index pack record of the residue is dropped too: the local
+        index is never written by a flow's data pass (the new index is
+        prepared to new_index.tmp and committed by replace_index()),
+        so it is not a path the residue may have left in the tree.
+
+        Returns:
+            dict[str, IdxInfo]: Fileinfo of the job file in the local
+                namespace of the target, deleted markers (edit == 2) and
+                the index pack record excluded, {} when there is none
+        """
+        try:
+            data = atomic_read_bytes(self.job_file)
+        except FileNotFoundError:
+            return {}
+        try:
+            decoder = PackDecodeBase(data)
+            decoder.validate_index()
+        except PackDecodeError:
+            return {}
+        self.localize(decoder)
+        return {
+            path: info for path, info in decoder.fileinfo.items()
+            if info.edit != 2 and path != self.index_rel
+        }
+
+    def _warm_residue(self):
+        """
+        Read the residue records before the job file is replaced.
+
+        run() calls this before write(): the records of a previous run
+        in the job file only exist until then, see residue_fileinfo().
+        """
+        return self.residue_fileinfo
 
     @staticmethod
     def _read_current(file):
