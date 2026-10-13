@@ -49,24 +49,9 @@ if TYPE_CHECKING:
 INIT_FLOW = 'init'
 # The four flows, mutually exclusive
 FLOW_NAMES = ('startup', 'restart', 'update', 'daily')
-# User-facing refusal of a flow request landing on an occupied slot
+# User-facing refusal of a request landing inside the startup window (the user
+# flow classes carry it in their REFUSALS table, see Flow)
 STARTING_UP = 'The backend is starting up, retry in a moment'
-REFUSALS = {
-    'restart': {
-        INIT_FLOW: STARTING_UP,
-        'startup': STARTING_UP,
-        'restart': 'A restart is already in progress',
-        'update': 'An update is in progress; the backend restarts by itself when it finishes',
-        'daily': 'The daily maintenance is in progress (it includes the restart)',
-    },
-    'update': {
-        INIT_FLOW: STARTING_UP,
-        'startup': STARTING_UP,
-        'update': 'An update is already in progress',
-        'restart': 'A restart is in progress; the updates are checked and applied right after it',
-        'daily': 'The daily maintenance is in progress (it includes the full update)',
-    },
-}
 
 
 class FlowRefused(RuntimeError):
@@ -93,6 +78,11 @@ class Flow:
         PARK_STATE (WORKER_PARK_STATE): The state the workers stopped for this
             flow are parked in ('updating', 'restarting' for a plain restart):
             the frontend shows what the maintenance is doing
+        REFUSALS (dict[str, str]): The user-facing reason a request of this
+            flow is refused with, by the name of the flow owning the backend
+            when it lands. Empty on this base and on the internal entries
+            (startup / daily): landing on a busy slot is their bug, the manager
+            reports it as such
 
     Attributes (the state the sync world reads):
         started_at (float): Claim time (time.time())
@@ -105,6 +95,9 @@ class Flow:
     """
     name = ''
     PARK_STATE: "WORKER_PARK_STATE" = 'updating'
+    # The flow-in-flight name -> the refusal of this request; only the user
+    # entries (restart / update) fill it (see restart_flow)
+    REFUSALS: "Dict[str, str]" = {}
 
     def __init__(self, manager=None):
         """

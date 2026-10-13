@@ -2,12 +2,15 @@
 The four maintenance flows of the backend
 
 Every flow is a class: the manager creates its object when the flow is claimed
-and runs it as the body of the flow task (``Flow.run()``). The object owns the
-state of the flow and, above all, the *cancellable part* of its body: the body
-declares it itself with ``with self.cancel_window(past_reason):`` -- inside that
-block a cancel is accepted, leaving it (or closing it early) makes the flow
-irreversible. The manager asks the object to cancel (``Flow.cancel()``) instead
-of binding a cancel scope of its own.
+and runs it as the body of the flow task (``Flow.run()``). The entries name the
+class itself (``restart_manager``): the class carries the flow name used by the
+view and the log lines, and the ``REFUSALS`` table the two user requests answer
+with. The object owns the state of the flow and, above all, the *cancellable
+part* of its body: the body declares it itself with ``with
+self.cancel_window(past_reason):`` -- inside that block a cancel is accepted,
+leaving it (or closing it early) makes the flow irreversible. The manager asks
+the object to cancel (``Flow.cancel()``) instead of binding a cancel scope of
+its own.
 
 The four flows:
 
@@ -27,9 +30,9 @@ it paused, the workers it stopped, the resume queue. A flow that hands over
 does nothing else -- the process is replaced and the new one resumes what the
 resume file recorded.
 """
-from typing import Dict, List
+from typing import List
 
-from alasio.backend.app.restart.restart_base import Flow
+from alasio.backend.app.restart.restart_base import INIT_FLOW, STARTING_UP, Flow
 from alasio.backend.app.restart.restart_step import HandoverFailed
 from alasio.logger import logger
 
@@ -104,6 +107,16 @@ class FlowRestart(Flow):
     """
     name = 'restart'
     PARK_STATE = 'restarting'
+    # Why this request is refused, by the name of the flow owning the backend
+    # when it lands (the startup window refuses a request of the process
+    # startup alike)
+    REFUSALS = {
+        INIT_FLOW: STARTING_UP,
+        'startup': STARTING_UP,
+        'restart': 'A restart is already in progress',
+        'update': 'An update is in progress; the backend restarts by itself when it finishes',
+        'daily': 'The daily maintenance is in progress (it includes the restart)',
+    }
 
     async def run(self):
         manager = self.manager
@@ -143,6 +156,16 @@ class FlowUpdate(Flow):
     phase there), a daily upgrade closes it too.
     """
     name = 'update'
+    # Why this request is refused, by the name of the flow owning the backend
+    # when it lands (the startup window refuses a request of the process
+    # startup alike)
+    REFUSALS = {
+        INIT_FLOW: STARTING_UP,
+        'startup': STARTING_UP,
+        'update': 'An update is already in progress',
+        'restart': 'A restart is in progress; the updates are checked and applied right after it',
+        'daily': 'The daily maintenance is in progress (it includes the full update)',
+    }
 
     async def run(self):
         manager = self.manager
@@ -246,13 +269,3 @@ class FlowDaily(Flow):
         finally:
             if not handed_over:
                 await manager.wrap_up(self, resume_list)
-
-
-# The flow classes of the manager, by name (the manager creates the object of
-# the claimed flow with create_flow)
-FLOW_CLASSES: "Dict[str, type]" = {
-    FlowStartup.name: FlowStartup,
-    FlowRestart.name: FlowRestart,
-    FlowUpdate.name: FlowUpdate,
-    FlowDaily.name: FlowDaily,
-}

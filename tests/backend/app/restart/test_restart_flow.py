@@ -10,8 +10,8 @@ import datetime
 import pytest
 
 from alasio.backend.app.restart.daily import DailyState
-from alasio.backend.app.restart.restart_base import FLOW_NAMES
-from alasio.backend.app.restart.restart_flow import FLOW_CLASSES, FlowDaily, FlowRestart, FlowStartup, FlowUpdate
+from alasio.backend.app.restart.restart_base import FLOW_NAMES, INIT_FLOW, STARTING_UP
+from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
 from alasio.backend.app.restart.restart_step import HandoverFailed
 from alasio.backend.app.restart.resume_file import ResumeRecord
 
@@ -373,22 +373,31 @@ class TestFlowStartup:
         assert manager.calls[-1] == ('wrap_up', [])
 
 
-class TestRegistry:
-    """The classes the manager creates the flow objects with"""
+class TestFlowClasses:
+    """The classes the manager claims the slot with (the entries name them)"""
 
-    def test_the_flow_classes_are_registered(self):
-        assert FLOW_CLASSES == {
-            'startup': FlowStartup,
-            'restart': FlowRestart,
-            'update': FlowUpdate,
-            'daily': FlowDaily,
-        }
-        for name, cls in FLOW_CLASSES.items():
-            assert cls.name == name
-            assert name in FLOW_NAMES
+    # The four flow classes, in the order of FLOW_NAMES
+    CLASSES = (FlowStartup, FlowRestart, FlowUpdate, FlowDaily)
+
+    def test_every_flow_name_has_its_class(self):
+        assert [cls.name for cls in self.CLASSES] == list(FLOW_NAMES)
+
+    def test_the_user_entries_refuse_every_flow_of_the_slot(self):
+        # a user request answers every flow that may own the backend; the
+        # internal entries (startup / daily) never answer a user
+        user_entries = [cls for cls in self.CLASSES if cls.REFUSALS]
+        assert [cls.name for cls in user_entries] == ['restart', 'update']
+        for cls in user_entries:
+            # the startup window (init and the startup flow) refuses a request
+            # alike, the other flows tell what the backend is busy with
+            assert set(cls.REFUSALS) == {INIT_FLOW, *FLOW_NAMES}
+            assert cls.REFUSALS[INIT_FLOW] == STARTING_UP
+            assert cls.REFUSALS[FlowStartup.name] == STARTING_UP
+            for message in cls.REFUSALS.values():
+                assert isinstance(message, str) and message
 
     def test_cancellability_is_not_a_class_property(self):
         # only the window a body opens makes a flow cancellable: no flow class
         # declares it
-        for cls in FLOW_CLASSES.values():
+        for cls in self.CLASSES:
             assert not hasattr(cls, 'CANCELLABLE')

@@ -21,14 +21,17 @@ The class layers of the package: ``RestartBase`` (the state of the slot and
 its context managers) -> ``RestartStep`` (the single steps a flow drives) ->
 ``RestartManager`` (this module: the entries and ``run()``). The flows
 (``restart_flow``) are objects the manager creates per run: each one owns its
-state (the cancellation window above all) and its body (``Flow.run()``).
+state (the cancellation window above all) and its body (``Flow.run()``). Every
+entry names the flow class it claims: the class carries the flow name, the
+refusal of its request and the parked state of its workers -- no name-keyed
+registry is resolved at the claim.
 """
-from typing import Dict, Optional
+from typing import Optional
 
 import trio
 
-from alasio.backend.app.restart.restart_base import INIT_FLOW, REFUSALS, STARTING_UP, Flow, FlowRefused, InitFlow
-from alasio.backend.app.restart.restart_flow import FLOW_CLASSES
+from alasio.backend.app.restart.restart_base import INIT_FLOW, STARTING_UP, Flow, FlowRefused, InitFlow
+from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
 from alasio.backend.app.restart.restart_step import RestartStep
 from alasio.logger import logger
 
@@ -39,8 +42,8 @@ class RestartManager(RestartStep):
 
     ``run()`` is the lifespan entry: it owns the nursery the flows (and the
     resume queue) run in and keeps the manager alive for the requests until the
-    process shuts down. The flows are objects the manager creates when it
-    claims the slot (``create_flow``).
+    process shuts down. The flows are objects the manager creates at the claim
+    (``flow_cls(self)``, see ``restart_flow``).
     """
 
     async def run(self):
@@ -129,7 +132,7 @@ class RestartManager(RestartStep):
         current = self.current
         if current is not None and not (current.name == INIT_FLOW):
             raise FlowRefused(f'The backend is already running the "{current.name}" flow')
-        return self._claim('startup')
+        return self._claim(FlowStartup)
 
     def request_restart(self) -> Flow:
         """
@@ -140,9 +143,9 @@ class RestartManager(RestartStep):
 
         Raises:
             FlowRefused: When another flow owns the backend (the message is the
-                user-facing reason of REFUSALS['restart'])
+                user-facing reason of FlowRestart.REFUSALS)
         """
-        return self._claim('restart', REFUSALS['restart'])
+        return self._claim(FlowRestart)
 
     def request_update(self) -> Flow:
         """
@@ -157,9 +160,9 @@ class RestartManager(RestartStep):
 
         Raises:
             FlowRefused: When another flow owns the backend (the message is the
-                user-facing reason of REFUSALS['update'])
+                user-facing reason of FlowUpdate.REFUSALS)
         """
-        return self._claim('update', REFUSALS['update'])
+        return self._claim(FlowUpdate)
 
     def request_daily(self, now=None) -> "Optional[Flow]":
         """
@@ -184,7 +187,7 @@ class RestartManager(RestartStep):
                 # the process is not serving flows yet (the next evaluation
                 # retries): nothing may be claimed before the startup flow
                 return None
-            return self._claim('daily')
+            return self._claim(FlowDaily)
         if current.name in (INIT_FLOW, 'startup'):
             # the process just started: its startup full update and its young
             # workers already serve both purposes of the daily action
@@ -210,7 +213,7 @@ class RestartManager(RestartStep):
             FlowRefused: When no restart is in flight, when it was already
                 cancelled, or when it is past its point of no return
         """
-        await self._require_flow('restart').cancel()
+        await self._require_flow(FlowRestart).cancel()
 
     async def cancel_update(self):
         """
@@ -224,7 +227,7 @@ class RestartManager(RestartStep):
             FlowRefused: When no update is in flight, when it was already
                 cancelled, or when it is past its point of no return
         """
-        await self._require_flow('update').cancel()
+        await self._require_flow(FlowUpdate).cancel()
 
     # ------------------------------------------------------------------
     # Tasks of the manager nursery
@@ -254,14 +257,14 @@ class RestartManager(RestartStep):
     # Internals
     # ------------------------------------------------------------------
 
-    def _claim(self, name: str, refusal: "Optional[Dict[str, str]]" = None) -> Flow:
+    def _claim(self, flow_cls: "type[Flow]") -> Flow:
         """
         Take the slot for a flow and spawn its body (one synchronous section)
 
         Args:
-            name (str): Flow name
-            refusal (dict[str, str]): {current flow name: user-facing refusal}
-                of this request, None for the internal entries
+            flow_cls (type[Flow]): The class of the flow the entry claims the
+                slot with (the class carries the flow name and the refusal of
+                its request)
 
         Returns:
             Flow: The claimed flow
@@ -273,46 +276,25 @@ class RestartManager(RestartStep):
         current = self.current
         if current is not None:
             # the only transition out of init is the startup flow
-            if not (current.name == INIT_FLOW and name == 'startup'):
-                if refusal is not None:
-                    message = refusal.get(current.name, STARTING_UP)
-                else:
+            if not (current.name == INIT_FLOW and flow_cls is FlowStartup):
+                # the user entries answer with a message of their own; the
+                # internal ones carry no refusal table: their request landing on
+                # a busy slot is a bug, not a user action
+                message = flow_cls.REFUSALS.get(current.name, None)
+                if message is None:
                     message = f'The backend is already running the "{current.name}" flow'
                 raise FlowRefused(message)
         nursery = self.nursery
         if nursery is None:
-            if refusal is None:
+            if not flow_cls.REFUSALS:
                 raise RuntimeError('The restart manager does not run (run() was not started)')
             # the process is not serving flows yet (run() did not run): the
             # user entry answers like any startup window
             raise FlowRefused(STARTING_UP)
-        flow = self.create_flow(name)
+        flow = flow_cls(self)
         self.claim(flow)
         nursery.start_soon(self._run_flow, flow)
         return flow
-
-    def create_flow(self, name: str) -> Flow:
-        """
-        Create the flow object of a name (the claim runs it)
-
-        The flow owns its state and its body: the manager only creates it, takes
-        the slot with it and runs it (see ``alasio.backend.app.restart.
-        restart_flow``).
-
-        Args:
-            name (str): Flow name (INIT_FLOW has no object: the placeholder is
-                a plain Flow)
-
-        Returns:
-            Flow: The flow object
-
-        Raises:
-            RuntimeError: When the name has no flow class
-        """
-        cls = FLOW_CLASSES.get(name, None)
-        if cls is None:
-            raise RuntimeError(f'No flow class is registered for the flow "{name}"')
-        return cls(self)
 
     async def _run_flow(self, flow: Flow):
         """
@@ -338,24 +320,24 @@ class RestartManager(RestartStep):
                 logger.error(f'[Restart] Flow "{flow.name}" failed: {e}')
                 logger.exception(e)
 
-    def _require_flow(self, name: str) -> Flow:
+    def _require_flow(self, flow_cls: "type[Flow]") -> Flow:
         """
-        The flow in flight with that name (the cancel entry)
+        The flow in flight of that class (the cancel entry)
 
         Args:
-            name (str): Flow name the cancel addresses
+            flow_cls (type[Flow]): The class the cancel addresses
 
         Returns:
             Flow: The flow to cancel
 
         Raises:
-            FlowRefused: When no flow of that name is in flight (the flow
+            FlowRefused: When no flow of that class is in flight (the flow
                 itself answers why its cancel is refused otherwise, see
                 ``Flow.cancel()``)
         """
         flow = self.current
-        if flow is None or flow.name != name:
-            raise FlowRefused(f'No {name} is in progress')
+        if flow is None or not isinstance(flow, flow_cls):
+            raise FlowRefused(f'No {flow_cls.name} is in progress')
         return flow
 
 

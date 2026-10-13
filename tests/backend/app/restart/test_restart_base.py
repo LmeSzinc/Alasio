@@ -10,7 +10,7 @@ import pytest
 import trio
 
 from alasio.backend.app.restart.restart_base import (
-    FLOW_NAMES, INIT_FLOW, REFUSALS, STARTING_UP, Flow, FlowRefused, InitFlow, RestartBase
+    FLOW_NAMES, INIT_FLOW, STARTING_UP, Flow, FlowRefused, InitFlow, RestartBase
 )
 
 
@@ -55,20 +55,11 @@ class FakeFlow(Flow):
 
 
 class TestConstants:
-    """The names and the user-facing refusals"""
+    """The flow names and the exception of a refused request"""
 
     def test_flow_names(self):
         assert FLOW_NAMES == ('startup', 'restart', 'update', 'daily')
         assert INIT_FLOW not in FLOW_NAMES
-
-    def test_refusals_cover_the_flows(self):
-        for request, refusals in REFUSALS.items():
-            assert request in FLOW_NAMES
-            # every flow of the slot is answered, the unknown falls back to
-            # STARTING_UP at the call site
-            assert set(refusals) == {INIT_FLOW, 'startup', 'restart', 'update', 'daily'}
-            for message in refusals.values():
-                assert isinstance(message, str) and message
 
     def test_flow_refused_is_a_runtime_error(self):
         assert issubclass(FlowRefused, RuntimeError)
@@ -104,6 +95,11 @@ class TestFlow:
 
     def test_the_default_park_state(self):
         assert Flow.PARK_STATE == 'updating'
+
+    def test_the_base_carries_no_refusal(self):
+        # the user entries (restart / update) answer a refusal of their own;
+        # the base and the internal entries never do
+        assert Flow.REFUSALS == {}
 
     def test_there_is_no_cancellable_flag_on_the_flow(self):
         # whether a flow may be cancelled is not a property of the flow kind:

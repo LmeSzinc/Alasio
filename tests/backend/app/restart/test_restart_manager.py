@@ -1,11 +1,11 @@
 """
 Tests for the entries and the run of the restart manager (restart_manager.py)
 
-The flow bodies are fakes over the real slot: the manager owns the slot, the
-accept / refuse semantics, the cancellation windows, the daily bookkeeping and
-the run, not the work of the flows. Every fake body signals its start, holds
-until the test releases it and signals its end, so the tests drive the slot
-from the outside.
+The flow bodies are fakes over the real slot: a fixture replaces ``Flow.run``
+of the four classes (they signal the test instead of doing the work), the rest
+of the manager -- the entries, the claim, the flow state machine and run() --
+is the real one. Every fake body signals its start, holds until the test
+releases it and signals its end, so the tests drive the slot from the outside.
 """
 import datetime
 
@@ -14,8 +14,8 @@ import trio
 import trio.testing
 
 from alasio.backend.app.restart.daily import DailyState
-from alasio.backend.app.restart.restart_base import FLOW_NAMES, INIT_FLOW, STARTING_UP, Flow, FlowRefused
-from alasio.backend.app.restart.restart_flow import FLOW_CLASSES
+from alasio.backend.app.restart.restart_base import FLOW_NAMES, INIT_FLOW, STARTING_UP, FlowRefused
+from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
 from alasio.backend.app.restart.restart_manager import RestartManager
 
 NOW = datetime.datetime(2026, 10, 13, 4, 0)
@@ -35,8 +35,11 @@ class FakeWorkerManager:
 
 class FakeManager(RestartManager):
     """
-    The manager with body-shaped fake flows: the slot, the entries, the flow
-    state machine and run() are the real ones, the bodies only signal the test
+    The manager under test with the Restart topic push recorded
+
+    The slot, the entries, the claim, the flow state machine and run() are the
+    real ones: only the flow bodies are replaced (the ``fake_bodies`` fixture)
+    and the topic push is recorded instead of published.
     """
 
     def __init__(self, daily=None, worker_manager=None):
@@ -52,23 +55,28 @@ class FakeManager(RestartManager):
         """The Restart topic push, recorded instead of published"""
         self.views.append(self.view())
 
-    def create_flow(self, name):
-        """
-        A flow of the real state machine (the window, the cancel) whose body
-        holds inside its cancellable window until the test releases it
-        """
-        manager = self
 
-        class FakeBody(Flow):
-            async def run(self):
-                manager.started[name].set()
-                with self.cancel_window('the handover started'):
-                    await manager.hold[name].wait()
-                manager.records.append(('cancelled' if self.cancelled else 'done', name))
-                manager.finished[name].set()
+@pytest.fixture(autouse=True)
+def fake_bodies(monkeypatch):
+    """
+    The body of every flow class replaced by one that signals the test
 
-        FakeBody.name = name
-        return FakeBody(self)
+    The manager tests own the slot and the flow state machine, not the work of
+    the flows: the fake body sets the start event of its flow, holds inside its
+    cancellation window until the test releases it and records how the flow
+    ended.
+    """
+
+    async def fake_run(self):
+        manager = self.manager
+        manager.started[self.name].set()
+        with self.cancel_window('the handover started'):
+            await manager.hold[self.name].wait()
+        manager.records.append(('cancelled' if self.cancelled else 'done', self.name))
+        manager.finished[self.name].set()
+
+    for flow_cls in (FlowStartup, FlowRestart, FlowUpdate, FlowDaily):
+        monkeypatch.setattr(flow_cls, 'run', fake_run)
 
 
 class Harness:
@@ -175,25 +183,22 @@ class TestRun:
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
-    async def test_a_failing_body_releases_the_slot(self):
-        class Failing(FakeManager):
-            def create_flow(self, name):
-                class BrokenBody(Flow):
-                    async def run(self):
-                        raise ValueError('the body failed')
+    async def test_a_failing_body_releases_the_slot(self, monkeypatch):
+        async def broken(self):
+            raise ValueError('the body failed')
 
-                BrokenBody.name = name
-                return BrokenBody(self)
-
+        # one body of the fixture replaced: the failure is reported and the
+        # manager keeps serving the requests
+        monkeypatch.setattr(FlowRestart, 'run', broken)
         async with trio.open_nursery() as nursery:
-            manager = Failing()
-            nursery.start_soon(manager.run)
+            h = await Harness.start(nursery)
+            await h.run_idle()
+            h.manager.request_restart()
+            assert h.manager.flow_name == 'restart'
             await trio.testing.wait_all_tasks_blocked()
-            # the failure was reported, the slot is free and the manager keeps
-            # serving the requests
-            assert manager.flow_name == ''
-            manager.request_restart()
-            assert manager.flow_name == 'restart'
+            # the slot is free again and the next request is served as usual
+            assert h.manager.flow_name == ''
+            assert h.manager.request_restart() is not None
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
@@ -439,19 +444,31 @@ class TestView:
 
 
 class TestFlowCreation:
-    """The manager creates the flow object when it claims the slot"""
+    """The claim builds the object of the flow class the entry names"""
 
-    def test_the_flow_object_is_created_by_name(self):
+    @pytest.mark.parametrize("entry, flow_cls", [
+        ('request_startup', FlowStartup),
+        ('request_restart', FlowRestart),
+        ('request_update', FlowUpdate),
+        ('request_daily', FlowDaily),
+    ])
+    def test_every_entry_claims_its_own_flow_class(self, entry, flow_cls):
         manager = RestartManager()
-        for name, cls in FLOW_CLASSES.items():
-            flow = manager.create_flow(name)
-            assert isinstance(flow, cls)
-            assert flow.manager is manager
-            assert flow.name == name
+        # the daily entry claims an idle slot only while the manager runs
+        manager.nursery = object()
+        claimed = []
+        manager._claim = lambda cls: claimed.append(cls)
+        getattr(manager, entry)()
+        assert claimed == [flow_cls]
 
-    def test_an_unknown_flow_name_is_an_internal_error(self):
-        with pytest.raises(RuntimeError, match='No flow class'):
-            RestartManager().create_flow('nope')
+    @pytest.mark.trio
+    async def test_the_claim_builds_the_object_of_the_class(self):
+        async with trio.open_nursery() as nursery:
+            h = await Harness.start(nursery)
+            flow = h.manager.current
+            assert type(flow) is FlowStartup
+            assert flow.manager is h.manager
+            nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
     async def test_every_claim_creates_a_new_flow(self):
@@ -483,7 +500,7 @@ class TestStates:
 
     def test_reset(self):
         manager = RestartManager()
-        manager.current = manager.create_flow('restart')
+        manager.current = FlowRestart(manager)
         manager.frozen = True
         manager.nursery = object()
         manager.reset()
