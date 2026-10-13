@@ -1,3 +1,4 @@
+import trio
 from msgspec import Struct
 
 from alasio.deploy.httpclient.async_client import AsyncHttpClient
@@ -80,6 +81,13 @@ class ServerFile(ProbeBase):
     and reused; aclose() closes a client the instance created.
     `async with ServerFile(...) as server:` closes it on exit.
 
+    The class serves one flow: the instance caches the mirror it
+    selected and its probe, so a caller builds a new one per check /
+    per deploy job (warmup() resolves the mirror up front) instead of
+    keeping one for the process. The blocking parts of the resolution
+    (the gui.db record of the mirror, see ServerUrl) run in the trio
+    worker thread, never on the event loop.
+
     Every method of the class is async: the requests run on the event
     loop of the caller (trio), so a cancelled task interrupts an
     in-flight request immediately instead of waiting for its timeout.
@@ -160,6 +168,26 @@ class ServerFile(ProbeBase):
         """
         await self._http.aclose()
 
+    async def warmup(self):
+        """
+        Resolve the mirror recorded for this instance before the first request.
+
+        Only the record read is warmed up: it is blocking sqlite IO (the mirror
+        name selected by an earlier flow, see ServerUrl), and the first request
+        would otherwise pay it on the event loop. The probe is left to the
+        first request on purpose: a probe hands its payload (latest.pack) over
+        to the request that needs it, warming it up here would waste that
+        prefetch -- the request would fetch latest.pack again.
+
+        Idempotent: an instance whose mirror was already resolved does nothing
+        (the resolution of an instance runs at most once).
+        """
+        if self._mirror:
+            return
+        name = await self._resolve_record()
+        if name:
+            self._mirror = name
+
     async def __aenter__(self):
         """
         Returns:
@@ -221,7 +249,9 @@ class ServerFile(ProbeBase):
             self._probe_error = e
             raise
         self._probe_result = (name, info)
-        self.server_url.set_name(name)
+        # the record write is blocking sqlite IO: run it in a worker thread
+        # instead of the event loop, like the read of _resolve
+        await trio.to_thread.run_sync(self.server_url.set_name, name)
         return self._probe_result
 
     async def probe_function(self, name, url):
@@ -272,14 +302,32 @@ class ServerFile(ProbeBase):
             f'{url}/latest.pack', timeout=AsyncHttpClient.PROBE_TIMEOUT, attempts=attempts)
         return LatestInfo.parse(response.content)
 
+    async def _resolve_record(self) -> str:
+        """
+        The mirror this instance draws from the record (or from a single
+        mirror set), '' when the recorded hint is unusable and a probe is
+        needed.
+
+        The record read is blocking sqlite IO: it runs in the worker thread
+        instead of the event loop (the property caches it, so the requests of
+        this instance only pay it once).
+
+        Returns:
+            str: The mirror name, '' when the instance must probe
+        """
+        single = self.server_url.single
+        if single:
+            return single
+        return await trio.to_thread.run_sync(lambda: self.server_url.name)
+
     async def _resolve(self):
         """
         Resolve the mirror of this instance, probing only when needed.
 
         The resolution order: the mirror already resolved, the only
         mirror of a single mirror set (no selection to make), the name
-        recorded in gui.db (a hint of the machine network
-        environment), then a probe (the last resort).
+        recorded in gui.db (a hint of the machine network environment),
+        then a probe (the last resort).
 
         Returns:
             tuple[str, LatestInfo | None]: The mirror name and the
@@ -289,11 +337,7 @@ class ServerFile(ProbeBase):
         """
         if self._mirror:
             return self._mirror, None
-        single = self.server_url.single
-        if single:
-            self._mirror = single
-            return single, None
-        name = self.server_url.name
+        name = await self._resolve_record()
         if name:
             self._mirror = name
             return name, None

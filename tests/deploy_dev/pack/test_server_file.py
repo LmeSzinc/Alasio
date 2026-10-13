@@ -350,6 +350,79 @@ class TestClientReuse:
         assert len(FakeClient.instances) == 1
 
 
+class TestWarmup:
+    """warmup() resolves the recorded mirror ahead of the first request."""
+
+    @staticmethod
+    def _latest_handler(requests):
+        """A handler serving latest.pack and counting the requests."""
+        def handler(request):
+            requests.append(request)
+            if request.url.path == '/latest.pack':
+                return httpx2.Response(200, content=COMMIT.encode() + b'\x00' * 20)
+            return httpx2.Response(404)
+        return handler
+
+    @pytest.mark.trio
+    async def test_warmup_reads_the_record_once(self):
+        """A usable record resolves the mirror without any request."""
+        requests = []
+        table = FakeMirrorTable()
+        server_url = make_server_url(
+            {'cn': 'http://cn', 'global': 'http://global'}, scope='mod', table=table)
+        table.seed(scope='mod', set_key=server_url.set_key, name='global')
+        server = ServerFile(server_url, client=make_aclient(self._latest_handler(requests)))
+
+        await server.warmup()
+        # the record selected the mirror: no request, one read
+        assert requests == []
+        assert table.selects == 1
+        assert server._mirror == 'global'
+
+        # the request of the instance reuses the warmed resolution
+        info = await server.get_latest_info()
+        assert info.version == COMMIT
+        assert str(requests[0].url) == 'http://global/latest.pack'
+        assert table.selects == 1
+
+        # warming an instance up twice changes nothing
+        await server.warmup()
+        assert table.selects == 1
+
+    @pytest.mark.trio
+    async def test_warmup_of_a_single_mirror_makes_no_io(self):
+        """A single mirror set has no selection to make: nothing is read
+        and nothing is requested."""
+        requests = []
+        table = FakeMirrorTable()
+        server = ServerFile(
+            make_server_url({'only': 'http://only'}, table=table),
+            client=make_aclient(self._latest_handler(requests)))
+        await server.warmup()
+        assert server._mirror == 'only'
+        assert (requests, table.selects, table.upserts) == ([], 0, 0)
+
+    @pytest.mark.trio
+    async def test_warmup_does_not_probe(self):
+        """Without a record the warmup leaves the probe to the first
+        request, so the probe payload (latest.pack) is not wasted."""
+        requests = []
+        table = FakeMirrorTable()
+        server = ServerFile(
+            make_server_url({'cn': {'123pan': 'http://a', 'tencent': 'http://b'}}, table=table),
+            client=make_aclient(self._latest_handler(requests)))
+        await server.warmup()
+        assert (requests, table.upserts) == ([], 0)
+        assert server._mirror == ''
+
+        # the first request probes and hands the payload over: one request
+        info = await server.get_latest_info()
+        assert info.version == COMMIT
+        assert len(requests) == 1
+        assert table.upserts == 1
+        assert server._mirror == '123pan'
+
+
 class TestCancellation:
     """A cancelled task interrupts the in-flight request immediately."""
 
