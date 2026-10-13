@@ -64,7 +64,7 @@ class DeployCheck(Struct):
 class UpdateAborted(Exception):
     """
     Raised by DeployJob.update() when its phase callback says the flow must
-    not continue: the transaction of the update manager was cancelled while
+    not continue: the maintenance flow running the job was cancelled while
     the job was between two interruptions (a cancel interrupts an in-flight
     request itself; this is the fallback check of a cancellation that did not
     have one). The flow aborted before changing anything and removed its

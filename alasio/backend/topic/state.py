@@ -1,6 +1,5 @@
 from msgspec import Struct
 
-from alasio.backend.app.lifespan import lifespan_restart
 from alasio.backend.locale.accept_language import negotiate_accept_language
 from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import RpcValueError
@@ -70,52 +69,38 @@ class ConnState(BaseTopic):
         Every running worker is asked to stop gracefully (scheduler-stopping:
         the current task finishes first, a 10-minute wait escalates to a kill),
         then the backend restarts and resumes the workers stopped by this
-        request. Returns as soon as the restart is accepted: the progress flows
-        through the Restart and Worker topics.
+        request. Returns as soon as the restart flow is accepted: the progress
+        flows through the Restart and Worker topics.
         """
-        # local import: topic.log imports ConnState from this module, a module
-        # level import of restart (-> topic._worker -> topic.log) would be
-        # circular
-        from alasio.backend.app import restart
+        # local import (see set_config below): the restart package drives the
+        # worker manager, whose topic imports this module
+        from alasio.backend.app.restart.restart_manager import RESTART_MANAGER, FlowRefused
 
         try:
-            await restart.request_graceful_restart('user request')
-        except restart.RestartInProgress:
-            # keep the historical user-facing wording of this rpc
-            raise RpcValueError('Restart already in progress') from None
-        except restart.RestartUnavailable as e:
-            # an update transaction / the startup window owns the backend: the
-            # reason carries the next step for the user
+            RESTART_MANAGER.request_restart()
+        except FlowRefused as e:
+            # the message carries the next step for the user (a restart is
+            # already in progress, an update restarts the backend by itself,
+            # the backend is still starting up)
             raise RpcValueError(str(e)) from None
 
     @rpc
     async def cancel_restart(self):
         """
-        Cancel the graceful restart waiting for the workers to stop
+        Cancel the restart flow waiting for the workers to stop
 
-        Only the wait is cancellable: once every worker stopped, the resume
-        list is frozen and the backend restarts whatever happens. Nothing is
-        resumed after a cancel -- the backend keeps running, the configs it
-        stopped stay stopped (start them again manually) and a config still
-        finishing its task only loses the restart mark (the scheduler can
-        continue it).
-
-        The restart of an update transaction in its applying phase is refused
-        (the update is not cancellable past its download phase): the stop of
-        the workers there is the update, not a plain restart.
+        Only the cancellable phase of the flow is interrupted: the workers it
+        stopped are resumed again and the check sequences it paused restart
+        (the wrap-up of the flow owns both). Past its point of no return (the
+        handover started) or after a daily upgrade the cancel is refused.
         """
         # local import (see restart above)
-        from alasio.backend.app import restart
-        from alasio.backend.app.update_manager import UPDATE_MANAGER
+        from alasio.backend.app.restart.restart_manager import RESTART_MANAGER, FlowRefused
 
-        if UPDATE_MANAGER.applying:
-            raise RpcValueError('The update is being applied and cannot be cancelled')
-        # running is the flag of the restart of this backend: the auto-resume
-        # queue of the new backend (the other entry point of the cancel) is not
-        # a restart in progress and must not be dropped by this rpc
-        if not restart.GRACEFUL_RESTART.running:
-            raise RpcValueError('No restart in progress')
-        await restart.cancel_graceful_restart('user cancel')
+        try:
+            await RESTART_MANAGER.cancel_restart()
+        except FlowRefused as e:
+            raise RpcValueError(str(e)) from None
 
     @rpc
     async def force_restart(self):
@@ -126,12 +111,9 @@ class ConnState(BaseTopic):
         is ended right away and nothing is resumed after the backend restarted.
         """
         # local import (see restart above)
-        from alasio.backend.app import restart
+        from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
 
-        # a graceful restart in progress (or a resume queue of the previous
-        # one) is cancelled first: no worker of it may be resumed
-        await restart.cancel_graceful_restart('force restart')
-        await lifespan_restart()
+        await RESTART_MANAGER.force_restart()
 
     @rpc
     async def set_config(self, name: str):

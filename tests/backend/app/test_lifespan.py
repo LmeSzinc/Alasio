@@ -239,11 +239,11 @@ class TestMpipeRecvLoop:
         child_conn.close()
 
 
-class TestMpipeRecvLoopCancelRestart:
+class TestMpipeRecvLoopAbort:
     """
-    Tests that a shutdown request (stdin stop / supervisor EOF) cancels a
-    graceful restart and a running auto-resume queue: the backend is going
-    down, nothing may restart it or resume workers afterwards.
+    Tests that a shutdown request (stdin stop / supervisor EOF) aborts the
+    maintenance flow in flight and drops the published resume intent: the
+    backend is going down, nothing may restart it or resume workers afterwards.
     """
 
     @staticmethod
@@ -255,7 +255,7 @@ class TestMpipeRecvLoopCancelRestart:
 
     def _run_with_cancel_spy(self, monkeypatch, send_bytes=None, close_parent=False):
         """
-        Run mpipe_recv_loop with cancel_graceful_restart spied
+        Run mpipe_recv_loop with the maintenance abort spied
 
         Args:
             monkeypatch: pytest monkeypatch fixture
@@ -266,15 +266,16 @@ class TestMpipeRecvLoopCancelRestart:
         Returns:
             list: Cancel reasons recorded by the spy
         """
-        from alasio.backend.app import restart as restart_mod
+        from alasio.backend.app.restart import restart_manager as manager_module
 
         calls = []
 
-        async def fake_cancel(reason=''):
-            # the mpipe thread drives the async cancel through the trio loop
-            calls.append(reason)
+        class FakeManager:
+            async def abort(self):
+                # the mpipe thread drives the async abort through the trio loop
+                calls.append('abort')
 
-        monkeypatch.setattr(restart_mod, 'cancel_graceful_restart', fake_cancel)
+        monkeypatch.setattr(manager_module, 'RESTART_MANAGER', FakeManager())
         parent_conn, event, child_conn = self._make(monkeypatch)
 
         async def main():
@@ -297,10 +298,10 @@ class TestMpipeRecvLoopCancelRestart:
         child_conn.close()
         return calls
 
-    def test_command_stop_cancels_restart(self, monkeypatch):
+    def test_command_stop_aborts_the_maintenance(self, monkeypatch):
         calls = self._run_with_cancel_spy(monkeypatch, send_bytes=b'command:stop')
-        assert calls == ['backend stop']
+        assert calls == ['abort']
 
-    def test_pipe_eof_cancels_restart(self, monkeypatch):
+    def test_pipe_eof_aborts_the_maintenance(self, monkeypatch):
         calls = self._run_with_cancel_spy(monkeypatch, close_parent=True)
-        assert calls == ['backend stop']
+        assert calls == ['abort']

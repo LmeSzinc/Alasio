@@ -691,7 +691,7 @@ class TestResumeQueue:
         success, msg = manager.worker_resume('WorkerTestInfinite', 'cfg_race')
 
         assert not success
-        assert 'gracefully restarting' in msg
+        assert 'Backend is restarting' in msg
         assert racing.state == 'resuming'
         assert racing.pending_restart is False
 

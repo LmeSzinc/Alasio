@@ -38,19 +38,19 @@ def mpipe_recv_loop(conn, trio_token):
         Args:
             reason (str): Log message for the shutdown
         """
-        # a graceful restart in progress (or a resume queue of the previous
-        # one) is cancelled: the backend is going down, nothing may restart
-        # the backend or resume the workers afterwards. Local import: this
-        # module is imported by restart.py (lifespan_restart), a module level
-        # import would be circular
+        # a maintenance flow in progress (or a resume queue of the previous
+        # one) is aborted: the backend is going down, nothing may restart it or
+        # resume the workers afterwards. Local import: the restart package
+        # imports this module (lifespan_restart), a module level import would be
+        # circular
         try:
-            from alasio.backend.app.restart import cancel_graceful_restart
+            from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
 
             # async: its blocking parts await the trio thread pool, so drive it
             # from this (mpipe recv) thread through the loop
-            trio.from_thread.run(cancel_graceful_restart, 'backend stop', trio_token=trio_token)
+            trio.from_thread.run(RESTART_MANAGER.abort, trio_token=trio_token)
         except Exception as e:
-            logger.error(f'Failed to cancel the graceful restart: {e}')
+            logger.error(f'Failed to abort the maintenance flow: {e}')
         try:
             trio.from_thread.run_sync(SHUTDOWN_EVENT.set, trio_token=trio_token)
         except Exception:

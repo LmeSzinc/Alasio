@@ -10,11 +10,23 @@ export type ConfigLike = {
 // Topic data from "ConfigScan"
 export type ConfigTopicLike = Record<string, ConfigLike>;
 
-// Topic data from "Restart": the phase of a graceful backend restart.
+// Topic data from "Restart": the phase of a graceful backend restart and the
+// maintenance flow owning the backend (see the four-flow model of the backend).
 // Absent (no restart in progress) = the object is empty / undefined.
 // 'done' is transient: it is pushed right before the topic is cleared.
+// flow/cancellable/upgraded describe the flow of the backend: a user restart
+// or update requested while one runs is refused, the frontend disables the
+// buttons from here.
 export type RestartTopicLike = {
   phase?: "stopping" | "shutting-down" | "resuming" | "done";
+  // the flow owning the backend: 'startup' / 'restart' / 'update' / 'daily'
+  // ('' = idle, 'init' = the process is starting up)
+  flow?: "init" | "startup" | "restart" | "update" | "daily" | "";
+  // whether the flow may still be cancelled (restart / update, before their
+  // point of no return)
+  cancellable?: boolean;
+  // whether the flow was upgraded into the daily maintenance
+  upgraded?: boolean;
   update?: number;
 };
 
@@ -24,13 +36,28 @@ export type RestartTopicLike = {
 // - 'checking': a check is in flight (cancellable through update_cancel)
 // - 'uptodate': the local version is the latest one
 // - 'available': an update is available and waits for the user
-// - 'downloading': the update transaction downloads the update into memory
-//   (nothing on disk changes, cancellable)
-// - 'updating': the transaction applies the update (stop / replace / restart /
-//   resume), local and irreversible, not cancellable
+// - 'queued': the update flow of the mod was accepted (the workers are being
+//   stopped, the check sequences paused)
+// - 'stopping': the workers stopped for the update, the pack is prepared
+// - 'downloading': the update pipeline downloads and validates the update into
+//   memory (nothing on disk changes, cancellable)
+// - 'updating': the flow applies the update (the real files are being
+//   replaced), local and irreversible, not cancellable
+// - 'restart-required': the files were applied but the backend restart could
+//   not be requested, the next backend start converges them
 // - 'error': the last check or the update failed, see error
 export type UPDATE_STATE =
-  "unmanaged" | "idle" | "checking" | "uptodate" | "available" | "downloading" | "updating" | "error";
+  | "unmanaged"
+  | "idle"
+  | "checking"
+  | "uptodate"
+  | "available"
+  | "queued"
+  | "stopping"
+  | "downloading"
+  | "updating"
+  | "restart-required"
+  | "error";
 
 // One update entry of the Update topic (the value type of the record).
 export type UpdateInfoLike = {

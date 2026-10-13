@@ -1,12 +1,14 @@
 """
 Update topic: the update state of every mod (data = dict[mod_name,
-UpdateInfo]), pushed by the update manager (alasio.backend.app.update_manager).
+UpdateInfo]), pushed by the update check module
+(alasio.backend.app.restart.update_check) and by the apply steps of the
+maintenance flows (alasio.backend.app.restart.restart_step).
 
 The state pipeline of one mod:
 
-    checking -> uptodate / available -> downloading -> updating
+    checking -> uptodate / available -> queued -> stopping -> downloading -> updating
 
-The data is runtime-produced and resident: the update manager pushes one
+The data is runtime-produced and resident: the check module pushes one
 event per change and the source keeps the data for a later front-end
 visit (no disk fallback, losing an event would lose the state).
 """
@@ -18,6 +20,7 @@ from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import ResponseEvent, RpcValueError
 from alasio.backend.reactive.source import GlobalSource, ResidentCache
 from alasio.backend.ws.ws_topic import BaseTopic
+from alasio.logger import logger
 
 # States of a mod update:
 # - 'unmanaged': the mod declares no update source (no mirrors); it is
@@ -26,14 +29,21 @@ from alasio.backend.ws.ws_topic import BaseTopic
 # - 'checking': a check is in flight (get_latest_info), cancellable
 # - 'uptodate': the local version is the latest one
 # - 'available': an update is available and waits for the user
-# - 'downloading': the update transaction downloads and validates the
-#   update into memory (nothing on disk changes), cancellable
-# - 'updating': the transaction applies the update (stop / replace /
-#   restart / resume); local and irreversible, not cancellable
+# - 'queued': the update flow of the mod was accepted (the workers are
+#   being stopped, the check sequences paused)
+# - 'stopping': the workers stopped for the update of the mod, the pack is
+#   about to be prepared
+# - 'downloading': the update pipeline downloads and validates the update
+#   into memory (nothing on disk changes), cancellable
+# - 'updating': the flow applies the update (the real files are being
+#   replaced); local and irreversible, not cancellable
+# - 'restart-required': the files were applied but the handover of the flow
+#   failed: the next process start converges them
 # - 'error': the last check or the update failed, see UpdateInfo.error
 UPDATE_STATE = [
     'unmanaged', 'idle', 'checking', 'uptodate',
-    'available', 'downloading', 'updating', 'error',
+    'available', 'queued', 'stopping', 'downloading', 'updating',
+    'restart-required', 'error',
 ]
 
 
@@ -51,8 +61,11 @@ class UpdateInfo(Struct):
     current_version: str = ''
     # latest version seen by the last succeeded check, '' when unknown
     latest_version: str = ''
-    # unix timestamp of the last check that finished, 0 = never
-    checked_at: float = 0.
+    # unix timestamp (seconds) of the last check that finished, 0 = never.
+    # An int on purpose: the sub-second part is meaningless to the frontend
+    # (the seconds are what the cards show) and the topic is pushed on every
+    # change
+    checked_at: int = 0
     # failure message of the last error, '' when there is none
     error: str = ''
 
@@ -115,60 +128,71 @@ class Update(BaseTopic):
         """
         Check the updates now
 
-        The check of one mod runs in the loop of that mod: this resets its
-        sequence (the manual check counts as the first one, the next
-        automatic one waits the standard random delay) and runs
-        immediately, an in-flight check of the mod is interrupted and
-        restarted. Returns once the checks are requested, the progress
-        flows through the Update topic.
+        The check runs in this call (it is one request to the mirrors) and the
+        returned message tells what happened: '' when the check ran, the reason
+        it was discarded otherwise (a check that just finished, a check of the
+        mod already in flight). A check in flight of the mod is interrupted and
+        the sequence starts over after the check.
 
         Args:
             name (str): Mod name, '' checks every managed mod
         """
-        from alasio.backend.app.update_manager import UPDATE_MANAGER, UpdateError
+        from alasio.backend.app.restart.update_check import UPDATE_CHECK
 
+        if not name:
+            # every managed mod (the frontend has no "check all" button: the
+            # periodic checks cover it), one after another
+            for one in UPDATE_CHECK.names():
+                message = await UPDATE_CHECK.check(one)
+                if message:
+                    logger.info(f'[Update] The check of "{one}" was discarded: {message}')
+            return ''
         try:
-            await UPDATE_MANAGER.check(name)
-        except UpdateError as e:
+            return await UPDATE_CHECK.check(name)
+        except ValueError as e:
             raise RpcValueError(str(e)) from None
 
     @rpc
-    async def update_apply(self, name: str):
+    async def update_apply(self):
         """
-        Apply the available update of a mod
+        Apply the available updates of every mod
 
-        The transaction is accepted and runs in the background: it first
-        downloads the update into memory ('downloading', cancellable
-        through update_cancel), then stops every worker, applies the update
-        and restarts the backend ('updating'). Returns once the transaction
-        is accepted, the progress flows through the Update topic (the
-        workers through the Worker topic and the restart through the
-        Restart topic).
+        The update flow is accepted and runs in the background: it stops the
+        workers, applies the deploy job of every mod with an available update
+        (cancellable until the first write through update_cancel, a failed mod
+        is isolated) and restarts the backend. Returns once the flow is
+        accepted, the progress flows through the Update topic (the workers
+        through the Worker topic and the restart through the Restart topic).
+        """
+        from alasio.backend.app.restart.restart_manager import RESTART_MANAGER, FlowRefused
+        from alasio.backend.app.restart.update_check import UPDATE_CHECK
+
+        if not UPDATE_CHECK.available():
+            raise RpcValueError('No update available')
+        try:
+            RESTART_MANAGER.request_update()
+        except FlowRefused as e:
+            raise RpcValueError(str(e)) from None
+
+    @rpc
+    async def update_cancel(self, name: str = ''):
+        """
+        Cancel a check in flight, or the update flow
 
         Args:
-            name (str): Mod name
+            name (str): Mod name: the check request of that mod is interrupted
+                and the recorded state of the last check stays. '' cancels the
+                update flow (its cancellable phase: the worker stop and the
+                download; past the first write the cancel is refused)
         """
-        from alasio.backend.app.update_manager import UPDATE_MANAGER, UpdateError
+        from alasio.backend.app.restart.restart_manager import RESTART_MANAGER, FlowRefused
+        from alasio.backend.app.restart.update_check import UPDATE_CHECK
 
+        if name:
+            if not UPDATE_CHECK.cancel_check(name):
+                raise RpcValueError(f'No check is in flight: "{name}"')
+            return
         try:
-            await UPDATE_MANAGER.apply(name)
-        except UpdateError as e:
-            raise RpcValueError(str(e)) from None
-
-    @rpc
-    async def update_cancel(self):
-        """
-        Cancel the cancellable phase of the update flow
-
-        A check in flight: its request is interrupted and the window
-        closes, the recorded state of the last check stays. The download of
-        an update transaction: the prepared data is dropped, nothing was
-        changed on disk and the state returns to 'available'. The apply of
-        a transaction is not cancellable and refuses this call.
-        """
-        from alasio.backend.app.update_manager import UPDATE_MANAGER, UpdateError
-
-        try:
-            await UPDATE_MANAGER.cancel()
-        except UpdateError as e:
+            await RESTART_MANAGER.cancel_update()
+        except FlowRefused as e:
             raise RpcValueError(str(e)) from None

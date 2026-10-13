@@ -10,21 +10,26 @@ from alasio.logger.writer import LogWriter
 
 
 @pytest.fixture(autouse=True)
-def update_startup_gate():
+def restart_state():
     """
-    Reset the startup events of the update manager around every test
+    Reset the restart manager, the check module and the daily bookkeeping around
+    every test
 
-    The events are process-wide (a trio.Event can only be set once) while the
-    tests run many "backends" in one process: reset them around every test and
-    open the gate by default. A test of the not-ready states resets the events
-    itself and drives them from there.
+    The singletons are process-wide while the tests run many "backends" in one
+    process: a test that claims the flow slot, freezes a handover or binds the
+    check module must not leak into the next one.
     """
-    from alasio.backend.app.update_startup import UPDATE_STARTUP
+    from alasio.backend.app.restart.daily import DAILY
+    from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
+    from alasio.backend.app.restart.update_check import UPDATE_CHECK
 
-    UPDATE_STARTUP.reset()
-    UPDATE_STARTUP.update_inited.set()
+    RESTART_MANAGER.reset()
+    UPDATE_CHECK.reset()
+    DAILY.reset()
     yield
-    UPDATE_STARTUP.reset()
+    RESTART_MANAGER.reset()
+    UPDATE_CHECK.reset()
+    DAILY.reset()
 
 
 @pytest.fixture(autouse=True)

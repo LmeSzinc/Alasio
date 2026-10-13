@@ -48,15 +48,31 @@
 
   // --- update flow ---
 
-  // the mod of the pending "update" confirmation dialog (null = closed)
-  let confirmMod = $state<ModOption | null>(null);
+  // the pending "update" confirmation dialog (true = open): the update is a
+  // single entry (every mod with an available update is applied, then the
+  // backend restarts), see the update flow of the backend
+  let confirmUpdate = $state(false);
   // states whose update runs (or waits for a window): a start is queued,
-  // see the update flow of the backend
-  const UPDATE_NOT_CHECKABLE = ["unmanaged", "checking", "downloading", "updating"];
+  // see the maintenance flows of the backend
+  const UPDATE_NOT_CHECKABLE = ["unmanaged", "checking", "queued", "stopping", "downloading", "updating"];
+  // states of the update flow that may still be cancelled (the check of a mod,
+  // the stop of the workers, the download): 'updating' is past the point of no
+  // return, the flow restarts the backend by itself when it finishes
+  const UPDATE_CANCELLABLE = ["checking", "queued", "stopping", "downloading"];
 
   function updateInfo(mod: string): UpdateInfoLike | undefined {
     return updateTopic.data?.[mod];
   }
+
+  /** The mods with an available update (the scope of the single update entry). */
+  const availableMods = $derived(mods.filter((mod) => updateInfo(mod.value)?.state === "available"));
+  /** Whether the update flow of the backend may still be cancelled. */
+  const updateCancellable = $derived(
+    mods.some((mod) => {
+      const state = updateInfo(mod.value)?.state;
+      return state !== undefined && UPDATE_CANCELLABLE.includes(state);
+    }),
+  );
 
   /** Badge label of an update state, '' when the mod has no entry yet. */
   function updateLabel(info: UpdateInfoLike | undefined): string {
@@ -71,10 +87,16 @@
         return t.Update.StateUptodate();
       case "available":
         return t.Update.StateAvailable();
+      case "queued":
+        return t.Update.StateQueued();
+      case "stopping":
+        return t.Update.StateStopping();
       case "downloading":
         return t.Update.StateDownloading();
       case "updating":
         return t.Update.StateUpdating();
+      case "restart-required":
+        return t.Update.StateRestartRequired();
       case "error":
         return t.Update.StateError();
       default:
@@ -82,10 +104,9 @@
     }
   }
 
-  function confirmUpdate() {
-    const mod = confirmMod;
-    confirmMod = null;
-    if (mod) updateApplyRpc.call("update_apply", { name: mod.value });
+  function confirmApply() {
+    confirmUpdate = false;
+    updateApplyRpc.call("update_apply", {});
   }
 </script>
 
@@ -95,6 +116,25 @@
   </div>
 {:else}
   <div class={cn("flex flex-col gap-4", className)}>
+    <!-- the single update entry: every mod with an available update is
+         applied, then the backend restarts and resumes the running configs -->
+    <div class="flex items-center justify-between gap-2">
+      <span class="text-muted-foreground text-sm">
+        {availableMods.length
+          ? t.Update.AvailableCount({ count: String(availableMods.length) })
+          : t.Update.NoAvailable()}
+      </span>
+      <span class="flex shrink-0 gap-2">
+        {#if updateCancellable}
+          <Button size="sm" variant="outline" onclick={() => updateCancelRpc.call("update_cancel", {})}>
+            {t.Update.ButtonCancel()}
+          </Button>
+        {/if}
+        <Button size="sm" disabled={availableMods.length === 0} onclick={() => (confirmUpdate = true)}>
+          {t.Update.ButtonUpdate()}
+        </Button>
+      </span>
+    </div>
     {#each mods as mod (mod.value)}
       {@const history = historyData?.[mod.value]}
       {@const items = history?.data ?? []}
@@ -124,12 +164,12 @@
                 </span>
               {/if}
               <span class="ml-auto flex shrink-0 gap-2">
-                {#if info.state === "available"}
-                  <Button size="sm" onclick={() => (confirmMod = mod)}>
-                    {t.Update.ButtonUpdate()}
-                  </Button>
-                {:else if info.state === "checking" || info.state === "downloading"}
-                  <Button size="sm" variant="outline" onclick={() => updateCancelRpc.call("update_cancel")}>
+                {#if info.state === "checking"}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onclick={() => updateCancelRpc.call("update_cancel", { name: mod.value })}
+                  >
                     {t.Update.ButtonCancel()}
                   </Button>
                 {:else}
@@ -185,24 +225,26 @@
   </div>
 {/if}
 
-<!-- "update" confirmation: v1 applies any mod update as a full backend
-     restart, every running config comes back after it -->
+<!-- "update" confirmation: one update applies every mod with an available
+     update as a full backend restart, every running config comes back after it -->
 <AlertDialog.Root
-  open={confirmMod !== null}
+  open={confirmUpdate}
   onOpenChange={(value: boolean) => {
-    if (!value) confirmMod = null;
+    if (!value) confirmUpdate = false;
   }}
 >
   <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title>{t.Update.ConfirmTitle()}</AlertDialog.Title>
       <AlertDialog.Description>
-        {t.Update.ConfirmDescription({ mod: confirmMod?.label ?? "" })}
+        {t.Update.ConfirmDescription({
+          mods: availableMods.map((mod) => mod.label).join(", "),
+        })}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel>{t.Update.ButtonCancel()}</AlertDialog.Cancel>
-      <Button onclick={confirmUpdate}>{t.Update.ButtonUpdate()}</Button>
+      <Button onclick={confirmApply}>{t.Update.ButtonUpdate()}</Button>
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>

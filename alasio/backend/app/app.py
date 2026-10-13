@@ -6,9 +6,9 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
 
 from alasio.backend.app.frontend import SITE
-from alasio.backend.app.restart import run_startup
-from alasio.backend.app.schedule import task_daily_restart
-from alasio.backend.app.update_manager import UPDATE_MANAGER
+from alasio.backend.app.restart.daily import task_daily
+from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
+from alasio.backend.app.restart.update_check import UPDATE_CHECK
 from alasio.backend.auth import auth
 from alasio.backend.dev.assets import ImageStaticFiles
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
@@ -195,22 +195,22 @@ async def lifespan(app):
         # the background, the 5s startup window of the supervisor must not be
         # spent on the whole tree (requests prepare their file on demand)
         nursery.start_soon(SITE.warm_up)
-        # daily scheduled restart (Deploy.Update.AutoRestartTime): a no-op
-        # when the config disables it. It goes through the same graceful
-        # restart as the settings page, so the running configs are resumed by
-        # the new backend and the frontend merely reconnects over them
-        nursery.start_soon(task_daily_restart)
-        # mod update checks: the startup convergence finishes the update a
-        # killed process left behind (it may end in one graceful restart),
-        # then the check loop of every mounted mod runs; the states flow
-        # through the Update topic. A no-op without an update-enabled mod
-        nursery.start_soon(UPDATE_MANAGER.run)
-        # the startup orchestration: it consumes the resume
-        # credential, waits for the startup convergence and the first update
-        # checks of UPDATE_MANAGER, then releases the resume queue behind
-        # them. Every start is accepted as a queued resume while it runs; a
-        # no-op without a recorded resume intent
-        nursery.start_soon(run_startup)
+        # daily maintenance (Deploy.Update.AutoRestartTime): a no-op when the
+        # config disables it. The task only decides WHEN the daily action is
+        # due -- the action itself is the daily flow (the same stop + full
+        # update + handover as a restart), so the running configs are resumed
+        # by the new backend and the frontend merely reconnects over them
+        nursery.start_soon(task_daily)
+        # the maintenance flows of the backend (see
+        # alasio.backend.app.restart): run() enters the init slot and claims
+        # the startup flow before its first await (the startup flow consumes
+        # the resume intent of the previous process, converges the mods, starts
+        # the check sequences and releases the resume queue); every restart /
+        # update / daily action is another flow of the same slot, claimed by
+        # the rpc layer or the daily task. The manager owns the nursery of the
+        # flows: a failing flow ends alone and never takes this nursery down.
+        UPDATE_CHECK.attach(nursery)
+        nursery.start_soon(RESTART_MANAGER.run)
 
         # actual backend runs here
         yield

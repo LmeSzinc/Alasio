@@ -55,6 +55,50 @@ class TestRestartSourceApply:
         source.on_event('resuming')
         assert source.data['phase'] == 'resuming'
 
+    def test_flow_view_merges_with_the_phase(self):
+        """the flow view sets its keys and keeps the phase in place"""
+        source = RestartSource()
+        source.on_event('stopping')
+        source.on_event({'flow': 'restart', 'cancellable': True, 'upgraded': False})
+
+        assert source.data['phase'] == 'stopping'
+        assert source.data['flow'] == 'restart'
+        assert source.data['cancellable'] is True
+        assert source.data['upgraded'] is False
+
+        # a phase change keeps the flow view
+        source.on_event('shutting-down')
+        assert source.data['flow'] == 'restart'
+        assert source.data['phase'] == 'shutting-down'
+
+    def test_empty_phase_keeps_the_flow_view(self):
+        """on_event('') only clears the phase: the flow still owns the backend"""
+        source = RestartSource()
+        source.on_event('stopping')
+        source.on_event({'flow': 'update', 'cancellable': True, 'upgraded': False})
+        source.on_event('')
+
+        assert 'phase' not in source.data
+        assert source.data['flow'] == 'update'
+
+    def test_idle_flow_clears_the_data(self):
+        """no phase and no flow -> the topic is empty (the backend is idle)"""
+        source = RestartSource()
+        source.on_event('stopping')
+        source.on_event({'flow': 'restart', 'cancellable': True, 'upgraded': False})
+        source.on_event({'flow': '', 'cancellable': False, 'upgraded': False})
+        assert source.data['phase'] == 'stopping'
+        source.on_event('')
+        assert source.data == {}
+
+    def test_flow_view_alone_is_data(self):
+        """a flow view without a phase is data (a flow that has not pushed a
+        phase yet is still a flow in progress)"""
+        source = RestartSource()
+        source.on_event({'flow': 'daily', 'cancellable': False, 'upgraded': False})
+        assert source.data['flow'] == 'daily'
+        assert source.data['update'] > 0
+
 
 class TestRestartSourceDelivery:
     @pytest.mark.trio

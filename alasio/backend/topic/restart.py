@@ -7,14 +7,17 @@ from alasio.backend.ws.ws_topic import BaseTopic
 
 class RestartSource(GlobalSource, ResidentCache):
     """
-    Phase of the graceful backend restart: data = {phase, update} while a
-    restart is in progress, empty otherwise.
+    Phase of the backend maintenance flow: data = {phase, flow, cancellable,
+    upgraded, update} while a restart / update / daily flow is in progress,
+    empty otherwise.
 
-    Event protocol: on_event(phase) -- '' clears the data (no restart in
-    progress), any other value sets the whole data. Worker states are NOT
-    duplicated here: the Worker topic is the single source of truth for every
-    worker, this topic only tells whether a restart is in progress and in
-    which stage (the frontend reads the per-worker progress from Worker).
+    Event protocol: a string sets the phase ('' clears it: no restart in
+    progress), a dict merges the flow view ({flow, cancellable, upgraded}) of
+    the restart manager. The data clears itself when neither a phase nor a flow
+    is left. Worker states are NOT duplicated here: the Worker topic is the
+    single source of truth for every worker, this topic only tells which flow
+    owns the backend, in which stage, and whether it may still be cancelled
+    (the frontend disables the update / restart buttons from here).
 
     Phases:
     - 'stopping': waiting for the workers to stop gracefully;
@@ -25,19 +28,36 @@ class RestartSource(GlobalSource, ResidentCache):
     """
     TOPIC_NAME = 'Restart'
 
+    # the keys of the flow view (the events that merge instead of setting the
+    # phase)
+    VIEW_KEYS = ('flow', 'cancellable', 'upgraded')
+
     def _apply(self, event):
         """
-        [锁内] phase -> data; '' clears it (no restart in progress)
+        [锁内] phase string / flow view dict -> data
+
+        A phase string sets the phase, '' clears it, a dict merges the flow
+        view; the data clears when no phase and no flow are left (the frontend
+        reads "empty topic" as "the backend is idle").
 
         Returns:
             bool: If data changed
         """
-        if not event:
+        data = dict(self.data)
+        if isinstance(event, dict):
+            for key in self.VIEW_KEYS:
+                if key in event:
+                    data[key] = event[key]
+        elif event:
+            data['phase'] = event
+        else:
+            data.pop('phase', None)
+        if not data.get('phase') and not data.get('flow'):
             if not self.data:
                 return False
             self.data = {}
             return True
-        data = {'phase': event, 'update': time.time()}
+        data['update'] = time.time()
         if self.data == data:
             return False
         self.data = data

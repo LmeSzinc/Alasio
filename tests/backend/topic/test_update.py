@@ -1,14 +1,14 @@
 """
 Tests for the Update topic (alasio/backend/topic/update.py): the source
 events (one entry per mod, set / delete) and the rpc layer of the update
-flow (the manager is faked, its logic is covered by
-tests/backend/app/test_update_manager.py).
+flow (the check module and the restart manager are faked, their logic is
+covered by tests/backend/app/restart/).
 """
 import pytest
 import trio
 
-from alasio.backend.app import update_manager as update_module
-from alasio.backend.app.update_manager import UpdateError
+from alasio.backend.app.restart import update_check as update_check_module
+from alasio.backend.app.restart.restart_base import FlowRefused
 from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.topic.update import Update, UpdateInfo, UpdateSource
 from tests.backend.reactive.test_source_base import MockTopic, decode
@@ -22,35 +22,61 @@ def cleanup_sources():
     Update.singleton_clear()
 
 
-class FakeUpdateManager:
-    """UpdateManager stand-in recording the rpc calls."""
+class FakeUpdateCheck:
+    """UpdateCheck stand-in recording the rpc calls."""
+
+    def __init__(self):
+        self.calls = []
+        self.available_names = []
+        self.cancelled = True
+        self.message = ''
+
+    def names(self, managed=True):
+        return ['m', 'u']
+
+    def available(self):
+        return list(self.available_names)
+
+    async def check(self, name):
+        self.calls.append(('check', name))
+        if name not in ('m', 'u'):
+            raise ValueError(f'No such mod: "{name}"')
+        return self.message
+
+    def cancel_check(self, name):
+        self.calls.append(('cancel_check', name))
+        return self.cancelled
+
+
+class FakeRestartManager:
+    """RestartManager stand-in recording the rpc calls."""
 
     def __init__(self):
         self.calls = []
         self.error = None
 
-    async def check(self, name=''):
-        self.calls.append(('check', name))
+    def request_update(self):
+        self.calls.append(('request_update',))
         if self.error is not None:
             raise self.error
 
-    async def apply(self, name):
-        self.calls.append(('apply', name))
-        if self.error is not None:
-            raise self.error
-
-    async def cancel(self):
-        self.calls.append(('cancel',))
+    async def cancel_update(self):
+        self.calls.append(('cancel_update',))
         if self.error is not None:
             raise self.error
 
 
 @pytest.fixture
 def update_topic(monkeypatch):
-    """An Update topic of a fake connection, with a fake manager."""
-    manager = FakeUpdateManager()
-    monkeypatch.setattr(update_module, 'UPDATE_MANAGER', manager)
-    yield Update('conn_test', None), manager
+    """An Update topic of a fake connection, with a fake check module."""
+    update_check = FakeUpdateCheck()
+    manager = FakeRestartManager()
+    monkeypatch.setattr(update_check_module, 'UPDATE_CHECK', update_check)
+    # the rpc imports the manager lazily; patching the attribute of the module
+    # it imports from is enough for the fakes above
+    import alasio.backend.app.restart.restart_manager as manager_module
+    monkeypatch.setattr(manager_module, 'RESTART_MANAGER', manager)
+    yield Update('conn_test', None), update_check, manager
 
 
 class TestUpdateSource:
@@ -104,41 +130,72 @@ class TestUpdateRpc:
     """The rpc layer of the update flow."""
 
     @pytest.mark.trio
-    async def test_check_calls_the_manager(self, update_topic):
-        topic, manager = update_topic
+    async def test_check_calls_the_module(self, update_topic):
+        topic, update_check, manager = update_topic
 
         await topic.update_check()
         await topic.update_check('m')
 
-        assert manager.calls == [('check', ''), ('check', 'm')]
+        assert update_check.calls == [('check', 'm'), ('check', 'u'), ('check', 'm')]
 
     @pytest.mark.trio
-    async def test_apply_calls_the_manager(self, update_topic):
-        topic, manager = update_topic
+    async def test_check_returns_the_message_of_the_module(self, update_topic):
+        topic, update_check, manager = update_topic
 
-        await topic.update_apply('m')
-
-        assert manager.calls == [('apply', 'm')]
+        assert await topic.update_check('m') == ''
+        update_check.message = 'Just checked a moment ago'
+        assert await topic.update_check('m') == 'Just checked a moment ago'
 
     @pytest.mark.trio
-    async def test_cancel_calls_the_manager(self, update_topic):
-        topic, manager = update_topic
+    async def test_check_of_an_unknown_mod_is_refused(self, update_topic):
+        topic, update_check, manager = update_topic
+
+        with pytest.raises(RpcValueError, match='No such mod'):
+            await topic.update_check('nope')
+
+    @pytest.mark.trio
+    async def test_apply_requires_an_available_update(self, update_topic):
+        topic, update_check, manager = update_topic
+
+        with pytest.raises(RpcValueError, match='No update available'):
+            await topic.update_apply()
+        assert manager.calls == []
+
+        update_check.available_names = ['m']
+        await topic.update_apply()
+        assert manager.calls == [('request_update',)]
+
+    @pytest.mark.trio
+    async def test_apply_refusal_carries_to_the_frontend(self, update_topic):
+        topic, update_check, manager = update_topic
+        update_check.available_names = ['m']
+        manager.error = FlowRefused('An update is already in progress')
+
+        with pytest.raises(RpcValueError, match='already in progress'):
+            await topic.update_apply()
+
+    @pytest.mark.trio
+    async def test_cancel_of_a_named_mod_cancels_the_check(self, update_topic):
+        topic, update_check, manager = update_topic
+
+        await topic.update_cancel('m')
+        assert update_check.calls == [('cancel_check', 'm')]
+        assert manager.calls == []
+
+        update_check.cancelled = False
+        with pytest.raises(RpcValueError, match='No check is in flight'):
+            await topic.update_cancel('m')
+
+    @pytest.mark.trio
+    async def test_cancel_without_a_name_cancels_the_flow(self, update_topic):
+        topic, update_check, manager = update_topic
 
         await topic.update_cancel()
+        assert manager.calls == [('cancel_update',)]
+        assert update_check.calls == []
 
-        assert manager.calls == [('cancel',)]
-
-    @pytest.mark.trio
-    async def test_refusals_become_rpc_value_errors(self, update_topic):
-        """The user-facing refusals of the manager carry to the frontend."""
-        topic, manager = update_topic
-        manager.error = UpdateError('The mod has no update available: "m"')
-
-        with pytest.raises(RpcValueError, match='no update available'):
-            await topic.update_apply('m')
-        with pytest.raises(RpcValueError, match='no update available'):
-            await topic.update_check('m')
-        with pytest.raises(RpcValueError, match='no update available'):
+        manager.error = FlowRefused('No update is in progress')
+        with pytest.raises(RpcValueError, match='No update is in progress'):
             await topic.update_cancel()
 
 
