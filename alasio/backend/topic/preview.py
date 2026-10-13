@@ -14,9 +14,9 @@ from alasio.config.table.scan import validate_config_name
 from alasio.ext.singleton import SingletonNamed
 
 PREVIEW_AVAILABLE = ['running', 'scheduler-stopping']
-# restarting / resuming are stopped states (no process): the preview task must
-# stop like on idle, and the cached last screenshot is sent once
-PREVIEW_IDLE = ['idle', 'error', 'scheduler-waiting', 'restarting', 'resuming']
+# restarting / updating / resuming are stopped states (no process): the preview
+# task must stop like on idle, and the cached last screenshot is sent once
+PREVIEW_IDLE = ['idle', 'error', 'scheduler-waiting', 'restarting', 'updating', 'resuming']
 PREVIEW_SPEED = Literal['normal', 'realtime']
 
 
@@ -192,6 +192,12 @@ class PreviewTask(BackgroundTask, metaclass=SingletonNamed):
                     if topic_speed == 'normal' and header != self._last_normal_header:
                         topic.server.send_lossy(self._preview)
                         continue
+                # the frame has reached the subscribers it was missing for:
+                # record it as the last frame of both speeds, so a later stop
+                # state (e.g. the cancel of a parked worker) does not send the
+                # same frame again
+                self._last_normal_header = header
+                self._last_realtime_header = header
 
             self._trigger_on_running = bool(self._subscribers)
             self.task_stop()

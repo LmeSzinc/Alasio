@@ -344,6 +344,45 @@ async def test_preview_task_subscribe_on_idle_sends_cache(preview_task, worker, 
 
 
 @pytest.mark.trio
+@pytest.mark.parametrize('state', ['restarting', 'updating', 'resuming'])
+async def test_preview_task_parked_states_send_cache(preview_task, worker, autojump_clock, state):
+    """
+    Test that a worker stopped for a maintenance flow (parked in restarting /
+    updating) or queued for auto-resume has no process: the preview task stops
+    like on idle and the cached last screenshot is sent to the subscriber that
+    missed it -- once, the next stop state does not send it again.
+    """
+    topic_normal = MockTopic()
+    topic_realtime = MockTopic()
+    preview_task.subscribe(topic_normal, 'normal')
+    preview_task.subscribe(topic_realtime, 'realtime')
+    await trio.testing.wait_all_tasks_blocked()
+
+    # a frame arriving inside the send interval of normal: cached for normal,
+    # delivered to realtime right away
+    preview_task._normal_lastsend = trio.current_time()
+    preview_data = b'Preview\x00\x00\x00\x00\x00\x00\x00\x00JPG_DATA'
+    preview_task.on_preview(preview_data)
+    topic_normal.server.send_lossy.assert_not_called()
+    topic_realtime.server.send_lossy.assert_called_once_with(preview_data)
+    topic_realtime.server.send_lossy.reset_mock()
+
+    # the worker stops for the maintenance flow: the cached frame is sent to
+    # the subscriber that missed it
+    worker.state = state
+    preview_task.on_worker_state(state)
+    topic_normal.server.send_lossy.assert_called_once_with(preview_data)
+    topic_realtime.server.send_lossy.assert_not_called()
+    assert preview_task._trigger_on_running is True
+
+    # the frame is recorded as sent: the next stop state does not send it again
+    topic_normal.server.send_lossy.reset_mock()
+    worker.state = 'idle'
+    preview_task.on_worker_state('idle')
+    topic_normal.server.send_lossy.assert_not_called()
+
+
+@pytest.mark.trio
 async def test_preview_task_on_error_sends_cache(preview_task, worker, autojump_clock):
     """
     Test that when worker transitions to error, subscribers receive the cached preview,
