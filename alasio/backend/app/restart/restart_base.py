@@ -33,11 +33,16 @@ steps of a flow), ``restart_flow`` (the four flow classes, the bodies) and
 """
 import time
 from contextlib import contextmanager
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 import trio
 
 from alasio.logger import logger
+
+if TYPE_CHECKING:
+    # For IDE typehint: the worker manager imports this package, so importing
+    # it back at runtime would be a cycle
+    from alasio.backend.worker.manager import WORKER_PARK_STATE
 
 # The placeholder flow of the process startup: the slot is entered as init
 # when the manager starts and the only transition out of it is the startup flow
@@ -85,9 +90,9 @@ class Flow:
 
     Class attributes (per flow):
         name (str): Flow name, one of FLOW_NAMES ('' on this base)
-        PARK_STATE (str): The state the workers stopped for this flow are
-            parked in ('updating', 'restarting' for a plain restart): the
-            frontend shows what the maintenance is doing
+        PARK_STATE (WORKER_PARK_STATE): The state the workers stopped for this
+            flow are parked in ('updating', 'restarting' for a plain restart):
+            the frontend shows what the maintenance is doing
 
     Attributes (the state the sync world reads):
         started_at (float): Claim time (time.time())
@@ -99,7 +104,7 @@ class Flow:
             maintenance (it covers the daily action with its own handover)
     """
     name = ''
-    PARK_STATE = 'updating'
+    PARK_STATE: "WORKER_PARK_STATE" = 'updating'
 
     def __init__(self, manager=None):
         """

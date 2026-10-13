@@ -37,7 +37,7 @@ import trio
 
 from alasio.backend.app.lifespan import SHUTDOWN_EVENT, lifespan_restart
 from alasio.backend.app.restart.daily import DAILY, DailyState
-from alasio.backend.app.restart.restart_base import RestartBase
+from alasio.backend.app.restart.restart_base import Flow, RestartBase
 from alasio.backend.app.restart.resume_file import OWNER_RESTART, RESUME_FILES, ResumeFiles, ResumeRecord
 from alasio.backend.app.restart.update_check import UPDATE_CHECK, UpdateCheck
 from alasio.backend.topic.restart import RestartSource
@@ -258,7 +258,7 @@ class RestartStep(RestartBase):
     # Stopping the workers
     # ------------------------------------------------------------------
 
-    async def stop_all(self, flow=None, timeout: "float | None" = GRACEFUL_STOP_TIMEOUT):
+    async def stop_all(self, flow: "Optional[Flow]" = None, timeout: "float | None" = GRACEFUL_STOP_TIMEOUT):
         """
         Stop every running worker gracefully (the first step of every flow)
 

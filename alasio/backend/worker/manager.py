@@ -51,8 +51,13 @@ WORKER_STATE_ALLOWS = ['running', 'scheduler-waiting']
 WORKER_RUNNING_STATE = ['running', 'scheduler-stopping', 'scheduler-waiting']
 # Worker is considered stopped if state in the followings
 WORKER_STOPPED_STATE = ['idle', 'error', 'restarting', 'updating', 'resuming']
-# States a worker stopped for the maintenance flow in progress is parked in:
-# the restarting state and its updating twin
+# The park states (a subset of WORKER_STATE): the state a worker stopped by
+# a maintenance flow in progress is parked in -- 'updating' for an update /
+# daily / startup flow, 'restarting' for a restart flow. The flow in flight
+# sets it through set_park_state() before it stops the workers.
+WORKER_PARK_STATE = Literal['restarting', 'updating']
+# The park states as a runtime list, for the membership checks (a typing
+# Literal itself cannot be used with `in`)
 WORKER_PARKED_STATE = ['restarting', 'updating']
 
 # Seconds to wait for a worker to stop by itself in worker_kill(),
@@ -251,7 +256,7 @@ class WorkerManager(metaclass=Singleton):
         # 'restarting' for a restart flow): the frontend shows what the flow is
         # doing, everything else about the parked entries is the same. The
         # flows set it through set_park_state() before they stop the workers.
-        self.park_state = 'restarting'
+        self.park_state: WORKER_PARK_STATE = 'restarting'
 
     @property
     def restarting(self) -> bool:
@@ -1198,13 +1203,13 @@ class WorkerManager(metaclass=Singleton):
 
     # ---------------- maintenance flows (restart / update / daily) ----------------
 
-    def set_park_state(self, state: str):
+    def set_park_state(self, state: WORKER_PARK_STATE):
         """
         Set the state the workers stopped by the flow in flight are parked in
         (the flow calls this before restart_begin()).
 
         Args:
-            state (str): 'updating' or 'restarting'
+            state (WORKER_PARK_STATE): 'updating' or 'restarting'
         """
         with self._lock:
             self.park_state = state
