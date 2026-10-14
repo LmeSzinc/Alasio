@@ -1,3 +1,7 @@
+import re
+
+import pytest
+
 from alasio.logger import logger
 
 
@@ -93,3 +97,149 @@ class TestMockCaptureWriter:
             assert outer.fd.any_contains("Inner 2")
             assert not inner.fd.any_contains("Inner 1")
             assert inner.fd.any_contains("Inner 2")
+
+
+class TestConcat:
+    """
+    Test concat(), the debug helper that renders captured logs as a multi-line
+    string without timestamp, so tests can assert the whole log output.
+    """
+
+    @pytest.fixture(autouse=True)
+    def logger_level(self):
+        """
+        concat() tests must not depend on the level left behind by other test files
+        """
+        original = logger._level
+        logger.set_level('DEBUG')
+        yield
+        logger.set_level(original)
+
+    def test_concat(self):
+        """
+        Normal logs render as `LEVEL | message`, raw logs render as the message itself
+        """
+        with logger.mock_capture_writer() as capture:
+            logger.info('message')
+            logger.warning('message')
+            logger.raw('raw message')
+
+        assert capture.concat() == """\
+INFO | message
+WARNING | message
+raw message
+"""
+
+    @pytest.mark.parametrize('method, expected', [
+        ('debug', 'DEBUG'),
+        ('info', 'INFO'),
+        ('warning', 'WARNING'),
+        ('error', 'ERROR'),
+        ('critical', 'CRITICAL'),
+    ])
+    def test_level(self, method, expected):
+        """
+        The level name is rendered uppercase, without padding
+        """
+        with logger.mock_capture_writer() as capture:
+            getattr(logger, method)('message')
+
+        assert capture.concat() == f'{expected} | message\n'
+
+    def test_empty(self):
+        """
+        Nothing was logged, nothing is rendered
+        """
+        with logger.mock_capture_writer() as capture:
+            pass
+
+        assert capture.concat() == ''
+
+    def test_clear(self):
+        """
+        clear() drops the logs rendered before it
+        """
+        with logger.mock_capture_writer() as capture:
+            logger.info('message 1')
+            capture.clear()
+            logger.info('message 2')
+
+        assert capture.concat() == 'INFO | message 2\n'
+
+    def test_multiline_message(self):
+        """
+        Only the first line of a message carries the level prefix
+        """
+        with logger.mock_capture_writer() as capture:
+            logger.info('line 1\nline 2')
+
+        assert capture.concat() == 'INFO | line 1\nline 2\n'
+
+    def test_message_format_and_context(self):
+        """
+        The rendered message is the same as the printed one, with the bound
+        context appended
+        """
+        with logger.mock_capture_writer() as capture:
+            logger.info('User {name} logged in', name='May')
+            logger.bind(user='May', action='login').info('Hello')
+
+        assert capture.concat() == """\
+INFO | User May logged in
+INFO | Hello, user='May', action='login'
+"""
+
+    def test_exception(self):
+        """
+        The exception traceback is rendered after the log message
+        """
+        with logger.mock_capture_writer() as capture:
+            try:
+                raise ValueError('Test Error')
+            except ValueError:
+                logger.exception('An exception occurred')
+
+        text = capture.concat()
+        head, _, traceback = text.partition('\n')
+        assert head == 'ERROR | An exception occurred'
+        assert 'ValueError: Test Error' in traceback
+        # traceback is followed by a blank line
+        assert text.endswith('\n\n')
+
+    def test_nested(self):
+        """
+        Each capture renders the logs of its own context only
+        """
+        with logger.mock_capture_writer() as outer:
+            logger.info('Outer 1')
+            with logger.mock_capture_writer() as inner:
+                logger.raw('Inner')
+            logger.info('Outer 2')
+
+        assert inner.concat() == 'Inner\n'
+        assert outer.concat() == """\
+INFO | Outer 1
+Inner
+INFO | Outer 2
+"""
+
+    def test_matches_printed_log(self):
+        """
+        concat() is exactly the text written to the log file, minus the timestamp
+        """
+        with logger.mock_capture_writer() as capture:
+            logger.debug('Debug message')
+            logger.info('Info message')
+            logger.hr('Section', level=3)
+            logger.raw('Raw message')
+            logger.warning('Warning message')
+            logger.error('Error message')
+            try:
+                raise ValueError('Test Error')
+            except ValueError:
+                logger.exception('An exception occurred')
+
+        # strip the timestamp, keep `INFO | `, see `AlasioLogger._msg()`
+        timestamp = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \| ')
+        expected = ''.join(timestamp.sub('', log, count=1) for log in capture.fd.logs)
+        assert capture.concat() == expected

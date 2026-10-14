@@ -192,7 +192,7 @@ class AlasioLogger(LoggingLevel):
         self.set_level(self._level)
 
     def mock_capture_writer(self):
-        """
+        r'''
         Mock writer for testing purpose
 
         Examples:
@@ -201,8 +201,11 @@ class AlasioLogger(LoggingLevel):
                 assert capture.fd.any_contains("Hello Info")
                 assert capture.stdout.any_contains("Hello Info")
                 assert any(log['l'] == 'INFO' and log['m'] == 'Hello Info' for log in capture.backend.logs)
+                assert capture.concat() == """\
+INFO | Hello Info
+"""
                 capture.clear()
-        """
+        '''
         return CaptureWriterContext(self)
 
     def mute(self, stdout=False, fd=False, backend=False, all=False):

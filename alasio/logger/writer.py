@@ -243,6 +243,48 @@ class CaptureBackend:
                     return True
         return False
 
+    def concat(self):
+        """
+        Concatenate captured logs into a multi-line string, for test assertions
+
+        The text is formatted like the printed log, but the timestamp is dropped
+        because it's different on every run.
+            INFO | message
+            raw message
+
+        Returns:
+            str: Log text, one log per line, e.g.
+                INFO | message
+                WARNING | message
+                raw message
+        """
+        return ''.join(self._event_text(event) for event in self.logs)
+
+    @staticmethod
+    def _event_text(event):
+        """
+        Build log text from a captured log event, like the printed log but without timestamp
+
+        Args:
+            event (dict): Log event, keys are
+                'l' (str): Log level
+                'm' (str): Log message
+                'e' (str): Exception traceback, printed after the log message. Defaults to None.
+                'r' (int): Raw tag, the log message is pre-formatted. Defaults to None.
+
+        Returns:
+            str: Log text, ends with a newline
+        """
+        if event.get('r'):
+            # raw log, the message is pre-formatted, no level prefix
+            text = f"{event['m']}\n"
+        else:
+            text = f"{event['l']} | {event['m']}\n"
+        exception = event.get('e')
+        if exception:
+            text = f'{text}{exception}\n'
+        return text
+
 
 class CaptureWriter:
     def __init__(self, parent=None):
@@ -259,6 +301,21 @@ class CaptureWriter:
             self.stdout = CaptureStream()
             self.fd = CaptureStream()
             self.backend = CaptureBackend()
+
+    def concat(self):
+        """
+        Captured logs as a multi-line string, without timestamp, for test assertions
+
+        The text looks like the printed log, but the timestamp is dropped because
+        it's different on every run, for example
+            INFO | message
+            WARNING | message
+            raw message
+
+        Returns:
+            str: Log text, see `CaptureBackend.concat()`
+        """
+        return self.backend.concat()
 
     def clear(self):
         self.stdout.logs.clear()
