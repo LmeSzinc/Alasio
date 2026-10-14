@@ -388,8 +388,9 @@ class ModUpdateCheck:
         ``_check_lock``)
 
         Read-only (the local ledger version against latest.pack). A failure is
-        recorded as the state of the mod, an interrupted request records
-        nothing (the state of the last check stays).
+        recorded as the state of the mod; an interrupted check (the manual
+        cancel, the sequence dropped mid-request) records nothing: the state of
+        the last check goes back, the topic is never left on 'checking'.
 
         Returns:
             str: '' when the check ran, FRESH_MESSAGE when it was discarded
@@ -404,9 +405,17 @@ class ModUpdateCheck:
             # two callers raced to the lock: the first one checked a moment ago
             return FRESH_MESSAGE
         previous = self.info
-        self.set_state('checking')
+        checking = self.set_state('checking')
         try:
             check = await self._request_check()
+        except trio.Cancelled:
+            # the sequence was dropped while the request was in flight (a pause
+            # of a maintenance flow, a replacement of the sequence, the
+            # teardown): the interrupted check records nothing and the state of
+            # the last check goes back -- the topic must not stay on 'checking'
+            # until the restored sequence runs its next check (5-10 minutes)
+            self._rollback_check(checking, previous)
+            raise
         except Exception as e:
             logger.warning(f'[Update] Failed to check "{self.name}": {e}')
             self.set_state('error', error=str(e))
@@ -416,8 +425,7 @@ class ModUpdateCheck:
             # the manual cancel: the request was interrupted, nothing is
             # recorded (the previous state and its versions stay)
             logger.info(f'[Update] The check of "{self.name}" was cancelled')
-            self.info = previous
-            self.push(previous)
+            self._rollback_check(checking, previous)
             return ''
         if check.uptodate():
             self.set_state('uptodate', current=check.local, latest=check.latest,
@@ -428,6 +436,28 @@ class ModUpdateCheck:
                            checked_at=int(time.time()))
         self._checked_mono = time.monotonic()
         return ''
+
+    def _rollback_check(self, checking, previous):
+        """
+        Put the state of the last check back after an interrupted request
+
+        Called by an interrupted check (a dropped sequence, the manual cancel):
+        no verdict exists, so nothing is recorded. Only when the state of the
+        mod is still the ``'checking'`` instance this request pushed -- a writer
+        that moved the state on meanwhile (a maintenance flow marking its scope
+        'queued' / 'stopping') did it knowingly and its state is the newer truth
+        (the interrupted check must not resurrect the verdict it replaced).
+        Binding the previous instance as-is is enough: the topic drops a push
+        whose value is already bound by identity.
+
+        Args:
+            checking (UpdateInfo): The 'checking' state this request pushed
+            previous (UpdateInfo): The state it replaced
+        """
+        if self.info is not checking:
+            return
+        self.info = previous
+        self.push(previous)
 
     async def _request_check(self):
         """
@@ -777,9 +807,11 @@ class UpdateCheck:
 
         The states of the files ('updating', 'restart-required') and the
         failures ('error') do not describe the flow in flight and stay (the next
-        process start converges the tree); 'checking' belongs to the check
-        module and stays too (the restored sequence resolves it with its next
-        check). A mod the flow never touched is left alone.
+        process start converges the tree); 'checking' is the state of a check
+        request, not of the flow: the check module puts the state of the last
+        check back itself when the request is interrupted (see
+        ``ModUpdateCheck._rollback_check``). A mod the flow never touched is
+        left alone.
         """
         for name, mod in self.mods.items():
             if mod.info.state in FLOW_STATES:

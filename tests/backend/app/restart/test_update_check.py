@@ -245,6 +245,71 @@ class TestCheck:
         assert state._checked_mono == 0.0
 
     @pytest.mark.trio
+    async def test_a_dropped_sequence_puts_the_state_of_the_last_check_back(self):
+        """
+        The sequence is dropped while its request is in flight (a pause of a
+        maintenance flow, a replacement): the interrupted check records nothing
+        and the verdict of the last check goes back -- on the mod and on the
+        topic, which must not stay on 'checking' until the next check
+        """
+        module, state = make_mod()
+        state.set_state('available', current='v1', latest='v2')
+        verdict = state.info
+        entered = trio.Event()
+
+        async def in_flight():
+            entered.set()
+            await trio.sleep_forever()
+
+        state._request_check = in_flight
+        async with trio.open_nursery() as nursery:
+            module.attach(nursery)
+            module.first_delay = lambda: 0.0
+            state.start_check_loop()
+            await entered.wait()
+            assert state.info.state == 'checking'
+            assert UpdateSource().data['m'].state == 'checking'
+
+            module.pause()
+            await trio.testing.wait_all_tasks_blocked()
+            assert state.info is verdict
+            assert state.info.state == 'available'
+            assert UpdateSource().data['m'] is verdict
+            assert state.running is False
+            nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_a_state_written_meanwhile_is_not_clobbered_by_the_rollback(self):
+        """
+        A maintenance flow pausing the sequence and marking its scope 'queued' in
+        the same section (the ordering of FlowUpdate): the newer state is the
+        truth, the rollback of the interrupted check leaves it alone
+        """
+        module, state = make_mod()
+        state.set_state('available')
+        entered = trio.Event()
+
+        async def in_flight():
+            entered.set()
+            await trio.sleep_forever()
+
+        state._request_check = in_flight
+        async with trio.open_nursery() as nursery:
+            module.attach(nursery)
+            module.first_delay = lambda: 0.0
+            state.start_check_loop()
+            await entered.wait()
+            assert state.info.state == 'checking'
+            # the flow: pause, then set the state of its scope, no checkpoint
+            # in between (the dropped sequence unwinds afterwards)
+            module.pause()
+            state.set_state('queued')
+            await trio.testing.wait_all_tasks_blocked()
+            assert state.info.state == 'queued'
+            assert UpdateSource().data['m'].state == 'queued'
+            nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
     async def test_cancel_check_interrupts_the_request(self):
         module, state = make_mod()
         started = trio.Event()
