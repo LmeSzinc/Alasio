@@ -172,15 +172,15 @@ class TestDeployUpdate:
             await UnpackJob(OLD_PACK).run()
             assert await DeployJob(server=SERVER).update()
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Unpack done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert read_tree() == NEW_TREE
@@ -196,14 +196,14 @@ INFO | Update done
             await UnpackJob(NEW_PACK).run()
             assert await DeployJob(server=SERVER).update()
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Unpack done
 INFO | [CurrentVersion] new
 INFO | [LatestVersion] new
 INFO | Already up to date: new
-INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Resetting files to "{env.PROJECT_ROOT}"
 INFO | Reset done
 """
         assert read_tree() == NEW_TREE
@@ -220,7 +220,7 @@ INFO | [CurrentVersion] {''}
 INFO | [LatestVersion] new
 INFO | Update available: no local version, latest is new
 WARNING | Failed to read the local version, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -244,7 +244,7 @@ WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPS
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
         assert read_tree() == NEW_TREE
@@ -263,10 +263,10 @@ INFO | Rebuild done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: Failed to decode header: not a pack file: b'garb', keeping the workspace for the next run
 WARNING | Failed to apply the update pack, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
         assert read_tree() == NEW_TREE
@@ -285,8 +285,8 @@ INFO | Rebuild done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert read_tree() == NEW_TREE
@@ -303,7 +303,7 @@ INFO | [CurrentVersion] {''}
 INFO | [LatestVersion] new
 INFO | Update available: no local version, latest is new
 WARNING | Failed to read the local version, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -362,7 +362,7 @@ class TestLatestInfoSnapshot:
 INFO | [CurrentVersion] new
 INFO | [LatestVersion] new
 INFO | Already up to date: new
-INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Resetting files to "{env.PROJECT_ROOT}"
 INFO | Reset done
 """
         assert len(calls) == 1
@@ -378,7 +378,7 @@ INFO | [CurrentVersion] {''}
 INFO | [LatestVersion] new
 INFO | Update available: no local version, latest is new
 WARNING | Failed to read the local version, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -400,7 +400,7 @@ WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPS
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
         assert len(calls) == 1
@@ -416,10 +416,10 @@ INFO | Rebuild done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: Failed to decode header: not a pack file: b'garb', keeping the workspace for the next run
 WARNING | Failed to apply the update pack, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
         assert len(calls) == 1
@@ -435,8 +435,8 @@ INFO | Rebuild done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert len(calls) == 1
@@ -472,14 +472,14 @@ INFO | Update done
             await UnpackJob(NEW_PACK).run()
             assert await DeployJob(server=server).update()
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Unpack done
 INFO | [CurrentVersion] new
 INFO | [LatestVersion] new
 INFO | Already up to date: new
-INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Resetting files to "{env.PROJECT_ROOT}"
 INFO | Reset done
 """
         # the snapshot of the entry fetch decided the whole flow
@@ -516,8 +516,8 @@ class TestUpdatePhases:
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert phases.phases == ['checking', 'downloading', 'updating']
@@ -539,7 +539,7 @@ WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPS
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
         assert phases.phases == ['checking', 'downloading', 'updating']
@@ -557,7 +557,7 @@ INFO | [CurrentVersion] {''}
 INFO | [LatestVersion] new
 INFO | Update available: no local version, latest is new
 WARNING | Failed to read the local version, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -576,7 +576,7 @@ INFO | Rebuild done
 INFO | [CurrentVersion] new
 INFO | [LatestVersion] new
 INFO | Already up to date: new
-INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Resetting files to "{env.PROJECT_ROOT}"
 INFO | Reset done
 """
         assert phases.phases == ['checking', 'updating']
@@ -592,8 +592,8 @@ INFO | Reset done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert read_tree() == NEW_TREE
@@ -673,8 +673,8 @@ class TestVersionDrivenUpdate:
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert len(latest_calls) == 1
@@ -701,7 +701,7 @@ INFO | [CurrentVersion] {''}
 INFO | [LatestVersion] new
 INFO | Update available: no local version, latest is new
 WARNING | Failed to read the local version, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -724,7 +724,7 @@ INFO | Rebuild done
 INFO | [CurrentVersion] new
 INFO | [LatestVersion] new
 INFO | Already up to date: new
-INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Resetting files to "{env.PROJECT_ROOT}"
 INFO | Reset done
 """
         assert len(latest_calls) == 1
@@ -746,7 +746,7 @@ WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPS
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
         assert len(latest_calls) == 1
@@ -775,8 +775,8 @@ INFO | Rebuild done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert phases.phases == ['checking', 'downloading', 'updating']
@@ -841,8 +841,8 @@ INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
 INFO | Update pack unchanged, reusing the kept pack: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert read_tree() == NEW_TREE
@@ -873,7 +873,7 @@ INFO | Update done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 """
         assert file_read_bytes(workspace_file('job.pack')) == UPDATE
         assert server.update_bytes == len(UPDATE)
@@ -895,8 +895,8 @@ INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
 INFO | Update pack unchanged, reusing the kept pack: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert read_tree() == NEW_TREE
@@ -935,8 +935,8 @@ INFO | Update done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert read_tree() == NEW_TREE

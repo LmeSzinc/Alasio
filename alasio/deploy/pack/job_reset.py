@@ -105,7 +105,7 @@ class ResetJob(JobBase):
             await trio.to_thread.run_sync(self._warm_residue)
             await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
-            logger.info(f'Resetting files to "{self.root}", name="{self.name}"')
+            logger.info(f'Resetting files to {self.described_target}')
             if not await trio.to_thread.run_sync(self.validate_index):
                 # the index pack is broken, download it again
                 await self.download_index()

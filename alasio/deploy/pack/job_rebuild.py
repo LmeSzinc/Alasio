@@ -84,7 +84,7 @@ class RebuildJob(ResetJob):
             await trio.to_thread.run_sync(self._warm_residue)
             await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
-            logger.info(f'Rebuilding files to "{self.root}", name="{self.name}"')
+            logger.info(f'Rebuilding files to {self.described_target}')
             # the deletion base of the leftover cleanup: the old local
             # index plus the records of the job file of a previous run
             # (R19), so a file that only an intermediate version has is

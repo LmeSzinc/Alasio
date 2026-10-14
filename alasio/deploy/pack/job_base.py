@@ -134,6 +134,22 @@ class DeployTarget:
         # DeployJob.locked()
         self.lock_file = self.ledger.joinpath('lock')
 
+    @cached_property
+    def described_target(self):
+        """
+        The target as the log messages of the jobs show it: the quoted
+        root, with the ledger key appended when the target is named.
+
+            "E:/ProgramData/Pycharm/Alasio"
+            "E:/ProgramData/Pycharm/Alasio", name="httpx"
+
+        Returns:
+            str: The target text
+        """
+        if self.name:
+            return f'"{self.root}", name="{self.name}"'
+        return f'"{self.root}"'
+
 
 class JobBase(DeployTarget):
     """

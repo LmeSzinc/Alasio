@@ -564,8 +564,8 @@ class TestUpdateRoundtrip:
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 ERROR | Failed to replace file: interrupted, keeping the workspace for the next run
 """
         # the target was written first, the source is still in place:
@@ -908,9 +908,9 @@ class TestIndexUpdate:
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to download the content of 1 files: no server provided
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
 """
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
@@ -998,11 +998,11 @@ class TestSourceDownload:
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to download docs/readme_copy.txt: Failed to decode docs/readme_copy.txt: size mismatch: decoded 8 bytes, expected 10
 WARNING | Failed to download docs/readme_copy2.txt: Failed to decode docs/readme_copy2.txt: size mismatch: decoded 8 bytes, expected 10
 WARNING | Failed to download docs/readme.md: Failed to decode docs/readme.md: size mismatch: decoded 8 bytes, expected 10
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: 3 file(s) stayed in error, the workspace is kept for the next run
 """
         # the failed copies and the missing unchanged source (failed
@@ -1027,9 +1027,9 @@ WARNING | Failed to update: 3 file(s) stayed in error, the workspace is kept for
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to download the content of 2 files: no server provided
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: 2 file(s) stayed in error, the workspace is kept for the next run
 """
         assert [item.info.path for item in job.error] == \
@@ -1063,9 +1063,9 @@ class TestValidateRemaining:
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to download data/blob.png: Failed to decompress data/blob.png: Corrupt input data
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
 """
         assert [item.info.path for item in job.error] == ['data/blob.png']
@@ -1088,10 +1088,10 @@ WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to download .pack/index.pack: Failed to decode header: not a pack file: b'bad '
 WARNING | Failed to validate the remaining files: the index pack record failed
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
 """
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
@@ -1258,10 +1258,10 @@ class TestDownload:
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to download .pack/index.pack: Failed to decode header: not a pack file: b'bad '
 WARNING | Failed to validate the remaining files: the index pack record failed
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
 """
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
@@ -1292,10 +1292,10 @@ WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to download .pack/index.pack: 500 Internal Server Error
 WARNING | Failed to validate the remaining files: the index pack record failed
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
 """
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
@@ -1314,10 +1314,10 @@ WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to download .pack/index.pack: Failed to decode header: not a pack file: b'bad '
 WARNING | Failed to validate the remaining files: the index pack record failed
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: 3 file(s) stayed in error, the workspace is kept for the next run
 """
         # the offsets are unavailable: the index record and every
@@ -1350,8 +1350,8 @@ class TestCallerFlow:
         with logger.mock_capture_writer() as capture:
             assert await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert read_tree() == NEW_TREE
@@ -1404,7 +1404,7 @@ INFO | Update done
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: Failed to validate data checksum: checksum mismatch, keeping the workspace for the next run
 """
         # the job file of the failed run is the resume base of the next
@@ -1489,8 +1489,8 @@ class TestIntermediateLeftovers:
         with logger.mock_capture_writer() as capture:
             assert await job.run()
         assert capture.concat() == f"""\
-INFO | Updating files to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Update done
 """
         assert not os.path.exists(env.PROJECT_ROOT / 'b.txt')
@@ -1504,7 +1504,7 @@ INFO | Update done
         with logger.mock_capture_writer() as capture:
             assert await job.run()
         assert capture.concat() == f"""\
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
         assert not os.path.exists(env.PROJECT_ROOT / 'b.txt')
@@ -1519,7 +1519,7 @@ INFO | Rebuild done
         with logger.mock_capture_writer() as capture:
             assert await job.run()
         assert capture.concat() == f"""\
-INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Resetting files to "{env.PROJECT_ROOT}"
 INFO | Reset done
 """
         assert not os.path.exists(env.PROJECT_ROOT / 'b.txt')

@@ -101,7 +101,7 @@ class UnpackJob(JobBase):
             await trio.to_thread.run_sync(self._warm_residue)
             await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
-            logger.info(f'Unpacking data to "{self.root}", name="{self.name}"')
+            logger.info(f'Unpacking data to {self.described_target}')
             await trio.to_thread.run_sync(self.unpack)
         except Exception as e:
             # no real file was written: the workspace (the job file
@@ -110,7 +110,7 @@ class UnpackJob(JobBase):
             logger.warning(f'Failed to unpack: {e}, keeping the workspace for the next run')
             return False
         try:
-            logger.info(f'Replacing files to "{self.root}", name="{self.name}"')
+            logger.info(f'Replacing files to {self.described_target}')
             await trio.to_thread.run_sync(self.replace)
         except Exception as e:
             # real files may be partially replaced, the workspace is

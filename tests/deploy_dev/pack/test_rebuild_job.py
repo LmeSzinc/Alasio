@@ -335,7 +335,7 @@ class TestLeftoverCleanup:
             job = RebuildJob(SERVER)
             assert await job.run()
         assert capture.concat() == f"""\
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -361,7 +361,7 @@ INFO | Rebuild done
             job = RebuildJob(SERVER)
             assert await job.run()
         assert capture.concat() == f"""\
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: Failed to validate index checksum: checksum mismatch
 INFO | Rebuild done
 """
@@ -453,7 +453,7 @@ class TestFileRepair:
             assert not await job.run()
         assert job.error
         assert capture.concat() == f"""\
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 WARNING | Failed to download .gitattributes: Failed to decompress .gitattributes: Corrupt input data
 WARNING | Failed to download backend/a1.py: Failed to decompress backend/a1.py: Corrupt input data
 WARNING | Failed to download backend/a2.py: Failed to decompress backend/a2.py: Corrupt input data
@@ -489,7 +489,7 @@ WARNING | Failed to rebuild: 18 file(s) stayed in error, the workspace is kept f
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 WARNING | Failed to rebuild: Failed to download the index pack: no server provided, keeping the workspace for the next run
 """
@@ -543,7 +543,7 @@ class TestResume:
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 ERROR | Failed to replace file: interrupted, keeping the workspace for the next run
 """
         # the interrupted pass replaced a data file, never the index pack

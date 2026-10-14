@@ -30,9 +30,9 @@ class TestDeployJob:
         with logger.mock_capture_writer() as capture:
             await DeployJob().unpack(WEBSITE_FULL_PACK)
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Unpack done
 """
         for path, (content, _) in WEBSITE_FILES.items():
@@ -49,9 +49,9 @@ INFO | Unpack done
             await job.unpack(WEBSITE_FULL_PACK)
         assert job.changed is True
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Unpack done
 """
         job = DeployJob()
@@ -61,8 +61,8 @@ INFO | Unpack done
         # the second run reads the local index of the first one: the
         # flow is the same, only the old index warning is gone
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Unpack done
 """
 
@@ -80,9 +80,9 @@ INFO | Unpack done
         # the job file of the previous run is not read: the flow is the
         # flow of an empty root
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Unpack done
 """
         for path, (content, _) in WEBSITE_FILES.items():
@@ -100,7 +100,7 @@ INFO | Unpack done
         with logger.mock_capture_writer() as capture:
             await DeployJob().unpack(bytes(bad))
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
 WARNING | Failed to unpack: Failed to validate data checksum: checksum mismatch, keeping the workspace for the next run
 """
         # the job file of the failed run is the resume base of the next
@@ -117,9 +117,9 @@ WARNING | Failed to unpack: Failed to validate data checksum: checksum mismatch,
         with logger.mock_capture_writer() as capture:
             await DeployJob().unpack(WEBSITE_FULL_PACK)
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 ERROR | Failed to replace file: replace failed, keeping the workspace for the next run
 """
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == WEBSITE_FULL_PACK

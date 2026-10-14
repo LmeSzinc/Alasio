@@ -140,7 +140,7 @@ class UpdateJob(JobBase):
             await trio.to_thread.run_sync(self._warm_residue)
             await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
-            logger.info(f'Updating files to "{self.root}", name="{self.name}"')
+            logger.info(f'Updating files to {self.described_target}')
             await trio.to_thread.run_sync(self.unpack)
             await self.download()
             await self._validate_remaining()
@@ -151,7 +151,7 @@ class UpdateJob(JobBase):
             logger.warning(f'Failed to update: {e}, keeping the workspace for the next run')
             return False
         try:
-            logger.info(f'Replacing files to "{self.root}", name="{self.name}"')
+            logger.info(f'Replacing files to {self.described_target}')
             # the new index pack is committed only when every record
             # landed: a failed flow keeps the old local version
             await trio.to_thread.run_sync(self.replace, not self.error)

@@ -671,7 +671,7 @@ class TestRun:
         with logger.mock_capture_writer() as capture:
             assert await job.run()
         assert capture.concat() == f"""\
-INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Resetting files to "{env.PROJECT_ROOT}"
 WARNING | Failed to validate the index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Reset done
 """
@@ -752,7 +752,7 @@ INFO | Reset done
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Resetting files to "{env.PROJECT_ROOT}"
 WARNING | Failed to validate the index pack: Failed to validate index checksum: checksum mismatch
 WARNING | Failed to reset: Failed to validate index checksum: checksum mismatch, keeping the workspace for the next run
 """
@@ -783,7 +783,7 @@ WARNING | Failed to reset: Failed to validate index checksum: checksum mismatch,
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
-INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Resetting files to "{env.PROJECT_ROOT}"
 WARNING | Failed to validate the index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 WARNING | Failed to reset: Failed to download the index pack: no server provided, keeping the workspace for the next run
 """
@@ -842,7 +842,7 @@ WARNING | Failed to reset: Failed to download the index pack: no server provided
         # the replace failure is an error: real files may be partially
         # replaced, it is not the safe "no real file was written" case
         assert capture.concat() == f"""\
-INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Resetting files to "{env.PROJECT_ROOT}"
 WARNING | Failed to validate the latest index: local checksum d7431ce092c43d751ef433cabd431ee3b003cad6 != 887e26978116304ea3a5b23c8b41f88a838d0e61
 ERROR | Failed to replace file: interrupted, keeping the workspace for the next run
 """

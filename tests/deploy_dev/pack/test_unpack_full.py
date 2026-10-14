@@ -888,9 +888,9 @@ class TestUnpackRebuild:
         with logger.mock_capture_writer() as capture:
             await UnpackJob(NEW_PACK).run()
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Unpack done
 """
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
@@ -915,9 +915,9 @@ INFO | Unpack done
         with logger.mock_capture_writer() as capture:
             await UnpackJob(NEW_PACK).run()
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
 WARNING | Failed to read the old index pack: Failed to validate index checksum: checksum mismatch
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 INFO | Unpack done
 """
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
@@ -970,8 +970,8 @@ INFO | Unpack done
         # the replace failure is an error: real files may be partially
         # replaced (see the run() docstring)
         assert capture.concat() == f"""\
-INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
-INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpacking data to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
 ERROR | Failed to replace file: interrupted, keeping the workspace for the next run
 """
         # the interrupted pass replaced a data file, never the index pack

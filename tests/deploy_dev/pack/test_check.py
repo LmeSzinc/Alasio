@@ -156,7 +156,7 @@ WARNING | Request to "http://mock/c2/from_c1.pack" failed (attempt 1/3): HTTPSta
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Failed to get the update pack c1 -> c2: Client error '404 Not Found' for url 'http://mock/c2/from_c1.pack'
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
 
@@ -190,6 +190,6 @@ WARNING | Request to "http://mock/c2/from_c1.pack" failed (attempt 1/3): HTTPSta
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Failed to get the update pack c1 -> c2: Client error '404 Not Found' for url 'http://mock/c2/from_c1.pack'
 For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
-INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
