@@ -100,6 +100,10 @@ def create_dist(fake, files, record=None, name='demo', version='1.0', site=None)
     """
     Create a distribution on the (fake) filesystem.
 
+    The METADATA of the .dist-info directory records the name and the version
+    of the distribution, the metadata an installer writes, PEP 566; files
+    that carry a METADATA of their own are used as they are.
+
     Args:
         fake (FakeFilesystem): Active fake filesystem
         files (dict[str, bytes | str]): Files of the distribution, path
@@ -121,7 +125,10 @@ def create_dist(fake, files, record=None, name='demo', version='1.0', site=None)
     folder = f'{name}-{version}.dist-info'
     dist_files = dict(files)
     if not any(path.endswith('/METADATA') for path in dist_files):
-        dist_files[f'{folder}/METADATA'] = b'Metadata-Version: 2.1\n'
+        # The metadata an installer writes: it records the name and the
+        # version of the distribution, PEP 566
+        content = f'Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n\n'
+        dist_files[f'{folder}/METADATA'] = content.encode('utf-8')
 
     if record is None:
         record = [

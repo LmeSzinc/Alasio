@@ -29,7 +29,7 @@ import trio
 
 from alasio.deploy.httpclient.probe import AllMirrorsFailedError
 from alasio.deploy.simple_pip.parse_req import Requirements
-from alasio.deploy.simple_pip.pip_list import PipList, normalize_name
+from alasio.deploy.simple_pip.pip_list import DIST_INFO_SUFFIX, PipList, normalize_name
 from alasio.deploy.simple_pip.pip_pack import PipPack
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_text
@@ -49,6 +49,10 @@ class InstallBase:
     install_pack() installs the declared pack updated distributions of
     that same read; a caller that wants to re-check after the installs
     (e.g. to report what is left for pip) creates a new instance.
+    cleanup_dist_info() removes the metadata directories a version update
+    of a distribution left behind: the pack flow only removes the files
+    its records describe, so a metadata directory of an old version that
+    still holds a file of no record survives it, see the method.
 
     Attributes:
         mod (Mod): The mounted mod, its entry carries the requirements
@@ -222,3 +226,122 @@ class InstallBase:
                 ok = False
             out[name] = ok
         return out
+
+    async def cleanup_dist_info(self, name, keep_version):
+        """
+        Remove the metadata directories of the other versions of one
+        distribution, whatever files they still hold: keep the directories
+        of keep_version, remove every other one.
+
+        A version update renames the metadata directory of a distribution
+        ({name}-{old_version}.dist-info -> {name}-{new_version}.dist-info).
+        The pack flow removes the files its records describe, but a
+        directory that still holds a file of no record -- e.g. the
+        REQUESTED or the direct_url.json a pip installation left, or the
+        directory pip installed itself -- survives the update, and pip and
+        importlib.metadata then see the distribution twice. This cleanup
+        removes every metadata directory of the distribution that is not
+        the directory of keep_version, whatever files it still holds.
+
+        The candidates are the "{name}-{version}.dist-info" directories of
+        the top level of the site-packages folder whose metadata names the
+        distribution: the name is read like PipList reads it (the Name
+        header of the metadata, the name of the directory as the fallback)
+        and compared in the PEP 503 normalized form, so any case and
+        separator style of the name finds the same directories. A symbolic
+        link and a .egg-info entry are never touched.
+
+        The version of an installation is the one its metadata records,
+        the version pip and importlib.metadata read. A directory whose name
+        carries another version than its metadata is the version of the
+        metadata: "{name}-2.0.dist-info" holding a 1.0 METADATA is a 1.0
+        installation and goes with the other versions. A directory whose
+        metadata records the version to keep is an installation of that
+        version whatever its name says: it is removed only when another
+        installation of the version carries the version in its directory
+        name too (the shape a flow writes, "{name}-2.0.dist-info" for a 2.0
+        METADATA), it is a copy under the name of another version then. A
+        directory whose metadata records no version -- an empty or a broken
+        one, e.g. the residue of an interrupted install -- is no
+        installation pip can read (PEP 376): it is removed with the others.
+
+        The cleanup runs only when the installation of the version to keep
+        landed (the metadata of a directory records that version): an
+        environment that is not at the version keeps the metadata it has,
+        nothing is removed and a warning is logged then. The removal is
+        best effort, like the cleanup of the pack flow: a directory that
+        can not be removed, e.g. a file held by a running process on
+        Windows, is logged and kept, the next call retries it.
+
+        The blocking file IO runs on a worker thread.
+
+        Args:
+            name (str): Name of the distribution, e.g. 'httpx' or
+                'ruamel.yaml', any case and separator style
+            keep_version (str): Version to keep, e.g. '0.28.1', the
+                version the dependency was installed at (the Version of
+                the METADATA of the wheel)
+
+        Returns:
+            list[str]: Paths of the removed metadata directories, sorted,
+                empty when there was nothing to remove
+        """
+        return await trio.to_thread.run_sync(self._cleanup_dist_info, name, keep_version)
+
+    def _cleanup_dist_info(self, name, keep_version):
+        """
+        Remove the metadata directories of the other versions of one
+        distribution: the blocking work of cleanup_dist_info(), called on
+        a worker thread.
+
+        Args:
+            name (str): Name of the distribution
+            keep_version (str): Version to keep
+
+        Returns:
+            list[str]: Paths of the removed metadata directories
+        """
+        dist_key = normalize_name(name)
+        dists = [
+            dist
+            for dist in PipList(self.site_packages).pip_list()
+            if dist.dist_key == dist_key and dist.info.endswith(DIST_INFO_SUFFIX)
+        ]
+        # The installations of the version to keep: the entries whose
+        # metadata records the version, pip reads the installations from the
+        # metadata. The entries of the other versions, the entries whose
+        # metadata records no version and the entries that hold no metadata
+        # at all, e.g. the empty directory of an interrupted install, are the
+        # removal candidates besides them
+        keep = [dist for dist in dists if dist.metadata_version == keep_version]
+        if not keep:
+            # The version to keep must be there before the metadata of the
+            # other versions goes: an environment that is not at the version
+            # keeps the metadata it has
+            logger.warning(
+                f'Skipped the cleanup of the metadata directories of "{name}": '
+                f'the version to keep is not installed: "{keep_version}"'
+            )
+            return []
+        # The installations of the version whose directory name carries the
+        # version too (PEP 427, the shape a flow writes,
+        # "{name}-{version}.dist-info"): they decide on the copies of the
+        # version, an installation of the version under the name of another
+        # one is a copy of them. Without a directory of that shape the
+        # installations of the version are the only metadata of the
+        # distribution and every one of them is kept
+        named = [dist for dist in keep if dist.dist_version == keep_version]
+        kept = {dist.info for dist in (named or keep)}
+        removed = []
+        for dist in dists:
+            if dist.info in kept:
+                continue
+            if dist.info.folder_rmtree():
+                removed.append(dist.info)
+                logger.info(f'Removed the metadata directory of "{name}" "{dist.version}": {dist.info}')
+            else:
+                logger.warning(
+                    f'Failed to remove the metadata directory of "{name}" "{dist.version}", '
+                    f'keeping it for the next call: {dist.info}'
+                )
+        return removed

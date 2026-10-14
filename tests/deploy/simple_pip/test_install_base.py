@@ -8,7 +8,9 @@ folder does not satisfy, missing locally or at another version.
 install_pack installs the out-of-date pins that the entry declares for
 pack updates (pack_update_deps) from the pack channels of the mod, one
 PipPack install per distribution, and leaves the other pins to the pip
-install of the caller.
+install of the caller. cleanup_dist_info removes the metadata directories
+a version update left behind, keeping the directory of the version that is
+kept.
 
 The channels of a test are in-memory channel servers (MockServerFile of
 tests.deploy_dev.pack) whose base url carries the path prefix of a
@@ -16,6 +18,7 @@ deployment, the packs are built from wheels on the fake filesystem like
 test_pip_pack does, so the requests of a flow run on the urls a real
 deployment serves.
 """
+import os
 from urllib.parse import urlsplit
 
 import httpx2
@@ -32,7 +35,9 @@ from alasio.ext.path.iter import iter_files
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack.conftest import MockServerFile, app_folder  # noqa: F401
-from tests.deploy_dev.simple_pip.conftest import abs_path, build_wheel, create_dist, site_packages
+from tests.deploy_dev.simple_pip.conftest import (
+    abs_path, build_wheel, create_dist, list_files, list_folders, site_packages
+)
 
 # the mirrors of the fake mod: the channel base of its tree, the packrepo
 # folder of a pack server deployment
@@ -447,3 +452,270 @@ plain==1.0
         mod = make_mod(fs, content='demo==1.0\n', mirrors='', pack_update_deps=['demo'])
         with pytest.raises(ValueError, match='declares no update source'):
             await InstallBase(mod, site).install_pack()
+
+
+class TestCleanupDistInfo:
+    """The metadata directories of the other versions of one distribution."""
+
+    @pytest.mark.trio
+    async def test_keeps_only_the_version_to_keep(self, fs):
+        """Every metadata directory of the distribution but the one of the
+        version to keep is removed, an other distribution is untouched."""
+        site = site_packages(fs)
+        create_dist(fs, {}, name='demo', version='1.0')
+        create_dist(fs, {}, name='demo', version='2.0')
+        create_dist(fs, {}, name='demo', version='3.0')
+        create_dist(fs, {}, name='other', version='1.0')
+        install = InstallBase(make_mod(fs), site)
+
+        # 3.0 is the residue of a downgrade: every other version goes, not
+        # only the older ones, and the order of the returned paths is the
+        # order of the listing
+        with logger.mock_capture_writer() as capture:
+            assert await install.cleanup_dist_info('demo', '2.0') == [
+                f'{site}/demo-1.0.dist-info',
+                f'{site}/demo-3.0.dist-info',
+            ]
+        assert capture.fd.any_contains('Removed the metadata directory of "demo" "1.0"')
+        assert capture.fd.any_contains('Removed the metadata directory of "demo" "3.0"')
+        assert list_folders(site) == ['demo-2.0.dist-info', 'other-1.0.dist-info']
+        # the kept installation is untouched, its files included
+        assert list_files(f'{site}/demo-2.0.dist-info') == ['METADATA', 'RECORD']
+
+    @pytest.mark.trio
+    async def test_removes_a_directory_with_files_of_no_record(self, fs):
+        """The removal is unconditional: a directory that still holds files
+        of no pack record, e.g. the files a pip installation left, goes as a
+        whole."""
+        site = site_packages(fs)
+        create_dist(fs, {
+            'demo-1.0.dist-info/REQUESTED': b'',
+            'demo-1.0.dist-info/direct_url.json': b'{"url": "file:///w/demo"}',
+            'demo-1.0.dist-info/leftover/note.txt': b'left by hand\n',
+        }, name='demo', version='1.0')
+        create_dist(fs, {}, name='demo', version='2.0')
+        install = InstallBase(make_mod(fs), site)
+
+        assert await install.cleanup_dist_info('demo', '2.0') == [f'{site}/demo-1.0.dist-info']
+        assert list_folders(site) == ['demo-2.0.dist-info']
+
+    @pytest.mark.trio
+    async def test_the_name_is_matched_normalized(self, fs):
+        """The metadata names the distribution, the directory name is the
+        fallback, and the compare is normalized: any case and separator
+        style of the name finds the same directories."""
+        site = site_packages(fs)
+        create_dist(fs, {
+            'ruamel_yaml-0.18.6.dist-info/METADATA':
+                b'Metadata-Version: 2.1\nName: ruamel.yaml\nVersion: 0.18.6\n\n',
+        }, name='ruamel_yaml', version='0.18.6')
+        create_dist(fs, {
+            'ruamel_yaml-0.19.0.dist-info/METADATA':
+                b'Metadata-Version: 2.1\nName: ruamel.yaml\nVersion: 0.19.0\n\n',
+        }, name='ruamel_yaml', version='0.19.0')
+        install = InstallBase(make_mod(fs), site)
+
+        assert await install.cleanup_dist_info('Ruamel.Yaml', '0.19.0') == [
+            f'{site}/ruamel_yaml-0.18.6.dist-info']
+        assert list_folders(site) == ['ruamel_yaml-0.19.0.dist-info']
+
+    @pytest.mark.trio
+    async def test_the_metadata_decides_the_version(self, fs):
+        """The directory carries the version to keep, the metadata another
+        one: pip reads the metadata, the entry is an installation of the
+        other version and is no proof the version to keep landed."""
+        site = site_packages(fs)
+        create_dist(fs, {
+            'demo-2.0.dist-info/METADATA':
+                b'Metadata-Version: 2.1\nName: demo\nVersion: 1.0\n\n',
+        }, name='demo', version='2.0')
+        create_dist(fs, {}, name='demo', version='1.0')
+        install = InstallBase(make_mod(fs), site)
+
+        # no installation of 2.0 is there, whatever the names say: nothing
+        # goes, an environment that is not at the version keeps its metadata
+        with logger.mock_capture_writer() as capture:
+            assert await install.cleanup_dist_info('demo', '2.0') == []
+        assert capture.fd.any_contains('the version to keep is not installed: "2.0"')
+        assert list_folders(site) == ['demo-1.0.dist-info', 'demo-2.0.dist-info']
+
+        # the version to keep lands: the mismatched directory is an
+        # installation of 1.0 and goes with the other 1.0 one
+        create_dist(fs, {
+            'demo_x-2.0.dist-info/METADATA':
+                b'Metadata-Version: 2.1\nName: demo\nVersion: 2.0\n\n',
+        }, name='demo_x', version='2.0')
+        assert await install.cleanup_dist_info('demo', '2.0') == [
+            f'{site}/demo-1.0.dist-info',
+            f'{site}/demo-2.0.dist-info',
+        ]
+        assert list_folders(site) == ['demo_x-2.0.dist-info']
+
+    @pytest.mark.trio
+    async def test_a_copy_of_the_version_under_the_name_of_another(self, fs):
+        """The metadata records the version to keep, the directory name
+        another one, and an installation of the version under its own name is
+        there too: the copy goes."""
+        site = site_packages(fs)
+        create_dist(fs, {
+            'demo-1.0.dist-info/METADATA':
+                b'Metadata-Version: 2.1\nName: demo\nVersion: 2.0\n\n',
+        }, name='demo', version='1.0')
+        create_dist(fs, {}, name='demo', version='2.0')
+        install = InstallBase(make_mod(fs), site)
+
+        assert await install.cleanup_dist_info('demo', '2.0') == [f'{site}/demo-1.0.dist-info']
+        assert list_folders(site) == ['demo-2.0.dist-info']
+
+    @pytest.mark.trio
+    async def test_the_only_installation_is_kept_whatever_its_name(self, fs):
+        """The version to keep is installed under the name of another version
+        and is the only metadata of it: it is kept, the other versions go, a
+        distribution is never left without metadata."""
+        site = site_packages(fs)
+        create_dist(fs, {
+            'demo-1.0.dist-info/METADATA':
+                b'Metadata-Version: 2.1\nName: demo\nVersion: 2.0\n\n',
+        }, name='demo', version='1.0')
+        create_dist(fs, {}, name='demo', version='3.0')
+        install = InstallBase(make_mod(fs), site)
+
+        assert await install.cleanup_dist_info('demo', '2.0') == [f'{site}/demo-3.0.dist-info']
+        assert list_folders(site) == ['demo-1.0.dist-info']
+
+    @pytest.mark.trio
+    async def test_a_directory_without_metadata_is_no_installation(self, fs):
+        """A directory that holds no METADATA is no installation, PEP 376,
+        whatever version its name carries: it goes, the version of the
+        metadata alone decides."""
+        site = site_packages(fs)
+        create_dist(fs, {
+            'demo-1.0.dist-info/METADATA':
+                b'Metadata-Version: 2.1\nName: demo\nVersion: 2.0\n\n',
+        }, name='demo', version='1.0')
+        # the empty directories an interrupted install left: one carries the
+        # version to keep, both are phantoms pip reads no installation from
+        fs.create_dir(f'{site}/demo-2.0.dist-info')
+        fs.create_dir(f'{site}/demo-3.0.dist-info')
+        install = InstallBase(make_mod(fs), site)
+
+        assert await install.cleanup_dist_info('demo', '2.0') == [
+            f'{site}/demo-2.0.dist-info',
+            f'{site}/demo-3.0.dist-info',
+        ]
+        assert list_folders(site) == ['demo-1.0.dist-info']
+
+    @pytest.mark.trio
+    async def test_a_metadata_without_a_version_is_no_installation(self, fs):
+        """A METADATA that records no version names no installation pip can
+        read: a directory of that shape is no proof the version to keep landed
+        and goes with the installations of the other versions."""
+        site = site_packages(fs)
+        create_dist(fs, {
+            'demo-2.0.dist-info/METADATA': b'Metadata-Version: 2.1\nName: demo\n\n',
+        }, name='demo', version='2.0')
+        create_dist(fs, {}, name='demo', version='1.0')
+        install = InstallBase(make_mod(fs), site)
+
+        # the version of the directory name alone is no proof: nothing goes
+        with logger.mock_capture_writer() as capture:
+            assert await install.cleanup_dist_info('demo', '2.0') == []
+        assert capture.fd.any_contains('the version to keep is not installed: "2.0"')
+        assert list_folders(site) == ['demo-1.0.dist-info', 'demo-2.0.dist-info']
+
+        # the version to keep lands: the entry without a version goes with
+        # the installations of the other version
+        create_dist(fs, {
+            'demo_x-2.0.dist-info/METADATA':
+                b'Metadata-Version: 2.1\nName: demo\nVersion: 2.0\n\n',
+        }, name='demo_x', version='2.0')
+        assert await install.cleanup_dist_info('demo', '2.0') == [
+            f'{site}/demo-1.0.dist-info',
+            f'{site}/demo-2.0.dist-info',
+        ]
+        assert list_folders(site) == ['demo_x-2.0.dist-info']
+
+    @pytest.mark.trio
+    async def test_the_version_to_keep_must_be_installed(self, fs):
+        """No directory of the version to keep: the metadata of the
+        installed version is kept and a warning is logged."""
+        site = site_packages(fs)
+        create_dist(fs, {}, name='demo', version='1.0')
+        install = InstallBase(make_mod(fs), site)
+
+        with logger.mock_capture_writer() as capture:
+            assert await install.cleanup_dist_info('demo', '2.0') == []
+        assert capture.fd.any_contains('the version to keep is not installed: "2.0"')
+        assert list_folders(site) == ['demo-1.0.dist-info']
+
+    @pytest.mark.trio
+    async def test_the_version_to_keep_must_hold_metadata(self, fs):
+        """A directory of the version to keep that holds no METADATA is the
+        residue of an interrupted install rather than a proof it landed: the
+        metadata of the other versions is kept."""
+        site = site_packages(fs)
+        create_dist(fs, {}, name='demo', version='1.0')
+        # the directory of the new version landed, its METADATA never did
+        fs.create_dir(f'{site}/demo-2.0.dist-info')
+        install = InstallBase(make_mod(fs), site)
+
+        with logger.mock_capture_writer() as capture:
+            assert await install.cleanup_dist_info('demo', '2.0') == []
+        assert capture.fd.any_contains('the version to keep is not installed: "2.0"')
+        assert list_folders(site) == ['demo-1.0.dist-info', 'demo-2.0.dist-info']
+
+    @pytest.mark.trio
+    async def test_a_linked_metadata_directory_is_left(self, fs):
+        """A metadata directory that is a symbolic link is not an
+        installation of the folder: it is neither read nor removed."""
+        site = site_packages(fs)
+        create_dist(fs, {}, name='demo', version='2.0')
+        other = abs_path(fs, '/env/other/demo-1.0.dist-info')
+        fs.create_file(f'{other}/METADATA', contents=b'Metadata-Version: 2.1\n')
+        fs.create_symlink(f'{site}/demo-1.0.dist-info', other)
+        install = InstallBase(make_mod(fs), site)
+
+        assert await install.cleanup_dist_info('demo', '2.0') == []
+        # the link and the tree it points at are untouched
+        assert os.path.islink(f'{site}/demo-1.0.dist-info')
+        assert list_files(other) == ['METADATA']
+
+    @pytest.mark.trio
+    async def test_a_failed_removal_is_kept_and_retried(self, fs, monkeypatch):
+        """A directory that can not be removed is logged and kept as it is,
+        the next call removes it."""
+        site = site_packages(fs)
+        create_dist(fs, {}, name='demo', version='1.0')
+        create_dist(fs, {}, name='demo', version='2.0')
+        stale = f'{site}/demo-1.0.dist-info'
+        unlink = os.unlink
+
+        def unlink_locked(path, *args, **kwargs):
+            if str(path).startswith(stale):
+                raise PermissionError(13, 'Permission denied')
+            return unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, 'unlink', unlink_locked)
+        install = InstallBase(make_mod(fs), site)
+        with logger.mock_capture_writer() as capture:
+            assert await install.cleanup_dist_info('demo', '2.0') == []
+        assert capture.fd.any_contains('keeping it for the next call')
+        assert list_folders(site) == ['demo-1.0.dist-info', 'demo-2.0.dist-info']
+
+        # the next call removes the directory the lock left behind
+        monkeypatch.setattr(os, 'unlink', unlink)
+        assert await install.cleanup_dist_info('demo', '2.0') == [stale]
+        assert list_folders(site) == ['demo-2.0.dist-info']
+
+    @pytest.mark.trio
+    async def test_idempotent(self, fs):
+        """A second call finds nothing to remove and logs no removal."""
+        site = site_packages(fs)
+        create_dist(fs, {}, name='demo', version='1.0')
+        install = InstallBase(make_mod(fs), site)
+
+        with logger.mock_capture_writer() as capture:
+            assert await install.cleanup_dist_info('demo', '1.0') == []
+            assert await install.cleanup_dist_info('demo', '1.0') == []
+        assert not capture.fd.any_contains('Removed the metadata directory of "demo"')
+        assert list_folders(site) == ['demo-1.0.dist-info']

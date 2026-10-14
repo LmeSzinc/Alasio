@@ -234,6 +234,21 @@ class TestDistribution:
         dist = Distribution('demo', '1.0', PathStr('/env/demo-1.0.dist-info'))
         assert repr(dist) == "Distribution('demo', '1.0', '/env/demo-1.0.dist-info')"
 
+    def test_versions(self):
+        """The version the metadata records, the version the name of the
+        entry carries and the effective one are kept apart."""
+        dist = Distribution(
+            'demo', '2.0', PathStr('/env/demo-2.0.dist-info'),
+            metadata_version='2.0', dist_version='2.0',
+        )
+        assert (dist.metadata_version, dist.dist_version, dist.version) == ('2.0', '2.0', '2.0')
+        # an entry that holds no metadata: the name of the entry only
+        dist = Distribution('demo', '1.0', PathStr('/env/demo-1.0.dist-info'), dist_version='1.0')
+        assert (dist.metadata_version, dist.dist_version, dist.version) == ('', '1.0', '1.0')
+        # an entry of a pack ledger: the version of the ledger only
+        dist = Distribution('demo', '3.0', PathStr('/env/.pack/demo/index.pack'))
+        assert (dist.metadata_version, dist.dist_version, dist.version) == ('', '', '3.0')
+
 
 class TestInit:
     def test_normalize_root(self):
@@ -287,6 +302,26 @@ class TestDistInfo:
         # the name of the directory is escaped, PEP 427, the normalized key
         # finds the distribution as it is named in a config
         assert result[0].dist_key == 'ruamel-yaml'
+
+    def test_the_versions_of_an_entry(self, fs):
+        """The version of the metadata, the version of the name of the entry
+        and the effective one are read apart: the metadata is the version, the
+        name of the entry the fallback."""
+        create_dist_info(fs, 'demo-2.0.dist-info', metadata('demo', '2.0'))
+        create_dist_info(fs, 'other-1.0.dist-info')
+        create_egg_info(fs, 'legacy.egg-info', metadata('legacy', '0.1'))
+        result = run_list()
+        assert [
+            (dist.name, dist.metadata_version, dist.dist_version, dist.version)
+            for dist in result
+        ] == [
+            ('demo', '2.0', '2.0', '2.0'),
+            # a .egg-info entry is named after the distribution only
+            ('legacy', '0.1', '', '0.1'),
+            # a directory without a METADATA file: the name of the entry is
+            # all the listing has of it
+            ('other', '', '1.0', '1.0'),
+        ]
 
     def test_metadata_without_version(self, fs):
         """A metadata without a Version header falls back to the version of the directory name."""
@@ -413,6 +448,13 @@ class TestPackList:
         assert names(result) == [('demo', '2.0')]
         assert result[0].info == ledger
         assert isinstance(result[0].info, PathStr)
+
+    def test_no_version_but_the_ledger(self, fs):
+        """The version of a ledger entry is the one the ledger records: the
+        entry carries no metadata version and no name version."""
+        create_pack(fs, 'demo', '2.0')
+        result = run_pack_list(['demo'])
+        assert [(dist.metadata_version, dist.dist_version) for dist in result] == [('', '')]
 
     def test_the_folder_is_normalized(self, fs):
         """The ledger folder of a name is its normalized name, any case and

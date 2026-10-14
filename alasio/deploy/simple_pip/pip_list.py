@@ -53,26 +53,39 @@ class Distribution:
             header of its metadata. The name of the metadata entry when the
             metadata can not be read, the name is escaped there, PEP 427,
             e.g. "ruamel.yaml" is "ruamel_yaml"
-        version (str): Version of the distribution, PEP 440, e.g. "0.18.6",
-            the Version header of its metadata. The version of the directory
-            name when the metadata can not be read, the empty string when
-            neither carries one, e.g. a .egg-info directory without a
-            PKG-INFO file. The version of the pack ledger when the entry
-            comes from one, see PipList.pack_list()
+        metadata_version (str): Version the metadata of the entry records,
+            PEP 440, e.g. "0.18.6", the Version header of its metadata. The
+            empty string when the metadata records no version, e.g. an
+            empty or a broken ".dist-info" directory
+        dist_version (str): Version the name of the metadata entry carries,
+            PEP 427, e.g. "0.18.6" of "ruamel_yaml-0.18.6.dist-info". The
+            empty string when the name carries none, e.g. a ".egg-info"
+            entry, named after the distribution only
+        version (str): Version of the distribution: the metadata_version,
+            the dist_version as the fallback of an entry whose metadata
+            records no version; the version of the pack ledger when the
+            entry comes from one, see PipList.pack_list()
         info (PathStr): Path of the entry the distribution was read from:
             the .dist-info directory, or the .egg-info directory or file, of
             the site-packages directory; the index.pack of a pack ledger
             when the entry comes from one
     """
 
-    def __init__(self, name, version, info):
+    def __init__(self, name, version, info, metadata_version='', dist_version=''):
         """
         Args:
             name (str): Name of the distribution
-            version (str): Version of the distribution
+            version (str): Version of the distribution, see the class
+                docstring
             info (PathStr): Path of the entry the distribution was read from
+            metadata_version (str): Version the metadata of the entry
+                records. Defaults to ''
+            dist_version (str): Version the name of the metadata entry
+                carries. Defaults to ''
         """
         self.name = name
+        self.metadata_version = metadata_version
+        self.dist_version = dist_version
         self.version = version
         self.info = info
 
@@ -364,14 +377,20 @@ class PipList:
             metadata = path
         headers = _read_headers(metadata)
         name = headers.get('name') or dir_name
-        version = headers.get('version') or dir_version
+        # the version the metadata records, the version of the name of the
+        # entry as the fallback, see Distribution
+        metadata_version = headers.get('version', '')
+        version = metadata_version or dir_version
         if not name:
             # A metadata entry that names no distribution can not be
             # reported, e.g. an empty ".dist-info" directory that holds
             # neither a name nor a version
             logger.warning(f'Skipped a metadata entry that names no distribution: {path}')
             return None
-        return Distribution(name, version, path)
+        return Distribution(
+            name, version, path,
+            metadata_version=metadata_version, dist_version=dir_version,
+        )
 
     def _read_pack_version(self, index_file):
         """
