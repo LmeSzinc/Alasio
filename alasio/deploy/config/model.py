@@ -135,7 +135,8 @@ AUTO_RESTART_TIME_PATTERN = r'^(?:[01]?[0-9]|2[0-3]):[0-5][0-9]$'
 
 class UpdateConfig(Struct):
     AutoUpdate: Annotated[bool, Meta(extra={"help": [
-        "Update Alas at startup",
+        "[true] Auto update modes on backend startup and daily restart",
+        "[false] Disable auto update and reject manual update check",
         "[In most cases] Use true",
     ]})] = True
     AutoRestartTime: Annotated[

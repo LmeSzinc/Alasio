@@ -24,6 +24,8 @@ from alasio.backend.ws.ws_topic import BaseTopic
 # States of a mod update:
 # - 'unmanaged': the mod declares no update source (no mirrors); it is
 #   never checked
+# - 'disabled': the mod updates are off for this process
+#   (Deploy.Update.AutoUpdate = false); the mod is never checked either
 # - 'idle': never checked, or the checks wait for a manual request
 # - 'checking': a check is in flight (get_latest_info), cancellable
 # - 'uptodate': the local version is the latest one
@@ -40,7 +42,7 @@ from alasio.backend.ws.ws_topic import BaseTopic
 #   failed: the next process start converges them
 # - 'error': the last check or the update failed, see UpdateInfo.error
 UPDATE_STATE = [
-    'unmanaged', 'idle', 'checking', 'uptodate',
+    'unmanaged', 'disabled', 'idle', 'checking', 'uptodate',
     'available', 'queued', 'stopping', 'downloading', 'updating',
     'restart-required', 'error',
 ]
@@ -130,8 +132,9 @@ class Update(BaseTopic):
         The check runs in this call (it is one request to the mirrors) and the
         returned message tells what happened: '' when the check ran, the reason
         it was discarded otherwise (a check that just finished, a check of the
-        mod already in flight). A check in flight of the mod is interrupted and
-        the sequence starts over after the check.
+        mod already in flight, a mod that is never checked -- unmanaged,
+        disabled -- with its own message). A check in flight of the mod is
+        interrupted and the sequence starts over after the check.
 
         Args:
             name (str): Mod name

@@ -47,14 +47,22 @@ class FlowStartup(Flow):
        the stale leftovers of dead sessions are cleaned);
     2. a full update when the previous process did not just run one
        (``updated_all_at`` unset): the tree converges whatever happened before.
-       When it changed real files the flow hands the process over -- the new
-       process sees ``updated_all_at`` and skips its own full update, so the
-       chain converges in one update and one restart;
+       When the full update changed real files the flow hands the process over
+       -- the new process sees ``updated_all_at`` and skips its own full
+       update, so the chain converges in one update and one restart. The flow
+       runs **no full update at all** while the mod updates are off
+       (Deploy.Update.AutoUpdate = false: every mod is 'disabled'): a disabled
+       backend applies nothing and restarts for no update;
     3. the daily coverage: a process that just ran the full update (this one or
        the previous one) after the target moment serves the daily action of the
-       day, the daily task then leaves the day alone;
+       day, the daily task then leaves the day alone. A disabled backend serves
+       it with the startup itself when it starts after the target moment: the
+       restart is the half of the daily action the switch leaves on (the check
+       half is off, and no completion is recorded for a full update that never
+       ran);
     4. start the check sequences (the first check waits the standard spread: the
-       full update just checked everything);
+       full update just checked everything). A disabled mod has no sequence:
+       nothing is checked while the mod updates are off;
     5. spawn the resume queue of the configs marked in step 1 and release the
        slot.
 
@@ -70,7 +78,18 @@ class FlowStartup(Flow):
         manager.update_check.set_initial_states()
         changed = []
         try:
-            if record is None or not record.updated_all_at:
+            if not manager.update_check.auto:
+                # the mod updates are off for this process (Deploy.Update.AutoUpdate
+                # = false, every mod is 'disabled'): the startup runs no full
+                # update at all -- nothing is checked, nothing is applied and
+                # the process is never handed over for an update. The daily
+                # action of a crossed target is still served: its restart is
+                # what this startup does, the check half is off by the switch
+                logger.info('[Restart] The mod updates are disabled: the startup runs no full update')
+                if manager.daily.target_passed():
+                    manager.daily.mark_done()
+                    logger.info('[Restart] The daily action of today is served by the startup')
+            elif record is None or not record.updated_all_at:
                 changed = await manager.full_update(self)
                 if manager.daily.mark_done_if_covered():
                     logger.info('[Restart] The daily action of today is served by the '
@@ -254,6 +273,10 @@ class FlowDaily(Flow):
     No cancellable phase: the daily action is done in one go (the schedule would
     retrigger otherwise, with the workers already stopped), and an upgrade of a
     flow in flight (``maybe_upgrade_to_daily``) closes its window the same way.
+
+    With the automatic mod updates off (Deploy.Update.AutoUpdate = false, every
+    mod is 'disabled') the full update is empty and the daily maintenance of
+    such a backend is a graceful restart -- its other purpose.
     """
     name = 'daily'
 

@@ -89,6 +89,8 @@ class FakeUpdateCheck:
         self.required = []
         self.mods = {'m': FakePerMod(uptodate)}
         self._available = list(available)
+        # the master switch of the mod updates (Deploy.Update.AutoUpdate)
+        self.auto = True
 
     def bind(self, mods=None):
         self.calls.append('bind')
@@ -416,6 +418,26 @@ class TestFlowStartup:
         manager = FakeManager()
         await FlowStartup(manager).run()
         assert manager.calls == ['read_resume_intent', 'full_update']
+        assert manager.update_check.calls == ['bind', 'set_initial_states', 'start']
+        assert manager.spawned and manager.spawned[0][0] == manager.resume_queue
+
+    @pytest.mark.trio
+    async def test_the_mod_updates_off_skip_the_full_update(self):
+        """
+        Deploy.Update.AutoUpdate = false: with every mod 'disabled' the startup
+        applies nothing -- it does not call the full update at all (the step
+        would be empty) and is never handed over for an update. The daily action
+        of a crossed target is served by the startup itself: the restart is the
+        half the switch leaves on
+        """
+        manager = FakeManager(changed=['m'])
+        manager.update_check.auto = False
+        await FlowStartup(manager).run()
+        assert manager.calls == ['read_resume_intent']
+        assert manager.handed_over == []
+        assert manager.daily.is_done() is True
+        # the checks start all the same (a disabled mod starts no sequence, but
+        # the call is part of the startup)
         assert manager.update_check.calls == ['bind', 'set_initial_states', 'start']
         assert manager.spawned and manager.spawned[0][0] == manager.resume_queue
 

@@ -125,6 +125,8 @@ class FakeUpdateCheck:
         self.restores = 0
         self.releases = 0
         self.required = []
+        # the master switch of the mod updates (Deploy.Update.AutoUpdate)
+        self.auto = True
 
     def names(self, managed=True):
         return list(self.mods)
@@ -514,6 +516,21 @@ class TestUpdateMods:
         manager, _ = self._make({'m': FakeDeployJob(changed=True)})
         assert await manager.full_update() == ['m']
         assert manager.daily.updated_all_at > 0
+
+    @pytest.mark.trio
+    async def test_a_full_update_with_the_mod_updates_off_is_empty(self):
+        """
+        With the mod updates off (Deploy.Update.AutoUpdate = false) every mod
+        is 'disabled': the full update checks nothing and applies nothing (the
+        daily round and a daily upgrade go through here). No completion is
+        recorded either: a full update that never ran must not claim the daily
+        action of a crossed target
+        """
+        manager, states = self._make({'m': FakeDeployJob(changed=True)})
+        manager.update_check.auto = False
+        assert await manager.full_update() == []
+        assert states == []
+        assert manager.daily.updated_all_at == 0.0
 
     @pytest.mark.trio
     async def test_the_daily_upgrade_runs_the_full_update_once(self):

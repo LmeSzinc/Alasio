@@ -11,8 +11,8 @@ import pytest
 import trio
 
 from alasio.backend.app.restart.update_check import (
-    BUSY_MESSAGE, CHECK_INTERVAL, FLOW_STATES, FRESH_MESSAGE, FRESH_WINDOW, UNMANAGED_MESSAGE, ModUpdateCheck,
-    UpdateCheck
+    BUSY_MESSAGE, CHECK_INTERVAL, DISABLED_MESSAGE, FLOW_STATES, FRESH_MESSAGE, FRESH_WINDOW, UNMANAGED_MESSAGE,
+    ModUpdateCheck, UpdateCheck
 )
 from alasio.backend.topic.update import UpdateSource
 from alasio.logger import logger
@@ -124,6 +124,31 @@ class TestState:
         assert UpdateSource().data['none'].state == 'unmanaged'
         assert module.names() == ['ok']
 
+    def test_initial_states_with_the_mod_updates_off(self):
+        """
+        The switch (Deploy.Update.AutoUpdate = false) classifies every managed
+        mod 'disabled': nothing checks it. A mod without a usable update source
+        stays 'unmanaged' -- the source is the classification that outlives
+        the switch
+        """
+        module = UpdateCheck()
+        module.mods = {
+            'none': ModUpdateCheck(module, FakeMod('none', mirrors=None)),
+            'ok': ModUpdateCheck(module, FakeMod('ok', mirrors='https://example.com/alas')),
+        }
+        module.auto = False
+        module.set_initial_states()
+        assert module.state_of('none') == 'unmanaged'
+        assert module.state_of('ok') == 'disabled'
+        assert UpdateSource().data['ok'].state == 'disabled'
+        # a mod without a source is not a disabled mod: the source keeps the
+        # mod unmanaged whatever the switch says
+        assert module.mods['none'].disabled is False
+        assert module.mods['ok'].disabled is True
+        # the mod still has its update source: the state of the process is not
+        # a property of the mod
+        assert module.names() == ['ok']
+
     def test_names_and_available(self):
         module, state = make_mod()
         module.mods['none'] = ModUpdateCheck(module, FakeMod('none', mirrors=None))
@@ -155,7 +180,7 @@ class TestReleaseStates:
         assert module.available() == ['m']
 
     @pytest.mark.parametrize("state", [
-        'unmanaged', 'idle', 'checking', 'uptodate',
+        'unmanaged', 'disabled', 'idle', 'checking', 'uptodate',
         'available', 'updating', 'restart-required', 'error',
     ])
     def test_the_other_states_stay(self, state):
@@ -348,11 +373,27 @@ class TestRhythm:
             assert CHECK_INTERVAL <= delay <= CHECK_INTERVAL * 2
         assert module.interval() == CHECK_INTERVAL
 
-    def test_auto_update_off_parks_the_sequence(self):
-        module = UpdateCheck()
+    @pytest.mark.trio
+    async def test_a_disabled_mod_never_starts_a_sequence(self):
+        """
+        The mod updates off (Deploy.Update.AutoUpdate = false): a disabled mod
+        has no sequence at all (the automatic sequence is the automatic check
+        itself), nothing checks it -- like an unmanaged mod
+        """
+        module, state = make_mod()
         module.auto = False
-        assert module.first_delay() is None
-        assert module.interval() is None
+        assert state.disabled is True
+        async with trio.open_nursery() as nursery:
+            module.attach(nursery)
+            # every entry refuses it: the start of the mod, of the module and
+            # a restore all leave it without a sequence
+            state.start_check_loop()
+            module.start()
+            module.restore()
+            await trio.testing.wait_all_tasks_blocked()
+            assert state.running is False
+            assert (await module.mods['m'].job()).checks == 0
+            nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
     async def test_the_loop_waits_the_spread_then_the_interval(self, autojump_clock):
@@ -378,18 +419,6 @@ class TestRhythm:
         assert CHECK_INTERVAL <= stamps[0] - start <= CHECK_INTERVAL * 2
         assert stamps[1] - stamps[0] == pytest.approx(CHECK_INTERVAL)
         assert stamps[2] - stamps[1] == pytest.approx(CHECK_INTERVAL)
-
-    @pytest.mark.trio
-    async def test_the_sequence_parks_when_automatic_checks_are_off(self, autojump_clock):
-        module, state = make_mod()
-        module.auto = False
-        async with trio.open_nursery() as nursery:
-            module.attach(nursery)
-            state.start_check_loop()
-            await trio.testing.wait_all_tasks_blocked()
-            # the sequence parks: no check runs
-            assert (await module.mods['m'].job()).checks == 0
-            nursery.cancel_scope.cancel()
 
 
 class TestStartPauseRestore:
@@ -583,6 +612,22 @@ class TestManualCheck:
             assert none.running is False
             assert state.running is True
             nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_check_of_a_disabled_mod_answers_the_message(self):
+        """
+        The mod updates off (Deploy.Update.AutoUpdate = false): a disabled mod
+        is never checked, not even by hand -- its classification is as final as
+        the update source of an unmanaged mod
+        """
+        module, state = make_mod()
+        module.auto = False
+        module.set_initial_states()
+        assert await module.update_check('m') == DISABLED_MESSAGE
+        assert await state.update_check() == DISABLED_MESSAGE
+        # no request was made and the state stays where the startup put it
+        assert (await module.mods['m'].job()).checks == 0
+        assert state.info.state == 'disabled'
 
     @pytest.mark.trio
     async def test_cancel_check_of_an_unknown_mod_is_false(self):

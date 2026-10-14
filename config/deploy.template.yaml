@@ -72,7 +72,8 @@ Ocr:
   # [Default] 127.0.0.1:22268
   OcrClientAddress: 127.0.0.1:22268
 Update:
-  # Update Alas at startup
+  # [true] Auto update modes on backend startup and daily restart
+  # [false] Disable auto update and reject manual update check
   # [In most cases] Use true
   AutoUpdate: true
   # Scheduled restart time

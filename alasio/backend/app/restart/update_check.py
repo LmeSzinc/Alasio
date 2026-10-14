@@ -30,10 +30,17 @@ pause the sequences they do not need (``pause``), restore them on their way out
 
 The states of one mod (Update topic):
 
-    unmanaged / idle / checking / uptodate / available / error
+    unmanaged / disabled / idle / checking / uptodate / available / error
 
 plus the states the apply steps set: 'queued', 'stopping', 'downloading',
 'updating' and 'restart-required'.
+
+A mod is classified once, at the startup: 'unmanaged' when it declares no
+usable update source (the source is parsed once), 'disabled' when the mod
+updates are off for this process (``auto``, i.e. Deploy.Update.AutoUpdate =
+false), 'idle' otherwise. Neither an unmanaged nor a disabled mod is ever
+checked: no sequence is started for it and the manual entry answers a message
+instead of checking.
 """
 import random
 import time
@@ -63,6 +70,11 @@ BUSY_MESSAGE = 'A check is already in progress'
 # (the entries answer it instead of raising: a mod without a source is a normal
 # state, the startup flow publishes it as 'unmanaged')
 UNMANAGED_MESSAGE = 'The mod has no update source'
+# The message of a check requested while the mod updates are off for this
+# process (Deploy.Update.AutoUpdate = false): no mod is ever checked then (the
+# entries answer it instead of raising: turning the updates off is a normal
+# state, the startup flow publishes it as 'disabled')
+DISABLED_MESSAGE = 'The mod updates are disabled'
 # The states the apply steps of a flow set on a mod while the flow runs
 # ('queued' / 'stopping' / 'downloading'): they describe the flow in flight, not
 # the update itself -- the wrap-up of a flow that does not hand over releases
@@ -207,6 +219,27 @@ class ModUpdateCheck:
                            f'the mod is unmanaged')
             return None
 
+    @property
+    def disabled(self) -> bool:
+        """
+        Whether the mod updates are off for this process
+
+        The switch (``auto``, Deploy.Update.AutoUpdate) is read once at the
+        startup, so the classification is final like the update source: a
+        disabled mod is never checked -- no sequence is started for it and the
+        manual entry answers DISABLED_MESSAGE (the state published at the
+        startup is 'disabled'). A mod without a usable update source is
+        'unmanaged' whatever the switch says: the source is the classification
+        that outlives the switch.
+
+        Returns:
+            bool: True when the mod updates are off for this process
+                (Deploy.Update.AutoUpdate = false) and the mod has an update
+                source to check (a mod without one is unmanaged, whatever the
+                switch says)
+        """
+        return self.mirrors is not None and not self.check_module.auto
+
     async def job(self):
         """
         Build the deploy job of this mod, bound to a fresh update server
@@ -242,9 +275,8 @@ class ModUpdateCheck:
     def running(self) -> bool:
         """
         Returns:
-            bool: Whether the automatic sequence of this mod is running (a
-                sequence parked because automatic checks are off counts as
-                running: it is dropped and restored like any other one)
+            bool: Whether the automatic sequence of this mod is running (a mod
+                that is never checked -- unmanaged, disabled -- has none)
         """
         return self._loop_scope is not None
 
@@ -257,10 +289,11 @@ class ModUpdateCheck:
         The new task waits the standard spread before its first check -- the
         startup flow just ran a full update, a check right now would repeat it.
 
-        An unmanaged mod has no sequence: nothing is started (the state stays
-        'unmanaged', it is published once by the startup flow).
+        A mod that is never checked has no sequence: nothing is started for an
+        unmanaged or disabled one (their states, 'unmanaged' / 'disabled', are
+        published once by the startup flow).
         """
-        if self.mirrors is None:
+        if self.mirrors is None or self.disabled:
             return
         nursery = self.check_module.nursery
         if nursery is None:
@@ -298,19 +331,16 @@ class ModUpdateCheck:
         if scope is None:
             # dropped before this task started
             return
-        if self.mirrors is None:
-            # defensive: the sequence is never started for an unmanaged mod
-            # (see start_check_loop), a sequence that finds itself without a
-            # source ends here instead of checking
+        if self.mirrors is None or self.disabled:
+            # defensive: the sequence is never started for a mod that is never
+            # checked (see start_check_loop), a sequence that finds itself
+            # without a source, or with the mod updates turned off, ends here
+            # instead of checking
             return
         try:
             with scope:
                 delay = self.check_module.first_delay()
                 while True:
-                    if delay is None:
-                        # automatic checks off: the sequence parks until it is
-                        # dropped (only the manual check checks)
-                        await trio.sleep_forever()
                     if delay > 0:
                         await trio.sleep(delay)
                     async with self._check_lock:
@@ -343,13 +373,18 @@ class ModUpdateCheck:
         Returns:
             str: The message of the check: '' when it ran, the reason it was
                 discarded otherwise (FRESH_MESSAGE / BUSY_MESSAGE /
-                UNMANAGED_MESSAGE)
+                UNMANAGED_MESSAGE / DISABLED_MESSAGE)
         """
         if self.mirrors is None:
             # the entry of the manual check: a mod without a usable update
             # source is never checked (its state is 'unmanaged', published once
             # by the startup flow); nothing is an error here
             return UNMANAGED_MESSAGE
+        if self.disabled:
+            # the mod updates are off for this process (Deploy.Update.AutoUpdate
+            # = false): a disabled mod is never checked, not even by hand -- the
+            # state 'disabled' published at the startup is final
+            return DISABLED_MESSAGE
         if time.monotonic() - self._checked_mono < FRESH_WINDOW:
             # the check that just ran is the answer already
             return FRESH_MESSAGE
@@ -396,11 +431,15 @@ class ModUpdateCheck:
             str: '' when the check ran, FRESH_MESSAGE when it was discarded
                 (the second check of the fresh window, inside the lock),
                 UNMANAGED_MESSAGE for an unmanaged mod (defensive: the entry
-                refuses it and its sequence is never started)
+                refuses it and its sequence is never started), DISABLED_MESSAGE
+                for a disabled one (the same, the mod updates are off)
         """
         if self.mirrors is None:
             # defensive: the last line of defence of the check path
             return UNMANAGED_MESSAGE
+        if self.disabled:
+            # defensive: the same line for a disabled mod (see the manual entry)
+            return DISABLED_MESSAGE
         if time.monotonic() - self._checked_mono < FRESH_WINDOW:
             # two callers raced to the lock: the first one checked a moment ago
             return FRESH_MESSAGE
@@ -495,8 +534,10 @@ class UpdateCheck:
         self.mods: "Dict[str, ModUpdateCheck]" = {}
         self._client = None
         self._nursery: "Optional[trio.Nursery]" = None
-        # automatic checks on / off (Deploy.Update.AutoUpdate: with the checks
-        # off the sequences park and only serve the manual checks)
+        # the master switch of the mod updates (Deploy.Update.AutoUpdate), read
+        # once per process by load_schedule(): with it off every managed mod is
+        # 'disabled' -- no sequence, no manual check, no full update (see
+        # ModUpdateCheck.disabled)
         self.auto = True
 
     # ------------------------------------------------------------------
@@ -556,7 +597,8 @@ class UpdateCheck:
         restart). A broken config falls back to the defaults: the checks of a
         broken installation must not stop.
 
-        Sets `auto`.
+        Sets `auto`. Read once: the classification of the mods ('disabled', see
+        ModUpdateCheck.disabled) is as final as their update source.
         """
         from alasio.deploy.config.model import DeployConfig
 
@@ -568,12 +610,12 @@ class UpdateCheck:
             auto = True
         self.auto = auto
 
-    def first_delay(self) -> "Optional[float]":
+    def first_delay(self) -> float:
         """
         Seconds to the first automatic check of a fresh sequence
 
-        Always ``random(CHECK_INTERVAL, CHECK_INTERVAL * 2)`` when automatic
-        checks are on. The window is a fixed mathematical design, not a tunable:
+        Always ``random(CHECK_INTERVAL, CHECK_INTERVAL * 2)``. The window is a
+        fixed mathematical design, not a tunable:
 
         - the spread is exactly CHECK_INTERVAL wide, and the checks that follow
           are CHECK_INTERVAL apart, so the sequence stays evenly spread --
@@ -583,24 +625,17 @@ class UpdateCheck:
           process just checked every mod, a check right after would repeat it.
 
         Returns:
-            float | None: The delay, None when no automatic check follows
-                (AutoUpdate = false: the sequence parks and only serves the
-                manual checks)
+            float: The delay
         """
-        if not self.auto:
-            return None
         return random.uniform(CHECK_INTERVAL, CHECK_INTERVAL * 2)
 
-    def interval(self) -> "Optional[float]":
+    def interval(self) -> float:
         """
         Seconds between two checks of a running sequence
 
         Returns:
-            float | None: CHECK_INTERVAL, None when no automatic check follows
-                (AutoUpdate = false: the sequence parks after its check)
+            float: CHECK_INTERVAL
         """
-        if not self.auto:
-            return None
         return CHECK_INTERVAL
 
     def client(self):
@@ -640,12 +675,19 @@ class UpdateCheck:
         """
         Publish the initial state of every mod (the startup flow, before the
         first check): 'unmanaged' for a mod without a usable update source (no
-        mirrors, or a malformed declaration: the mod is never checked), 'idle'
+        mirrors, or a malformed declaration: the mod is never checked),
+        'disabled' for a mod whose updates are off (``auto``), 'idle'
         otherwise. The classification is final: the source of a mod is parsed
-        once, see ModUpdateCheck.mirrors.
+        once and the switch is read once, see ModUpdateCheck.mirrors and
+        ModUpdateCheck.disabled.
         """
         for mod in self.mods.values():
-            mod.set_state('idle' if mod.mirrors is not None else 'unmanaged')
+            if mod.mirrors is None:
+                mod.set_state('unmanaged')
+            elif mod.disabled:
+                mod.set_state('disabled')
+            else:
+                mod.set_state('idle')
 
     # ------------------------------------------------------------------
     # The flows' API: start / pause / restore / check / cancel
@@ -654,7 +696,9 @@ class UpdateCheck:
     def names(self, managed=True) -> "List[str]":
         """
         Args:
-            managed (bool): Only the mods with a usable update source
+            managed (bool): Only the mods with a usable update source (a
+                disabled mod still has one: the update of a mod and the switch
+                of the process are two different things)
 
         Returns:
             List[str]: The mod names (the order of the mount), sorted
@@ -719,7 +763,8 @@ class UpdateCheck:
 
         Raises:
             ValueError: The mod is unknown (the entry of the module): an
-                unmanaged mod answers UNMANAGED_MESSAGE like its own entry
+                unmanaged mod answers UNMANAGED_MESSAGE and a disabled one
+                DISABLED_MESSAGE, like their own entries
         """
         mod = self.mods.get(name, None)
         if mod is None:

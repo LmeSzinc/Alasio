@@ -32,6 +32,8 @@ export type RestartTopicLike = {
 
 // States of a mod update (the Update topic, one entry per mod):
 // - 'unmanaged': the mod declares no update source, it is never checked
+// - 'disabled': the mod updates are off for this backend
+//   (Deploy.Update.AutoUpdate = false), the mod is never checked either
 // - 'idle': never checked, or the checks wait for a manual request
 // - 'checking': a check is in flight (cancellable through cancel_check)
 // - 'uptodate': the local version is the latest one
@@ -48,6 +50,7 @@ export type RestartTopicLike = {
 // - 'error': the last check or the update failed, see error
 export type UPDATE_STATE =
   | "unmanaged"
+  | "disabled"
   | "idle"
   | "checking"
   | "uptodate"

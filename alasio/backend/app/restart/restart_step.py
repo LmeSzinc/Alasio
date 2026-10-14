@@ -381,12 +381,25 @@ class RestartStep(RestartBase):
         mod that is already up to date is validated and repaired by its job
         instead of being applied -- the tree converges either way.
 
+        The automatic mod updates off (Deploy.Update.AutoUpdate = false: every
+        managed mod is 'disabled') make the step empty -- no mod is checked and
+        none is applied, and no completion is recorded (a full update that
+        never ran must not claim the daily action of a crossed target: the
+        startup of a disabled backend does that by itself, see ``FlowStartup``).
+
         Args:
             flow (Flow): The flow running this step, see update_mods
 
         Returns:
             List[str]: The mods whose real files changed
         """
+        if not self.update_check.auto:
+            # the mod updates are off for this process: nothing to check and
+            # nothing to apply. Every caller of this step is covered here --
+            # the daily round and the full update of a daily upgrade (the
+            # startup flow does not call it at all while the switch is off)
+            logger.info('[Update] The mod updates are disabled, the full update is empty')
+            return []
         changed = await self.update_mods(self.update_check.names(), flow=flow)
         self.daily.note_full_update()
         logger.info(f'[Update] Full update finished, changed mods: {changed}')

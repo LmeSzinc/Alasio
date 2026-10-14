@@ -34,6 +34,13 @@
     "zh-TW": "未設定更新來源",
     "es-ES": "Sin origen de actualización"
   },
+  "StateDisabled": {
+    "en-US": "Updates disabled",
+    "zh-CN": "更新已禁用",
+    "ja-JP": "更新は無効",
+    "zh-TW": "更新已停用",
+    "es-ES": "Actualizaciones desactivadas"
+  },
   "StateIdle": {
     "en-US": "Not checked",
     "zh-CN": "未检查",
@@ -110,6 +117,13 @@
     "ja-JP": "{count} 個の Mod を更新できます",
     "zh-TW": "{count} 個插件可更新",
     "es-ES": "{count} mod(s) se pueden actualizar"
+  },
+  "UpdatesDisabled": {
+    "en-US": "Mod updates are disabled (Deploy.Update.AutoUpdate)",
+    "zh-CN": "插件更新已禁用（Deploy.Update.AutoUpdate）",
+    "ja-JP": "Mod の更新は無効です（Deploy.Update.AutoUpdate）",
+    "zh-TW": "插件更新已停用（Deploy.Update.AutoUpdate）",
+    "es-ES": "Las actualizaciones de mods están desactivadas (Deploy.Update.AutoUpdate)"
   },
   "NoAvailable": {
     "en-US": "All mods are up to date",
