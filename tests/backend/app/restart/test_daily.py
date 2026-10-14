@@ -57,9 +57,11 @@ class TestDoneDay:
         assert daily.is_done(NOW) is True
         assert daily.is_done(at(4, 0, day=14)) is False
 
-    def test_mark_done_defaults_to_now(self):
+    def test_mark_done_defaults_to_now(self, frozen_clock):
         daily = DailyState(target=TARGET)
         daily.mark_done()
+        # the clock is frozen: the day of the mark is the same for both reads
+        # (a real clock could roll over midnight between them)
         assert daily.done_day == datetime.datetime.now().date()
 
     def test_should_upgrade(self):
@@ -87,11 +89,12 @@ class TestDoneDay:
 class TestFullUpdateCoverage:
     """updated_all_at and the coverage of the daily action"""
 
-    def test_note_full_update_defaults_to_now(self):
+    def test_note_full_update_defaults_to_now(self, frozen_clock):
         daily = DailyState(target=TARGET)
         before = datetime.datetime.now().timestamp()
         daily.note_full_update()
-        assert before <= daily.updated_all_at <= datetime.datetime.now().timestamp()
+        # the clock is frozen: the recorded instant is exactly the read one
+        assert daily.updated_all_at == before
 
     @pytest.mark.parametrize("ts, covered", [
         (0.0, False),

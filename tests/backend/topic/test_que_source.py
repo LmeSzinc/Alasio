@@ -435,6 +435,12 @@ class TestUpdateTimeRegistration:
     every data change and on every subscriber attach / detach; without a
     watcher nothing is registered (nothing displays the table, and the
     forced disk read is the expensive part).
+
+    No frozen clock here (unlike the manager tests): the table carries real
+    datetimes and msgspec cannot encode the datetime subclass PatchTime
+    builds, so the assertions tolerate the microseconds between the table's
+    ``datetime.now()`` and the test's ``time.time()`` read instead of
+    asserting an exact instant.
     """
 
     @pytest.mark.trio

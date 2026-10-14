@@ -3,10 +3,36 @@ Fixtures for the backend tests.
 """
 
 import socket
+from datetime import datetime
 
 import pytest
 
 from alasio.logger.writer import LogWriter
+from alasio.testing.patch_time import PatchTime
+
+# A fixed instant for the tests that assert exact wall-clock instants: the real
+# clock advances between two calls and its granularity is a system detail
+# (~15.6ms on Windows), so "the same instant" could only be asserted by luck.
+# 2020-01-01 00:00 UTC (PatchTime reads a naive value as UTC).
+FROZEN_NOW = datetime(2020, 1, 1, 0, 0, 0)
+
+
+@pytest.fixture
+def frozen_clock():
+    """
+    Freeze the wall clock of the test at a fixed instant (PatchTime)
+
+    For the tests whose assertions compare instants derived from the wall clock
+    (``time.time()`` / ``datetime.now()``): with the clock frozen the two reads
+    are the same value, so the comparison is exact instead of winning or losing
+    on the clock granularity between the two calls. The patched functions
+    advance when the test calls ``time.sleep``.
+
+    trio's own clock is unaffected (it captured ``time.perf_counter`` at import
+    time), so the sleeps and deadlines of a trio test keep working.
+    """
+    with PatchTime(FROZEN_NOW) as clock:
+        yield clock
 
 
 @pytest.fixture(autouse=True)

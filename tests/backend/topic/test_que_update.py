@@ -76,20 +76,18 @@ class TestNextWaitingTime:
         assert next_waiting_time([]) is None
         assert next_waiting_time(None) is None
 
-    def test_task_items(self):
+    def test_task_items(self, frozen_clock):
         """TaskItem structs (disk read shape) give the earliest NextRun"""
-        now = time.time()
         waiting = [item('A', 30), item('B', 10), item('C', 60)]
-        assert next_waiting_time(waiting) == pytest.approx(now + 10, abs=1)
+        assert next_waiting_time(waiting) == pytest.approx(time.time() + 10, abs=1e-3)
 
-    def test_unsorted_takes_the_minimum(self):
+    def test_unsorted_takes_the_minimum(self, frozen_clock):
         """
         waiting[0] is not trusted (only mod.get_task_schedule sorts the
         list): the earliest item wins
         """
-        now = time.time()
         waiting = [item('A', 60), item('B', 5), item('C', 30)]
-        assert next_waiting_time(waiting) == pytest.approx(now + 5, abs=1)
+        assert next_waiting_time(waiting) == pytest.approx(time.time() + 5, abs=1e-3)
 
     @pytest.mark.parametrize('bad', [
         None,
@@ -99,10 +97,9 @@ class TestNextWaitingTime:
         'A',
         object(),
     ])
-    def test_unusable_items_are_skipped(self, bad):
+    def test_unusable_items_are_skipped(self, bad, frozen_clock):
         """items without a usable NextRun are skipped, the rest still count"""
-        now = time.time()
-        assert next_waiting_time([bad, item('B', 20)]) == pytest.approx(now + 20, abs=1)
+        assert next_waiting_time([bad, item('B', 20)]) == pytest.approx(time.time() + 20, abs=1e-3)
         assert next_waiting_time([bad]) is None
 
 
@@ -117,20 +114,21 @@ class TestRegisterAndUnregister:
         """
         monkeypatch.setattr(TaskQueueUpdateManager, 'MIN_LEAD', 0)
 
-    def test_far_deadline_kept(self):
+    def test_far_deadline_kept(self, frozen_clock):
         manager = TaskQueueUpdateManager()
         deadline = time.time() + 600
         manager.register('alas', deadline)
-        assert manager._watched['alas'] == pytest.approx(deadline, abs=1)
+        # the floor of MIN_LEAD = 0 is below it: the deadline is kept as-is
+        assert manager._watched['alas'] == deadline
 
-    def test_none_deadline_is_tracked(self):
+    def test_none_deadline_is_tracked(self, frozen_clock):
         """a watched config with nothing waiting is tracked with None"""
         manager = TaskQueueUpdateManager()
         manager.register('alas', None)
         assert manager._watched['alas'] is None
         assert manager._due(time.time() + 1000) == []
 
-    def test_unregister_clears_deadline_and_request(self):
+    def test_unregister_clears_deadline_and_request(self, frozen_clock):
         manager = TaskQueueUpdateManager()
         manager.register('alas', time.time() + 10)
         manager.request_refresh('alas')
@@ -138,7 +136,7 @@ class TestRegisterAndUnregister:
         assert manager._watched == {}
         assert manager._requested == set()
 
-    def test_due_snapshot(self):
+    def test_due_snapshot(self, frozen_clock):
         """only passed deadlines are due; None / future are not"""
         manager = TaskQueueUpdateManager()
         now = time.time()
@@ -148,7 +146,7 @@ class TestRegisterAndUnregister:
         assert manager._due(now) == ['past']
         assert sorted(manager._due(now + 600)) == ['future', 'past']
 
-    def test_all_registered_snapshot(self):
+    def test_all_registered_snapshot(self, frozen_clock):
         """a backward jump makes every tracked config due, None included"""
         manager = TaskQueueUpdateManager()
         now = time.time()
@@ -159,15 +157,21 @@ class TestRegisterAndUnregister:
 
 
 class TestMinLeadFloor:
-    """The MIN_LEAD floor: adjacent NextRuns accumulate into one recompute."""
+    """
+    The MIN_LEAD floor: adjacent NextRuns accumulate into one recompute
 
-    def test_near_deadline_is_floored(self):
+    The clock is frozen: the floor is derived from ``time.time()`` at the
+    moment of the registration, so "the same floored instant" is only the same
+    value when the clock does not advance between the two registrations.
+    """
+
+    def test_near_deadline_is_floored(self, frozen_clock):
         manager = TaskQueueUpdateManager()
         now = time.time()
         manager.register('alas', now + 1)
-        assert manager._watched['alas'] == pytest.approx(now + TaskQueueUpdateManager.MIN_LEAD, abs=1)
+        assert manager._watched['alas'] == now + TaskQueueUpdateManager.MIN_LEAD
 
-    def test_adjacent_waiting_tasks_share_one_deadline(self):
+    def test_adjacent_waiting_tasks_share_one_deadline(self, frozen_clock):
         """3 tasks 1s apart register the same floored instant"""
         manager = TaskQueueUpdateManager()
         now = time.time()
