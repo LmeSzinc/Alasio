@@ -68,8 +68,14 @@ class TestNamedUnpack:
     @pytest.mark.trio
     async def test_unpack(self, app_folder):
         """The ledger and the pack area paths land under .pack/{name}."""
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await DeployJob(name='httpx').unpack(WEBSITE_FULL_PACK)
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name="httpx"
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/httpx/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name="httpx"
+INFO | Unpack done
+"""
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         # the ledger of the target, and the history of the pack mapped
@@ -90,8 +96,14 @@ class TestNamedUnpack:
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/b/workspace/job.pack')
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/a/workspace/job.pack') == WEBSITE_FULL_PACK
         job = UnpackJob(WEBSITE_FULL_PACK, name='a')
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await job.run()
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name="a"
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/a/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name="a"
+INFO | Unpack done
+"""
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
             WEBSITE_FILES['backend/main.py'][0]
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/a/workspace')
@@ -153,8 +165,16 @@ class TestNamedUpdate:
             raise AssertionError('no download expected for a named target')
         monkeypatch.setattr(NAMED_SERVER, 'get_file_content', _fail)
 
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(name='httpx', server=NAMED_SERVER).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name="httpx"
+INFO | Replacing files to "{env.PROJECT_ROOT}", name="httpx"
+INFO | Update done
+"""
         for path, content in NAMED_TREE.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         # the generated history record follows the mapping too
@@ -168,9 +188,20 @@ class TestNamedUpdate:
     @pytest.mark.trio
     async def test_reset(self, app_folder):
         """The validation flow reads the ledger of the named target."""
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await UnpackJob(NAMED_NEW_PACK, name='httpx').run()
             assert await DeployJob(name='httpx', server=NAMED_SERVER).update()
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name="httpx"
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/httpx/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name="httpx"
+INFO | Unpack done
+INFO | [CurrentVersion] new
+INFO | [LatestVersion] new
+INFO | Already up to date: new
+INFO | Resetting files to "{env.PROJECT_ROOT}", name="httpx"
+INFO | Reset done
+"""
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/httpx/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/httpx/workspace')
@@ -184,7 +215,15 @@ class TestNamedUpdate:
         os.remove(env.PROJECT_ROOT / '.pack/httpx/index.pack')
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(name='httpx', server=NAMED_SERVER).update()
-        assert capture.backend.any_contains('Failed to read the local version')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] {''}
+INFO | [LatestVersion] new
+INFO | Update available: no local version, latest is new
+WARNING | Failed to read the local version, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name="httpx"
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/httpx/index.pack'
+INFO | Rebuild done
+"""
         for path, content in NAMED_TREE.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/httpx/index.pack'))
@@ -204,8 +243,16 @@ class TestNamedUpdate:
             raise AssertionError('no download expected after a rename')
         monkeypatch.setattr(NAMED_SERVER, 'get_file_content', _fail)
 
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(name='b', server=NAMED_SERVER).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name="b"
+INFO | Replacing files to "{env.PROJECT_ROOT}", name="b"
+INFO | Update done
+"""
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/b/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/a')

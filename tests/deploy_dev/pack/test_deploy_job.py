@@ -27,8 +27,14 @@ class TestDeployJob:
     @pytest.mark.trio
     async def test_unpack(self, app_folder):
         """DeployJob().unpack() writes the job file and unpacks all files."""
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await DeployJob().unpack(WEBSITE_FULL_PACK)
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpack done
+"""
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -39,13 +45,26 @@ class TestDeployJob:
         run unpacked everything, the second one found every file in place
         (its index commit alone does not count as a change)."""
         job = DeployJob()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await job.unpack(WEBSITE_FULL_PACK)
         assert job.changed is True
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpack done
+"""
         job = DeployJob()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await job.unpack(WEBSITE_FULL_PACK)
         assert job.changed is False
+        # the second run reads the local index of the first one: the
+        # flow is the same, only the old index warning is gone
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpack done
+"""
 
     @pytest.mark.trio
     async def test_unpack_ignores_a_job_file(self, app_folder):
@@ -56,8 +75,16 @@ class TestDeployJob:
         os.makedirs(job_file.uppath(), exist_ok=True)
         with open(job_file, 'wb') as f:
             f.write(b'garbage')
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await DeployJob().unpack(WEBSITE_FULL_PACK)
+        # the job file of the previous run is not read: the flow is the
+        # flow of an empty root
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpack done
+"""
         for path, (content, _) in WEBSITE_FILES.items():
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -72,7 +99,10 @@ class TestDeployJob:
         bad[index_end + 100] ^= 0xFF
         with logger.mock_capture_writer() as capture:
             await DeployJob().unpack(bytes(bad))
-        assert capture.backend.any_contains('Failed to unpack:')
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to unpack: Failed to validate data checksum: checksum mismatch, keeping the workspace for the next run
+"""
         # the job file of the failed run is the resume base of the next
         # run, the tmp files written so far are its cache
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == bytes(bad)
@@ -86,7 +116,12 @@ class TestDeployJob:
         monkeypatch.setattr(UnpackJob, 'replace', _raise)
         with logger.mock_capture_writer() as capture:
             await DeployJob().unpack(WEBSITE_FULL_PACK)
-        assert capture.backend.any_contains('Failed to replace file:')
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+ERROR | Failed to replace file: replace failed, keeping the workspace for the next run
+"""
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == WEBSITE_FULL_PACK
         # the unpack wrote every tmp file, the workspace holds them
         assert os.listdir(env.PROJECT_ROOT / '.pack/workspace')

@@ -563,7 +563,11 @@ class TestUpdateRoundtrip:
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to replace file')
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+ERROR | Failed to replace file: interrupted, keeping the workspace for the next run
+"""
         # the target was written first, the source is still in place:
         # the renamed file is never missing on both paths
         assert file_read_bytes(env.PROJECT_ROOT / 'scripts/runner.sh') == NEW['scripts/runner.sh']
@@ -903,7 +907,12 @@ class TestIndexUpdate:
         job = UpdateJob(UPDATE)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('no server provided')
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to download the content of 1 files: no server provided
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
+"""
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
         # the flow did not succeed: the workspace is kept as the resume
         # base of the next run
@@ -988,7 +997,14 @@ class TestSourceDownload:
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to download docs/readme_copy.txt:')
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to download docs/readme_copy.txt: Failed to decode docs/readme_copy.txt: size mismatch: decoded 8 bytes, expected 10
+WARNING | Failed to download docs/readme_copy2.txt: Failed to decode docs/readme_copy2.txt: size mismatch: decoded 8 bytes, expected 10
+WARNING | Failed to download docs/readme.md: Failed to decode docs/readme.md: size mismatch: decoded 8 bytes, expected 10
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: 3 file(s) stayed in error, the workspace is kept for the next run
+"""
         # the failed copies and the missing unchanged source (failed
         # in the remaining check) stay in error
         assert [item.info.path for item in job.error] == \
@@ -1010,7 +1026,12 @@ class TestSourceDownload:
         job = UpdateJob(UPDATE)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('no server provided')
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to download the content of 2 files: no server provided
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: 2 file(s) stayed in error, the workspace is kept for the next run
+"""
         assert [item.info.path for item in job.error] == \
             ['docs/readme_copy.txt', 'docs/readme_copy2.txt']
 
@@ -1041,7 +1062,12 @@ class TestValidateRemaining:
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to download data/blob.png:')
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to download data/blob.png: Failed to decompress data/blob.png: Corrupt input data
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
+"""
         assert [item.info.path for item in job.error] == ['data/blob.png']
 
     @pytest.mark.trio
@@ -1061,7 +1087,13 @@ class TestValidateRemaining:
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('the index pack record failed')
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to download .pack/index.pack: Failed to decode header: not a pack file: b'bad '
+WARNING | Failed to validate the remaining files: the index pack record failed
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
+"""
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
         assert file_read_bytes(target) == b'corrupt content'
 
@@ -1225,7 +1257,13 @@ class TestDownload:
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to download .pack/index.pack:')
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to download .pack/index.pack: Failed to decode header: not a pack file: b'bad '
+WARNING | Failed to validate the remaining files: the index pack record failed
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
+"""
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
         # the local index is not replaced, the workspace is kept as the
         # resume base of the next run
@@ -1253,7 +1291,13 @@ class TestDownload:
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to download .pack/index.pack:')
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to download .pack/index.pack: 500 Internal Server Error
+WARNING | Failed to validate the remaining files: the index pack record failed
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
+"""
         assert [item.info.path for item in job.error] == ['.pack/index.pack']
 
     @pytest.mark.trio
@@ -1269,7 +1313,13 @@ class TestDownload:
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to download .pack/index.pack:')
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to download .pack/index.pack: Failed to decode header: not a pack file: b'bad '
+WARNING | Failed to validate the remaining files: the index pack record failed
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: 3 file(s) stayed in error, the workspace is kept for the next run
+"""
         # the offsets are unavailable: the index record and every
         # record that could not be computed locally stay in error
         assert [item.info.path for item in job.error] == [
@@ -1297,8 +1347,13 @@ class TestCallerFlow:
         # written, no file of it applied
         UpdateJob(UPDATE, server=SERVER).write()
         job = UpdateJob(UPDATE, server=SERVER)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await job.run()
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert read_tree() == NEW_TREE
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
             bytes(NEW_DECODER.extract_index_pack())
@@ -1348,7 +1403,10 @@ class TestCallerFlow:
         job = UpdateJob(bytes(bad), server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to update:')
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: Failed to validate data checksum: checksum mismatch, keeping the workspace for the next run
+"""
         # the job file of the failed run is the resume base of the next
         # run, the tmp files written so far are its cache
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == bytes(bad)
@@ -1428,8 +1486,13 @@ class TestIntermediateLeftovers:
         job = UpdateJob(INTER_UPDATE_13, server=INTER_SERVER)
         # the deletion base: the records of the job file of the failed run
         assert 'b.txt' in job.residue_fileinfo
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await job.run()
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert not os.path.exists(env.PROJECT_ROOT / 'b.txt')
         assert read_tree() == INTER_TREE_3
 
@@ -1438,8 +1501,12 @@ class TestIntermediateLeftovers:
         """The rebuild from the latest index removes b.txt too."""
         await unpack_intermediate()
         job = RebuildJob(INTER_SERVER)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await job.run()
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuild done
+"""
         assert not os.path.exists(env.PROJECT_ROOT / 'b.txt')
         assert read_tree() == INTER_TREE_3
 
@@ -1449,8 +1516,12 @@ class TestIntermediateLeftovers:
         as well: the withdrawn V2 release leaves no file behind."""
         await unpack_intermediate()
         job = ResetJob(INTER_ROLLBACK_SERVER)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await job.run()
+        assert capture.concat() == f"""\
+INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Reset done
+"""
         assert not os.path.exists(env.PROJECT_ROOT / 'b.txt')
         assert read_tree() == INTER_TREE_1
 

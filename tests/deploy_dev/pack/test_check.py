@@ -134,8 +134,11 @@ class TestCheckLogs:
         await UnpackJob(WEBSITE_FULL_PACK).run()
         with logger.mock_capture_writer() as capture:
             await DeployJob(server=SERVER_C2).check()
-        assert capture.backend.any_contains('[CurrentVersion] c1')
-        assert capture.backend.any_contains('[LatestVersion] c2')
+        assert capture.concat() == """\
+INFO | [CurrentVersion] c1
+INFO | [LatestVersion] c2
+INFO | Update available: c1 -> c2
+"""
 
     @pytest.mark.trio
     async def test_update_logs_the_versions_once(self, app_folder):
@@ -143,10 +146,19 @@ class TestCheckLogs:
         await UnpackJob(WEBSITE_FULL_PACK).run()
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER_C2).update()
-        current = [log for log in capture.backend.logs if '[CurrentVersion]' in log['m']]
-        latest = [log for log in capture.backend.logs if '[LatestVersion]' in log['m']]
-        assert len(current) == 1
-        assert len(latest) == 1
+        # the pair is logged once, by the check of the flow (the server
+        # publishes no update pack: the flow falls back to the rebuild)
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] c1
+INFO | [LatestVersion] c2
+INFO | Update available: c1 -> c2
+WARNING | Request to "http://mock/c2/from_c1.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/c2/from_c1.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+WARNING | Failed to get the update pack c1 -> c2: Client error '404 Not Found' for url 'http://mock/c2/from_c1.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuild done
+"""
 
     @pytest.mark.trio
     async def test_check_logs_the_pair_with_a_version(self, app_folder):
@@ -155,8 +167,11 @@ class TestCheckLogs:
         await UnpackJob(WEBSITE_FULL_PACK).run()
         with logger.mock_capture_writer() as capture:
             await DeployJob(server=SERVER_C2).check(version='c2')
-        assert capture.backend.any_contains('[CurrentVersion] c1')
-        assert capture.backend.any_contains('[LatestVersion] c2')
+        assert capture.concat() == """\
+INFO | [CurrentVersion] c1
+INFO | [LatestVersion] c2
+INFO | Update available: c1 -> c2
+"""
 
     @pytest.mark.trio
     async def test_update_with_a_version_logs_the_pair_once(self, app_folder):
@@ -165,7 +180,16 @@ class TestCheckLogs:
         await UnpackJob(WEBSITE_FULL_PACK).run()
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER_C2).update(version='c2')
-        current = [log for log in capture.backend.logs if '[CurrentVersion]' in log['m']]
-        latest = [log for log in capture.backend.logs if '[LatestVersion]' in log['m']]
-        assert len(current) == 1
-        assert len(latest) == 1
+        # the pair is logged once, by the check(version) of the flow (the
+        # server publishes no update pack: the flow falls back to the rebuild)
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] c1
+INFO | [LatestVersion] c2
+INFO | Update available: c1 -> c2
+WARNING | Request to "http://mock/c2/from_c1.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/c2/from_c1.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+WARNING | Failed to get the update pack c1 -> c2: Client error '404 Not Found' for url 'http://mock/c2/from_c1.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuild done
+"""

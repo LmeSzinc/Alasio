@@ -168,9 +168,21 @@ class TestDeployUpdate:
     @pytest.mark.trio
     async def test_update_to_new_version(self, app_folder):
         """A version mismatch downloads the update pack and applies it."""
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await UnpackJob(OLD_PACK).run()
             assert await DeployJob(server=SERVER).update()
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpack done
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert read_tree() == NEW_TREE
         # the local index pack is the new one
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
@@ -180,9 +192,20 @@ class TestDeployUpdate:
     @pytest.mark.trio
     async def test_up_to_date(self, app_folder):
         """The same version continues with ResetJob, nothing changes."""
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await UnpackJob(NEW_PACK).run()
             assert await DeployJob(server=SERVER).update()
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpack done
+INFO | [CurrentVersion] new
+INFO | [LatestVersion] new
+INFO | Already up to date: new
+INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Reset done
+"""
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -192,7 +215,15 @@ class TestDeployUpdate:
         rebuilt from the server."""
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update()
-        assert capture.backend.any_contains('Failed to read the local version')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] {''}
+INFO | [LatestVersion] new
+INFO | Update available: no local version, latest is new
+WARNING | Failed to read the local version, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Rebuild done
+"""
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         assert decoder.current_version == 'new'
@@ -205,7 +236,17 @@ class TestDeployUpdate:
         await UnpackJob(OLD_PACK).run()
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER_NO_UPDATE).update()
-        assert capture.backend.any_contains('Failed to get the update pack')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuild done
+"""
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         assert decoder.current_version == 'new'
@@ -218,7 +259,16 @@ class TestDeployUpdate:
         await UnpackJob(OLD_PACK).run()
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER_CORRUPT_UPDATE).update()
-        assert capture.backend.any_contains('Failed to apply the update pack')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: Failed to decode header: not a pack file: b'garb', keeping the workspace for the next run
+WARNING | Failed to apply the update pack, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuild done
+"""
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         assert decoder.current_version == 'new'
@@ -229,17 +279,34 @@ class TestDeployUpdate:
         """An unfinished rebuild job is finished before the update."""
         await UnpackJob(OLD_PACK).run()
         RebuildJob(SERVER).write()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     @pytest.mark.trio
     async def test_unfinished_job_finished_first(self, app_folder):
         """An unfinished job is finished before the update."""
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             UnpackJob(OLD_PACK).write()
             assert await DeployJob(server=SERVER).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] {''}
+INFO | [LatestVersion] new
+INFO | Update available: no local version, latest is new
+WARNING | Failed to read the local version, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Rebuild done
+"""
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
@@ -289,16 +356,32 @@ class TestLatestInfoSnapshot:
         """The same version path: the entry fetch serves ResetJob too."""
         await UnpackJob(NEW_PACK).run()
         calls = self.count_latest(SERVER, monkeypatch)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] new
+INFO | [LatestVersion] new
+INFO | Already up to date: new
+INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Reset done
+"""
         assert len(calls) == 1
 
     @pytest.mark.trio
     async def test_local_index_missing(self, app_folder, monkeypatch):
         """The unknown local version path: RebuildJob reuses the entry snapshot."""
         calls = self.count_latest(SERVER, monkeypatch)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] {''}
+INFO | [LatestVersion] new
+INFO | Update available: no local version, latest is new
+WARNING | Failed to read the local version, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Rebuild done
+"""
         assert len(calls) == 1
         assert read_tree() == NEW_TREE
 
@@ -307,8 +390,19 @@ class TestLatestInfoSnapshot:
         """The update pack 404 fallback: RebuildJob reuses the entry snapshot."""
         await UnpackJob(OLD_PACK).run()
         calls = self.count_latest(SERVER_NO_UPDATE, monkeypatch)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER_NO_UPDATE).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuild done
+"""
         assert len(calls) == 1
 
     @pytest.mark.trio
@@ -316,8 +410,18 @@ class TestLatestInfoSnapshot:
         """The corrupt update pack fallback: RebuildJob reuses the entry snapshot."""
         await UnpackJob(OLD_PACK).run()
         calls = self.count_latest(SERVER_CORRUPT_UPDATE, monkeypatch)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER_CORRUPT_UPDATE).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to update: Failed to decode header: not a pack file: b'garb', keeping the workspace for the next run
+WARNING | Failed to apply the update pack, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuild done
+"""
         assert len(calls) == 1
 
     @pytest.mark.trio
@@ -325,8 +429,16 @@ class TestLatestInfoSnapshot:
         """The incremental path: UpdateJob never reads latest.pack."""
         await UnpackJob(OLD_PACK).run()
         calls = self.count_latest(SERVER, monkeypatch)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert len(calls) == 1
 
     @pytest.mark.trio
@@ -356,9 +468,20 @@ class TestLatestInfoSnapshot:
 
         monkeypatch.setattr(server, 'get_latest_info', latest_then_publish)
         monkeypatch.setattr(server, 'get_index_pack', counting_index)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await UnpackJob(NEW_PACK).run()
             assert await DeployJob(server=server).update()
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpack done
+INFO | [CurrentVersion] new
+INFO | [LatestVersion] new
+INFO | Already up to date: new
+INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Reset done
+"""
         # the snapshot of the entry fetch decided the whole flow
         assert len(calls) == 1
         assert index_calls == []
@@ -387,8 +510,16 @@ class TestUpdatePhases:
     async def test_incremental_reports_checking_downloading_updating(self, app_folder):
         await UnpackJob(OLD_PACK).run()
         phases = FakePhaseManager()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update(phases)
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert phases.phases == ['checking', 'downloading', 'updating']
         assert read_tree() == NEW_TREE
 
@@ -398,8 +529,19 @@ class TestUpdatePhases:
         download was attempted (and failed), the rebuild follows."""
         await UnpackJob(OLD_PACK).run()
         phases = FakePhaseManager()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER_NO_UPDATE).update(phases)
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuild done
+"""
         assert phases.phases == ['checking', 'downloading', 'updating']
         assert read_tree() == NEW_TREE
 
@@ -408,8 +550,17 @@ class TestUpdatePhases:
         """A missing local index has no version to compare and no pack to
         download: the rebuild from the latest index is one apply."""
         phases = FakePhaseManager()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update(phases)
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] {''}
+INFO | [LatestVersion] new
+INFO | Update available: no local version, latest is new
+WARNING | Failed to read the local version, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Rebuild done
+"""
         assert phases.phases == ['checking', 'updating']
         assert read_tree() == NEW_TREE
 
@@ -419,8 +570,15 @@ class TestUpdatePhases:
         the check and the local changes."""
         await UnpackJob(NEW_PACK).run()
         phases = FakePhaseManager()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update(phases)
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] new
+INFO | [LatestVersion] new
+INFO | Already up to date: new
+INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Reset done
+"""
         assert phases.phases == ['checking', 'updating']
         assert read_tree() == NEW_TREE
 
@@ -428,8 +586,16 @@ class TestUpdatePhases:
     async def test_without_manager_nothing_is_reported(self, app_folder):
         """The CLI form runs the same flow without a callback."""
         await UnpackJob(OLD_PACK).run()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert read_tree() == NEW_TREE
 
     @pytest.mark.trio
@@ -443,9 +609,15 @@ class TestUpdatePhases:
             phases.append(phase)
             return phase != 'updating'
 
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(UpdateAborted):
                 await DeployJob(server=SERVER).update(on_job_phase)
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Update aborted at the 'updating' phase, cleaning up the temporary files
+"""
         assert phases == ['checking', 'downloading', 'updating']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
         # the local tree was not changed (the pack was never applied)
@@ -462,9 +634,15 @@ class TestUpdatePhases:
             phases.append(phase)
             return phase != 'downloading'
 
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(UpdateAborted):
                 await DeployJob(server=SERVER).update(on_job_phase)
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Update aborted at the 'downloading' phase, cleaning up the temporary files
+"""
         assert phases == ['checking', 'downloading']
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
         assert read_tree() == OLD_TREE
@@ -489,8 +667,16 @@ class TestVersionDrivenUpdate:
         """A version mismatch applies the update pack of the version."""
         await UnpackJob(OLD_PACK).run()
         latest_calls = TestLatestInfoSnapshot.count_latest(SERVER, monkeypatch)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update(version='new')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert len(latest_calls) == 1
         assert read_tree() == NEW_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
@@ -508,8 +694,17 @@ class TestVersionDrivenUpdate:
             return await original_index(version)
 
         monkeypatch.setattr(SERVER, 'get_index_pack', counting_index)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update(version='new')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] {''}
+INFO | [LatestVersion] new
+INFO | Update available: no local version, latest is new
+WARNING | Failed to read the local version, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Rebuild done
+"""
         assert len(latest_calls) == 1
         assert index_calls == ['new']
         assert read_tree() == NEW_TREE
@@ -523,8 +718,15 @@ class TestVersionDrivenUpdate:
         await UnpackJob(NEW_PACK).run()
         file_write(env.PROJECT_ROOT / 'backend/main.py', b'damaged\n')
         latest_calls = TestLatestInfoSnapshot.count_latest(SERVER, monkeypatch)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update(version='new')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] new
+INFO | [LatestVersion] new
+INFO | Already up to date: new
+INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+INFO | Reset done
+"""
         assert len(latest_calls) == 1
         assert read_tree() == NEW_TREE
 
@@ -534,8 +736,19 @@ class TestVersionDrivenUpdate:
         pack of the version."""
         await UnpackJob(OLD_PACK).run()
         latest_calls = TestLatestInfoSnapshot.count_latest(SERVER_NO_UPDATE, monkeypatch)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER_NO_UPDATE).update(version='new')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+INFO | Rebuild done
+"""
         assert len(latest_calls) == 1
         assert read_tree() == NEW_TREE
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
@@ -556,8 +769,16 @@ class TestVersionDrivenUpdate:
         latest-driven one."""
         await UnpackJob(OLD_PACK).run()
         phases = FakePhaseManager()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=SERVER).update(phases, version='new')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert phases.phases == ['checking', 'downloading', 'updating']
         assert read_tree() == NEW_TREE
 
@@ -615,8 +836,15 @@ class TestUpdatePackReuse:
         UpdateJob(UPDATE, server=server).write()
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=server).update()
-        assert capture.backend.any_contains(
-            'Update pack unchanged, reusing the kept pack: old -> new')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Update pack unchanged, reusing the kept pack: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert read_tree() == NEW_TREE
         # the trailing 20 bytes digest was transferred, not the body
         assert server.update_bytes == 20
@@ -637,9 +865,16 @@ class TestUpdatePackReuse:
                 raise KeyboardInterrupt
 
             dying.setattr(UpdateJob, 'unpack', failing_unpack)
-            with logger.mock_capture_writer():
+            with logger.mock_capture_writer() as capture:
                 with pytest.raises(KeyboardInterrupt):
                     await DeployJob(server=server).update()
+            # the run died on the unpack, the apply never started
+            assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+"""
         assert file_read_bytes(workspace_file('job.pack')) == UPDATE
         assert server.update_bytes == len(UPDATE)
 
@@ -655,7 +890,15 @@ class TestUpdatePackReuse:
         monkeypatch.setattr(UpdateJob, 'write', counting_write)
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=server).update()
-        assert capture.backend.any_contains('reusing the kept pack')
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Update pack unchanged, reusing the kept pack: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert read_tree() == NEW_TREE
         assert server.update_bytes == len(UPDATE) + 20
         assert writes == [True]
@@ -686,7 +929,15 @@ class TestUpdatePackReuse:
         """Without a kept pack the flow downloads the body as before."""
         server = make_server()
         await UnpackJob(OLD_PACK).run()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await DeployJob(server=server).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Update done
+"""
         assert read_tree() == NEW_TREE
         assert server.update_bytes == len(UPDATE)

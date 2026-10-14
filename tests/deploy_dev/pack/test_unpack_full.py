@@ -887,7 +887,12 @@ class TestUnpackRebuild:
         os.remove(env.PROJECT_ROOT / '.pack/index.pack')
         with logger.mock_capture_writer() as capture:
             await UnpackJob(NEW_PACK).run()
-        assert capture.backend.any_contains('Failed to read the old index pack')
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpack done
+"""
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
         tree = read_tree()
         assert all(tree[path] == content for path, content in NEW_TREE.items())
@@ -909,7 +914,12 @@ class TestUnpackRebuild:
             f.write(bad)
         with logger.mock_capture_writer() as capture:
             await UnpackJob(NEW_PACK).run()
-        assert capture.backend.any_contains('Failed to read the old index pack')
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: Failed to validate index checksum: checksum mismatch
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+INFO | Unpack done
+"""
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
         tree = read_tree()
         assert all(tree[path] == content for path, content in NEW_TREE.items())
@@ -959,7 +969,11 @@ class TestUnpackRebuild:
             assert not await UnpackJob(NEW_PACK).run()
         # the replace failure is an error: real files may be partially
         # replaced (see the run() docstring)
-        assert capture.backend.any_contains('Failed to replace file')
+        assert capture.concat() == f"""\
+INFO | Unpacking data to "{env.PROJECT_ROOT}", name=""
+INFO | Replacing files to "{env.PROJECT_ROOT}", name=""
+ERROR | Failed to replace file: interrupted, keeping the workspace for the next run
+"""
         # the interrupted pass replaced a data file, never the index pack
         assert len(calls) == 1
         assert not str(calls[0]).endswith('index.pack')

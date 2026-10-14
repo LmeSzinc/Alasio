@@ -93,7 +93,9 @@ class TestJobFile:
         """A missing index pack fails with a warning."""
         with logger.mock_capture_writer() as capture:
             assert not ResetJob(WEBSITE_SERVER).validate_index()
-        assert capture.backend.any_contains('Failed to validate the index pack:')
+        assert capture.concat() == f"""\
+WARNING | Failed to validate the index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+"""
 
     def test_corrupted(self, app_folder):
         """An index pack with a bad checksum fails."""
@@ -149,7 +151,9 @@ class TestValidateLatest:
         job = ResetJob(WEBSITE_SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.validate_latest()
-        assert capture.backend.any_contains('Failed to validate the latest index:')
+        assert capture.concat() == """\
+WARNING | Failed to validate the latest index: local checksum d7431ce092c43d751ef433cabd431ee3b003cad6 != 887e26978116304ea3a5b23c8b41f88a838d0e61
+"""
 
     @pytest.mark.trio
     async def test_no_server(self, app_folder):
@@ -533,7 +537,9 @@ class TestDownload:
         job.validate_files()
         with logger.mock_capture_writer() as capture:
             await job.download()
-        assert capture.backend.any_contains('Failed to download')
+        assert capture.concat() == """\
+WARNING | Failed to download backend/__init__.py: Failed to decode backend/__init__.py: size mismatch: decoded 8 bytes, expected 0
+"""
         assert [item.info.path for item in job.error] == ['backend/__init__.py']
         assert job.pending == []
 
@@ -664,7 +670,11 @@ class TestRun:
         job = ResetJob(WEBSITE_SERVER)
         with logger.mock_capture_writer() as capture:
             assert await job.run()
-        assert capture.backend.any_contains('Failed to validate the index pack:')
+        assert capture.concat() == f"""\
+INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to validate the index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Reset done
+"""
         # the index pack is downloaded and all files are unpacked
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == WEBSITE_INDEX_PACK
         assert file_read_bytes(env.PROJECT_ROOT / 'backend/main.py') == \
@@ -741,7 +751,11 @@ class TestRun:
         job = ResetJob(server)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to reset:')
+        assert capture.concat() == f"""\
+INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to validate the index pack: Failed to validate index checksum: checksum mismatch
+WARNING | Failed to reset: Failed to validate index checksum: checksum mismatch, keeping the workspace for the next run
+"""
         # the broken index pack is not replaced, the workspace is kept
         # as the resume base of the next run
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == bytes(bad)
@@ -768,7 +782,11 @@ class TestRun:
         job = ResetJob(None)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to reset:')
+        assert capture.concat() == f"""\
+INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to validate the index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+WARNING | Failed to reset: Failed to download the index pack: no server provided, keeping the workspace for the next run
+"""
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == ResetJob.MARK
 
     @pytest.mark.trio
@@ -823,7 +841,11 @@ class TestRun:
             assert not await job.run()
         # the replace failure is an error: real files may be partially
         # replaced, it is not the safe "no real file was written" case
-        assert capture.backend.any_contains('Failed to replace file')
+        assert capture.concat() == f"""\
+INFO | Resetting files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to validate the latest index: local checksum d7431ce092c43d751ef433cabd431ee3b003cad6 != 887e26978116304ea3a5b23c8b41f88a838d0e61
+ERROR | Failed to replace file: interrupted, keeping the workspace for the next run
+"""
         # the interrupted pass replaced a data file, never the index pack
         assert len(calls) == 1
         assert not str(calls[0]).endswith('index.pack')

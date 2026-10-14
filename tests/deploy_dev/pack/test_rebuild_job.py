@@ -334,7 +334,11 @@ class TestLeftoverCleanup:
         with logger.mock_capture_writer() as capture:
             job = RebuildJob(SERVER)
             assert await job.run()
-        assert capture.backend.any_contains('Failed to read the old index pack')
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Rebuild done
+"""
         tree = read_tree()
         assert all(tree[path] == content for path, content in NEW_TREE.items())
         # without the old index the leftovers cannot be computed and
@@ -356,7 +360,11 @@ class TestLeftoverCleanup:
         with logger.mock_capture_writer() as capture:
             job = RebuildJob(SERVER)
             assert await job.run()
-        assert capture.backend.any_contains('Failed to read the old index pack')
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: Failed to validate index checksum: checksum mismatch
+INFO | Rebuild done
+"""
         tree = read_tree()
         assert all(tree[path] == content for path, content in NEW_TREE.items())
         for path in OLD_ONLY:
@@ -444,7 +452,28 @@ class TestFileRepair:
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert job.error
-        assert capture.backend.any_contains('stayed in error')
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to download .gitattributes: Failed to decompress .gitattributes: Corrupt input data
+WARNING | Failed to download backend/a1.py: Failed to decompress backend/a1.py: Corrupt input data
+WARNING | Failed to download backend/a2.py: Failed to decompress backend/a2.py: Corrupt input data
+WARNING | Failed to download backend/a3.py: Failed to decompress backend/a3.py: Corrupt input data
+WARNING | Failed to download backend/copy.py: Failed to decode backend/copy.py: size mismatch: decoded 8 bytes, expected 43
+WARNING | Failed to download backend/main.py: Failed to decode backend/main.py: size mismatch: decoded 8 bytes, expected 94
+WARNING | Failed to download backend/tiny.py: Failed to decode backend/tiny.py: size mismatch: decoded 8 bytes, expected 1
+WARNING | Failed to download data/new_blob.bin: Failed to decode data/new_blob.bin: size mismatch: decoded 8 bytes, expected 12800
+WARNING | Failed to download docs/guide2.txt: Failed to decode docs/guide2.txt: size mismatch: decoded 8 bytes, expected 30
+WARNING | Failed to download docs/notes.txt: Failed to decode docs/notes.txt: size mismatch: decoded 8 bytes, expected 13
+WARNING | Failed to download docs/readme_copy.txt: Failed to decode docs/readme_copy.txt: size mismatch: decoded 8 bytes, expected 10
+WARNING | Failed to download docs/readme_copy2.txt: Failed to decode docs/readme_copy2.txt: size mismatch: decoded 8 bytes, expected 10
+WARNING | Failed to download frontend/App.svelte: Failed to decode frontend/App.svelte: size mismatch: decoded 8 bytes, expected 52
+WARNING | Failed to download frontend/App2.svelte: Failed to decode frontend/App2.svelte: size mismatch: decoded 8 bytes, expected 52
+WARNING | Failed to download scripts/new_tool.py: Failed to decompress scripts/new_tool.py: Corrupt input data
+WARNING | Failed to download scripts/runner.sh: Failed to decode scripts/runner.sh: size mismatch: decoded 8 bytes, expected 28
+WARNING | Failed to download tools/run.sh: Failed to decode tools/run.sh: size mismatch: decoded 8 bytes, expected 31
+WARNING | Failed to download .pack/history.pack: Failed to decode .pack/history.pack: size mismatch: decoded 8 bytes, expected 16
+WARNING | Failed to rebuild: 18 file(s) stayed in error, the workspace is kept for the next run
+"""
         # the index was not committed: the workspace is the resume base
         # of the next run, which retries the failed records
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == RebuildJob.MARK
@@ -459,7 +488,11 @@ class TestFileRepair:
         job = RebuildJob(None)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to rebuild:')
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+WARNING | Failed to rebuild: Failed to download the index pack: no server provided, keeping the workspace for the next run
+"""
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == RebuildJob.MARK
 
 
@@ -509,7 +542,10 @@ class TestResume:
         job = RebuildJob(SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
-        assert capture.backend.any_contains('Failed to replace file')
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name=""
+ERROR | Failed to replace file: interrupted, keeping the workspace for the next run
+"""
         # the interrupted pass replaced a data file, never the index pack
         assert len(calls) == 1
         assert not str(calls[0]).endswith('index.pack')
