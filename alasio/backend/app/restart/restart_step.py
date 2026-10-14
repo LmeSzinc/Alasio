@@ -17,8 +17,9 @@ adds the entries and the lifespan run):
 - ``read_resume_intent`` / ``resume_queue``: the other side of the handover --
   the startup flow consumes the file and this task starts the configs of the
   new process;
-- ``wrap_up``: the release path of a flow that did not hand over (restore the
-  checks, resume the workers stopped for it);
+- ``wrap_up``: the release path of a flow that did not hand over (release the
+  transient update states of the mods, restore the checks, resume the workers
+  stopped for it);
 - ``force_restart`` / ``abort``: leave the flows behind and end the process.
 
 The steps read the state of ``restart_base`` (the slot, the frozen flag) and
@@ -498,12 +499,15 @@ class RestartStep(RestartBase):
         Wrap up a flow that did not hand over (cancelled, failed, refused
         restart)
 
-        1. the check sequences the flow paused are restored (a mod that was
+        1. the transient states the apply steps set return to 'available' (the
+           flow in flight is gone, the update of the last check is still
+           pending);
+        2. the check sequences the flow paused are restored (a mod that was
            never paused is left alone);
-        2. the workers stopped for the flow are resumed: the restart run of the
+        3. the workers stopped for the flow are resumed: the restart run of the
            worker manager is released (the cancel path may have done it already)
            and the frozen list is queued for the resume task;
-        3. the resume queue is spawned as an external task: it drains outside
+        4. the resume queue is spawned as an external task: it drains outside
            the slot, so a new flow may take the backend over while it still runs
            (the queue stops there and its entries are collected by the new
            flow).
@@ -519,6 +523,7 @@ class RestartStep(RestartBase):
                 stopped none
         """
         worker_manager = self.worker_manager
+        self.update_check.release_states()
         self.update_check.restore()
         try:
             # every worker this flow took must come back: the frozen list of

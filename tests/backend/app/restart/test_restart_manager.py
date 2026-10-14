@@ -17,6 +17,7 @@ from alasio.backend.app.restart.daily import DailyState
 from alasio.backend.app.restart.restart_base import FLOW_NAMES, INIT_FLOW, STARTING_UP, FlowRefused
 from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
 from alasio.backend.app.restart.restart_manager import RestartManager
+from alasio.logger import logger
 
 NOW = datetime.datetime(2026, 10, 13, 4, 0)
 
@@ -64,16 +65,24 @@ def fake_bodies(monkeypatch):
     The manager tests own the slot and the flow state machine, not the work of
     the flows: the fake body sets the start event of its flow, holds inside its
     cancellation window until the test releases it and records how the flow
-    ended.
+    ended (a cancelled body never continues past the window: see the marker
+    below).
     """
 
     async def fake_run(self):
         manager = self.manager
         manager.started[self.name].set()
-        with self.cancel_window('the handover started'):
-            await manager.hold[self.name].wait()
-        manager.records.append(('cancelled' if self.cancelled else 'done', self.name))
-        manager.finished[self.name].set()
+        try:
+            with self.cancel_window('the handover started'):
+                await manager.hold[self.name].wait()
+            if self.cancelled:
+                # unreachable: the window raises FlowCancelled when a cancelled
+                # body leaves it. A record here means the body continued past
+                # its window (the assert of the tests compares the records)
+                manager.records.append(('continued after a cancel', self.name))
+        finally:
+            manager.records.append(('cancelled' if self.cancelled else 'done', self.name))
+            manager.finished[self.name].set()
 
     for flow_cls in (FlowStartup, FlowRestart, FlowUpdate, FlowDaily):
         monkeypatch.setattr(flow_cls, 'run', fake_run)
@@ -313,6 +322,25 @@ class TestCancel:
             await h.manager.finished['restart'].wait()
             await trio.testing.wait_all_tasks_blocked()
             assert h.records == [('done', 'startup'), ('done', 'restart')]
+            assert h.manager.flow_name == ''
+            nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_a_cancelled_flow_is_reported_as_cancelled(self):
+        """
+        An accepted cancel is an expected end of the flow, not a failure: the
+        manager reports it as a cancellation and keeps serving the slot
+        """
+        async with trio.open_nursery() as nursery:
+            h = await Harness.start(nursery)
+            await h.run_idle()
+            h.manager.restart()
+            await h.manager.started['restart'].wait()
+            with logger.mock_capture_writer() as capture:
+                await h.manager.cancel_restart()
+                await h.manager.finished['restart'].wait()
+            assert capture.fd.any_contains('The restart flow was cancelled')
+            assert not capture.fd.any_contains('failed')
             assert h.manager.flow_name == ''
             nursery.cancel_scope.cancel()
 

@@ -123,6 +123,7 @@ class FakeUpdateCheck:
         self.mods = mods if mods is not None else {}
         self.states = []
         self.restores = 0
+        self.releases = 0
         self.required = []
 
     def names(self, managed=True):
@@ -133,6 +134,9 @@ class FakeUpdateCheck:
 
     def restore(self, names=None):
         self.restores += 1
+
+    def release_states(self):
+        self.releases += 1
 
     def mark_restart_required(self, names, error=''):
         self.required.extend(names)
@@ -548,6 +552,16 @@ class TestWrapUp:
         # the queue is a task of the nursery, not part of the flow: the wrap-up
         # only asks for it
         assert spawned == [(manager.resume_queue, ())]
+
+    @pytest.mark.trio
+    async def test_wrap_up_releases_the_states_of_the_flow_in_flight(self):
+        manager = make_manager()
+        manager.spawn = lambda fn, *args: None
+        await manager.wrap_up(FlowUpdate(manager), ['cfg_a'])
+        # the pending states of the update steps are released before the check
+        # sequences restart (the update of the last check is still pending)
+        assert manager.update_check.releases == 1
+        assert manager.update_check.restores == 1
 
     @pytest.mark.trio
     async def test_wrap_up_collects_the_parked_and_queued_configs(self):

@@ -63,6 +63,11 @@ BUSY_MESSAGE = 'A check is already in progress'
 # (the entries answer it instead of raising: a mod without a source is a normal
 # state, the startup flow publishes it as 'unmanaged')
 UNMANAGED_MESSAGE = 'The mod has no update source'
+# The states the apply steps of a flow set on a mod while the flow runs
+# ('queued' / 'stopping' / 'downloading'): they describe the flow in flight, not
+# the update itself -- the wrap-up of a flow that does not hand over releases
+# them back to 'available' (see UpdateCheck.release_states)
+FLOW_STATES = ('queued', 'stopping', 'downloading')
 
 
 class ModUpdateCheck:
@@ -757,6 +762,28 @@ class UpdateCheck:
                 continue
             logger.warning(f'[Update] The update of "{name}" needs a restart to be applied')
             mod.set_state('restart-required', error=error)
+
+    def release_states(self):
+        """
+        Release the transient states of the flow in flight (the wrap-up of a
+        flow that does not hand over)
+
+        The pending states the apply steps set (``FLOW_STATES``: 'queued',
+        'stopping', 'downloading') describe the flow that set them: once it
+        wrapped up they are stale -- the update of the last check is still
+        pending (nothing on disk changed) and the wrapped-up flow restored the
+        check sequences, so the mod returns to 'available' (the versions of the
+        last check are kept).
+
+        The states of the files ('updating', 'restart-required') and the
+        failures ('error') do not describe the flow in flight and stay (the next
+        process start converges the tree); 'checking' belongs to the check
+        module and stays too (the restored sequence resolves it with its next
+        check). A mod the flow never touched is left alone.
+        """
+        for name, mod in self.mods.items():
+            if mod.info.state in FLOW_STATES:
+                self.set_state(name, 'available')
 
     def _resolve(self, names):
         """

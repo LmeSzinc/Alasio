@@ -8,14 +8,39 @@ what these tests pin.
 import datetime
 
 import pytest
+import trio
 
 from alasio.backend.app.restart.daily import DailyState
-from alasio.backend.app.restart.restart_base import FLOW_NAMES, INIT_FLOW, STARTING_UP
+from alasio.backend.app.restart.restart_base import FLOW_NAMES, INIT_FLOW, STARTING_UP, FlowCancelled
 from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
 from alasio.backend.app.restart.restart_step import HandoverFailed
 from alasio.backend.app.restart.resume_file import ResumeRecord
 
 NOW = datetime.datetime.now()
+
+
+async def run_expecting_cancel(coro):
+    """
+    Run the body of an interrupted flow: it must end with FlowCancelled
+
+    The window of a cancelled flow never lets the body continue past it, so the
+    tail of the flow (the handover) is unreachable after an accepted cancel.
+
+    Args:
+        coro (Coroutine): The body coroutine
+    """
+    with pytest.raises(FlowCancelled):
+        await coro
+
+
+class FakeWorkerManager:
+    """The worker manager side the cancel wakes (Flow.interrupt)"""
+
+    def __init__(self):
+        self.aborts = 0
+
+    def restart_abort(self):
+        self.aborts += 1
 
 
 class FakeCheck:
@@ -120,6 +145,7 @@ class FakeManager:
         self.handed_over = []
         self.spawned = []
         self.views = 0
+        self.worker_manager = FakeWorkerManager()
         self.update_check = FakeUpdateCheck(available=available, uptodate=uptodate)
         daily = DailyState(target=target)
         daily.note_full_update(NOW.timestamp())
@@ -173,6 +199,10 @@ class FakeManager:
         """The flow view push of the manager (the window announces itself)"""
         self.views += 1
 
+    async def push_view(self):
+        """The async view push the cancel of a flow triggers"""
+        self.views += 1
+
 
 class TestFlowRestart:
     """The user restart flow"""
@@ -192,6 +222,35 @@ class TestFlowRestart:
         await FlowRestart(manager).run()
         assert manager.calls == [('stop_all', 'restart'), ('wrap_up', [])]
         assert manager.handed_over == []
+
+    @pytest.mark.trio
+    async def test_a_cancel_inside_the_window_never_hands_over(self):
+        """
+        An accepted cancel ends the flow: the window raises FlowCancelled out
+        of the body, the handover is never reached and the wrap-up resumes what
+        the flow stopped
+        """
+        manager = FakeManager()
+        entered = trio.Event()
+        release = trio.Event()
+
+        async def stop_all(one=None, timeout=None):
+            manager.calls.append(('stop_all', one.name))
+            entered.set()
+            await release.wait()
+            return True, ['cfg_a']
+
+        manager.stop_all = stop_all
+        flow = FlowRestart(manager)
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_expecting_cancel, flow.run())
+            await entered.wait()
+            assert flow.cancellable is True
+            # exactly what the rpc layer does (cancel_restart)
+            await flow.cancel()
+        assert manager.handed_over == []
+        assert manager.calls == [('stop_all', 'restart'), ('wrap_up', [])]
+        assert manager.update_check.calls == ['pause']
 
     @pytest.mark.trio
     async def test_handover_failure_wraps_up_the_workers(self):
@@ -257,6 +316,33 @@ class TestFlowUpdate:
         assert manager.calls == [('wrap_up', [])]
         assert ('set_state', 'm', 'uptodate') in manager.update_check.calls
         assert manager.handed_over == []
+
+    @pytest.mark.trio
+    async def test_a_cancel_during_the_pre_check_never_hands_over(self):
+        """
+        The read-only pre-check is inside the cancellable window: an accepted
+        cancel must end the flow there (nothing stopped, nothing written, no
+        handover)
+        """
+        manager = FakeManager()
+        entered = trio.Event()
+        release = trio.Event()
+
+        async def gated_job():
+            entered.set()
+            await release.wait()
+            return FakeJob(True)
+
+        manager.update_check.mods['m'].job = gated_job
+        flow = FlowUpdate(manager)
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_expecting_cancel, flow.run())
+            await entered.wait()
+            assert flow.cancellable is True
+            await flow.cancel()
+        assert manager.handed_over == []
+        assert manager.calls == [('wrap_up', [])]
+        assert manager.update_check.calls == ['pause', ('set_state', 'm', 'queued')]
 
     @pytest.mark.trio
     async def test_applies_and_hands_over(self):

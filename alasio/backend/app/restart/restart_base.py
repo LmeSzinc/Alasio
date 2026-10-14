@@ -63,6 +63,26 @@ class FlowRefused(RuntimeError):
     """
 
 
+class FlowCancelled(RuntimeError):
+    """
+    Raised when a cancelled flow leaves its cancellation window
+
+    The window absorbs the ``Cancelled`` of its own scope (the body would
+    silently continue after the ``with`` block otherwise, see
+    ``Flow.cancel_window``), so the flow answers an accepted cancel with this
+    instead: the body must not run its irreversible tail (the handover of a
+    flow), the wrap-up belongs to the flow's own ``finally``. Both ways a
+    cancel can end the window are covered: the cancellation delivered at a
+    checkpoint (the scope absorbs it) and the cancellation that was never
+    delivered at all (a cancel consumed by a blocked thread hop, no checkpoint
+    left inside the window) -- the flag of the flow is the signal both leave
+    behind.
+
+    It is never raised instead of an exception of the body itself: a failure
+    of the body passes through and the cancel does not mask it.
+    """
+
+
 class Flow:
     """
     One maintenance flow: the state behind the slot, the body and the
@@ -87,7 +107,14 @@ class Flow:
     Attributes (the state the sync world reads):
         started_at (float): Claim time (time.time())
         cancelled (bool): A cancel (or a force restart) was accepted: the flow
-            must not continue past its next checkpoint
+            must not continue past its next checkpoint. The cancellation window
+            raises ``FlowCancelled`` when a cancelled body leaves it, so the
+            irreversible tail of a flow is never reached after a cancel. A
+            plain field on purpose: it is the durable half of the cancel --
+            trio delivers a cancellation at a checkpoint only (one consumed by
+            a blocked thread call is dropped, see ``interrupt``) and
+            ``CancelScope.cancel_called`` needs the async context of a running
+            trio loop to be read
         cancellable (bool): Whether a cancel() would be accepted right now:
             the flow is inside its cancellation window
         upgraded (bool): Whether the flow was upgraded into the daily
@@ -117,8 +144,12 @@ class Flow:
         self._irreversible = False
         # the reason a later cancel is refused with, given by the window
         self._past_reason = ''
-        # the cancel scope of the cancellable phase, None outside the window
-        self._window: "Optional[trio.CancelScope]" = None
+        # the cancel scope of the cancellable phase: it belongs to the flow
+        # (not to one window), so an interrupt landing before the body opened
+        # its window is not lost -- it cancels the scope, the first checkpoint
+        # inside the window raises (see cancel_window). Cancelled at most once:
+        # a further cancel is refused by `cancelled`
+        self._scope = trio.CancelScope()
 
     async def run(self):
         """
@@ -158,35 +189,51 @@ class Flow:
             with self.cancel_window('the handover started'):
                 ...the part a cancel may interrupt...
 
-        The cancel scope of the phase belongs to the flow: a cancel() landing
-        while the window is open interrupts the ``await`` in flight (the body
-        continues after the ``with`` block and wraps up). Leaving the window --
-        or closing it early (``close_window``, the point of no return inside
-        the phase) -- makes the flow irreversible: a later cancel is refused.
-        A flow with no cancellable part at all (the startup and the daily
-        ones) opens no window and can never be cancelled.
+        The window enters the cancel scope the flow owns (``_scope``): a cancel
+        landing while the window is open interrupts the ``await`` in flight and
+        the window turns the accepted cancel into ``FlowCancelled`` on the way
+        out -- the body must not continue past the ``with`` block (its tail is
+        the irreversible part, the handover of a flow), it wraps up instead
+        (``Flow.run``'s ``finally``). The scope belongs to the flow instead of
+        the window, so an interrupt landing before the window opened is not
+        lost: it cancels the scope, the first checkpoint inside the window
+        raises. One window per flow (a cancel scope is entered once).
+
+        Leaving the window -- or closing it early (``close_window``, the point
+        of no return inside the phase) -- makes the flow irreversible: a later
+        cancel is refused. A flow with no cancellable part at all (the startup
+        and the daily ones) opens no window and can never be cancelled.
 
         The flow view is published on both ends: the frontend offers the cancel
         entry only while the window is open.
+
+        Raises:
+            FlowCancelled: When the body left the window while the flow was
+                cancelled (the tail of the body must not run)
 
         Args:
             past_reason (str): The reason a later cancel is refused with (the
                 window is gone, the flow is past its point of no return, e.g.
                 'the handover started'); '' leaves it out of the message
         """
-        scope = trio.CancelScope()
-        self._window = scope
         self._open = True
         self._past_reason = past_reason
         self.publish_view()
         try:
-            with scope:
+            with self._scope:
                 yield
         finally:
             # the body left the window (or the process is going down)
             self._close(past_reason)
-            if self._window is scope:
-                self._window = None
+        if self.cancelled:
+            # the flow was cancelled: the Cancelled of the scope was absorbed
+            # by the scope itself (the body would silently continue after the
+            # with block otherwise) or never delivered at all (a cancel
+            # consumed by a blocked thread hop, see interrupt()). Either way
+            # the body must not run its tail. Reached on the normal way out
+            # only: an exception of the body itself passes through the finally
+            # above and is never masked by the cancel.
+            raise FlowCancelled(f'The {self.name} flow was cancelled')
 
     def close_window(self):
         """
@@ -244,7 +291,10 @@ class Flow:
 
         Only a cancel landing inside the cancellation window is accepted (see
         ``cancel_window``): outside it the flow is either not doing anything
-        cancellable yet or past its point of no return.
+        cancellable yet or past its point of no return. An accepted cancel
+        interrupts the phase in flight and ends the window with
+        ``FlowCancelled``, so the flow wraps up instead of handing the backend
+        over.
 
         Raises:
             FlowRefused: When the cancel cannot be accepted right now (the flow
@@ -266,8 +316,18 @@ class Flow:
         stop can last minutes), a trio cancel cannot end it: the abort event of
         the worker manager is what wakes it, the cancel scope only ends the
         flow task once the wait returned. The wrap-up (the workers it stopped,
-        the checks it paused) belongs to ``run()``, which observes the cancel
-        at its next checkpoint.
+        the checks it paused) belongs to ``run()``, which observes the cancel as
+        a ``FlowCancelled`` out of its cancellation window; a flow without a
+        window (startup / daily) runs on instead -- the process is going down
+        anyway (the force restart / the backend stop continue their own path).
+
+        The two halves of the cancel are set here, in this order: the flag
+        first (the durable state: a further cancel is refused, the window of
+        the flow ends the body with it, see ``cancel_window``), then the abort
+        of the worker wait and the cancel of the flow scope (the delivery: a
+        cancellation only ends an ``await`` at a checkpoint, a delivery
+        consumed by a blocked thread call is dropped -- the flag is what
+        remains).
         """
         self.cancelled = True
         self.close_window()
@@ -276,9 +336,9 @@ class Flow:
                 await trio.to_thread.run_sync(self.manager.worker_manager.restart_abort)
             except Exception as e:
                 logger.warning(f'[Restart] Failed to wake the worker manager on a cancel: {e}')
-        scope = self._window
-        if scope is not None:
-            scope.cancel()
+        # the scope of the flow: cancelling it before its window was entered is
+        # not lost (the window waits for the body), a second cancel is a no-op
+        self._scope.cancel()
         if self.manager is not None:
             await self.manager.push_view()
 

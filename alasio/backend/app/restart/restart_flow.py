@@ -8,9 +8,11 @@ view and the log lines, and the ``REFUSALS`` table the two user requests answer
 with. The object owns the state of the flow and, above all, the *cancellable
 part* of its body: the body declares it itself with ``with
 self.cancel_window(past_reason):`` -- inside that block a cancel is accepted,
-leaving it (or closing it early) makes the flow irreversible. The manager asks
-the object to cancel (``Flow.cancel()``) instead of binding a cancel scope of
-its own.
+leaving it (or closing it early) makes the flow irreversible. A cancelled flow
+never runs the code after the window (the window raises ``FlowCancelled``
+there), so the tail of a body -- the handover -- is only reached when no cancel
+was accepted. The manager asks the object to cancel (``Flow.cancel()``) instead
+of binding a cancel scope of its own.
 
 The four flows:
 
@@ -103,7 +105,9 @@ class FlowRestart(Flow):
     daily target, hand the process over
 
     The wait for the workers to stop is the cancellable phase (the long part);
-    an upgrade into the daily maintenance closes the window.
+    an upgrade into the daily maintenance closes the window. A cancel accepted
+    there ends the flow before the handover: the window raises ``FlowCancelled``
+    and the wrap-up resumes the workers it stopped and restores the checks.
     """
     name = 'restart'
     PARK_STATE = 'restarting'
@@ -127,8 +131,10 @@ class FlowRestart(Flow):
                 manager.update_check.pause()
                 success, resume_list = await manager.stop_all(self)
                 if not success:
-                    # cancelled while waiting: the wrap-up below resumes the
-                    # workers it stopped and restores the checks
+                    # the wait was cancelled (or the workers could not be
+                    # stopped): the window answers the cancel with
+                    # FlowCancelled on the way out, the wrap-up below resumes
+                    # the workers it stopped and restores the checks
                     return
                 await manager.maybe_upgrade_to_daily(self)
             await manager.handover(self, 'user request', resume_list)
@@ -153,7 +159,10 @@ class FlowUpdate(Flow):
 
     The cancellable phase is the stop and the download: the apply step closes
     the window at the first real write (the deploy jobs report their 'updating'
-    phase there), a daily upgrade closes it too.
+    phase there), a daily upgrade closes it too. A cancel accepted before that
+    point ends the flow before the handover: the window raises
+    ``FlowCancelled`` and the wrap-up resumes the workers it stopped and
+    restores the checks (nothing on disk changed yet).
     """
     name = 'update'
     # Why this request is refused, by the name of the flow owning the backend

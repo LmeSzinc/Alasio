@@ -10,8 +10,23 @@ import pytest
 import trio
 
 from alasio.backend.app.restart.restart_base import (
-    FLOW_NAMES, INIT_FLOW, STARTING_UP, Flow, FlowRefused, InitFlow, RestartBase
+    FLOW_NAMES, INIT_FLOW, STARTING_UP, Flow, FlowCancelled, FlowRefused, InitFlow, RestartBase
 )
+
+
+async def run_expecting_cancel(coro):
+    """
+    Run the body of an interrupted flow: it must end with FlowCancelled
+
+    The window of a cancelled flow raises FlowCancelled instead of letting the
+    body continue past it (the body would otherwise reach its irreversible
+    tail), the wrap-up belongs to the caller's ``finally``.
+
+    Args:
+        coro (Coroutine): The body coroutine
+    """
+    with pytest.raises(FlowCancelled):
+        await coro
 
 
 class FakeWorkerManager:
@@ -118,7 +133,7 @@ class TestWindow:
     """The cancellation window: only the body of a flow declares it"""
 
     @pytest.mark.trio
-    async def test_a_cancel_cancels_the_phase_in_flight(self):
+    async def test_a_cancel_ends_the_body_at_the_window(self):
         flow = FakeFlow(FakeManager())
         reached = []
 
@@ -129,13 +144,74 @@ class TestWindow:
             reached.append('left')
 
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(body)
+            nursery.start_soon(run_expecting_cancel, body())
             await trio.testing.wait_all_tasks_blocked()
             await flow.cancel()
-            await trio.testing.wait_all_tasks_blocked()
-        # the cancel interrupted the sleep, the body continued after the window
-        assert reached == ['entered', 'left']
+        # the cancel interrupted the sleep and the body never continued past
+        # the window (the tail of a flow is its irreversible part)
+        assert reached == ['entered']
         assert flow.cancelled is True
+
+    @pytest.mark.trio
+    async def test_a_cancel_that_was_never_delivered_still_ends_the_body(self):
+        """
+        A cancel can be consumed without ever being raised: the abort attempt of
+        a blocked thread hop consumes it and no checkpoint is left inside the
+        window (see interrupt()). The flag of the flow is what ends the body.
+        """
+        flow = FakeFlow(FakeManager())
+        reached = []
+
+        async def body():
+            with flow.cancel_window('the handover started'):
+                # no checkpoint: the cancelled scope has nothing to interrupt
+                reached.append('entered')
+            reached.append('left')
+
+        # the real cancel path: the flag is set and the scope is cancelled, the
+        # delivery is the half that can be lost
+        await flow.interrupt()
+        with pytest.raises(FlowCancelled):
+            await body()
+        assert reached == ['entered']
+
+    @pytest.mark.trio
+    async def test_an_interrupt_before_the_window_is_not_lost(self):
+        """
+        The cancel scope belongs to the flow (not to one window): an interrupt
+        landing before the body opened its window poisons it instead of being
+        lost -- the first checkpoint inside the window raises, and the window is
+        not cancellable again
+        """
+        flow = FakeFlow(FakeManager())
+        reached = []
+
+        async def body():
+            with flow.cancel_window('the handover started'):
+                reached.append('entered')
+                assert flow.cancellable is False
+                await trio.sleep(0)      # the first checkpoint of the poisoned scope
+                reached.append('after the checkpoint')
+            reached.append('left')
+
+        await flow.interrupt()
+        with pytest.raises(FlowCancelled):
+            await body()
+        assert reached == ['entered']
+
+    @pytest.mark.trio
+    async def test_a_failure_of_the_body_is_not_masked_by_a_cancel(self):
+        flow = FakeFlow(FakeManager())
+
+        async def body():
+            with flow.cancel_window('the handover started'):
+                flow.cancelled = True
+                raise ValueError('the body failed')
+
+        # the failure of the body is the last word: a cancel that raced it
+        # does not turn it into a cancellation
+        with pytest.raises(ValueError):
+            await body()
 
     @pytest.mark.trio
     async def test_a_cancel_outside_the_window_is_refused(self):
@@ -191,8 +267,9 @@ class TestWindow:
     @pytest.mark.trio
     async def test_a_cancelled_window_is_not_a_cancellable_flow_any_more(self):
         flow = FakeFlow(FakeManager())
-        with flow.cancel_window('the handover started'):
-            await flow.cancel()
+        with pytest.raises(FlowCancelled):
+            with flow.cancel_window('the handover started'):
+                await flow.cancel()
         assert flow.cancellable is False
         assert flow.cancelled is True
 
@@ -212,7 +289,7 @@ class TestCancel:
                 await trio.sleep_forever()
 
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(body)
+            nursery.start_soon(run_expecting_cancel, body())
             await entered.wait()
             assert flow.cancellable is True
             await flow.cancel()
@@ -226,11 +303,12 @@ class TestCancel:
     @pytest.mark.trio
     async def test_cancel_refused_twice(self):
         flow = FakeFlow(FakeManager())
-        with flow.cancel_window('the handover started'):
-            await flow.cancel()
-            with pytest.raises(FlowRefused) as e:
+        with pytest.raises(FlowCancelled):
+            with flow.cancel_window('the handover started'):
                 await flow.cancel()
-            assert str(e.value) == 'The restart was already cancelled'
+                with pytest.raises(FlowRefused) as e:
+                    await flow.cancel()
+                assert str(e.value) == 'The restart was already cancelled'
 
     @pytest.mark.trio
     async def test_cancel_refused_after_the_upgrade(self):
@@ -280,14 +358,16 @@ class TestCancel:
             left.set()
 
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(body)
+            nursery.start_soon(run_expecting_cancel, body())
             await entered.wait()
             # the force restart path does not ask whether the flow may be
             # cancelled: it ends the phase in flight
             await flow.interrupt()
-            await left.wait()
+            await trio.testing.wait_all_tasks_blocked()
         assert flow.cancelled is True
         assert manager.worker_manager.aborts == 1
+        # the body never continued past its window
+        assert left.is_set() is False
 
     @pytest.mark.trio
     async def test_interrupt_without_a_manager(self):

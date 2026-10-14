@@ -31,7 +31,7 @@ from typing import Optional
 
 import trio
 
-from alasio.backend.app.restart.restart_base import INIT_FLOW, STARTING_UP, Flow, FlowRefused, InitFlow
+from alasio.backend.app.restart.restart_base import INIT_FLOW, STARTING_UP, Flow, FlowCancelled, FlowRefused, InitFlow
 from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
 from alasio.backend.app.restart.restart_step import RestartStep
 from alasio.logger import logger
@@ -308,7 +308,7 @@ class RestartManager(RestartStep):
         the rest of the process (the lifespan keeps running). The wrap-up of a
         failure (workers, checks, queue) belongs to the flow body, which runs it
         before propagating; a failure reaching here is reported and releases
-        the slot.
+        the slot, an accepted cancel (``FlowCancelled``) is an expected end.
 
         Args:
             flow (Flow): The flow to run
@@ -316,6 +316,11 @@ class RestartManager(RestartStep):
         with self.slot(flow):
             try:
                 await flow.run()
+            except FlowCancelled as e:
+                # the flow was cancelled (or force-restarted) inside its
+                # cancellable window: it wrapped up on its own way out, the
+                # slot is released and the next request is served as usual
+                logger.info(f'[Restart] {e}')
             except trio.Cancelled:
                 # the process is going down (the manager nursery was cancelled)
                 raise

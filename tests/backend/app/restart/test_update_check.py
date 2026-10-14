@@ -11,7 +11,8 @@ import pytest
 import trio
 
 from alasio.backend.app.restart.update_check import (
-    BUSY_MESSAGE, CHECK_INTERVAL, FRESH_MESSAGE, FRESH_WINDOW, UNMANAGED_MESSAGE, ModUpdateCheck, UpdateCheck
+    BUSY_MESSAGE, CHECK_INTERVAL, FLOW_STATES, FRESH_MESSAGE, FRESH_WINDOW, UNMANAGED_MESSAGE, ModUpdateCheck,
+    UpdateCheck
 )
 from alasio.backend.topic.update import UpdateSource
 from alasio.logger import logger
@@ -133,6 +134,39 @@ class TestState:
         assert module.available() == ['m']
         assert module.state_of('nope') == ''
         assert module.state_of('m') == 'available'
+
+
+class TestReleaseStates:
+    """The transient states of the flow in flight (released by its wrap-up)"""
+
+    def test_the_flow_states_are_the_pending_ones(self):
+        # the states the apply steps set on a mod while the flow runs
+        assert FLOW_STATES == ('queued', 'stopping', 'downloading')
+
+    @pytest.mark.parametrize("state", ['queued', 'stopping', 'downloading'])
+    def test_the_pending_states_return_to_available(self, state):
+        module, mod = make_mod()
+        mod.set_state(state, current='v1', latest='v2', checked_at=123)
+        module.release_states()
+        assert mod.info.state == 'available'
+        # the versions of the last check are the answer of the mod again
+        assert (mod.info.current_version, mod.info.latest_version, mod.info.checked_at) == \
+            ('v1', 'v2', 123)
+        assert module.available() == ['m']
+
+    @pytest.mark.parametrize("state", [
+        'unmanaged', 'idle', 'checking', 'uptodate',
+        'available', 'updating', 'restart-required', 'error',
+    ])
+    def test_the_other_states_stay(self, state):
+        module, mod = make_mod()
+        error = 'boom' if state == 'error' else ''
+        mod.set_state(state, error=error)
+        module.release_states()
+        # the states of the files, the failures and the states of the check
+        # module itself do not describe the flow in flight
+        assert mod.info.state == state
+        assert mod.info.error == error
 
 
 class TestMirrors:
