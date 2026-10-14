@@ -38,3 +38,28 @@ class TestCwd:
         """A root cwd should stay "/" instead of becoming an empty string."""
         monkeypatch.setattr(os, 'getcwd', lambda: '/')
         assert PathStr.cwd() == '/'
+
+
+class TestSubpath:
+    """Tests for PathStr.subpath_to() and PathStr.subpath(), the calc wrappers."""
+
+    def test_subpath_to(self):
+        """A sub-path should come back as a PathStr."""
+        sub = PathStr.new('/a/b/c').subpath_to('/a/b')
+        assert isinstance(sub, PathStr)
+        assert sub == 'c'
+
+    def test_subpath_to_not_a_sub_path(self):
+        """A non sub-path should yield None instead of a broken PathStr."""
+        assert PathStr.new('/a/bc').subpath_to('/a/b') is None
+
+    def test_subpath(self):
+        """The strict version should come back as a PathStr."""
+        sub = PathStr.new('/a/b/c').subpath('/a/b')
+        assert isinstance(sub, PathStr)
+        assert sub == 'c'
+
+    def test_subpath_not_a_sub_path(self):
+        """The strict version should raise ValueError for a non sub-path."""
+        with pytest.raises(ValueError, match='Not a sub-path'):
+            PathStr.new('/a/bc').subpath('/a/b')

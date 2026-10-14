@@ -9,7 +9,7 @@ from alasio.base.op import Area, Slist
 from alasio.config.const import Const
 from alasio.ext.cache import cached_property
 from alasio.ext.concurrent.threadpool import THREAD_POOL
-from alasio.ext.path.calc import subpath_to
+from alasio.ext.path.calc import subpath
 from alasio.logger import logger
 
 
@@ -23,14 +23,14 @@ class AssetImage:
             file (str): Absolute filepath
         """
         self.file = file
-        self.path = subpath_to(file, AssetImage.REPO_ROOT).replace('\\', '/')
+        self.path = subpath(file, AssetImage.REPO_ROOT).replace('\\', '/')
 
         # parse file like:
         # /path/to/BATTLE_PREPARATION.png
         # /path/to/BATTLE_PREPARATION.cn.2.png
         # /path/to/BATTLE_PREPARATION.area.png
         # /path/to/BATTLE_PREPARATION.cn.2.search.png
-        filepath = subpath_to(file, AssetImage.LANG_ROOT).replace('\\', '/')
+        filepath = subpath(file, AssetImage.LANG_ROOT).replace('\\', '/')
         module, _, filename = filepath.rpartition('/')
         self.module = module.replace('\\', '/')
         stem, _, suffix = filename.rpartition('.')

@@ -308,9 +308,10 @@ class CrossNavGenerator:
             for group_name, group in config.groups_data.items():
                 ancestor_config = self.dict_group_to_ancestor_nav[group_name]
                 file = ancestor_config.model_file.subpath_to(self.path_config)
-                if file == config.model_file:
+                if file is None:
                     raise DefinitionError(
-                        f'model_file is not a subpath of root, model_file={config.model_file}, root={self.root}')
+                        f'model_file is not a subpath of root, model_file={ancestor_config.model_file}, '
+                        f'root={self.path_config}')
                 file = to_posix(file)
                 # build model reference
                 ref = {'file': file, 'cls': group_name}

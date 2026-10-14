@@ -24,8 +24,8 @@ import pytest
 from alasio.ext.path import calc
 from alasio.ext.path.calc import (
     abspath, get_multisuffix, get_name, get_rootstem, get_stem, get_suffix, is_abspath, joinnormpath, joinpath,
-    normpath, subpath_to, to_posix, to_python_import, uppath, with_multisuffix, with_name, with_rootstem, with_stem,
-    with_suffix
+    normpath, subpath, subpath_to, to_posix, to_python_import, uppath, with_multisuffix, with_name, with_rootstem,
+    with_stem, with_suffix
 )
 
 
@@ -474,26 +474,68 @@ class TestSubpathTo:
         ('/a/b', '/a/b', ''),
         ('/a/b/c', '/', 'a/b/c'),
         ('/a/b', '/', 'a/b'),
-        ('/a/b', '', 'a/b'),
         ('a/b/c', 'a', 'b/c'),
         ('a/b', 'a', 'b'),
-        ('a', '', 'a'),
-        # Not a sub-path, the path is returned unchanged
-        ('/x/y', '/a', '/x/y'),
+        # The empty path is the sub-path of an empty root
+        ('', '', ''),
+        # Not a sub-path, None is returned
+        ('/x/y', '/a', None),
+        ('/', '/a', None),
+        ('/a/b', '', None),
+        ('a', '', None),
+        ('/', '', None),
         # A plain string prefix is not a sub-path
-        ('/a/bc', '/a/b', '/a/bc'),
-        ('ab', 'a', 'ab'),
+        ('/a/bc', '/a/b', None),
+        ('ab', 'a', None),
         # Input should be normalized first, backslash is neither a separator
         # nor a boundary (same as the get_* functions)
-        ('a\\b\\c', 'a', 'a\\b\\c'),
-        ('a\\b\\c', 'a\\', 'a\\b\\c'),
-        ('a\\b\\c', 'a\\b', 'a\\b\\c'),
-        ('a\\bc', 'a\\b', 'a\\bc'),
-        ('a/b/c', 'a\\b', 'a/b/c'),
+        ('a\\b\\c', 'a', None),
+        ('a\\b\\c', 'a\\', None),
+        ('a\\b\\c', 'a\\b', None),
+        ('a\\bc', 'a\\b', None),
+        ('a/b/c', 'a\\b', None),
     ])
     def test_subpath_to(self, path, root, expected):
-        """A sub-path should be stripped, a non sub-path should be returned unchanged."""
+        """A sub-path should be stripped, a non sub-path should yield None."""
         assert subpath_to(path, root) == expected
+
+
+class TestSubpath:
+    """subpath() is the strict version of subpath_to(), a non sub-path raises."""
+
+    @pytest.mark.parametrize("path, root, expected", [
+        ('/a/b/c', '/a/b', 'c'),
+        ('/a/b/c', '/a/b/', 'c'),
+        ('/a/b/c', '/a', 'b/c'),
+        ('/a/b', '/a/b', ''),
+        ('/a/b/c', '/', 'a/b/c'),
+        ('a/b/c', 'a', 'b/c'),
+        ('', '', ''),
+    ])
+    def test_subpath(self, path, root, expected):
+        """A sub-path should be stripped."""
+        assert subpath(path, root) == expected
+
+    @pytest.mark.parametrize("path, root", [
+        ('/x/y', '/a'),
+        ('/', '/a'),
+        ('/a/b', ''),
+        ('/', ''),
+        ('', '/a'),
+        ('/a/bc', '/a/b'),
+        ('ab', 'a'),
+        ('a\\b\\c', 'a\\b'),
+    ])
+    def test_subpath_not_a_sub_path(self, path, root):
+        """A non sub-path should raise ValueError."""
+        with pytest.raises(ValueError, match='Not a sub-path'):
+            subpath(path, root)
+
+    def test_error_message(self):
+        """The ValueError should name the path and the root."""
+        with pytest.raises(ValueError) as e:
+            subpath('/x/y', '/a')
+        assert str(e.value) == 'Not a sub-path: path="/x/y", root="/a"'
 
 
 class TestGetName:

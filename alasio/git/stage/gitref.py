@@ -5,7 +5,7 @@ from msgspec import Struct
 
 from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_remove, atomic_write
-from alasio.ext.path.calc import joinnormpath, subpath_to, to_posix
+from alasio.ext.path.calc import joinnormpath, subpath, to_posix
 from alasio.ext.path.iter import iter_files
 from alasio.git.stage.base import GitRepoBase
 from alasio.logger import logger
@@ -129,7 +129,7 @@ class GitRef(GitRepoBase):
             except ValueError as e:
                 logger.error(f'GitRef error, {e}, at file "{file}"')
                 continue
-            path = to_posix(subpath_to(file, root))
+            path = to_posix(subpath(file, root))
             if loose.sha1:
                 # loose refs can override packed refs
                 out[path] = loose.sha1

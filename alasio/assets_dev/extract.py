@@ -9,7 +9,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.file.watchdog import PathEvent, Watchdog
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_remove
-from alasio.ext.path.calc import get_rootstem, get_suffix, subpath_to, uppath
+from alasio.ext.path.calc import get_rootstem, get_suffix, subpath, uppath
 from alasio.git.stage.gitadd import GitAdd
 from alasio.logger import logger
 
@@ -270,7 +270,7 @@ class AssetsExtractor:
     def file_to_module(self, file):
         # /assets/combat/interact/xxx.png -> combat/interact
         path = uppath(file)
-        path = subpath_to(path, self.root.joinpath(Const.ASSETS_PATH))
+        path = subpath(path, self.root.joinpath(Const.ASSETS_PATH))
         path = path.replace('\\', '/')
         return path
 

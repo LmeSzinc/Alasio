@@ -53,7 +53,7 @@ class GenTaskEntry(CrossNavGenerator):
                 code = atomic_read_text(file)
             except FileNotFoundError:
                 continue
-            rel = file.subpath_to(self.root).to_posix()
+            rel = file.subpath(self.root).to_posix()
             parser = TaskEntryParser(file=rel, code=code)
             for info in parser.iter_entry():
                 if info.task in out:
@@ -75,7 +75,7 @@ class GenTaskEntry(CrossNavGenerator):
         for folder_name in self.entry.task_entry_folders:
             folder = self.root.joinpath(folder_name)
             for file in folder.iter_files(ext='.py', recursive=True):
-                rel = file.subpath_to(self.root).to_posix()
+                rel = file.subpath(self.root).to_posix()
                 if any(part.startswith('_') for part in rel.split('/')):
                     continue
                 yield file

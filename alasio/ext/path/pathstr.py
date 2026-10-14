@@ -295,16 +295,34 @@ class PathStr(str):
 
     def subpath_to(self, root):
         """
-        Calculate sub-path to `root`.
-        If `self` is not sub-path to `root`, return `self`
+        Calculate sub-path to `root`
+        If `self` is not a sub-path to `root`, return None
 
         Args:
             root (str):
 
         Returns:
-            PathStr
+            PathStr | None: Sub-path to `root`, None if `self` is not a sub-path
         """
-        return self.__class__(subpath_to(self, root))
+        result = subpath_to(self, root)
+        if result is None:
+            return None
+        return self.__class__(result)
+
+    def subpath(self, root):
+        """
+        Calculate sub-path to `root`, `self` must be a sub-path of `root`
+
+        Args:
+            root (str):
+
+        Raises:
+            ValueError: If `self` is not a sub-path of `root`
+
+        Returns:
+            PathStr: Sub-path to `root`
+        """
+        return self.__class__(subpath(self, root))
 
     @property
     def is_tmp_file(self):

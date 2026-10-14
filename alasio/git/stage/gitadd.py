@@ -167,7 +167,7 @@ class GitAdd(GitIndex):
             return False
 
         path = subpath_to(file, self.path)
-        if path == file:
+        if path is None:
             if is_abspath(file):
                 # not sub path to repo root
                 logger.warning(f'stage_add failed, file is not subpath to repo root {file}')
@@ -175,9 +175,6 @@ class GitAdd(GitIndex):
             else:
                 # relative path
                 path = file
-        else:
-            # abspath and sub path to repo root
-            pass
 
         return self._stage_add(path)
 

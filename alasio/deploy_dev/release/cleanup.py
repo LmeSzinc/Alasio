@@ -257,7 +257,7 @@ def cleanup_license(root: PathStr):
 
 def find_test_file(root: PathStr):
     for file in root.iter_files(ext='.py', recursive=True):
-        path = file.subpath_to(root).replace('\\', '/')
+        path = file.subpath(root).replace('\\', '/')
         content = atomic_read_bytes(file)
         # must startswith \n to ignore `try: import`
         if b'\nimport unittest' in content:

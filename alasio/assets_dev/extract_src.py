@@ -4,7 +4,7 @@ from alasio.backport import removeprefix
 from alasio.backport.suppress import suppress_keyboard_interrupt
 from alasio.codegen.python import CodeGen
 from alasio.config.const import Const
-from alasio.ext.path.calc import subpath_to, uppath
+from alasio.ext.path.calc import subpath, uppath
 
 
 class AssetsExtractorSRC(AssetsExtractor):
@@ -41,7 +41,7 @@ class AssetsExtractorSRC(AssetsExtractor):
     def file_to_module(self, file):
         # /assets/share/combat/interact/xxx.png -> combat/interact
         path = uppath(file)
-        path = subpath_to(path, self.root.joinpath(Const.ASSETS_PATH))
+        path = subpath(path, self.root.joinpath(Const.ASSETS_PATH))
         path = path.replace('\\', '/')
         for lang in Const.ASSETS_LANG:
             lang = f'{lang}/'

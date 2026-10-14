@@ -175,9 +175,9 @@ class GenConfigIndex(CrossNavGenerator):
                 raise DefinitionError(
                     f'Group "{group_name}" is not defined in any file', file=config.config_file)
             if self.alasio and group_name in self.alasio.groups_data:
-                file = group.parser.i18n_file.subpath_to(self.alasio.path_config)
+                file = group.parser.i18n_file.subpath(self.alasio.path_config)
             else:
-                file = group.parser.i18n_file.subpath_to(self.path_config)
+                file = group.parser.i18n_file.subpath(self.path_config)
             read = to_posix(file)
             i18n[read] = None
 
@@ -231,7 +231,7 @@ class GenConfigIndex(CrossNavGenerator):
         for nav_name, config in self.dict_nav_config.items():
             if not config.config_data:
                 continue
-            file = config.config_file.subpath_to(self.path_config)
+            file = config.config_file.subpath(self.path_config)
             file = to_posix(file)
             i18n = self._get_nav_config_i18n(config)
             config = self._get_nav_config_task(config)

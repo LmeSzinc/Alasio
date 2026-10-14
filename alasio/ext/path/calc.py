@@ -177,26 +177,51 @@ def to_python_import(path):
 
 def subpath_to(path, root):
     """
-    Calculate sub-path to `root`.
-    If `path` is not sub-path to `root`, return `path`
+    Calculate sub-path to `root`
+    If `path` is not a sub-path to `root`, return None
 
     Args:
         path (str): Normalized path
         root (str): Normalized path
 
     Returns:
-        str:
+        str | None: Sub-path to `root`, None if `path` is not a sub-path
     """
-    if path.startswith(root):
-        subpath = path[len(root):]
-        # Both paths are normalized (separator "/"), a plain string prefix is
-        # not enough, the rest of the path must continue at a separator
-        # boundary, otherwise "/a/bc" would be treated as a sub-path to "/a/b"
-        if not subpath:
-            return subpath
-        if subpath[0] == '/' or root.endswith('/'):
-            return subpath.lstrip('/')
-    return path
+    if not path.startswith(root):
+        return None
+    rest = path[len(root):]
+    # path == root, the empty path is the sub-path of an empty root
+    if not rest:
+        return rest
+    # An empty root is the prefix of no non-empty path
+    if not root:
+        return None
+    # Both paths are normalized (separator "/"), a plain string prefix is not
+    # enough, the rest of the path must continue at a separator boundary,
+    # otherwise "/a/bc" would be treated as a sub-path to "/a/b"
+    if rest[0] == '/' or root.endswith('/'):
+        return rest.lstrip('/')
+    return None
+
+
+def subpath(path, root):
+    """
+    Calculate sub-path to `root`, `path` must be a sub-path of `root`
+
+    Args:
+        path (str): Normalized path
+        root (str): Normalized path
+
+    Raises:
+        ValueError: If `path` is not a sub-path of `root`
+
+    Returns:
+        str: Sub-path to `root`
+    """
+    result = subpath_to(path, root)
+    if result is None:
+        raise ValueError(f'Not a sub-path: path="{path}", root="{root}"')
+    return result
 
 
 def get_name(path: str) -> str:
