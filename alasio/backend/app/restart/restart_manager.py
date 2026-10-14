@@ -2,8 +2,9 @@
 Restart manager: the single slot of the backend maintenance flows
 
 The manager is the entry surface of the flow model: the rpc layer (restart /
-cancel / update) and the daily task request a flow here, the lifespan runs it
-with ``run()``. Requesting a flow while another one owns the backend is
+update_apply / cancel_restart / cancel_apply) and the daily task request a flow
+here, the lifespan runs it with ``run()``. Requesting a flow while another one
+owns the backend is
 *refused* with a user-facing reason (never queued, never joined): the user
 retries, or the chain satisfies the request by itself (an update hands over
 with a restart, a restart is followed by the startup update check). The
@@ -113,6 +114,8 @@ class RestartManager(RestartStep):
 
     # ------------------------------------------------------------------
     # Entries (trio thread: the judgment and the claim are one sync section)
+    # The user entries are named after the rpc that drives them; the internal
+    # ones (the lifespan, the daily task) carry the request_ prefix.
     # ------------------------------------------------------------------
 
     def request_startup(self) -> Flow:
@@ -134,7 +137,7 @@ class RestartManager(RestartStep):
             raise FlowRefused(f'The backend is already running the "{current.name}" flow')
         return self._claim(FlowStartup)
 
-    def request_restart(self) -> Flow:
+    def restart(self) -> Flow:
         """
         Claim the slot for a user restart
 
@@ -147,7 +150,7 @@ class RestartManager(RestartStep):
         """
         return self._claim(FlowRestart)
 
-    def request_update(self) -> Flow:
+    def update_apply(self) -> Flow:
         """
         Claim the slot for a user update
 
@@ -215,7 +218,7 @@ class RestartManager(RestartStep):
         """
         await self._require_flow(FlowRestart).cancel()
 
-    async def cancel_update(self):
+    async def cancel_apply(self):
         """
         Cancel the update flow in flight (the stop and the download phase)
 

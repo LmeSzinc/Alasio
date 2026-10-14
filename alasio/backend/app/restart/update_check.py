@@ -23,7 +23,7 @@ pause the sequences they do not need (``pause``), restore them on their way out
   every backend started at the same moment spread out (see
   ``UpdateCheck.first_delay``);
 - a sequence never follows another one: a caller replaces it (``start`` /
-  ``check``) or drops it (``pause``);
+  ``update_check``) or drops it (``pause``);
 - an exception of a check ends that sequence (reported, never raised: the
   module shares the lifespan nursery, a raised error would take the backend
   down) -- the flow that paused the mod restores the sequence later.
@@ -87,7 +87,7 @@ class ModUpdateCheck:
     ago. Two callers arriving together therefore leave exactly one check
     running: the loser is answered with FRESH_MESSAGE or BUSY_MESSAGE (the two
     checks before the lock only exist for those messages, the arbitration is
-    the re-check inside the lock). ``cancel_update_check()`` interrupts the
+    the re-check inside the lock). ``cancel_check()`` interrupts the
     request in flight alone: nothing is recorded, the state of the last check
     stays.
 
@@ -125,7 +125,7 @@ class ModUpdateCheck:
         # so a stop landing before the task starts is not lost)
         self._loop_scope: "Optional[trio.CancelScope]" = None
         # the cancel scope of the check request in flight, None when there is
-        # none; cancel_update_check() cancels it
+        # none; cancel_check() cancels it
         self._request_scope: "Optional[trio.CancelScope]" = None
         # monotonic timestamp (time.monotonic) of the last check that ran (any
         # outcome, a cancelled request does not count): a check younger than
@@ -356,7 +356,7 @@ class ModUpdateCheck:
             self.start_check_loop()
             return message
 
-    def cancel_update_check(self) -> bool:
+    def cancel_check(self) -> bool:
         """
         Interrupt the check request in flight of this mod (the manual cancel).
 
@@ -426,7 +426,7 @@ class ModUpdateCheck:
     async def _request_check(self):
         """
         Run one check request of the mod (DeployJob.check()) under the request
-        cancel scope: cancel_update_check() interrupts this request alone.
+        cancel scope: cancel_check() interrupts this request alone.
 
         Returns:
             DeployCheck | None: The result, None when the request was cancelled
@@ -670,7 +670,7 @@ class UpdateCheck:
                 continue
             mod.start_check_loop()
 
-    async def check(self, name: str) -> str:
+    async def update_check(self, name: str) -> str:
         """
         Check the updates of one mod now (the manual check of the rpc layer)
 
@@ -701,7 +701,7 @@ class UpdateCheck:
             bool: True when a request was in flight
         """
         mod = self.mods.get(name, None)
-        return mod is not None and mod.cancel_update_check()
+        return mod is not None and mod.cancel_check()
 
     # ------------------------------------------------------------------
     # States (the rpc precondition and the apply steps)

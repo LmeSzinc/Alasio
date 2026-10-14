@@ -77,7 +77,7 @@ class ConnState(BaseTopic):
         from alasio.backend.app.restart.restart_manager import RESTART_MANAGER, FlowRefused
 
         try:
-            RESTART_MANAGER.request_restart()
+            RESTART_MANAGER.restart()
         except FlowRefused as e:
             # the message carries the next step for the user (a restart is
             # already in progress, an update restarts the backend by itself,

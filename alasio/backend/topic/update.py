@@ -20,7 +20,6 @@ from alasio.backend.reactive.base_rpc import rpc
 from alasio.backend.reactive.event import ResponseEvent, RpcValueError
 from alasio.backend.reactive.source import GlobalSource, ResidentCache
 from alasio.backend.ws.ws_topic import BaseTopic
-from alasio.logger import logger
 
 # States of a mod update:
 # - 'unmanaged': the mod declares no update source (no mirrors); it is
@@ -124,9 +123,9 @@ class Update(BaseTopic):
         return UpdateSource()
 
     @rpc
-    async def update_check(self, name: str = ''):
+    async def update_check(self, name: str):
         """
-        Check the updates now
+        Check the updates of one mod now
 
         The check runs in this call (it is one request to the mirrors) and the
         returned message tells what happened: '' when the check ran, the reason
@@ -135,22 +134,28 @@ class Update(BaseTopic):
         the sequence starts over after the check.
 
         Args:
-            name (str): Mod name, '' checks every managed mod
+            name (str): Mod name
         """
         from alasio.backend.app.restart.update_check import UPDATE_CHECK
 
-        if not name:
-            # every managed mod (the frontend has no "check all" button: the
-            # periodic checks cover it), one after another
-            for one in UPDATE_CHECK.names():
-                message = await UPDATE_CHECK.check(one)
-                if message:
-                    logger.info(f'[Update] The check of "{one}" was discarded: {message}')
-            return ''
         try:
-            return await UPDATE_CHECK.check(name)
+            return await UPDATE_CHECK.update_check(name)
         except ValueError as e:
             raise RpcValueError(str(e)) from None
+
+    @rpc
+    async def cancel_check(self, name: str):
+        """
+        Cancel the check of one mod in flight
+
+        Args:
+            name (str): Mod name: the check request of that mod is interrupted
+                and the recorded state of the last check stays
+        """
+        from alasio.backend.app.restart.update_check import UPDATE_CHECK
+
+        if not UPDATE_CHECK.cancel_check(name):
+            raise RpcValueError(f'No check is in flight: "{name}"')
 
     @rpc
     async def update_apply(self):
@@ -159,10 +164,10 @@ class Update(BaseTopic):
 
         The update flow is accepted and runs in the background: it stops the
         workers, applies the deploy job of every mod with an available update
-        (cancellable until the first write through update_cancel, a failed mod
-        is isolated) and restarts the backend. Returns once the flow is
-        accepted, the progress flows through the Update topic (the workers
-        through the Worker topic and the restart through the Restart topic).
+        (cancel_apply interrupts it until its first real write, a failed mod is
+        isolated) and restarts the backend. Returns once the flow is accepted,
+        the progress flows through the Update topic (the workers through the
+        Worker topic and the restart through the Restart topic).
         """
         from alasio.backend.app.restart.restart_manager import RESTART_MANAGER, FlowRefused
         from alasio.backend.app.restart.update_check import UPDATE_CHECK
@@ -170,29 +175,24 @@ class Update(BaseTopic):
         if not UPDATE_CHECK.available():
             raise RpcValueError('No update available')
         try:
-            RESTART_MANAGER.request_update()
+            RESTART_MANAGER.update_apply()
         except FlowRefused as e:
             raise RpcValueError(str(e)) from None
 
     @rpc
-    async def update_cancel(self, name: str = ''):
+    async def cancel_apply(self):
         """
-        Cancel a check in flight, or the update flow
+        Cancel the update flow in flight
 
-        Args:
-            name (str): Mod name: the check request of that mod is interrupted
-                and the recorded state of the last check stays. '' cancels the
-                update flow (its cancellable phase: the worker stop and the
-                download; past the first write the cancel is refused)
+        The flow is cancellable until its first real write (the worker stop and
+        the download); past that point of no return, and after an upgrade into
+        the daily maintenance, the cancel is refused. The wrap-up of the flow
+        resumes the workers it stopped and restarts the check sequences it
+        paused.
         """
         from alasio.backend.app.restart.restart_manager import RESTART_MANAGER, FlowRefused
-        from alasio.backend.app.restart.update_check import UPDATE_CHECK
 
-        if name:
-            if not UPDATE_CHECK.cancel_check(name):
-                raise RpcValueError(f'No check is in flight: "{name}"')
-            return
         try:
-            await RESTART_MANAGER.cancel_update()
+            await RESTART_MANAGER.cancel_apply()
         except FlowRefused as e:
             raise RpcValueError(str(e)) from None

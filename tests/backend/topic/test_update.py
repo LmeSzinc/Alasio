@@ -6,6 +6,7 @@ covered by tests/backend/app/restart/).
 """
 import pytest
 import trio
+from msgspec import ValidationError
 
 from alasio.backend.app.restart import update_check as update_check_module
 from alasio.backend.app.restart.restart_base import FlowRefused
@@ -37,8 +38,8 @@ class FakeUpdateCheck:
     def available(self):
         return list(self.available_names)
 
-    async def check(self, name):
-        self.calls.append(('check', name))
+    async def update_check(self, name):
+        self.calls.append(('update_check', name))
         if name not in ('m', 'u'):
             raise ValueError(f'No such mod: "{name}"')
         return self.message
@@ -55,13 +56,13 @@ class FakeRestartManager:
         self.calls = []
         self.error = None
 
-    def request_update(self):
-        self.calls.append(('request_update',))
+    def update_apply(self):
+        self.calls.append(('update_apply',))
         if self.error is not None:
             raise self.error
 
-    async def cancel_update(self):
-        self.calls.append(('cancel_update',))
+    async def cancel_apply(self):
+        self.calls.append(('cancel_apply',))
         if self.error is not None:
             raise self.error
 
@@ -133,10 +134,11 @@ class TestUpdateRpc:
     async def test_check_calls_the_module(self, update_topic):
         topic, update_check, manager = update_topic
 
-        await topic.update_check()
+        # one mod per call: there is no "check all" entry
         await topic.update_check('m')
+        await topic.update_check('u')
 
-        assert update_check.calls == [('check', 'm'), ('check', 'u'), ('check', 'm')]
+        assert update_check.calls == [('update_check', 'm'), ('update_check', 'u')]
 
     @pytest.mark.trio
     async def test_check_returns_the_message_of_the_module(self, update_topic):
@@ -163,7 +165,7 @@ class TestUpdateRpc:
 
         update_check.available_names = ['m']
         await topic.update_apply()
-        assert manager.calls == [('request_update',)]
+        assert manager.calls == [('update_apply',)]
 
     @pytest.mark.trio
     async def test_apply_refusal_carries_to_the_frontend(self, update_topic):
@@ -175,28 +177,40 @@ class TestUpdateRpc:
             await topic.update_apply()
 
     @pytest.mark.trio
-    async def test_cancel_of_a_named_mod_cancels_the_check(self, update_topic):
+    async def test_cancel_check_cancels_the_check_of_one_mod(self, update_topic):
         topic, update_check, manager = update_topic
 
-        await topic.update_cancel('m')
+        await topic.cancel_check('m')
         assert update_check.calls == [('cancel_check', 'm')]
         assert manager.calls == []
 
         update_check.cancelled = False
         with pytest.raises(RpcValueError, match='No check is in flight'):
-            await topic.update_cancel('m')
+            await topic.cancel_check('m')
 
     @pytest.mark.trio
-    async def test_cancel_without_a_name_cancels_the_flow(self, update_topic):
+    async def test_cancel_apply_cancels_the_update_flow(self, update_topic):
         topic, update_check, manager = update_topic
 
-        await topic.update_cancel()
-        assert manager.calls == [('cancel_update',)]
+        await topic.cancel_apply()
+        assert manager.calls == [('cancel_apply',)]
         assert update_check.calls == []
 
         manager.error = FlowRefused('No update is in progress')
         with pytest.raises(RpcValueError, match='No update is in progress'):
-            await topic.update_cancel()
+            await topic.cancel_apply()
+
+    def test_the_rpc_surface_is_symmetric(self):
+        """The update rpcs are two pairs: update_* starts, cancel_* interrupts."""
+        assert set(Update.rpc_methods) == {
+            'update_check', 'cancel_check', 'update_apply', 'cancel_apply'
+        }
+
+    def test_the_mod_name_is_required(self):
+        """The two check rpcs address one mod: a payload without a name is refused."""
+        for rpc_name in ('update_check', 'cancel_check'):
+            with pytest.raises(ValidationError, match='Missing arg: "name"'):
+                Update.rpc_methods[rpc_name].convert({})
 
 
 class TestTopicRegistration:

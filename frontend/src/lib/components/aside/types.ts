@@ -33,7 +33,7 @@ export type RestartTopicLike = {
 // States of a mod update (the Update topic, one entry per mod):
 // - 'unmanaged': the mod declares no update source, it is never checked
 // - 'idle': never checked, or the checks wait for a manual request
-// - 'checking': a check is in flight (cancellable through update_cancel)
+// - 'checking': a check is in flight (cancellable through cancel_check)
 // - 'uptodate': the local version is the latest one
 // - 'available': an update is available and waits for the user
 // - 'queued': the update flow of the mod was accepted (the workers are being

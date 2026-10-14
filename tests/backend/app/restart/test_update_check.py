@@ -170,7 +170,7 @@ class TestCheck:
     @pytest.mark.trio
     async def test_check_sets_uptodate_or_available(self):
         module, state = make_mod(job=FakeJob(uptodate=True))
-        assert await module.check('m') == ''
+        assert await module.update_check('m') == ''
         assert state.info.state == 'uptodate'
         # the timestamp is an int (unix seconds): the sub-second part is not
         # sent to the frontend
@@ -183,13 +183,13 @@ class TestCheck:
         state.job = fake_job
         # the next check is not inside the fresh window of the one that ran
         state._checked_mono = 0.0
-        assert await module.check('m') == ''
+        assert await module.update_check('m') == ''
         assert state.info.state == 'available'
 
     @pytest.mark.trio
     async def test_check_failure_is_reported(self):
         module, state = make_mod(job=FakeJob(error=OSError('mirror is down')))
-        assert await module.check('m') == ''
+        assert await module.update_check('m') == ''
         assert state.info.state == 'error'
         assert 'mirror is down' in state.info.error
 
@@ -204,14 +204,14 @@ class TestCheck:
             return None
 
         state._request_check = cancelled
-        assert await module.check('m') == ''
+        assert await module.update_check('m') == ''
         assert state.info is previous
         # a cancelled request is not a completed check: the fresh window of the
         # next one does not apply
         assert state._checked_mono == 0.0
 
     @pytest.mark.trio
-    async def test_cancel_update_check_interrupts_the_request(self):
+    async def test_cancel_check_interrupts_the_request(self):
         module, state = make_mod()
         started = trio.Event()
 
@@ -223,13 +223,13 @@ class TestCheck:
         async def fake_job():
             return SlowJob()
         state.job = fake_job
-        assert state.cancel_update_check() is False
+        assert state.cancel_check() is False
         state.set_state('available')
         results = []
         async with trio.open_nursery() as nursery:
-            nursery.start_soon(_collect, results, module.check('m'))
+            nursery.start_soon(_collect, results, module.update_check('m'))
             await started.wait()
-            assert state.cancel_update_check() is True
+            assert state.cancel_check() is True
             await trio.testing.wait_all_tasks_blocked()
         # the request was interrupted alone: nothing was recorded and the state
         # of the last check is back
@@ -376,7 +376,7 @@ class TestManualCheck:
         module, state = make_mod()
         async with trio.open_nursery() as nursery:
             module.attach(nursery)
-            message = await module.check('m')
+            message = await module.update_check('m')
             assert message == ''
             assert state.info.state == 'uptodate'
             # the sequence started over (it waits the spread before its check)
@@ -390,24 +390,24 @@ class TestManualCheck:
             module.attach(nursery)
             module.start()
             first = state._loop_scope
-            await module.check('m')
+            await module.update_check('m')
             assert state._loop_scope is not first
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
     async def test_a_fresh_check_is_discarded(self):
         module, state = make_mod()
-        assert await module.check('m') == ''
+        assert await module.update_check('m') == ''
         # the check that just ran is the answer already
-        assert await module.check('m') == FRESH_MESSAGE
-        assert await module.check('m') == FRESH_MESSAGE
+        assert await module.update_check('m') == FRESH_MESSAGE
+        assert await module.update_check('m') == FRESH_MESSAGE
 
     @pytest.mark.trio
     async def test_the_fresh_window_expires(self):
         module, state = make_mod()
-        assert await module.check('m') == ''
+        assert await module.update_check('m') == ''
         state._checked_mono -= FRESH_WINDOW
-        assert await module.check('m') == ''
+        assert await module.update_check('m') == ''
 
     @pytest.mark.trio
     async def test_a_check_in_flight_answers_busy(self):
@@ -425,7 +425,7 @@ class TestManualCheck:
 
         async def first():
             started.set()
-            return await module.check('m')
+            return await module.update_check('m')
 
         async with trio.open_nursery() as nursery:
             results = []
@@ -433,7 +433,7 @@ class TestManualCheck:
             await started.wait()
             await trio.testing.wait_all_tasks_blocked()
             # the second caller is answered without touching the lock
-            assert await module.check('m') == BUSY_MESSAGE
+            assert await module.update_check('m') == BUSY_MESSAGE
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
@@ -448,8 +448,8 @@ class TestManualCheck:
             return FakeCheck(True)
 
         state._request_check = request
-        first = await module.check('m')
-        second = await module.check('m')
+        first = await module.update_check('m')
+        second = await module.update_check('m')
         assert (first, second) == ('', FRESH_MESSAGE)
         assert calls == ['check']
 
@@ -457,7 +457,7 @@ class TestManualCheck:
     async def test_check_of_an_unknown_mod_is_refused(self):
         module, state = make_mod()
         with pytest.raises(ValueError, match='No such mod'):
-            await module.check('nope')
+            await module.update_check('nope')
 
     @pytest.mark.trio
     async def test_check_of_an_unmanaged_mod_answers_the_message(self):
@@ -465,7 +465,7 @@ class TestManualCheck:
         module.mods['none'] = ModUpdateCheck(module, FakeMod('none', mirrors=None))
         # nothing is an error: the mod has no update source, its state stays
         # 'unmanaged' and no request is made
-        assert await module.check('none') == UNMANAGED_MESSAGE
+        assert await module.update_check('none') == UNMANAGED_MESSAGE
         assert await module.mods['none'].update_check() == UNMANAGED_MESSAGE
         assert module.mods['none'].info.state == 'idle'
 

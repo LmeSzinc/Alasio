@@ -29,11 +29,14 @@
   const modListTopic = useTopic<ModOption[]>("ModList");
   const modHistoryTopic = useTopic<ModHistoryData>("ModHistory");
   // update states of the update flow: the badges, the buttons and the
-  // confirmation dialog read the Update topic, the buttons call its rpc
+  // confirmation dialog read the Update topic, the buttons call its rpc.
+  // The four rpcs are two symmetric pairs: update_check / cancel_check
+  // address one mod, update_apply / cancel_apply the update flow
   const updateTopic = useTopic<UpdateTopicLike>("Update");
   const updateCheckRpc = updateTopic.rpc();
+  const cancelCheckRpc = updateTopic.rpc();
   const updateApplyRpc = updateTopic.rpc();
-  const updateCancelRpc = updateTopic.rpc();
+  const cancelApplyRpc = updateTopic.rpc();
 
   // data from props for testing, otherwise from topics
   const mods = $derived(modsProp ?? modListTopic.data ?? []);
@@ -126,7 +129,7 @@
       </span>
       <span class="flex shrink-0 gap-2">
         {#if updateCancellable}
-          <Button size="sm" variant="outline" onclick={() => updateCancelRpc.call("update_cancel", {})}>
+          <Button size="sm" variant="outline" onclick={() => cancelApplyRpc.call("cancel_apply", {})}>
             {t.Update.ButtonCancel()}
           </Button>
         {/if}
@@ -168,7 +171,7 @@
                   <Button
                     size="sm"
                     variant="outline"
-                    onclick={() => updateCancelRpc.call("update_cancel", { name: mod.value })}
+                    onclick={() => cancelCheckRpc.call("cancel_check", { name: mod.value })}
                   >
                     {t.Update.ButtonCancel()}
                   </Button>

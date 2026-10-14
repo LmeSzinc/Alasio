@@ -158,10 +158,10 @@ class TestRun:
         # the backend does not serve flows yet: the user answer is the startup
         # window, an internal entry is an error
         with pytest.raises(FlowRefused) as e:
-            manager.request_restart()
+            manager.restart()
         assert str(e.value) == STARTING_UP
         with pytest.raises(FlowRefused) as e:
-            manager.request_update()
+            manager.update_apply()
         assert str(e.value) == STARTING_UP
         assert manager.request_daily(now=NOW) is None
         with pytest.raises(RuntimeError, match='does not run'):
@@ -193,12 +193,12 @@ class TestRun:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            h.manager.request_restart()
+            h.manager.restart()
             assert h.manager.flow_name == 'restart'
             await trio.testing.wait_all_tasks_blocked()
             # the slot is free again and the next request is served as usual
             assert h.manager.flow_name == ''
-            assert h.manager.request_restart() is not None
+            assert h.manager.restart() is not None
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
@@ -215,6 +215,21 @@ class TestRun:
 
 async def _never(*args):
     """Task that does nothing (the manager is not running in that test)"""
+
+
+def flow_entries(manager):
+    """
+    The entry that claims each flow, by flow name
+
+    The user entries are named after the rpc that drives them (restart /
+    update_apply), the internal ones carry the request_ prefix (the lifespan,
+    the daily task).
+    """
+    return {
+        'restart': manager.restart,
+        'update': manager.update_apply,
+        'daily': lambda: manager.request_daily(now=NOW),
+    }
 
 
 class TestRefusals:
@@ -234,12 +249,13 @@ class TestRefusals:
     async def test_refusal_matrix(self, current, requested, message):
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
+            entries = flow_entries(h.manager)
             if current != 'startup':
                 await h.run_idle()
-                getattr(h.manager, f'request_{current}')()
+                entries[current]()
             await h.manager.started[current].wait()
             with pytest.raises(FlowRefused) as e:
-                getattr(h.manager, f'request_{requested}')()
+                entries[requested]()
             assert str(e.value) == message
             # the flow in flight is untouched by the refused request
             assert h.manager.flow_name == current
@@ -250,7 +266,7 @@ class TestRefusals:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            h.manager.request_update()
+            h.manager.update_apply()
             await h.manager.started['update'].wait()
             h.release('update')
             await h.manager.finished['update'].wait()
@@ -268,7 +284,7 @@ class TestCancel:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            h.manager.request_restart()
+            h.manager.restart()
             await h.manager.started['restart'].wait()
             assert h.manager.cancellable is True
             await h.manager.cancel_restart()
@@ -285,7 +301,7 @@ class TestCancel:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            h.manager.request_restart()
+            h.manager.restart()
             # no await since the claim: the body did not open its window yet
             assert h.manager.flow_name == 'restart'
             assert h.manager.cancellable is False
@@ -305,7 +321,7 @@ class TestCancel:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            for cancel in (h.manager.cancel_restart, h.manager.cancel_update):
+            for cancel in (h.manager.cancel_restart, h.manager.cancel_apply):
                 with pytest.raises(FlowRefused) as e:
                     await cancel()
                 assert 'is in progress' in str(e.value)
@@ -316,12 +332,12 @@ class TestCancel:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            h.manager.request_update()
+            h.manager.update_apply()
             await h.manager.started['update'].wait()
             with pytest.raises(FlowRefused) as e:
                 await h.manager.cancel_restart()
             assert str(e.value) == 'No restart is in progress'
-            await h.manager.cancel_update()
+            await h.manager.cancel_apply()
             await h.manager.finished['update'].wait()
             await trio.testing.wait_all_tasks_blocked()
             assert ('cancelled', 'update') in h.records
@@ -332,7 +348,7 @@ class TestCancel:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            flow = h.manager.request_restart()
+            flow = h.manager.restart()
             await h.manager.started['restart'].wait()
             # the first cancel was accepted (the flow is winding down): the
             # second one is refused with the "already cancelled" message (the
@@ -348,7 +364,7 @@ class TestCancel:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            flow = h.manager.request_restart()
+            flow = h.manager.restart()
             flow.upgrade_to_daily()
             assert flow.upgraded is True
             assert h.manager.upgraded is True
@@ -363,11 +379,11 @@ class TestCancel:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            h.manager.request_update()
+            h.manager.update_apply()
             await h.manager.started['update'].wait()
             h.manager.current.close_window()
             with pytest.raises(FlowRefused) as e:
-                await h.manager.cancel_update()
+                await h.manager.cancel_apply()
             assert str(e.value) == ('The update is past its point of no return '
                                     '(the handover started) and cannot be cancelled')
             nursery.cancel_scope.cancel()
@@ -411,12 +427,10 @@ class TestDailyRequest:
     async def test_daily_skipped_while_a_flow_runs(self, current, marked):
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
+            entries = flow_entries(h.manager)
             if current != 'startup':
                 await h.run_idle()
-                if current == 'daily':
-                    h.manager.request_daily(now=NOW)
-                else:
-                    getattr(h.manager, f'request_{current}')()
+                entries[current]()
             await h.manager.started[current].wait()
             assert h.manager.request_daily(now=NOW) is None
             assert h.manager.daily.is_done(NOW) is marked
@@ -432,7 +446,7 @@ class TestView:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            h.manager.request_restart()
+            h.manager.restart()
             await trio.testing.wait_all_tasks_blocked()
             assert h.manager.views[-1] == {'flow': 'restart', 'cancellable': True, 'upgraded': False}
             h.manager.current.upgrade_to_daily()
@@ -448,8 +462,8 @@ class TestFlowCreation:
 
     @pytest.mark.parametrize("entry, flow_cls", [
         ('request_startup', FlowStartup),
-        ('request_restart', FlowRestart),
-        ('request_update', FlowUpdate),
+        ('restart', FlowRestart),
+        ('update_apply', FlowUpdate),
         ('request_daily', FlowDaily),
     ])
     def test_every_entry_claims_its_own_flow_class(self, entry, flow_cls):
@@ -475,13 +489,13 @@ class TestFlowCreation:
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            first = h.manager.request_restart()
+            first = h.manager.restart()
             await h.manager.started['restart'].wait()
             h.release('restart')
             await h.manager.finished['restart'].wait()
             await trio.testing.wait_all_tasks_blocked()
             # a flow object belongs to one run: the next claim builds a new one
-            second = h.manager.request_restart()
+            second = h.manager.restart()
             assert second is not first
             assert second.cancelled is False
             nursery.cancel_scope.cancel()
