@@ -4,8 +4,10 @@ Synchronous retrying http client: HttpClient, over a httpx2.Client.
 The client of the synchronous callers of the deploy domain, e.g. the
 wheel fetch of the pack server
 (alasio/deploy_dev/pack_server/fetch_wheel.py). The retry policy, the
-default timeout and the ownership of the client are the shared design of
-alasio/deploy/httpclient/base.py, see HttpClientBase.
+default timeout, the ownership of the client and the ignoring of the
+environment of the user (no proxy is taken from it) are the shared
+design of alasio/deploy/httpclient/base.py, see HttpClientBase. The
+client itself is built by create_client(), the factory of the domain.
 
 request() blocks the calling thread: the wait before a retry is a
 time.sleep. stream() is the streamed transfer: the consumer reads the
@@ -29,7 +31,8 @@ class HttpClient(HttpClientBase):
     timeout and ownership of the client (the shared design of base.py),
     with blocking requests for the synchronous callers.
 
-    See request() for the timeout and stream() for the retried transfer.
+    See create_client() for a client of the domain, request() for the
+    timeout and stream() for the retried transfer.
     """
 
     def __init__(self, client=None):
@@ -44,9 +47,9 @@ class HttpClient(HttpClientBase):
                 the source can be released right after construction.
                 The lifetime of an injected or taken client belongs to
                 its owner (this class never closes it). Defaults to
-                None: the client of this instance is created on the
-                first request and reused by every later one, close()
-                closes it
+                None: the client of this instance is created by
+                create_client() on the first request and reused by
+                every later one, close() closes it
         """
         if isinstance(client, HttpClient):
             # take the client of the other wrapper: the two wrappers
@@ -56,11 +59,35 @@ class HttpClient(HttpClientBase):
             client = client.client
         super().__init__(client)
 
+    @classmethod
+    def create_client(cls):
+        """
+        Create a httpx2.Client with the options of the domain.
+
+        The factory of the domain: the client it builds ignores the
+        environment of the user (trust_env=False), so the proxy of a
+        proxy tool (and the proxy of the system configuration) never
+        routes a request, see the module note of base.py. The client of
+        an instance is built here on the first request (see
+        _get_client()), and this is the entry for a caller that needs a
+        client of its own: one injected into the wrappers of the domain
+        (e.g. the shared client of a backend module, see
+        ServerFile.__init__) or handed to the calls that take one.
+
+        The creation opens nothing, the first request of the client
+        opens the connection.
+
+        Returns:
+            httpx2.Client: The client to send the requests with
+        """
+        import httpx2
+        return httpx2.Client(trust_env=False)
+
     def _get_client(self):
         """
         The http client of this instance: the injected one, the one
-        taken from another wrapper, or the client of the instance
-        created on the first request.
+        taken from another wrapper, or the client the instance creates
+        with create_client() on the first request.
 
         The client is reused by every request of the instance, so the
         keep-alive connections of a flow are reused instead of a new
@@ -73,8 +100,7 @@ class HttpClient(HttpClientBase):
             httpx2.Client: The client to send the requests with
         """
         if self._client is None:
-            import httpx2
-            self._client = httpx2.Client()
+            self._client = self.create_client()
         return self._client
 
     def close(self):

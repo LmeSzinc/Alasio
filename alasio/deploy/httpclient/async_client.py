@@ -5,8 +5,10 @@ httpx2.AsyncClient.
 The client of the asynchronous callers of the deploy domain, e.g.
 ServerFile, the pack update client
 (alasio/deploy/pack/server_file.py). The retry policy, the default
-timeout and the ownership of the client are the shared design of
-alasio/deploy/httpclient/base.py, see HttpClientBase.
+timeout, the ownership of the client and the ignoring of the
+environment of the user (no proxy is taken from it) are the shared
+design of alasio/deploy/httpclient/base.py, see HttpClientBase. The
+client itself is built by create_client(), the factory of the domain.
 
 request() runs on the event loop of the caller (trio): the wait before a
 retry is a trio sleep, so the cancellation of the enclosing task
@@ -30,8 +32,8 @@ class AsyncHttpClient(HttpClientBase):
     and ownership of the client (the shared design of base.py), for the
     callers that run on the event loop (trio).
 
-    See request() for the timeout of a call and stream() for the retried
-    transfer.
+    See create_client() for a client of the domain, request() for the
+    timeout of a call and stream() for the retried transfer.
     """
 
     def __init__(self, client=None):
@@ -47,8 +49,9 @@ class AsyncHttpClient(HttpClientBase):
                 released right after construction. The lifetime of an
                 injected or taken client belongs to its owner (this
                 class never closes it). Defaults to None: the client
-                of this instance is created on the first request and
-                reused by every later one, aclose() closes it
+                of this instance is created by create_client() on the
+                first request and reused by every later one, aclose()
+                closes it
         """
         if isinstance(client, AsyncHttpClient):
             # take the client of the other wrapper: the two wrappers
@@ -58,11 +61,35 @@ class AsyncHttpClient(HttpClientBase):
             client = client.client
         super().__init__(client)
 
+    @classmethod
+    def create_client(cls):
+        """
+        Create a httpx2.AsyncClient with the options of the domain.
+
+        The factory of the domain: the client it builds ignores the
+        environment of the user (trust_env=False), so the proxy of a
+        proxy tool (and the proxy of the system configuration) never
+        routes a request, see the module note of base.py. The client of
+        an instance is built here on the first request (see
+        _get_aclient()), and this is the entry for a caller that needs
+        a client of its own: one injected into the wrappers of the
+        domain (e.g. the shared client of a backend module, see
+        ServerFile.__init__) or handed to the calls that take one.
+
+        The creation opens nothing, the first request of the client
+        opens the connection.
+
+        Returns:
+            httpx2.AsyncClient: The client to send the requests with
+        """
+        import httpx2
+        return httpx2.AsyncClient(trust_env=False)
+
     def _get_aclient(self):
         """
         The async http client of this instance: the injected one, the
-        one taken from another wrapper, or the client of the instance
-        created on the first request.
+        one taken from another wrapper, or the client the instance
+        creates with create_client() on the first request.
 
         The client is reused by every request of the instance, so the
         keep-alive connections of a flow are reused instead of a new
@@ -78,8 +105,7 @@ class AsyncHttpClient(HttpClientBase):
             httpx2.AsyncClient: The client to send the requests with
         """
         if self._client is None:
-            import httpx2
-            self._client = httpx2.AsyncClient()
+            self._client = self.create_client()
         return self._client
 
     async def aclose(self):

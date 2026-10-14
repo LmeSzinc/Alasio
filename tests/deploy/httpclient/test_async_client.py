@@ -378,6 +378,44 @@ class TestAsyncLifecycle:
         assert created[0].is_closed
 
     @pytest.mark.trio
+    async def test_create_client_ignores_the_environment(self, monkeypatch):
+        """create_client() is the factory of the domain: a caller that
+        needs a client of its own (e.g. one to inject into the wrappers
+        or into a call that takes one) never handles the proxy of the
+        user environment itself."""
+        created = []
+
+        class TrackingClient(httpx2.AsyncClient):
+            def __init__(self, **kwargs):
+                created.append(kwargs)
+                super().__init__(**kwargs)
+
+        monkeypatch.setattr(httpx2, 'AsyncClient', TrackingClient)
+        client = AsyncHttpClient.create_client()
+        assert created == [{'trust_env': False}]
+        await client.aclose()
+
+    @pytest.mark.trio
+    async def test_created_client_ignores_the_environment(self, monkeypatch):
+        """The created client is created with trust_env=False: neither
+        the proxy variables nor the system proxy of the user
+        environment route a request of the domain."""
+        created = []
+
+        def handler(request):
+            return httpx2.Response(200, content=b'ok')
+
+        class TrackingClient(httpx2.AsyncClient):
+            def __init__(self, **kwargs):
+                created.append(kwargs)
+                super().__init__(transport=httpx2.MockTransport(handler), **kwargs)
+
+        monkeypatch.setattr(httpx2, 'AsyncClient', TrackingClient)
+        client = AsyncHttpClient()
+        assert (await client.get('http://test/a')).content == b'ok'
+        assert created == [{'trust_env': False}]
+
+    @pytest.mark.trio
     async def test_injected_client_is_used_and_never_closed(self):
         """An injected client serves the requests and is left alone by
         aclose(): its lifetime belongs to the caller."""

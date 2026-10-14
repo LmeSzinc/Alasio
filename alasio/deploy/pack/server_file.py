@@ -126,11 +126,12 @@ class ServerFile(ProbeBase):
             client (httpx2.AsyncClient | AsyncHttpClient, optional):
                 Client to use, or an AsyncHttpClient whose client is
                 taken (independent servers can share one client, see
-                AsyncHttpClient). Its lifetime belongs to the caller
-                (this class never closes an injected client). Defaults
-                to None, a client of this instance is created on the
-                first request and reused by every later one, aclose()
-                closes it
+                AsyncHttpClient). A client of the domain is built by
+                AsyncHttpClient.create_client(). Its lifetime belongs
+                to the caller (this class never closes an injected
+                client). Defaults to None, a client of this instance
+                is created on the first request and reused by every
+                later one, aclose() closes it
         """
         if not isinstance(mirrors, ServerUrl):
             mirrors = ServerUrl(mirrors, scope=scope)

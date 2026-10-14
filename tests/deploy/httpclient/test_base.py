@@ -1,7 +1,8 @@
 """
 Tests for HttpClientBase: the shared design of the retrying http clients
-(the retry policy, the default timeout and the ownership of the httpx2
-client), used by the sync HttpClient and the async AsyncHttpClient.
+(the retry policy, the default timeout, the ownership of the httpx2
+client and the ignoring of the environment of the user), used by the
+sync HttpClient and the async AsyncHttpClient.
 """
 import pytest
 

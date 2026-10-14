@@ -40,6 +40,23 @@ the calling thread) and a trio sleep in the async one, so the
 cancellation of the enclosing task interrupts the async wait, like it
 interrupts the in-flight request itself.
 
+The client created by the concrete classes ignores the environment of
+the user: it is built by the create_client() of the flavor
+(HttpClient.create_client() / AsyncHttpClient.create_client()) with
+trust_env=False, so the proxy of the user environment (HTTP_PROXY /
+HTTPS_PROXY / ALL_PROXY / NO_PROXY, and the proxy of the windows
+registry or the macos system configuration when the variables are
+empty) never routes a request. The deploy runs on the machine of the
+user, where a proxy tool usually leaves its variables behind when it
+exits: a request through a proxy that is not listening fails, while the
+direct connection of the user works. The same argument as the stdio
+encoding and the mimetype table of alasio.backport.patch. The factory
+is also the entry for a caller that needs a client of the domain, e.g.
+the shared client of a backend module (see ServerFile.__init__); a
+caller that does want a proxy injects a client of its own (e.g.
+httpx2.Client(trust_env=False, proxy=...)), an injected client is used
+as it is.
+
 httpx2 is imported lazily in the places that use it: the package
 resolves its own version with importlib.metadata at import time, which
 the in-memory filesystem of the tests cannot answer.
@@ -51,15 +68,19 @@ from alasio.logger import logger
 class HttpClientBase:
     """
     Shared design of the retrying http clients: the retry policy, the
-    default timeout and the ownership of the httpx2 client.
+    default timeout, the ownership of the httpx2 client and the
+    ignoring of the environment of the user.
 
     The client of an instance is the injected httpx2 client, the client
     of another wrapper of the same flavor (the client is taken, so the
     wrappers share one client and one connection pool), or one created
-    on the first request: it is reused by every later request, and
-    client is the accessor. An injected or taken client belongs to its
-    owner and is left alone; close() / aclose() closes a client the
-    instance created.
+    by the create_client() of the concrete class on the first request:
+    it is reused by every later request, and client is the accessor. An
+    injected or taken client belongs to its owner and is left alone;
+    close() / aclose() closes a client the instance created. A client
+    of create_client() ignores the environment of the user, an injected
+    or taken one is used as it is (the trust_env of the caller decides),
+    see the module note.
 
     The concrete classes implement the requests of their flavor and
     unwrap the wrapper they take the client from, see HttpClient and

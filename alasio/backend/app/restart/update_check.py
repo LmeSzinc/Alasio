@@ -42,6 +42,7 @@ from typing import Dict, List, Optional
 import trio
 
 from alasio.backend.topic.update import UpdateInfo, UpdateSource
+from alasio.deploy.httpclient.async_client import AsyncHttpClient
 from alasio.deploy.httpclient.probe import Mirrors
 from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.server_file import ServerFile
@@ -576,8 +577,8 @@ class UpdateCheck:
             httpx2.AsyncClient: The client
         """
         if self._client is None:
-            import httpx2
-            self._client = httpx2.AsyncClient()
+            # the client of the deploy domain, see AsyncHttpClient.create_client()
+            self._client = AsyncHttpClient.create_client()
         return self._client
 
     async def close(self):
