@@ -78,10 +78,15 @@ class MockStaticFile:
 
         Args:
             path (str): Path of the file below the root, '/'-separated, e.g.
-                'latest.pack' or '1.0/full.pack'
+                'latest.pack' or '1.0/full.pack'. The trailing '/' of the path
+                of a directory-like file (the index page of a simple mirror)
+                is kept, the client asks the url with it
             content (bytes): Content of the file
         """
-        self.files[f'/{path.strip("/")}'] = content
+        name = path.strip('/')
+        if path.endswith('/') and name:
+            name += '/'
+        self.files[f'/{name}'] = content
 
     def register_files(self, files):
         """

@@ -98,6 +98,16 @@ class TestAnswers:
         assert response.content == b'new'
 
     @pytest.mark.trio
+    async def test_a_directory_like_path_keeps_the_slash(self):
+        """The index page of a mirror is registered at its path with the
+        trailing slash the client asks."""
+        server = MockStaticFile({'httpx/': CONTENT})
+        async with make_client(server) as client:
+            assert (await client.get('/httpx/')).content == CONTENT
+            # the paths are exact: the page is not served without the slash
+            assert (await client.get('/httpx')).status_code == 404
+
+    @pytest.mark.trio
     async def test_head(self):
         """A HEAD answer carries the headers of the GET, no body."""
         server = MockStaticFile({'latest.pack': CONTENT})

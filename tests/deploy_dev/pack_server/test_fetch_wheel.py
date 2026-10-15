@@ -2,13 +2,12 @@
 Tests for WheelFetcher: download the wheel of a distribution version from a
 PyPI simple mirror.
 
-The mirror is simulated with an httpx2.MockTransport client: the index pages
-and the wheel files are served from the memory of the mock, no socket is
-bound and no real mirror is requested, the same pattern as the tests of
-ServerFile (tests/deploy_dev/pack/test_server_file.py). The index data cache
-and the wheel are written to the fake filesystem
-(alasio.testing.filesystem), the cache of an earlier fetch is prepared with
-write_index_data.
+The mirror is simulated with MockStaticFile, the in-memory static file server
+of the tests: the index pages and the wheel files are registered into it and
+served through a starlette TestClient, no socket is bound and no real mirror
+is requested. The index data cache and the wheel are written to the fake
+filesystem (alasio.testing.filesystem), the cache of an earlier fetch is
+prepared with write_index_data.
 """
 import hashlib
 from types import SimpleNamespace
@@ -16,6 +15,7 @@ from types import SimpleNamespace
 import httpx2
 import pytest
 from msgspec.structs import asdict
+from starlette.testclient import TestClient
 
 from alasio.deploy.httpclient import sync_client as sync_client_module
 from alasio.deploy_dev.pack_server.fetch_wheel import (
@@ -27,6 +27,13 @@ from alasio.ext.file.jsonfile import json_dumps, write_json
 from alasio.ext.path import PathStr
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from alasio.testing.static_file import MockStaticFile
+
+# the client of the mirror is a starlette TestClient and the code under test
+# passes the timeout of its own http client: the deprecation warning of
+# starlette about the timeout argument is noise here
+pytestmark = pytest.mark.filterwarnings(
+    'ignore::starlette.exceptions.StarletteDeprecationWarning')
 
 
 def wheel_file(root, name, version, filename):
@@ -85,15 +92,103 @@ def page_link(filename, digest):
     return f'<a href="../../packages/{filename}{fragment}">{filename}</a><br/>\n'
 
 
+def recording_app(static, requests):
+    """
+    The app of the mirror: the static file server, the requests recorded.
+
+    Args:
+        static (MockStaticFile): The static file server of the mirror
+        requests (list): Appended with the urls of the requests, in order
+
+    Returns:
+        Callable: The ASGI app to serve
+    """
+    async def app(scope, receive, send):
+        if scope['type'] == 'http':
+            headers = dict(scope['headers'])
+            requests.append(
+                f"{scope['scheme']}://{headers.get(b'host', b'').decode()}{scope['path']}")
+        await static(scope, receive, send)
+
+    return app
+
+
+class FlakyClient(TestClient):
+    """
+    The mirror client of the failure tests: the transport errors are injected.
+
+    The subclass fails the first request of a wheel (the errors of the
+    transport are not served by the app, no handler of the mirror is
+    involved), every later request is served by the app of the mirror.
+    """
+
+    def __init__(self, app, attempts, mode='raise'):
+        """
+        Args:
+            app (Callable): The ASGI app of the mirror
+            attempts (list): Appended with the urls of the requests, the
+                failed ones included
+            mode (str): 'raise' (a transport error before the app) or
+                'stream' (a response whose stream fails after a chunk).
+                Defaults to 'raise'
+        """
+        super().__init__(app)
+        self.attempts = attempts
+        self.mode = mode
+
+    def send(self, request, **kwargs):
+        """
+        Send one request, failing the first request of a wheel.
+
+        Args:
+            request (httpx2.Request): The request
+            **kwargs: Arguments of httpx2.Client.send
+
+        Returns:
+            httpx2.Response: The response of the app
+
+        Raises:
+            httpx2.ReadTimeout: In the 'raise' mode, for the first wheel
+                request
+        """
+        url = str(request.url)
+        self.attempts.append(url)
+        if url.endswith('.whl') and self.attempts.count(url) == 1:
+            if self.mode == 'raise':
+                raise httpx2.ReadTimeout('read timed out')
+            return httpx2.Response(200, stream=BrokenStream(), request=request)
+        return super().send(request, **kwargs)
+
+
+class BrokenStream(httpx2.SyncByteStream):
+    """A wheel stream that fails after a first chunk."""
+
+    def __iter__(self):
+        yield b'partial '
+        raise httpx2.ReadError('connection lost')
+
+
 class MockMirror:
     """
-    In-memory PyPI simple mirror, served through an httpx2 MockTransport.
+    In-memory PyPI simple mirror, served by the static file server of the tests.
 
-    The index page of a distribution is built from the registered files: every
-    link is relative and carries the sha256 fragment like the page of a real
-    mirror, so the client resolves the url against the index url; a file that
-    was registered without a digest is linked without a fragment. The files
-    are served from the memory, a file that is not registered is a 404.
+    The index page of a distribution is built from the registered files and
+    registered into the server like any other file: every link is relative and
+    carries the sha256 fragment like the page of a real mirror, so the client
+    resolves the url against the index url; a file that was registered without
+    a digest is linked without a fragment. A file that is not registered is a
+    404, no request is parsed by hand here.
+
+    Attributes:
+        base (str): Base url of the mirror. Defaults to 'http://mirror'
+        files (dict[str, dict[str, tuple[bytes, str]]]): {dist key:
+            {filename: (content, sha256)}}
+        requests (list[str]): Urls of the requests made by the clients, in
+            order, for the assertions
+        static (MockStaticFile): The static file server of the mirror
+        app (Callable): The ASGI app of the mirror, the requests recorded
+        client (httpx2.Client): The client of the mirror, a TestClient over
+            the app
     """
 
     def __init__(self, base='http://mirror'):
@@ -106,7 +201,12 @@ class MockMirror:
         self.files = {}
         # urls of the requests made by the clients, for the assertions
         self.requests = []
-        self.client = httpx2.Client(transport=httpx2.MockTransport(self._handle))
+        # the files of the mirror and the app serving them: the requests are
+        # recorded for the assertions, the client is a sync one like the code
+        # under test uses
+        self.static = MockStaticFile()
+        self.app = recording_app(self.static, self.requests)
+        self.client = TestClient(self.app)
 
     def register(self, name, version, tags='py3-none-any', filename='', content=b'', digest=None):
         """
@@ -135,34 +235,43 @@ class MockMirror:
         if digest is None:
             digest = hashlib.sha256(content).hexdigest()
         self.files.setdefault(normalize_name(name), {})[filename] = (content, digest)
+        self._rebuild()
         return content
 
-    def _handle(self, request):
+    def _rebuild(self):
         """
-        MockTransport handler, serves the index pages and the files.
+        Register the index pages and the files into the static file server.
+
+        The pages are files like the wheels: a mirror serves the same bytes
+        every time, the registry of the tests is what changes.
+        """
+        files = {
+            f'packages/{filename}': content
+            for dist in self.files.values()
+            for filename, (content, _) in dist.items()
+        }
+        files.update({
+            f'{dist_key}/': self._page(dist)
+            for dist_key, dist in self.files.items()
+        })
+        self.static.register_files(files)
+
+    @staticmethod
+    def _page(dist):
+        """
+        The index page of a distribution: a relative link per file.
 
         Args:
-            request (httpx2.Request): The request
+            dist (dict[str, tuple[bytes, str]]): {filename: (content, sha256)}
 
         Returns:
-            httpx2.Response: The response
+            bytes: The page
         """
-        self.requests.append(str(request.url))
-        path = request.url.path
-        if path.startswith('/packages/'):
-            filename = path.rpartition('/')[2]
-            for files in self.files.values():
-                if filename in files:
-                    return httpx2.Response(200, content=files[filename][0])
-            return httpx2.Response(404, content=b'')
-        files = self.files.get(path.strip('/'))
-        if files is None:
-            return httpx2.Response(404, content=b'')
         links = ''.join(
             page_link(filename, digest)
-            for filename, (_, digest) in sorted(files.items())
+            for filename, (_, digest) in sorted(dist.items())
         )
-        return httpx2.Response(200, content=f'<!DOCTYPE html><html>{links}</html>'.encode('utf-8'))
+        return f'<!DOCTYPE html><html>{links}</html>'.encode('utf-8')
 
 
 @pytest.fixture
@@ -448,19 +557,12 @@ class TestWheelFetcher:
         mirror.register('httpx', '0.28.1')
         attempts = []
 
-        def handler(request):
-            url = str(request.url)
-            attempts.append(url)
-            if url.endswith('.whl') and attempts.count(url) == 1:
-                raise httpx2.ReadTimeout('read timed out')
-            return mirror._handle(request)
-
         # the retry waits RETRY_BACKOFF for real: skip the wait, the
         # retry itself is what this test checks
         monkeypatch.setattr(sync_client_module, 'time', SimpleNamespace(sleep=lambda seconds: None))
-        client = httpx2.Client(transport=httpx2.MockTransport(handler))
         with logger.mock_capture_writer():
-            file = WheelFetcher(root, mirror.base, 'httpx', '0.28.1', client=client).fetch()
+            file = WheelFetcher(
+                root, mirror.base, 'httpx', '0.28.1', client=FlakyClient(mirror.app, attempts)).fetch()
         assert file.atomic_read_bytes() == b'httpx-0.28.1-py3-none-any.whl content'
         assert attempts == [
             'http://mirror/httpx/',
@@ -475,24 +577,11 @@ class TestWheelFetcher:
         mirror.register('httpx', '0.28.1')
         attempts = []
 
-        class BrokenStream(httpx2.SyncByteStream):
-            """A wheel stream that fails after a first chunk."""
-
-            def __iter__(self):
-                yield b'partial '
-                raise httpx2.ReadError('connection lost')
-
-        def handler(request):
-            url = str(request.url)
-            attempts.append(url)
-            if url.endswith('.whl') and attempts.count(url) == 1:
-                return httpx2.Response(200, stream=BrokenStream())
-            return mirror._handle(request)
-
         monkeypatch.setattr(sync_client_module, 'time', SimpleNamespace(sleep=lambda seconds: None))
-        client = httpx2.Client(transport=httpx2.MockTransport(handler))
         with logger.mock_capture_writer():
-            file = WheelFetcher(root, mirror.base, 'httpx', '0.28.1', client=client).fetch()
+            file = WheelFetcher(
+                root, mirror.base, 'httpx', '0.28.1',
+                client=FlakyClient(mirror.app, attempts, mode='stream')).fetch()
         assert file.atomic_read_bytes() == b'httpx-0.28.1-py3-none-any.whl content'
         assert attempts == [
             'http://mirror/httpx/',
