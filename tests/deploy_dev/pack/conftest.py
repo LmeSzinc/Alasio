@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 import httpx2
 import pytest
 import trio
+from starlette.applications import Starlette
+from starlette.routing import Mount
 
 from alasio.db.table import AlasioTable
 from alasio.deploy.httpclient.async_client import AsyncHttpClient
@@ -32,6 +34,7 @@ from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.git.mock.mock_repo import MockGitRepo
+from alasio.testing.static_file import MockStaticFile
 
 COMMIT = 'c1'
 
@@ -206,8 +209,8 @@ WEBSITE_INDEX_PACK = b''.join(PackFull(WEBSITE_REPO, commit=COMMIT).iter_packidx
 
 class MockHttpClient(AsyncHttpClient):
     """
-    The AsyncHttpClient of MockServerFile: an httpx2.AsyncClient with a
-    MockTransport handler per trio run.
+    The AsyncHttpClient of MockServerFile: an httpx2.AsyncClient that talks to
+    the app of the mock (httpx2.ASGITransport), one client per trio run.
 
     httpx clients are bound to the event loop they are used in, and
     pytest-trio runs every test case in a fresh trio.run(), so a
@@ -238,26 +241,95 @@ class MockHttpClient(AsyncHttpClient):
         token = trio.lowlevel.current_trio_token()
         client = self._clients.get(token)
         if client is None:
-            client = httpx2.AsyncClient(transport=httpx2.MockTransport(self.server._handle))
+            client = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=self.server.app()))
             self._clients[token] = client
         return client
 
 
+def mock_serving_app(server, app):
+    """
+    The ASGI app of a MockServerFile: the packs of the registry, served by the
+    static file server of the mock.
+
+    The wrapper registers the packs into the static file server before every
+    request (a pack registered after the last request is served from the next
+    one on, latest.pack follows latest_version) and keeps what the tests of
+    the packs assert:
+
+    - the bytes of an update pack the server transfers are counted, see
+      MockServerFile.update_bytes;
+    - a full pack fetched without a range request is an error: the client
+      walks the packs of a version with range requests only;
+    - the urls of the requests are recorded in order, see
+      MockServerFile.requests.
+
+    Args:
+        server (MockServerFile): The mock the packs belong to
+        app (Starlette): The app serving the registered packs
+
+    Returns:
+        Callable: The ASGI app to send the requests to
+    """
+    async def serving(scope, receive, send):
+        if scope['type'] != 'http':
+            await app(scope, receive, send)
+            return
+        server.static.register_files(server._packs())
+        path = scope['path']
+        name = path.rpartition('/')[2]
+        headers = dict(scope['headers'])
+        server.requests.append(
+            f"{scope['scheme']}://{headers.get(b'host', b'').decode()}{path}")
+        if scope['method'] == 'GET' and name == 'full.pack' and b'range' not in headers:
+            raise AssertionError(f'Not a range request of a full pack: {path}')
+        if not name.startswith('from_'):
+            await app(scope, receive, send)
+            return
+
+        async def counting_send(message):
+            # the bytes of the update pack the client reads: a body, the range
+            # of a kept pack (the trailing 20 bytes digest), nothing for an
+            # unregistered pack (the 404 the caller rebuilds on)
+            if message['type'] == 'http.response.body':
+                server.update_bytes += len(message.get('body', b''))
+            await send(message)
+
+        await app(scope, receive, counting_send)
+
+    return serving
+
+
 class MockServerFile(ServerFile):
     """
-    In-memory ServerFile for tests, serves the pack data without http.
+    In-memory ServerFile for tests: the registered packs, served by the static
+    file server of the mock.
 
-    The http requests are intercepted by an httpx2.AsyncClient with an
-    httpx2.MockTransport handler, so the whole ServerFile logic (range
-    requests, index pack assembly) runs as-is and only the transport
-    differs. The client of the instance is replaced by MockHttpClient:
-    one client is created per trio run when it is first requested,
-    httpx clients are bound to the event loop they are used in, and
-    pytest-trio runs every test case in a fresh trio.run(), so a module
-    level MockServerFile (WEBSITE_SERVER) can serve every test without
-    crossing loops. register_version() stores the full pack and the
-    index pack of a version, the transport handler serves latest.pack
-    and the range requests from the memory.
+    register_version() / register_update() keep the packs in memory, the app
+    of the instance serves them the way a deployment serves them:
+    {base url}/latest.pack, {base url}/{version}/full.pack and
+    {base url}/{new_version}/from_{old_version}.pack (the path of the base url
+    is the mount point, so the channel base of a deployment works as it is).
+    The files are served by MockStaticFile, the in-memory static file server
+    of the tests: the range requests, the 404s and the headers the client sees
+    are the ones of a static file server and no request is parsed by hand
+    here; the packs stay in memory, nothing is written to the filesystem of
+    the test.
+
+    The client of the instance is replaced by MockHttpClient: one client is
+    created per trio run when it is first requested, httpx clients are bound
+    to the event loop they are used in, and pytest-trio runs every test case
+    in a fresh trio.run(), so a module level MockServerFile (WEBSITE_SERVER)
+    can serve every test without crossing loops.
+
+    Attributes:
+        full_packs (dict[str, bytes]): {version: full pack}
+        index_packs (dict[str, bytes]): {version: index pack}
+        update_packs (dict[tuple[str, str], bytes]): {(old, new): update pack}
+        update_bytes (int): Bytes of the update packs served, the tests assert
+            what was transferred (a body, a range, a digest only)
+        latest_version (str): The latest registered version
+        requests (list[str]): Urls of the requests served, in order
+        static (MockStaticFile): The static file server of the packs
     """
 
     def __init__(self, base_url='http://mock'):
@@ -276,11 +348,15 @@ class MockServerFile(ServerFile):
         self.latest_version = ''
         # urls of the requests served, in order
         self.requests = []
-        # path of the base url, stripped from every request
+        # path of the base url, the mount point of the packs
         self.prefix = urlsplit(base_url).path.rstrip('/')
+        # the static file server the packs are registered into
+        self.static = MockStaticFile()
+        # the ASGI app of the instance, built on first use
+        self._app = None
         # the http client of the base serves nothing, replace it by one
-        # that serves the memory through a MockTransport, one client
-        # per trio run, see MockHttpClient
+        # that talks to the app of this mock, one client per trio run,
+        # see MockHttpClient
         self._http = MockHttpClient(self)
 
     def register_version(self, version, full_pack, index_pack):
@@ -307,57 +383,44 @@ class MockServerFile(ServerFile):
         """
         self.update_packs[(old_version, new_version)] = update_pack
 
-    def _handle(self, request):
+    def app(self):
         """
-        MockTransport handler, serves the packs from the memory.
+        The ASGI app of the mock: the packs of the registry, served by the
+        static file server of the mock.
 
-        The path of the base url is stripped from every request before it is
-        served (the channel base of a deployment works as it is) and the urls
-        of the requests are recorded in order, see requests.
-
-        Args:
-            request (httpx2.Request): The request
+        The registry is registered into the static file server before every
+        request, see mock_serving_app().
 
         Returns:
-            httpx2.Response: The response
+            Callable: The ASGI app to send the requests to
         """
-        self.requests.append(str(request.url))
-        path = request.url.path
-        if self.prefix and path.startswith(self.prefix):
-            path = path[len(self.prefix):] or '/'
-        if path.endswith('/latest.pack'):
-            index_pack = self.index_packs[self.latest_version]
-            # the checksum of the pack format: the trailing 20 bytes
-            # of the index section, the same digest the decoder
-            # validates
-            checksum = bytes.fromhex(PackDecodeBase(index_pack).index_checksum)
-            content = self.latest_version.encode() + checksum
-            return httpx2.Response(200, content=content)
-        # base_url/{new_version}/from_{old_version}.pack
-        version, _, old = path.strip('/').partition('/from_')
-        if old:
-            content = self.update_packs.get((old[: -len('.pack')], version))
-            if content is None:
-                # an unregistered update pack, the incremental path
-                # is broken: DeployJob.update() falls back to
-                # RebuildJob on the 404
-                return httpx2.Response(404, content=b'')
-            # the update pack is read with range requests too: the client
-            # compares the trailing whole-pack digest of a kept pack with
-            # the served one, see ServerFile.get_update_pack_checksum. A
-            # request without a range serves the whole body
-            start, _, end = request.headers.get('Range', '').partition('=')[2].partition('-')
-            if not start:
-                self.update_bytes += len(content)
-                return httpx2.Response(200, content=content)
-            start, end = int(start), int(end)
-            self.update_bytes += end - start + 1
-            return httpx2.Response(206, content=content[start:end + 1])
-        # base_url/{version}/full.pack, served as a range request
-        version = path.strip('/').partition('/')[0]
-        start, _, end = request.headers['Range'].partition('=')[2].partition('-')
-        content = self.full_packs[version][int(start):int(end) + 1]
-        return httpx2.Response(206, content=content)
+        if self._app is None:
+            routes = [Mount(self.prefix or '/', app=self.static)]
+            self._app = mock_serving_app(self, Starlette(routes=routes))
+        return self._app
+
+    def _packs(self):
+        """
+        The files the app serves: {path below the folder: content}.
+
+        Returns:
+            dict[str, bytes]: The files of the mock, the layout of a
+                deployment
+        """
+        packs = {
+            f'{version}/full.pack': content
+            for version, content in self.full_packs.items()
+        }
+        packs.update({
+            f'{new_version}/from_{old_version}.pack': content
+            for (old_version, new_version), content in self.update_packs.items()
+        })
+        # latest.pack: the version in bytes, then the 20 bytes checksum of the
+        # index pack of the version, see LatestInfo
+        index_pack = self.index_packs[self.latest_version]
+        checksum = bytes.fromhex(PackDecodeBase(index_pack).index_checksum)
+        packs['latest.pack'] = self.latest_version.encode() + checksum
+        return packs
 
 
 # MockServerFile serving the website packs in memory, read-only test data

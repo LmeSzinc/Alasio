@@ -901,8 +901,10 @@ INFO | Update done
 
     @pytest.mark.trio
     async def test_another_pack_served_downloads(self, app_folder):
-        """The server serves another pack of the pair (another digest): the
-        kept pack is not reused, the body is downloaded."""
+        """The server serves another, shorter pack of the pair: the range of
+        the kept size lies outside it, the server answers 416 (like a static
+        file server), nothing is transferred for the hint and the body is
+        downloaded."""
         server = make_server()
         server.register_update('old', 'new', OTHER_UPDATE)
         await UnpackJob(OLD_PACK).run()
@@ -910,7 +912,21 @@ INFO | Update done
         data, kept = await DeployJob(server=server)._get_update_pack('old', 'new')
         assert bytes(data.data) == OTHER_UPDATE
         assert kept is False
-        assert server.update_bytes == 20 + len(OTHER_UPDATE)
+        assert server.update_bytes == len(OTHER_UPDATE)
+
+    @pytest.mark.trio
+    async def test_another_kept_pack_downloads(self, app_folder):
+        """The kept file is a shorter pack of the pair and the server serves
+        another one: the digest of the hint is read back and differs, the body
+        is downloaded (equal digests mean byte-identical files)."""
+        server = make_server()
+        await UnpackJob(OLD_PACK).run()
+        UpdateJob(OTHER_UPDATE, server=server).write()
+        data, kept = await DeployJob(server=server)._get_update_pack('old', 'new')
+        assert bytes(data.data) == UPDATE
+        assert kept is False
+        # the 20 bytes digest of the hint were transferred, then the body
+        assert server.update_bytes == 20 + len(UPDATE)
 
     def test_kept_pack_is_not_written_again(self, app_folder):
         """A pack read back from the job file is not written again."""

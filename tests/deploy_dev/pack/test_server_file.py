@@ -35,8 +35,9 @@ def make_aclient(handler):
 
 
 class TestMockServerFile:
-    """MockServerFile runs the whole pack API through the mock transport,
-    serving the packs from the memory (a single mirror set: no probe)."""
+    """MockServerFile runs the whole pack API through the static file server of
+    its app, serving the packs of the registry (a single mirror set: no
+    probe)."""
 
     @pytest.mark.trio
     async def test_get_latest_info(self):
