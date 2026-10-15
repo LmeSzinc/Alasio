@@ -318,7 +318,7 @@ class TestCheck:
 
         state._request_check = in_flight
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             module.first_delay = lambda: 0.0
             state.start_check_loop()
             await entered.wait()
@@ -350,7 +350,7 @@ class TestCheck:
 
         state._request_check = in_flight
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             module.first_delay = lambda: 0.0
             state.start_check_loop()
             await entered.wait()
@@ -414,7 +414,7 @@ class TestRhythm:
         module.auto = False
         assert state.disabled is True
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             # every entry refuses it: the start of the mod, of the module and
             # a restore all leave it without a sequence
             state.start_check_loop()
@@ -436,7 +436,7 @@ class TestRhythm:
         module, state = make_mod()
         assert state.no_supervisor is True
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             # every entry refuses it: the start of the mod, of the module and
             # a restore all leave it without a sequence
             state.start_check_loop()
@@ -460,12 +460,13 @@ class TestRhythm:
 
         state._run_update_check = check
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             start = trio.current_time()
             state.start_check_loop()
             # the clock jumps over the sleeps: the stamps are exact
             await three.wait()
             state.stop_check_loop()
+            nursery.cancel_scope.cancel()
         # the first check waits the spread, then every check is CHECK_INTERVAL
         # apart (the fixed rhythm of a sequence)
         assert CHECK_INTERVAL <= stamps[0] - start <= CHECK_INTERVAL * 2
@@ -480,7 +481,7 @@ class TestStartPauseRestore:
     async def test_start_starts_one_sequence_per_mod(self):
         module, state = make_mod()
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             module.start()
             assert state.running is True
             await trio.testing.wait_all_tasks_blocked()
@@ -491,7 +492,7 @@ class TestStartPauseRestore:
     async def test_a_sequence_started_and_stopped_in_the_same_section(self):
         module, state = make_mod()
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             # the task did not start yet: the stop is not lost
             state.start_check_loop()
             state.stop_check_loop()
@@ -503,7 +504,7 @@ class TestStartPauseRestore:
     async def test_pause_stops_and_restore_starts(self):
         module, state = make_mod()
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             module.start()
             assert state.running is True
 
@@ -526,7 +527,7 @@ class TestStartPauseRestore:
     async def test_restore_recovers_a_sequence_that_ended_by_itself(self):
         module, state = make_mod()
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             module.start()
             module.pause()
             # the sequence ended (a check raised, or it was dropped): a restore
@@ -540,7 +541,7 @@ class TestStartPauseRestore:
     async def test_pause_of_an_unknown_mod_is_ignored(self):
         module, state = make_mod()
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             module.pause(['nope', 'm'])
             assert state.running is False
             module.restore(['nope', 'm'])
@@ -555,7 +556,7 @@ class TestManualCheck:
     async def test_the_manual_check_runs_the_check_and_restarts_the_sequence(self):
         module, state = make_mod()
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             message = await module.update_check('m')
             assert message == ''
             assert state.info.state == 'uptodate'
@@ -567,7 +568,7 @@ class TestManualCheck:
     async def test_the_manual_check_drops_the_sequence_in_flight(self):
         module, state = make_mod()
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             module.start()
             first = state._loop_scope
             await module.update_check('m')
@@ -655,7 +656,7 @@ class TestManualCheck:
         none = ModUpdateCheck(module, FakeMod('none', mirrors=None))
         module.mods['none'] = none
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             # both entries refuse it: the start does nothing, the module's
             # start / restore skip it (names() only lists managed mods)
             none.start_check_loop()
@@ -707,14 +708,30 @@ async def _collect(results, coro):
     results.append(await coro)
 
 
+async def start_module(module, nursery):
+    """
+    Run the module's task the way the lifespan does, and wait for its nursery
+
+    The module owns the nursery of the sequences (``run``): its first section
+    sets it, and the synchronous entries of a test (start / pause / restore)
+    read it right away
+
+    Args:
+        module (UpdateCheck): The module to run
+        nursery (trio.Nursery): The nursery of the test, the parent of the task
+    """
+    nursery.start_soon(module.run)
+    await trio.testing.wait_all_tasks_blocked()
+
+
 class TestClose:
-    """The teardown of the module"""
+    """The teardown of the module and the task that owns it"""
 
     @pytest.mark.trio
     async def test_close_stops_every_sequence(self):
         module, state = make_mod()
         async with trio.open_nursery() as nursery:
-            module.attach(nursery)
+            await start_module(module, nursery)
             module.start()
             assert state._loop_scope is not None
             module.start()
@@ -722,3 +739,82 @@ class TestClose:
             await module.close()
             assert state._loop_scope is None
             nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_run_owns_the_nursery_and_tears_down_when_it_ends(self):
+        """
+        run() owns the nursery of the sequences: when the lifespan cancels the
+        task, the sequences are joined and the shared http client closed -- the
+        teardown is the task's finally, not the caller's job
+        """
+        module, state = make_mod()
+        closed = []
+
+        class FakeClient:
+            async def aclose(self):
+                # read at close time: the sequences were already joined
+                closed.append(state.running)
+
+        module._client = FakeClient()
+        async with trio.open_nursery() as nursery:
+            await start_module(module, nursery)
+            module.start()
+            assert module.nursery is not None
+            assert state.running is True
+            nursery.cancel_scope.cancel()
+        # the nursery of the test only ends once the module's teardown ran
+        assert module.nursery is None
+        assert state.running is False
+        assert closed == [False]
+
+    @pytest.mark.trio
+    async def test_close_is_final(self):
+        """
+        The close is final: the closed client stays, a request arriving after
+        it fails through that client instead of a second client being built
+        (nothing would ever close the second one)
+        """
+        module, state = make_mod()
+
+        class FakeClient:
+            async def aclose(self):
+                pass
+
+        client = FakeClient()
+        module._client = client
+        await module.close()
+        assert module._client is client
+        assert module.client() is client
+
+
+class TestRun:
+    """The lifespan task of the module (the nursery the sequences run in)"""
+
+    @pytest.mark.trio
+    async def test_the_nursery_is_set_before_a_sibling_spawns_its_own_tasks(self):
+        """
+        The lifespan starts this task and the restart manager in one section:
+        both are runnable in the same pass, and a task spawned during that pass
+        (the startup flow, which starts the sequences) only runs in the next
+        one -- so the nursery is set by then, whatever order the pass picks
+        (trio randomizes the order of the tasks of a pass). The wiring of the
+        lifespan depends on this: an unset nursery silently starts no sequence
+        """
+        module = UpdateCheck()
+        seen = []
+
+        async def child():
+            seen.append(module.nursery is not None)
+
+        async def sibling():
+            # the shape of the manager: its first section spawns the task that
+            # starts the sequences
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(child)
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(module.run)
+            nursery.start_soon(sibling)
+            await trio.testing.wait_all_tasks_blocked()
+            nursery.cancel_scope.cancel()
+        assert seen == [True]

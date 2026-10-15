@@ -6,7 +6,13 @@ frontend reads on the Update topic. One class holds both sides of one mod --
 the state and its check sequence (``ModUpdateCheck``): the sequence calls back
 into the state it serves instead of a second object that owns the mod, there is
 no loop object to keep in sync. The module (``UpdateCheck``) holds one per
-mounted mod, the shared http client and the nursery the sequences run in.
+mounted mod, the shared http client, and the lifespan task (``run``) that owns
+the nursery the sequences run in.
+
+The module runs as one task of the lifespan (``run``): the sequences are
+children of the nursery that task owns, so the process shutdown cancels and
+joins them before the teardown -- nothing of the module is in flight when
+``close`` closes the shared http client.
 
 A check is read-only (the local ledger against latest.pack) and never applies
 anything: the apply flows belong to ``alasio.backend.app.restart.restart_step``
@@ -25,8 +31,8 @@ pause the sequences they do not need (``pause``), restore them on their way out
 - a sequence never follows another one: a caller replaces it (``start`` /
   ``update_check``) or drops it (``pause``);
 - an exception of a check ends that sequence (reported, never raised: the
-  module shares the lifespan nursery, a raised error would take the backend
-  down) -- the flow that paused the mod restores the sequence later.
+  module runs in the lifespan, a raised error would take the backend down) --
+  the flow that paused the mod restores the sequence later.
 
 The states of one mod (Update topic):
 
@@ -565,6 +571,10 @@ class UpdateCheck:
     The check module of the process: one ModUpdateCheck per mounted mod, the
     shared http client and the pause bookkeeping of the maintenance flows.
 
+    The module runs as one task of the lifespan (``run``): the task owns the
+    nursery of the check sequences and tears them down, with the shared http
+    client, when the process shuts down (``close``).
+
     Attributes (read-only for the outside):
         mods (dict[str, ModUpdateCheck]): The managed mods, keyed by mod name,
             built by bind()
@@ -581,24 +591,50 @@ class UpdateCheck:
         self.auto = True
 
     # ------------------------------------------------------------------
-    # Wiring
+    # Wiring (the lifespan task and the nursery of the sequences)
     # ------------------------------------------------------------------
 
-    def attach(self, nursery):
+    async def run(self):
         """
-        Bind the lifespan nursery the check sequences run in
+        Lifespan background task: own the nursery the check sequences run in
 
-        Args:
-            nursery (trio.Nursery): The lifespan nursery
+        One task per backend process, started by the lifespan before the
+        restart manager: the manager's startup flow starts the check sequences
+        (``start``) and finds the nursery set here -- this task sets it in its
+        first synchronous section, and the startup flow, spawned by the task
+        of the manager, only runs after the pass both tasks were queued in (see
+        the comment at the entry of the lifespan).
+
+        The sequences are children of the nursery opened here, never of the
+        lifespan nursery: a failing sequence ends alone (its body reports and
+        never raises), and the module can join every sequence before it tears
+        down. The task runs until the process shuts down (the lifespan nursery
+        is cancelled): the sequences are cancelled and joined with this
+        nursery, then ``close`` closes the shared http client (shielded: the
+        teardown must complete under the cancellation of the shutdown).
         """
-        self._nursery = nursery
+        try:
+            async with trio.open_nursery() as nursery:
+                self._nursery = nursery
+                await trio.sleep_forever()
+        except trio.Cancelled:
+            raise
+        except Exception as e:
+            # a check sequence must never take the backend down: report and end
+            # the module (the lifespan nursery keeps running)
+            logger.error(f'[Update] The check module stopped: {e}')
+            logger.exception(e)
+        finally:
+            await self.close()
 
     @property
     def nursery(self):
         """
         Returns:
-            trio.Nursery | None: The attached nursery, None when the module is
-                not attached (a sequence is never started then)
+            trio.Nursery | None: The nursery of the check sequences, owned by
+                ``run``; None when the module does not run (the process startup
+                has not reached the task yet, or the process is shutting down:
+                no sequence is started then)
         """
         return self._nursery
 
@@ -681,7 +717,9 @@ class UpdateCheck:
     def client(self):
         """
         The shared http client of the update servers, created lazily (a client
-        is bound to the event loop it is used in).
+        is bound to the event loop it is used in). Never replaced: a client
+        ``close`` closed stays the client, a further request fails through it
+        instead of a second client being built.
 
         Returns:
             httpx2.AsyncClient: The client
@@ -693,14 +731,27 @@ class UpdateCheck:
 
     async def close(self):
         """
-        Stop every sequence and close the http client (the lifespan teardown,
-        best effort: the process may be going down).
+        Tear the module down: stop every sequence and close the shared http
+        client
+
+        The teardown of ``run`` (its ``finally``); also callable on its own (a
+        test). The sequences are stopped (a task still in flight is cancelled;
+        ``run`` joins them with its nursery before this point, so no request of
+        the module is in flight here) and the client is closed.
+
+        The closed client is kept: the close is final -- a request that arrives
+        after it goes to the closed client and fails with "Cannot send a
+        request, as the client has been closed" instead of silently building a
+        second client that nothing would ever close (a foreign task may still
+        be in flight while the process goes down: its request fails, the
+        teardown does not wait for it). Idempotent, and shielded: the process
+        may be shutting down with the cancellation already in flight, the
+        closing itself must complete.
         """
         self._nursery = None
         for mod in self.mods.values():
             mod.stop_check_loop()
         client = self._client
-        self._client = None
         if client is None:
             return
         try:

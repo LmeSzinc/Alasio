@@ -202,6 +202,15 @@ async def lifespan(app):
         # update + handover as a restart), so the running configs are resumed
         # by the new backend and the frontend merely reconnects over them
         nursery.start_soon(DAILY.run)
+        # the mod update checks: one sequence per managed mod, in the module's
+        # own task and nursery (UpdateCheck.run) -- the sequences are joined
+        # and the shared http client is closed on the way out. Started before
+        # the restart manager, whose startup flow starts the sequences and
+        # needs the module's nursery set: the module task does that in its
+        # first section, and the startup flow, spawned by the manager task, can
+        # only run after the pass both tasks were queued in (trio runs a task
+        # spawned during a pass in the next one).
+        nursery.start_soon(UPDATE_CHECK.run)
         # the maintenance flows of the backend (see
         # alasio.backend.app.restart): run() enters the init slot and claims
         # the startup flow before its first await (the startup flow consumes
@@ -210,7 +219,6 @@ async def lifespan(app):
         # update / daily action is another flow of the same slot, claimed by
         # the rpc layer or the daily task. The manager owns the nursery of the
         # flows: a failing flow ends alone and never takes this nursery down.
-        UPDATE_CHECK.attach(nursery)
         nursery.start_soon(RESTART_MANAGER.run)
 
         # actual backend runs here
