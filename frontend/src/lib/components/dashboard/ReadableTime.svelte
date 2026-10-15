@@ -3,6 +3,7 @@
   import { globalClock } from "$lib/use/clock.svelte";
   import { cn } from "$lib/utils";
   import { DEFAULT_TIME_MS } from "../arg/utils.svelte";
+  import { readableTime as relativeTime } from "./readableTime";
 
   let { time, class: className }: { time: string; class?: string } = $props();
 
@@ -36,26 +37,7 @@
       return t.Dashboard.NoData();
     }
 
-    const diff = (globalClock.now - ti.getTime()) / 1000;
-
-    if (diff < -1) {
-      return t.Dashboard.TimeError();
-    } else if (diff < 60) {
-      // < 1 min
-      return t.Dashboard.JustNow();
-    } else if (diff < 5400) {
-      // < 90 min
-      return t.Dashboard.MinutesAgo({ time: Math.floor(diff / 60) });
-    } else if (diff < 129600) {
-      // < 36 hours
-      return t.Dashboard.HoursAgo({ time: Math.floor(diff / 3600) });
-    } else if (diff < 7776000) {
-      // < 90 days
-      return t.Dashboard.DaysAgo({ time: Math.floor(diff / 86400) });
-    } else {
-      // >= 90 days
-      return t.Dashboard.LongTimeAgo();
-    }
+    return relativeTime(ti, globalClock.now);
   }
 
   // Re-calculate the relative time string whenever time prop or clock.now changes

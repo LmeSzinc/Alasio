@@ -1,32 +1,4 @@
 {
-  "DialogTitle": {
-    "en-US": "DialogTitle",
-    "zh-CN": "DialogTitle",
-    "ja-JP": "DialogTitle",
-    "zh-TW": "DialogTitle",
-    "es-ES": "DialogTitle"
-  },
-  "DialogDescription": {
-    "en-US": "DialogDescription",
-    "zh-CN": "DialogDescription",
-    "ja-JP": "DialogDescription",
-    "zh-TW": "DialogDescription",
-    "es-ES": "DialogDescription"
-  },
-  "DialogLater": {
-    "en-US": "DialogLater",
-    "zh-CN": "DialogLater",
-    "ja-JP": "DialogLater",
-    "zh-TW": "DialogLater",
-    "es-ES": "DialogLater"
-  },
-  "DialogView": {
-    "en-US": "DialogView",
-    "zh-CN": "DialogView",
-    "ja-JP": "DialogView",
-    "zh-TW": "DialogView",
-    "es-ES": "DialogView"
-  },
   "StateNoSupervisor": {
     "en-US": "No supervisor",
     "zh-CN": "无 supervisor",
@@ -36,9 +8,9 @@
   },
   "StateUnmanaged": {
     "en-US": "No update source",
-    "zh-CN": "未配置更新源",
-    "ja-JP": "更新元が未設定",
-    "zh-TW": "未設定更新來源",
+    "zh-CN": "无更新源",
+    "ja-JP": "更新元なし",
+    "zh-TW": "無更新來源",
     "es-ES": "Sin origen de actualización"
   },
   "StateDisabled": {
@@ -47,13 +19,6 @@
     "ja-JP": "更新は無効",
     "zh-TW": "更新已停用",
     "es-ES": "Actualizaciones desactivadas"
-  },
-  "StateIdle": {
-    "en-US": "Not checked",
-    "zh-CN": "未检查",
-    "ja-JP": "未確認",
-    "zh-TW": "未檢查",
-    "es-ES": "Sin comprobar"
   },
   "StateChecking": {
     "en-US": "Checking",
@@ -69,11 +34,18 @@
     "zh-TW": "已是最新",
     "es-ES": "Actualizado"
   },
+  "CheckedAt": {
+    "en-US": "{time}",
+    "zh-CN": "检查于{time}",
+    "ja-JP": "{time}",
+    "zh-TW": "檢查於{time}",
+    "es-ES": "{time}"
+  },
   "StateAvailable": {
     "en-US": "Update available",
-    "zh-CN": "可更新",
+    "zh-CN": "发现更新",
     "ja-JP": "更新があります",
-    "zh-TW": "可更新",
+    "zh-TW": "發現更新",
     "es-ES": "Actualización disponible"
   },
   "StateQueued": {
@@ -112,11 +84,74 @@
     "es-ES": "Requiere reinicio"
   },
   "StateError": {
-    "en-US": "Failed",
-    "zh-CN": "失败",
-    "ja-JP": "失敗",
-    "zh-TW": "失敗",
-    "es-ES": "Error"
+    "en-US": "Update failed",
+    "zh-CN": "更新失败",
+    "ja-JP": "更新に失敗",
+    "zh-TW": "更新失敗",
+    "es-ES": "Error al actualizar"
+  },
+  "StateIdle": {
+    "en-US": "Not checked",
+    "zh-CN": "未检查",
+    "ja-JP": "未確認",
+    "zh-TW": "未檢查",
+    "es-ES": "Sin comprobar"
+  },
+  "VersionUnavailable": {
+    "en-US": "Local version unavailable",
+    "zh-CN": "无法获取本地版本",
+    "ja-JP": "ローカル版を取得できません",
+    "zh-TW": "無法取得本地版本",
+    "es-ES": "Versión local no disponible"
+  },
+  "ButtonCancel": {
+    "en-US": "Cancel",
+    "zh-CN": "取消",
+    "ja-JP": "キャンセル",
+    "zh-TW": "取消",
+    "es-ES": "Cancelar"
+  },
+  "ButtonCheck": {
+    "en-US": "Check for updates",
+    "zh-CN": "检查更新",
+    "ja-JP": "更新を確認",
+    "zh-TW": "檢查更新",
+    "es-ES": "Buscar actualizaciones"
+  },
+  "DialogTitle": {
+    "en-US": "Update available",
+    "zh-CN": "有可用更新",
+    "ja-JP": "更新があります",
+    "zh-TW": "有可用更新",
+    "es-ES": "Actualización disponible"
+  },
+  "DialogDescription": {
+    "en-US": "{mod} can be updated to {version}.",
+    "zh-CN": "{mod} 可以更新到 {version}。",
+    "ja-JP": "{mod} を {version} に更新できます。",
+    "zh-TW": "{mod} 可以更新到 {version}。",
+    "es-ES": "{mod} se puede actualizar a {version}."
+  },
+  "DialogLater": {
+    "en-US": "Later",
+    "zh-CN": "稍后",
+    "ja-JP": "後で",
+    "zh-TW": "稍後",
+    "es-ES": "Más tarde"
+  },
+  "DialogView": {
+    "en-US": "View",
+    "zh-CN": "查看",
+    "ja-JP": "表示",
+    "zh-TW": "查看",
+    "es-ES": "Ver"
+  },
+  "ButtonUpdate": {
+    "en-US": "Update",
+    "zh-CN": "更新",
+    "ja-JP": "更新",
+    "zh-TW": "更新",
+    "es-ES": "Actualizar"
   },
   "AvailableCount": {
     "en-US": "{count} mod(s) can be updated",
@@ -145,54 +180,5 @@
     "ja-JP": "すべての Mod は最新です",
     "zh-TW": "所有插件已是最新",
     "es-ES": "Todos los mods están actualizados"
-  },
-  "ButtonCancel": {
-    "en-US": "Cancel",
-    "zh-CN": "取消",
-    "ja-JP": "キャンセル",
-    "zh-TW": "取消",
-    "es-ES": "Cancelar"
-  },
-  "ButtonUpdate": {
-    "en-US": "Update",
-    "zh-CN": "更新",
-    "ja-JP": "更新",
-    "zh-TW": "更新",
-    "es-ES": "Actualizar"
-  },
-  "VersionNone": {
-    "en-US": "none",
-    "zh-CN": "无",
-    "ja-JP": "なし",
-    "zh-TW": "無",
-    "es-ES": "ninguna"
-  },
-  "VersionUnknown": {
-    "en-US": "unknown",
-    "zh-CN": "未知",
-    "ja-JP": "不明",
-    "zh-TW": "未知",
-    "es-ES": "desconocida"
-  },
-  "ButtonCheck": {
-    "en-US": "Check for updates",
-    "zh-CN": "检查更新",
-    "ja-JP": "更新を確認",
-    "zh-TW": "檢查更新",
-    "es-ES": "Buscar actualizaciones"
-  },
-  "ConfirmTitle": {
-    "en-US": "Update mods?",
-    "zh-CN": "更新插件？",
-    "ja-JP": "Mod を更新しますか？",
-    "zh-TW": "更新插件？",
-    "es-ES": "¿Actualizar los mods?"
-  },
-  "ConfirmDescription": {
-    "en-US": "The whole backend restarts to apply the updates of {mods}: every running config stops gracefully and resumes automatically after the update.",
-    "zh-CN": "更新 {mods} 将重启整个后端：所有运行中的配置会优雅停止，并在更新完成后自动恢复。",
-    "ja-JP": "{mods} の更新のためバックエンド全体が再起動します：実行中の設定はすべて安全に停止し、更新後に自動で再開します。",
-    "zh-TW": "更新 {mods} 將重啟整個後端：所有執行中的設定會優雅停止，並在更新完成後自動恢復。",
-    "es-ES": "El backend se reinicia para aplicar las actualizaciones de {mods}: cada configuración en ejecución se detiene de forma segura y se reanuda automáticamente."
   }
 }

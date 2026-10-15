@@ -4,7 +4,9 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import { Button } from "$lib/components/ui/button";
   import { t } from "$lib/i18n";
+  import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
+  import { prettyVersion } from "./utils";
 
   /**
    * "Update available" popup of the update flow (renders only the dialog).
@@ -53,7 +55,7 @@
     <AlertDialog.Header>
       <AlertDialog.Title>{t.Update.DialogTitle()}</AlertDialog.Title>
       <AlertDialog.Description>
-        {t.Update.DialogDescription({ mod: current?.mod ?? "", version: current?.latest ?? "" })}
+        {t.Update.DialogDescription({ mod: current?.mod ?? "", version: prettyVersion(current?.latest ?? "") })}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
