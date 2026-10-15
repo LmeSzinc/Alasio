@@ -76,12 +76,12 @@
     "zh-TW": "展開全部",
     "es-ES": "Expandir todo"
   },
-  "Title": {
-    "en-US": "Mod Manager",
-    "zh-CN": "插件管理",
-    "ja-JP": "Mod マネージャー",
-    "zh-TW": "插件管理",
-    "es-ES": "Administrador de Mods"
+  "Updater": {
+    "en-US": "Updater",
+    "zh-CN": "更新器",
+    "ja-JP": "アップデーター",
+    "zh-TW": "更新器",
+    "es-ES": "Actualizador"
   },
   "ModName": {
     "en-US": "Mod Name",

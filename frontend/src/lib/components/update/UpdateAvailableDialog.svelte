@@ -46,7 +46,7 @@
 
   function handleView() {
     open = false;
-    void goto("/dev/mod");
+    void goto("/dev/updater");
   }
 </script>
 
