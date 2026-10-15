@@ -1,16 +1,23 @@
 """
 Tests for the development server of the packs (serve.py).
 
-The app is driven through its ASGI interface: the scope of a request is built
-by hand and the response messages are collected, no socket is bound, see
-test_assets.py. The url mirrors the pack folder of the run directory, so the
+The app is driven with starlette's TestClient (starlette.testclient, backed by
+httpx2 in this project): the requests run in-process on the app, no socket is
+bound and the app runs on a trio backend, like the production server
+(hypercorn.trio). The url mirrors the pack folder of the run directory, so the
 packs of every config are served under the name and the layout they have on
 the disk; a pack that a run has not generated is a 404 and a range request is
 a 206, the client walks the packs of a version with range requests.
+
+One test is the exception: the Client of the TestClient normalizes the '..'
+segments of a url before the request is sent, so a path that walks out of the
+pack folder only reaches the app through a raw ASGI scope - it is built by
+hand there, see raw_get().
 """
 import os
 
 import pytest
+from starlette.testclient import TestClient
 
 from alasio.deploy_dev.pack_server import serve
 from alasio.deploy_dev.pack_server.serve import create_app, pack_folder
@@ -65,23 +72,43 @@ def run_dir(fs, monkeypatch):
     return root
 
 
+@pytest.fixture
+def app(run_dir):
+    """The app of the pack folder of the tests."""
+    return create_app(pack_folder())
+
+
+@pytest.fixture
+def client(app):
+    """
+    The TestClient of the app of the tests, the app runs on a background trio
+    loop (the backend of the production server) and is closed on exit.
+    """
+    with TestClient(app, backend='trio') as client:
+        yield client
+
+
 def pack_url(*names):
     """Url of a file of the pack folder of the tests."""
     return '/'.join((serve.PACK_URL, FOLDER_NAME, serve.PACKREPO_FOLDER, *names))
 
 
-def make_scope(path, headers=None):
+async def raw_get(app, path):
     """
-    Build a minimal http scope of a request.
+    Call the app with a hand built scope and collect the response.
+
+    The Client of the TestClient normalizes the '..' segments of a url before
+    the request is sent, a traversal path only reaches the app through a raw
+    scope: the scope is built by hand and the app is called directly here.
 
     Args:
-        path (str): The request path
-        headers (dict[str, str], optional): Request headers
+        app (Starlette): App to call
+        path (str): Path of the request, sent as it is
 
     Returns:
-        dict: The scope
+        tuple[int, dict[str, str], bytes]: (status code, headers, body)
     """
-    return {
+    scope = {
         'type': 'http',
         'http_version': '1.1',
         'method': 'GET',
@@ -92,24 +119,8 @@ def make_scope(path, headers=None):
         'root_path': '',
         'server': ('127.0.0.1', 8000),
         'client': ('127.0.0.1', 1234),
-        'headers': [
-            (key.lower().encode('latin-1'), value.encode('latin-1'))
-            for key, value in (headers or {}).items()
-        ],
+        'headers': [],
     }
-
-
-async def call_app(app, scope):
-    """
-    Call the app with a hand built scope and collect the response.
-
-    Args:
-        app (Starlette): App to call
-        scope (dict): Scope of the request
-
-    Returns:
-        tuple[int, dict[str, str], bytes]: (status code, headers, body)
-    """
     messages = []
 
     async def receive():
@@ -145,46 +156,35 @@ class TestPackFolder:
 class TestPackRoutes:
     """The urls of the development server, the path of the packs on the disk."""
 
-    @pytest.fixture
-    def app(self, run_dir):
-        """The app of the pack folder of the tests."""
-        return create_app(pack_folder())
-
-    @pytest.mark.trio
-    async def test_latest_pack(self, app):
+    def test_latest_pack(self, client):
         """latest.pack of a repo is served under its own name."""
-        status, headers, body = await call_app(app, make_scope(pack_url('latest.pack')))
-        assert status == 200
-        assert body == LATEST_PACK
-        assert headers['content-length'] == str(len(LATEST_PACK))
+        response = client.get(pack_url('latest.pack'))
+        assert response.status_code == 200
+        assert response.content == LATEST_PACK
+        assert response.headers['content-length'] == str(len(LATEST_PACK))
 
-    @pytest.mark.trio
-    async def test_full_pack(self, app):
+    def test_full_pack(self, client):
         """The full pack of a version is served under the name it has on the disk."""
-        status, headers, body = await call_app(app, make_scope(pack_url('c3', 'full_c3.pack')))
-        assert status == 200
-        assert body == FULL_PACK
+        response = client.get(pack_url('c3', 'full_c3.pack'))
+        assert response.status_code == 200
+        assert response.content == FULL_PACK
         # the client walks the packs of a version with range requests
-        assert headers['accept-ranges'] == 'bytes'
+        assert response.headers['accept-ranges'] == 'bytes'
 
-    @pytest.mark.trio
-    async def test_update_pack(self, app):
+    def test_update_pack(self, client):
         """An update pack is served under the name it has on the disk."""
-        status, headers, body = await call_app(app, make_scope(pack_url('c3', 'update_c2.pack')))
-        assert status == 200
-        assert body == UPDATE_PACK
+        response = client.get(pack_url('c3', 'update_c2.pack'))
+        assert response.status_code == 200
+        assert response.content == UPDATE_PACK
 
-    @pytest.mark.trio
-    async def test_range_request(self, app):
+    def test_range_request(self, client):
         """A range request is a 206 of the requested bytes."""
-        status, headers, body = await call_app(
-            app, make_scope(pack_url('c3', 'full_c3.pack'), {'Range': 'bytes=2-5'}))
-        assert status == 206
-        assert body == FULL_PACK[2:6]
-        assert headers['content-range'] == f'bytes 2-5/{len(FULL_PACK)}'
+        response = client.get(pack_url('c3', 'full_c3.pack'), headers={'Range': 'bytes=2-5'})
+        assert response.status_code == 206
+        assert response.content == FULL_PACK[2:6]
+        assert response.headers['content-range'] == f'bytes 2-5/{len(FULL_PACK)}'
 
-    @pytest.mark.trio
-    async def test_missing_pack(self, app):
+    def test_missing_pack(self, client):
         """A pack that a run has not generated is a 404."""
         for path in (
                 # no update pack of the old version c1 in the folder
@@ -197,8 +197,7 @@ class TestPackRoutes:
                 f'{serve.PACK_URL}/latest.pack',
                 # the packs live under the pack url
                 '/latest.pack'):
-            status, headers, body = await call_app(app, make_scope(path))
-            assert status == 404, path
+            assert client.get(path).status_code == 404, path
 
     @pytest.mark.trio
     async def test_walks_nowhere(self, app):
@@ -206,7 +205,7 @@ class TestPackRoutes:
         for path in (
                 f'{serve.PACK_URL}/{FOLDER_NAME}/../../../latest.pack',
                 f'{serve.PACK_URL}/../log/main.txt'):
-            status, headers, body = await call_app(app, make_scope(path))
+            status, headers, body = await raw_get(app, path)
             assert status == 404, path
 
 
