@@ -117,7 +117,9 @@ class AsyncProbe(ProbeBase):
         once more on the winner - or takes the payload of the new probe when it
         was the request itself again; a second failure is raised as-is. With no
         candidate able to serve the path, the original failure is raised as-is,
-        so the caller keeps its own fallback (see DeployJob.update()).
+        so the caller keeps its own fallback (see DeployJob.update()); the
+        failed probe itself is logged with an ERROR (see run()), the fallback
+        would otherwise hide it.
 
         Args:
             path (str): Path of the request
@@ -304,10 +306,11 @@ class AsyncProbe(ProbeBase):
 
         Raises:
             AllMirrorsFailedError: If no candidate of any group is usable, the
-                message carries every failure
+                message carries every failure; the failure is logged with an
+                ERROR too (the caller may swallow the exception, see fetch())
         """
         names = [name for members in self.mirrors.groups.values() for name in members]
-        logger.info(f'Probing {self.SCENE}/{self.name} for "{path}": {", ".join(names)}')
+        logger.info(f'Probing {self.key} for "{path}": {", ".join(names)}')
         exclude = set(exclude)
         winner = []
         failures = []
@@ -324,9 +327,13 @@ class AsyncProbe(ProbeBase):
                 # timeouts, their results are dropped
                 nursery.cancel_scope.cancel()
         if not winner:
+            # no candidate of any group is usable: the per-candidate warnings
+            # above carry the reasons, this line marks the failed probe (the
+            # caller may swallow the exception, see fetch())
+            logger.error(f'Failed to probe {self.key} for "{path}": no mirror is usable')
             raise AllMirrorsFailedError('; '.join(failures))
         name, payload = winner[0]
-        logger.attr('Mirror', name)
+        logger.attr(f'Mirror {self.key}', name)
         return name, payload
 
     async def _probe_group(self, members, path, exclude, winner, failures, decided):

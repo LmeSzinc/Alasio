@@ -7,8 +7,10 @@ A probe is one candidate set (Mirrors) with an identity inside its scene:
     ProbeBase(mirrors, name='')      name: the DeployJob(name=...) key of the set
     ServerFile.SCENE = 'repo'        scene: the usage domain, a class attribute
 
-The identity keys the selection record (probe_db) and the in-process probe
-lock: (scene, name). The unit of a probe is the path of the request it
+The identity keys the selection record (probe_db), the in-process probe lock
+and the logs of a probe: (scene, name), printed as `scene` for a set of its
+own and `scene/name` for a named one (see ProbeBase.key). The unit of a probe
+is the path of the request it
 serves: the engine keys its bookkeeping with it (one probe per path per
 instance) and the domain declares what a candidate must answer to serve it
 (probe_function). A subclass overrides SCENE and implements the flow below;
@@ -81,6 +83,18 @@ class ProbeBase:
         # path per instance, shared by the probe of the first request and the
         # re-probe of a failed request
         self._probed = set()
+
+    @property
+    def key(self):
+        """
+        The identity of this candidate set as the logs print it, see
+        probe_db.key_text(): `scene` for a set of its own, `scene/name` for a
+        named one.
+
+        Returns:
+            str: The key of this set, e.g. '`repo`', '`repo/alas`'
+        """
+        return probe_db.key_text(self.SCENE, self.name)
 
     # ------------------------------------------------------------------
     # The record (a hint, see probe_db): synchronous, the async flavor

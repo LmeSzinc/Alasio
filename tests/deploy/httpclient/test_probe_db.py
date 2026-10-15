@@ -52,10 +52,15 @@ class TestRecordRead:
         assert load_result('pypi', 'alas', MIRRORS, table=table) == ''
 
     def test_stale_digest_is_ignored(self):
-        """A record of another mirror structure is ignored."""
+        """A record of another mirror structure is ignored: the flow probes
+        again and the reason is logged."""
         table = FakeMirrorTable()
         table.seed(scene='repo', name='alas', digest='stale', result='123pan')
-        assert load_result('repo', 'alas', MIRRORS, table=table) == ''
+        with logger.mock_capture_writer() as capture:
+            assert load_result('repo', 'alas', MIRRORS, table=table) == ''
+        assert capture.concat() == """\
+INFO | Mirror record of `repo/alas` is of another mirror structure, selecting again: 123pan
+"""
 
     def test_unknown_name_is_ignored(self):
         """A record of a mirror the set no longer has is ignored."""
@@ -72,8 +77,9 @@ class TestRecordRead:
             result='123pan', expire=int(time()) - 1)
         with logger.mock_capture_writer() as capture:
             assert load_result('repo', 'alas', MIRRORS, table=table) == ''
-        assert capture.backend.any_contains(
-            'Mirror record of repo/alas is expired, selecting again: 123pan')
+        assert capture.concat() == """\
+INFO | Mirror record of `repo/alas` is expired, selecting again: 123pan
+"""
 
     def test_record_without_expire_is_expired(self):
         """expire=0 (a row without the column, an old development database)
@@ -87,13 +93,14 @@ class TestRecordRead:
         max of RECORD_TTL in the future: a tampered record or an abnormal
         clock must not pin the machine."""
         table = FakeMirrorTable()
+        expire = int(time()) + RECORD_TTL[1] + 1
         table.seed(
-            scene='repo', name='alas', digest=MIRRORS.digest, result='123pan',
-            expire=int(time()) + RECORD_TTL[1] + 1)
+            scene='repo', name='alas', digest=MIRRORS.digest, result='123pan', expire=expire)
         with logger.mock_capture_writer() as capture:
             assert load_result('repo', 'alas', MIRRORS, table=table) == ''
-        assert capture.backend.any_contains(
-            'Mirror record of repo/alas expires too far in the future, ignored: 123pan')
+        assert capture.concat() == f"""\
+WARNING | Mirror record of `repo/alas` expires too far in the future, ignored: 123pan, expire {expire}
+"""
 
     def test_record_at_the_ttl_boundary_is_valid(self):
         """A record expiring exactly the max of RECORD_TTL in the future is
@@ -112,7 +119,9 @@ class TestRecordRead:
         """A broken database only warns, the selection still works."""
         with logger.mock_capture_writer() as capture:
             assert load_result('repo', 'alas', MIRRORS, table=BrokenMirrorTable()) == ''
-        assert capture.backend.any_contains('Failed to read the mirror record of repo/alas')
+        assert capture.concat() == """\
+WARNING | Failed to read the mirror record of `repo/alas`: unable to open database file
+"""
 
 
 class TestRecordWrite:
@@ -146,7 +155,9 @@ class TestRecordWrite:
         record."""
         with logger.mock_capture_writer() as capture:
             save_result('repo', 'alas', MIRRORS, '123pan', table=BrokenMirrorTable())
-        assert capture.backend.any_contains('Failed to record the mirror of repo/alas')
+        assert capture.concat() == """\
+WARNING | Failed to record the mirror of `repo/alas`: unable to open database file
+"""
 
     def test_last_write_wins(self):
         """The write is a single UPSERT without a lock: two writers of the
@@ -203,6 +214,30 @@ class TestMirrorRecordTable:
         row = real_table.select_one(scene='repo', name='')
         assert (row.scene, row.name, row.digest, row.result, row.expire) == (
             'repo', '', 'k1', '123pan', 1700000000)
+
+    def test_the_record_flow_round_trip(self, real_table):
+        """The real table serves the flow of the probes: a selection is
+        recorded and read back, and the flow is silent as long as the
+        record is usable."""
+        with logger.mock_capture_writer() as capture:
+            save_result('repo', 'alas', MIRRORS, '123pan', table=real_table)
+            assert load_result('repo', 'alas', MIRRORS, table=real_table) == '123pan'
+        # the record is a hint: a usable one is used without a log
+        assert capture.concat() == ''
+
+    def test_the_record_flow_logs_an_expired_record(self, real_table):
+        """The expiration of a real record is read from its column."""
+        real_table.upsert_row(
+            MirrorRecord(
+                scene='repo', name='alas', digest=MIRRORS.digest, result='tencent',
+                expire=int(time()) - 1),
+            conflicts=('scene', 'name'), updates=('digest', 'result', 'expire'),
+        )
+        with logger.mock_capture_writer() as capture:
+            assert load_result('repo', 'alas', MIRRORS, table=real_table) == ''
+        assert capture.concat() == """\
+INFO | Mirror record of `repo/alas` is expired, selecting again: tencent
+"""
 
     def test_upsert_replaces_the_key(self, real_table):
         """A second upsert of the (scene, name) key replaces the record."""

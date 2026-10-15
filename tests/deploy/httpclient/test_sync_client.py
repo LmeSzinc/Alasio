@@ -105,11 +105,15 @@ class TestSyncRequest:
             return httpx2.Response(200, content=b'ok')
 
         client = HttpClient(make_sclient(handler))
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             response = client.get('http://test/a', timeout=2.5)
         assert response.content == b'ok'
         assert timeouts == [{'connect': 2.5, 'read': 2.5, 'write': 2.5, 'pool': 2.5}] * 2
         assert fake_sleep.seconds == [HttpClient.RETRY_BACKOFF]
+        # the retried attempt is logged like any other
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+"""
 
     def test_default_timeout_of_the_client(self):
         """Without a timeout of the call, the default timeout of
@@ -181,10 +185,9 @@ class TestSyncRetry:
         assert response.content == b'ok'
         assert requests == ['http://test/a', 'http://test/a']
         assert fake_sleep.seconds == [HttpClient.RETRY_BACKOFF]
-        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
-        assert warnings == [
-            'Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out',
-        ]
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+"""
 
     def test_attempts_are_three(self, fake_sleep):
         """Two transport errors are retried: the third attempt is the
@@ -198,11 +201,15 @@ class TestSyncRetry:
             return httpx2.Response(200, content=b'ok')
 
         client = HttpClient(make_sclient(handler))
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             response = client.get('http://test/a')
         assert response.content == b'ok'
         assert requests == ['http://test/a'] * 3
         assert fake_sleep.seconds == [HttpClient.RETRY_BACKOFF] * 2
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+WARNING | Request to "http://test/a" failed (attempt 2/3): ReadTimeout: read timed out
+"""
 
     def test_retry_is_limited(self, fake_sleep):
         """A persistent transport error is raised after the attempts,
@@ -214,11 +221,16 @@ class TestSyncRetry:
             raise httpx2.ReadTimeout('read timed out')
 
         client = HttpClient(make_sclient(handler))
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.ReadTimeout):
                 client.get('http://test/a')
         assert requests == ['http://test/a'] * 3
         assert fake_sleep.seconds == [HttpClient.RETRY_BACKOFF] * 2
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+WARNING | Request to "http://test/a" failed (attempt 2/3): ReadTimeout: read timed out
+WARNING | Request to "http://test/a" failed (attempt 3/3): ReadTimeout: read timed out
+"""
 
     def test_attempts_one_is_single_shot(self, fake_sleep):
         """attempts=1 makes the request single-shot without a wait."""
@@ -229,11 +241,14 @@ class TestSyncRetry:
             raise httpx2.ReadTimeout('read timed out')
 
         client = HttpClient(make_sclient(handler))
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.ReadTimeout):
                 client.get('http://test/a', attempts=1)
         assert requests == ['http://test/a']
         assert fake_sleep.seconds == []
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/1): ReadTimeout: read timed out
+"""
 
     def test_status_error_is_not_retried(self, fake_sleep):
         """An http status error is the answer of the server: it is
@@ -245,11 +260,15 @@ class TestSyncRetry:
             return httpx2.Response(500)
 
         client = HttpClient(make_sclient(handler))
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.HTTPStatusError):
                 client.get('http://test/a')
         assert requests == ['http://test/a']
         assert fake_sleep.seconds == []
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): HTTPStatusError: Server error '500 Internal Server Error' for url 'http://test/a'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+"""
 
     def test_every_exhausted_failure_is_logged(self, fake_sleep):
         """Exhausted retries read as the sequence of attempts, one
@@ -262,12 +281,11 @@ class TestSyncRetry:
         with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.ReadTimeout):
                 client.get('http://test/a')
-        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
-        assert warnings == [
-            'Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out',
-            'Request to "http://test/a" failed (attempt 2/3): ReadTimeout: read timed out',
-            'Request to "http://test/a" failed (attempt 3/3): ReadTimeout: read timed out',
-        ]
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+WARNING | Request to "http://test/a" failed (attempt 2/3): ReadTimeout: read timed out
+WARNING | Request to "http://test/a" failed (attempt 3/3): ReadTimeout: read timed out
+"""
 
 
 class TestSyncStream:
@@ -288,11 +306,14 @@ class TestSyncStream:
 
         client = HttpClient(make_sclient(handler))
         chunks = []
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             client.stream('http://test/a', lambda response: chunks.extend(response.iter_bytes()))
         assert chunks == [b'payload']
         assert attempts == ['http://test/a', 'http://test/a']
         assert fake_sleep.seconds == [HttpClient.RETRY_BACKOFF]
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+"""
 
     def test_mid_stream_error_restarts_the_transfer(self, fake_sleep):
         """A transport error while the consumer reads the response
@@ -323,10 +344,9 @@ class TestSyncStream:
         assert chunks == [b'partial ', b'payload']
         assert attempts == ['http://test/a', 'http://test/a']
         assert fake_sleep.seconds == [HttpClient.RETRY_BACKOFF]
-        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
-        assert warnings == [
-            'Request to "http://test/a" failed (attempt 1/3): ReadError: connection lost',
-        ]
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadError: connection lost
+"""
 
     def test_consumer_failure_is_not_retried(self, fake_sleep):
         """A failure of the consumer (a hash check, ...) is raised as-is
@@ -346,10 +366,9 @@ class TestSyncStream:
                 client.stream('http://test/a', consume)
         assert attempts == ['http://test/a']
         assert fake_sleep.seconds == []
-        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
-        assert warnings == [
-            'Request to "http://test/a" failed (attempt 1/3): ValueError: digest mismatch',
-        ]
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ValueError: digest mismatch
+"""
 
     def test_attempts_one_is_single_shot(self, fake_sleep):
         """attempts=1 makes the transfer single-shot without a wait."""
@@ -360,11 +379,14 @@ class TestSyncStream:
             raise httpx2.ReadTimeout('read timed out')
 
         client = HttpClient(make_sclient(handler))
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.ReadTimeout):
                 client.stream('http://test/a', lambda response: None, attempts=1)
         assert attempts == ['http://test/a']
         assert fake_sleep.seconds == []
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/1): ReadTimeout: read timed out
+"""
 
 
 class TestSyncLifecycle:

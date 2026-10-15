@@ -57,6 +57,24 @@ from alasio.logger import logger
 RECORD_TTL = (86400, 129600)  # 1 ~ 1.5 days
 
 
+def key_text(scene, name):
+    """
+    The key of one candidate set as the logs print it: `scene` when the set
+    has no name of its own, `scene/name` otherwise. The backquotes keep the
+    key apart from the words of the message (a scene is a plain word).
+
+    Args:
+        scene (str): Usage domain of the set, e.g. 'repo'
+        name (str): Identity of the set inside the scene, '' allowed
+
+    Returns:
+        str: The key of the set, e.g. '`repo`', '`repo/alas`'
+    """
+    if name:
+        return f'`{scene}/{name}`'
+    return f'`{scene}`'
+
+
 class MirrorRecord(msgspec.Struct):
     """
     The selected mirror of one candidate set in gui.db.
@@ -121,7 +139,10 @@ def load_result(scene, name, mirrors, table=None):
     A record is usable when it is not stale and not expired:
 
     - a record of another mirror structure (digest mismatch, the set
-      was edited) or of a mirror this set no longer has is ignored;
+      was edited) or of a mirror this set no longer has is ignored. The
+      digest mismatch is logged (INFO): the mirror list of the
+      deployment was probably edited, and the re-probe that follows is
+      worth seeing;
     - a record past its expiration is ignored: the caller probes again
       and, when the same mirror wins, writes a fresh record;
     - a record expiring further in the future than the max of
@@ -153,22 +174,33 @@ def load_result(scene, name, mirrors, table=None):
     except sqlite3.Error as e:
         # the record is an optimization of the selection only, a
         # broken database must not break the update
-        logger.warning(f'Failed to read the mirror record of {scene}/{name}: {e}')
+        logger.warning(f'Failed to read the mirror record of {key_text(scene, name)}: {e}')
         return ''
-    if row is None or row.digest != mirrors.digest or row.result not in mirrors.urls:
+    if row is None:
+        return ''
+    if row.digest != mirrors.digest:
+        # the mirror structure was edited since the record was written (a
+        # mirror added, removed or reordered): the record selects for another
+        # set, the flow probes again
+        logger.info(
+            f'Mirror record of {key_text(scene, name)} is of another mirror structure, '
+            f'selecting again: {row.result}')
+        return ''
+    if row.result not in mirrors.urls:
         return ''
     now = int(time())
     if row.expire <= now:
         # the record is expired: select the mirror again, a mirror
         # that came back, or a better one, is picked up then
-        logger.info(f'Mirror record of {scene}/{name} is expired, selecting again: {row.result}')
+        logger.info(
+            f'Mirror record of {key_text(scene, name)} is expired, selecting again: {row.result}')
         return ''
     if row.expire > now + RECORD_TTL[1]:
         # no version of this code writes a record that expires
         # further in the future: a tampered record or an abnormal
         # clock must not pin the machine, ignore the record
         logger.warning(
-            f'Mirror record of {scene}/{name} expires too far in the future, ignored: '
+            f'Mirror record of {key_text(scene, name)} expires too far in the future, ignored: '
             f'{row.result}, expire {row.expire}')
         return ''
     return row.result
@@ -213,4 +245,4 @@ def save_result(scene, name, mirrors, result, table=None):
             conflicts=('scene', 'name'), updates=('digest', 'result', 'expire'),
         )
     except sqlite3.Error as e:
-        logger.warning(f'Failed to record the mirror of {scene}/{name}: {e}')
+        logger.warning(f'Failed to record the mirror of {key_text(scene, name)}: {e}')

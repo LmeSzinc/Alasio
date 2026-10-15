@@ -281,19 +281,24 @@ class SyncProbe(ProbeBase):
 
         Raises:
             AllMirrorsFailedError: If no candidate of any group is usable, the
-                message carries every failure
+                message carries every failure; the failure is logged with an
+                ERROR too (the caller may swallow the exception, see fetch())
         """
         names = [name for members in self.mirrors.groups.values() for name in members]
-        logger.info(f'Probing {self.SCENE}/{self.name} for "{path}": {", ".join(names)}')
+        logger.info(f'Probing {self.key} for "{path}": {", ".join(names)}')
         race = _Race(len(self.mirrors.groups))
         exclude = set(exclude)
         for members in self.mirrors.groups.values():
             THREAD_POOL.start_thread_soon(self._probe_group, members, path, exclude, race)
         race.decided.wait()
         if not race.winner:
+            # no candidate of any group is usable: the per-candidate warnings
+            # above carry the reasons, this line marks the failed probe (the
+            # caller may swallow the exception, see fetch())
+            logger.error(f'Failed to probe {self.key} for "{path}": no mirror is usable')
             raise AllMirrorsFailedError('; '.join(race.failures))
         name, payload = race.winner[0]
-        logger.attr('Mirror', name)
+        logger.attr(f'Mirror {self.key}', name)
         return name, payload
 
     def _probe_group(self, members, path, exclude, race):

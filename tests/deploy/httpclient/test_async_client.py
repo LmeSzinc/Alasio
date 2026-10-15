@@ -71,10 +71,14 @@ class TestAsyncRequest:
             return httpx2.Response(200, content=b'ok')
 
         client = AsyncHttpClient(make_aclient(handler))
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             response = await client.get('http://test/a', timeout=2.5)
         assert response.content == b'ok'
         assert timeouts == [{'connect': 2.5, 'read': 2.5, 'write': 2.5, 'pool': 2.5}] * 2
+        # the retried attempt is logged like any other
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+"""
 
     @pytest.mark.trio
     async def test_default_timeout_of_the_client(self):
@@ -126,10 +130,9 @@ class TestAsyncRetry:
         assert response.content == b'ok'
         assert requests == ['http://test/a', 'http://test/a']
         assert trio.current_time() - start == AsyncHttpClient.RETRY_BACKOFF
-        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
-        assert warnings == [
-            'Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out',
-        ]
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+"""
 
     @pytest.mark.trio
     async def test_attempts_are_three(self, autojump_clock):
@@ -145,11 +148,15 @@ class TestAsyncRetry:
 
         client = AsyncHttpClient(make_aclient(handler))
         start = trio.current_time()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             response = await client.get('http://test/a')
         assert response.content == b'ok'
         assert requests == ['http://test/a'] * 3
         assert trio.current_time() - start == 2 * AsyncHttpClient.RETRY_BACKOFF
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+WARNING | Request to "http://test/a" failed (attempt 2/3): ReadTimeout: read timed out
+"""
 
     @pytest.mark.trio
     async def test_retry_is_limited(self, autojump_clock):
@@ -163,11 +170,16 @@ class TestAsyncRetry:
 
         client = AsyncHttpClient(make_aclient(handler))
         start = trio.current_time()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.ReadTimeout):
                 await client.get('http://test/a')
         assert requests == ['http://test/a'] * 3
         assert trio.current_time() - start == 2 * AsyncHttpClient.RETRY_BACKOFF
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+WARNING | Request to "http://test/a" failed (attempt 2/3): ReadTimeout: read timed out
+WARNING | Request to "http://test/a" failed (attempt 3/3): ReadTimeout: read timed out
+"""
 
     @pytest.mark.trio
     async def test_attempts_one_is_single_shot(self, autojump_clock):
@@ -181,11 +193,14 @@ class TestAsyncRetry:
 
         client = AsyncHttpClient(make_aclient(handler))
         start = trio.current_time()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.ReadTimeout):
                 await client.get('http://test/a', attempts=1)
         assert requests == ['http://test/a']
         assert trio.current_time() - start == 0
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/1): ReadTimeout: read timed out
+"""
 
     @pytest.mark.trio
     async def test_status_error_is_not_retried(self, autojump_clock):
@@ -199,12 +214,16 @@ class TestAsyncRetry:
 
         client = AsyncHttpClient(make_aclient(handler))
         start = trio.current_time()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.HTTPStatusError):
                 await client.get('http://test/a')
         assert requests == ['http://test/a']
         # the status error is not retried: the request was sent once
         assert trio.current_time() - start == 0
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): HTTPStatusError: Server error '500 Internal Server Error' for url 'http://test/a'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+"""
 
     @pytest.mark.trio
     async def test_every_exhausted_failure_is_logged(self, autojump_clock):
@@ -218,12 +237,11 @@ class TestAsyncRetry:
         with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.ReadTimeout):
                 await client.get('http://test/a')
-        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
-        assert warnings == [
-            'Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out',
-            'Request to "http://test/a" failed (attempt 2/3): ReadTimeout: read timed out',
-            'Request to "http://test/a" failed (attempt 3/3): ReadTimeout: read timed out',
-        ]
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+WARNING | Request to "http://test/a" failed (attempt 2/3): ReadTimeout: read timed out
+WARNING | Request to "http://test/a" failed (attempt 3/3): ReadTimeout: read timed out
+"""
 
 
 class TestAsyncStream:
@@ -251,11 +269,14 @@ class TestAsyncStream:
 
         client = AsyncHttpClient(make_aclient(handler))
         start = trio.current_time()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await client.stream('http://test/a', consume)
         assert chunks == [b'payload']
         assert attempts == ['http://test/a', 'http://test/a']
         assert trio.current_time() - start == AsyncHttpClient.RETRY_BACKOFF
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read timed out
+"""
 
     @pytest.mark.trio
     async def test_mid_stream_error_restarts_the_transfer(self, autojump_clock):
@@ -291,10 +312,9 @@ class TestAsyncStream:
         # whole transfer was started over
         assert chunks == [b'partial ', b'payload']
         assert attempts == ['http://test/a', 'http://test/a']
-        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
-        assert warnings == [
-            'Request to "http://test/a" failed (attempt 1/3): ReadError: connection lost',
-        ]
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ReadError: connection lost
+"""
 
     @pytest.mark.trio
     async def test_consumer_failure_is_not_retried(self):
@@ -314,10 +334,9 @@ class TestAsyncStream:
             with pytest.raises(ValueError, match='digest mismatch'):
                 await client.stream('http://test/a', consume)
         assert attempts == ['http://test/a']
-        warnings = [log['m'] for log in capture.backend.logs if log['l'] == 'WARNING']
-        assert warnings == [
-            'Request to "http://test/a" failed (attempt 1/3): ValueError: digest mismatch',
-        ]
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/3): ValueError: digest mismatch
+"""
 
     @pytest.mark.trio
     async def test_attempts_one_is_single_shot(self, autojump_clock):
@@ -334,11 +353,14 @@ class TestAsyncStream:
 
         client = AsyncHttpClient(make_aclient(handler))
         start = trio.current_time()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.ReadTimeout):
                 await client.stream('http://test/a', consume, attempts=1)
         assert attempts == ['http://test/a']
         assert trio.current_time() - start == 0
+        assert capture.concat() == """\
+WARNING | Request to "http://test/a" failed (attempt 1/1): ReadTimeout: read timed out
+"""
 
 
 class TestAsyncLifecycle:

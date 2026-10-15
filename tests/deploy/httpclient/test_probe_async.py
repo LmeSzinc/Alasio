@@ -12,6 +12,7 @@ by the engine instead of running to their timeouts.
 import pytest
 import trio
 
+from alasio.deploy.httpclient import probe_async
 from alasio.deploy.httpclient.probe_async import AsyncProbe, probe_lock
 from alasio.deploy.httpclient.probe_mirrors import AllMirrorsFailedError, Mirrors, RangeUnsupportedError
 from alasio.logger import logger
@@ -67,35 +68,61 @@ class StubProbe(AsyncProbe):
         return result
 
 
+@pytest.fixture
+def fake_clock(monkeypatch):
+    """
+    Freeze the clock the probes measure their candidates with.
+
+    A probe logs the measured time of the winning candidate ('Mirror "a"
+    responded in 0ms'): the time of the machine differs on every run and
+    is not assertable, the frozen one is always 0ms.
+
+    Args:
+        monkeypatch (MonkeyPatch): The monkeypatch fixture of pytest
+    """
+    monkeypatch.setattr(probe_async, 'perf_counter', lambda: 0.0)
+
+
 class TestRace:
     """The race: groups run in parallel, members fall back in order."""
 
     @pytest.mark.trio
-    async def test_member_order(self):
+    async def test_member_order(self, fake_clock):
         """The members of a group are probed in the declared order, a
         failed member falls through to the next one."""
         probe = StubProbe(
             {'cn': {'down': 'http://down', 'up': 'http://up'}},
             results={'down': ValueError('boom'), 'up': 'UP'}, table=FakeMirrorTable())
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             name, payload = await probe.run(PATH)
         assert (name, payload) == ('up', 'UP')
         assert probe.probed == [
             ('down', 'http://down', PATH), ('up', 'http://up', PATH)]
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": down, up
+WARNING | Mirror "down" is not usable: ValueError: boom
+INFO | Mirror "up" responded in 0ms
+INFO | [Mirror `probe`] up
+"""
 
     @pytest.mark.trio
-    async def test_preferred_member_wins(self):
+    async def test_preferred_member_wins(self, fake_clock):
         """A usable preferred member is not bypassed by the fallback."""
         probe = StubProbe(
             {'cn': {'preferred': 'http://a', 'fallback': 'http://b'}},
             results={'preferred': 'P', 'fallback': 'F'}, table=FakeMirrorTable())
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             name, payload = await probe.run(PATH)
         assert (name, payload) == ('preferred', 'P')
         assert probe.probed == [('preferred', 'http://a', PATH)]
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": preferred, fallback
+INFO | Mirror "preferred" responded in 0ms
+INFO | [Mirror `probe`] preferred
+"""
 
     @pytest.mark.trio
-    async def test_groups_race(self):
+    async def test_groups_race(self, fake_clock):
         """Groups run in parallel, the fastest one wins, the losing
         group is cancelled instead of running to its timeout."""
         entered = trio.Event()
@@ -112,11 +139,16 @@ class TestRace:
         probe = SlowProbe(
             {'slow': {'slow': 'http://slow'}, 'fast': {'fast': 'http://fast'}},
             results={'slow': 'S', 'fast': 'F'}, table=FakeMirrorTable())
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             name, payload = await probe.run(PATH)
         assert (name, payload) == ('fast', 'F')
         # the slow group started its probe and was cancelled
         assert entered.is_set()
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": slow, fast
+INFO | Mirror "fast" responded in 0ms
+INFO | [Mirror `probe`] fast
+"""
 
     @pytest.mark.trio
     async def test_all_failed(self):
@@ -130,36 +162,61 @@ class TestRace:
         message = str(e.value)
         assert 'a: ValueError: down' in message
         assert "b: KeyError: 'gone'" in message
-        assert capture.backend.any_contains('is not usable')
+        # the groups race in parallel and trio may run the batch of the two
+        # tasks in either order: the sequence of the two failures is not
+        # defined
+        assert sorted(capture.concat().splitlines()) == [
+            'ERROR | Failed to probe `probe` for "/latest.pack": no mirror is usable',
+            'INFO | Probing `probe` for "/latest.pack": a, b',
+            'WARNING | Mirror "a" is not usable: ValueError: down',
+            'WARNING | Mirror "b" is not usable: KeyError: \'gone\'',
+        ]
 
     @pytest.mark.trio
-    async def test_mirrors_input(self):
+    async def test_mirrors_input(self, fake_clock):
         """A Mirrors instance is accepted as the probe input."""
         mirrors = Mirrors.from_input({'g': {'a': 'http://a'}})
         probe = StubProbe(mirrors, results={'a': 'A'}, table=FakeMirrorTable())
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             name, payload = await probe.run(PATH)
         assert (name, payload) == ('a', 'A')
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+"""
 
     @pytest.mark.trio
-    async def test_the_payload_of_the_winner_is_returned(self):
+    async def test_the_payload_of_the_winner_is_returned(self, fake_clock):
         """The payload of the winner is returned as-is."""
         token = object()
         probe = StubProbe({'g': {'a': 'http://a'}}, results={'a': token}, table=FakeMirrorTable())
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             name, payload = await probe.run(PATH)
         assert name == 'a'
         assert payload is token
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+"""
 
     @pytest.mark.trio
     async def test_probe_function_not_implemented(self):
         """The base probe_function makes every candidate unusable."""
         probe = AsyncProbe({'g': {'a': 'http://a'}}, name='')
         probe.RECORD_TABLE = FakeMirrorTable()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(AllMirrorsFailedError) as e:
                 await probe.run(PATH)
         assert 'a: NotImplementedError' in str(e.value)
+        # the base probe_function raises without a message: the reason of
+        # the log ends with the empty one
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a
+WARNING | Mirror "a" is not usable: NotImplementedError: {''}
+ERROR | Failed to probe `probe` for "{PATH}": no mirror is usable
+"""
 
 
 class TestResolve:
@@ -173,8 +230,10 @@ class TestResolve:
         probe, the only candidate serves the request."""
         table = FakeMirrorTable()
         probe = StubProbe('http://only', requests={'default': 'PAY'}, table=table)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await probe.fetch(PATH) == 'PAY'
+        # no probe, no log: the flow of a single mirror set is silent
+        assert capture.concat() == ''
         assert probe.probed == []
         # no read, no write: a single mirror set never touches the table
         assert (table.selects, table.upserts) == (0, 0)
@@ -185,23 +244,32 @@ class TestResolve:
         table = FakeMirrorTable()
         probe = StubProbe(self.MIRRORS, requests={'b': 'PAY'}, table=table)
         table.seed(scene='probe', name='', digest=probe.mirrors.digest, result='b')
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await probe.fetch(PATH) == 'PAY'
+        # the record serves the flow: no probe, no log
+        assert capture.concat() == ''
         assert probe.probed == []
         assert probe.called == [('b', 'http://b', PATH)]
         # the record is an optimization: it is only read, never rewritten
         assert table.upserts == 0
 
     @pytest.mark.trio
-    async def test_probe_of_the_first_request_records_the_winner(self):
+    async def test_probe_of_the_first_request_records_the_winner(self, fake_clock):
         """Without a record the first request probes: the winner is recorded
         and every later request of the instance reuses it (no probe again)."""
         table = FakeMirrorTable()
         probe = StubProbe(self.MIRRORS, results={'a': None}, requests={'a': 'PAY'}, table=table)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await probe.fetch(PATH) == 'PAY'
             # optimistic reuse: a second request goes to the same mirror
             assert await probe.fetch(PATH) == 'PAY'
+        # the second request reuses the mirror of the first one: one probe,
+        # one pair of log lines
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+"""
         assert probe.probed == [('a', 'http://a', PATH)]
         assert probe.called == [('a', 'http://a', PATH), ('a', 'http://a', PATH)]
         row = table.select_one(scene='probe', name='')
@@ -209,7 +277,7 @@ class TestResolve:
         assert row.digest == probe.mirrors.digest
 
     @pytest.mark.trio
-    async def test_the_payload_of_the_probe_is_the_answer_of_the_flow(self):
+    async def test_the_payload_of_the_probe_is_the_answer_of_the_flow(self, fake_clock):
         """A probe that was the request itself answers the flow: its payload is
         returned as-is and the work of the flow does not run."""
         table = FakeMirrorTable()
@@ -220,14 +288,19 @@ class TestResolve:
             seen.append(name)
             return 'WORK'
 
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await probe.fetch(PATH, work) == 'BODY'
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+"""
         assert probe.probed == [('a', 'http://a', PATH)]
         assert probe.called == []
         assert seen == []
 
     @pytest.mark.trio
-    async def test_a_probe_that_fetched_nothing_runs_the_work(self):
+    async def test_a_probe_that_fetched_nothing_runs_the_work(self, fake_clock):
         """A probe that only proved the availability (a HEAD) hands nothing
         over: the work of the flow runs and fetches the path itself."""
         table = FakeMirrorTable()
@@ -238,24 +311,34 @@ class TestResolve:
             seen.append(name)
             return 'WORK'
 
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await probe.fetch(PATH, work) == 'WORK'
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+"""
         assert probe.probed == [('a', 'http://a', PATH)]
         assert seen == ['a']
 
     @pytest.mark.trio
-    async def test_a_flow_without_a_work_takes_the_payload_as_its_answer(self):
+    async def test_a_flow_without_a_work_takes_the_payload_as_its_answer(self, fake_clock):
         """A flow that passes no work of its own takes the payload of the probe
         as its answer: the plain request of the flavour does not repeat it."""
         table = FakeMirrorTable()
         probe = StubProbe(self.MIRRORS, results={'a': 'BODY'}, table=table)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await probe.fetch(PATH) == 'BODY'
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+"""
         assert probe.probed == [('a', 'http://a', PATH)]
         assert probe.called == []
 
     @pytest.mark.trio
-    async def test_probe_lock_serializes_the_flows_of_one_key(self):
+    async def test_probe_lock_serializes_the_flows_of_one_key(self, fake_clock):
         """Two flows of the process with the same (scene, name) probe once:
         the second one waits for the lock and reuses the written record."""
         table = FakeMirrorTable()
@@ -269,11 +352,18 @@ class TestResolve:
 
         first = SlowProbe(self.MIRRORS, results={'a': 'A'}, requests={'a': 'PAY'}, table=table)
         second = SlowProbe(self.MIRRORS, results={'a': 'A'}, requests={'a': 'PAY'}, table=table)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             async with trio.open_nursery() as nursery:
                 nursery.start_soon(first.fetch, PATH)
                 await entered.wait()
                 nursery.start_soon(second.fetch, PATH)
+        # the second flow re-read the record of the first one: one probe,
+        # one pair of log lines
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+"""
         # exactly one probe ran, the second flow re-read the record
         assert len(first.probed) + len(second.probed) == 1
         assert first.probed == [('a', 'http://a', PATH)]
@@ -302,7 +392,7 @@ class TestFailure:
     MIRRORS = {'g': {'a': 'http://a', 'b': 'http://b'}}
 
     @pytest.mark.trio
-    async def test_content_failure_excludes_the_mirror(self):
+    async def test_content_failure_excludes_the_mirror(self, fake_clock):
         """A content failure (the domain's own: the bytes are not usable) does
         not get better by asking the same mirror again: the mirror that failed
         is excluded from the re-probe, another candidate wins and the retry
@@ -312,15 +402,21 @@ class TestFailure:
         table.seed(scene='probe', name='', digest=probe.mirrors.digest, result='a')
         probe.results = {'a': None, 'b': None}
         probe.requests = {'a': RangeUnsupportedError('no ranges'), 'b': 'PAY'}
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await probe.fetch(PATH) == 'PAY'
+        # the re-probe of the failed path: a is skipped, b wins
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "b" responded in 0ms
+INFO | [Mirror `probe`] b
+"""
         # the failed mirror is not probed again, the winner is the other one
         assert probe.probed == [('b', 'http://b', PATH)]
         assert probe.called == [('a', 'http://a', PATH), ('b', 'http://b', PATH)]
         assert table.select_one(scene='probe', name='').result == 'b'
 
     @pytest.mark.trio
-    async def test_transport_failure_keeps_the_mirror_a_candidate(self):
+    async def test_transport_failure_keeps_the_mirror_a_candidate(self, fake_clock):
         """A transport failure may be a blip: the mirror stays a candidate and
         can win the re-probe again (the retry on it is the new attempt)."""
         import httpx2
@@ -330,15 +426,21 @@ class TestFailure:
         table.seed(scene='probe', name='', digest=probe.mirrors.digest, result='a')
         probe.results = {'a': None}
         probe.requests = {'a': httpx2.ReadTimeout('slow')}
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.ReadTimeout):
                 await probe.fetch(PATH)
+        # the re-probe of the failed path: a is a candidate again and wins
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+"""
         # a is probed again and wins: the retry (its request) fails again
         assert probe.probed == [('a', 'http://a', PATH)]
         assert probe.called == [('a', 'http://a', PATH), ('a', 'http://a', PATH)]
 
     @pytest.mark.trio
-    async def test_the_payload_of_the_reprobe_serves_the_retry(self):
+    async def test_the_payload_of_the_reprobe_serves_the_retry(self, fake_clock):
         """A re-probe that was the request itself serves the retry: the flow
         consumes its payload instead of repeating the request that failed."""
         import httpx2
@@ -348,13 +450,18 @@ class TestFailure:
         table.seed(scene='probe', name='', digest=probe.mirrors.digest, result='a')
         probe.results = {'a': 'BODY'}
         probe.requests = {'a': httpx2.ReadTimeout('slow')}
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await probe.fetch(PATH) == 'BODY'
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+"""
         assert probe.probed == [('a', 'http://a', PATH)]
         assert probe.called == [('a', 'http://a', PATH)]
 
     @pytest.mark.trio
-    async def test_retry_failure_is_raised(self):
+    async def test_retry_failure_is_raised(self, fake_clock):
         """The request is retried exactly once: a failure of the retry is
         raised as-is, no second probe."""
         table = FakeMirrorTable()
@@ -363,23 +470,35 @@ class TestFailure:
         probe.results = {'b': None}
         probe.requests = {
             'a': RangeUnsupportedError('boom'), 'b': RangeUnsupportedError('boom again')}
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(RangeUnsupportedError, match='boom again'):
                 await probe.fetch(PATH)
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "b" responded in 0ms
+INFO | [Mirror `probe`] b
+"""
         assert probe.probed == [('b', 'http://b', PATH)]
         assert probe.called == [('a', 'http://a', PATH), ('b', 'http://b', PATH)]
 
     @pytest.mark.trio
-    async def test_a_probed_path_failure_is_raised(self):
+    async def test_a_probed_path_failure_is_raised(self, fake_clock):
         """A path of this instance was already probed (the first request): a
         later failure is the answer, probing again is meaningless."""
         table = FakeMirrorTable()
         probe = StubProbe(self.MIRRORS, results={'a': None}, requests={'a': 'PAY'}, table=table)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             assert await probe.fetch(PATH) == 'PAY'
             probe.requests['a'] = RangeUnsupportedError('no ranges')
             with pytest.raises(RangeUnsupportedError, match='no ranges'):
                 await probe.fetch(PATH)
+        # the second fetch failed on a path this instance probed: no re-probe,
+        # the log is the one of the first probe
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+"""
         assert len(probe.probed) == 1
 
     @pytest.mark.trio
@@ -391,9 +510,16 @@ class TestFailure:
         table.seed(scene='probe', name='', digest=probe.mirrors.digest, result='a')
         probe.requests = {'a': RangeUnsupportedError('boom')}
         probe.results = {'a': ValueError('down'), 'b': ValueError('gone')}
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(RangeUnsupportedError, match='boom'):
                 await probe.fetch(PATH)
+        # the re-probe had no winner: a is excluded, the members of its group
+        # failed
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+WARNING | Mirror "b" is not usable: ValueError: gone
+ERROR | Failed to probe `probe` for "{PATH}": no mirror is usable
+"""
         assert table.select_one(scene='probe', name='').result == 'a'
 
     @pytest.mark.trio
@@ -401,7 +527,9 @@ class TestFailure:
         """A single mirror set has nothing to reselect: the failure is
         raised as-is."""
         probe = StubProbe('http://only', requests={'default': RuntimeError('boom')})
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(RuntimeError, match='boom'):
                 await probe.fetch(PATH)
+        # nothing to select and nothing to probe: no log
+        assert capture.concat() == ''
         assert probe.probed == []
