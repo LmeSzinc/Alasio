@@ -215,12 +215,17 @@ class DailyState:
         """
         Record that a full update finished (the apply steps call this)
 
+        The value is an epoch (``time.time()``): it travels to the next process
+        in the resume record, and an epoch is the only instant two processes
+        share -- the local naive calendar of this module is not one (see the
+        module docstring).
+
         Args:
             ts (float): Completion time (time.time()), defaults to now; a
                 startup that skips its full update records the completion time
                 of the process it replaces -- the check it relies on
         """
-        self.updated_all_at = ts if ts is not None else datetime.datetime.now().timestamp()
+        self.updated_all_at = ts if ts is not None else time.time()
 
     # ------------------------------------------------------------------
     # The schedule task

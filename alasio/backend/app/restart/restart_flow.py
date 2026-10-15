@@ -109,7 +109,11 @@ class FlowStartup(Flow):
                 # restart checked right before its handover, a convergence handover
                 # follows the update it applied): a check right now would only
                 # repeat it. The completion time is carried into this process so the
-                # window is always measured from the last real check
+                # window is always measured from the last real check. The age is a
+                # wall-clock duration between two processes (the record carries an
+                # epoch, the only instant the two share): a clock jump makes it
+                # wrong once -- a forward jump checks a little early, a backward one
+                # makes the age negative and skips the check, both harmless
                 manager.daily.note_full_update(record.updated_all_at)
                 logger.info(f'[Restart] The previous process checked less than '
                             f'{CHECK_INTERVAL:.0f}s ago: the startup runs no full update')

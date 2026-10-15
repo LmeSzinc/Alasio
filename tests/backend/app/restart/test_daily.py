@@ -10,6 +10,7 @@ whatever the timezone of the host that runs the tests.
 """
 import builtins
 import datetime
+import time
 
 import pytest
 import trio
@@ -268,7 +269,10 @@ class TestFullUpdateCoverage:
 
     def test_note_full_update_defaults_to_now(self, clock):
         daily = DailyState()
-        before = datetime.datetime.now().timestamp()
+        # the completion time is an epoch: it travels to the next process in the
+        # resume record, the local calendar of the module is no instant two
+        # processes share
+        before = time.time()
         daily.note_full_update()
         assert daily.updated_all_at == before
 
