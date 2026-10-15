@@ -205,7 +205,6 @@ INFO | [Mirror `repo`] a
         assert capture.concat() == """\
 INFO | Probing `repo` for "/new/from_old.pack": a, b
 WARNING | Request to "http://a/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '405 Method Not Allowed' for url 'http://a/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/405
 INFO | Mirror "a" responded in 0ms
 INFO | [Mirror `repo`] a
 """
@@ -240,11 +239,8 @@ INFO | [Mirror `repo`] a
         assert capture.concat() == """\
 INFO | Probing `repo` for "/new/from_old.pack": a, b
 WARNING | Request to "http://a/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '405 Method Not Allowed' for url 'http://a/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/405
 WARNING | Request to "http://a/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Mirror "a" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 INFO | Mirror "b" responded in 0ms
 INFO | [Mirror `repo`] b
 """
@@ -316,12 +312,9 @@ class TestReselection:
         ]
         assert capture.concat() == """\
 WARNING | Request to "http://a/latest.pack" failed (attempt 1/3): HTTPStatusError: Server error '500 Internal Server Error' for url 'http://a/latest.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
 INFO | Probing `repo` for "/latest.pack": a, b
 WARNING | Request to "http://a/latest.pack" failed (attempt 1/3): HTTPStatusError: Server error '500 Internal Server Error' for url 'http://a/latest.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
 WARNING | Mirror "a" is not usable: HTTPStatusError: Server error '500 Internal Server Error' for url 'http://a/latest.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
 INFO | Mirror "b" responded in 0ms
 INFO | [Mirror `repo`] b
 """
@@ -389,16 +382,11 @@ INFO | [Mirror `repo`] b
         assert requests == ['http://a/new/from_old.pack', 'http://a/new/from_old.pack', 'http://b/new/from_old.pack']
         assert capture.concat() == """\
 WARNING | Request to "http://a/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 INFO | Probing `repo` for "/new/from_old.pack": a, b
 WARNING | Request to "http://a/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Mirror "a" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Request to "http://b/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://b/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Mirror "b" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://b/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 ERROR | Failed to probe `repo` for "/new/from_old.pack": no mirror is usable
 """
         assert table.select_one(scene='repo', name='').result == 'a'
@@ -460,13 +448,9 @@ INFO | [Mirror `repo`] b
         assert capture.concat() == """\
 INFO | Probing `repo` for "/latest.pack": a, b
 WARNING | Request to "http://a/latest.pack" failed (attempt 1/3): HTTPStatusError: Server error '503 Service Unavailable' for url 'http://a/latest.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503
 WARNING | Mirror "a" is not usable: HTTPStatusError: Server error '503 Service Unavailable' for url 'http://a/latest.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503
 WARNING | Request to "http://b/latest.pack" failed (attempt 1/3): HTTPStatusError: Server error '503 Service Unavailable' for url 'http://b/latest.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503
 WARNING | Mirror "b" is not usable: HTTPStatusError: Server error '503 Service Unavailable' for url 'http://b/latest.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503
 ERROR | Failed to probe `repo` for "/latest.pack": no mirror is usable
 """
         # nothing was recorded: a total failure usually means the machine is

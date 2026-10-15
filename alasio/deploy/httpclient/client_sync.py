@@ -173,7 +173,7 @@ class HttpClient(HttpClientBase):
                 time.sleep(self.RETRY_BACKOFF)
             try:
                 response = client.request(method, url, headers=headers, timeout=timeout, **kwargs)
-                response.raise_for_status()
+                self._raise_for_status(response)
                 return response
             except httpx2.TransportError as e:
                 # a transport error is logged, and retried while an
@@ -297,7 +297,7 @@ class HttpClient(HttpClientBase):
                 time.sleep(self.RETRY_BACKOFF)
             try:
                 with client.stream('GET', url, headers=headers, timeout=timeout, **kwargs) as response:
-                    response.raise_for_status()
+                    self._raise_for_status(response)
                     consume(response)
                 return
             except httpx2.TransportError as e:

@@ -222,7 +222,6 @@ WARNING | Request to "http://test/a" failed (attempt 1/1): ReadTimeout: read tim
         assert trio.current_time() - start == 0
         assert capture.concat() == """\
 WARNING | Request to "http://test/a" failed (attempt 1/3): HTTPStatusError: Server error '500 Internal Server Error' for url 'http://test/a'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
 """
 
     @pytest.mark.trio

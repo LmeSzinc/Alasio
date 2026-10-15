@@ -24,7 +24,10 @@ whether another strategy (e.g. another mirror) makes sense is decided
 by the caller, which knows the content semantics. Every failed attempt
 is logged with a warning, whatever the failure is: an absorbed blip
 stays visible in the log, and exhausted retries read as the sequence of
-attempts.
+attempts. The message of a status error is the one httpx builds,
+without the documentation link it appends (see
+HttpClientBase._raise_for_status): the log of a candidate that cannot
+serve a path reads the status itself.
 
 Every request carries a timeout: the timeout of the call, or the default
 timeout of the class (DEFAULT_TIMEOUT) when the call gives none. The
@@ -64,6 +67,11 @@ the in-memory filesystem of the tests cannot answer.
 from alasio.ext.cache import cached_class_property
 from alasio.logger import logger
 from alasio.logger.utils import stringify_event
+
+# the line httpx appends to the message of a status error: a link to the MDN
+# page of the status code, dropped by HttpClientBase._raise_for_status (a call
+# that logs every attempt reads the status itself)
+STATUS_DOC_LINK = '\nFor more information check: '
 
 
 class HttpClientBase:
@@ -171,6 +179,35 @@ class HttpClientBase:
             httpx2.Timeout: The timeout to send with the request
         """
         return self.DEFAULT_TIMEOUT if timeout is None else timeout
+
+    def _raise_for_status(self, response):
+        """
+        Raise the status error of a response that is not a success: the
+        type and the message of httpx (e.g. Client error '404 Not Found'
+        for url '...'), without the documentation link it appends to the
+        message (see STATUS_DOC_LINK).
+
+        The location of a redirect is kept: only the last line of the
+        message is dropped. The caller of the client and the log of every
+        failed attempt (see _log_attempt_failure) read the status itself,
+        a link to the MDN page of the status code is noise in it.
+
+        Args:
+            response (httpx2.Response): Response of one attempt
+
+        Raises:
+            httpx2.HTTPStatusError: If the response is not a success (2xx),
+                the redirects and the client/server errors included
+        """
+        import httpx2
+        try:
+            response.raise_for_status()
+        except httpx2.HTTPStatusError as e:
+            message, link, _ = str(e).partition(STATUS_DOC_LINK)
+            if not link:
+                # another version of httpx: the message is raised as it is
+                raise
+            raise httpx2.HTTPStatusError(message, request=e.request, response=e.response) from None
 
     def _log_attempt_failure(self, url, attempt, attempts, e):
         """

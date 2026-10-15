@@ -241,9 +241,7 @@ INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
 WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
-WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
@@ -395,9 +393,7 @@ INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
 WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
-WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
@@ -532,9 +528,7 @@ INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
 WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
-WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
@@ -739,9 +733,7 @@ INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
 WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
-WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404, rebuilding from the latest index
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """

@@ -584,7 +584,6 @@ INFO | [Mirror `probe`] a
         assert capture.concat() == """\
 INFO | Probing `probe` for "/v/full.pack": a, b
 WARNING | Request to "http://a/v/full.pack" failed (attempt 1/3): HTTPStatusError: Client error '405 Method Not Allowed' for url 'http://a/v/full.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/405
 INFO | Mirror "a" responded in 0ms
 INFO | [Mirror `probe`] a
 """
@@ -616,9 +615,7 @@ INFO | [Mirror `probe`] a
         assert capture.concat() == """\
 INFO | Probing `probe` for "/v/full.pack": a, b
 WARNING | Request to "http://a/v/full.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/v/full.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 WARNING | Mirror "a" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://a/v/full.pack'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
 INFO | Mirror "b" responded in 0ms
 INFO | [Mirror `probe`] b
 """

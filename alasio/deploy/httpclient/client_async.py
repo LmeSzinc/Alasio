@@ -182,7 +182,7 @@ class AsyncHttpClient(HttpClientBase):
                 await trio.sleep(self.RETRY_BACKOFF)
             try:
                 response = await client.request(method, url, headers=headers, timeout=timeout)
-                response.raise_for_status()
+                self._raise_for_status(response)
                 return response
             except httpx2.TransportError as e:
                 # a transport error is logged, and retried while an
@@ -294,7 +294,7 @@ class AsyncHttpClient(HttpClientBase):
                 await trio.sleep(self.RETRY_BACKOFF)
             try:
                 async with client.stream('GET', url, headers=headers, timeout=timeout) as response:
-                    response.raise_for_status()
+                    self._raise_for_status(response)
                     await consume(response)
                 return
             except httpx2.TransportError as e:
