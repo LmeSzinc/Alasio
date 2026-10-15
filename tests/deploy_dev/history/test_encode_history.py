@@ -8,11 +8,41 @@ from alasio.deploy.history.decode_history import HistoryObj, decode_history
 from alasio.deploy_dev.history.encode_history import (
     commit_to_history, encode_commit_history, encode_tag_history, split_commit_message, tag_to_history
 )
-from alasio.git.obj.objcommit import CommitObj
-from alasio.git.obj.objtag import TagObject
+from alasio.git.obj.objcommit import CommitObj, parse_commit
+from alasio.git.obj.objtag import TagObject, parse_tag
+from tests.git.obj.test_objcommit import obj_signed_gpg, obj_signed_mergetag
 
 SHA1_A = 'a' * 40
 SHA1_B = 'b' * 40
+
+# A tag object with a gpg signed message, the identity of the tagger replaced by
+# Test <test@example.com>, the armored block is that of a real signed tag. git
+# writes the signature of a tag at the end of its message, with no line prefix,
+# and the message of a tag is what must not reach the history of a version.
+obj_signed_tag = (
+    b'object ' + b'c' * 40 + b'\n'
+    b'type commit\n'
+    b'tag v1.0.0\n'
+    b'tagger Test <test@example.com> 1000000000 +0000\n'
+    b'\n'
+    b'v1.0.0\n'
+    b'-----BEGIN PGP SIGNATURE-----\n'
+    b'\n'
+    b'iQIcBAABCAAGBQJXRGaRAAoJEK4lNiJ/afGBkX8QAJTQZROw1gFSOpaDfICOp/1G\n'
+    b'ulTJJAxdVqrKgS2rGHnkwk3pVSDqQ9W99uHeDp5mCWRx2ytH5CdIR69PjrVnb4gA\n'
+    b'ws6e6CEhFVlFkW33vDgaqL95GRKzxvWsEsBWRPu3tZk3MEVtt+n//y/nGAH0G3SX\n'
+    b'/H4KbjGRWELnEuIF9nEVaX83SDzfmFVsrVduR/qJyl0K8HkpAVEfgAxDJRyKqIQW\n'
+    b'8jMV0fEK3slWPkII+ZYpXRkejJFzlBHM/c2nLbDyXbEVyzGLIyVLwYsB43Bxd2wl\n'
+    b'3B3qe/B896CEptUICU+D5gnY9QWmK+sbg0aaPRaUOiLqKTeMi0oPDG4E+ivv98r3\n'
+    b'vq4fa64MQb2X+7vAMrvzAT95rFywDhrr4x90ByQUqHPLjfVCy5KGgmW7LkjehxBi\n'
+    b'ukv1SkuA9YE7v/ObJCLznYygbkwTpPf5GjOG5EtpMWUGHds8s0XAGCR6RuvGvoFq\n'
+    b'aaX/C43+fxZgQnzglXEPxZ+XZnQ7Wah4ZLwwfzhOx79ZfLKT23GKoaD4pIpXpR7m\n'
+    b'QkORh0RTJ20zInQ62T64nfWfMn9bypreYC3zbmIVzrAUPCWaURWOEAxs8Gfa1yTy\n'
+    b'eAl8x/9AvfYNS1rOkEVnqipWAbK3+3CJr3N14kzltZY4pD3KRrchxpYxl5dshKZ9\n'
+    b'TZygxErcisbbsXDzP4pO\n'
+    b'=q18x\n'
+    b'-----END PGP SIGNATURE-----\n'
+)
 
 
 def _make_commit(message='', author_name='Author', author_time=900, committer_time=1000):
@@ -150,6 +180,26 @@ class TestTagToHistory:
         assert history.title == ''
         assert history.detail == ''
 
+    def test_signed_tag_message_is_not_packed(self):
+        """A tag that carries a gpg signature in its message packs no signature.
+
+        The message of a tag is where git puts the signature of a signed tag,
+        it must not reach the history of the version.
+        """
+        tag = parse_tag(obj_signed_tag)
+        assert '-----BEGIN PGP SIGNATURE-----' in tag.message
+
+        history = tag_to_history(tag)
+
+        assert history.version == 'v1.0.0'
+        assert history.author == 'Test'
+        assert history.time == 1000000000
+        assert history.title == ''
+        assert history.detail == ''
+        assert encode_tag_history([tag]) == (
+            b'\x91\x95\xa6v1.0.0\xa4Test\xce;\x9a\xca\x00\xa0\xa0'
+        )
+
 
 class TestEncodeCommitHistory:
     """Encode commit history from a dict of sha1 to CommitObj."""
@@ -169,6 +219,41 @@ class TestEncodeCommitHistory:
     def test_empty_history(self):
         """An empty commit dict encodes to an empty msgpack array."""
         assert encode_commit_history({}) == b'\x90'
+
+
+class TestEncodeSignedCommit:
+    """The history of a gpg signed commit carries no signature.
+
+    The record is pinned byte by byte: a signature that reached it would be
+    shipped to every client that reads the history pack of a version.
+    """
+
+    def test_signed_commit(self):
+        """The record is version, author name, author time, title and detail."""
+        assert b'gpgsig -----BEGIN PGP SIGNATURE-----' in obj_signed_gpg
+
+        commit = parse_commit(obj_signed_gpg)
+        data = encode_commit_history({SHA1_A: commit})
+
+        # no armor, no signature body, no key id, no email of the author
+        assert data == (
+            b'\x91\x95\xd9(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\xa4Test'
+            b'\xcej\xa8q\x17\xd9*more classifiers for PyPI metadata (#1151)\xa0'
+        )
+        assert b'test@example.com' not in data
+
+    def test_signed_mergetag_commit(self):
+        """The mergetag header embeds the whole signed tag object of a merge."""
+        assert b'\nmergetag ' in obj_signed_mergetag
+
+        commit = parse_commit(obj_signed_mergetag)
+        data = encode_commit_history({SHA1_B: commit})
+
+        assert data == (
+            b"\x91\x95\xd9(bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\xa4Test"
+            b"\xcec\x8c\x1eB\xb2Merge tag 'v1.8.2'\xa6v1.8.2"
+        )
+        assert b'test@example.com' not in data
 
 
 class TestEncodeTagHistory:
