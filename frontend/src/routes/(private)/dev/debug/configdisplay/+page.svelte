@@ -2,6 +2,12 @@
   // !!![svelte-drop-dev-page]!!!
   import ArgCard from "$lib/components/arg/ArgCard.svelte";
   import type { ArgData, CardData, InfoData } from "$lib/components/arg/utils.svelte";
+  import { cardWidth } from "$lib/use/cardWidth.svelte";
+  import { elementSize } from "$lib/use/size.svelte";
+
+  // the width of the cards follows the config pages, see cardWidth()
+  let containerSize = $state({ width: 0, height: 0 });
+  const cardClass = $derived(cardWidth(containerSize.width));
 
   // --- Mock helpers ---
   const noop = () => {};
@@ -95,7 +101,7 @@
   ]);
 </script>
 
-<div class="container mx-auto flex flex-col gap-8 overflow-auto p-6 pb-20">
+<div class="container mx-auto flex flex-col gap-8 p-6 pb-20" use:elementSize={containerSize}>
   <h1 class="text-3xl font-bold">Config Display Test</h1>
   <p class="text-muted-foreground">
     ArgCard rendering under different data shapes: card header combinations, single-group arg counts, and multi-group
@@ -115,10 +121,10 @@
       {#each headerCases as _, i (i)}
         <ArgCard
           bind:cardData={headerCases[i]}
-          parentWidth={1800}
+          parentWidth={containerSize.width}
           handleEdit={noop}
           handleReset={noop}
-          class="max-w-240"
+          class={cardClass}
         />
       {/each}
     </div>
@@ -132,10 +138,10 @@
       {#each singleGroupCases as _, i (i)}
         <ArgCard
           bind:cardData={singleGroupCases[i]}
-          parentWidth={1800}
+          parentWidth={containerSize.width}
           handleEdit={noop}
           handleReset={noop}
-          class="max-w-240"
+          class={cardClass}
         />
       {/each}
     </div>
@@ -149,10 +155,10 @@
       {#each multiGroupCases as _, i (i)}
         <ArgCard
           bind:cardData={multiGroupCases[i]}
-          parentWidth={1800}
+          parentWidth={containerSize.width}
           handleEdit={noop}
           handleReset={noop}
-          class="max-w-240"
+          class={cardClass}
         />
       {/each}
     </div>

@@ -2,6 +2,12 @@
   // !!![svelte-drop-dev-page]!!!
   import ArgCard from "$lib/components/arg/ArgCard.svelte";
   import type { CardData } from "$lib/components/arg/utils.svelte";
+  import { cardWidth } from "$lib/use/cardWidth.svelte";
+  import { elementSize } from "$lib/use/size.svelte";
+
+  // the width of the cards follows the config pages, see cardWidth()
+  let containerSize = $state({ width: 0, height: 0 });
+  const cardClass = $derived(cardWidth(containerSize.width));
 
   // --- Mock helpers ---
   function ago(ms: number): string {
@@ -134,12 +140,11 @@
     },
   });
 
-  // Full-width card class matching ArgCardList logic
   const noopEdit = noop;
   const noopReset = noop;
 </script>
 
-<div class="container mx-auto flex flex-col gap-8 overflow-auto p-6 pb-20">
+<div class="container mx-auto flex flex-col gap-8 p-6 pb-20" use:elementSize={containerSize}>
   <h1 class="text-3xl font-bold">Dashboard Group Types</h1>
   <p class="text-muted-foreground">
     Each group with <code class="bg-muted rounded px-1">_info.dashboard</code> is rendered as a single compact arg row. Compare
@@ -155,10 +160,10 @@
     </p>
     <ArgCard
       bind:cardData={dashboardCard}
-      parentWidth={1800}
+      parentWidth={containerSize.width}
       handleEdit={noopEdit}
       handleReset={noopReset}
-      class="max-w-240"
+      class={cardClass}
     />
   </section>
 
@@ -171,10 +176,10 @@
     </p>
     <ArgCard
       bind:cardData={normalCard}
-      parentWidth={1800}
+      parentWidth={containerSize.width}
       handleEdit={noopEdit}
       handleReset={noopReset}
-      class="max-w-240"
+      class={cardClass}
     />
   </section>
 
@@ -186,10 +191,10 @@
     </p>
     <ArgCard
       bind:cardData={mixedCard}
-      parentWidth={1800}
+      parentWidth={containerSize.width}
       handleEdit={noopEdit}
       handleReset={noopReset}
-      class="max-w-240"
+      class={cardClass}
     />
   </section>
 </div>

@@ -2,8 +2,14 @@
   // !!![svelte-drop-dev-page]!!!
   import ArgGroupCard from "$lib/components/arg/ArgGroupCard.svelte";
   import type { RestartTopicLike, WORKER_STATE } from "$lib/components/aside/types";
+  import { cardWidth } from "$lib/use/cardWidth.svelte";
+  import { elementSize } from "$lib/use/size.svelte";
   import RestartBackendTool from "$private/dev/setting/RestartBackendTool.svelte";
   import RestartStatus from "$private/dev/setting/RestartStatus.svelte";
+
+  // the width of the cards follows the config pages, see cardWidth()
+  let containerSize = $state({ width: 0, height: 0 });
+  const cardClass = $derived(cardWidth(containerSize.width));
 
   // A restart is fast and transient, so every state of RestartStatus is
   // rendered here with explicit phase / worker states: the props override the
@@ -118,7 +124,7 @@
   ];
 </script>
 
-<div class="container mx-auto flex h-full w-full flex-col gap-6 overflow-auto p-4">
+<div class="container mx-auto flex w-full flex-col gap-6 p-4 pb-20" use:elementSize={containerSize}>
   <h1 class="text-3xl font-bold">RestartStatus Debug Page</h1>
 
   <section class="space-y-2">
@@ -129,7 +135,7 @@
         The tool buttons call the real rpc.
       </p>
     </div>
-    <ArgGroupCard title="System Tool" class="max-w-180">
+    <ArgGroupCard title="System Tool" class={cardClass}>
       <RestartBackendTool />
       <RestartStatus />
     </ArgGroupCard>
@@ -142,7 +148,7 @@
           <h2 class="text-lg font-semibold">{testCase.label}</h2>
           <p class="text-muted-foreground text-xs">{testCase.note}</p>
         </div>
-        <ArgGroupCard title="System Tool" class="max-w-180">
+        <ArgGroupCard title="System Tool" class={cardClass}>
           <!-- the phase override drives the tool row too: the cancel button of a
                restart still waiting for the configs to stop -->
           <RestartBackendTool phase={testCase.phase} />

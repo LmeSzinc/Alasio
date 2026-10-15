@@ -88,7 +88,7 @@
   };
 </script>
 
-<div class="container mx-auto flex h-full w-full flex-col gap-4 overflow-auto p-4">
+<div class="container mx-auto flex w-full flex-col gap-4 p-4 pb-20">
   <h1 class="text-3xl font-bold">ConfigItem Debug Page</h1>
 
   <div class="grid gap-4 md:grid-cols-2">

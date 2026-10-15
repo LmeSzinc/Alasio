@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { cardWidth } from "$lib/use/cardWidth.svelte";
   import { fastSmoothScroll, findScrollParent } from "$lib/use/scroll.svelte";
   import { elementSize, elementViewportSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
@@ -128,12 +129,10 @@
     }
   });
 
-  // Dynamic card width based on content width
-  // 1. follow parent width until max-w-180
-  // 2. keep max-w-180, let margin auto increase, until card/parent <= 3/5
-  // 3. keep width ratio card/parent <= 3/5 until max-w-240
-  // 4. keep max-w-240, let margin auto increase
-  const cardClass = $derived(parentWidth < 1200 ? "max-w-180" : parentWidth < 1600 ? "w-3/5" : "max-w-240");
+  // the width of the cards is the shared width of every card page, the rule
+  // sits in cardWidth() (the config pages, the mod page, the settings page ...
+  // all use it)
+  const cardClass = $derived(cardWidth(parentWidth));
 </script>
 
 <div bind:this={root} use:elementSize={containerSize} class={cn("relative space-y-4", className)}>
